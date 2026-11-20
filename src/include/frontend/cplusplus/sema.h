@@ -3128,6 +3128,7 @@ class semantic_analysis
     analysis_result list_clauses(SyntaxRef list,
                                  owned_array<SyntaxElement> &clauses,
                                  owned_array<uint32_t> *packs = nullptr);
+    bool initializer_names_nothing(SyntaxRef init) const;
     analysis_result gather_clauses(SyntaxRef list, SyntaxRef node,
                                    owned_array<SyntaxElement> &clauses,
                                    owned_array<uint32_t> *packs);
@@ -3368,7 +3369,9 @@ class semantic_analysis
        defined constructor or destructor of c would do that analysis does
        not; checked when c is complete */
     analysis_result implicit_special_members(entity_index c, SyntaxRef n);
-    void declare_implicit(entity_index c, special_member kind, bool copy);
+    /* copy: X(const X&); move (with copy): X(X&&) */
+    void declare_implicit(entity_index c, special_member kind, bool copy,
+                          bool move = false);
     analysis_result implicit_definitions(entity_index c, SyntaxRef n);
     /* a function whose definition analysis makes itself (an implicit
        special member, a closure type's __invoke and conversion function):
@@ -3390,7 +3393,8 @@ class semantic_analysis
                             token_index at, uint32_t block,
                             uint32_t members = 0, uint32_t destructions = 0);
     analysis_result implicit_copy(entity_index c, SyntaxRef n,
-                                  entity_index source, uint32_t &built);
+                                  entity_index source, uint32_t &built,
+                                  bool move = false);
     /* [class.dtor]/13: after the body of the destructor of class c, the
        destructors of its members and bases, in the reverse order of
        their construction */

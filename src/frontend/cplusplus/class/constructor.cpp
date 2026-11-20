@@ -249,14 +249,21 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     SyntaxRef init = entity_table[e].default_initializer;
     if (record.kind == type_kind::array ||
         record.kind == type_kind::lvalue_reference ||
-        record.kind == type_kind::rvalue_reference ||
-        (record.kind == type_kind::class_type &&
-         entity_table[record.entity].first_constructor))
+        record.kind == type_kind::rvalue_reference)
         return not_supported(init, "class.base.init");
+    /* before the analysis, which may move the tables */
+    bool constructed = record.kind == type_kind::class_type &&
+                       entity_table[record.entity].first_constructor;
     expression_meaning object;
     VTRY(r, subobject(at, e, object));
     initialized_value value;
     VTRY_SET(r, initializer(init, type, value));
+    if (constructed &&
+        (semantics[value.node].kind != semantic_kind::construct ||
+         semantics[value.node].a))
+        /* [dcl.init]/17.6.1: a prvalue of the class, or no constructor
+           call for the object: not analysed */
+        return not_supported(init, "class.base.init");
     /* [except.spec]/7: the initializer's own exceptions, which a
        constructor's exception specification when implicit is made of */
     bool throwing = false;
@@ -270,6 +277,15 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
                 initializer_exception::may_throw;
     }
     unsupported.resize(unsupported_before);
+    if (constructed) {
+        /* [class.base.init]/9.1: the member's constructor, called on the
+           member itself (the object of the construct node: 0 until now,
+           as for a declared variable) */
+        semantics[value.node].a = object.node;
+        statement =
+            statement_node(semantic_kind::expression_statement, at, value.node);
+        return analysis_result::well_formed;
+    }
     statement = subobject_store(object, type, at, value.node);
     return analysis_result::well_formed;
 }
@@ -921,7 +937,15 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
     /* [class.copy.ctor]/10.1: which construction from arguments the
        deleted implicit copy constructor takes part in (copy elision,
        [dcl.init]/17.6.2's aggregate) is not analysed */
-    if (!arguments.empty() && x.implicit_copy_deleted &&
+    bool moved = false;
+    /* [class.copy.ctor]/8: an xvalue of the class goes to the implicitly
+       declared move constructor, which is better than the deleted copy
+       constructor ([over.match.best]) */
+    if (arguments.size() == 1 &&
+        arguments[0].category == value_category::xvalue &&
+        declares_move_constructor(c))
+        moved = true;
+    if (!arguments.empty() && x.implicit_copy_deleted && !moved &&
         !x.defaulted_move_constructor && copy_argument_candidate(c, arguments))
         return not_supported(at, "class.copy.ctor");
     if (arguments.empty() && trivial_defaulted_default_constructor(c))
@@ -1639,31 +1663,58 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     bool move_implicitly_declared =
         !declares_copy && !x.destructor && !x.user_copy_assignments &&
         !x.defaulted_copy_assignment && !x.defaulted_move_assignment;
+    /* [class.copy.ctor]/8: the implicit move constructor X(X&&), declared
+       when some subobject has a move constructor (otherwise a move copies
+       as the copy does); defined as deleted, and then ignored by overload
+       resolution ([over.match.funcs]/8), when a subobject can be neither
+       moved nor copied */
+    bool move_declared = false, move_deleted = false;
     for (entity_index k : classes) {
         const entity &sub = entity_table[k];
-        if (declares_move_constructor(k) && move_implicitly_declared)
-            /* [class.copy.ctor]/8: the implicit move constructor, which
-               moves the subobject, is not declared yet */
-            return not_supported(n, "class.copy.ctor");
         /* X() = default beside other constructors may be no entity
            (trivial_defaulted_default_constructor) */
         bool default_ok = (!sub.first_constructor ||
                            sub.defaulted_default_constructor) &&
                           !sub.implicit_default_deleted,
-             copy_ok = copies_bytes(k);
+             copy_ok = copies_bytes(k), copy_usable = false,
+             move_usable = false, move_seen = false;
         for (entity_index q = sub.first_constructor; q;
              q = entity_table[q].next_constructor) {
             /* [class.access]/1: c a friend of k may call it, where an
                aggregate initialization may not (not analysed) */
             if (entity_table[q].access && grants(k, c))
                 return not_supported(n, "class.friend");
-            if (entity_table[q].access || entity_table[q].deleted)
+            bool usable = !entity_table[q].access && !entity_table[q].deleted;
+            bool is_move = false;
+            if (is_copy_constructor(k, q))
+                is_move =
+                    type_table[type_table
+                                   .parameters(
+                                       entity_table[q].type.unqualified())[0]
+                                   .unqualified()]
+                        .kind == type_kind::rvalue_reference;
+            if (is_move) {
+                move_seen = true;
+                if (usable)
+                    move_usable = true;
+            }
+            if (!usable)
                 continue;
             if (!type_table[entity_table[q].type.unqualified()].parameter_count)
                 default_ok = true;
-            if (is_copy_constructor(k, q))
-                copy_ok = true;
+            /* [class.copy.ctor]/10.1: a move constructor does not copy */
+            if (is_copy_constructor(k, q) && !is_move)
+                copy_usable = true;
         }
+        if (copy_usable)
+            copy_ok = true;
+        if (move_seen && !copies_bytes(k))
+            move_declared = true;
+        /* the subobject's move, by overload resolution on an xvalue: its
+           move constructor if it declares one, else its copy constructor */
+        if (!copies_bytes(k) && !(move_seen && move_usable) &&
+            !(!move_seen && copy_usable))
+            move_deleted = true;
         if (construction && !default_ok && !x.first_constructor &&
             default_constructed(c, k)) {
             /* C++03 has no deleted functions: the implicit default
@@ -1734,6 +1785,14 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     entity_table[c].implicit_copy_deleted = copy_deleted;
     if (copy && !user_copy && !copy_deleted)
         declare_implicit(c, special_member::constructor, true);
+    /* C++03 has no move constructors ([class.copy.ctor]/3 is C++11's) */
+    if (move_implicitly_declared && move_declared && !move_deleted &&
+        tokens.files.behavior.has(language_feature::rvalue_references)) {
+        /* a union's variant members are not moved by analysis */
+        if (entity_table[c].union_)
+            return not_supported(n, "class.copy.ctor");
+        declare_implicit(c, special_member::constructor, false, true);
+    }
     if (!user_constructors && !entity_table[c].implicit_default_deleted &&
         (construction || entity_table[c].first_constructor))
         declare_implicit(c, special_member::constructor, false);
@@ -1813,7 +1872,7 @@ bool semantic_analysis::trivial_defaulted_default_constructor(
 /* an implicitly-declared constructor (the copy constructor X(const X&)
    when copy) or destructor of class c, public and inline */
 void semantic_analysis::declare_implicit(entity_index c, special_member kind,
-                                         bool copy)
+                                         bool copy, bool move)
 {
     qualified_type v = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -1828,6 +1887,16 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
         parameter = qualified_type::make(
             type_table.lvalue_reference_to(qualified_type::make(
                 entity_table[c].type.unqualified(), cv_const)),
+            cv_none);
+        count = 1;
+    }
+    if (move) {
+        /* [class.copy.ctor]/3: "If the definition of a class X does not
+           explicitly declare a move constructor, a non-explicit one will
+           be implicitly declared as defaulted" with the form X::X(X&&) */
+        parameter = qualified_type::make(
+            type_table.rvalue_reference_to(qualified_type::make(
+                entity_table[c].type.unqualified(), cv_none)),
             cv_none);
         count = 1;
     }
@@ -1916,9 +1985,15 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
             /* [class.cdtor]/4: the destructor's virtual table pointer */
             members = vtable_pointer_store(c, at);
             destructions = subobject_destructions(c, at);
-        } else if (source)
-            r = implicit_copy(c, n, source, members);
-        else
+        } else if (source) {
+            bool move =
+                type_table[type_table
+                               .parameters(
+                                   entity_table[f].type.unqualified())[0]
+                               .unqualified()]
+                    .kind == type_kind::rvalue_reference;
+            r = implicit_copy(c, n, source, members, move);
+        } else
             r = ctor_initializer(SyntaxElement(), members);
         finish_synthesized(sf, n, at, statement_node(semantic_kind::block, at),
                            members, destructions);
@@ -1937,7 +2012,7 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
    from the corresponding one of the source (the parameter, a const X&) */
 analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
                                                  entity_index source,
-                                                 uint32_t &built)
+                                                 uint32_t &built, bool move)
 {
     token_index at = n.first_token();
     owned_array<entity_index> order;
@@ -1956,6 +2031,10 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
                         from);
         else
             VTRY_SET(r, member_access(at, e, from));
+        /* [class.copy.ctor]/14: the move constructor initializes each
+           subobject from "static_cast<T&&>(x_i)", an xvalue */
+        if (move)
+            from.category = value_category::xvalue;
         expression_meaning object;
         VTRY_SET(r, subobject(at, e, object));
         qualified_type type = entity_table[e].type;
@@ -1988,8 +2067,21 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
             continue;
         }
         if (record.kind == type_kind::lvalue_reference ||
-            record.kind == type_kind::rvalue_reference)
-            return not_supported(n, "class.copy.ctor");
+            record.kind == type_kind::rvalue_reference) {
+            /* [class.copy.ctor]/10.4: a copy constructor is deleted for a
+               member of rvalue reference type; (/14) a reference member is
+               direct-initialized from the source's, binding the same
+               object ([dcl.init.ref]); for a move, "static_cast<T&&>(x_i)"
+               with T an lvalue reference stays an lvalue ([dcl.ref]/6) */
+            if (record.kind == type_kind::rvalue_reference && !move)
+                return not_supported(n, "class.copy.ctor");
+            if (record.kind == type_kind::lvalue_reference)
+                from.category = value_category::lvalue;
+            initialized_value bound;
+            VTRY_SET(r, initialize_with(n, from, type, true, false, bound));
+            statements.append(subobject_store(object, type, at, bound.node));
+            continue;
+        }
         if (record.kind == type_kind::class_type &&
             entity_table[e].field == UINT32_MAX &&
             (!entity_table[e].virtual_base || empty_class(record.entity)))
