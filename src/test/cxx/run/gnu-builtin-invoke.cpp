@@ -26,7 +26,8 @@ int main()
     if (__builtin_invoke(Fn(), 9, 4) != 5)
         return 5;
     auto lam = [](int a) { return a + 1; };
-    if (__builtin_invoke(lam, 1) != 2)
+    volatile int one = 1;
+    if (__builtin_invoke(lam, one) != 2)
         return 6;
     return 0;
 }

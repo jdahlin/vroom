@@ -45,6 +45,7 @@ static const gnu_builtin builtin_registry[] = {
     ROWL("__builtin_char_memchr", library_alias, 4, string, node, "SSiz",
          "memchr"),
     ROWL("__builtin_launder", launder, 0, identity, identity, nullptr, nullptr),
+    ROWL("__builtin_invoke", invoke, 0, none, node, nullptr, nullptr),
     ROWL("__builtin_bswapg", bswapg, 0, bswap, bswap, nullptr, nullptr),
     /* the builtins a constant expression folds: the integer operations,
        the floating ones, the string functions; a `library` row is a call
@@ -208,6 +209,7 @@ bool gnu_builtin_untyped(uint16_t row)
     case builtin_form::atomic:
     case builtin_form::launder:
     case builtin_form::bswapg:
+    case builtin_form::invoke:
     case builtin_form::unsupported:
         return true;
     default:

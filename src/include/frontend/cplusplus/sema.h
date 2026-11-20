@@ -2969,6 +2969,10 @@ class semantic_analysis
                                             const char *spelling, size_t length,
                                             const owned_array<uint32_t> &nodes,
                                             qualified_type &result);
+    analysis_result builtin_invoke(SyntaxRef n, entity_index called,
+                                   const owned_array<SyntaxElement> &written,
+                                   const owned_array<expression_meaning> &ops,
+                                   expression_meaning &m);
     analysis_result launder_result(SyntaxRef n, entity_index called,
                                    const owned_array<uint32_t> &nodes,
                                    qualified_type &result);

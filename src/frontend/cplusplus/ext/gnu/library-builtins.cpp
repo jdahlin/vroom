@@ -292,7 +292,8 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     if (form == builtin_form::query || form == builtin_form::va_list ||
         form == builtin_form::overflow || form == builtin_form::atomic ||
         form == builtin_form::bit_count || form == builtin_form::generic ||
-        form == builtin_form::launder || form == builtin_form::bswapg) {
+        form == builtin_form::launder || form == builtin_form::bswapg ||
+        form == builtin_form::invoke) {
         qualified_type result = void_type;
         /* (the type-generic ones have the signature's result type) */
         if (form == builtin_form::generic || form == builtin_form::bit_count)

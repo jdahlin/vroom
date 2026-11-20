@@ -35,6 +35,8 @@ enum class builtin_form : uint8_t {
     launder,
     /* T __builtin_bswapg(T), T an integer type of a multiple of 8 bits */
     bswapg,
+    /* __builtin_invoke (f, args...): analysed as the call it stands for */
+    invoke,
     /* a builtin of the C front end whose signature has parameters this
        front end has no types for yet: declared, a call is refused naming it */
     unsupported,

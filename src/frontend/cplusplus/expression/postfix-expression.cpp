@@ -863,7 +863,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         token_index t = n[0].token();
         uint32_t name = tokens.identifier(t);
         lookup_result x = lookup_unqualified(name, lookup_filter::any);
-        bool dependent = !x.ambiguous && !x.unknown;
+        /* ([lex.name]/3 reserves __builtin_x to the implementation: a
+           builtin function, found by the call's analysis of the name) */
+        bool dependent = !x.ambiguous && !x.unknown && !builtin_spelled(name);
         if (x.entity) {
             const entity &fx = entity_table[x.entity];
             dependent = fx.kind == entity_kind::function &&
@@ -954,6 +956,26 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
     }
     if (r != analysis_result::well_formed)
         return r;
+    /* [ext:clang_builtin_functions] __builtin_invoke is the call of its
+       first argument with the others (builtin-invoke.cpp) */
+    if (f.entity && entity_table[f.entity].gnu_builtin_row &&
+        gnu_builtin_at(entity_table[f.entity].gnu_builtin_row).form ==
+            builtin_form::invoke) {
+        owned_array<expression_meaning> ops;
+        if (early.size() == arguments.size()) {
+            for (const expression_meaning &e : early)
+                ops.append(e);
+        } else {
+            for (SyntaxElement a : arguments) {
+                if (a.is(syntax_kind::braced_init_list))
+                    return not_supported(n, "expr.call");
+                expression_meaning e;
+                VTRY_SET(r, expression(a, e));
+                ops.append(e);
+            }
+        }
+        return builtin_invoke(n, f.entity, arguments, ops, m);
+    }
     if (type_table[f.type.unqualified()].kind == type_kind::class_type) {
         /* [over.call]/1: "where the postfix-expression is of class type,
            the operator function is selected by overload resolution
