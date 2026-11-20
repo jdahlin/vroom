@@ -56,3 +56,15 @@ struct Holder {
 };
 int without_object = Holder::nonstatic(1);
 int static_without_object = Holder::fine(1);
+// Member function templates with the same name, parameter-type-list and
+// template-head cannot be overloaded if one is static ([over.load]/2); a
+// different template-head or parameter-type-list can.
+struct StaticOverload {
+    template <class T> static int f(T);
+    template <class T> int f(T) const;
+};
+struct StaticOverloadOk {
+    template <class T> static int g(T);
+    template <class T> int g(T *) const;
+    template <class T, class U = int> int g(T);
+};
