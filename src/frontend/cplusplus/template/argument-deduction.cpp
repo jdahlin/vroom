@@ -442,8 +442,12 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
     if (pr.kind != type_kind::dependent ||
         !entity_table[pr.entity].instantiation)
         return -1;
-    /* (an arithmetic or enumeration A is no class, nor derived from one) */
-    if (ar.kind == type_kind::fundamental || ar.kind == type_kind::enumeration)
+    /* (an arithmetic, enumeration, pointer or pointer-to-member A is no
+       class, nor derived from one: /4.3's derived class D is a class, and
+       a pointer to D matches a pointer P, which this P is not) */
+    if (ar.kind == type_kind::fundamental ||
+        ar.kind == type_kind::enumeration || ar.kind == type_kind::pointer ||
+        ar.kind == type_kind::pointer_to_member)
         return 0;
     if (ar.kind != type_kind::class_type ||
         template_template_parameter(specialized_template(pr.entity)))
