@@ -1659,6 +1659,18 @@ class semantic_analysis
        declarator-id */
     bool declarator_template_id = false;
     analysis_result deduction_guide(DeductionGuide n);
+    analysis_result deduction_guide(TemplateDeclaration t, DeductionGuide n);
+    analysis_result deduction_guide_candidate(TemplateDeclaration t,
+                                              DeductionGuide n);
+    /* the function type of a deduction-guide: its parameters returning the
+       class template specialization it names (in the scope current) */
+    analysis_result deduction_guide_type(SyntaxRef guide, qualified_type &type);
+    /* [over.match.class.deduct]/1, [dcl.type.class.deduct]/2: the class
+       template specialization the placeholder for a deduced class type
+       (the class template whose function_templates' index plus one is
+       ct) names when initialized from the arguments of n, a postfix
+       expression C(arguments) or C{arguments} */
+    analysis_result deduced_class(SyntaxRef n, uint32_t ct, entity_index &c);
     analysis_result simple_declaration(SyntaxRef n);
     analysis_result function_definition(FunctionDefinition definition);
     /* [dcl.link]: extern "C" or extern "C++", and the declarations in it */
@@ -3644,6 +3656,12 @@ class semantic_analysis
            (template_arguments[first_pattern .. + pattern_count), in terms
            of its own parameters) */
         uint32_t primary = 0, first_pattern = 0, pattern_count = 0;
+        /* a deduction guide ([temp.deduct.guide]/1) of a template-head: the
+           class template it names (function_templates' index plus one);
+           its declarator is the deduction-guide, its function type the
+           guide's parameters returning the class template's
+           specialization it names */
+        uint32_t guide_of = 0;
     };
     owned_array<function_template> function_templates;
     function_template new_template(uint32_t name, entity_index outer,

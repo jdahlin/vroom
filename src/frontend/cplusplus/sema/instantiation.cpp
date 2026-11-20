@@ -77,19 +77,26 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         bool constructor = t.special == special_member::constructor;
         analysis_result r = analysis_result::well_formed;
         bool lambda = ft.declarator.is(syntax_kind::lambda_expression);
+        /* [temp.deduct.guide]/1: a deduction guide's function type, its
+           parameters returning the class template's specialization */
+        bool guide = ft.guide_of != 0;
         qualified_type lambda_type;
-        if (lambda)
+        if (guide)
+            r = deduction_guide_type(ft.declarator, lambda_type);
+        else if (lambda)
             r = lambda_specialization(ft.declarator, false, lambda_type, 0);
         else if (constructor && specifiers)
             r = constructor_specifiers(d_syntax[d_skip], s);
         else if (specifiers)
             r = decl_specifier_seq(d_syntax[d_skip], s, false);
         qualified_type type = s.type;
+        if (guide)
+            type = lambda_type;
         if (lambda) {
             type = lambda_type;
             s.constexpr_ = t.constexpr_;
         }
-        if (r == analysis_result::well_formed && !lambda) {
+        if (r == analysis_result::well_formed && !lambda && !guide) {
             function_cv = 0;
             /* (a member function template's cv-qualifier-seq,
                [temp.mem]) */

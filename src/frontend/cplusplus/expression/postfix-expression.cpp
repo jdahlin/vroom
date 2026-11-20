@@ -453,6 +453,21 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             VTRY(r, simple_type(n, k, named));
         }
     }
+    if ((parenthesized || braced) && n[0].is_token() &&
+        tokens[n[0].token()].kind == token_kind::identifier && !class_named &&
+        !named) {
+        /* [dcl.type.class.deduct]/1: a template-name of a class template
+           alone is a placeholder for a deduced class type, which
+           [expr.type.conv]/1 allows as the simple-type-specifier */
+        lookup_result x = lookup_unqualified(tokens.identifier(n[0].token()),
+                                             lookup_filter::any);
+        uint32_t ct = class_template_of(x.unknown_entity);
+        if (ct && n.size() <= 4) {
+            entity_index deduced = 0;
+            VTRY(r, deduced_class(n, ct, deduced));
+            return class_conversion(n, deduced, m);
+        }
+    }
     if (named_cv)
         return not_supported(n, "expr.type.conv");
     if (class_named)
@@ -626,6 +641,76 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         return analysis_result::well_formed;
     }
     return not_supported(n, "expr.post");
+}
+
+/*
+ * [over.match.class.deduct]/1: "When resolving a placeholder for a deduced
+ * class type ([dcl.type.simple]) where the template-name names a primary
+ * class template C, a set of functions and function templates, called the
+ * guides of C, is formed", /3: "Initialization and overload resolution are
+ * performed as described in [dcl.init] and [over.match.ctor],
+ * [over.match.copy], or [over.match.list] ... If overload resolution
+ * fails, the program is ill-formed.  Otherwise, the return type of the
+ * selected function template specialization becomes the deduced class
+ * template specialization."  Of the guides, only the deduction-guides
+ * ([over.match.class.deduct]/1.3) are candidates, as function templates
+ * ([temp.deduct.guide]); the implicit guides of C's constructors (/1.1) and
+ * the copy deduction candidate (/1.2) are not, and a class template whose
+ * deduction-guides none is viable for the arguments is not analysed.  The
+ * arguments are the initializer's expression-list or braced elements
+ * (no braced-init-list element, no pack expansion).
+ */
+analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
+                                                 entity_index &c)
+{
+    c = 0;
+    owned_array<uint32_t> group;
+    for (size_t i = 0; i < function_templates.size(); i++)
+        if (function_templates[i].guide_of == ct)
+            group.append(static_cast<uint32_t>(i + 1));
+    if (group.empty())
+        return not_supported(n, "over.match.class.deduct");
+    owned_array<SyntaxElement> clauses;
+    if (n[1].is(syntax_kind::braced_init_list)) {
+        VTRY(gathered, list_clauses(n[1], clauses, nullptr));
+    } else if (n.size() == 4) {
+        for (SyntaxElement a : n[2].items(syntax_kind::initializer_list))
+            clauses.append(a);
+    }
+    size_t expressions_before = expressions.size();
+    size_t uses_before = name_uses.size();
+    owned_array<expression_meaning> arguments;
+    for (SyntaxElement a : clauses) {
+        if (a.is(syntax_kind::braced_init_list) ||
+            a.is(preprocessing_op_or_punc::ELLIPSIS))
+            return not_supported(n, "over.match.class.deduct");
+        expression_meaning e;
+        VTRY(r, passed_expression(a, e));
+        if (e.entity && entity_table[e.entity].kind == entity_kind::function)
+            return not_supported(n, "over.match.class.deduct");
+        arguments.append(e);
+    }
+    owned_array<overload_candidate> candidates;
+    owned_array<uint32_t> first_arguments;
+    owned_array<template_argument> all;
+    VTRY(added,
+         template_candidates(n, group, arguments.data(),
+                             static_cast<uint32_t>(arguments.size()),
+                             candidates, &first_arguments, &all, nullptr, 0));
+    if (candidates.empty())
+        return not_supported(n, "over.match.class.deduct");
+    size_t chosen = 0;
+    VTRY(best, best_viable_function(n, candidates, nullptr, arguments, chosen));
+    /* (the arguments are analysed again by the initialization) */
+    expressions.resize(expressions_before);
+    name_uses.resize(uses_before);
+    qualified_type function = entity_table[candidates[chosen].function].type;
+    const struct type &returned =
+        type_table[type_table[function.unqualified()].operand.unqualified()];
+    if (returned.kind != type_kind::class_type)
+        return not_supported(n, "over.match.class.deduct");
+    c = returned.entity;
+    return analysis_result::well_formed;
 }
 
 /*
