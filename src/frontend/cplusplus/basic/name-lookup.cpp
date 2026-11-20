@@ -273,6 +273,11 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
                     r.unknown = true;
             }
         } else if (entity_table[s].kind == entity_kind::class_type) {
+            if (filter == lookup_filter::non_members) {
+                if (r.unknown || r.ambiguous || !s)
+                    break;
+                continue;
+            }
             /* [class.member.lookup]: a class scope's lookup includes its
                bases'; an ambiguous one finds nothing analysis uses */
             bool ambiguous = false;

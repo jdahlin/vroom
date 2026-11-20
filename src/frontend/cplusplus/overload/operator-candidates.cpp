@@ -53,8 +53,29 @@ bool is_comparison(preprocessing_op_or_punc op)
    [over.built] has no class-typed parameters, and a conversion function to
    a class type ([over.best.ics]/4: no second user-defined conversion)
    never makes one viable.  A base class's or a template conversion
-   function is not analysed: assumed to convert */
-bool semantic_analysis::converts_to_non_class(entity_index c) const
+   function is not analysed: assumed to convert.  An explicit conversion
+   function ([class.conv.fct]/2) is no implicit conversion of a built-in
+   candidate's parameter ([over.best.ics]), unless explicit_counts */
+bool semantic_analysis::converts_to_non_class(entity_index c,
+                                              bool explicit_counts) const
+{
+    if (entity_table[c].kind != entity_kind::class_type ||
+        base_has_conversion_functions(c))
+        return true;
+    for (entity_index f = own_conversion_functions(c); f;
+         f = entity_table[f].next_overload) {
+        if (!entity_table[f].conversion_function)
+            return true;
+        if (entity_table[f].explicit_ && !explicit_counts)
+            continue;
+        qualified_type to = conversion_function_result(f).type;
+        if (type_table[to.unqualified()].kind != type_kind::class_type)
+            return true;
+    }
+    return false;
+}
+
+bool semantic_analysis::converts_to_lvalue_reference(entity_index c) const
 {
     if (entity_table[c].kind != entity_kind::class_type ||
         base_has_conversion_functions(c))
@@ -64,7 +85,7 @@ bool semantic_analysis::converts_to_non_class(entity_index c) const
         if (!entity_table[f].conversion_function)
             return true;
         qualified_type to = conversion_function_result(f).type;
-        if (type_table[to.unqualified()].kind != type_kind::class_type)
+        if (type_table[to.unqualified()].kind == type_kind::lvalue_reference)
             return true;
     }
     return false;
@@ -94,10 +115,14 @@ analysis_result semantic_analysis::overloaded_operator(
        contextually converted to bool ([over.match.oper]/7,
        [expr.unary.op]/9, [expr.log.and]/1, [expr.log.or]/1) by the
        built-in operator, not by this function */
+    bool logical = op == preprocessing_op_or_punc::EXCLAMATION ||
+                   op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
+                   op == preprocessing_op_or_punc::BAR_BAR;
     bool converts = false;
     for (const expression_meaning &e : operands) {
         const struct type &t = type_table[e.type.unqualified()];
-        if (t.kind == type_kind::class_type && converts_to_non_class(t.entity))
+        if (t.kind == type_kind::class_type &&
+            converts_to_non_class(t.entity, logical))
             converts = true;
     }
     /* [over.call.object]/2: a captureless lambda's surrogate call function
@@ -120,9 +145,42 @@ analysis_result semantic_analysis::overloaded_operator(
         type_table[operands[0].type.unqualified()].kind ==
             type_kind::class_type)
         converts = false;
-    bool logical = op == preprocessing_op_or_punc::EXCLAMATION ||
-                   op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
-                   op == preprocessing_op_or_punc::BAR_BAR;
+    /* [over.built]/3-4, /18-19: ++ -- and the compound assignments'
+       built-in candidates take their left operand by L VQ &: a class
+       operand whose conversion functions return no lvalue reference binds
+       to none, so only the right operand can make one viable */
+    if (converts && !logical &&
+        type_table[operands[0].type.unqualified()].kind ==
+            type_kind::class_type) {
+        switch (op) {
+        case preprocessing_op_or_punc::PLUS_PLUS:
+        case preprocessing_op_or_punc::MINUS_MINUS:
+        case preprocessing_op_or_punc::PLUS_EQUAL:
+        case preprocessing_op_or_punc::MINUS_EQUAL:
+        case preprocessing_op_or_punc::STAR_EQUAL:
+        case preprocessing_op_or_punc::SLASH_EQUAL:
+        case preprocessing_op_or_punc::PERCENT_EQUAL:
+        case preprocessing_op_or_punc::LESS_LESS_EQUAL:
+        case preprocessing_op_or_punc::GREATER_GREATER_EQUAL:
+        case preprocessing_op_or_punc::AMPERSAND_EQUAL:
+        case preprocessing_op_or_punc::CARET_EQUAL:
+        case preprocessing_op_or_punc::BAR_EQUAL:
+            if (!converts_to_lvalue_reference(
+                    type_table[operands[0].type.unqualified()].entity)) {
+                converts = false;
+                for (size_t i = 1; i < operands.size(); i++) {
+                    const struct type &t =
+                        type_table[operands[i].type.unqualified()];
+                    if (t.kind == type_kind::class_type &&
+                        converts_to_non_class(t.entity, false))
+                        converts = true;
+                }
+            }
+            break;
+        default:
+            break;
+        }
+    }
     if (converts && !logical)
         return not_supported(n, "over.built");
     /* [over.match.oper], Table 15: a=b, a[b] and (by [over.call.object]) a(b)
@@ -201,8 +259,7 @@ analysis_result semantic_analysis::overloaded_operator(
            unqualified lookup of operator@ in the context of the expression
            according to the usual rules for name lookup in unqualified
            function calls ([basic.lookup.argdep]) except that all member
-           functions are ignored."  A member found is not passed over: not
-           analysed */
+           functions are ignored." */
         if (member_only) {
             for (entity_index e : members) {
                 overload_candidate c;
@@ -213,7 +270,8 @@ analysis_result semantic_analysis::overloaded_operator(
             }
             return analysis_result::well_formed;
         }
-        lookup_result found = lookup_unqualified(name, lookup_filter::any);
+        lookup_result found =
+            lookup_unqualified(name, lookup_filter::non_members);
         /* [temp.over]/1: operator function templates by that name, whose
            specializations deduced from the operands are candidates too */
         owned_array<entity_index> held_names;

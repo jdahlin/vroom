@@ -1798,6 +1798,9 @@ class semantic_analysis
         scopes,
         /* [basic.lookup.udir]/1: "only namespace names are considered" */
         namespaces,
+        /* [over.match.oper]/3.2: "all member functions are ignored": the
+           scopes of classes are not searched */
+        non_members,
     };
     /* what a lookup found */
     struct lookup_result {
@@ -4516,7 +4519,11 @@ class semantic_analysis
     bool has_conversion_functions(entity_index c) const;
     /* ... a base class of c does */
     bool base_has_conversion_functions(entity_index c) const;
-    bool converts_to_non_class(entity_index c) const;
+    bool converts_to_non_class(entity_index c, bool explicit_counts) const;
+    /* whether class c may bind to a non-const lvalue reference to a non-class
+       type: a conversion function returning an lvalue reference
+       ([over.match.ref]) */
+    bool converts_to_lvalue_reference(entity_index c) const;
     /* the first conversion function class c itself declares (the others
        follow by next_overload), 0 if none */
     entity_index own_conversion_functions(entity_index c) const;
