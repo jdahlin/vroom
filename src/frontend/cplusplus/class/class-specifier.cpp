@@ -1835,14 +1835,18 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "the type of a non-static data member "
                                        "shall not be an abstract class type",
                                        "basic.def");
-        if (is_void || (record.kind == type_kind::array && !record.bound_known))
-            /* incomplete too; an array of unknown bound last is clang's
-               flexible array member extension */
-            return not_supported(declaration, "class.mem");
-        /* (an array of zero elements, clang's and GCC's extension
-           (declarator_meaning warns of it), takes no bytes: glibc's struct
+        if (is_void)
+            /* [class.mem]/15: "The type of a non-static data member shall
+               not be an incomplete type" */
+            return ill_formed_at_token(m.id,
+                                       "the type of a non-static data member "
+                                       "shall not be an incomplete type",
+                                       "class.mem");
+        /* (an array of unknown bound, clang's and GCC's flexible array
+           member, and an array of zero elements, their extension
+           (declarator_meaning warns of it), take no bytes: glibc's struct
            file_handle) */
-        if (!size && !(record.kind == type_kind::array && record.bound_known))
+        if (!size && record.kind != type_kind::array)
             return not_supported(declaration, "class.mem");
         uint32_t alignment = static_cast<uint32_t>(alignment_of_type(type));
         if (is_reference)
