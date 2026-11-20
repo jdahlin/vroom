@@ -7,6 +7,7 @@
 
 #include "../cplusplus-internal.h"
 #include "dump.h"
+#include "../lexer/simd-search.h"
 
 namespace cplusplus
 {
@@ -27,6 +28,31 @@ static bool parsing_check(vbuffer *out, bool condition, const char *what)
 bool dump_parsing_selftest(vbuffer *out)
 {
     bool ok = true;
+    {
+        /* OPTIMIZATION: simd-search.h's searches are their scalar
+           definitions, on generated text with NULs inside and 64 after */
+        static const char alphabet[] = "aZ_09 \t\n\r\\?*/x$#\x80\x01";
+        unsigned char text[330];
+        uint32_t state = 1;
+        auto random = [&state]() {
+            state = state * 1103515245u + 12345u;
+            return state >> 8;
+        };
+        bool same = true;
+        for (int round = 0; round < 20000 && same; round++) {
+            uint32_t n = random() % 260;
+            for (uint32_t i = 0; i < n; i++)
+                text[i] = alphabet[random() % (sizeof alphabet - 1)];
+            memset(text + n, 0, 64);
+            if (n && !(random() % 8))
+                text[random() % n] = 0;
+            for (int k = 0; k < 5; k++)
+                for (uint32_t at = 0; at <= n; at += 1 + random() % 5)
+                    same &= lex_search((lex_stop)k, text, at) ==
+                            lex_search_scalar((lex_stop)k, text, at);
+        }
+        ok &= parsing_check(out, same, "simd-search.h searches = scalar");
+    }
     {
         declared_names names;
         const uint32_t N = 1, T = 2, x = 3, M = 4;

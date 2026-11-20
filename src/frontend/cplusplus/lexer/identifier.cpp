@@ -21,6 +21,7 @@
 #include <stdio.h>
 
 #include "../cplusplus-internal.h"
+#include "simd-search.h"
 
 namespace cplusplus
 {
@@ -185,7 +186,8 @@ uint32_t lexer::scan_identifier(uint32_t at, bool *spelling_differs)
         unsigned char c = p[at];
         /* the common case: a run of physical nondigits and digits */
         if (is_nondigit(c) || is_digit(c)) {
-            at++;
+            /* OPTIMIZATION: the rest of the run (simd-search.h) */
+            at = lex_search(lex_stop::identifier, p, at + 1);
             first = false;
             continue;
         }
