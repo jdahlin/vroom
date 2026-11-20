@@ -96,7 +96,7 @@ bool semantic_analysis::specialization_visible(entity_index e) const
            x.instantiation && x.linkage_of_name == linkage::internal &&
            entity_table[specialized_template(e)].linkage_of_name ==
                linkage::external &&
-           !type_without_external_linkage(x.type, true);
+           !type_without_external_linkage(x.type, true, true);
 }
 
 /* [basic.link]/4: a class or enumeration of an unnamed namespace has
@@ -106,7 +106,8 @@ bool semantic_analysis::specialization_visible(entity_index e) const
    type that visible_local_class() names in other translation units does
    not count */
 bool semantic_analysis::type_without_external_linkage(qualified_type t,
-                                                      bool visible) const
+                                                      bool visible,
+                                                      bool arguments) const
 {
     const struct type &record = type_table[t.unqualified()];
     switch (record.kind) {
@@ -119,26 +120,57 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
         if (visible && x.linkage_of_name == linkage::none &&
             visible_local_class(entity_table, record.entity))
             return false;
-        return x.linkage_of_name != linkage::external;
+        if (x.linkage_of_name != linkage::external)
+            return true;
+        /* [basic.link]/4 (clang's template argument list linkage): a class
+           template specialization has the weakest linkage of its template
+           arguments (overloaded<closure type of main>); one that is a local
+           class other translation units name too (visible_local_class) is
+           no weaker */
+        if (arguments && x.kind == entity_kind::class_type && x.instantiation) {
+            const instantiation_record &made =
+                instantiations[x.instantiation - 1];
+            for (uint32_t i = 0; i < made.argument_count; i++) {
+                const template_argument &a =
+                    template_arguments[made.first_argument + i];
+                if (a.kind == template_argument::kind_t::type &&
+                    type_without_external_linkage(a.type, true, true))
+                    return true;
+                if (a.kind != template_argument::kind_t::pack)
+                    continue;
+                for (uint32_t k = 0; k < a.count; k++) {
+                    const template_argument &element =
+                        pack_arguments[a.value + k];
+                    if (element.kind == template_argument::kind_t::type &&
+                        type_without_external_linkage(element.type, true, true))
+                        return true;
+                }
+            }
+        }
+        return false;
     }
     case type_kind::pointer:
     case type_kind::array:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::block_pointer:
-        return type_without_external_linkage(record.operand, visible);
+        return type_without_external_linkage(record.operand, visible,
+                                             arguments);
     case type_kind::function: {
         const qualified_type *parameters =
             type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < record.parameter_count; i++)
-            if (type_without_external_linkage(parameters[i], visible))
+            if (type_without_external_linkage(parameters[i], visible,
+                                              arguments))
                 return true;
-        return type_without_external_linkage(record.operand, visible);
+        return type_without_external_linkage(record.operand, visible,
+                                             arguments);
     }
     case type_kind::pointer_to_member:
         return type_without_external_linkage(entity_table[record.entity].type,
-                                             visible) ||
-               type_without_external_linkage(record.operand, visible);
+                                             visible, arguments) ||
+               type_without_external_linkage(record.operand, visible,
+                                             arguments);
     default:
         return false;
     }

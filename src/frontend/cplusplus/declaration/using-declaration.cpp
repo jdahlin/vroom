@@ -159,10 +159,20 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
             }
             if ((g.flags & ~gnu_using_if_exists) || g.aligned || g.section)
                 return worse(result, not_supported(n, "namespace.udecl"));
-            result = worse(result,
-                           using_declarator(d, g.flags & gnu_using_if_exists));
+            size_t after = i + 1;
+            while (after < items.size() &&
+                   items[after].is(syntax_kind::gnu_attribute_specifier))
+                after++;
+            if (after < items.size() &&
+                items[after].is(preprocessing_op_or_punc::ELLIPSIS))
+                result = worse(result, using_declarator_pack(
+                                           d, g.flags & gnu_using_if_exists));
+            else
+                result = worse(
+                    result, using_declarator(d, g.flags & gnu_using_if_exists));
             any = true;
-        } else if (d.is(syntax_kind::gnu_attribute_specifier)) {
+        } else if (d.is(syntax_kind::gnu_attribute_specifier) ||
+                   d.is(preprocessing_op_or_punc::ELLIPSIS)) {
             continue; /* the using-declarator's before it */
         } else if (!d.is(preprocessing_op_or_punc::COMMA)) {
             /* a pack expansion */
@@ -172,6 +182,144 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
     if (!any)
         result = worse(result, not_supported(n, "namespace.udecl"));
     return result;
+}
+
+/*
+ * [temp.variadic]/5: "In a using-declaration; the pattern is a
+ * using-declarator", /7: "The instantiation of a pack expansion ... produces
+ * a list E1, ..., EN": the using-declarator, once with each element of the
+ * packs it names (`using Ts::operator()...;`).  In a template's own
+ * definition the packs are not known.
+ */
+analysis_result semantic_analysis::using_declarator_pack(UsingDeclarator n,
+                                                         bool if_exists)
+{
+    uint32_t count = 0;
+    if (!expansion_count(n.first_token(), n.end_token(), count))
+        return not_supported(n, "temp.variadic");
+    analysis_result result = analysis_result::well_formed;
+    bool saved_expanding = expanding;
+    uint32_t saved_element = expansion_element;
+    expanding = true;
+    for (uint32_t e = 0; e < count; e++) {
+        expansion_element = e;
+        result = worse(result, using_declarator(n, if_exists));
+        if (result != analysis_result::well_formed)
+            break;
+    }
+    expanding = saved_expanding;
+    expansion_element = saved_element;
+    return result;
+}
+
+/*
+ * [namespace.udecl]/1: "the set of declarations introduced by the
+ * using-declarator"; /15 (C++20 /14): a derived class's functions hide the
+ * base's with their signature.  The chain of a class's name ends with the
+ * functions of the base its first using-declaration named, which the
+ * base's own chain shares; another base's functions cannot follow them
+ * without changing the first base's chain.  The class's chain then links a
+ * copy of each function a using-declaration introduced (using_shadow_of),
+ * which overload_set takes for the function itself.  Two functions of
+ * different bases with one signature conflict ([namespace.udecl]/14: the
+ * program is ill-formed); virtual functions, member function templates and
+ * the special members have no rules here.
+ */
+analysis_result
+semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
+                                     entity_index c, uint32_t name,
+                                     entity_index head, entity_index e)
+{
+    auto plain = [&](entity_index f) {
+        const entity &x = entity_table[f];
+        return x.kind == entity_kind::function && !x.virtual_ &&
+               !x.member_templates && !x.conversion_function &&
+               x.special == special_member::none;
+    };
+    auto same_signature = [&](entity_index a, entity_index b) {
+        return entity_table[a].member_cv == entity_table[b].member_cv &&
+               same_parameters(type_table, entity_table[a].type.unqualified(),
+                               entity_table[b].type.unqualified());
+    };
+    /* the class's own functions, which come first in the chain, and the
+       copies at its end if it has any */
+    owned_array<entity_index> chain;
+    for (entity_index o = head; o; o = entity_table[o].next_overload)
+        chain.append(o);
+    size_t own_count = 0;
+    while (own_count < chain.size() &&
+           entity_table[chain[own_count]].enclosing == c &&
+           !entity_table[chain[own_count]].using_shadow_of)
+        own_count++;
+    bool copies = own_count < chain.size() &&
+                  entity_table[chain[own_count]].using_shadow_of;
+    owned_array<entity_index> visible;
+    overload_set(head, visible);
+    owned_array<entity_index> present; /* what the base's functions are */
+    for (entity_index f : visible) {
+        if (entity_table[f].enclosing == c)
+            continue;
+        if (!plain(f))
+            return not_supported(n, "namespace.udecl");
+        present.append(f);
+    }
+    if (!plain(e))
+        return not_supported(n, "namespace.udecl");
+    owned_array<entity_index> introduced;
+    owned_array<entity_index> found;
+    overload_set(e, found);
+    for (entity_index f : found) {
+        if (!plain(f))
+            return not_supported(n, "namespace.udecl");
+        bool skip = false;
+        for (entity_index o : visible) {
+            if (o == f) {
+                skip = true; /* /9: introduced already */
+            } else if (same_signature(o, f)) {
+                if (entity_table[o].enclosing == c)
+                    skip = true; /* /15: hidden by the class's own */
+                else if (!skip)
+                    return not_supported(n, "namespace.udecl");
+            }
+        }
+        for (entity_index o : introduced)
+            if (same_signature(o, f))
+                return not_supported(n, "namespace.udecl");
+        if (!skip)
+            introduced.append(f);
+    }
+    auto shadow = [&](entity_index f) {
+        entity copy = entity_table[f];
+        copy.next_overload = 0;
+        copy.using_shadow_of = f;
+        entity_index s =
+            entity_table.make(entity_kind::function, name, copy.enclosing);
+        entity_table[s] = copy;
+        return s;
+    };
+    entity_index last = 0;
+    if (copies) {
+        last = chain[chain.size() - 1];
+    } else {
+        /* the class's own, then a copy of each function of the bases */
+        if (own_count)
+            last = chain[own_count - 1];
+        for (entity_index f : present) {
+            entity_index s = shadow(f);
+            if (last)
+                entity_table[last].next_overload = s;
+            else
+                entity_table.bind(c, name, s, true);
+            last = s;
+        }
+    }
+    for (entity_index f : introduced) {
+        entity_index s = shadow(f);
+        entity_table[last].next_overload = s;
+        last = s;
+    }
+    used(t, e);
+    return analysis_result::well_formed;
 }
 
 /*
@@ -189,13 +337,45 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
 analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                                                     bool if_exists)
 {
-    if (n.size() != 2 || !n.nested_name_specifier() || !n.identifier())
-        /* typename, an operator-function-id, a destructor's name, a pack
-           expansion */
+    if (n.size() != 2 || !n.nested_name_specifier())
+        /* typename */
         return not_supported(n, "namespace.udecl");
+    token_index t = 0;
+    if (n.identifier()) {
+        t = n.identifier().token();
+    } else if (auto function = n[1].operator_function_id()) {
+        /* [over.match.oper]/3.4: a function a using-declaration brings in
+           is a candidate for the reversed or rewritten form of a
+           comparison, unless one declared with it ("corresponds") says
+           otherwise: not analysed */
+        if (function.size() >= 2 && function.symbol().is_token() &&
+            tokens[function.symbol().token()].kind ==
+                token_kind::operator_or_punctuator)
+            switch (preprocessing_op_or_punc_primary(
+                tokens[function.symbol().token()].op_or_punc)) {
+            case preprocessing_op_or_punc::EQUAL_EQUAL:
+            case preprocessing_op_or_punc::EXCLAMATION_EQUAL:
+            case preprocessing_op_or_punc::LESS:
+            case preprocessing_op_or_punc::GREATER:
+            case preprocessing_op_or_punc::LESS_EQUAL:
+            case preprocessing_op_or_punc::GREATER_EQUAL:
+            case preprocessing_op_or_punc::SPACESHIP:
+                return not_supported(n, "over.match.oper");
+            default:
+                break;
+            }
+        /* [over.oper]/1: operator() names the operator function: the
+           keyword's token takes the operator's name */
+        declarator_meaning function_name;
+        VTRY(r, operator_function_id(function, function_name));
+        t = function_name.id;
+    } else {
+        /* a destructor's name, a conversion function's, a literal
+           operator's */
+        return not_supported(n, "namespace.udecl");
+    }
     nominated_scope q;
     VTRY(r, nested_name_specifier(n.nested_name_specifier(), q));
-    token_index t = n.identifier().token();
     uint32_t name = tokens.identifier(t);
     /* [class.qual]/2: the name of the class in its own scope names its
        constructors: [namespace.udecl]/3 inheriting constructors */
@@ -345,9 +525,11 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             if (kind != entity_kind::function ||
                 entity_table[e].special != special_member::none ||
                 entity_table[own].kind != entity_kind::function ||
-                entity_table[own].enclosing != c ||
                 entity_table[own].special != special_member::none)
                 return not_supported(n, "namespace.udecl");
+            if (entity_table[own].enclosing != c)
+                /* the name is a base's already (another using-declaration) */
+                return using_join_chains(n, t, c, name, own, e);
             entity_index last = own;
             while (entity_table[last].next_overload &&
                    entity_table[entity_table[last].next_overload].enclosing ==
@@ -359,7 +541,7 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 return analysis_result::well_formed;
             }
             if (entity_table[last].next_overload)
-                return not_supported(n, "namespace.udecl");
+                return using_join_chains(n, t, c, name, own, e);
             entity_table[last].next_overload = e;
             if (entity_table[e].member_templates)
                 introduce_member_templates(c, own,

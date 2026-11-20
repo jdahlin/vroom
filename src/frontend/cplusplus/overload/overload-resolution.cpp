@@ -35,7 +35,11 @@ void semantic_analysis::overload_set(entity_index e,
                                      owned_array<entity_index> &out) const
 {
     size_t first = out.size();
-    for (; e; e = entity_table[e].next_overload) {
+    for (entity_index link = e; link; link = entity_table[link].next_overload) {
+        /* a class's copy of a base's function stands for it */
+        e = link;
+        if (entity_table[e].using_shadow_of)
+            e = entity_table[e].using_shadow_of;
         bool seen = false;
         for (entity_index other : out)
             if (other == e)

@@ -86,6 +86,45 @@ bool semantic_analysis::converts_to_non_class(entity_index c,
     return false;
 }
 
+/*
+ * [over.call.object]/2: "for each non-explicit conversion function declared
+ * in T or in a base class of T ... to pointer to function, ... a surrogate
+ * call function".  Those of the closure types of captureless lambdas have
+ * their function call operators' parameters, and the operator's object
+ * binds without the surrogate's user-defined conversion
+ * ([over.ics.rank]/3.3): when every conversion function of class c and its
+ * bases is a closure's whose const function call operator is one of calls
+ * (the candidates of c's operator()), no surrogate is the better candidate.
+ */
+bool semantic_analysis::call_surrogates_lose(
+    entity_index c, const owned_array<entity_index> &calls) const
+{
+    const entity &x = entity_table[c];
+    if (x.kind != entity_kind::class_type)
+        return false;
+    for (uint32_t i = 0; i < x.base_count; i++)
+        if (!call_surrogates_lose(
+                type_table[entity_table[class_bases[x.first_base + i]]
+                               .type.unqualified()]
+                    .entity,
+                calls))
+            return false;
+    for (entity_index f = own_conversion_functions(c); f;
+         f = entity_table[f].next_overload) {
+        if (!entity_table[f].conversion_function || !x.lambda ||
+            !x.call_operator ||
+            entity_table[x.call_operator].member_cv != cv_const)
+            return false;
+        bool visible = false;
+        for (entity_index k : calls)
+            if (k == x.call_operator)
+                visible = true;
+        if (!visible)
+            return false;
+    }
+    return true;
+}
+
 bool semantic_analysis::converts_to_lvalue_reference(entity_index c) const
 {
     if (entity_table[c].kind != entity_kind::class_type)
@@ -151,8 +190,22 @@ analysis_result semantic_analysis::overloaded_operator(
         const struct type &t = type_table[operands[0].type.unqualified()];
         if (t.kind == type_kind::class_type && entity_table[t.entity].lambda &&
             entity_table[entity_table[t.entity].call_operator].member_cv ==
-                cv_const)
+                cv_const) {
             converts = false;
+        } else if (t.kind == type_kind::class_type &&
+                   entity_table[t.entity].kind == entity_kind::class_type) {
+            /* a class derived from closure types (the "overloaded"
+               visitor): the same for each, when the class's function call
+               operators include theirs */
+            lookup_result found = lookup_qualified(t.entity, operator_name(op),
+                                                   lookup_filter::any);
+            if (found.entity && !found.ambiguous && !found.unknown) {
+                owned_array<entity_index> calls;
+                overload_set(found.entity, calls);
+                if (call_surrogates_lose(t.entity, calls))
+                    converts = false;
+            }
+        }
     }
     /* [over.match.oper]/3.3, [over.built]: the built-in candidates of = are
        operator=(L VQ &, R) of arithmetic or pointer L; no conversion binds
