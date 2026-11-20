@@ -566,10 +566,14 @@ analysis_result semantic_analysis::captured_entity(token_index t,
        (resolve_pending_uses) */
     const struct type &variable_type =
         type_table[entity_table[e].type.unqualified()];
-    if (entity_table[e].usable == constness::constant && !forced_odr_use &&
-        (variable_type.kind == type_kind::fundamental ||
-         variable_type.kind == type_kind::enumeration ||
-         variable_type.kind == type_kind::pointer)) {
+    if (entity_table[e].usable != constness::not_constant && !forced_odr_use) {
+        if (entity_table[e].usable != constness::constant ||
+            (variable_type.kind != type_kind::fundamental &&
+             variable_type.kind != type_kind::enumeration))
+            /* (a pointer's or class object's reads, and a variable whose
+               value is not known, are not tracked: whether it is odr-used
+               is not analysed) */
+            return not_supported(current_declaration, "basic.def.odr");
         plain = true;
         deferred = true;
         return analysis_result::well_formed;
@@ -840,8 +844,7 @@ analysis_result semantic_analysis::implicit_captures(
                 const struct type kind = type_table[x.type.unqualified()];
                 if (x.usable == constness::constant &&
                     (kind.kind == type_kind::fundamental ||
-                     kind.kind == type_kind::enumeration ||
-                     kind.kind == type_kind::pointer) &&
+                     kind.kind == type_kind::enumeration) &&
                     !odr_use_in_statement(t, first, end, parameters))
                     continue;
                 record.variable = e;

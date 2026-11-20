@@ -705,6 +705,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
                 declared.kind == type_kind::rvalue_reference)
                 seen = declared.operand;
             captured_view = seen;
+            declared_view_used = true;
         }
     }
     const struct type record = type_table[x.type.unqualified()];

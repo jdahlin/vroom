@@ -649,7 +649,13 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                    capture them; those in the parameters do not) */
                 lambda_context *outer_declaring = declaring_lambda;
                 declaring_lambda = &l;
+                size_t claims_before = expressions.size();
+                declared_view_used = false;
                 r = type_id(part[1], returns);
+                /* (a claim of what a name's type is there is clang's from
+                   outside the lambda: not checkable) */
+                if (declared_view_used)
+                    expressions.resize(claims_before);
                 declaring_lambda = outer_declaring;
                 if (r == analysis_result::well_formed &&
                     abstract_class(returns))

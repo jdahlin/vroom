@@ -2671,6 +2671,7 @@ class semantic_analysis
     /* the lambda whose lambda-declarator is analysed (names in it have the
        types of the members that would capture them) */
     lambda_context *declaring_lambda = nullptr;
+    bool declared_view_used = false;
     /* the closure type of a lambda-expression in a default member
        initializer, which each constructor's analysis of the initializer
        uses (one type, [class.mem]/10) and the captures it made (this) */
