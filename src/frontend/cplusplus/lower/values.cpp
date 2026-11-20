@@ -165,6 +165,15 @@ uint32_t c_lowering::constant(const semantic_node &n)
     switch (f) {
     case fundamental_type::float_:
     case fundamental_type::double_: {
+        /* A float constant normally reaches C as a double. Use an exact
+           bit cast when narrowing that double would quiet a signaling NaN. */
+        if (f == fundamental_type::float_ &&
+            floating_is_signaling_nan(n.value)) {
+            uint32_t bits = ast_builder_integer(
+                c, ast_builder_type_basic(AST_TYPE_UNSIGNED_INT),
+                float_storage_bits(n.value));
+            return cast(bits, t, AST_CAST_BIT_CAST);
+        }
         double d;
         memcpy(&d, &n.value, sizeof d);
         return ast_builder_floating(c, t, d);

@@ -1537,7 +1537,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
     if (int which = query_builtin(semantics[callee].a))
         return evaluate_query_builtin(state, which, x, v);
     if (entity_table[semantics[callee].a].gnu_flags & gnu_floating_constant)
-        return evaluate_floating_builtin(x, v);
+        return evaluate_floating_builtin(state, semantics[callee].a, x, v);
     /* [class.this]/1: a non-static member function's this, the address
        of the object expression */
     constant_value self;

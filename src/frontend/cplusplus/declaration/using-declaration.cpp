@@ -245,19 +245,40 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 if (!poisoned)
                     return not_supported(n, "over");
             }
-            for (size_t i = 0, k = function_templates.size(); i < k; i++)
-                if (function_templates[i].name == held &&
-                    !function_templates[i].unusable) {
-                    function_template copy = function_templates[i];
-                    copy.name = prior;
-                    if (poisoned)
-                        copy.unusable = true;
-                    function_templates.append(copy);
-                }
-            for (size_t i = 0, k = template_name_functions.size(); i < k; i++)
-                if (template_name_functions[i].name == held)
-                    template_name_functions.append(
-                        {prior, template_name_functions[i].function});
+            /* [namespace.udecl]/1, /9: two paths can introduce the same
+               declaration. Merge by entity identity, keeping distinct
+               functions even when their parameter types match. */
+            for (size_t i = 0, k = function_templates.size(); i < k; i++) {
+                const function_template &imported = function_templates[i];
+                if (imported.name != held || imported.unusable)
+                    continue;
+                bool present = false;
+                for (const function_template &t : function_templates)
+                    if (t.name == prior && t.entity == imported.entity) {
+                        present = true;
+                        break;
+                    }
+                if (present)
+                    continue;
+                function_template copy = imported;
+                copy.name = prior;
+                copy.unusable = poisoned;
+                function_templates.append(copy);
+            }
+            for (size_t i = 0, k = template_name_functions.size(); i < k; i++) {
+                const template_name_function imported =
+                    template_name_functions[i];
+                if (imported.name != held)
+                    continue;
+                bool present = false;
+                for (const template_name_function &f : template_name_functions)
+                    if (f.name == prior && f.function == imported.function) {
+                        present = true;
+                        break;
+                    }
+                if (!present)
+                    template_name_functions.append({prior, imported.function});
+            }
         }
         used(t, held);
         return analysis_result::well_formed;
