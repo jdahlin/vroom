@@ -3011,6 +3011,10 @@ class semantic_analysis
     /* [expr.arith.conv]: the operands' common type, both converted */
     fundamental_type usual_arithmetic_conversions(expression_meaning &a,
                                                   expression_meaning &b);
+    /* [expr.const.cast]/7: whether a cast between pointers casts away
+       constness at some level; *unknown: levels it does not decompose */
+    bool casts_away_constness(qualified_type from, qualified_type to,
+                              bool *unknown) const;
     /* [conv.qual]/2 */
     bool similar(qualified_type a, qualified_type b) const;
     /* [conv.qual]/3: whether a prvalue of type from converts to type to by
