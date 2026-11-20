@@ -772,10 +772,14 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
             target = entity_table[target].enclosing;
     }
     /* a function parameter scope (a mem-initializer's expressions) is no
-       block */
-    if (!is_namespace(target) &&
-        (entity_table[target].kind != entity_kind::block_scope ||
-         entity_table[target].parameter_scope))
+       block; a class's scope declares no class of an elaborated-type-specifier
+       ([basic.scope.pdecl]/7.2) but the lookup of [basic.lookup.elab]/2
+       may find one declared before: a class is named then, not declared */
+    bool declarable = is_namespace(target) ||
+                      (entity_table[target].kind == entity_kind::block_scope &&
+                       !entity_table[target].parameter_scope);
+    if (!declarable &&
+        (sole || entity_table[target].kind != entity_kind::class_type))
         return not_supported(n, "basic.scope.pdecl");
     entity_index c = 0;
     if (sole && defining_class) {
@@ -848,6 +852,8 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
             return not_supported(n, "basic.lookup.elab");
         c = found.entity;
         if (!c) {
+            if (!declarable)
+                return not_supported(n, "basic.scope.pdecl");
             /* declared in target; a name bound there by a declaration
                analysis did not follow, or by a using-declaration, may be
                the class's */

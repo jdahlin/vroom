@@ -808,20 +808,49 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
         if (entity_table[target.entity].kind != entity_kind::class_type)
             return not_supported(at, "dcl.init");
         bool same = m.type.unqualified() == type.unqualified();
-        const struct type &source = type_table[m.type.unqualified()];
         bool related = false;
-        if (source.kind == type_kind::class_type && !same) {
+        if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
+            !same) {
             bool ambiguous = false;
-            related = base_step(source.entity, target.entity, ambiguous) != 0;
+            related = base_step(type_table[m.type.unqualified()].entity,
+                                target.entity, ambiguous) != 0;
         }
-        if (source.kind == type_kind::class_type && !same && !related &&
-            conversion_functions_yield_class(source.entity, target.entity,
-                                             true))
+        if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
+            !same && !related) {
             /* [dcl.init]/17.6.3, [over.match.copy]/1.2: the conversion
                functions of the source class are candidates too, and in a
                direct-initialization ([over.match.ctor]) a constructor's
-               parameter may be initialized by one: not analysed */
-            return not_supported(at, "over.match.copy");
+               parameter may be initialized by one.  The one conversion
+               function that yields the class, no converting constructor
+               viable beside it, is called ([over.match.conv]), its result
+               initializing the object; else not analysed */
+            qualified_type unqualified =
+                qualified_type::make(type.unqualified(), cv_none);
+            conversion_sequence found;
+            bool cannot_tell = false;
+            if (conversion_function_to_class(m, unqualified, found,
+                                             cannot_tell)) {
+                conversion_sequence s = class_sequence(m, unqualified, true);
+                /* before C++17 the result initializes the object by a copy
+                   constructor, which may be elided but shall be viable
+                   ([dcl.init]/17.6.3, [class.copy.elision]/1): not
+                   analysed */
+                if (direct ||
+                    tokens.files.behavior.edition <
+                        standard_edition::cplusplus_17 ||
+                    s.kind != conversion_sequence::form::user_defined ||
+                    s.ambiguous || s.function != found.function)
+                    return not_supported(at, "over.match.copy");
+                bool converted = false;
+                VTRY_SET(r, conversion_function_call(at, m, unqualified, direct,
+                                                     converted));
+                if (!converted || m.type.unqualified() != type.unqualified())
+                    return not_supported(at, "over.match.copy");
+                same = true;
+            } else if (cannot_tell) {
+                return not_supported(at, "over.match.copy");
+            }
+        }
         if (!(same && m.category == value_category::prvalue) &&
             (entity_table[target.entity].first_constructor ||
              /* its deleted implicit copy constructor (construct) */
@@ -1102,9 +1131,14 @@ analysis_result semantic_analysis::list_initialization_of(
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference)
         return not_supported(list, "dcl.init.list");
+    /* [dcl.init.list]/3.10: no element: value-initialization
+       ([dcl.init]/8: zero-initialization of a scalar, an enumeration's
+       too); one element of an enumeration is not analysed */
+    bool empty_enumeration =
+        target.kind == type_kind::enumeration && clauses.empty();
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer &&
-        target.kind != type_kind::pointer_to_member)
+        target.kind != type_kind::pointer_to_member && !empty_enumeration)
         return not_supported(list, "dcl.init.list");
     if (clauses.empty()) {
         /* [dcl.init]/8: to value-initialize a scalar is to zero-initialize

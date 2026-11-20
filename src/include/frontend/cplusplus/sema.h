@@ -3607,6 +3607,11 @@ class semantic_analysis
         token_index at = 0;
     };
     owned_array<inheriting_declaration> inheriting;
+    /* the constraints being checked, template and arguments as a key
+       (template_constraints_satisfied): one that needs its own
+       satisfaction is the program's error ([temp.constr.constr]; clang's
+       "satisfaction of constraint depends on itself"), not analysed */
+    owned_array<uint32_t> constraints_in_progress;
     analysis_result inheriting_using(UsingDeclarator n, token_index at,
                                      entity_index base);
     analysis_result inherit_constructors(entity_index c, SyntaxRef n);
@@ -4709,8 +4714,16 @@ class semantic_analysis
             .parameter_count;
     }
     entity_index constraint_parameter(entity_index t, token_index i) const;
+    /* what token i names, looked up from scope outward (0: none) */
+    entity_index constraint_name(entity_index scope, token_index i) const;
     /* the concept token i names, looked up from scope outward (0: none) */
     entity_index constraint_concept(entity_index scope, token_index i) const;
+    /* the concept or variable template token i names in a requires-clause
+       ([temp.names]/8, [abi:expressions]'s <unresolved-name>), looked up from
+       scope outward (0: none) */
+    entity_index constraint_template(entity_index scope, token_index i) const;
+    /* the class token i names, looked up from scope outward (0: none) */
+    entity_index constraint_class(entity_index scope, token_index i) const;
     /* [abi:mangle.function-param]: the position plus one of function
        template t's parameter named by token i (0: none) */
     uint32_t function_parameter_position(entity_index t, token_index i) const;
@@ -4974,6 +4987,10 @@ class semantic_analysis
     /* whether the class s has a non-explicit conversion function that may
        yield the class t or one derived from it ([over.match.copy]/1.2) */
     bool has_implicit_conversion_functions(entity_index c) const;
+    bool conversion_function_to_class(const expression_meaning &a,
+                                      qualified_type to,
+                                      conversion_sequence &found,
+                                      bool &unknown);
     bool conversion_functions_yield_class(entity_index s, entity_index t,
                                           bool explicit_counts = false) const;
     /* ... a base class of c does */

@@ -324,6 +324,74 @@ bool semantic_analysis::has_implicit_conversion_functions(entity_index c) const
     return false;
 }
 
+/*
+ * [over.match.copy]/1.2: "When the type of the initializer expression is a
+ * class type "cv S", the non-explicit conversion functions of S and its
+ * base classes are considered.  ...  Those that are not hidden within S and
+ * yield a type whose cv-unqualified version is the same type as T or is a
+ * derived class thereof are candidate functions."  The one conversion
+ * function that does, of an argument of class a's type to the class type
+ * `to`, as the user-defined conversion sequence [over.ics.user]/1: its
+ * second standard conversion sequence the result's (identity, or
+ * derived-to-base) to T.  False without a candidate; with unknown set when
+ * the analysis cannot tell (a conversion function template, an explicit
+ * one ([over.match.copy]/1.2's last sentence: the first parameter of a copy
+ * or move constructor in a direct-initialization), a ref-qualified one,
+ * two candidates, which [over.match.best] would rank).
+ */
+bool semantic_analysis::conversion_function_to_class(
+    const expression_meaning &a, qualified_type to, sequence &found,
+    bool &unknown)
+{
+    unknown = false;
+    found = of_form(sequence::form::bad);
+    entity_index c1 = type_table[to.unqualified()].entity;
+    owned_array<entity_index> candidates;
+    if (!visible_conversion_functions(type_table[a.type.unqualified()].entity,
+                                      candidates)) {
+        unknown = true;
+        return false;
+    }
+    entity_index chosen = 0;
+    for (entity_index f : candidates) {
+        expression_meaning value = conversion_function_result(f);
+        const struct type &r = type_table[value.type.unqualified()];
+        if (r.kind != type_kind::class_type)
+            continue;
+        bool ambiguous = false;
+        if (entity_table[r.entity].kind != entity_kind::class_type) {
+            unknown = true;
+            return false;
+        }
+        if (r.entity != c1 && !base_step(r.entity, c1, ambiguous) && !ambiguous)
+            continue;
+        /* a ref-qualified one: [class.copy.elision]/3's first overload
+           resolution takes the returned lvalue as an rvalue, which the
+           sequence of an argument is not told apart from */
+        if (ambiguous || entity_table[f].explicit_ || chosen ||
+            (entity_table[f].member_cv & (cv_ref_lvalue | cv_ref_rvalue))) {
+            unknown = true;
+            return false;
+        }
+        /* the implicit object parameter ([over.match.funcs]/4) */
+        if (object_sequence(a, f).kind == sequence::form::bad)
+            continue;
+        chosen = f;
+    }
+    if (!chosen)
+        return false;
+    sequence second =
+        class_sequence(conversion_function_result(chosen), to, false);
+    if (second.kind != sequence::form::standard) {
+        unknown = true;
+        return false;
+    }
+    found = second;
+    found.kind = sequence::form::user_defined;
+    found.function = chosen;
+    return true;
+}
+
 semantic_analysis::conversion_sequence
 semantic_analysis::class_sequence(const expression_meaning &a,
                                   qualified_type to, bool user_defined)
@@ -355,14 +423,18 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         return of_form(sequence::form::unknown);
     }
     /* [over.match.copy]/1.2: the conversion functions of the argument's
-       class are candidates too: not analysed */
-    if (y.kind == type_kind::class_type && user_defined &&
-        conversion_functions_yield_class(y.entity, c1, true)) {
-        /* (a class unrelated to c1: only a user-defined conversion
-           converts it) */
-        sequence unknown = of_form(sequence::form::unknown);
-        unknown.user_defined_if_viable = true;
-        return unknown;
+       class are candidates too */
+    sequence by_function = of_form(sequence::form::bad);
+    if (y.kind == type_kind::class_type && user_defined) {
+        bool unknown = false;
+        if (!conversion_function_to_class(a, to, by_function, unknown) &&
+            unknown) {
+            /* (a class unrelated to c1: only a user-defined conversion
+               converts it) */
+            sequence cannot_tell = of_form(sequence::form::unknown);
+            cannot_tell.user_defined_if_viable = true;
+            return cannot_tell;
+        }
     }
     if (!user_defined)
         return of_form(sequence::form::bad);
@@ -419,6 +491,17 @@ semantic_analysis::class_sequence(const expression_meaning &a,
     }
     if (unknown)
         return of_form(sequence::form::unknown);
+    if (by_function.kind == sequence::form::user_defined) {
+        /* [over.match.copy]/1: a conversion function and a converting
+           constructor both viable are candidates of one overload
+           resolution: not ranked */
+        if (best.kind != sequence::form::bad) {
+            sequence cannot_tell = of_form(sequence::form::unknown);
+            cannot_tell.user_defined_if_viable = true;
+            return cannot_tell;
+        }
+        return by_function;
+    }
     if (best.kind == sequence::form::bad)
         return best;
     /* the second standard conversion sequence: the constructor's prvalue
@@ -512,8 +595,15 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
             if (c2 && user_defined) {
                 /* (those that yield T1 or a class derived from it) */
                 bool functions = has_conversion_functions(c2);
-                if (c1)
-                    functions = conversion_functions_yield_class(c2, c1, true);
+                if (c1) {
+                    conversion_sequence found;
+                    bool cannot_tell = false;
+                    functions =
+                        conversion_function_to_class(
+                            a, qualified_type::make(t1.unqualified(), cv_none),
+                            found, cannot_tell) ||
+                        cannot_tell;
+                }
                 if (functions)
                     return of_form(sequence::form::unknown);
             }

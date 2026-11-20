@@ -138,8 +138,10 @@ analysis_result semantic_analysis::member_template_declaration(
         inner[at].is(syntax_kind::decl_specifier_seq) &&
         !declares_special_member(c, inner[at + 1]))
         return member_function_template(c, n, inner, access);
-    /* a constrained constructor template ([temp.constr.decl]) */
-    if (head_constraint(n))
+    /* a constrained constructor template only declared ([temp.constr.decl]);
+       a defined one is a member_function_template, whose deduction checks
+       the constraints ([temp.deduct]/5) */
+    if (head_constraint(n) && !inner.is(syntax_kind::function_definition))
         return not_supported(n, "temp.constr");
     if (at < inner.size() && inner[at].is(syntax_kind::decl_specifier_seq)) {
         /* (the template-parameters are not in scope here: a condition is
@@ -1212,7 +1214,14 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         /* a class-or-decltype with a nested-name-specifier: the class it
            names ([basic.lookup.qual]) */
         entity_index qualified_class = 0;
-        if (item[0].is(syntax_kind::class_or_decltype)) {
+        if (item[0].is(syntax_kind::simple_template_id)) {
+            /* [class.base.init]/3, [temp.names]/1: a base class that is a
+               class template's specialization */
+            VTRY(r, base_class_name(item[0], item, qualified_class, id));
+            if (qualified_class == c)
+                return not_supported(item, "class.base.init");
+            name = tokens.identifier(id);
+        } else if (item[0].is(syntax_kind::class_or_decltype)) {
             VTRY(r, named_class(item[0], item, qualified_class, id));
             if (qualified_class == c)
                 return not_supported(item, "class.base.init");
@@ -1953,6 +1962,19 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
              k = entity_table[k].next_constructor)
             if (!entity_table[k].implicit)
                 user_declared = true;
+        /* [class.default.ctor]/1: the inherited constructors are no
+           user-declared ones, so c has its implicit default constructor;
+           a trivial one is no entity until a constructor beside it makes
+           the default-initialization ask for one */
+        bool has_default = false;
+        for (entity_index k = entity_table[c].first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (entity_table[k].implicit &&
+                !type_table[entity_table[k].type.unqualified()].parameter_count)
+                has_default = true;
+        if (!user_declared && !has_default &&
+            !entity_table[c].implicit_default_deleted)
+            declare_implicit(c, special_member::constructor, false);
         bool base_default = false;
         for (entity_index k = entity_table[base_class].first_constructor; k;
              k = entity_table[k].next_constructor)
