@@ -18,7 +18,13 @@
 namespace cplusplus
 {
 
-#define ROW(n, f, w, k) {n, builtin_form::f, w, builtin_fold::k}
+#define ROW(n, f, w, k)                                                        \
+    {n,       builtin_form::f, w, builtin_fold::k, builtin_lowering::node,     \
+     nullptr, nullptr}
+/* a builtin of the C++ front end alone: its lowering, prototype and library
+   function */
+#define ROWL(n, f, w, k, l, p, s)                                              \
+    {n, builtin_form::f, w, builtin_fold::k, builtin_lowering::l, p, s}
 
 /* the rows, in no order: gnu_builtin_find searches them */
 static const gnu_builtin builtin_registry[] = {
@@ -28,6 +34,20 @@ static const gnu_builtin builtin_registry[] = {
     /* a builtin of the C front end whose signature this front end has no
        types for (gnu_builtin_unsupported_row) */
     ROW("", unsupported, 0, none),
+    /* the builtins of the C front end's table that are calls of the C
+       library function (library-builtins.cpp, library_function_builtin) */
+    ROW("__builtin_strlen", library, 0, none),
+    ROW("__builtin_ffs", library, 0, none),
+    /* clang's builtins of no C front end node */
+    ROWL("__builtin_verbose_trap", signature, 0, none, trap, "vSS", nullptr),
+    ROWL("__builtin_assume_dereferenceable", signature, 0, none, discard, "vPz",
+         nullptr),
+    ROWL("__builtin_memcpy_inline", library_alias, 0, none, node, "vpPz",
+         "memcpy"),
+    ROWL("__builtin_char_memchr", library_alias, 0, none, node, "SSiz",
+         "memchr"),
+    ROWL("__builtin_launder", launder, 0, identity, identity, nullptr, nullptr),
+    ROWL("__builtin_bswapg", bswapg, 0, bswap, bswap, nullptr, nullptr),
     /* int __builtin_constant_p(...), and the lock-free queries */
     ROW("__builtin_constant_p", query, 1, constant_p),
     ROW("__atomic_always_lock_free", query, 2, lock_free),
@@ -99,6 +119,7 @@ static const gnu_builtin builtin_registry[] = {
 };
 
 #undef ROW
+#undef ROWL
 
 const gnu_builtin *gnu_builtin_find(const char *spelling, size_t length,
                                     uint16_t *row)
@@ -132,6 +153,8 @@ bool gnu_builtin_untyped(uint16_t row)
     case builtin_form::va_list:
     case builtin_form::overflow:
     case builtin_form::atomic:
+    case builtin_form::launder:
+    case builtin_form::bswapg:
     case builtin_form::unsupported:
         return true;
     default:

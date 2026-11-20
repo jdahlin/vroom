@@ -2342,8 +2342,11 @@ class semantic_analysis
                                  const qualified_type *parameters, size_t count,
                                  bool variadic, uint32_t flags,
                                  bool non_throwing = false);
-    /* real: the fundamental_type of builtin_type::real */
-    qualified_type builtin_parameter_type(uint8_t t, uint8_t real = 0);
+    qualified_type builtin_pointer(fundamental_type f, uint32_t pointee_cv);
+    qualified_type builtin_scalar(fundamental_type f);
+    bool library_type(const char *&p, qualified_type &t);
+    entity_index library_function_builtin(uint32_t name, const char *spelling,
+                                          size_t length);
     /* the parameters of the function declarator analysed last: a function
        definition's, with the types they have in its body ([dcl.fct]/5's
        adjustment, top-level cv-qualifiers kept) */
@@ -2965,6 +2968,12 @@ class semantic_analysis
                                             const char *spelling, size_t length,
                                             const owned_array<uint32_t> &nodes,
                                             qualified_type &result);
+    analysis_result launder_result(SyntaxRef n, entity_index called,
+                                   const owned_array<uint32_t> &nodes,
+                                   qualified_type &result);
+    analysis_result bswapg_result(SyntaxRef n, entity_index called,
+                                  const owned_array<uint32_t> &nodes,
+                                  qualified_type &result);
     analysis_result atomic_builtin_result(SyntaxRef n, entity_index called,
                                           const owned_array<uint32_t> &nodes,
                                           qualified_type &result);
@@ -3228,6 +3237,8 @@ class semantic_analysis
                                      constant_value &v);
     constness evaluate_bit_count(constant_evaluation &state, int which,
                                  const semantic_node &call, constant_value &v);
+    constness evaluate_bswap(constant_evaluation &state,
+                             const semantic_node &call, constant_value &v);
     constness evaluate_call(constant_evaluation &state, uint32_t node,
                             constant_value &v);
     constness evaluate_object(constant_evaluation &state, uint32_t node,

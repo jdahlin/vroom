@@ -28,7 +28,8 @@ int main()
     if (relaunder(&s) != &s || relaunder(&s)->a != 1)
         return 1;
     int x = 5;
-    if (through(&x) != &x || wrap(&x) != &x)
+    int *volatile vp = &x;
+    if (through(vp) != vp || wrap(vp) != vp)
         return 2;
     const volatile char c = 'a';
     const volatile char *q = wrap(&c);

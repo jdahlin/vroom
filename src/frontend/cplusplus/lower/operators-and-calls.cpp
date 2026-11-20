@@ -202,12 +202,72 @@ uint32_t c_lowering::assignment(const semantic_node &n)
 
 /* [expr.call]: a function called through a pointer; one that returns a
    reference returns its address */
+/*
+ * [ext:gnu_library_builtins] a call of a builtin of this front end that is
+ * not the C front end's builtin node of its name (the registry's lowering):
+ * the argument itself (__builtin_launder), the arguments evaluated and no
+ * value (__builtin_assume_dereferenceable), a trap (__builtin_verbose_trap:
+ * its message strings are no run-time operands), or the byte swap of the
+ * argument's width (__builtin_bswapg).
+ */
+uint32_t c_lowering::special_builtin(builtin_lowering lowering,
+                                     ast_qualified_type t,
+                                     const owned_array<uint32_t> &arguments)
+{
+    uint32_t count = static_cast<uint32_t>(arguments.size());
+    switch (lowering) {
+    case builtin_lowering::identity:
+        return arguments[0];
+    case builtin_lowering::discard: {
+        uint32_t all = 0;
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t one = cast(arguments[i], v, AST_CAST_VOID);
+            if (all)
+                all = comma(v, all, one);
+            else
+                all = one;
+        }
+        if (!all)
+            all = cast(
+                ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0),
+                v, AST_CAST_VOID);
+        return all;
+    }
+    case builtin_lowering::trap:
+        return ast_builder_builtin_call(c, "__builtin_trap", 14, t, nullptr, 0);
+    case builtin_lowering::bswap: {
+        /* the argument as the unsigned integer of its width, swapped, and
+           the result as the argument's type */
+        uint64_t bytes = ast_builder_type_size(c, type_of(arguments[0]));
+        if (bytes == 1)
+            return arguments[0];
+        const char *name = "__builtin_bswap16";
+        ast_qualified_type u = ast_builder_type_basic(AST_TYPE_UNSIGNED_SHORT);
+        if (bytes == 4) {
+            name = "__builtin_bswap32";
+            u = ast_builder_type_basic(AST_TYPE_UNSIGNED_INT);
+        } else if (bytes == 8) {
+            name = "__builtin_bswap64";
+            u = ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
+        }
+        uint32_t x = cast(arguments[0], u, AST_CAST_INTEGER);
+        uint32_t swapped =
+            ast_builder_builtin_call(c, name, strlen(name), u, &x, 1);
+        return cast(swapped, t, AST_CAST_INTEGER);
+    }
+    case builtin_lowering::node:
+        break;
+    }
+    return fail("a builtin of this front end", 0);
+}
+
 uint32_t c_lowering::call(const semantic_node &n)
 {
     qualified_type function_type = node(n.a).type;
     uint32_t callee = 0;
     uint32_t builtin = 0;
     bool untyped_builtin = false;
+    builtin_lowering lowering = builtin_lowering::node;
     owned_array<uint32_t> arguments;
     /* a call through a pointer to member function: its statements
        first ([expr.mptr.oper]/6) */
@@ -272,6 +332,8 @@ uint32_t c_lowering::call(const semantic_node &n)
             builtin = analysis.entity_table[node(named).a].name;
             uint16_t row = analysis.entity_table[node(named).a].gnu_builtin_row;
             untyped_builtin = row && gnu_builtin_untyped(row);
+            if (row)
+                lowering = gnu_builtin_at(row).lower;
         } else {
             /* [expr.call]/8: "The postfix-expression is sequenced before
                each expression in the expression-list": the object
@@ -329,7 +391,11 @@ uint32_t c_lowering::call(const semantic_node &n)
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(result, n.at));
     uint32_t count = static_cast<uint32_t>(arguments.size());
     uint32_t made = 0;
-    if (builtin) {
+    if (builtin && lowering != builtin_lowering::node) {
+        made = special_builtin(lowering, t, arguments);
+        if (!made)
+            return 0;
+    } else if (builtin) {
         size_t length = 0;
         const char *spelling =
             tokens.pp.identifier_spelling(builtin - 1, &length);

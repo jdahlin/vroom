@@ -138,6 +138,14 @@ const char *ast_builder_builtin_signature(const char *name, size_t length);
 uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
                                   ast_qualified_type t, const uint32_t *args,
                                   uint32_t count);
+/* the C library function the builtin __builtin_NAME (name[0..length) is
+   NAME) declares implicitly, as clang does: its prototype in the front
+   end's builtin table letters (*clang_encoding false) or in clang's
+   Builtins.def encoding (true), and the symbol it calls, NULL if that is
+   NAME; false if there is no such builtin */
+bool ast_builder_library_builtin(const char *name, size_t length,
+                                 const char **signature, bool *clang_encoding,
+                                 const char **symbol);
 /* whether name is one of the __atomic_*, __sync_* and __c11_atomic_* calls:
    the number of arguments as written (the orders a __sync_ call lacks not
    counted), and the result: 0 void, 1 bool, 2 the type the first argument

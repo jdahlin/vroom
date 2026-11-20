@@ -26,6 +26,7 @@
 #define VCC_CPLUSPLUS_LOWER_INTERNAL_H
 
 #include "../cplusplus-internal.h"
+#include "frontend/cplusplus/builtin-registry.h"
 #include "frontend/cplusplus/lower.h"
 
 namespace cplusplus::lowering
@@ -622,6 +623,8 @@ class c_lowering
         return block(items.data(), static_cast<uint32_t>(items.size()));
     }
     ast_qualified_type type_of(uint32_t n);
+    uint32_t special_builtin(builtin_lowering lowering, ast_qualified_type t,
+                             const owned_array<uint32_t> &arguments);
     uint32_t to_bool(uint32_t int_value);
     uint32_t truth(uint32_t value);
     uint32_t to_ptrdiff(uint32_t integer);

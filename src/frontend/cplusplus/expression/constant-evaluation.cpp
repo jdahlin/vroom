@@ -1543,6 +1543,10 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
             return evaluate_query_builtin(state, b.which, x, v);
         case builtin_fold::floating_constant:
             return evaluate_floating_builtin(x, v);
+        case builtin_fold::identity:
+            return evaluate_node(state, semantics.items(x.first)[0], v);
+        case builtin_fold::bswap:
+            return evaluate_bswap(state, x, v);
         default:
             break;
         }

@@ -25,6 +25,16 @@ enum class builtin_form : uint8_t {
     overflow,
     atomic,
     bit_count,
+    /* a builtin the C front end has its own node for that is a call of the
+       C library function here, as clang's: __builtin_strlen */
+    library,
+    /* a function of the prototype in `proto` that is a call of the C
+       library function `symbol`: __builtin_char_memchr */
+    library_alias,
+    /* T *__builtin_launder(T *) */
+    launder,
+    /* T __builtin_bswapg(T), T an integer type of a multiple of 8 bits */
+    bswapg,
     /* a builtin of the C front end whose signature has parameters this
        front end has no types for yet: declared, a call is refused naming it */
     unsupported,
@@ -39,6 +49,23 @@ enum class builtin_fold : uint8_t {
     bit_count,
     floating_classify,
     floating_constant,
+    /* the first argument's value */
+    identity,
+    bswap,
+};
+
+/* what lowering makes of a call, where it is not the C front end's builtin
+   node of the same name */
+enum class builtin_lowering : uint8_t {
+    node,
+    /* the call is its argument */
+    identity,
+    /* the arguments evaluated for their effects, no value */
+    discard,
+    /* __builtin_trap's node */
+    trap,
+    /* the C front end's byte swap of the argument's width */
+    bswap,
 };
 
 struct gnu_builtin {
@@ -47,6 +74,11 @@ struct gnu_builtin {
     /* the form's own number (the query, the va_list builtin, the bit count) */
     uint8_t which;
     builtin_fold fold;
+    builtin_lowering lower;
+    /* the prototype in the letters of the C front end's builtin table where
+       it is not the table's, and the library function a library_alias calls */
+    const char *proto;
+    const char *symbol;
 };
 
 /* the row of the builtins of form `unsupported` (they share it) */
