@@ -502,8 +502,14 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
     else if (s.static_)
         implied = linkage::internal;
     uint32_t cv = cv_of(type_table, type);
+    /* [dcl.link]/7: a declaration directly contained in a
+       linkage-specification without braces is treated as if it contains
+       the extern specifier "for the purpose of determining the linkage of
+       the declared name", so a const variable of it keeps external
+       linkage */
     bool const_object = kind == entity_kind::variable && (cv & cv_const) &&
-                        !(cv & cv_volatile) && !s.extern_ && !s.inline_;
+                        !(cv & cv_volatile) && !s.extern_ && !s.inline_ &&
+                        !linkage_without_braces;
     if (block)
         return declare_local(declaration, id, kind, type, s, declared_entity);
     /* [basic.link]/4: "An unnamed namespace or a namespace declared
