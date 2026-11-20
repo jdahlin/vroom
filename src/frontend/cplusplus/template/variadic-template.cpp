@@ -47,6 +47,7 @@ bool semantic_analysis::template_parameter_form(
        its type-constraint the placeholder's (abbreviated_parameters) */
     if (p.is(syntax_kind::decl_specifier_seq)) {
         out.type = true;
+        out.pack = invented_pack(p);
         for (auto child : p.elements())
             if (child.is(syntax_kind::placeholder_type_specifier) &&
                 child[0].is(syntax_kind::type_constraint))

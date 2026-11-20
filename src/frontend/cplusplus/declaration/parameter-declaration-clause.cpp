@@ -665,6 +665,38 @@ bool semantic_analysis::generic_placeholder(SyntaxRef seq) const
     return false;
 }
 
+/* whether a declarator's ... precedes its declarator-id, outside the
+   parameters of a function declarator in it */
+static bool declares_pack(SyntaxElement n)
+{
+    /* (a parameter-declaration's declarator, or one nested in it; not a
+       parameters-and-qualifiers or an array bound's expression) */
+    for (auto c : n.elements()) {
+        if (c.is(preprocessing_op_or_punc::ELLIPSIS))
+            return true;
+        if (c.is(syntax_kind::ptr_declarator, syntax_kind::noptr_declarator,
+                 syntax_kind::ptr_abstract_declarator,
+                 syntax_kind::noptr_abstract_declarator) &&
+            declares_pack(c))
+            return true;
+    }
+    return false;
+}
+
+/* the parameter-declarations of a parameter-declaration-clause (or its
+   list) and the "..." tokens, in order */
+static void flatten_parameters(SyntaxElement n,
+                               owned_array<SyntaxElement> &items)
+{
+    for (auto c : n.elements()) {
+        if (c.is(syntax_kind::parameter_declaration_clause,
+                 syntax_kind::parameter_declaration_list))
+            flatten_parameters(c, items);
+        else
+            items.append(c);
+    }
+}
+
 bool semantic_analysis::abbreviated_parameters(
     SyntaxRef declaration, owned_array<SyntaxRef> &parameters) const
 {
@@ -694,14 +726,9 @@ bool semantic_analysis::abbreviated_parameters(
     if (!list)
         return true;
     owned_array<SyntaxElement> items;
-    for (auto c : list.elements()) {
-        if (c.is(syntax_kind::parameter_declaration_list))
-            for (auto item : c.elements())
-                items.append(item);
-        else
-            items.append(c);
-    }
-    for (auto c : items) {
+    flatten_parameters(list, items);
+    for (size_t i = 0; i < items.size(); i++) {
+        auto c = items[i];
         if (!c.parameter_declaration())
             continue;
         for (auto seq : c.elements()) {
@@ -711,11 +738,39 @@ bool semantic_analysis::abbreviated_parameters(
                 break;
             /* [dcl.fct]/22: "The invented type template-parameter is a
                template parameter pack if the corresponding parameter-
-               declaration declares a function parameter pack" */
-            for (token_index t = c.first_token(); t < c.end_token(); t++)
-                if (SyntaxElement::from_token(t).is(
-                        preprocessing_op_or_punc::ELLIPSIS))
+               declaration declares a function parameter pack": its
+               declarator's ... (not one of a nested function
+               declarator's parameters), or the clause's own after the
+               parameter (auto&&...: [dcl.fct]/21's ambiguity resolves to
+               a pack, as the placeholder's type depends on its
+               invented parameter) */
+            bool pack = declares_pack(c);
+            if (i + 1 < items.size() &&
+                items[i + 1].is(preprocessing_op_or_punc::ELLIPSIS) && !pack) {
+                /* the clause's ...: after a declarator-id C's variadic
+                   ellipsis ([dcl.fct]/21: auto x...), after no
+                   declarator or one of ptr-operators a pack (clang:
+                   auto&&...); another abstract declarator ((*)(int)...)
+                   is not decided here */
+                bool named = false, plain = true;
+                for (auto d : c.elements()) {
+                    if (d.decl_specifier_seq() || d.is_token())
+                        continue;
+                    if (!d.is(syntax_kind::ptr_abstract_declarator))
+                        named = true;
+                    for (auto q : d.elements())
+                        if (!q.is(syntax_kind::ptr_operator))
+                            plain = false;
+                }
+                if (named)
+                    pack = false;
+                else if (plain)
+                    pack = true;
+                else
                     return false;
+            }
+            if (pack && !invented_pack(seq))
+                invented_packs.append(seq.index().index());
             parameters.append(seq);
             break;
         }
@@ -729,6 +784,14 @@ uint32_t semantic_analysis::invented_parameter_name(SyntaxRef seq) const
     int length =
         snprintf(spelling, sizeof spelling, "auto:%u", seq.index().index());
     return tokens.pp.identifier(spelling, static_cast<size_t>(length)) + 1;
+}
+
+bool semantic_analysis::invented_pack(SyntaxRef seq) const
+{
+    for (uint32_t k : invented_packs)
+        if (k == seq.index().index())
+            return true;
+    return false;
 }
 
 bool semantic_analysis::invented_parameter_type(SyntaxRef seq,

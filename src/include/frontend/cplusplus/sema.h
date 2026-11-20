@@ -3685,8 +3685,11 @@ class semantic_analysis
        function that declaration (a template-declaration's or a
        function-definition) declares with a generic parameter type
        placeholder, each an invented type template-parameter, appended to
-       parameters; false for a parameter pack of one (no rules yet) */
+       parameters (a parameter pack's is a pack: invented_pack) */
     bool generic_placeholder(SyntaxRef seq) const;
+    /* whether the invented template-parameter of seq is a pack */
+    bool invented_pack(SyntaxRef seq) const;
+    mutable owned_array<uint32_t> invented_packs;
     bool abbreviated_parameters(SyntaxRef declaration,
                                 owned_array<SyntaxRef> &parameters) const;
     /* whether a function-definition declares an abbreviated function
