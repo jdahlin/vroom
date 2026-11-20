@@ -26,18 +26,19 @@ types::types()
 uint32_t types::hash(const type &t, const qualified_type *parameters) const
 {
     /* the record's members as words: its padding is not part of the type */
-    uint32_t key[9] = {static_cast<uint32_t>(t.kind),
-                       static_cast<uint32_t>(t.fundamental),
-                       static_cast<uint32_t>(t.non_throwing) << 2 |
-                           static_cast<uint32_t>(t.variadic) << 1 |
-                           static_cast<uint32_t>(t.bound_known),
-                       t.operand.bits,
-                       t.entity,
-                       static_cast<uint32_t>(t.bound),
-                       static_cast<uint32_t>(t.bound >> 32),
-                       t.parameter_count,
-                       static_cast<uint32_t>(t.function_cv) << 8 |
-                           t.function_ref};
+    uint32_t key[10] = {static_cast<uint32_t>(t.kind),
+                        static_cast<uint32_t>(t.fundamental),
+                        static_cast<uint32_t>(t.non_throwing) << 2 |
+                            static_cast<uint32_t>(t.variadic) << 1 |
+                            static_cast<uint32_t>(t.bound_known),
+                        t.operand.bits,
+                        t.entity,
+                        static_cast<uint32_t>(t.bound),
+                        static_cast<uint32_t>(t.bound >> 32),
+                        t.parameter_count,
+                        static_cast<uint32_t>(t.function_cv) << 8 |
+                            t.function_ref,
+                        t.variable_bound};
     uint32_t h = vhash_string(reinterpret_cast<const char *>(key), sizeof key);
     if (t.parameter_count)
         h ^= vhash_string(reinterpret_cast<const char *>(parameters),
@@ -55,6 +56,7 @@ bool types::same(const type &a, const qualified_type *a_parameters,
         a.function_ref != other.function_ref ||
         a.bound_known != other.bound_known || !(a.operand == other.operand) ||
         a.entity != other.entity || a.bound != other.bound ||
+        a.variable_bound != other.variable_bound ||
         a.parameter_count != other.parameter_count)
         return false;
     const qualified_type *b_parameters = parameters(b);
@@ -156,6 +158,19 @@ type_index types::array_of_parameter_bound(qualified_type element,
     t.operand = element;
     t.bound_known = true;
     t.entity = parameter;
+    return intern(t, nullptr);
+}
+
+/* [ext:clang_vla] a variable length array: the bound is a node, whose
+   value no table knows */
+type_index types::array_of_variable_bound(qualified_type element, uint32_t node)
+{
+    type t;
+    t.kind = type_kind::array;
+    t.operand = element;
+    t.bound_known = true;
+    t.bound = ~uint64_t(0);
+    t.variable_bound = node;
     return intern(t, nullptr);
 }
 

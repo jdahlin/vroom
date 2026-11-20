@@ -215,6 +215,9 @@ uint32_t c_lowering::expression(uint32_t index)
         return new_object(n);
     case semantic_kind::array_size:
         return array_size(n);
+    case semantic_kind::variable_size:
+        /* [ext:clang_vla] */
+        return ast_builder_sizeof_vla(c, type(n.computation, n.at));
     case semantic_kind::delete_object:
         return delete_object(n);
     case semantic_kind::throw_exception:

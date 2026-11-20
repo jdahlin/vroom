@@ -74,6 +74,9 @@ class c_lowering
         records.resize(analysis.entity_table.size());
         for (ast_qualified_type &r : records)
             r = 0;
+        variable_arrays.resize(analysis.type_table.size());
+        for (ast_qualified_type &r : variable_arrays)
+            r = 0;
         c_fields.resize(analysis.entity_table.size());
         for (uint32_t &f : c_fields)
             f = 0;
@@ -135,6 +138,10 @@ class c_lowering
     owned_array<uint32_t> symbols;
     /* the C struct of each class, 0 until made */
     owned_array<ast_qualified_type> records;
+    /* [ext:clang_vla] the C type of each variable length array type (by
+       the type's index), made once: its bound is lowered once, where the
+       array is first named (its declaration) */
+    owned_array<ast_qualified_type> variable_arrays;
     /* a data member or base subobject: its field's number in its class's
        C struct, which has padding fields where C's layout would place a
        member earlier than the ABI does; a class: its C struct's number of

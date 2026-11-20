@@ -151,6 +151,11 @@ struct type {
        pointer to member of a dependent class ([temp.dep.type]/9): the
        class's type */
     uint64_t bound = 0;
+    /* [ext:clang_vla] array: a variable length array, whose bound is the
+       semantic-tree node (a prvalue of integral type, evaluated once where
+       the array is declared) and whose bound_known is true with bound all
+       ones: the type is made once per declaration */
+    uint32_t variable_bound = 0;
     /* function: the parameter types are parameters[first_parameter ..
        first_parameter + parameter_count) */
     uint32_t first_parameter = 0, parameter_count = 0;
@@ -176,6 +181,8 @@ class types
     type_index array_of_unknown_bound_of(qualified_type element);
     type_index array_of_parameter_bound(qualified_type element,
                                         uint32_t parameter);
+    /* [ext:clang_vla] element[node], node a run-time bound */
+    type_index array_of_variable_bound(qualified_type element, uint32_t node);
     type_index function(qualified_type result, const qualified_type *parameters,
                         size_t parameter_count, bool variadic,
                         bool non_throwing = false, uint32_t function_cv = 0,
@@ -1302,6 +1309,10 @@ enum class semantic_kind : uint8_t {
        under construction or destruction (this), b: its class, whose
        virtual table pointer is stored in it */
     vtable_pointer_store,
+    /* [ext:clang_vla] sizeof of a variable length array: a size_t prvalue,
+       the bytes of the array of the type computation, read at run time
+       (the bound was evaluated where the array was declared) */
+    variable_size,
     /* ---- statements ---- */
     /* the statements in list[first .. first + count) */
     block,
@@ -1721,6 +1732,12 @@ class semantic_analysis
     /* the type's size and alignment in bytes ([expr.sizeof],
        [expr.alignof]), 0 if not complete */
     uint64_t size_of_type(qualified_type t) const;
+    /* [ext:clang_vla] whether t is an array with a run-time bound (its
+       size_of_type is 0) */
+    bool variable_length_array(qualified_type t) const;
+    /* ... or has one in it: pointed to, referred to, an element or a
+       parameter */
+    bool has_variable_bound(qualified_type t) const;
     /* the size (and alignment) of a pointer, which a reference member
        takes in a class ([abi:class-types]) */
     uint64_t pointer_size() const;
@@ -2298,6 +2315,17 @@ class semantic_analysis
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(SyntaxRef op, qualified_type &type,
                                      declarator_meaning &m);
+    /* [ext:clang_vla] the declarator being analysed is a block-scope
+       variable's, whose array bounds may be run-time values (cleared
+       while its function parameters and bound expressions are analysed) */
+    bool variable_length_declarator = false;
+    bool depends_on_run_time_state(uint32_t n) const;
+    /* the checks of a declaration whose type has a variable length array
+       in it (declarator-meaning.cpp) */
+    analysis_result variable_length_declaration(SyntaxRef declaration,
+                                                qualified_type type,
+                                                bool permitted,
+                                                bool initialized);
     analysis_result array(SyntaxRef at, SyntaxElement bound,
                           qualified_type &type);
     analysis_result reference(SyntaxRef at, bool rvalue, qualified_type &type,

@@ -53,7 +53,7 @@ struct tree_checker {
                /* T(args), a prvalue of class type ([expr.type.conv]/2) */
                k == semantic_kind::construct ||
                (k >= semantic_kind::new_object &&
-                k <= semantic_kind::vtable_pointer_store);
+                k <= semantic_kind::variable_size);
     }
     static bool is_initializer(semantic_kind k)
     {
@@ -296,6 +296,7 @@ struct tree_checker {
             break;
         case semantic_kind::source_location:
         case semantic_kind::label_address:
+        case semantic_kind::variable_size:
             break;
         case semantic_kind::default_argument:
             child(n, node.a, tree_sort::initializer, false, "argument");

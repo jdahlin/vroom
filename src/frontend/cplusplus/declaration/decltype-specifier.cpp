@@ -137,6 +137,10 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
     bool named = names_entity(operand);
     if (!decltype_of(m, named, type))
         return not_supported(n, "dcl.type.decltype");
+    /* [ext:clang_vla] a variable length array type is the declaration's
+       own: clang refuses it as a template argument and in the type traits */
+    if (has_variable_bound(type))
+        return not_supported(n, "dcl.array");
     return analysis_result::well_formed;
 }
 

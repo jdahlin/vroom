@@ -84,6 +84,20 @@ ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
     return cc_type_array(c, element, count, 0);
 }
 
+ast_qualified_type ast_builder_type_vla(cc *c, ast_qualified_type element,
+                                        uint32_t size)
+{
+    return cc_type_vla(c, element, size);
+}
+
+uint32_t ast_builder_sizeof_vla(cc *c, ast_qualified_type t)
+{
+    uint32_t n = cc_node_new(c, AST_NODE_SIZEOF_VLA, c->t_size, 0);
+
+    AST_NODE(n)->b = t;
+    return n;
+}
+
 ast_qualified_type
 ast_builder_type_function(cc *c, ast_qualified_type result,
                           const ast_qualified_type *parameters, uint32_t count,

@@ -933,6 +933,23 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
         v = value_of(t, e.value);
         return constness::constant;
     }
+    /* [expr.const]/5.8: a scalar member of an automatic class object
+       whose lifetime did not begin within the evaluation (the enclosing
+       function's local or parameter): only a subobject of a constexpr
+       object is usable in constant expressions */
+    if (scalar && x.kind == semantic_kind::member) {
+        uint32_t root = x.a;
+        while (semantics[root].kind == semantic_kind::member)
+            root = semantics[root].a;
+        if (semantics[root].kind == semantic_kind::entity &&
+            frame_object(state, semantics[root].a) == no_frame_object) {
+            const entity &e = entity_table[semantics[root].a];
+            if (e.kind == entity_kind::variable && e.automatic &&
+                !e.constexpr_ &&
+                type_table[e.type.unqualified()].kind == type_kind::class_type)
+                return constness::not_constant;
+        }
+    }
     uint32_t object = 0;
     constness c = evaluate_object(state, node, object);
     if (c != constness::constant)

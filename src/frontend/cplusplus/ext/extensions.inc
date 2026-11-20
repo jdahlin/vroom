@@ -161,6 +161,9 @@ EXTENSION(clang_bit_cast, clang,
 EXTENSION(clang_datasizeof, clang,
           "clang Language Extensions: __datasizeof (type-id) and __datasizeof expression, "
           "the size without the tail padding of a class ([abi:layout]'s data size)")
+EXTENSION(clang_vla, clang,
+          "clang Language Extensions: variable length arrays in C++ (C99's, GCC manual 6.20 "
+          "Arrays of Variable Length): an automatic array whose bound is a run-time value")
 EXTENSION(clang_convertvector, clang,
           "clang Language Extensions, Vector Operations: __builtin_convertvector (vector, type), "
           "each element converted to the vector type's element type")

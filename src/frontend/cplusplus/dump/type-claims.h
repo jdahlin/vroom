@@ -62,6 +62,9 @@ static bool write_type_claim_unqualified(const types &table, type_index t,
         vbuffer_string_append(out, "::vcc_claim::rvalue_reference_to<");
         break;
     case type_kind::array:
+        /* [ext:clang_vla] a run-time bound is no claim clang can check */
+        if (record.variable_bound)
+            return false;
         if (record.bound_known)
             vbuffer_string_append(out, "::vcc_claim::array_of<");
         else

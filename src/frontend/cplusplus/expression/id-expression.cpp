@@ -682,6 +682,12 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
             s != function_state.function) {
             if (!current_lambda())
                 return not_supported(current_declaration, "basic.def.odr");
+            /* [ext:clang_vla] a variable length array of the enclosing
+               function (captured by reference, or its sizeof): its bound
+               is kept in that function's frame */
+            if (has_variable_bound(x.type))
+                return not_supported(current_declaration,
+                                     "expr.prim.lambda.capture");
             bool plain = false;
             VTRY(r, captured_entity(t, e, m, deferred_use, plain));
             if (!plain)

@@ -13,6 +13,9 @@ DIAGNOSTIC(sema_duplicate_specifier, EXTENSION_WARNING, WARNING, "duplicate-decl
            "'%0' appears more than once in the decl-specifier-seq ([dcl.spec]/2)")
 DIAGNOSTIC(sema_zero_length_array, EXTENSION, IGNORE, "zero-length-array",
            "an array bound shall be greater than zero ([dcl.array]/1)")
+/* [ext:clang_vla] clang's -Wvla-cxx-extension, off unless asked */
+DIAGNOSTIC(sema_variable_length_array, EXTENSION, IGNORE, "vla-cxx-extension",
+           "variable length arrays in C++ are a Clang extension")
 DIAGNOSTIC(sema_no_declarator, EXTENSION_WARNING, WARNING, "missing-declarations",
            "the declaration declares nothing: the init-declarator-list can be omitted only when declaring a class or enumeration ([dcl.pre]/5)")
 /* [intro.compliance]/8: Microsoft's extensions (-fms-extensions) */

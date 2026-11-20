@@ -41,6 +41,10 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                                     owned_array<template_argument> &deduced,
                                     owned_array<bool> &set, bool exact)
 {
+    /* [ext:clang_vla] a variable length array type is deduced from no
+       template argument (clang: "no matching function") */
+    if (has_variable_bound(a))
+        return false;
     const struct type &pr = type_table[p.unqualified()];
     if (pr.kind == type_kind::template_parameter) {
         /* (P's cv-qualifiers beyond A's: [temp.deduct.call]/4.1's "more
