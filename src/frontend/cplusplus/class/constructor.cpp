@@ -234,11 +234,30 @@ analysis_result semantic_analysis::constructor_template_declarator(
 }
 
 /*
+ * Whether the initializer of a member of class c (with constructors) is
+ * not a constructor call on the member but the value of an aggregate
+ * ([dcl.init.aggr], [dcl.init.list]/3.4: `{}` or `{...}`), which the
+ * lowering builds and stores: right only when copying the value is
+ * the same as initializing the member in place, c's copy and destructor
+ * trivial ([class.copy.ctor]/11, [class.dtor]/8).
+ */
+bool semantic_analysis::aggregate_value_stored(entity_index c,
+                                               uint32_t value) const
+{
+    const semantic_node &n = semantics[value];
+    if (n.kind != semantic_kind::initializer_list &&
+        n.kind != semantic_kind::zero)
+        return false;
+    return trivial_class(c);
+}
+
+/*
  * [class.base.init]/9.1: member e initialized from its default member
  * initializer ([class.mem]/10), analysed in the constructor ([class.mem]/6:
  * a complete-class context, `this` its object), and stored as by an
- * assignment to (*this).e.  A member of class type with constructors, or
- * an array, has no rules here yet.
+ * assignment to (*this).e.  A member of class type with constructors is
+ * constructed in place, or, when its initializer is an aggregate's value
+ * (aggregate_value_stored), stored; an array has no rules here yet.
  */
 analysis_result
 semantic_analysis::default_member_initializer(token_index at, entity_index e,
@@ -258,7 +277,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     VTRY(r, subobject(at, e, object));
     initialized_value value;
     VTRY_SET(r, initializer(init, type, value));
-    if (constructed &&
+    if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         (semantics[value.node].kind != semantic_kind::construct ||
          semantics[value.node].a))
         /* [dcl.init]/17.6.1: a prvalue of the class, or no constructor
@@ -277,7 +296,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
                 initializer_exception::may_throw;
     }
     unsupported.resize(unsupported_before);
-    if (constructed) {
+    if (constructed && !aggregate_value_stored(record.entity, value.node)) {
         /* [class.base.init]/9.1: the member's constructor, called on the
            member itself (the object of the construct node: 0 until now,
            as for a declared variable) */
@@ -1268,8 +1287,24 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
             owned_array<expression_meaning> arguments;
             if (item.size() == 4)
                 r = expression_list_meanings(item[2], arguments);
-            else if (item.size() != 3)
-                /* a braced-init-list */
+            else if (item.size() == 2 &&
+                     item[1].is(syntax_kind::braced_init_list)) {
+                /* [dcl.init.list]/3.4: an aggregate member's list: its
+                   value, stored; a constructor's list and a base's (its
+                   tail padding may hold a derived member) are not
+                   analysed */
+                if (entity_table[e].base_subobject)
+                    return not_supported(item, "class.base.init");
+                initialized_value listed;
+                r = list_initialization(item[1], type, true, listed);
+                if (r != analysis_result::well_formed)
+                    return r;
+                if (!aggregate_value_stored(record.entity, listed.node))
+                    return not_supported(item, "class.base.init");
+                initialized[slot] =
+                    subobject_store(object, type, id, listed.node);
+                continue;
+            } else if (item.size() != 3)
                 return not_supported(item, "class.base.init");
             if (r != analysis_result::well_formed)
                 return r;

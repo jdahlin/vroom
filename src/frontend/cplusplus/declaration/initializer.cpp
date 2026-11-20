@@ -1414,7 +1414,8 @@ analysis_result semantic_analysis::aggregate_elements(
             element = types[i];
         initialized_value one;
         const struct type &of_element = type_table[element.unqualified()];
-        if (next >= clauses.size() &&
+        bool has_default = target.kind != type_kind::array && defaults[i];
+        if (next >= clauses.size() && !has_default &&
             of_element.kind == type_kind::class_type &&
             entity_table[of_element.entity].kind == entity_kind::class_type &&
             (entity_table[of_element.entity].first_constructor ||
@@ -1449,7 +1450,16 @@ analysis_result semantic_analysis::aggregate_elements(
             if (!initializer_names_nothing(defaults[i]))
                 return not_supported(list, "dcl.init.aggr");
             qualified_type member_type = element;
+            const struct type member = type_table[element.unqualified()];
             VTRY(r, initializer(defaults[i], member_type, one));
+            if (member.kind == type_kind::class_type &&
+                entity_table[member.entity].kind == entity_kind::class_type &&
+                (entity_table[member.entity].first_constructor ||
+                 destroys(member.entity)) &&
+                !aggregate_value_stored(member.entity, one.node))
+                /* a class with constructors initialized in place by a
+                   constructor call: not analysed */
+                return not_supported(list, "dcl.init.aggr");
         } else {
             /* (5.2): from an empty initializer list: value-initialization
                ([dcl.init.list]/3.11 for a scalar, an aggregate's own

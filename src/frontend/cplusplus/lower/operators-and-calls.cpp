@@ -167,7 +167,13 @@ uint32_t c_lowering::data_size_assignment(const semantic_node &n, uint32_t a,
 uint32_t c_lowering::assignment(const semantic_node &n)
 {
     uint32_t a = object(n.a);
-    uint32_t b = expression(n.b);
+    uint32_t b = 0;
+    if (node(n.b).kind == semantic_kind::initializer_list)
+        /* [dcl.init.list]/3.4: a member's braced default member
+           initializer ([class.base.init]/9.1): its object, copied in */
+        b = compound_literal(n.b);
+    else
+        b = expression(n.b);
     if (!a || !b)
         return 0;
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));

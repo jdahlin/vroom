@@ -3373,6 +3373,7 @@ class semantic_analysis
                                               entity_index e,
                                               SyntaxElement init,
                                               const specified &s);
+    bool aggregate_value_stored(entity_index c, uint32_t value) const;
     analysis_result default_member_initializer(token_index at, entity_index e,
                                                uint32_t &statement);
     /* the subobject e (a base or a non-static data member) of *this */
