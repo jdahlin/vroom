@@ -1813,6 +1813,29 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
         tokens[head_name.token()].kind != token_kind::identifier)
         return not_supported(n, "temp.class");
     uint32_t name = tokens.identifier(head_name.token());
+    /* [temp.mem]/3: "A member function template shall not be virtual.":
+       diagnosed in the definition, which is analysed only per
+       specialization (member_function_template's check) */
+    if (specifier.is(syntax_kind::class_specifier))
+        for (auto member :
+             specifier.class_specifier().member_specification().elements()) {
+            if (!member.is(syntax_kind::template_declaration) ||
+                member.size() != 2 ||
+                !member[1].is(syntax_kind::member_declaration,
+                              syntax_kind::function_definition))
+                continue;
+            SyntaxRef inner = member[1];
+            uint32_t lead = leading_gnu_attributes(inner);
+            if (lead >= inner.size() ||
+                !inner[lead].is(syntax_kind::decl_specifier_seq))
+                continue;
+            for (auto x : inner[lead].elements())
+                if (x.is(standard_keyword::virtual_))
+                    return ill_formed_at_token(
+                        x.token(),
+                        "a member function template shall not be virtual",
+                        "temp.mem");
+        }
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
@@ -2931,6 +2954,45 @@ analysis_result semantic_analysis::member_definition_of_template(
                 (tokens.identifier(t) == mine_name ||
                  tokens.identifier(t) == class_name))
                 return not_supported(n, "basic.lookup.qual");
+    }
+    if (!variable && !inner && of.definition.is(syntax_kind::class_specifier)) {
+        /* [temp.mem]/1: "A member template of a class template that is
+           defined outside of its class template definition shall be
+           specified with a template-head equivalent to that of the class
+           template followed by a template-head equivalent to that of the
+           member template": a definition with the class's template-head
+           alone, of a name only member templates of the class declare
+           (each member that writes the name, a template-declaration) */
+        token_index name = 0;
+        out_of_class_member(definition, &name);
+        uint32_t wanted = 0;
+        if (name && tokens[name].kind == token_kind::identifier)
+            wanted = tokens.identifier(name);
+        bool by_template = false, by_other = false;
+        for (auto member : of.definition.class_specifier()
+                               .member_specification()
+                               .elements()) {
+            if (!wanted || member.is_token())
+                continue;
+            bool writes = false;
+            for (token_index t = member.first_token(); t < member.end_token();
+                 t++)
+                if (tokens[t].kind == token_kind::identifier &&
+                    tokens.identifier(t) == wanted)
+                    writes = true;
+            if (writes && member.is(syntax_kind::template_declaration))
+                by_template = true;
+            else if (writes)
+                by_other = true;
+        }
+        if (by_template && !by_other)
+            return ill_formed_at_token(
+                name,
+                "a member template of a class template defined outside of "
+                "its class template definition shall be specified with the "
+                "class template's template-head followed by the member "
+                "template's",
+                "temp.mem");
     }
     template_member_definition record;
     record.first_parameter = first;
