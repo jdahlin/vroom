@@ -452,8 +452,33 @@ class c_lowering
     uint32_t construct_at(const semantic_node &n, uint32_t object, uint32_t vtt,
                           token_index at);
     /* the object in symbol s, of type object_type (C type t) */
+    /* (through: symbol s is a pointer to the object) */
     uint32_t initialize_into(uint32_t s, qualified_type object_type,
-                             ast_qualified_type t, uint32_t n);
+                             ast_qualified_type t, uint32_t n,
+                             bool through = false);
+    uint32_t scalar_zero(qualified_type object, ast_qualified_type u,
+                         token_index at);
+    /* while it lives: the pointer new or delete holds (a variable of type
+       t) and the element count array_count reads */
+    struct allocation {
+        c_lowering &l;
+        uint32_t symbol, count;
+        ast_qualified_type type;
+        allocation(c_lowering &l, uint32_t s, ast_qualified_type t, uint32_t k)
+            : l(l), symbol(l.allocated_symbol), count(l.count_symbol),
+              type(l.allocated_type)
+        {
+            l.allocated_symbol = s;
+            l.allocated_type = t;
+            l.count_symbol = k;
+        }
+        ~allocation()
+        {
+            l.allocated_symbol = symbol;
+            l.allocated_type = type;
+            l.count_symbol = count;
+        }
+    };
     uint32_t temporary_object(uint32_t n);
     /* the class or array of classes type: its innermost element type in
        object, and that class's destructor (0 if none or not a class) */
@@ -1660,48 +1685,12 @@ uint32_t c_lowering::new_object(const semantic_node &n)
         return 0;
     auto variable = [&] { return c_variable(c, symbol, t); };
     if (n.b) {
-        uint32_t outer = allocated_symbol;
-        ast_qualified_type outer_type = allocated_type;
-        allocated_symbol = symbol;
-        allocated_type = t;
-        const semantic_node &init = node(n.b);
-        uint32_t done = 0;
-        if (init.kind == semantic_kind::construct) {
-            done = expression(n.b);
-        } else {
-            qualified_type object = record(n.type).operand;
-            ast_qualified_type u = AST_QUALIFIED_TYPE_UNQUALIFIED(type(
-                qualified_type::make(object.unqualified(), cv_none), n.at));
-            uint32_t value = 0;
-            if (init.kind == semantic_kind::initializer_list) {
-                value = compound_literal(n.b);
-            } else if (init.kind == semantic_kind::zero) {
-                /* [dcl.init]/6: "To zero-initialize an object ... of
-                   scalar type T means the object is initialized to the
-                   value obtained by converting the integer literal 0 to
-                   T" */
-                const struct type &r = record(object);
-                uint32_t zero = ast_builder_integer(
-                    c, ast_builder_type_basic(AST_TYPE_INT), 0);
-                if (r.kind == type_kind::pointer)
-                    value = cast(zero, u, AST_CAST_NULL_POINTER);
-                else if (r.kind == type_kind::pointer_to_member)
-                    value = null_member_pointer(object, n.at);
-                else if (r.kind == type_kind::fundamental &&
-                         fundamental_type_is_floating(r.fundamental))
-                    value = cast(zero, u, AST_CAST_INTEGER_TO_FLOAT);
-                else
-                    value = cast(zero, u, AST_CAST_INTEGER);
-            } else {
-                value = expression(n.b);
-            }
-            if (value) {
-                uint32_t target = dereference(variable(), type(object, n.at));
-                done = assign(u, target, value);
-            }
-        }
-        allocated_symbol = outer;
-        allocated_type = outer_type;
+        qualified_type object = record(n.type).operand;
+        allocation bound(*this, symbol, t, count_symbol);
+        uint32_t done = initialize_into(
+            symbol, object,
+            type(qualified_type::make(object.unqualified(), cv_none), n.at),
+            n.b, true);
         if (!done)
             return 0;
         uint32_t statement = c_statement(c, done);
@@ -1723,13 +1712,8 @@ uint32_t c_lowering::element_loop(uint32_t first, ast_qualified_type object,
     uint32_t element = c_local(c, pointer);
     auto index = [&] { return c_variable(c, i, size); };
     auto counted = [&] { return c_variable(c, count, size); };
-    uint32_t outer = allocated_symbol;
-    ast_qualified_type outer_type = allocated_type;
-    allocated_symbol = element;
-    allocated_type = pointer;
+    allocation bound(*this, element, pointer, count_symbol);
     uint32_t done = expression(each);
-    allocated_symbol = outer;
-    allocated_type = outer_type;
     if (!done)
         return 0;
     uint32_t at_index =
@@ -1773,10 +1757,11 @@ uint32_t c_lowering::new_array(const semantic_node &n, ast_qualified_type t)
     uint32_t count = held_value(n.d, size, items);
     if (!count)
         return 0;
-    uint32_t outer_count = count_symbol;
-    count_symbol = count;
-    uint32_t raw = held_value(n.a, bytes, items);
-    count_symbol = outer_count;
+    uint32_t raw = 0;
+    {
+        allocation bound(*this, allocated_symbol, allocated_type, count);
+        raw = held_value(n.a, bytes, items);
+    }
     if (!raw)
         return 0;
     auto variable = [&](uint32_t s, ast_qualified_type st) {
@@ -1854,16 +1839,8 @@ uint32_t c_lowering::delete_array(const semantic_node &n)
             return 0;
         body.append(loop);
     }
-    uint32_t outer = allocated_symbol;
-    ast_qualified_type outer_type = allocated_type;
-    uint32_t outer_count = count_symbol;
-    allocated_symbol = raw;
-    allocated_type = bytes;
-    count_symbol = count;
+    allocation bound(*this, raw, bytes, count);
     uint32_t deallocated = expression(n.c);
-    allocated_symbol = outer;
-    allocated_type = outer_type;
-    count_symbol = outer_count;
     if (!deallocated)
         return 0;
     body.append(c_statement(c, deallocated));
@@ -1915,10 +1892,6 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
     uint32_t symbol = held_value(n.a, t, items);
     if (!symbol)
         return 0;
-    uint32_t outer = allocated_symbol;
-    ast_qualified_type outer_type = allocated_type;
-    allocated_symbol = symbol;
-    allocated_type = t;
     uint32_t body[2];
     uint32_t count = 0;
     uint32_t destroyed = 0, deallocated = 0;
@@ -1927,8 +1900,6 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
         /* [expr.delete]/3: a virtual destructor, the deleting destructor
            in the slot after the complete object one destroys and
            deallocates the most derived object ([abi:vtable-components]) */
-        allocated_symbol = outer;
-        allocated_type = outer_type;
         uint32_t callee = virtual_function(node(n.b).b, variable(), n.at, 1);
         if (!callee)
             return 0;
@@ -1939,11 +1910,10 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
         items.append(if_statement(truth(variable()), block(body, 1), 0));
         return statement_expression(v, block(items));
     }
+    allocation bound(*this, symbol, t, count_symbol);
     if (n.b)
         destroyed = expression(n.b);
     deallocated = expression(n.c);
-    allocated_symbol = outer;
-    allocated_type = outer_type;
     if ((n.b && !destroyed) || !deallocated)
         return 0;
     if (destroyed)
@@ -3133,10 +3103,17 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
    operand chosen at run time initializing it ([expr.cond]/7), else its
    value stored */
 uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
-                                     ast_qualified_type t, uint32_t n)
+                                     ast_qualified_type t, uint32_t n,
+                                     bool through)
 {
     const semantic_node &x = node(n);
     uint32_t object = c_variable(c, s, t);
+    if (through)
+        object = dereference(c_variable(c, s, pointer_to(t)), t);
+    t = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
+    /* a constructor's call on an object the tree names (new's) */
+    if (x.kind == semantic_kind::construct && x.a)
+        return expression(n);
     qualified_type element;
     element_destructor(object_type, element);
     if (x.kind == semantic_kind::construct && !x.a) {
@@ -3153,18 +3130,45 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
     if (x.kind == semantic_kind::conditional && !is_glvalue(x)) {
         uint32_t cond = truth(expression(x.a));
         conditional_depth++;
-        uint32_t b = initialize_into(s, object_type, t, x.b);
-        uint32_t c_ = initialize_into(s, object_type, t, x.c);
+        uint32_t b = initialize_into(s, object_type, t, x.b, through);
+        uint32_t c_ = initialize_into(s, object_type, t, x.c, through);
         conditional_depth--;
         if (!cond || !b || !c_)
             return 0;
         return make(AST_NODE_CONDITIONAL, v, cond, cast(b, v, AST_CAST_VOID),
                     cast(c_, v, AST_CAST_VOID), 0, 0);
     }
-    uint32_t value = initializer(n);
+    uint32_t value = 0;
+    if (x.kind == semantic_kind::initializer_list)
+        /* a braced-init-list's object, its value stored */
+        value = compound_literal(n);
+    else if (x.kind == semantic_kind::zero &&
+             record(x.type).kind != type_kind::class_type)
+        value = scalar_zero(x.type, t, x.at);
+    else
+        value = initializer(n);
     if (!value)
         return 0;
-    return assign(AST_QUALIFIED_TYPE_UNQUALIFIED(t), object, value);
+    return assign(t, object, value);
+}
+
+/* [dcl.init]/6: "To zero-initialize an object ... of scalar type T means
+   the object is initialized to the value obtained by converting the
+   integer literal 0 to T" */
+uint32_t c_lowering::scalar_zero(qualified_type object, ast_qualified_type u,
+                                 token_index at)
+{
+    const struct type &r = record(object);
+    uint32_t zero =
+        ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0);
+    if (r.kind == type_kind::pointer)
+        return cast(zero, u, AST_CAST_NULL_POINTER);
+    if (r.kind == type_kind::pointer_to_member)
+        return null_member_pointer(object, at);
+    if (r.kind == type_kind::fundamental &&
+        fundamental_type_is_floating(r.fundamental))
+        return cast(zero, u, AST_CAST_INTEGER_TO_FLOAT);
+    return cast(zero, u, AST_CAST_INTEGER);
 }
 
 /* [basic.lval]/7: a class prvalue where a glvalue is wanted, materialized
@@ -6173,8 +6177,9 @@ void c_lowering::guarded_initialization(const semantic_node &n,
         return;
     }
     bool constant = !n.b || constant_initializer(n.b);
-    if (!constant && node(n.b).kind == semantic_kind::initializer_list) {
-        fail("dynamic initialization of an aggregate", n.at);
+    if (!constant && node(n.b).kind == semantic_kind::initializer_list &&
+        record(analysis.entity_table[e].type).kind == type_kind::array) {
+        fail("dynamic initialization of an array", n.at);
         return;
     }
     uint32_t s = symbol(e, n.at);
@@ -6262,9 +6267,10 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
 {
     const entity &x = analysis.entity_table[e];
     const semantic_node &init = node(x.definition);
-    if (!only_destroy && init.kind == semantic_kind::initializer_list)
-        /* an aggregate's elements, some not constant: each stored */
-        return fail("dynamic initialization of an aggregate", init.at);
+    if (!only_destroy && init.kind == semantic_kind::initializer_list &&
+        record(x.type).kind == type_kind::array)
+        /* an array's elements, some not constant: each stored */
+        return fail("dynamic initialization of an array", init.at);
     uint32_t f = generated_function("__cxx_global_var_init");
     in_function = true;
     labels.clear();
