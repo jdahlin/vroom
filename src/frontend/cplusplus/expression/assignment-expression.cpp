@@ -292,8 +292,28 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
                           "if the left operand is of class type, the class "
                           "shall be complete",
                           "expr.ass");
-    if (right.type.unqualified() != left.type.unqualified())
-        return not_supported(n, "over.match.oper");
+    /* [class.copy.assign]/1: the copy assignment operator's parameter is
+       "X, const X&, ..." and the move's "X&&": a right operand of another
+       type is converted to the class ([over.match.oper]/3.3 with
+       [over.best.ics]) by a converting constructor or conversion function
+       ([over.ics.user]; an explicit constructor does not take part), or is
+       an object of a derived class, bound to the base's parameter
+       ([over.best.ics]/6); the temporary is assigned, which for the
+       bitwise-assigned classes below has the effect of the selected
+       operator.  A class with a user-declared assignment operator is
+       binary_operator_function's. */
+    if (right.type.unqualified() != left.type.unqualified()) {
+        if (!assigned_bitwise(c))
+            return not_supported(n, "over.match.oper");
+        initialized_value converted;
+        VTRY(r, initialize_with(
+                    n, right,
+                    qualified_type::make(left.type.unqualified(), cv_none),
+                    false, false, converted));
+        right.type = qualified_type::make(left.type.unqualified(), cv_none);
+        right.category = value_category::prvalue;
+        right.node = converted.node;
+    }
     /* [class.copy.assign]/12: the implicitly-defined copy assignment
        operator "performs memberwise copy assignment of its subobjects":
        one that calls an operator function is not analysed */

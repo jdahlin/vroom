@@ -470,7 +470,19 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
 {
     const struct type r = type_table[reference.unqualified()];
     bool rvalue_reference = r.kind == type_kind::rvalue_reference;
-    if (aggregate_prvalue(m) && !closure_prvalue_binding(m))
+    /* [dcl.init.ref]/5.3.2 (or /5.4): an aggregate's prvalue T{...} or T()
+       of a class without a destructor bound to a reference to its own
+       class is held in a temporary of the enclosing block (bind_reference);
+       one bound to a base class's reference needs the conversion to the
+       base subobject, and at namespace scope the temporary has static
+       storage ([class.temporary]/6): not analysed */
+    if (aggregate_prvalue(m) && !closure_prvalue_binding(m) &&
+        !(at_block_scope() &&
+          type_table[r.operand.unqualified()].kind == type_kind::class_type &&
+          type_table[m.type.unqualified()].kind == type_kind::class_type &&
+          type_table[r.operand.unqualified()].entity ==
+              type_table[m.type.unqualified()].entity &&
+          !entity_table[type_table[m.type.unqualified()].entity].destructor))
         return not_supported(at, "class.temporary");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const one is bound to a temporary (not
