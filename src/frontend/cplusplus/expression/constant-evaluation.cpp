@@ -1604,6 +1604,8 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
             continue;
         const postponed_body taken = b;
         b.c = 0;
+        if (taken.function)
+            entity_table[taken.function].member_body_deferred = false;
         instantiation_context context;
         enter_instantiation(context, taken.scope, taken.declaration);
         instantiated_member_body(taken.c, taken.body);

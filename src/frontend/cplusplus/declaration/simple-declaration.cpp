@@ -1561,6 +1561,9 @@ analysis_result semantic_analysis::declare_with_initializer(
         (kind == entity_kind::function || kind == entity_kind::variable) &&
         entity_table[declared_entity].linkage_of_name != linkage::internal)
         entity_table[declared_entity].c_language_linkage = true;
+    if (r == analysis_result::well_formed && kind == entity_kind::variable &&
+        entity_table[declared_entity].defined)
+        require_destructor_definition(type);
     /* the declaration statement's variables (statement) */
     if (r == analysis_result::well_formed && function_state.active &&
         kind == entity_kind::variable && declared_in_scope == current_scope &&

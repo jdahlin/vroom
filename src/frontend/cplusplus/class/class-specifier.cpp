@@ -550,6 +550,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         return result;
     }
     owned_array<SyntaxRef> bodies;
+    entity_index first_member_entity = entity_table.size();
     size_t nested_start = nested_bodies.size();
     auto spec = n.class_specifier().member_specification();
     token_index outer_members_first = defining_members_first;
@@ -627,6 +628,44 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     entity_index enclosing_scope = current_scope;
     result = worse(result, member_default_arguments(c));
     current_declaration = outer_declaration;
+    bool incomplete_argument = false;
+    if (specialization) {
+        const auto &instantiation = instantiations[specialization - 1];
+        for (uint32_t i = 0; i < instantiation.argument_count; i++) {
+            const auto &arg =
+                template_arguments[instantiation.first_argument + i];
+            if (arg.kind != template_argument::kind_t::type)
+                continue;
+            const auto &type = type_table[arg.type.unqualified()];
+            if (type.kind == type_kind::class_type &&
+                !entity_table[type.entity].size) {
+                incomplete_argument = true;
+                break;
+            }
+        }
+    }
+    auto queue_incomplete_body = [&](SyntaxRef body) {
+        if (!incomplete_argument ||
+            body.function_definition().function_body().deleted())
+            return false;
+        for (entity_index f = first_member_entity; f < entity_table.size();
+             f++) {
+            entity &member = entity_table[f];
+            if (member.kind != entity_kind::function || member.enclosing != c ||
+                member.virtual_ ||
+                contains_placeholder(
+                    type_table[member.type.unqualified()].operand) ||
+                !declared_by(f, body))
+                continue;
+            /* [temp.inst]/3, /11: an unused member definition need
+               not make a forward-declared template argument complete. */
+            member.member_body_deferred = true;
+            postponed_bodies.append(postponed_body{c, body, postponed_scope,
+                                                   postponed_declaration, f});
+            return true;
+        }
+        return false;
+    };
     if (outer && entity_table[outer].kind == entity_kind::class_type) {
         /* [class.mem]/6: a nested class's member function bodies are in
            the complete-class context of the enclosing class too: analysed
@@ -640,8 +679,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            }; struct d : base<d>) is complete only after it: the bodies
            wait for the end of the translation unit (instantiate_pending) */
         for (SyntaxRef body : bodies)
-            postponed_bodies.append(postponed_body{c, body, postponed_scope,
-                                                   postponed_declaration});
+            if (!queue_incomplete_body(body))
+                postponed_bodies.append(postponed_body{c, body, postponed_scope,
+                                                       postponed_declaration});
         for (size_t i = nested_start; i < nested_bodies.size(); i++)
             postponed_bodies.append(
                 postponed_body{nested_bodies[i].c, nested_bodies[i].body,
@@ -651,6 +691,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         size_t nested_end = nested_bodies.size();
         bool quiet = entity_table[c].instantiation != 0;
         for (SyntaxRef body : bodies) {
+            if (queue_incomplete_body(body))
+                continue;
             if (quiet)
                 instantiated_member_body(c, body);
             else
