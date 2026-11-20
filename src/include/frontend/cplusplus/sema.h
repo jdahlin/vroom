@@ -3327,6 +3327,8 @@ class semantic_analysis
                (semantics[m.node].kind == semantic_kind::initializer_list ||
                 semantics[m.node].kind == semantic_kind::zero);
     }
+    /* a lambda's closure prvalue that a reference binds to (initializer.cpp) */
+    bool closure_prvalue_binding(const expression_meaning &m) const;
     /* [dcl.init.aggr]/1: whether the class is an aggregate */
     bool is_aggregate(entity_index c) const;
     /* the class whose member function is analysed now, 0 if none */

@@ -439,6 +439,24 @@ analysis_result semantic_analysis::narrowing(SyntaxRef at,
 }
 
 /*
+ * [dcl.init.ref]/5.3.2 and [class.temporary]/6: a prvalue of class type
+ * with no destructor (a lambda's closure object, built from its captures)
+ * bound to a reference of its own class: the lowering holds it in a
+ * temporary of the enclosing block as C's compound literal is.  A
+ * destructor ([class.temporary]/4) and a base class's reference (the
+ * conversion to the base, [class.temporary]/2) stay refused.
+ */
+bool semantic_analysis::closure_prvalue_binding(
+    const expression_meaning &m) const
+{
+    const struct type y = type_table[m.type.unqualified()];
+    if (y.kind != type_kind::class_type)
+        return false;
+    const entity &c = entity_table[y.entity];
+    return c.lambda && !c.destructor;
+}
+
+/*
  * [dcl.init.ref]/5: "A reference to type "cv1 T1" is initialized by an
  * expression of type "cv2 T2" as follows: ..."  [dcl.init.ref]/4: ""cv1
  * T1" is reference-related to "cv2 T2" if T1 is similar to T2, or T1 is a
@@ -452,7 +470,7 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
 {
     const struct type r = type_table[reference.unqualified()];
     bool rvalue_reference = r.kind == type_kind::rvalue_reference;
-    if (aggregate_prvalue(m))
+    if (aggregate_prvalue(m) && !closure_prvalue_binding(m))
         return not_supported(at, "class.temporary");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const one is bound to a temporary (not

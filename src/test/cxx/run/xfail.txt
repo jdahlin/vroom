@@ -50,7 +50,6 @@ old-initializer-list-local	vcc: the rules of [dcl.init.list] are not implemented
 old-initializer-lists	vcc: the rules of [class.mem] are not implemented yet
 old-inline-ns-overloads	vcc: the rules of [temp.deduct.call] are not implemented yet
 old-instantiate-at-end	vcc: the rules of [temp.names] are not implemented yet
-old-lambdas	vcc: the rules of [class.temporary] are not implemented yet
 old-local-unnamed-template-arg	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 old-long-double	vcc: C++ code generation does not handle a constant whose value analysis does not know yet
 old-member-pointers	vcc: the rules of [temp.res] are not implemented yet
