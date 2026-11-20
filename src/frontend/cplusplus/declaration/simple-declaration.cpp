@@ -1105,8 +1105,10 @@ analysis_result semantic_analysis::declare_with_initializer(
         object_alignment =
             typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
     /* (a member defined outside its class may repeat the declaration's
-       abi_tag and visibility: checked against the member below) */
-    uint32_t others = gnu_flags & ~(gnu_abi_tag | gnu_hidden_visibility);
+       abi_tag and visibility: checked against the member below; and
+       exclude_from_explicit_instantiation, which only marks the member) */
+    uint32_t others = gnu_flags & ~(gnu_abi_tag | gnu_hidden_visibility |
+                                    gnu_exclude_from_explicit_instantiation);
     if ((aligned && (s.typedef_ || is_function_type)) ||
         ((aligned || others) && (m.qualifier || m.qualified_namespace)) ||
         (gnu_flags && m.qualified_namespace))

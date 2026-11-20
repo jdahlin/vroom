@@ -28,7 +28,6 @@ old-constexpr-case-array-nsdmi	vcc: the rules of [class.base.init] are not imple
 old-conversion-template	vcc: the rules of [temp.mem] are not implemented yet
 old-converting-bind	vcc: the rules of [dcl.init.ref] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
-old-default-args	vcc: the rules of [temp.inst] are not implemented yet
 old-defaulted-assignment	vcc: the rules of [class.mem] are not implemented yet
 old-defaulted-ctor-out-of-class	vcc: the rules of [class.copy.ctor] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
