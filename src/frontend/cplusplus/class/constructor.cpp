@@ -1379,6 +1379,18 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         initialized_value value;
         if (item.size() == 2 && item[1].is(syntax_kind::braced_init_list)) {
             r = list_initialization(item[1], type, true, value);
+            if (r == analysis_result::well_formed &&
+                (record.kind == type_kind::lvalue_reference ||
+                 record.kind == type_kind::rvalue_reference) &&
+                semantics[value.node].kind == semantic_kind::bind_reference &&
+                semantics[value.node].category == value_category::prvalue)
+                /* the reference is bound to the temporary the list
+                   initialized (reference_list_initialization) */
+                return ill_formed(item,
+                                  "a temporary expression bound to a "
+                                  "reference member in a mem-initializer is "
+                                  "ill-formed",
+                                  "class.base.init");
         } else if (item.size() == 3) {
             /* ( ): value-initialization ([dcl.init]/11): zero for the
                members analysis has */
