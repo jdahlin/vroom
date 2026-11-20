@@ -384,6 +384,8 @@ enum gnu_attribute_flag : uint32_t {
     /* "cleanup (cleanup_function)": a local variable's function, called
        with its address when it goes out of scope (gnu_cleanup) */
     gnu_cleanup = 67108864,
+    /* Float and double infinity and quiet NaN compiler builtins. */
+    gnu_floating_constant = 134217728,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -3127,6 +3129,8 @@ class semantic_analysis
                             constant_value &v);
     constness evaluate_statement(constant_evaluation &state, uint32_t node,
                                  bool &returned, constant_value &result);
+    constness evaluate_floating_builtin(const semantic_node &call,
+                                        constant_value &v);
     constness evaluate_query_builtin(constant_evaluation &state, int which,
                                      const semantic_node &call,
                                      constant_value &v);
