@@ -1771,9 +1771,15 @@ analysis_result semantic_analysis::designated_list_initialization(
  * "the explicitly initialized elements ... are the first n"; C99 6.7.9/17).
  * A clause with more designators initializes a subobject of the element: the
  * clauses designating the element so are its own list (the recursion).
+ * A name that is a member of an anonymous union or structure of the class
+ * selects that member of the class and is a designator of it, the same
+ * clause one level down ([class.union.anon]/1: its members are members of
+ * the enclosing scope; clang designates through the anonymous member).
+ * A union holds the member its designators name; the node's a is that
+ * member's entity unless it is the first (0).
  * Left to refuse: a clause without designator after a nested one (C's
  * current object is then inside the element), the same element designated
- * in part and as a whole, a union member but its first.
+ * in part and as a whole.
  */
 analysis_result semantic_analysis::designated_elements(
     SyntaxRef list, const owned_array<SyntaxElement> &clauses,
@@ -1837,18 +1843,23 @@ analysis_result semantic_analysis::designated_elements(
     constness all = constness::constant;
     uint64_t pos = 0, extent = 0;
     bool after_nested = false;
+    /* a union's member the clauses so far initialize */
+    uint64_t active = 0;
+    bool active_set = false;
     for (size_t i = 0; i < items.size(); i++) {
         if (consumed[i])
             continue;
         const designated_item item = items[i];
         uint64_t first = pos, last = pos;
+        bool through = false;
         if (item.chain_count) {
             VTRY(r, designator_elements(
                         list, designations.pool[item.chain_first], target,
-                        members, bound, bound_known, first, last));
-            if (is_union && first != 0)
-                /* a union member but the first: its active member is not
-                   in the list's value */
+                        members, bound, bound_known, first, last, through));
+            if (is_union && active_set && first != active)
+                /* another member than the one given: clang's "initializer
+                   partially overrides prior initialization of this
+                   subobject" error, not modelled */
                 return not_supported(list, "dcl.init.aggr");
         } else {
             if (after_nested)
@@ -1866,7 +1877,7 @@ analysis_result semantic_analysis::designated_elements(
         if (!is_array)
             element = types[first];
         initialized_value one;
-        if (item.chain_count > 1) {
+        if (item.chain_count > 1 || through) {
             /* a subobject of the element: the clauses designating the
                element so, as a list of its own */
             if (first != last || (first < slots.size() && slots[first]))
@@ -1876,19 +1887,26 @@ analysis_result semantic_analysis::designated_elements(
                 if (consumed[j] || !items[j].chain_count)
                     continue;
                 uint64_t a = 0, b = 0;
+                bool through_j = through;
                 if (j != i) {
                     VTRY(r, designator_elements(
                                 list, designations.pool[items[j].chain_first],
-                                target, members, bound, bound_known, a, b));
+                                target, members, bound, bound_known, a, b,
+                                through_j));
+                    if (is_union && a != first)
+                        /* another member: refused when it is reached */
+                        continue;
                     if (a != first || b != last)
                         continue;
-                    if (items[j].chain_count == 1)
+                    if (items[j].chain_count == 1 && !through_j)
                         /* the element designated in part and as a whole */
                         return not_supported(list, "dcl.init.aggr");
                 }
                 designated_item d = items[j];
-                d.chain_first++;
-                d.chain_count--;
+                if (!through_j) {
+                    d.chain_first++;
+                    d.chain_count--;
+                }
                 inner.append(d);
                 consumed[j] = 1;
             }
@@ -1923,6 +1941,10 @@ analysis_result semantic_analysis::designated_elements(
         }
         for (uint64_t k = first; k <= last; k++)
             slots[k] = one.node;
+        if (item.chain_count) {
+            active = first;
+            active_set = true;
+        }
         all = combined_constness(all, one.evaluation);
         pos = last + 1;
         if (pos > extent)
@@ -1937,6 +1959,15 @@ analysis_result semantic_analysis::designated_elements(
     if (is_array && bound_known && count > target.bound)
         count = target.bound;
     owned_array<uint32_t> elements;
+    entity_index active_member = 0;
+    if (is_union && active_set && active != 0 && active < slots.size() &&
+        slots[active]) {
+        /* a union member but the first: the list holds its value alone and
+           the node names the member (the lowering's initialized field) */
+        elements.append(slots[active]);
+        active_member = members[active];
+        count = 0;
+    }
     for (uint64_t i = 0; i < count; i++) {
         if (i < slots.size() && slots[i]) {
             elements.append(slots[i]);
@@ -1961,7 +1992,28 @@ analysis_result semantic_analysis::designated_elements(
         type = qualified_type::make(type_table.array_of(target.operand, extent),
                                     type.cv());
     aggregate_value(list, type, all, elements, result);
+    semantics[result.node].a = active_member;
     return analysis_result::well_formed;
+}
+
+/* Whether the class declares a member named name, or has an anonymous union
+   or structure member that does ([class.union.anon]/1) */
+bool semantic_analysis::anonymous_member_declares(entity_index cls,
+                                                  uint32_t name)
+{
+    const entity &x = entity_table[cls];
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.name == name)
+            return true;
+        if (m.name || m.bit_field || m.base_subobject)
+            continue;
+        const struct type mt = type_table[m.type.unqualified()];
+        if (mt.kind == type_kind::class_type &&
+            anonymous_member_declares(mt.entity, name))
+            return true;
+    }
+    return false;
 }
 
 /*
@@ -1976,8 +2028,9 @@ analysis_result semantic_analysis::designated_elements(
 analysis_result semantic_analysis::designator_elements(
     SyntaxRef list, SyntaxElement designator, const struct type &target,
     const owned_array<entity_index> &members, uint64_t bound, bool bound_known,
-    uint64_t &first, uint64_t &last)
+    uint64_t &first, uint64_t &last, bool &through)
 {
+    through = false;
     bool is_array = target.kind == type_kind::array;
     SyntaxRef at = list;
     if (designator.is_node())
@@ -2000,10 +2053,21 @@ analysis_result semantic_analysis::designator_elements(
                 return analysis_result::well_formed;
             }
         }
-        /* a member of an anonymous union or structure is bound through it */
-        for (size_t i = 0; i < members.size(); i++)
-            if (!entity_table[members[i]].name)
-                return not_supported(at, "dcl.init.aggr");
+        /* a member of an anonymous union or structure is bound through it:
+           the designator selects the anonymous member and the same
+           designator then names the member in it */
+        for (size_t i = 0; i < members.size(); i++) {
+            const entity &m = entity_table[members[i]];
+            if (m.name || m.base_subobject)
+                continue;
+            const struct type mt = type_table[m.type.unqualified()];
+            if (mt.kind == type_kind::class_type &&
+                anonymous_member_declares(mt.entity, name)) {
+                first = last = i;
+                through = true;
+                return analysis_result::well_formed;
+            }
+        }
         return ill_formed(at,
                           "the identifier in each designator shall name a "
                           "direct non-static data member of the class",
