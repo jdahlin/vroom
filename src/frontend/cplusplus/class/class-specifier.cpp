@@ -1147,6 +1147,37 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     /* [ext:gnu_attributes] before it all (special_member_declarator takes
        them) */
     uint32_t lead = leading_gnu_attributes(node);
+    /* [dcl.align]/1, [dcl.attr.grammar]/4: alignas before the
+       decl-specifier-seq appertains to the member declared; the largest
+       raises its alignment, as GCC's aligned does ([dcl.align]/5: never
+       lowers it).  Not on a constructor or destructor: no rule yet. */
+    uint64_t member_alignment = 0;
+    uint32_t alignas_count = 0;
+    owned_array<SyntaxRef> alignments;
+    for (uint32_t i = lead; i < node.size(); i++) {
+        SyntaxElement a = node[i];
+        if (a.is(syntax_kind::alignment_specifier)) {
+            alignments.append(a);
+        } else if (a.is(syntax_kind::attribute_specifier_seq)) {
+            bool only = true;
+            for (auto k : a.elements())
+                only = only && k.is(syntax_kind::alignment_specifier);
+            if (!only)
+                break;
+            for (auto k : a.elements())
+                alignments.append(k);
+        } else {
+            break;
+        }
+        alignas_count++;
+    }
+    for (SyntaxRef each : alignments) {
+        uint64_t alignment = 0;
+        VTRY(r, alignment_specifier(each, alignment));
+        if (alignment > member_alignment)
+            member_alignment = alignment;
+    }
+    lead += alignas_count;
     uint32_t at = lead;
     bool constexpr_specified = false, virtual_specified = false,
          explicit_specified = false, inline_specified = false;
@@ -1168,7 +1199,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         final_ = f;
         return d[0];
     };
-    if (node.size() > lead + 1 &&
+    if (!alignas_count && node.size() > lead + 1 &&
         node[lead].is(syntax_kind::decl_specifier_seq) &&
         function_specifiers_only(node[lead], constexpr_specified,
                                  &virtual_specified, &explicit_specified,
@@ -1252,8 +1283,11 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     mutable_allowed = outer_mutable_allowed;
     sole_elaborated = 0;
     declaration_access = 0;
-    for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
+    for (uint32_t i = 0;
+         i < lead - alignas_count && r == analysis_result::well_formed; i++)
         VTRY_SET(r, gnu_attribute_specifier(node[i], s));
+    if (member_alignment > s.aligned)
+        s.aligned = member_alignment;
     return member_declarators(c, node, s, access, lead + 1, bodies);
 }
 
@@ -2327,6 +2361,9 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
     }
     expression_meaning e;
     VTRY(r, expression(n[2], e));
+    /* "an integral constant expression" is converted to a prvalue
+       ([expr.const]/8): a constexpr variable's value */
+    VTRY_SET(r, operand_value(n, e));
     if (!is_integral(e.type) || e.category != value_category::prvalue)
         return not_supported(n, "dcl.align");
     bool constant = false;
