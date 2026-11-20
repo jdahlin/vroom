@@ -3514,7 +3514,7 @@ class semantic_analysis
        (template_constraints_satisfied): one that needs its own
        satisfaction is the program's error ([temp.constr.constr]; clang's
        "satisfaction of constraint depends on itself"), not analysed */
-    owned_array<uint64_t> constraints_in_progress;
+    owned_array<uint32_t> constraints_in_progress;
     analysis_result inheriting_using(UsingDeclarator n, token_index at,
                                      entity_index base);
     analysis_result inherit_constructors(entity_index c, SyntaxRef n);

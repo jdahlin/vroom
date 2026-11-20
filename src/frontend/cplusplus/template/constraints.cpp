@@ -15,6 +15,7 @@
  * not formed yet.
  */
 #include "../cplusplus-internal.h"
+#include "common/hash.h"
 #include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
@@ -645,16 +646,19 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     /* [temp.constr.constr]: a constraint whose satisfaction asks for its own
        (a constructor template constrained by __is_constructible of its
        class) */
-    uint64_t key = function_template;
+    owned_array<uint64_t> words;
+    words.append(function_template);
     for (const template_argument &a : values) {
-        key = key * 1099511628211u + static_cast<uint64_t>(a.kind);
-        key = key * 1099511628211u + a.type.unqualified();
-        key = key * 1099511628211u + static_cast<uint64_t>(a.type.cv());
-        key = key * 1099511628211u + a.value;
-        key = key * 1099511628211u + a.template_entity;
-        key = key * 1099511628211u + a.count;
+        words.append(static_cast<uint64_t>(a.kind) |
+                     static_cast<uint64_t>(a.type.cv()) << 8);
+        words.append(a.type.unqualified());
+        words.append(a.value);
+        words.append(a.template_entity);
+        words.append(a.count);
     }
-    for (uint64_t k : constraints_in_progress)
+    uint32_t key = vhash_bytes(reinterpret_cast<const char *>(words.data()),
+                               words.size() * sizeof(uint64_t));
+    for (uint32_t k : constraints_in_progress)
         if (k == key)
             return not_supported(constraint, "temp.constr");
     constraints_in_progress.append(key);
