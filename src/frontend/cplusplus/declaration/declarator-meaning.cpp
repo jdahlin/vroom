@@ -536,6 +536,11 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
            brackets and braces, which holds more names than the declaration
            declares and so only makes more declarations unsupported */
         int depth = 0;
+        /* [dcl.init]/1: an initializer declares no name; the
+           names after = (up to the next declarator's comma, not one of a
+           template-argument-list) are used */
+        bool initializer = false;
+        int initializer_angles = 0;
         auto is_punctuator_at = [&](token_index at,
                                     preprocessing_op_or_punc op) {
             const token &x = tokens[at];
@@ -608,11 +613,37 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                     continue;
                 }
             }
-            if (tok.kind == token_kind::identifier && !depth && !qualified)
+            if (tok.kind == token_kind::identifier && !depth && !qualified &&
+                !initializer)
                 ids.append(t);
             if (tok.kind != token_kind::operator_or_punctuator)
                 continue;
             switch (preprocessing_op_or_punc_primary(tok.op_or_punc)) {
+            case preprocessing_op_or_punc::EQUAL:
+                if (!depth)
+                    initializer = true;
+                break;
+            case preprocessing_op_or_punc::LESS:
+                if (initializer && !depth &&
+                    tokens[t - 1].kind == token_kind::identifier)
+                    initializer_angles++;
+                break;
+            case preprocessing_op_or_punc::GREATER:
+                if (initializer && !depth && initializer_angles)
+                    initializer_angles--;
+                break;
+            case preprocessing_op_or_punc::GREATER_GREATER:
+                if (initializer && !depth) {
+                    if (initializer_angles > 2)
+                        initializer_angles -= 2;
+                    else
+                        initializer_angles = 0;
+                }
+                break;
+            case preprocessing_op_or_punc::COMMA:
+                if (!depth && !initializer_angles)
+                    initializer = false;
+                break;
             case preprocessing_op_or_punc::LEFT_BRACE:
             case preprocessing_op_or_punc::LEFT_BRACKET:
             case preprocessing_op_or_punc::LEFT_PARENTHESIS:
