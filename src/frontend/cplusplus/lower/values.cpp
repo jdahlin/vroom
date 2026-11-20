@@ -60,8 +60,30 @@ uint32_t c_lowering::address_of(uint32_t lvalue, ast_qualified_type pointer)
    assignment's or prefix increment's result is its left operand, an
    lvalue, which C's is not: *({ T *p; p = &lhs; *p op= rhs; p; }), the
    left operand evaluated once */
+uint32_t c_lowering::member_access(const semantic_node &n, uint32_t object)
+{
+    const entity &x = analysis.entity_table[n.b];
+    if (!is_reference(x.type) || is_reference(n.type))
+        /* a reference member being initialized ([class.base.init]) is the
+           pointer itself */
+        return ast_builder_member(c, object, c_fields[n.b], type(n.type, n.at));
+    /* [expr.ref]/6.1: a reference member is the object it refers to */
+    uint32_t pointer =
+        ast_builder_member(c, object, c_fields[n.b], type(x.type, n.at));
+    return dereference(pointer, type(n.type, n.at));
+}
+
 uint32_t c_lowering::object(uint32_t n)
 {
+    if (node(n).kind == semantic_kind::member && !is_glvalue(node(node(n).a))) {
+        /* [expr.ref]/6.3: a member of a class prvalue is an xvalue; its
+           object is the temporary the prvalue is materialized into
+           ([class.temporary]/2) */
+        uint32_t held = temporary_object(node(n).a);
+        if (!held)
+            return 0;
+        return member_access(node(n), held);
+    }
     if (node(n).kind == semantic_kind::conditional && !is_glvalue(node(n)) &&
         record(node(n).type).kind == type_kind::class_type)
         return temporary_object(n);
