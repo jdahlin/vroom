@@ -91,7 +91,7 @@ bool semantic_analysis::template_parameter_form(
     } else if (!out.type && k < p.size() && !p[k].is_token()) {
         out.has_declarator = true;
         out.declarator = p[k];
-        /* [dcl.decl.general]/1: the pack is the "..." ending a
+        /* [dcl.decl]/1: the pack is the "..." ending a
            ptr-abstract-declarator (int&...) */
         SyntaxElement last = p[k];
         while (last.is(syntax_kind::ptr_abstract_declarator) &&
