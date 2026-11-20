@@ -542,6 +542,22 @@ uint32_t ast_builder_label_define(cc *c, uint32_t l, uint32_t statement)
     return n;
 }
 
+uint32_t ast_builder_label_address(cc *c, uint32_t l)
+{
+    uint32_t r =
+        cc_node_new(c, AST_NODE_LABEL_ADDRESS,
+                    cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID)), 0);
+
+    AST_NODE(r)->a = l;
+    c->labels[l].addr_taken = 1;
+    return r;
+}
+
+uint32_t ast_builder_goto_indirect(cc *c, uint32_t address)
+{
+    return cc_statement_new(c, AST_NODE_GOTO_INDIRECT, 0, address, 0, 0);
+}
+
 /* a string of c->strs for text, its index + 1 (as the C parser's asm
    strings are) */
 static uint32_t ast_builder_asm_string(cc *c, ast_builder_asm_text text)

@@ -238,6 +238,9 @@ uint32_t c_lowering::expression(uint32_t index)
             AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at)), list, 0, 0, 0,
             0);
     }
+    case semantic_kind::label_address:
+        return ast_builder_label_address(c,
+                                         label(static_cast<uint32_t>(n.value)));
     case semantic_kind::vtable_pointer_store:
         return vtable_pointer_stores(n);
     case semantic_kind::destroy: {

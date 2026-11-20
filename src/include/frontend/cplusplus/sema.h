@@ -1275,6 +1275,10 @@ enum class semantic_kind : uint8_t {
     /* [ext:gnu_va_arg] __builtin_va_arg (a, T): a: the va_list (an
        lvalue); a prvalue of the node's type */
     va_arg_,
+    /* [ext:gnu_labels_as_values] &&label: value: the label's identifier
+       number; a prvalue of type void*, the address of the label in the
+       function ([stmt.label]) */
+    label_address,
     /* [ext:gnu_asm_statements] one operand of an asm statement (the value
        of its expression is no result): a: the expression (an lvalue for an
        output; an input is a prvalue, or an lvalue of an object the asm may
@@ -1326,6 +1330,9 @@ enum class semantic_kind : uint8_t {
     identifier_label,
     /* value: the identifier's number */
     goto_statement,
+    /* [ext:gnu_labels_as_values] goto *a;: a: the address (a const void*
+       prvalue) of a label whose address was taken in the function */
+    indirect_goto_statement,
     break_statement,
     continue_statement,
     /* a: the operand, initialized as the result (0: none) */
@@ -3008,6 +3015,10 @@ class semantic_analysis
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
     analysis_result gnu_va_arg(SyntaxRef n, expression_meaning &m);
+    /* ---- ext/gnu/labels-as-values.cpp ---- */
+    analysis_result gnu_label_address(SyntaxRef n, expression_meaning &m);
+    analysis_result gnu_computed_goto(SyntaxRef n, uint32_t &built);
+    analysis_result check_indirect_gotos();
     /* ---- ext/gnu/asm-statement.cpp ---- */
     analysis_result gnu_asm_statement(GnuAsmStatement n, uint32_t &built);
     analysis_result gnu_asm_operand(GnuAsmOperand n, bool output,
@@ -4001,9 +4012,16 @@ class semantic_analysis
         unsigned loops = 0, breakable = 0;
         owned_array<label_record> labels;
         owned_array<goto_record> gotos;
+        /* [ext:gnu_labels_as_values] the computed gotos and the &&label
+           expressions of the function */
+        owned_array<goto_record> indirect_gotos;
+        owned_array<goto_record> label_addresses;
         /* [stmt.dcl]/3: the variables whose initialization a jump shall
            not bypass, where each is declared */
         owned_array<jump_point> initialized;
+        /* [ext:gnu_labels_as_values] the variables with a non-trivial
+           destructor, where each is declared */
+        owned_array<jump_point> destroyed;
         owned_array<switch_record> switches;
         owned_array<uint64_t> case_values;
         /* a non-static member function's `this` ([class.this]): the
