@@ -291,8 +291,42 @@ class c_lowering
         /* an array's: its element type and bound (0: not an array) */
         ast_qualified_type element = 0;
         uint64_t bound = 0;
+        /* an object constructed in an operand that may not be evaluated:
+           the bool variable set once it is ([class.temporary]/4), 0 if
+           none */
+        uint32_t flag = 0;
+        /* the variable the object is (or whose reference it is bound to,
+           [class.temporary]/6): what a goto's target has in scope */
+        entity_index owner = 0;
+        /* a loop whose continue is a goto to continue_label (a for
+           statement whose condition declares: [stmt.for]/1 runs the step
+           before the condition's variable is destroyed), leaving
+           live[continue_mark ..] */
+        uint32_t continue_label = 0;
+        size_t continue_mark = 0;
     };
     owned_array<scope_record> live;
+    /* the declaration lowered now: the owner of what it makes live */
+    entity_index declaring = 0;
+    /* [stmt.dcl]/2 for a goto: per label of the function lowered, the
+       automatic variables in scope at it, as identifier, count, then the
+       variables; made at the function's first goto */
+    owned_array<uint32_t> label_paths;
+    bool label_paths_made = false;
+    uint32_t function_root = 0;
+    void label_scopes(uint32_t s, owned_array<uint32_t> &path);
+    bool in_label_scope(uint32_t identifier, entity_index e) const;
+    /* [class.temporary]/4: the flag of a temporary constructed where it
+       may not be (in an operand of ?:, && or ||), 0 elsewhere; the
+       construction made that sets it; a statement run only if it is set */
+    uint32_t constructed_flag();
+    uint32_t mark_constructed(uint32_t made, uint32_t flag);
+    uint32_t if_constructed(uint32_t statement, uint32_t flag);
+    /* [intro.execution]/5: the full-expression e as one C expression,
+       its temporaries made and destroyed in it */
+    uint32_t full_value(uint32_t e, bool discarded);
+    /* an init-statement's statements, its variables made live */
+    void init_statement(uint32_t n, owned_array<uint32_t> &out);
     /* for each element of the array in symbol s (type array, elements of
        type element), first to last or last to first: a call of special
        member e on its address */
@@ -373,6 +407,8 @@ class c_lowering
        lvalue object, with n's arguments */
     uint32_t construct_at(const semantic_node &n, uint32_t object, uint32_t vtt,
                           token_index at);
+    uint32_t initialize_into(uint32_t s, ast_qualified_type t, uint32_t n);
+    uint32_t temporary_object(uint32_t n);
     /* the class or array of classes type: its innermost element type in
        object, and that class's destructor (0 if none or not a class) */
     entity_index element_destructor(qualified_type type,
@@ -420,14 +456,13 @@ class c_lowering
     entity_index returned_variable(uint32_t return_operand) const;
     void find_named_return(uint32_t statement, entity_index &found,
                            bool &mixed) const;
-    uint32_t materialize(const semantic_node &n, uint32_t value,
-                         qualified_type t, token_index at);
     /* a temporary of type t of the full-expression being collected: its
        symbol, declared in temporaries */
     uint32_t full_expression_temporary(ast_qualified_type t);
     /* the temporary's destructor call, in destructions */
     void destroyed_after(entity_index destructor, uint32_t temporary,
-                         ast_qualified_type t, token_index at);
+                         ast_qualified_type t, token_index at,
+                         uint32_t flag = 0);
     /* [class.temporary]/6: the prvalue whose temporary lives as long as
        the reference it initializes (a declared variable's), not to the
        end of the full-expression */
@@ -436,7 +471,7 @@ class c_lowering
        the full-expression, or with the block's variables */
     void destroyed_temporary(const semantic_node &n, entity_index destructor,
                              uint32_t temporary, ast_qualified_type t,
-                             token_index at);
+                             token_index at, uint32_t flag = 0);
     unsigned conditional_depth = 0;
     owned_array<uint32_t> temporaries, destructions;
     uint32_t conditional(const semantic_node &n);
@@ -531,12 +566,20 @@ class c_lowering
                      owned_array<uint32_t> &out);
     void initialized_declaration(const semantic_node &n,
                                  owned_array<uint32_t> &out);
+    void initialized_variable(const semantic_node &n,
+                              owned_array<uint32_t> &out);
     void declaration_items(const semantic_node &n, owned_array<uint32_t> &out);
     uint32_t scoped_block(const semantic_node &n, uint32_t prefix);
     uint32_t loop_body(uint32_t n, bool is_switch);
+    uint32_t loop(uint32_t cond_node, uint32_t step_node, uint32_t body_node,
+                  token_index at);
+    /* the statements of a condition that does not declare: none */
+    owned_array<uint32_t> no_statements;
     uint32_t block(const uint32_t *items, uint32_t count);
-    uint32_t declaration(const semantic_node &n, bool in_block = false);
-    uint32_t condition(uint32_t n, uint32_t &declaration_statement);
+    uint32_t declaration(const semantic_node &n);
+    /* a condition's value; a condition that declares has its
+       declaration's statements appended to out, its variable live */
+    uint32_t condition(uint32_t n, owned_array<uint32_t> &out);
     uint32_t label(uint32_t identifier);
     bool function_definition(entity_index e);
     bool variable_definition(entity_index e);
@@ -1327,7 +1370,7 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
             uint32_t loop = each_element(r.symbol, r.type, r.element, r.bound,
                                          true, r.destructor, at);
             if (loop)
-                out.append(loop);
+                out.append(if_constructed(loop, r.flag));
             continue;
         }
         uint32_t object = make(AST_NODE_VARIABLE, r.type, r.symbol, 0, 0, 0,
@@ -1336,8 +1379,9 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
             r.destructor,
             address_of(object, ast_builder_type_pointer(c, r.type)), nullptr, 0,
             at);
-        out.append(
-            ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0));
+        out.append(if_constructed(
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, call, 0, 0, 0, 0),
+            r.flag));
     }
 }
 
@@ -1413,6 +1457,42 @@ size_t c_lowering::leaving(bool is_break) const
     return 0;
 }
 
+uint32_t c_lowering::constructed_flag()
+{
+    if (!conditional_depth)
+        return 0;
+    ast_qualified_type b = ast_builder_type_basic(AST_TYPE_BOOL);
+    uint32_t flag = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, b,
+                                       AST_STORAGE_AUTO, 0, 1);
+    temporaries.append(ast_builder_node(
+        c, AST_NODE_DECLARATION, ast_builder_type_basic(AST_TYPE_VOID), flag,
+        ast_builder_integer(c, b, 0), 0, 0, 0));
+    return flag;
+}
+
+uint32_t c_lowering::mark_constructed(uint32_t made, uint32_t flag)
+{
+    if (!flag || !made)
+        return made;
+    ast_qualified_type b = ast_builder_type_basic(AST_TYPE_BOOL);
+    uint32_t set =
+        make(AST_NODE_ASSIGN, b,
+             make(AST_NODE_VARIABLE, b, flag, 0, 0, 0, AST_NODE_FLAG_LVALUE),
+             ast_builder_integer(c, b, 1), 0, 0, 0);
+    return make(AST_NODE_COMMA, b, made, set, 0, 0, 0);
+}
+
+uint32_t c_lowering::if_constructed(uint32_t statement, uint32_t flag)
+{
+    if (!flag)
+        return statement;
+    ast_qualified_type b = ast_builder_type_basic(AST_TYPE_BOOL);
+    return ast_builder_node(
+        c, AST_NODE_IF, ast_builder_type_basic(AST_TYPE_VOID),
+        make(AST_NODE_VARIABLE, b, flag, 0, 0, 0, AST_NODE_FLAG_LVALUE),
+        statement, 0, 0, 0);
+}
+
 /* [class.ctor]: a constructor call whose object is a temporary
    ([class.temporary]/1: "Temporary objects are created ... when a prvalue
    is converted to an xvalue", and a prvalue initializing an object is that
@@ -1433,37 +1513,9 @@ uint32_t c_lowering::construct(const semantic_node &n)
             return 0;
         return construct_at(n, object, vtt, n.at);
     }
-    bool here = at_result_object;
     if (!in_function)
         return fail("dynamic initialization of a variable", n.at);
-    entity_index cls = record(n.type).entity;
-    entity_index destructor = analysis.entity_table[cls].destructor;
     ast_qualified_type t = type(n.type, n.at);
-    if (destructor && !here) {
-        /* [class.temporary]/4: destroyed at the end of the full-expression
-           (the object, *(construct(&t), &t)) */
-        if (!collecting)
-            return fail("a temporary with a destructor outside a statement",
-                        n.at);
-        if (conditional_depth)
-            return fail("a temporary with a destructor in a conditional "
-                        "operand",
-                        n.at);
-        ast_qualified_type pointer = ast_builder_type_pointer(c, t);
-        uint32_t held = full_expression_temporary(t);
-        auto variable = [&] {
-            return make(AST_NODE_VARIABLE, t, held, 0, 0, 0,
-                        AST_NODE_FLAG_LVALUE);
-        };
-        uint32_t made = construct_at(n, variable(), 0, n.at);
-        if (!made)
-            return 0;
-        destroyed_temporary(n, destructor, held, t, n.at);
-        uint32_t address = make(AST_NODE_COMMA, pointer, made,
-                                address_of(variable(), pointer), 0, 0, 0);
-        return make(AST_NODE_DEREFERENCE, t, address, 0, 0, 0,
-                    AST_NODE_FLAG_LVALUE);
-    }
     uint32_t temporary =
         ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, t, AST_STORAGE_AUTO,
                            AST_SYMBOL_FLAG_ADDRESS_TAKEN, 1);
@@ -1968,6 +2020,9 @@ uint32_t c_lowering::address_of(uint32_t lvalue, ast_qualified_type pointer)
    left operand evaluated once */
 uint32_t c_lowering::object(uint32_t n)
 {
+    if (node(n).kind == semantic_kind::conditional && !is_glvalue(node(n)) &&
+        record(node(n).type).kind == type_kind::class_type)
+        return temporary_object(n);
     uint32_t made = expression(n);
     if (!made)
         return 0;
@@ -2958,7 +3013,6 @@ uint32_t c_lowering::assignment(const semantic_node &n)
    reference returns its address */
 uint32_t c_lowering::call(const semantic_node &n)
 {
-    bool here = at_result_object;
     qualified_type function_type = node(n.a).type;
     uint32_t callee = 0;
     uint32_t builtin = 0;
@@ -3065,7 +3119,6 @@ uint32_t c_lowering::call(const semantic_node &n)
         result = n.type;
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(result, n.at));
     uint32_t count = static_cast<uint32_t>(arguments.size());
-    bool initializes = here;
     uint32_t made = 0;
     if (builtin) {
         size_t length = 0;
@@ -3085,8 +3138,6 @@ uint32_t c_lowering::call(const semantic_node &n)
                  block(through.data(), static_cast<uint32_t>(through.size())),
                  0, 0, 0, 0);
     }
-    if (passed_indirectly(result) && !initializes)
-        return materialize(n, made, result, n.at);
     if (!is_reference(result))
         return made;
     return make(AST_NODE_DEREFERENCE, type(n.type, n.at), made, 0, 0, 0,
@@ -3140,6 +3191,65 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
         arguments.data(), n.count, at, vtt);
 }
 
+/* [dcl.init]/17.6.1: the prvalue n initializes the object in symbol s
+   (of C type t) itself: a constructor's call on it, a conditional's
+   operand chosen at run time initializing it ([expr.cond]/7), else its
+   value stored */
+uint32_t c_lowering::initialize_into(uint32_t s, ast_qualified_type t,
+                                     uint32_t n)
+{
+    const semantic_node &x = node(n);
+    uint32_t object =
+        make(AST_NODE_VARIABLE, t, s, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    if (x.kind == semantic_kind::construct && !x.a)
+        return construct_at(x, object, 0, x.at);
+    if (x.kind == semantic_kind::conditional && !is_glvalue(x)) {
+        uint32_t cond = truth(expression(x.a));
+        conditional_depth++;
+        uint32_t b = initialize_into(s, t, x.b);
+        uint32_t c_ = initialize_into(s, t, x.c);
+        conditional_depth--;
+        if (!cond || !b || !c_)
+            return 0;
+        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+        return make(AST_NODE_CONDITIONAL, v, cond, cast(b, v, AST_CAST_VOID),
+                    cast(c_, v, AST_CAST_VOID), 0, 0);
+    }
+    uint32_t value = initializer(n);
+    if (!value)
+        return 0;
+    return make(AST_NODE_ASSIGN, AST_QUALIFIED_TYPE_UNQUALIFIED(t), object,
+                value, 0, 0, 0);
+}
+
+/* [basic.lval]/7: a class prvalue where a glvalue is wanted, materialized
+   in a temporary of the full-expression ([class.temporary]/2) */
+uint32_t c_lowering::temporary_object(uint32_t n)
+{
+    const semantic_node &x = node(n);
+    if (!collecting)
+        return fail("a class temporary outside a statement", x.at);
+    ast_qualified_type t = type(x.type, x.at);
+    uint32_t held = full_expression_temporary(t);
+    entity_index destructor =
+        analysis.entity_table[record(x.type).entity].destructor;
+    uint32_t flag = 0;
+    if (destructor)
+        flag = constructed_flag();
+    uint32_t made = mark_constructed(initialize_into(held, t, n), flag);
+    if (!made)
+        return 0;
+    if (destructor)
+        destroyed_temporary(x, destructor, held, t, x.at, flag);
+    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
+    uint32_t variable =
+        make(AST_NODE_VARIABLE, t, held, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    return make(AST_NODE_DEREFERENCE, t,
+                make(AST_NODE_COMMA, pointer, made,
+                     address_of(variable, pointer), 0, 0, 0),
+                0, 0, 0, AST_NODE_FLAG_LVALUE);
+}
+
 entity_index c_lowering::element_destructor(qualified_type type,
                                             qualified_type &object) const
 {
@@ -3182,10 +3292,10 @@ uint32_t c_lowering::full_expression_temporary(ast_qualified_type t)
 void c_lowering::destroyed_temporary(const semantic_node &n,
                                      entity_index destructor,
                                      uint32_t temporary, ast_qualified_type t,
-                                     token_index at)
+                                     token_index at, uint32_t flag)
 {
     if (&n != extended_temporary) {
-        destroyed_after(destructor, temporary, t, at);
+        destroyed_after(destructor, temporary, t, at, flag);
         return;
     }
     /* [class.temporary]/6: "The temporary object to which the reference
@@ -3196,50 +3306,25 @@ void c_lowering::destroyed_temporary(const semantic_node &n,
     r.symbol = temporary;
     r.type = t;
     r.destructor = destructor;
+    r.flag = flag;
+    r.owner = declaring;
     live.append(r);
 }
 
 void c_lowering::destroyed_after(entity_index destructor, uint32_t temporary,
-                                 ast_qualified_type t, token_index at)
+                                 ast_qualified_type t, token_index at,
+                                 uint32_t flag)
 {
     uint32_t object =
         make(AST_NODE_VARIABLE, t, temporary, 0, 0, 0, AST_NODE_FLAG_LVALUE);
     uint32_t call = special_call(
         destructor, address_of(object, ast_builder_type_pointer(c, t)), nullptr,
         0, at);
-    destructions.append(ast_builder_node(c, AST_NODE_EXPRESSION,
-                                         ast_builder_type_basic(AST_TYPE_VOID),
-                                         call, 0, 0, 0, 0));
-}
-
-/* [class.temporary]/2: "the temporary materialization conversion": a
-   prvalue of a class returned by address that initializes no object, held
-   in a temporary destroyed at the end of the full-expression; *(t =
-   value, &t) */
-uint32_t c_lowering::materialize(const semantic_node &n, uint32_t value,
-                                 qualified_type type_, token_index at)
-{
-    entity_index destructor =
-        analysis.entity_table[record(type_).entity].destructor;
-    if (!collecting)
-        return fail("a class returned by address outside a statement", at);
-    if (destructor && conditional_depth)
-        return fail("a class returned by address in a conditional operand", at);
-    ast_qualified_type t = type(type_, at);
-    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
-    uint32_t temporary = full_expression_temporary(t);
-    auto variable = [&] {
-        return make(AST_NODE_VARIABLE, t, temporary, 0, 0, 0,
-                    AST_NODE_FLAG_LVALUE);
-    };
-    if (destructor)
-        destroyed_temporary(n, destructor, temporary, t, at);
-    uint32_t stored = make(AST_NODE_ASSIGN, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
-                           variable(), value, 0, 0, 0);
-    uint32_t address = make(AST_NODE_COMMA, pointer, stored,
-                            address_of(variable(), pointer), 0, 0, 0);
-    return make(AST_NODE_DEREFERENCE, t, address, 0, 0, 0,
-                AST_NODE_FLAG_LVALUE);
+    destructions.append(
+        if_constructed(ast_builder_node(c, AST_NODE_EXPRESSION,
+                                        ast_builder_type_basic(AST_TYPE_VOID),
+                                        call, 0, 0, 0, 0),
+                       flag));
 }
 
 /* the automatic variable a return statement's operand copies (a copy
@@ -3315,36 +3400,10 @@ void c_lowering::find_named_return(uint32_t statement, entity_index &found,
 uint32_t c_lowering::indirect_argument(uint32_t argument,
                                        qualified_type parameter, token_index at)
 {
-    entity_index cls = record(parameter).entity;
-    entity_index destructor = analysis.entity_table[cls].destructor;
-    if (!collecting)
-        return fail("a class argument by value outside a statement", at);
-    if (destructor && conditional_depth)
-        /* destroyed only if constructed: clang's flag */
-        return fail("a class argument by value in a conditional operand", at);
-    ast_qualified_type t = type(parameter, at);
-    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
-    uint32_t temporary = full_expression_temporary(t);
-    uint32_t object =
-        make(AST_NODE_VARIABLE, t, temporary, 0, 0, 0, AST_NODE_FLAG_LVALUE);
-    const semantic_node &init = node(argument);
-    uint32_t made = 0;
-    if (init.kind == semantic_kind::construct && !init.a) {
-        made = construct_at(init, object, 0, at);
-    } else {
-        /* a prvalue of the class: its bytes are the object (no copy
-           constructor runs, [dcl.init]/17.6.1) */
-        uint32_t value = initializer(argument);
-        if (!value)
-            return 0;
-        made = make(AST_NODE_ASSIGN, t, object, value, 0, 0, 0);
-    }
-    if (!made)
+    uint32_t held = temporary_object(argument);
+    if (!held)
         return 0;
-    if (destructor)
-        destroyed_after(destructor, temporary, t, at);
-    return make(AST_NODE_COMMA, pointer, made, address_of(object, pointer), 0,
-                0, 0);
+    return address_of(held, ast_builder_type_pointer(c, type(parameter, at)));
 }
 
 uint32_t c_lowering::full_expression(uint32_t e, bool discarded,
@@ -3369,6 +3428,50 @@ uint32_t c_lowering::full_expression(uint32_t e, bool discarded,
     temporaries.resize(first);
     destructions.resize(first_destruction);
     return lowered;
+}
+
+/* [intro.execution]/5: a full-expression where C wants an expression (a
+   condition, a for statement's step): ({ temporaries; T r = e;
+   destructions; r; }), a glvalue's address held instead of its value */
+uint32_t c_lowering::full_value(uint32_t e, bool discarded)
+{
+    owned_array<uint32_t> items, after;
+    uint32_t value = full_expression(e, discarded, items, after);
+    if (!value || (items.empty() && after.empty()))
+        return value;
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type t = type_of(value);
+    if (discarded || AST_QUALIFIED_TYPE_UNQUALIFIED(t) == v) {
+        items.append(
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, value, 0, 0, 0, 0));
+        for (uint32_t a : after)
+            items.append(a);
+        return make(AST_NODE_STATEMENT_EXPRESSION, v,
+                    block(items.data(), static_cast<uint32_t>(items.size())), 0,
+                    0, 0, 0);
+    }
+    bool lvalue = ast_builder_ast(c)->nodes[value].flags & AST_NODE_FLAG_LVALUE;
+    ast_qualified_type held_type = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
+    if (lvalue) {
+        held_type = ast_builder_type_pointer(c, t);
+        value = address_of(value, held_type);
+    }
+    uint32_t held = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, held_type,
+                                       AST_STORAGE_AUTO, 0, 1);
+    items.append(
+        ast_builder_node(c, AST_NODE_DECLARATION, v, held, value, 0, 0, 0));
+    for (uint32_t a : after)
+        items.append(a);
+    items.append(ast_builder_node(
+        c, AST_NODE_EXPRESSION, held_type,
+        make(AST_NODE_VARIABLE, held_type, held, 0, 0, 0, AST_NODE_FLAG_LVALUE),
+        0, 0, 0, 0));
+    uint32_t result = make(
+        AST_NODE_STATEMENT_EXPRESSION, held_type,
+        block(items.data(), static_cast<uint32_t>(items.size())), 0, 0, 0, 0);
+    if (!lvalue)
+        return result;
+    return make(AST_NODE_DEREFERENCE, t, result, 0, 0, 0, AST_NODE_FLAG_LVALUE);
 }
 
 /* [dcl.init.ref]: the address of the object a reference is bound to; a
@@ -3643,6 +3746,10 @@ uint32_t c_lowering::expression(uint32_t index)
         /* [expr.const]/13: an immediate invocation is its value */
         if (n.evaluation == constness::constant)
             return constant(n);
+        /* a class result returned by address that initializes no object:
+           materialized ([class.temporary]/2) */
+        if (!at_result_object && !is_glvalue(n) && passed_indirectly(n.type))
+            return temporary_object(index);
         return call(n);
     case semantic_kind::subscript: {
         uint32_t a = expression(n.a), b = expression(n.b);
@@ -3685,6 +3792,11 @@ uint32_t c_lowering::expression(uint32_t index)
     case semantic_kind::bind_reference:
         return bind_reference(n);
     case semantic_kind::construct:
+        /* [class.temporary]/4: one with a destructor is destroyed at the
+           end of the full-expression */
+        if (!n.a && !at_result_object &&
+            analysis.entity_table[record(n.type).entity].destructor)
+            return temporary_object(index);
         return construct(n);
     case semantic_kind::new_object:
         return new_object(n);
@@ -3743,7 +3855,20 @@ void c_lowering::block_items(uint32_t first, uint32_t count,
 {
     const uint32_t *items = analysis.semantics.items(first);
     for (uint32_t i = 0; i < count; i++) {
-        const semantic_node &s = node(items[i]);
+        uint32_t item = items[i];
+        /* a labeled declaration-statement declares in the block
+           ([stmt.label]/1, [stmt.dcl]): the label, then the declaration */
+        while (node(item).kind == semantic_kind::identifier_label &&
+               node(node(item).a).kind ==
+                   semantic_kind::declaration_statement) {
+            out.append(ast_builder_label_define(
+                c, label(static_cast<uint32_t>(node(item).value)),
+                ast_builder_node(c, AST_NODE_EXPRESSION,
+                                 ast_builder_type_basic(AST_TYPE_VOID), 0, 0, 0,
+                                 0, 0)));
+            item = node(item).a;
+        }
+        const semantic_node &s = node(item);
         if (s.kind == semantic_kind::declarations) {
             block_items(s.first, s.count, out);
             continue;
@@ -3752,7 +3877,7 @@ void c_lowering::block_items(uint32_t first, uint32_t count,
             declaration_items(s, out);
             continue;
         }
-        out.append(statement(items[i]));
+        out.append(statement(item));
     }
 }
 
@@ -3782,6 +3907,15 @@ void c_lowering::declaration_items(const semantic_node &n,
 
 void c_lowering::initialized_declaration(const semantic_node &n,
                                          owned_array<uint32_t> &out)
+{
+    entity_index outer_declaring = declaring;
+    declaring = n.a;
+    initialized_variable(n, out);
+    declaring = outer_declaring;
+}
+
+void c_lowering::initialized_variable(const semantic_node &n,
+                                      owned_array<uint32_t> &out)
 {
     entity_index e = n.a;
     const entity &x = analysis.entity_table[e];
@@ -3816,7 +3950,7 @@ void c_lowering::initialized_declaration(const semantic_node &n,
     }
     if (!n.b || node(n.b).kind != semantic_kind::construct || !x.automatic) {
         /* a block's object, whose destructor is called below */
-        out.append(declaration(n, true));
+        out.append(declaration(n));
     } else {
         const semantic_node &init = node(n.b);
         uint32_t s = symbol(e, n.at);
@@ -3860,6 +3994,7 @@ void c_lowering::initialized_declaration(const semantic_node &n,
         r.symbol = symbol(e, n.at);
         r.type = type(x.type, n.at);
         r.destructor = destructor;
+        r.owner = e;
         if (bound) {
             r.element = type(object, n.at);
             r.bound = bound;
@@ -3895,6 +4030,76 @@ uint32_t c_lowering::loop_body(uint32_t n, bool is_switch)
     uint32_t s = statement(n);
     live.resize(mark);
     return s;
+}
+
+/*
+ * [stmt.while]/2, [stmt.for]/1: while (condition) statement, with the step
+ * after the statement (a for statement's expression, 0 if none):
+ *     for (;;) { condition's declaration; if (condition) { statement }
+ *                else { destroy the declaration's objects; break; }
+ *                continue_label: step; destroy them; }
+ * so that the condition's variable lives through the statement and the
+ * step and is destroyed before the next test; without one, C's own loop.
+ * A condition's temporaries are those of its full-expression.
+ */
+uint32_t c_lowering::loop(uint32_t cond_node, uint32_t step_node,
+                          uint32_t body_node, token_index at)
+{
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    bool declares = cond_node && node(cond_node).kind ==
+                                     semantic_kind::condition_declaration;
+    if (!declares) {
+        uint32_t cond = 0, step = 0;
+        if (cond_node) {
+            cond = condition(cond_node, no_statements);
+            if (!cond)
+                return 0;
+        }
+        if (step_node) {
+            step = full_value(step_node, true);
+            if (!step)
+                return 0;
+        }
+        uint32_t body = loop_body(body_node, false);
+        if (!step_node && cond)
+            return ast_builder_node(c, AST_NODE_WHILE, v, cond, body, 0, 0, 0);
+        uint32_t step_body[2] = {step, body};
+        return ast_builder_node(c, AST_NODE_FOR, v, 0, cond,
+                                ast_builder_list(c, step_body, 2), 0, 0);
+    }
+    size_t mark = live.size();
+    scope_record r;
+    r.kind = scope_record::loop;
+    live.append(r);
+    owned_array<uint32_t> items;
+    uint32_t cond = condition(cond_node, items);
+    if (!cond)
+        return 0;
+    if (step_node) {
+        live[mark].continue_label = ast_builder_label(c, "", 0);
+        live[mark].continue_mark = live.size();
+    }
+    uint32_t body = statement(body_node);
+    owned_array<uint32_t> leave;
+    destroy(mark + 1, leave, at);
+    leave.append(ast_builder_node(c, AST_NODE_BREAK, v, 0, 0, 0, 0, 0));
+    items.append(ast_builder_node(
+        c, AST_NODE_IF, v, cond, body,
+        block(leave.data(), static_cast<uint32_t>(leave.size())), 0, 0));
+    if (step_node) {
+        uint32_t step = full_value(step_node, true);
+        if (!step)
+            return 0;
+        items.append(ast_builder_label_define(
+            c, live[mark].continue_label,
+            ast_builder_node(c, AST_NODE_EXPRESSION, v, step, 0, 0, 0, 0)));
+    }
+    destroy(mark + 1, items, at);
+    live.resize(mark);
+    uint32_t step_body[2] = {
+        0, block(items.data(), static_cast<uint32_t>(items.size()))};
+    return ast_builder_node(c, AST_NODE_FOR, v, 0, 0,
+                            ast_builder_list(c, step_body, 2), 0, 0);
 }
 
 /* whether the glvalue n designates an object or function of static
@@ -4090,22 +4295,13 @@ bool c_lowering::constant_initializer(uint32_t n) const
 
 /* a variable declared in a block: an automatic one is a C declaration, a
    static one's symbol holds its initializer */
-uint32_t c_lowering::declaration(const semantic_node &n, bool in_block)
+uint32_t c_lowering::declaration(const semantic_node &n)
 {
     entity_index e = n.a;
     const entity &x = analysis.entity_table[e];
     uint32_t s = symbol(e, n.at);
     if (!s)
         return 0;
-    if (n.b && x.automatic && node(n.b).kind == semantic_kind::construct)
-        return fail("a constructor call in a condition or init-statement",
-                    n.at);
-    qualified_type object = x.type;
-    if (!in_block && record(object).kind == type_kind::class_type &&
-        analysis.entity_table[record(object).entity].destructor)
-        return fail("an object with a destructor in a condition or "
-                    "init-statement",
-                    n.at);
     uint32_t init = 0;
     if (!x.automatic && !n.b && holds_data_member_pointer(x.type)) {
         if (record(x.type).kind != type_kind::pointer_to_member)
@@ -4138,16 +4334,99 @@ uint32_t c_lowering::declaration(const semantic_node &n, bool in_block)
                             0, 0);
 }
 
-/* a condition's value; a condition that declares gives its declaration in
-   declaration_statement (0 if none) */
-uint32_t c_lowering::condition(uint32_t n, uint32_t &declaration_statement)
+/* [stmt.pre]/4: a condition that declares is that declaration (its
+   initializer a full-expression, its variable live in the statement),
+   then the variable's value as the condition */
+uint32_t c_lowering::condition(uint32_t n, owned_array<uint32_t> &out)
 {
-    declaration_statement = 0;
     const semantic_node &x = node(n);
-    if (x.kind != semantic_kind::condition_declaration)
-        return truth(expression(n));
-    declaration_statement = declaration(node(x.a));
-    return truth(expression(x.b));
+    if (x.kind == semantic_kind::condition_declaration) {
+        declaration_items(node(x.a), out);
+        n = x.b;
+    }
+    uint32_t value = full_value(n, false);
+    if (!value)
+        return 0;
+    return truth(value);
+}
+
+/* [stmt.if]/3, [stmt.switch]/7, [stmt.for]/1: an init-statement before
+   the statement, its variables in the statement's scope */
+void c_lowering::init_statement(uint32_t n, owned_array<uint32_t> &out)
+{
+    if (!n)
+        return;
+    const semantic_node &first = node(n);
+    if (first.kind == semantic_kind::declarations)
+        block_items(first.first, first.count, out);
+    else if (first.kind == semantic_kind::declaration_statement)
+        declaration_items(first, out);
+    else if (first.kind != semantic_kind::null_statement)
+        out.append(statement(n));
+}
+
+/* the automatic variables in scope at each label of the function, for a
+   goto's [stmt.dcl]/2: a block's declarations before the label and those
+   of the statements around it (an init-statement's, a condition's) */
+void c_lowering::label_scopes(uint32_t s, owned_array<uint32_t> &path)
+{
+    if (!s || s >= analysis.semantics.size())
+        return;
+    const semantic_node &n = node(s);
+    if (n.kind == semantic_kind::condition_declaration) {
+        label_scopes(n.a, path);
+        return;
+    }
+    if (n.kind < semantic_kind::block || n.kind > semantic_kind::null_statement)
+        return;
+    switch (n.kind) {
+    case semantic_kind::declarations: {
+        const uint32_t *items = analysis.semantics.items(n.first);
+        for (uint32_t i = 0; i < n.count; i++)
+            label_scopes(items[i], path);
+        return;
+    }
+    case semantic_kind::declaration_statement:
+        path.append(n.a);
+        return;
+    case semantic_kind::identifier_label:
+        label_paths.append(static_cast<uint32_t>(n.value));
+        label_paths.append(static_cast<uint32_t>(path.size()));
+        for (uint32_t e : path)
+            label_paths.append(e);
+        label_scopes(n.a, path);
+        return;
+    default:
+        break;
+    }
+    size_t mark = path.size();
+    if (n.kind == semantic_kind::block) {
+        const uint32_t *items = analysis.semantics.items(n.first);
+        for (uint32_t i = 0; i < n.count; i++)
+            label_scopes(items[i], path);
+    } else {
+        /* an if or switch's init-statement is d, before its condition a */
+        label_scopes(n.d, path);
+        label_scopes(n.a, path);
+        label_scopes(n.b, path);
+        label_scopes(n.c, path);
+    }
+    path.resize(mark);
+}
+
+bool c_lowering::in_label_scope(uint32_t identifier, entity_index e) const
+{
+    for (size_t i = 0; i + 1 < label_paths.size();) {
+        uint32_t count = label_paths[i + 1];
+        if (label_paths[i] == identifier) {
+            for (uint32_t k = 0; k < count; k++)
+                if (label_paths[i + 2 + k] == e)
+                    return true;
+            return false;
+        }
+        i += 2 + count;
+    }
+    return false;
 }
 
 uint32_t c_lowering::label(uint32_t identifier)
@@ -4209,106 +4488,54 @@ uint32_t c_lowering::statement(uint32_t index)
         live.resize(mark);
         return block(items.data(), static_cast<uint32_t>(items.size()));
     }
-    case semantic_kind::if_statement: {
-        /* [stmt.if]/3: an init-statement is the statement before the if, in
-           a block around both; a condition that declares likewise
-           ([stmt.select]: its scope is the if statement) */
-        uint32_t declared = 0;
-        uint32_t init = statement(n.d);
-        uint32_t cond = condition(n.a, declared);
-        uint32_t made = ast_builder_node(c, AST_NODE_IF, v, cond,
-                                         statement(n.b), statement(n.c), 0, 0);
-        uint32_t items[3];
-        uint32_t count = 0;
-        if (init)
-            items[count++] = init;
-        if (declared)
-            items[count++] = declared;
-        if (!count)
+    case semantic_kind::if_statement:
+    case semantic_kind::switch_statement: {
+        /* [stmt.if]/3, [stmt.switch]/7: an init-statement is the statement
+           before the if or switch, in a block around both; a condition
+           that declares likewise ([stmt.select]: its scope is the
+           statement), its variables destroyed after it */
+        size_t mark = live.size();
+        owned_array<uint32_t> items;
+        init_statement(n.d, items);
+        uint32_t cond = condition(n.a, items);
+        if (!cond)
+            return 0;
+        uint32_t made = 0;
+        if (n.kind == semantic_kind::if_statement)
+            made = ast_builder_node(c, AST_NODE_IF, v, cond, statement(n.b),
+                                    statement(n.c), 0, 0);
+        else
+            made = ast_builder_node(c, AST_NODE_SWITCH, v, cond,
+                                    loop_body(n.b, true), 0, 0, 0);
+        if (items.empty() && live.size() == mark)
             return made;
-        items[count++] = made;
-        return block(items, count);
+        items.append(made);
+        destroy(mark, items, n.at);
+        live.resize(mark);
+        return block(items.data(), static_cast<uint32_t>(items.size()));
     }
-    case semantic_kind::while_statement: {
-        uint32_t declared = 0;
-        uint32_t cond = condition(n.a, declared);
-        uint32_t body = loop_body(n.b, false);
-        if (!declared)
-            return ast_builder_node(c, AST_NODE_WHILE, v, cond, body, 0, 0, 0);
-        /* [stmt.while]/2: with a declaration the loop is
-               label: { if (condition) { statement goto label; } }
-           here a for without a condition whose body declares, tests and
-           leaves */
-        uint32_t leave = ast_builder_node(c, AST_NODE_BREAK, v, 0, 0, 0, 0, 0);
-        uint32_t test =
-            ast_builder_node(c, AST_NODE_IF, v, cond, body, leave, 0, 0);
-        uint32_t items[2] = {declared, test};
-        uint32_t step_body[2] = {0, block(items, 2)};
-        return ast_builder_node(c, AST_NODE_FOR, v, 0, 0,
-                                ast_builder_list(c, step_body, 2), 0, 0);
-    }
+    case semantic_kind::while_statement:
+        return loop(n.a, 0, n.b, n.at);
     case semantic_kind::do_statement: {
         uint32_t body = loop_body(n.a, false);
-        return ast_builder_node(c, AST_NODE_DO, v, truth(expression(n.b)), body,
-                                0, 0, 0);
+        uint32_t cond = full_value(n.b, false);
+        if (!cond)
+            return 0;
+        return ast_builder_node(c, AST_NODE_DO, v, truth(cond), body, 0, 0, 0);
     }
     case semantic_kind::for_statement: {
-        uint32_t init = 0;
+        /* [stmt.for]/1: { init-statement while (condition) { statement
+           expression ; } } */
         size_t mark = live.size();
-        if (n.a) {
-            const semantic_node &first = node(n.a);
-            if (first.kind == semantic_kind::declaration_statement ||
-                first.kind == semantic_kind::declarations) {
-                owned_array<uint32_t> items;
-                if (first.kind == semantic_kind::declarations)
-                    block_items(first.first, first.count, items);
-                else
-                    items.append(declaration(first));
-                init = block(items.data(), static_cast<uint32_t>(items.size()));
-            } else if (first.kind != semantic_kind::null_statement)
-                init = statement(n.a);
-        }
-        if (live.size() != mark)
-            return fail("an object with a destructor in an init-statement",
-                        n.at);
-        uint32_t declared = 0, cond = 0;
-        if (n.b)
-            cond = condition(n.b, declared);
-        uint32_t step = 0;
-        if (n.c)
-            step = discard(n.c);
-        uint32_t body = loop_body(n.d, false);
-        if (declared) {
-            uint32_t leave =
-                ast_builder_node(c, AST_NODE_BREAK, v, 0, 0, 0, 0, 0);
-            uint32_t test =
-                ast_builder_node(c, AST_NODE_IF, v, cond, body, leave, 0, 0);
-            uint32_t items[2] = {declared, test};
-            body = block(items, 2);
-            cond = 0;
-        }
-        uint32_t step_body[2] = {step, body};
-        return ast_builder_node(c, AST_NODE_FOR, v, init, cond,
-                                ast_builder_list(c, step_body, 2), 0, 0);
-    }
-    case semantic_kind::switch_statement: {
-        /* [stmt.switch]/7: an init-statement is before the switch, in a
-           block around both */
-        uint32_t declared = 0;
-        uint32_t init = statement(n.d);
-        uint32_t cond = condition(n.a, declared);
-        uint32_t made = ast_builder_node(c, AST_NODE_SWITCH, v, cond,
-                                         loop_body(n.b, true), 0, 0, 0);
-        uint32_t items[3];
-        uint32_t count = 0;
-        if (init)
-            items[count++] = init;
-        if (declared)
-            items[count++] = declared;
-        if (!count)
+        owned_array<uint32_t> items;
+        init_statement(n.a, items);
+        uint32_t made = loop(n.b, n.c, n.d, n.at);
+        if (items.empty() && live.size() == mark)
             return made;
-        items[count++] = made;
-        return block(items, count);
+        items.append(made);
+        destroy(mark, items, n.at);
+        live.resize(mark);
+        return block(items.data(), static_cast<uint32_t>(items.size()));
     }
     case semantic_kind::case_label:
         return ast_builder_case(c, static_cast<int64_t>(n.value),
@@ -4320,15 +4547,35 @@ uint32_t c_lowering::statement(uint32_t index)
         uint32_t l = label(static_cast<uint32_t>(n.value));
         return ast_builder_label_define(c, l, statement(n.a));
     }
-    case semantic_kind::goto_statement:
-        if (leaving_objects())
-            /* [stmt.dcl]/2's destruction on a jump out of the objects'
-               scopes, which a goto needs its target's scope for */
-            return fail("a goto where an object with a destructor is live",
-                        n.at);
-        return ast_builder_node(c, AST_NODE_GOTO, v,
-                                label(static_cast<uint32_t>(n.value)), 0, 0, 0,
-                                0);
+    case semantic_kind::goto_statement: {
+        /* [stmt.dcl]/2: the objects live here and not at the label are
+           destroyed, last constructed first; those the label has in scope
+           are the first ones live (a jump into an object's scope past its
+           declaration is ill-formed, [stmt.dcl]/3) */
+        uint32_t identifier = static_cast<uint32_t>(n.value);
+        uint32_t jump = ast_builder_node(c, AST_NODE_GOTO, v, label(identifier),
+                                         0, 0, 0, 0);
+        if (!leaving_objects())
+            return jump;
+        if (!label_paths_made) {
+            owned_array<uint32_t> path;
+            label_scopes(function_root, path);
+            label_paths_made = true;
+        }
+        size_t from = live.size();
+        for (size_t i = 0; i < live.size(); i++)
+            if (live[i].kind == scope_record::object &&
+                !in_label_scope(identifier, live[i].owner)) {
+                from = i;
+                break;
+            }
+        if (from == live.size())
+            return jump;
+        owned_array<uint32_t> items;
+        destroy(from, items, n.at);
+        items.append(jump);
+        return block(items.data(), static_cast<uint32_t>(items.size()));
+    }
     case semantic_kind::break_statement:
     case semantic_kind::continue_statement: {
         bool is_break = n.kind == semantic_kind::break_statement;
@@ -4337,6 +4584,12 @@ uint32_t c_lowering::statement(uint32_t index)
             op = AST_NODE_BREAK;
         uint32_t jump = ast_builder_node(c, op, v, 0, 0, 0, 0, 0);
         size_t mark = leaving(is_break);
+        if (!is_break && mark && live[mark - 1].continue_label) {
+            /* to the step, the condition's variable still live */
+            jump = ast_builder_node(c, AST_NODE_GOTO, v,
+                                    live[mark - 1].continue_label, 0, 0, 0, 0);
+            mark = live[mark - 1].continue_mark;
+        }
         if (mark >= live.size())
             return jump;
         owned_array<uint32_t> items;
@@ -5717,6 +5970,9 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     const entity &x = analysis.entity_table[e];
     const semantic_node &body = node(x.definition);
     labels.clear();
+    label_paths.clear();
+    label_paths_made = false;
+    function_root = body.a;
     in_function = true;
     /* every parameter has a symbol, an unnamed one too */
     owned_array<uint32_t> parameters;
