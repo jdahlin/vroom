@@ -341,9 +341,20 @@ analysis_result semantic_analysis::member_template_call(
     }
     if (!entity_table[f].nonstatic_member)
         return static_member_call(n, f, object, arguments, early, m);
+    if (!object && !current_class() && !defining_class)
+        /* [expr.prim.id]/2: "An id-expression that denotes a non-static
+           data member or non-static member function of a class can only
+           be used: as part of a class member access [...], or to form a
+           pointer to member [...]" (X::f(a) outside any class) */
+        return ill_formed(n,
+                          "an id-expression that denotes a non-static member "
+                          "function can only be used as part of a class "
+                          "member access or to form a pointer to member",
+                          "expr.prim.id");
     if (!object)
         /* [class.mfct.non-static]/3: a non-static member function named
-           where no object is: ill-formed, not analysed */
+           where no object is (a static member's context, a default
+           argument): ill-formed, not analysed */
         return not_supported(n, "class.mfct.non-static");
     return bound_member_call(n, f, *object, arguments, early, m);
 }

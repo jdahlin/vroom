@@ -48,3 +48,11 @@ template <C1 T> struct S {
 };
 template <C1 T> template <C2 U> void S<T>::f(U) {}
 template <C1 T> template <typename U> void S<T>::g(U) {}
+// A non-static member function template is called through an object; a
+// static one by its class's name too ([expr.prim.id]/2, [temp.mem]/2).
+struct Holder {
+    template <class T> int nonstatic(T) { return 0; }
+    template <class T> static int fine(T) { return 0; }
+};
+int without_object = Holder::nonstatic(1);
+int static_without_object = Holder::fine(1);
