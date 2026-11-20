@@ -441,8 +441,18 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     qualified_type t1 = r.operand, t2 = m.type;
     const struct type x = type_table[t1.unqualified()];
     const struct type y = type_table[t2.unqualified()];
-    if (x.kind == type_kind::class_type && y.kind == type_kind::class_type)
+    if (x.kind == type_kind::class_type && y.kind == type_kind::class_type) {
+        entity_index c1 = x.entity, c2 = y.entity;
+        bool ambiguous = false;
+        if (entity_table[c1].kind == entity_kind::class_type &&
+            entity_table[c2].kind == entity_kind::class_type &&
+            entity_table[c2].size && c1 != c2 && !base_step(c2, c1, ambiguous))
+            return converted_temporary_binding(at, m, reference);
         return class_reference_binding(at, m, reference);
+    }
+    if (x.kind == type_kind::class_type && y.kind != type_kind::class_type &&
+        y.kind != type_kind::none)
+        return converted_temporary_binding(at, m, reference);
     if (y.kind == type_kind::class_type &&
         (x.kind == type_kind::fundamental || x.kind == type_kind::pointer)) {
         /* [dcl.init.ref]/5.1.2, /5.3.2, /5.4.1: "has a class type (i.e., T2
@@ -541,6 +551,59 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
 }
 
 /*
+ * [dcl.init.ref]/5.4.1 and /5.4.4: the initializer is not reference-related
+ * to the class T1, so it is "implicitly converted to a prvalue of type "cv1
+ * T1"" (a user-defined conversion: a converting constructor of T1
+ * ([class.conv.ctor], [over.match.copy]/1.1)), "the temporary
+ * materialization conversion is applied and the reference is bound to the
+ * result" ([class.temporary]/6: the temporary lives as long as the reference
+ * or to the end of the full-expression).  A temporary made by a constructor
+ * that binds one again nests: bounded, a clean refusal at 16.
+ */
+analysis_result semantic_analysis::converted_temporary_binding(
+    SyntaxRef at, expression_meaning &m, qualified_type reference)
+{
+    const struct type r = type_table[reference.unqualified()];
+    bool rvalue_reference = r.kind == type_kind::rvalue_reference;
+    qualified_type t1 = r.operand;
+    /* /5.2: an lvalue reference to a non-const (or volatile) type binds to
+       nothing converted */
+    if (!rvalue_reference && (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile)))
+        return ill_formed(at,
+                          "an lvalue reference to a type that is not "
+                          "const-qualified or is volatile-qualified binds "
+                          "only to a reference-compatible lvalue",
+                          "dcl.init.ref");
+    if (converting_binds >= 16)
+        return not_supported(at, "dcl.init.ref");
+    qualified_type made_type = qualified_type::make(t1.unqualified(), cv_none);
+    const struct type &source = type_table[m.type.unqualified()];
+    if (source.kind == type_kind::class_type &&
+        has_conversion_functions(source.entity)) {
+        /* /5.1.2, /5.3.2: "can be converted to an lvalue [or rvalue] of
+           type "cv3 T3"" by a conversion function ([over.match.ref]) */
+        bool converted = false;
+        VTRY(c, conversion_function_call(at, m, made_type, false, converted));
+        if (!converted)
+            return not_supported(at, "over.match.ref");
+        return analysis_result::well_formed;
+    }
+    converting_binds++;
+    initialized_value value;
+    analysis_result a = initialize_with(at, m, made_type, false, false, value);
+    converting_binds--;
+    if (a != analysis_result::well_formed)
+        return a;
+    expression_meaning made;
+    made.type = made_type;
+    made.category = value_category::prvalue;
+    made.evaluation = constness::not_constant;
+    made.node = value.node;
+    m = made;
+    return analysis_result::well_formed;
+}
+
+/*
  * [dcl.init.ref]/5 for a class: "(5.1) If the reference is an lvalue
  * reference and the initializer expression (5.1.1) is an lvalue (but is
  * not a bit-field), and "cv1 T1" is reference-compatible with "cv2 T2"
@@ -564,8 +627,11 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
     entity_index c1 = type_table[t1.unqualified()].entity;
     entity_index c2 = type_table[t2.unqualified()].entity;
     if (entity_table[c1].kind != entity_kind::class_type ||
-        entity_table[c2].kind != entity_kind::class_type ||
-        !entity_table[c2].size)
+        entity_table[c2].kind != entity_kind::class_type)
+        return not_supported(at, "dcl.init.ref");
+    /* the same class binds even when incomplete (an lvalue of it); a base
+       needs the complete derived class */
+    if (c1 != c2 && !entity_table[c2].size)
         return not_supported(at, "dcl.init.ref");
     bool ambiguous = false;
     bool related = c1 == c2 || base_step(c2, c1, ambiguous);

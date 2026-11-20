@@ -2238,6 +2238,8 @@ class semantic_analysis
     /* construct() is called for a base class subobject, which may be of an
        abstract class ([class.abstract]/2) */
     bool constructing_base = false;
+    /* temporaries being made for a reference binding (bounded) */
+    uint32_t converting_binds = 0;
     bool virt_override = false, virt_final = false, virt_pure = false;
     /* the virtual functions declared, with their class, in order: a
        class's are its new slots at its closing } (dynamic_class_record) */
@@ -2917,6 +2919,9 @@ class semantic_analysis
     analysis_result string_initialization(SyntaxRef at,
                                           const expression_meaning &string,
                                           qualified_type &type);
+    analysis_result converted_temporary_binding(SyntaxRef at,
+                                                expression_meaning &m,
+                                                qualified_type reference);
     analysis_result class_reference_binding(SyntaxRef at, expression_meaning &m,
                                             qualified_type reference);
     analysis_result reference_binding(SyntaxRef at, expression_meaning &m,
