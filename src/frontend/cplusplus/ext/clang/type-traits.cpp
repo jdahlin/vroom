@@ -562,6 +562,17 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         return clang_constructible_trait(n, false, m);
     if (spelled(name, written.size(), "__is_nothrow_constructible"))
         return clang_constructible_trait(n, true, m);
+    if (n.size() == 6 && n[2].is(syntax_kind::type_id) &&
+        n[4].is(syntax_kind::type_id)) {
+        if (spelled(name, written.size(), "__is_base_of"))
+            return clang_base_of_trait(n, m);
+        if (spelled(name, written.size(), "__is_assignable"))
+            return clang_assignable_trait(n, 0, m);
+        if (spelled(name, written.size(), "__is_nothrow_assignable"))
+            return clang_assignable_trait(n, 1, m);
+        if (spelled(name, written.size(), "__is_trivially_assignable"))
+            return clang_assignable_trait(n, 2, m);
+    }
     /* ( type-id ): a trait of the type's category */
     if (!same && !convertible && n.size() == 4 &&
         n[2].is(syntax_kind::type_id)) {

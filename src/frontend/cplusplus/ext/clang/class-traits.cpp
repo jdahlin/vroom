@@ -128,6 +128,62 @@ bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
     return false;
 }
 
+/* [class.derived]/2: whether class d has class b among its direct or
+   indirect base classes, virtual ones included */
+bool semantic_analysis::derives_from(entity_index d, entity_index b) const
+{
+    const entity &x = entity_table[d];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index k = type_table[entity_table[class_bases[x.first_base + i]]
+                                        .type.unqualified()]
+                             .entity;
+        if (k == b || derives_from(k, b))
+            return true;
+    }
+    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+        entity_index k =
+            type_table
+                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
+                     .type.unqualified()]
+                    .entity;
+        if (k == b || derives_from(k, b))
+            return true;
+    }
+    return false;
+}
+
+/* ( type-id , type-id ): __is_base_of(Base, Derived), [meta.rel] is_base_of:
+   "Base is a base class of Derived, or both are the same non-union class
+   type" (cv-qualification ignored); a type that is no class is none.  A
+   Derived that is an incomplete class other than Base is ill-formed
+   ([meta.rel]/5: "complete type"), left unsupported. */
+analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
+                                                       expression_meaning &m)
+{
+    qualified_type b, d;
+    VTRY(r, type_id(n[2], b));
+    VTRY_SET(r, type_id(n[4], d));
+    if (depends_on_template_parameter(b) || depends_on_template_parameter(d))
+        return not_supported(n, "temp.dep.constexpr");
+    const struct type bk = type_table[b.unqualified()];
+    const struct type dk = type_table[d.unqualified()];
+    bool value = false;
+    if (bk.kind == type_kind::class_type && dk.kind == type_kind::class_type) {
+        if (entity_table[bk.entity].kind != entity_kind::class_type ||
+            entity_table[dk.entity].kind != entity_kind::class_type)
+            return not_supported(n, "meta.rel");
+        if (bk.entity == dk.entity) {
+            value = !entity_table[bk.entity].union_;
+        } else {
+            if (!entity_table[dk.entity].size)
+                return not_supported(n, "meta.rel");
+            value = derives_from(dk.entity, bk.entity);
+        }
+    }
+    m = integer_constant(fundamental_type::bool_, value, n.first_token());
+    return analysis_result::well_formed;
+}
+
 /* the traits; known is false when the analysis cannot tell */
 bool semantic_analysis::class_property_trait(int which, qualified_type t,
                                              bool &answer)

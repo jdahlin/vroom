@@ -112,6 +112,14 @@ analysis_result semantic_analysis::overloaded_operator(
                 cv_const)
             converts = false;
     }
+    /* [over.match.oper]/3.3, [over.built]: the built-in candidates of = are
+       operator=(L VQ &, R) of arithmetic or pointer L; no conversion binds
+       the class left operand to a reference to one ([over.match.oper]/4,
+       [over.ics.ref]), so none is viable */
+    if (converts && op == preprocessing_op_or_punc::EQUAL &&
+        type_table[operands[0].type.unqualified()].kind ==
+            type_kind::class_type)
+        converts = false;
     bool logical = op == preprocessing_op_or_punc::EXCLAMATION ||
                    op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
                    op == preprocessing_op_or_punc::BAR_BAR;

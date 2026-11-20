@@ -2582,6 +2582,8 @@ class semantic_analysis
     /* ext/clang/class-traits.cpp: the traits that ask about a class */
     bool class_property_trait(int which, qualified_type t, bool &answer);
     bool empty_class(entity_index c) const;
+    bool derives_from(entity_index d, entity_index b) const;
+    analysis_result clang_base_of_trait(SyntaxRef n, expression_meaning &m);
     bool polymorphic_class(entity_index c) const;
     bool virtual_destructor(entity_index c) const;
     bool triviality_unknown(entity_index c) const;
@@ -2620,6 +2622,15 @@ class semantic_analysis
                                          expression_meaning &m);
     /* [expr.ass] */
     analysis_result assignment(SyntaxRef n, expression_meaning &m);
+    analysis_result
+    assignment_of(SyntaxRef n, token_index at, preprocessing_op_or_punc op,
+                  SyntaxElement left_syntax, SyntaxElement right_syntax,
+                  expression_meaning &left, expression_meaning &right,
+                  expression_meaning &m);
+    /* [meta.unary.prop] is_assignable, is_nothrow_assignable,
+       is_trivially_assignable (ext/clang/assignable-traits.cpp) */
+    analysis_result clang_assignable_trait(SyntaxRef n, int which,
+                                           expression_meaning &m);
     /* [expr.ass]/4: = of a class */
     analysis_result class_assignment(SyntaxRef n, preprocessing_op_or_punc op,
                                      expression_meaning &left,
