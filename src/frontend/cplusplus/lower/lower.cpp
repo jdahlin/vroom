@@ -224,9 +224,8 @@ class c_lowering
     uint32_t vtt(entity_index k, token_index at);
     uint32_t vtt_define(entity_index k, uint32_t table, int storage,
                         uint32_t flags, token_index at);
-    /* the index in class k's VTT of the entry for its group (UINT32_MAX:
-       none), and of the sub-VTT of its base of class b at offset */
-    uint32_t vtt_index_of_group(entity_index k, uint32_t group) const;
+    /* the index in class k's VTT of the sub-VTT of its base of class b at
+       offset */
     uint32_t sub_vtt_index(entity_index k, entity_index b,
                            uint64_t offset) const;
     /* the address of the virtual base v of the object of class k at the
@@ -358,6 +357,8 @@ class c_lowering
     /* for each element of the array in symbol s (type array, elements of
        type element), first to last or last to first: a call of special
        member e on its address */
+    uint32_t counted_loop(uint32_t i, ast_qualified_type t, uint32_t count,
+                          bool reverse, uint32_t body);
     uint32_t each_element(uint32_t s, ast_qualified_type array,
                           ast_qualified_type element, uint64_t bound,
                           bool reverse, entity_index e, token_index at);
@@ -550,6 +551,32 @@ class c_lowering
         return make(AST_NODE_CAST, to, operand, 0, 0,
                     static_cast<uint16_t>(kind), 0);
     }
+    /* C types and nodes said once */
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type pointer_to(ast_qualified_type t)
+    {
+        return ast_builder_type_pointer(c, t);
+    }
+    uint32_t dereference(uint32_t p, ast_qualified_type t)
+    {
+        return make(AST_NODE_DEREFERENCE, t, p, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    }
+    uint32_t assign(ast_qualified_type t, uint32_t a, uint32_t b)
+    {
+        return make(AST_NODE_ASSIGN, t, a, b, 0, 0, 0);
+    }
+    uint32_t comma(ast_qualified_type t, uint32_t a, uint32_t b)
+    {
+        return make(AST_NODE_COMMA, t, a, b, 0, 0, 0);
+    }
+    uint32_t statement_expression(ast_qualified_type t, uint32_t block_node)
+    {
+        return make(AST_NODE_STATEMENT_EXPRESSION, t, block_node, 0, 0, 0, 0);
+    }
+    uint32_t if_statement(uint32_t cond, uint32_t then, uint32_t otherwise)
+    {
+        return ast_builder_node(c, AST_NODE_IF, v, cond, then, otherwise, 0, 0);
+    }
     uint32_t block(const owned_array<uint32_t> &items)
     {
         return block(items.data(), static_cast<uint32_t>(items.size()));
@@ -657,7 +684,7 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
 {
     switch (f) {
     case fundamental_type::void_:
-        return ast_builder_type_basic(AST_TYPE_VOID);
+        return v;
     case fundamental_type::bool_:
         return ast_builder_type_basic(AST_TYPE_BOOL);
     case fundamental_type::char_:
@@ -711,8 +738,7 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
     case fundamental_type::std_nullptr_t:
         /* [basic.fundamental]/14: "A value of type std::nullptr_t is a
            null pointer constant"; it has a pointer's size */
-        return ast_builder_type_pointer(c,
-                                        ast_builder_type_basic(AST_TYPE_VOID));
+        return pointer_to(v);
     case fundamental_type::builtin_va_list:
         return ast_builder_type_va_list(c);
     default:
@@ -773,7 +799,7 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::block_pointer: /* the block's address, as C's ^ */
-        made = ast_builder_type_pointer(c, type(r.operand, at));
+        made = pointer_to(type(r.operand, at));
         break;
     case type_kind::array:
         made = ast_builder_type_array(c, type(r.operand, at), r.bound,
@@ -897,9 +923,8 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
     const dynamic_class *dynamic = analysis.dynamic_of(e);
     if (dynamic && !dynamic->primary_base) {
         /* [abi:class-types] I: the virtual table pointer at offset 0 */
-        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-        add(ast_builder_type_pointer(c, ast_builder_type_pointer(c, v)),
-            "__vptr", 6, 0, false, -1);
+        add(pointer_to(ast_builder_type_pointer(c, v)), "__vptr", 6, 0, false,
+            -1);
         offsets.append(0);
         end = analysis.pointer_size();
     }
@@ -1098,7 +1123,7 @@ bool c_lowering::passed_indirectly(qualified_type t) const
 ast_qualified_type c_lowering::parameter_type(qualified_type t, token_index at)
 {
     if (passed_indirectly(t))
-        return ast_builder_type_pointer(c, type(t, at));
+        return pointer_to(type(t, at));
     return type(t, at);
 }
 
@@ -1131,7 +1156,7 @@ ast_qualified_type c_lowering::member_function_type(qualified_type object,
 {
     const struct type &f = record(function);
     owned_array<ast_qualified_type> parameters;
-    parameters.append(ast_builder_type_pointer(c, type(object, at)));
+    parameters.append(pointer_to(type(object, at)));
     const qualified_type *p =
         analysis.type_table.parameters(function.unqualified());
     for (uint32_t i = 0; i < f.parameter_count; i++)
@@ -1390,9 +1415,8 @@ uint32_t c_lowering::special_call(entity_index e, uint32_t object,
     }
     if (!s || !object)
         return 0;
-    uint32_t callee =
-        cast(make(AST_NODE_VARIABLE, f, s, 0, 0, 0, 0),
-             ast_builder_type_pointer(c, f), AST_CAST_FUNCTION_DECAY);
+    uint32_t callee = cast(make(AST_NODE_VARIABLE, f, s, 0, 0, 0, 0),
+                           pointer_to(f), AST_CAST_FUNCTION_DECAY);
     owned_array<uint32_t> all;
     all.append(object);
     if (vtt_argument)
@@ -1400,8 +1424,8 @@ uint32_t c_lowering::special_call(entity_index e, uint32_t object,
     for (uint32_t i = 0; i < count; i++)
         all.append(arguments[i]);
     uint32_t n = static_cast<uint32_t>(all.size());
-    return make(AST_NODE_CALL, ast_builder_type_basic(AST_TYPE_VOID), callee,
-                ast_builder_list(c, all.data(), n), n, 0, 0);
+    return make(AST_NODE_CALL, v, callee, ast_builder_list(c, all.data(), n), n,
+                0, 0);
 }
 
 /* [stmt.dcl]/2: "Upon each transfer of control (including sequential
@@ -1441,10 +1465,9 @@ uint32_t c_lowering::destruction(uint32_t s, qualified_type object_type,
     if (uint64_t count = element_count(object_type, element))
         return each_element(s, t, type(element, at), count, true, destructor,
                             at);
-    uint32_t call = special_call(
-        destructor,
-        address_of(c_variable(c, s, t), ast_builder_type_pointer(c, t)),
-        nullptr, 0, at);
+    uint32_t call =
+        special_call(destructor, address_of(c_variable(c, s, t), pointer_to(t)),
+                     nullptr, 0, at);
     if (!call)
         return 0;
     return c_statement(c, call);
@@ -1454,49 +1477,53 @@ uint32_t c_lowering::each_element(uint32_t s, ast_qualified_type array,
                                   ast_qualified_type element, uint64_t bound,
                                   bool reverse, entity_index e, token_index at)
 {
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     ast_qualified_type index_type = ast_builder_type_basic(AST_TYPE_LONG);
-    ast_qualified_type truth = ast_builder_type_basic(AST_TYPE_INT);
     uint32_t i = c_local(c, index_type);
-    auto index = [&] { return c_variable(c, i, index_type); };
-    auto constant = [&](uint64_t value) {
-        return ast_builder_integer(c, index_type, static_cast<int64_t>(value));
-    };
     /* the elements of an array of arrays too, as one sequence
        ([dcl.array]/6: contiguous) */
-    ast_qualified_type pointer = ast_builder_type_pointer(c, element);
-    uint32_t first = cast(
-        address_of(c_variable(c, s, array), ast_builder_type_pointer(c, array)),
-        pointer, AST_CAST_POINTER_TO_POINTER);
-    uint32_t object = make(AST_NODE_INDEX, element, first, index(), 0, 0,
-                           AST_NODE_FLAG_LVALUE);
+    ast_qualified_type pointer = pointer_to(element);
+    uint32_t first =
+        cast(address_of(c_variable(c, s, array), pointer_to(array)), pointer,
+             AST_CAST_POINTER_TO_POINTER);
+    uint32_t object =
+        make(AST_NODE_INDEX, element, first, c_variable(c, i, index_type), 0, 0,
+             AST_NODE_FLAG_LVALUE);
     uint32_t call =
         special_call(e, address_of(object, pointer), nullptr, 0, at);
     if (!call)
         return 0;
-    uint32_t body = c_statement(c, call);
-    uint32_t init, cond, step = 0;
-    if (reverse) {
-        /* for (i = bound; i-- > 0;) */
-        init = make(AST_NODE_ASSIGN, index_type, index(), constant(bound), 0, 0,
-                    0);
-        cond =
-            make(AST_NODE_BINARY, truth,
-                 make(AST_NODE_POST_DECREMENT, index_type, index(), 0, 0, 0, 0),
-                 constant(0), 0, LEX_TOKEN_GREATER, 0);
-    } else {
-        /* for (i = 0; i < bound; i++) */
-        init = make(AST_NODE_ASSIGN, index_type, index(), constant(0), 0, 0, 0);
-        cond = make(AST_NODE_BINARY, truth, index(), constant(bound), 0,
-                    LEX_TOKEN_LESS, 0);
-        step = make(AST_NODE_POST_INCREMENT, index_type, index(), 0, 0, 0, 0);
-    }
-    uint32_t step_body[2] = {step, body};
     uint32_t items[2] = {
         c_declare(c, i),
-        ast_builder_node(c, AST_NODE_FOR, v, c_statement(c, init), cond,
-                         ast_builder_list(c, step_body, 2), 0, 0)};
+        counted_loop(
+            i, index_type,
+            ast_builder_integer(c, index_type, static_cast<int64_t>(bound)),
+            reverse, c_statement(c, call))};
     return block(items, 2);
+}
+
+/* for (i = 0; i < count; i++) body, or reverse for (i = count; i-- > 0;)
+   body; count a constant or a variable */
+uint32_t c_lowering::counted_loop(uint32_t i, ast_qualified_type t,
+                                  uint32_t count, bool reverse, uint32_t body)
+{
+    ast_qualified_type truth = ast_builder_type_basic(AST_TYPE_INT);
+    auto index = [&] { return c_variable(c, i, t); };
+    uint32_t zero = ast_builder_integer(c, t, 0);
+    uint32_t init, cond, step = 0;
+    if (reverse) {
+        init = assign(t, index(), count);
+        cond = make(AST_NODE_BINARY, truth,
+                    make(AST_NODE_POST_DECREMENT, t, index(), 0, 0, 0, 0), zero,
+                    0, LEX_TOKEN_GREATER, 0);
+    } else {
+        init = assign(t, index(), zero);
+        cond =
+            make(AST_NODE_BINARY, truth, index(), count, 0, LEX_TOKEN_LESS, 0);
+        step = make(AST_NODE_POST_INCREMENT, t, index(), 0, 0, 0, 0);
+    }
+    uint32_t step_body[2] = {step, body};
+    return ast_builder_node(c, AST_NODE_FOR, v, c_statement(c, init), cond,
+                            ast_builder_list(c, step_body, 2), 0, 0);
 }
 
 bool c_lowering::leaving_objects() const
@@ -1532,9 +1559,9 @@ uint32_t c_lowering::mark_constructed(uint32_t made, uint32_t flag)
     if (!flag || !made)
         return made;
     ast_qualified_type b = ast_builder_type_basic(AST_TYPE_BOOL);
-    uint32_t set = make(AST_NODE_ASSIGN, b, c_variable(c, flag, b),
-                        ast_builder_integer(c, b, 1), 0, 0, 0);
-    return make(AST_NODE_COMMA, b, made, set, 0, 0, 0);
+    uint32_t set =
+        assign(b, c_variable(c, flag, b), ast_builder_integer(c, b, 1));
+    return comma(b, made, set);
 }
 
 uint32_t c_lowering::if_constructed(uint32_t statement, uint32_t flag)
@@ -1542,9 +1569,7 @@ uint32_t c_lowering::if_constructed(uint32_t statement, uint32_t flag)
     if (!flag)
         return statement;
     ast_qualified_type b = ast_builder_type_basic(AST_TYPE_BOOL);
-    return ast_builder_node(c, AST_NODE_IF,
-                            ast_builder_type_basic(AST_TYPE_VOID),
-                            c_variable(c, flag, b), statement, 0, 0, 0);
+    return if_statement(c_variable(c, flag, b), statement, 0);
 }
 
 /* [class.ctor]: a constructor call whose object is a temporary
@@ -1581,8 +1606,7 @@ uint32_t c_lowering::construct(const semantic_node &n)
                               ast_builder_node(c, AST_NODE_EXPRESSION, t,
                                                c_variable(c, temporary, t), 0,
                                                0, 0, 0)};
-    return make(AST_NODE_STATEMENT_EXPRESSION, t, block(statements, 3), 0, 0, 0,
-                0);
+    return statement_expression(t, block(statements, 3));
 }
 
 /* ---- new and delete ------------------------------------------------ */
@@ -1601,8 +1625,7 @@ uint32_t c_lowering::held_value(uint32_t value, ast_qualified_type t,
     uint32_t symbol = c_local(c, t);
     items.append(c_declare(c, symbol));
     uint32_t variable = c_variable(c, symbol, t);
-    items.append(
-        c_statement(c, make(AST_NODE_ASSIGN, t, variable, lowered, 0, 0, 0)));
+    items.append(c_statement(c, assign(t, variable, lowered)));
     return symbol;
 }
 
@@ -1614,7 +1637,6 @@ uint32_t c_lowering::new_object(const semantic_node &n)
     if (!in_function)
         return fail("a new-expression outside a function", n.at);
     ast_qualified_type t = type(n.type, n.at);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     owned_array<uint32_t> items;
     if (n.d)
         return new_array(n, t);
@@ -1659,10 +1681,8 @@ uint32_t c_lowering::new_object(const semantic_node &n)
                 value = expression(n.b);
             }
             if (value) {
-                uint32_t target =
-                    make(AST_NODE_DEREFERENCE, type(object, n.at), variable(),
-                         0, 0, 0, AST_NODE_FLAG_LVALUE);
-                done = make(AST_NODE_ASSIGN, u, target, value, 0, 0, 0);
+                uint32_t target = dereference(variable(), type(object, n.at));
+                done = assign(u, target, value);
             }
         }
         allocated_symbol = outer;
@@ -1671,22 +1691,19 @@ uint32_t c_lowering::new_object(const semantic_node &n)
             return 0;
         uint32_t statement = c_statement(c, done);
         if (n.c)
-            statement = ast_builder_node(c, AST_NODE_IF, v, truth(variable()),
-                                         statement, 0, 0, 0);
+            statement = if_statement(truth(variable()), statement, 0);
         items.append(statement);
     }
     items.append(
         ast_builder_node(c, AST_NODE_EXPRESSION, t, variable(), 0, 0, 0, 0));
-    return make(AST_NODE_STATEMENT_EXPRESSION, t, block(items), 0, 0, 0, 0);
+    return statement_expression(t, block(items));
 }
 
 uint32_t c_lowering::element_loop(uint32_t first, ast_qualified_type object,
                                   ast_qualified_type size, uint32_t count,
                                   bool reverse, uint32_t each)
 {
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type truth = ast_builder_type_basic(AST_TYPE_INT);
-    ast_qualified_type pointer = ast_builder_type_pointer(c, object);
+    ast_qualified_type pointer = pointer_to(object);
     uint32_t i = c_local(c, size);
     uint32_t element = c_local(c, pointer);
     auto index = [&] { return c_variable(c, i, size); };
@@ -1704,31 +1721,12 @@ uint32_t c_lowering::element_loop(uint32_t first, ast_qualified_type object,
         make(AST_NODE_INDEX, object, c_variable(c, first, pointer),
              to_ptrdiff(index()), 0, 0, AST_NODE_FLAG_LVALUE);
     uint32_t body_items[2] = {
-        c_statement(c, make(AST_NODE_ASSIGN, pointer,
-                            c_variable(c, element, pointer),
-                            address_of(at_index, pointer), 0, 0, 0)),
+        c_statement(c, assign(pointer, c_variable(c, element, pointer),
+                              address_of(at_index, pointer))),
         c_statement(c, done)};
-    uint32_t body = block(body_items, 2);
-    uint32_t init, cond, step = 0;
-    if (reverse) {
-        /* for (i = count; i-- > 0;) */
-        init = make(AST_NODE_ASSIGN, size, index(), counted(), 0, 0, 0);
-        cond = make(AST_NODE_BINARY, truth,
-                    make(AST_NODE_POST_DECREMENT, size, index(), 0, 0, 0, 0),
-                    ast_builder_integer(c, size, 0), 0, LEX_TOKEN_GREATER, 0);
-    } else {
-        /* for (i = 0; i < count; i++) */
-        init = make(AST_NODE_ASSIGN, size, index(),
-                    ast_builder_integer(c, size, 0), 0, 0, 0);
-        cond = make(AST_NODE_BINARY, truth, index(), counted(), 0,
-                    LEX_TOKEN_LESS, 0);
-        step = make(AST_NODE_POST_INCREMENT, size, index(), 0, 0, 0, 0);
-    }
-    uint32_t step_body[2] = {step, body};
     uint32_t items[3] = {
         c_declare(c, i), c_declare(c, element),
-        ast_builder_node(c, AST_NODE_FOR, v, c_statement(c, init), cond,
-                         ast_builder_list(c, step_body, 2), 0, 0)};
+        counted_loop(i, size, counted(), reverse, block(body_items, 2))};
     return block(items, 3);
 }
 
@@ -1750,11 +1748,10 @@ uint32_t c_lowering::new_array(const semantic_node &n, ast_qualified_type t)
     if (target == PP_DARWIN && n.value)
         /* Apple's arm64 cookie has the element size too */
         return fail("an array cookie of Apple's arm64 ABI", n.at);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     ast_qualified_type size =
         AST_QUALIFIED_TYPE_UNQUALIFIED(type(node(n.d).type, n.at));
     ast_qualified_type bytes =
-        ast_builder_type_pointer(c, ast_builder_type_basic(AST_TYPE_CHAR));
+        pointer_to(ast_builder_type_basic(AST_TYPE_CHAR));
     qualified_type element = record(n.type).operand;
     ast_qualified_type object = type(element, n.at);
     owned_array<uint32_t> items;
@@ -1772,23 +1769,20 @@ uint32_t c_lowering::new_array(const semantic_node &n, ast_qualified_type t)
     };
     uint32_t p = declared_symbol(c, items, t);
     items.append(c_statement(
-        c, make(AST_NODE_ASSIGN, t, variable(p, t),
-                cast(variable(raw, bytes), t, AST_CAST_POINTER_TO_POINTER), 0,
-                0, 0)));
+        c, assign(t, variable(p, t),
+                  cast(variable(raw, bytes), t, AST_CAST_POINTER_TO_POINTER))));
     owned_array<uint32_t> body;
     if (n.value) {
-        ast_qualified_type counts = ast_builder_type_pointer(c, size);
-        uint32_t stored = make(
-            AST_NODE_DEREFERENCE, size,
-            cast(variable(raw, bytes), counts, AST_CAST_POINTER_TO_POINTER), 0,
-            0, 0, AST_NODE_FLAG_LVALUE);
-        body.append(c_statement(c, make(AST_NODE_ASSIGN, size, stored,
-                                        variable(count, size), 0, 0, 0)));
+        ast_qualified_type counts = pointer_to(size);
+        uint32_t stored = dereference(
+            cast(variable(raw, bytes), counts, AST_CAST_POINTER_TO_POINTER),
+            size);
+        body.append(
+            c_statement(c, assign(size, stored, variable(count, size))));
         body.append(c_statement(
-            c, make(AST_NODE_ASSIGN, t, variable(p, t),
-                    offset_pointer(variable(raw, bytes),
-                                   static_cast<int64_t>(n.value), t),
-                    0, 0, 0)));
+            c, assign(t, variable(p, t),
+                      offset_pointer(variable(raw, bytes),
+                                     static_cast<int64_t>(n.value), t))));
     }
     if (n.b) {
         uint32_t loop = element_loop(p, object, size, count, false, n.b);
@@ -1799,13 +1793,12 @@ uint32_t c_lowering::new_array(const semantic_node &n, ast_qualified_type t)
     if (!body.empty()) {
         uint32_t made = block(body);
         if (n.c)
-            made = ast_builder_node(c, AST_NODE_IF, v,
-                                    truth(variable(raw, bytes)), made, 0, 0, 0);
+            made = if_statement(truth(variable(raw, bytes)), made, 0);
         items.append(made);
     }
     items.append(ast_builder_node(c, AST_NODE_EXPRESSION, t, variable(p, t), 0,
                                   0, 0, 0));
-    return make(AST_NODE_STATEMENT_EXPRESSION, t, block(items), 0, 0, 0, 0);
+    return statement_expression(t, block(items));
 }
 
 /* [expr.delete]/6, /7 and [abi:array-cookies]: ({ T *p = operand; if (p) {
@@ -1816,10 +1809,9 @@ uint32_t c_lowering::delete_array(const semantic_node &n)
     if (target == PP_DARWIN)
         return fail("an array cookie of Apple's arm64 ABI", n.at);
     ast_qualified_type t = type(n.computation, n.at);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     ast_qualified_type size = ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG);
     ast_qualified_type bytes =
-        ast_builder_type_pointer(c, ast_builder_type_basic(AST_TYPE_CHAR));
+        pointer_to(ast_builder_type_basic(AST_TYPE_CHAR));
     qualified_type element = record(n.computation).operand;
     ast_qualified_type object =
         type(qualified_type::make(element.unqualified(), cv_none), n.at);
@@ -1833,18 +1825,14 @@ uint32_t c_lowering::delete_array(const semantic_node &n)
     owned_array<uint32_t> body;
     uint32_t raw = declared_symbol(c, body, bytes);
     body.append(c_statement(
-        c,
-        make(AST_NODE_ASSIGN, bytes, variable(raw, bytes),
-             offset_pointer(variable(p, t), -static_cast<int64_t>(n.d), bytes),
-             0, 0, 0)));
+        c, assign(bytes, variable(raw, bytes),
+                  offset_pointer(variable(p, t), -static_cast<int64_t>(n.d),
+                                 bytes))));
     uint32_t count = declared_symbol(c, body, size);
-    uint32_t stored =
-        make(AST_NODE_DEREFERENCE, size,
-             cast(variable(raw, bytes), ast_builder_type_pointer(c, size),
-                  AST_CAST_POINTER_TO_POINTER),
-             0, 0, 0, AST_NODE_FLAG_LVALUE);
-    body.append(c_statement(c, make(AST_NODE_ASSIGN, size,
-                                    variable(count, size), stored, 0, 0, 0)));
+    uint32_t stored = dereference(cast(variable(raw, bytes), pointer_to(size),
+                                       AST_CAST_POINTER_TO_POINTER),
+                                  size);
+    body.append(c_statement(c, assign(size, variable(count, size), stored)));
     if (n.b) {
         uint32_t loop = element_loop(p, object, size, count, true, n.b);
         if (!loop)
@@ -1864,9 +1852,8 @@ uint32_t c_lowering::delete_array(const semantic_node &n)
     if (!deallocated)
         return 0;
     body.append(c_statement(c, deallocated));
-    items.append(ast_builder_node(c, AST_NODE_IF, v, truth(variable(p, t)),
-                                  block(body), 0, 0, 0));
-    return make(AST_NODE_STATEMENT_EXPRESSION, v, block(items), 0, 0, 0, 0);
+    items.append(if_statement(truth(variable(p, t)), block(body), 0));
+    return statement_expression(v, block(items));
 }
 
 /* [expr.new]/9: ({ size_t k = count; k > SIZE_MAX / size ? SIZE_MAX : k *
@@ -1898,7 +1885,7 @@ uint32_t c_lowering::array_size(const semantic_node &n)
                            constant(UINT64_MAX), product, 0, 0);
     items.append(
         ast_builder_node(c, AST_NODE_EXPRESSION, t, chosen, 0, 0, 0, 0));
-    return make(AST_NODE_STATEMENT_EXPRESSION, t, block(items), 0, 0, 0, 0);
+    return statement_expression(t, block(items));
 }
 
 /* [expr.delete]: ({ T *p = operand; if (p) { p->~T(); deallocation; } }) */
@@ -1909,7 +1896,6 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
     if (n.d)
         return delete_array(n);
     ast_qualified_type t = type(n.computation, n.at);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     owned_array<uint32_t> items;
     uint32_t symbol = held_value(n.a, t, items);
     if (!symbol)
@@ -1935,9 +1921,8 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
         uint32_t call = make(AST_NODE_CALL, v, callee,
                              ast_builder_list(c, &argument, 1), 1, 0, 0);
         body[0] = c_statement(c, call);
-        items.append(ast_builder_node(c, AST_NODE_IF, v, truth(variable()),
-                                      block(body, 1), 0, 0, 0));
-        return make(AST_NODE_STATEMENT_EXPRESSION, v, block(items), 0, 0, 0, 0);
+        items.append(if_statement(truth(variable()), block(body, 1), 0));
+        return statement_expression(v, block(items));
     }
     if (n.b)
         destroyed = expression(n.b);
@@ -1949,9 +1934,8 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
     if (destroyed)
         body[count++] = c_statement(c, destroyed);
     body[count++] = c_statement(c, deallocated);
-    items.append(ast_builder_node(c, AST_NODE_IF, v, truth(variable()),
-                                  block(body, count), 0, 0, 0));
-    return make(AST_NODE_STATEMENT_EXPRESSION, v, block(items), 0, 0, 0, 0);
+    items.append(if_statement(truth(variable()), block(body, count), 0));
+    return statement_expression(v, block(items));
 }
 
 /* ---- expressions ---------------------------------------------------- */
@@ -2028,24 +2012,21 @@ uint32_t c_lowering::object(uint32_t n)
         return fail("an assignment or increment used as an object", node(n).at);
     uint32_t left = x.a;
     ast_qualified_type t = type_of(left);
-    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
+    ast_qualified_type pointer = pointer_to(t);
     uint32_t symbol = c_local(c, pointer);
     auto variable = [&] { return c_variable(c, symbol, pointer); };
     uint32_t items[4];
     items[0] = c_declare(c, symbol);
-    items[1] = c_statement(c, make(AST_NODE_ASSIGN, pointer, variable(),
-                                   address_of(left, pointer), 0, 0, 0));
+    items[1] =
+        c_statement(c, assign(pointer, variable(), address_of(left, pointer)));
     /* the assignment, through p */
-    uint32_t through = make(AST_NODE_DEREFERENCE, t, variable(), 0, 0, 0,
-                            AST_NODE_FLAG_LVALUE);
+    uint32_t through = dereference(variable(), t);
     ast_builder_ast(c)->nodes[made].a = through;
     items[2] = c_statement(c, made);
     items[3] = ast_builder_node(c, AST_NODE_EXPRESSION, pointer, variable(), 0,
                                 0, 0, 0);
-    uint32_t address = make(AST_NODE_STATEMENT_EXPRESSION, pointer,
-                            block(items, 4), 0, 0, 0, 0);
-    return make(AST_NODE_DEREFERENCE, t, address, 0, 0, 0,
-                AST_NODE_FLAG_LVALUE);
+    uint32_t address = statement_expression(pointer, block(items, 4));
+    return dereference(address, t);
 }
 
 /* [conv.lval]/3.4: the value of a glvalue: "the value contained in the
@@ -2065,8 +2046,8 @@ uint32_t c_lowering::read(uint32_t n)
     const semantic_node &x = node(n);
     ast_qualified_type t = type(x.type, x.at);
     if (x.kind == semantic_kind::comma)
-        return make(AST_NODE_COMMA, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
-                    discard(x.a), read(x.b), 0, 0, 0);
+        return comma(AST_QUALIFIED_TYPE_UNQUALIFIED(t), discard(x.a),
+                     read(x.b));
     if (x.kind == semantic_kind::conditional)
         return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
                     expression(x.a), read(x.b), read(x.c), 0, 0);
@@ -2089,16 +2070,12 @@ uint32_t c_lowering::discard(uint32_t n)
     const semantic_node &x = node(n);
     if (x.kind == semantic_kind::comma) {
         uint32_t b = discard(x.b);
-        return make(AST_NODE_COMMA, type_of(b), discard(x.a), b, 0, 0, 0);
+        return comma(type_of(b), discard(x.a), b);
     }
     if (x.kind == semantic_kind::conditional && is_glvalue(x))
-        return make(AST_NODE_CONDITIONAL, ast_builder_type_basic(AST_TYPE_VOID),
-                    expression(x.a),
-                    cast(discard(x.b), ast_builder_type_basic(AST_TYPE_VOID),
-                         AST_CAST_VOID),
-                    cast(discard(x.c), ast_builder_type_basic(AST_TYPE_VOID),
-                         AST_CAST_VOID),
-                    0, 0);
+        return make(AST_NODE_CONDITIONAL, v, expression(x.a),
+                    cast(discard(x.b), v, AST_CAST_VOID),
+                    cast(discard(x.c), v, AST_CAST_VOID), 0, 0);
     return expression(n);
 }
 
@@ -2289,8 +2266,7 @@ uint32_t c_lowering::conversion(const semantic_node &n)
     case conversion_kind::integral_to_pointer:
         return cast(expression(n.a), t, AST_CAST_INTEGER_TO_POINTER);
     case conversion_kind::to_void:
-        return cast(discard(n.a), ast_builder_type_basic(AST_TYPE_VOID),
-                    AST_CAST_VOID);
+        return cast(discard(n.a), v, AST_CAST_VOID);
     }
     return fail("a conversion", n.at);
 }
@@ -2311,9 +2287,7 @@ ast_qualified_type c_lowering::member_function_pointer_type()
 {
     if (member_function_pair)
         return member_function_pair;
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type fields[2] = {ast_builder_type_pointer(c, v),
-                                    ast_builder_type_ptrdiff(c)};
+    ast_qualified_type fields[2] = {pointer_to(v), ast_builder_type_ptrdiff(c)};
     const char *names[2] = {"ptr", "adj"};
     size_t lengths[2] = {3, 3};
     uint32_t aligned[2] = {0, 0};
@@ -2430,8 +2404,7 @@ uint32_t c_lowering::member_pointer_constant(qualified_type t,
     if (record(record(t).operand).kind != type_kind::function)
         return ast_builder_integer(c, d,
                                    static_cast<int64_t>(f.offset) + adjustment);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    ast_qualified_type vp = pointer_to(v);
     uint32_t ptr = 0;
     int64_t adj = 2 * adjustment;
     if (f.virtual_) {
@@ -2447,10 +2420,9 @@ uint32_t c_lowering::member_pointer_constant(qualified_type t,
             return 0;
         ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
         ast_qualified_type ft = entity_type(member, at);
-        ptr =
-            cast(cast(make(AST_NODE_VARIABLE, ft, s, 0, 0, 0, 0),
-                      ast_builder_type_pointer(c, ft), AST_CAST_FUNCTION_DECAY),
-                 vp, AST_CAST_POINTER_TO_POINTER);
+        ptr = cast(cast(make(AST_NODE_VARIABLE, ft, s, 0, 0, 0, 0),
+                        pointer_to(ft), AST_CAST_FUNCTION_DECAY),
+                   vp, AST_CAST_POINTER_TO_POINTER);
     }
     return member_function_pointer_of(ptr, ast_builder_integer(c, d, adj), at);
 }
@@ -2459,11 +2431,10 @@ uint32_t c_lowering::null_member_pointer(qualified_type t, token_index at)
 {
     if (record(record(t).operand).kind != type_kind::function)
         return ast_builder_integer(c, ast_builder_type_ptrdiff(c), -1);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     uint32_t zero =
         ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0);
     return member_function_pointer_of(
-        cast(zero, ast_builder_type_pointer(c, v), AST_CAST_NULL_POINTER),
+        cast(zero, pointer_to(v), AST_CAST_NULL_POINTER),
         ast_builder_integer(c, ast_builder_type_ptrdiff(c), 0), at);
 }
 
@@ -2480,9 +2451,7 @@ uint32_t c_lowering::read_first(uint32_t n, reread &r, const char *what)
     if (!collecting)
         return fail(what, node(n).at);
     r.symbol = full_expression_temporary(r.type);
-    return make(AST_NODE_COMMA, r.type,
-                make(AST_NODE_ASSIGN, r.type, read_again(r), p, 0, 0, 0),
-                read_again(r), 0, 0, 0);
+    return comma(r.type, assign(r.type, read_again(r), p), read_again(r));
 }
 
 /* a member pointer constant, or a variable's value, through member pointer
@@ -2549,7 +2518,6 @@ uint32_t c_lowering::member_pointer_conversion(const semantic_node &n)
         /* {p.ptr, p.adj + 2 * offset}, p read twice */
         if (!offset)
             return expression(n.a);
-        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
         reread r;
         uint32_t first = read_first(n.a, r,
                                     "a pointer to member function converted "
@@ -2563,12 +2531,11 @@ uint32_t c_lowering::member_pointer_conversion(const semantic_node &n)
             make(AST_NODE_BINARY, d, ast_builder_member(c, read_again(r), 1, d),
                  ast_builder_integer(c, d, 2 * offset), 0, LEX_TOKEN_PLUS, 0);
         uint32_t pair = member_function_pointer_of(
-            ast_builder_member(c, held, 0, ast_builder_type_pointer(c, v)), adj,
-            n.at);
+            ast_builder_member(c, held, 0, pointer_to(v)), adj, n.at);
         if (!r.symbol)
             return pair;
         /* the temporary assigned before the pair reads it */
-        return make(AST_NODE_COMMA, r.type, first, pair, 0, 0, 0);
+        return comma(r.type, first, pair);
     }
     if (!offset)
         return expression(n.a);
@@ -2610,16 +2577,14 @@ uint32_t c_lowering::member_pointer_object(const semantic_node &n)
                     "operands",
                     n.at);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
-    ast_qualified_type bytes = ast_builder_type_pointer(c, byte);
+    ast_qualified_type bytes = pointer_to(byte);
     ast_qualified_type t = type(n.type, n.at);
     uint32_t at = make(AST_NODE_INDEX, byte,
                        cast(object, bytes, AST_CAST_POINTER_TO_POINTER),
                        to_ptrdiff(offset), 0, 0, AST_NODE_FLAG_LVALUE);
-    uint32_t address =
-        cast(make(AST_NODE_ADDRESS, bytes, at, 0, 0, 0, 0),
-             ast_builder_type_pointer(c, t), AST_CAST_POINTER_TO_POINTER);
-    return make(AST_NODE_DEREFERENCE, t, address, 0, 0, 0,
-                AST_NODE_FLAG_LVALUE);
+    uint32_t address = cast(make(AST_NODE_ADDRESS, bytes, at, 0, 0, 0, 0),
+                            pointer_to(t), AST_CAST_POINTER_TO_POINTER);
+    return dereference(address, t);
 }
 
 /*
@@ -2642,8 +2607,7 @@ uint32_t c_lowering::member_pointer_test(uint32_t n, token_index at)
                             ast_builder_integer(c, d, -1), 0,
                             LEX_TOKEN_EXCLAMATION_EQUAL, 0));
     }
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    ast_qualified_type vp = pointer_to(v);
     reread r;
     uint32_t first = read_first(n, r,
                                 "a pointer to member function tested "
@@ -2679,8 +2643,7 @@ uint32_t c_lowering::member_pointer_equality(const semantic_node &n, int op)
         return to_bool(
             make(AST_NODE_BINARY, i, a, b, 0, static_cast<uint16_t>(op), 0));
     }
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    ast_qualified_type vp = pointer_to(v);
     const char *what = "pointers to member functions compared outside a "
                        "statement";
     reread ra, rb;
@@ -2734,11 +2697,10 @@ uint32_t c_lowering::member_function_call(const semantic_node &n,
                                           uint32_t &object)
 {
     const semantic_node &access = node(n.a);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    ast_qualified_type vp = pointer_to(v);
     ast_qualified_type d = ast_builder_type_ptrdiff(c);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
-    ast_qualified_type bytes = ast_builder_type_pointer(c, byte);
+    ast_qualified_type bytes = pointer_to(byte);
     uint32_t address = held_value(access.a, bytes, items);
     if (!address)
         return 0;
@@ -2757,35 +2719,31 @@ uint32_t c_lowering::member_function_call(const semantic_node &n,
                   LEX_TOKEN_GREATER_GREATER, 0),
              0, 0, AST_NODE_FLAG_LVALUE);
     items.append(c_statement(
-        c, make(AST_NODE_ASSIGN, bytes, read(address, bytes),
-                make(AST_NODE_ADDRESS, bytes, moved, 0, 0, 0, 0), 0, 0, 0)));
+        c, assign(bytes, read(address, bytes),
+                  make(AST_NODE_ADDRESS, bytes, moved, 0, 0, 0, 0))));
     const struct type &pointer = record(node(access.b).type);
     qualified_type class_type_ = qualified_type::make(
         analysis.entity_table[pointer.entity].type.unqualified(), cv_none);
     ast_qualified_type ft =
         member_function_type(class_type_, pointer.operand, n.at);
-    ast_qualified_type fp = ast_builder_type_pointer(c, ft);
+    ast_qualified_type fp = pointer_to(ft);
     /* *(F **)(*(char **)o + (ptrdiff_t)p.ptr) */
-    uint32_t table =
-        make(AST_NODE_DEREFERENCE, bytes,
-             cast(read(address, bytes), ast_builder_type_pointer(c, bytes),
-                  AST_CAST_POINTER_TO_POINTER),
-             0, 0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t table = dereference(cast(read(address, bytes), pointer_to(bytes),
+                                      AST_CAST_POINTER_TO_POINTER),
+                                 bytes);
     uint32_t entry = make(AST_NODE_INDEX, byte, table,
                           cast(ast_builder_member(c, read(pair, t), 0, vp), d,
                                AST_CAST_POINTER_TO_INTEGER),
                           0, 0, AST_NODE_FLAG_LVALUE);
     uint32_t virtual_callee =
-        make(AST_NODE_DEREFERENCE, fp,
-             cast(make(AST_NODE_ADDRESS, bytes, entry, 0, 0, 0, 0),
-                  ast_builder_type_pointer(c, fp), AST_CAST_POINTER_TO_POINTER),
-             0, 0, 0, AST_NODE_FLAG_LVALUE);
+        dereference(cast(make(AST_NODE_ADDRESS, bytes, entry, 0, 0, 0, 0),
+                         pointer_to(fp), AST_CAST_POINTER_TO_POINTER),
+                    fp);
     uint32_t direct_callee = cast(ast_builder_member(c, read(pair, t), 0, vp),
                                   fp, AST_CAST_POINTER_TO_POINTER);
     uint32_t odd = make(AST_NODE_BINARY, d, adj(), ast_builder_integer(c, d, 1),
                         0, LEX_TOKEN_AMPERSAND, 0);
-    object = cast(read(address, bytes),
-                  ast_builder_type_pointer(c, type(class_type_, n.at)),
+    object = cast(read(address, bytes), pointer_to(type(class_type_, n.at)),
                   AST_CAST_POINTER_TO_POINTER);
     return make(AST_NODE_CONDITIONAL, fp, odd, virtual_callee, direct_callee, 0,
                 0);
@@ -2919,17 +2877,11 @@ uint32_t c_lowering::data_size_assignment(const semantic_node &n, uint32_t a,
                     n.at);
     const entity &x = analysis.entity_table[record(n.type).entity];
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
-    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
-    if (!(ast_builder_ast(c)->nodes[b].flags & AST_NODE_FLAG_LVALUE)) {
-        /* a prvalue: materialized ([basic.lval]/7), its data size copied */
-        uint32_t held = full_expression_temporary(t);
-        b = make(
-            AST_NODE_DEREFERENCE, t,
-            make(AST_NODE_COMMA, pointer,
-                 make(AST_NODE_ASSIGN, t, c_variable(c, held, t), b, 0, 0, 0),
-                 address_of(c_variable(c, held, t), pointer), 0, 0, 0),
-            0, 0, 0, AST_NODE_FLAG_LVALUE);
-    }
+    ast_qualified_type pointer = pointer_to(t);
+    if (!(ast_builder_ast(c)->nodes[b].flags & AST_NODE_FLAG_LVALUE))
+        return fail("an assignment of a class with tail padding from a "
+                    "prvalue",
+                    n.at);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     ast_qualified_type view = ast_builder_type_record(c, "", 0, false);
     ast_qualified_type data =
@@ -2941,24 +2893,20 @@ uint32_t c_lowering::data_size_assignment(const semantic_node &n, uint32_t a,
     int32_t no_width = -1;
     ast_builder_type_record_complete(c, view, &data, &field_name, &field_length,
                                      &no_alignment, &not_packed, &no_width, 1);
-    ast_qualified_type view_pointer = ast_builder_type_pointer(c, view);
+    ast_qualified_type view_pointer = pointer_to(view);
     uint32_t temporary = c_local(c, pointer);
     temporaries.append(c_declare(c, temporary));
     auto p = [&] { return c_variable(c, temporary, pointer); };
     auto as_view = [&](uint32_t address) {
-        return make(AST_NODE_DEREFERENCE, view,
-                    cast(address, view_pointer, AST_CAST_POINTER_TO_POINTER), 0,
-                    0, 0, AST_NODE_FLAG_LVALUE);
+        return dereference(
+            cast(address, view_pointer, AST_CAST_POINTER_TO_POINTER), view);
     };
-    uint32_t stored =
-        make(AST_NODE_ASSIGN, pointer, p(), address_of(a, pointer), 0, 0, 0);
-    uint32_t copied = make(AST_NODE_ASSIGN, view, as_view(p()),
-                           as_view(address_of(b, pointer)), 0, 0, 0);
-    uint32_t sequence =
-        make(AST_NODE_COMMA, pointer, stored,
-             make(AST_NODE_COMMA, pointer, copied, p(), 0, 0, 0), 0, 0, 0);
-    return make(AST_NODE_DEREFERENCE, t, sequence, 0, 0, 0,
-                AST_NODE_FLAG_LVALUE);
+    uint32_t stored = assign(pointer, p(), address_of(a, pointer));
+    uint32_t copied =
+        assign(view, as_view(p()), as_view(address_of(b, pointer)));
+    uint32_t sequence = comma(
+        pointer, stored, make(AST_NODE_COMMA, pointer, copied, p(), 0, 0, 0));
+    return dereference(sequence, t);
 }
 
 uint32_t c_lowering::assignment(const semantic_node &n)
@@ -2975,7 +2923,7 @@ uint32_t c_lowering::assignment(const semantic_node &n)
             analysis.entity_table[r.entity].data_size <
                 analysis.entity_table[r.entity].size)
             return data_size_assignment(n, a, b);
-        return make(AST_NODE_ASSIGN, t, a, b, 0, 0, 0);
+        return assign(t, a, b);
     }
     int op = c_operator(static_cast<preprocessing_op_or_punc>(n.op));
     if (!op)
@@ -3063,9 +3011,8 @@ uint32_t c_lowering::call(const semantic_node &n)
             if (record(function_type).kind == type_kind::pointer)
                 function_type = record(function_type).operand;
             else
-                callee =
-                    cast(callee, ast_builder_type_pointer(c, type_of(callee)),
-                         AST_CAST_FUNCTION_DECAY);
+                callee = cast(callee, pointer_to(type_of(callee)),
+                              AST_CAST_FUNCTION_DECAY);
         }
         if (n.b) {
             /* the implicit object argument: the object's address, the
@@ -3114,13 +3061,11 @@ uint32_t c_lowering::call(const semantic_node &n)
     if (member_pointer_call) {
         through.append(
             ast_builder_node(c, AST_NODE_EXPRESSION, t, made, 0, 0, 0, 0));
-        made =
-            make(AST_NODE_STATEMENT_EXPRESSION, t, block(through), 0, 0, 0, 0);
+        made = statement_expression(t, block(through));
     }
     if (!is_reference(result))
         return made;
-    return make(AST_NODE_DEREFERENCE, type(n.type, n.at), made, 0, 0, 0,
-                AST_NODE_FLAG_LVALUE);
+    return dereference(made, type(n.type, n.at));
 }
 
 /* [expr.cond] */
@@ -3132,15 +3077,14 @@ uint32_t c_lowering::conditional(const semantic_node &n)
                     truth(expression(n.a)), expression(n.b), expression(n.c), 0,
                     0);
     /* the object one of the operands is: its address selected */
-    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
+    ast_qualified_type pointer = pointer_to(t);
     uint32_t b = object(n.b), c_ = object(n.c);
     if (!b || !c_)
         return 0;
     uint32_t selected =
         make(AST_NODE_CONDITIONAL, pointer, truth(expression(n.a)),
              address_of(b, pointer), address_of(c_, pointer), 0, 0);
-    return make(AST_NODE_DEREFERENCE, t, selected, 0, 0, 0,
-                AST_NODE_FLAG_LVALUE);
+    return dereference(selected, t);
 }
 
 /* the initializer n of an object: a prvalue there initializes the object
@@ -3165,9 +3109,8 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
             return 0;
         arguments.append(a);
     }
-    return special_call(
-        n.b, address_of(object, ast_builder_type_pointer(c, type_of(object))),
-        arguments.data(), n.count, at, vtt);
+    return special_call(n.b, address_of(object, pointer_to(type_of(object))),
+                        arguments.data(), n.count, at, vtt);
 }
 
 /* [dcl.init]/17.6.1: the prvalue n initializes the object in symbol s
@@ -3190,9 +3133,7 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
             each_element(s, t, type(element, x.at), count, false, x.b, x.at);
         if (!loop)
             return 0;
-        return make(AST_NODE_STATEMENT_EXPRESSION,
-                    ast_builder_type_basic(AST_TYPE_VOID), block(&loop, 1), 0,
-                    0, 0, 0);
+        return statement_expression(v, block(&loop, 1));
     }
     if (x.kind == semantic_kind::conditional && !is_glvalue(x)) {
         uint32_t cond = truth(expression(x.a));
@@ -3202,15 +3143,13 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
         conditional_depth--;
         if (!cond || !b || !c_)
             return 0;
-        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
         return make(AST_NODE_CONDITIONAL, v, cond, cast(b, v, AST_CAST_VOID),
                     cast(c_, v, AST_CAST_VOID), 0, 0);
     }
     uint32_t value = initializer(n);
     if (!value)
         return 0;
-    return make(AST_NODE_ASSIGN, AST_QUALIFIED_TYPE_UNQUALIFIED(t), object,
-                value, 0, 0, 0);
+    return assign(AST_QUALIFIED_TYPE_UNQUALIFIED(t), object, value);
 }
 
 /* [basic.lval]/7: a class prvalue where a glvalue is wanted, materialized
@@ -3232,12 +3171,9 @@ uint32_t c_lowering::temporary_object(uint32_t n)
         return 0;
     if (destructor)
         destroyed_temporary(x, held, x.at, flag);
-    ast_qualified_type pointer = ast_builder_type_pointer(c, t);
+    ast_qualified_type pointer = pointer_to(t);
     uint32_t variable = c_variable(c, held, t);
-    return make(AST_NODE_DEREFERENCE, t,
-                make(AST_NODE_COMMA, pointer, made,
-                     address_of(variable, pointer), 0, 0, 0),
-                0, 0, 0, AST_NODE_FLAG_LVALUE);
+    return dereference(comma(pointer, made, address_of(variable, pointer)), t);
 }
 
 entity_index c_lowering::element_destructor(qualified_type type,
@@ -3374,7 +3310,7 @@ uint32_t c_lowering::indirect_argument(uint32_t argument,
     uint32_t held = temporary_object(argument);
     if (!held)
         return 0;
-    return address_of(held, ast_builder_type_pointer(c, type(parameter, at)));
+    return address_of(held, pointer_to(type(parameter, at)));
 }
 
 uint32_t c_lowering::full_expression(uint32_t e, bool discarded,
@@ -3424,18 +3360,17 @@ uint32_t c_lowering::full_value(uint32_t e, bool discarded)
     uint32_t value = full_expression(e, discarded, items, after);
     if (!value || (items.empty() && after.empty()))
         return value;
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     ast_qualified_type t = type_of(value);
     if (discarded || AST_QUALIFIED_TYPE_UNQUALIFIED(t) == v) {
         items.append(c_statement(c, value));
         for (uint32_t a : after)
             items.append(a);
-        return make(AST_NODE_STATEMENT_EXPRESSION, v, block(items), 0, 0, 0, 0);
+        return statement_expression(v, block(items));
     }
     bool lvalue = ast_builder_ast(c)->nodes[value].flags & AST_NODE_FLAG_LVALUE;
     ast_qualified_type held_type = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
     if (lvalue) {
-        held_type = ast_builder_type_pointer(c, t);
+        held_type = pointer_to(t);
         value = address_of(value, held_type);
     }
     uint32_t held = c_local(c, held_type);
@@ -3444,11 +3379,10 @@ uint32_t c_lowering::full_value(uint32_t e, bool discarded)
         items.append(a);
     items.append(ast_builder_node(c, AST_NODE_EXPRESSION, held_type,
                                   c_variable(c, held, held_type), 0, 0, 0, 0));
-    uint32_t result = make(AST_NODE_STATEMENT_EXPRESSION, held_type,
-                           block(items), 0, 0, 0, 0);
+    uint32_t result = statement_expression(held_type, block(items));
     if (!lvalue)
         return result;
-    return make(AST_NODE_DEREFERENCE, t, result, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+    return dereference(result, t);
 }
 
 /* [dcl.init.ref]: the address of the object a reference is bound to; a
@@ -3605,18 +3539,17 @@ uint32_t c_lowering::expression(uint32_t index)
             return make(AST_NODE_VARIABLE, type(x.type, n.at), s, 0, 0, 0, 0);
         if (indirect_parameter(e))
             /* the object at the address the caller passed */
-            return make(AST_NODE_DEREFERENCE, type(x.type, n.at),
-                        c_variable(c, s, parameter_type(x.type, n.at)), 0, 0, 0,
-                        AST_NODE_FLAG_LVALUE);
+            return dereference(c_variable(c, s, parameter_type(x.type, n.at)),
+                               type(x.type, n.at));
         ast_qualified_type t = type(x.type, n.at);
-        uint32_t v = c_variable(c, s, t);
+        uint32_t var = c_variable(c, s, t);
         if (!is_reference(x.type))
-            return v;
+            return var;
         /* [dcl.ref]: a name of a reference is the object it refers to */
         uint8_t flags = AST_NODE_FLAG_LVALUE;
         if (record(n.type).kind == type_kind::function)
             flags = 0;
-        return make(AST_NODE_DEREFERENCE, type(n.type, n.at), v, 0, 0, 0,
+        return make(AST_NODE_DEREFERENCE, type(n.type, n.at), var, 0, 0, 0,
                     flags);
     }
     case semantic_kind::conversion:
@@ -3706,16 +3639,13 @@ uint32_t c_lowering::expression(uint32_t index)
         ast_qualified_type t = type(n.type, n.at);
         uint32_t a = discard(n.a);
         if (!is_glvalue(n))
-            return make(AST_NODE_COMMA, AST_QUALIFIED_TYPE_UNQUALIFIED(t), a,
-                        expression(n.b), 0, 0, 0);
-        ast_qualified_type pointer = ast_builder_type_pointer(c, t);
+            return comma(AST_QUALIFIED_TYPE_UNQUALIFIED(t), a, expression(n.b));
+        ast_qualified_type pointer = pointer_to(t);
         uint32_t b = object(n.b);
         if (!b)
             return 0;
-        uint32_t selected =
-            make(AST_NODE_COMMA, pointer, a, address_of(b, pointer), 0, 0, 0);
-        return make(AST_NODE_DEREFERENCE, t, selected, 0, 0, 0,
-                    AST_NODE_FLAG_LVALUE);
+        uint32_t selected = comma(pointer, a, address_of(b, pointer));
+        return dereference(selected, t);
     }
     case semantic_kind::call:
         /* [expr.const]/13: an immediate invocation is its value */
@@ -3747,8 +3677,7 @@ uint32_t c_lowering::expression(uint32_t index)
         /* [expr.ref]/6.1: a reference member is the object it refers to */
         uint32_t pointer =
             ast_builder_member(c, object, c_fields[n.b], type(x.type, n.at));
-        return make(AST_NODE_DEREFERENCE, type(n.type, n.at), pointer, 0, 0, 0,
-                    AST_NODE_FLAG_LVALUE);
+        return dereference(pointer, type(n.type, n.at));
     }
     case semantic_kind::member_pointer:
         return member_pointer(index);
@@ -3802,10 +3731,9 @@ uint32_t c_lowering::expression(uint32_t index)
             vtt = vtt_argument(b, n.at);
         if (failure.what)
             return 0;
-        return special_call(
-            n.b,
-            address_of(object, ast_builder_type_pointer(c, type_of(object))),
-            nullptr, 0, n.at, vtt);
+        return special_call(n.b,
+                            address_of(object, pointer_to(type_of(object))),
+                            nullptr, 0, n.at, vtt);
     }
     default:
         return fail("an expression of this kind", n.at);
@@ -3816,8 +3744,7 @@ uint32_t c_lowering::expression(uint32_t index)
 
 uint32_t c_lowering::block(const uint32_t *items, uint32_t count)
 {
-    return ast_builder_node(c, AST_NODE_BLOCK,
-                            ast_builder_type_basic(AST_TYPE_VOID), 0,
+    return ast_builder_node(c, AST_NODE_BLOCK, v, 0,
                             ast_builder_list(c, items, count), count, 0, 0);
 }
 
@@ -3965,7 +3892,6 @@ uint32_t c_lowering::loop_body(uint32_t n, bool is_switch)
 uint32_t c_lowering::loop(uint32_t cond_node, uint32_t step_node,
                           uint32_t body_node, token_index at)
 {
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     bool declares = cond_node && node(cond_node).kind ==
                                      semantic_kind::condition_declaration;
     if (!declares) {
@@ -4003,8 +3929,7 @@ uint32_t c_lowering::loop(uint32_t cond_node, uint32_t step_node,
     owned_array<uint32_t> leave;
     destroy(mark + 1, leave, at);
     leave.append(ast_builder_node(c, AST_NODE_BREAK, v, 0, 0, 0, 0, 0));
-    items.append(
-        ast_builder_node(c, AST_NODE_IF, v, cond, body, block(leave), 0, 0));
+    items.append(if_statement(cond, body, block(leave)));
     if (step_node) {
         uint32_t step = full_value(step_node, true);
         if (!step)
@@ -4361,7 +4286,6 @@ uint32_t c_lowering::statement(uint32_t index)
     if (failure.what || !index)
         return 0;
     const semantic_node &n = node(index);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     switch (n.kind) {
     case semantic_kind::block:
     case semantic_kind::declarations:
@@ -4407,8 +4331,7 @@ uint32_t c_lowering::statement(uint32_t index)
             return 0;
         uint32_t made = 0;
         if (n.kind == semantic_kind::if_statement)
-            made = ast_builder_node(c, AST_NODE_IF, v, cond, statement(n.b),
-                                    statement(n.c), 0, 0);
+            made = if_statement(cond, statement(n.b), statement(n.c));
         else
             made = ast_builder_node(c, AST_NODE_SWITCH, v, cond,
                                     loop_body(n.b, true), 0, 0, 0);
@@ -4531,8 +4454,7 @@ uint32_t c_lowering::statement(uint32_t index)
            destruction of local variables ([stmt.jump]) of the block
            enclosing the return statement." */
         uint32_t result = 0;
-        if (value && AST_QUALIFIED_TYPE_UNQUALIFIED(type_of(value)) !=
-                         ast_builder_type_basic(AST_TYPE_VOID)) {
+        if (value && AST_QUALIFIED_TYPE_UNQUALIFIED(type_of(value)) != v) {
             ast_qualified_type t = type_of(value);
             uint32_t held = c_local(c, t);
             items.append(c_declare(c, held, value));
@@ -4562,9 +4484,7 @@ ast_qualified_type c_lowering::vtable_type(entity_index k)
     table_spec t;
     t.k = k;
     t.layout = k;
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    return ast_builder_type_array(c, ast_builder_type_pointer(c, v),
-                                  table_length(t), true);
+    return ast_builder_type_array(c, pointer_to(v), table_length(t), true);
 }
 
 /*
@@ -4862,9 +4782,8 @@ uint32_t c_lowering::element_address(uint32_t s, ast_qualified_type array,
                                      uint32_t index)
 {
     ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vp = ast_builder_type_pointer(c, v);
-    ast_qualified_type vpp = ast_builder_type_pointer(c, vp);
+    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vpp = pointer_to(vp);
     uint32_t table = c_variable(c, s, array);
     address_taken(table);
     uint32_t element =
@@ -5013,16 +4932,6 @@ void c_lowering::vtt_virtual(vtt_layout &out, entity_index b,
     }
 }
 
-uint32_t c_lowering::vtt_index_of_group(entity_index k, uint32_t group) const
-{
-    vtt_layout layout;
-    vtt_of(k, layout);
-    for (uint32_t i = 0; i < layout.entries.size(); i++)
-        if (!layout.entries[i].table && layout.entries[i].group == group)
-            return i;
-    return UINT32_MAX;
-}
-
 uint32_t c_lowering::sub_vtt_index(entity_index k, entity_index b,
                                    uint64_t offset) const
 {
@@ -5047,8 +4956,7 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
 {
     const dynamic_class *d = analysis.dynamic_of(t.k);
     owned_array<uint32_t> runs;
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    ast_qualified_type vp = pointer_to(v);
     uint32_t start = 0;
     owned_array<int64_t> offsets;
     auto integer = [&](uint32_t index, int64_t value) {
@@ -5130,7 +5038,7 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
                                              AST_SYMBOL_FLAG_ADDRESS_TAKEN);
             uint32_t function =
                 cast(make(AST_NODE_VARIABLE, ft, target, 0, 0, 0, 0),
-                     ast_builder_type_pointer(c, ft), AST_CAST_FUNCTION_DECAY);
+                     pointer_to(ft), AST_CAST_FUNCTION_DECAY);
             runs.append(start + 2 + i);
             runs.append(start + 2 + i);
             runs.append(cast(function, vp, AST_CAST_POINTER_TO_POINTER));
@@ -5176,8 +5084,7 @@ uint32_t c_lowering::vtt_define(entity_index k, uint32_t table, int storage,
         return fail("a VTT whose symbol is not mangled", at);
     vtt_layout layout;
     vtt_of(k, layout);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vp = ast_builder_type_pointer(c, v);
+    ast_qualified_type vp = pointer_to(v);
     ast_qualified_type array =
         ast_builder_type_array(c, vp, layout.entries.size(), true);
     uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, name.data(),
@@ -5253,18 +5160,15 @@ uint32_t c_lowering::table_adjusted(uint32_t p, uint32_t again, int64_t index,
                                     ast_qualified_type t)
 {
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
-    ast_qualified_type bytes = ast_builder_type_pointer(c, byte);
+    ast_qualified_type bytes = pointer_to(byte);
     ast_qualified_type ptrdiff = ast_builder_type_ptrdiff(c);
     if (!p || !again)
         return 0;
-    uint32_t table = make(AST_NODE_DEREFERENCE, bytes,
-                          cast(p, ast_builder_type_pointer(c, bytes),
-                               AST_CAST_POINTER_TO_POINTER),
-                          0, 0, 0, AST_NODE_FLAG_LVALUE);
+    uint32_t table = dereference(
+        cast(p, pointer_to(bytes), AST_CAST_POINTER_TO_POINTER), bytes);
     uint32_t offset =
         make(AST_NODE_INDEX, ptrdiff,
-             cast(table, ast_builder_type_pointer(c, ptrdiff),
-                  AST_CAST_POINTER_TO_POINTER),
+             cast(table, pointer_to(ptrdiff), AST_CAST_POINTER_TO_POINTER),
              ast_builder_integer(c, ptrdiff, static_cast<uint64_t>(index)), 0,
              0, AST_NODE_FLAG_LVALUE);
     uint32_t at = make(AST_NODE_INDEX, byte,
@@ -5326,13 +5230,11 @@ uint32_t c_lowering::vtt_argument(entity_index b, token_index at)
     uint32_t index = sub_vtt_index(structor_class, of, offset);
     if (index == UINT32_MAX)
         return fail("a base without a sub-VTT", at);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vpp =
-        ast_builder_type_pointer(c, ast_builder_type_pointer(c, v));
+    ast_qualified_type vpp = pointer_to(ast_builder_type_pointer(c, v));
     if (structor_variant == 2) {
         uint32_t p = c_variable(c, vtt_parameter, vpp);
         uint32_t element =
-            make(AST_NODE_INDEX, ast_builder_type_pointer(c, v), p,
+            make(AST_NODE_INDEX, pointer_to(v), p,
                  to_ptrdiff(ast_builder_integer(
                      c, ast_builder_type_basic(AST_TYPE_INT), index)),
                  0, 0, AST_NODE_FLAG_LVALUE);
@@ -5343,8 +5245,8 @@ uint32_t c_lowering::vtt_argument(entity_index b, token_index at)
         return 0;
     vtt_layout layout;
     vtt_of(structor_class, layout);
-    ast_qualified_type array = ast_builder_type_array(
-        c, ast_builder_type_pointer(c, v), layout.entries.size(), true);
+    ast_qualified_type array =
+        ast_builder_type_array(c, pointer_to(v), layout.entries.size(), true);
     return element_address(s, array, index);
 }
 
@@ -5353,11 +5255,9 @@ ast_qualified_type c_lowering::structor_type(entity_index e, token_index at)
     const entity &x = analysis.entity_table[e];
     const struct type &f = record(x.type);
     owned_array<ast_qualified_type> parameters;
-    parameters.append(ast_builder_type_pointer(
-        c, type(analysis.entity_table[x.enclosing].type, at)));
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     parameters.append(
-        ast_builder_type_pointer(c, ast_builder_type_pointer(c, v)));
+        pointer_to(type(analysis.entity_table[x.enclosing].type, at)));
+    parameters.append(pointer_to(ast_builder_type_pointer(c, v)));
     const qualified_type *p =
         analysis.type_table.parameters(x.type.unqualified());
     for (uint32_t i = 0; i < f.parameter_count; i++)
@@ -5380,10 +5280,9 @@ uint32_t c_lowering::vtable_pointer_stores(const semantic_node &n)
 {
     entity_index k = n.b;
     const dynamic_class *d = analysis.dynamic_of(k);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vp = ast_builder_type_pointer(c, v);
-    ast_qualified_type vpp = ast_builder_type_pointer(c, vp);
-    ast_qualified_type vppp = ast_builder_type_pointer(c, vpp);
+    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vpp = pointer_to(vp);
+    ast_qualified_type vppp = pointer_to(vpp);
     bool from_vtt = structor_variant == 2 && k == structor_class &&
                     analysis.entity_table[k].virtual_base_count;
     vtt_layout layout;
@@ -5425,11 +5324,10 @@ uint32_t c_lowering::vtable_pointer_stores(const semantic_node &n)
         }
         if (!where || !point)
             return 0;
-        uint32_t slot = make(AST_NODE_DEREFERENCE, vpp, where, 0, 0, 0,
-                             AST_NODE_FLAG_LVALUE);
-        uint32_t store = make(AST_NODE_ASSIGN, vpp, slot, point, 0, 0, 0);
+        uint32_t slot = dereference(where, vpp);
+        uint32_t store = assign(vpp, slot, point);
         if (stores)
-            store = make(AST_NODE_COMMA, vpp, stores, store, 0, 0, 0);
+            store = comma(vpp, stores, store);
         stores = store;
     }
     return stores;
@@ -5484,7 +5382,7 @@ uint32_t c_lowering::offset_pointer(uint32_t p, int64_t offset,
                                     ast_qualified_type t)
 {
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
-    ast_qualified_type bytes = ast_builder_type_pointer(c, byte);
+    ast_qualified_type bytes = pointer_to(byte);
     uint32_t by = ast_builder_integer(c, ast_builder_type_ptrdiff(c),
                                       static_cast<uint64_t>(offset));
     uint32_t at =
@@ -5604,11 +5502,11 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
     const qualified_type *types =
         analysis.type_table.parameters(x.type.unqualified());
     owned_array<ast_qualified_type> parameter_types;
-    parameter_types.append(ast_builder_type_pointer(
-        c, type(qualified_type::make(
-                    analysis.entity_table[x.enclosing].type.unqualified(),
-                    object_cv(x.member_cv)),
-                at)));
+    parameter_types.append(pointer_to(
+        type(qualified_type::make(
+                 analysis.entity_table[x.enclosing].type.unqualified(),
+                 object_cv(x.member_cv)),
+             at)));
     for (uint32_t k = 0; k < ft.parameter_count; k++)
         parameter_types.append(parameter_type(types[k], at));
     uint32_t count = ft.parameter_count + 1;
@@ -5635,12 +5533,11 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
     ast_builder_symbol_flags_add(c, target, AST_SYMBOL_FLAG_USED);
     uint32_t callee =
         cast(make(AST_NODE_VARIABLE, function, target, 0, 0, 0, 0),
-             ast_builder_type_pointer(c, function), AST_CAST_FUNCTION_DECAY);
+             pointer_to(function), AST_CAST_FUNCTION_DECAY);
     ast_qualified_type result = type(ft.operand, at);
     uint32_t call =
         make(AST_NODE_CALL, result, callee,
              ast_builder_list(c, arguments.data(), count), count, 0, 0);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     uint32_t statement_node = 0;
     if (record(ft.operand).kind == type_kind::fundamental &&
         AST_QUALIFIED_TYPE_UNQUALIFIED(result) == v)
@@ -5679,9 +5576,8 @@ bool c_lowering::deleting_destructor(entity_index e, token_index at,
         fail("a deleting destructor without a deallocation function", at);
         return false;
     }
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     ast_qualified_type self =
-        ast_builder_type_pointer(c, type(analysis.entity_table[k].type, at));
+        pointer_to(type(analysis.entity_table[k].type, at));
     uint32_t p = c_local(c, self);
     ast_builder_symbol_flags_add(c, p, AST_SYMBOL_FLAG_PARAMETER);
     auto self_value = [&] { return c_variable(c, p, self); };
@@ -5710,7 +5606,7 @@ bool c_lowering::deleting_destructor(entity_index e, token_index at,
     }
     uint32_t callee =
         cast(make(AST_NODE_VARIABLE, function, target, 0, 0, 0, 0),
-             ast_builder_type_pointer(c, function), AST_CAST_FUNCTION_DECAY);
+             pointer_to(function), AST_CAST_FUNCTION_DECAY);
     uint32_t call = make(AST_NODE_CALL, v, callee,
                          ast_builder_list(c, arguments, count), count, 0, 0);
     statements[1] = c_statement(c, call);
@@ -5728,21 +5624,17 @@ bool c_lowering::deleting_destructor(entity_index e, token_index at,
 uint32_t c_lowering::virtual_function(entity_index f, uint32_t object,
                                       token_index at, uint32_t next)
 {
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type vp = ast_builder_type_pointer(c, v);
-    ast_qualified_type vpp = ast_builder_type_pointer(c, vp);
-    uint32_t table = make(AST_NODE_DEREFERENCE, vpp,
-                          cast(object, ast_builder_type_pointer(c, vpp),
-                               AST_CAST_POINTER_TO_POINTER),
-                          0, 0, 0, AST_NODE_FLAG_LVALUE);
+    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vpp = pointer_to(vp);
+    uint32_t table = dereference(
+        cast(object, pointer_to(vpp), AST_CAST_POINTER_TO_POINTER), vpp);
     uint32_t slot = make(AST_NODE_INDEX, vp, table,
                          to_ptrdiff(ast_builder_integer(
                              c, ast_builder_type_basic(AST_TYPE_INT),
                              analysis.entity_table[f].vtable_slot + next)),
                          0, 0, AST_NODE_FLAG_LVALUE);
     ast_qualified_type ft = entity_type(f, at);
-    return cast(slot, ast_builder_type_pointer(c, ft),
-                AST_CAST_POINTER_TO_POINTER);
+    return cast(slot, pointer_to(ft), AST_CAST_POINTER_TO_POINTER);
 }
 
 /* whether evaluating the lowered expression twice is evaluating it once:
@@ -5794,11 +5686,10 @@ bool c_lowering::complete_variant(entity_index e)
         return false;
     vtt_layout layout;
     vtt_of(k, layout);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type array = ast_builder_type_array(
-        c, ast_builder_type_pointer(c, v), layout.entries.size(), true);
-    ast_qualified_type pointer = ast_builder_type_pointer(
-        c, type(analysis.entity_table[k].type, body.at));
+    ast_qualified_type array =
+        ast_builder_type_array(c, pointer_to(v), layout.entries.size(), true);
+    ast_qualified_type pointer =
+        pointer_to(type(analysis.entity_table[k].type, body.at));
     uint32_t call = special_call(e, c_variable(c, self, pointer), nullptr, 0,
                                  body.at, element_address(table, array, 0));
     if (!call)
@@ -5889,9 +5780,7 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     }
     if (variant == 2) {
         /* the VTT parameter after this */
-        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-        vtt_parameter = c_local(
-            c, ast_builder_type_pointer(c, ast_builder_type_pointer(c, v)));
+        vtt_parameter = c_local(c, pointer_to(ast_builder_type_pointer(c, v)));
         ast_builder_symbol_flags_add(c, vtt_parameter,
                                      AST_SYMBOL_FLAG_PARAMETER);
         owned_array<uint32_t> with_vtt;
@@ -5998,8 +5887,8 @@ bool c_lowering::function_definition(entity_index e)
         return false;
     owned_array<uint32_t> forwarded, arguments;
     owned_array<ast_qualified_type> parameter_types;
-    parameter_types.append(ast_builder_type_pointer(
-        c, type(analysis.entity_table[x.enclosing].type, body.at)));
+    parameter_types.append(
+        pointer_to(type(analysis.entity_table[x.enclosing].type, body.at)));
     for (uint32_t i = 0; i < f.parameter_count; i++)
         parameter_types.append(parameter_type(types[i], body.at));
     for (uint32_t i = 0; i < body.count; i++) {
@@ -6010,11 +5899,9 @@ bool c_lowering::function_definition(entity_index e)
         arguments.append(c_variable(c, p, t));
     }
     ast_qualified_type function = entity_type(e, body.at);
-    uint32_t callee =
-        cast(make(AST_NODE_VARIABLE, function, s, 0, 0, 0, 0),
-             ast_builder_type_pointer(c, function), AST_CAST_FUNCTION_DECAY);
+    uint32_t callee = cast(make(AST_NODE_VARIABLE, function, s, 0, 0, 0, 0),
+                           pointer_to(function), AST_CAST_FUNCTION_DECAY);
     ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     uint32_t call = make(AST_NODE_CALL, v, callee,
                          ast_builder_list(c, arguments.data(), body.count),
                          body.count, 0, 0);
@@ -6123,8 +6010,7 @@ uint32_t c_lowering::generated_function(const char *base)
 
 uint32_t c_lowering::local_function(const char *name, size_t length)
 {
-    ast_qualified_type f = ast_builder_type_function(
-        c, ast_builder_type_basic(AST_TYPE_VOID), nullptr, 0, 0);
+    ast_qualified_type f = ast_builder_type_function(c, v, nullptr, 0, 0);
     uint32_t s = ast_builder_symbol(c, AST_SYMBOL_FUNCTION, name, length, f,
                                     AST_STORAGE_STATIC, 0, 0);
     owned_buffer written;
@@ -6182,9 +6068,8 @@ uint32_t c_lowering::runtime_call(uint32_t &slot, const char *name,
         ast_builder_toplevel(c, slot);
     }
     ast_builder_symbol_flags_add(c, slot, AST_SYMBOL_FLAG_USED);
-    uint32_t callee =
-        cast(make(AST_NODE_VARIABLE, ft, slot, 0, 0, 0, 0),
-             ast_builder_type_pointer(c, ft), AST_CAST_FUNCTION_DECAY);
+    uint32_t callee = cast(make(AST_NODE_VARIABLE, ft, slot, 0, 0, 0, 0),
+                           pointer_to(ft), AST_CAST_FUNCTION_DECAY);
     owned_array<uint32_t> all;
     for (uint32_t i = 0; i < count; i++) {
         if (!arguments[i])
@@ -6221,7 +6106,7 @@ void c_lowering::static_destruction(entity_index e, owned_array<uint32_t> &out,
     if (!count) {
         registered = destructor_registration(
             special_callee(destructor, at), entity_type(destructor, at),
-            address_of(c_variable(c, s, t), ast_builder_type_pointer(c, t)));
+            address_of(c_variable(c, s, t), pointer_to(t)));
     } else {
         /* [class.dtor]/13, [impl.clang]: __cxx_global_array_dtor (then
            .1, ...), destroying the elements in reverse order */
@@ -6231,12 +6116,11 @@ void c_lowering::static_destruction(entity_index e, owned_array<uint32_t> &out,
             return;
         ast_builder_symbol_body(c, f, block(&loop, 1));
         ast_builder_symbol_flags_add(c, f, AST_SYMBOL_FLAG_DEFINED);
-        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
         registered = destructor_registration(
             f, ast_builder_type_function(c, v, nullptr, 0, 0),
             cast(ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_LONG),
                                      0),
-                 ast_builder_type_pointer(c, v), AST_CAST_INTEGER_TO_POINTER));
+                 pointer_to(v), AST_CAST_INTEGER_TO_POINTER));
     }
     if (registered)
         out.append(c_statement(c, registered));
@@ -6248,8 +6132,7 @@ uint32_t c_lowering::destructor_registration(uint32_t d, ast_qualified_type f,
     if (!d || !object)
         return 0;
     ast_builder_symbol_flags_add(c, d, AST_SYMBOL_FLAG_ADDRESS_TAKEN);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    ast_qualified_type pointer = ast_builder_type_pointer(c, v);
+    ast_qualified_type pointer = pointer_to(v);
     ast_qualified_type dt = ast_builder_type_function(c, v, &pointer, 1, false);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     if (!dso_handle) {
@@ -6259,13 +6142,11 @@ uint32_t c_lowering::destructor_registration(uint32_t d, ast_qualified_type f,
         ast_builder_toplevel(c, dso_handle);
     }
     ast_builder_symbol_flags_add(c, dso_handle, AST_SYMBOL_FLAG_USED);
-    uint32_t function =
-        cast(make(AST_NODE_VARIABLE, f, d, 0, 0, 0, 0),
-             ast_builder_type_pointer(c, f), AST_CAST_FUNCTION_DECAY);
-    uint32_t handle = address_of(c_variable(c, dso_handle, byte),
-                                 ast_builder_type_pointer(c, byte));
-    ast_qualified_type parameters[3] = {ast_builder_type_pointer(c, dt),
-                                        pointer, pointer};
+    uint32_t function = cast(make(AST_NODE_VARIABLE, f, d, 0, 0, 0, 0),
+                             pointer_to(f), AST_CAST_FUNCTION_DECAY);
+    uint32_t handle =
+        address_of(c_variable(c, dso_handle, byte), pointer_to(byte));
+    ast_qualified_type parameters[3] = {pointer_to(dt), pointer, pointer};
     uint32_t arguments[3] = {function, object, handle};
     return runtime_call(cxa_atexit, "__cxa_atexit",
                         ast_builder_type_basic(AST_TYPE_INT), parameters,
@@ -6327,10 +6208,9 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     if (target == PP_DARWIN)
         vbuffer_string_append(written.get(), "_");
     vbuffer_append(written.get(), guard_name.data(), guard_name.size());
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     ast_qualified_type i64 =
         ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
-    ast_qualified_type i64p = ast_builder_type_pointer(c, i64);
+    ast_qualified_type i64p = pointer_to(i64);
     ast_qualified_type int_type = ast_builder_type_basic(AST_TYPE_INT);
     uint32_t guard =
         ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
@@ -6355,24 +6235,21 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     argument = guard_address();
     uint32_t acquire = runtime_call(guard_acquire, "__cxa_guard_acquire",
                                     int_type, &i64p, &argument, 1);
-    uint32_t acquired =
-        ast_builder_node(c, AST_NODE_IF, v,
-                         make(AST_NODE_BINARY, int_type, acquire,
-                              ast_builder_integer(c, int_type, 0), 0,
-                              LEX_TOKEN_EXCLAMATION_EQUAL, 0),
-                         block(inner), 0, 0, 0);
+    uint32_t acquired = if_statement(make(AST_NODE_BINARY, int_type, acquire,
+                                          ast_builder_integer(c, int_type, 0),
+                                          0, LEX_TOKEN_EXCLAMATION_EQUAL, 0),
+                                     block(inner), 0);
     /* the guard's first byte, read with acquire semantics
        (__atomic_load_n(p, __ATOMIC_ACQUIRE)) */
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_UNSIGNED_CHAR);
     uint32_t loaded = ast_builder_atomic_load(
         c, byte,
-        cast(guard_address(), ast_builder_type_pointer(c, byte),
-             AST_CAST_POINTER_TO_POINTER),
+        cast(guard_address(), pointer_to(byte), AST_CAST_POINTER_TO_POINTER),
         ast_builder_integer(c, int_type, 2));
     uint32_t test = make(
         AST_NODE_BINARY, int_type, cast(loaded, int_type, AST_CAST_INTEGER),
         ast_builder_integer(c, int_type, 0), 0, LEX_TOKEN_EQUAL_EQUAL, 0);
-    out.append(ast_builder_node(c, AST_NODE_IF, v, test, acquired, 0, 0, 0));
+    out.append(if_statement(test, acquired, 0));
 }
 
 /*
@@ -6393,7 +6270,6 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
     if (!only_destroy && init.kind == semantic_kind::initializer_list)
         /* an aggregate's elements, some not constant: each stored */
         return fail("dynamic initialization of an aggregate", init.at);
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
     uint32_t f = generated_function("__cxx_global_var_init");
     in_function = true;
     labels.clear();
@@ -6412,9 +6288,8 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
     ast_builder_symbol_flags_add(
         c, f, AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED);
     ast_qualified_type ft = ast_builder_type_function(c, v, nullptr, 0, 0);
-    uint32_t callee =
-        cast(make(AST_NODE_VARIABLE, ft, f, 0, 0, 0, 0),
-             ast_builder_type_pointer(c, ft), AST_CAST_FUNCTION_DECAY);
+    uint32_t callee = cast(make(AST_NODE_VARIABLE, ft, f, 0, 0, 0, 0),
+                           pointer_to(ft), AST_CAST_FUNCTION_DECAY);
     initializers.append(
         c_statement(c, make(AST_NODE_CALL, v, callee, 0, 0, 0, 0)));
     return true;
