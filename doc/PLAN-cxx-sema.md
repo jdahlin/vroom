@@ -2377,3 +2377,95 @@ libc++, Skia and nlohmann/json.  Its run tests are kept as
   `-O0` symbols are compared with clang's by `bench/cxx-run.py`.
 - Member template bodies parsed late lost their template depth (e0d34d7c).
   Today: the parser keeps the scope ([temp.mem]).
+
+## GNU vectors and x86 SIMD intrinsics ([ext:gnu_vector_size])
+
+Why: clang's `mmintrin.h` and friends (`<immintrin.h>`, which the lexer's
+`simd-search.h` includes on x86) are written with `vector_size` types, so the
+C++ front end cannot compile any x86 SIMD code without them.  The code
+generator already has vectors (C's `AST_TYPE_VECTOR`, the `AST_CAST_VECTOR_*`
+casts, vector arithmetic in VIR); what the C++ analysis lacks is the analysis
+side, and it lowers through `ast_builder_*` to what C's parser would have made.
+Shared with C, not copied: the layout and validity rule
+(`include/frontend/vector-layout.h`, used by `cc_type_vector` and by
+`vector_layout` / `gnu_vector_type` in `ext/clang/ext-vector.cpp`).
+
+- V1 **Done** (2026-11-20): the type.  `type_kind::vector`;
+  `__attribute__((vector_size(N)))` on a typedef-name or variable
+  (`declaration/simple-declaration.cpp`, like `mode`); size and alignment
+  (x86-64: the whole size; arm64: at most 16, `vector_alignment_uncapped`);
+  Itanium mangling `Dv N _ T`; lowering to C's vector type; clang's "invalid
+  vector element type" and size errors.  Test: `src/test/cxx/run/gnu-vector-size.cpp`
+  (cxx-run, -O0 symbols = clang's).  An expression of vector type is still
+  refused (`expression/expression.cpp`).
+- V2 **Done** (2026-11-20): vector values of one type: initialization from
+  a vector of the type (`initialize_with`), `=` (`assignment_of`), the identity
+  conversion (`implicit_conversion`), so arguments, results, `sizeof` and
+  vector members copied with their class.  Test:
+  `src/test/cxx/run/gnu-vector-values.cpp` (bytes read back by memcpy; cxx-run
+  -O0..3, arm64 calling convention against clang's).  Not yet: a conversion
+  between two vector types, `+=` and the other operators (V3), `v[i]` (V4),
+  list-initialization and constant evaluation of a vector.
+- V3 **Done** (2026-11-20): the operators (`ext/gnu/vector-operators.cpp`):
+  `+ - * / % & | ^ << >>` and the comparisons lane by lane on two vectors of
+  one type, or a vector and a scalar (converted to the element type; an
+  integer constant must fit, clang's truncation rule); comparisons give a
+  signed integer vector of the same lanes (-1 / 0); unary `+ - ~`; the
+  compound assignments `op=`.  The nodes are as C's front end builds them,
+  so code generation is shared.  Test: `src/test/cxx/run/gnu-vector-operators.cpp`
+  (lanes against clang, cxx-run -O0..3).  Not yet: two different vector types
+  (clang's lax conversions), `&&`, `||`, `!`, `?:` on vectors, `++`/`--`,
+  constant evaluation, templates on vector types.
+- V4 **Done** (2026-11-20): `v[i]` (an lvalue lane of a vector object, a prvalue
+  of an rvalue; lowered through a pointer to the first lane as C's parser does;
+  `&v[i]` is clang's error), list-initialization (the elements in order, the
+  rest zero, vectors in arrays, classes and static storage, braces elided
+  as for arrays), casts between a vector and a vector or a same-size scalar
+  (`conversion_kind::vector_cast`: the bits), `__builtin_shufflevector`
+  (`semantic_kind::vector_shuffle`, C's builtin node) and
+  `__builtin_convertvector` on GNU vectors.  Tests: `gnu-vector-subscript`,
+  `-init`, `-casts`, `-shuffle` in `src/test/cxx/run`.  Moved to V5:
+  `__builtin_elementwise_*` (C has `abs` only), `__builtin_nontemporal_*`.
+  Not yet: a vector in a constant expression, `v.xyzw` (ext_vector), vector
+  parameters of templates.
+- V5 **Done for SSE2** (2026-11-20): clang's `<emmintrin.h>` (with `mmintrin.h`,
+  `xmmintrin.h`) compiles in C++ for x86-64, and the lexer's `simd-search.h`
+  (`lexer-simd` branch) compiled by vcc's C++ front end finds the same bytes
+  as clang's.  What it took: `nodebug`, `min_vector_width`, `target`
+  attributes (no effect yet: the -m options decide); GNU attributes after a
+  `*` (`void *__attribute__((malloc)) f`, `<mm_malloc.h>`); a vector typedef of
+  a lesser `aligned`; `_Float16` and `__bf16` as types (`clang_float16`:
+  sizes, mangling, vector elements; no arithmetic); compound literals of
+  vector type (`semantic_kind::compound_literal`); `__builtin_elementwise_min`
+  and `_max` of integer vectors (shared with C: `cc_vector_minmax`, as
+  `b ^ ((a ^ b) & (a < b))`); `__builtin_ia32_pmovmskb128` (C's builtin table,
+  lane by lane as `movmskps` is; codegen could match it to `pmovmskb`) and
+  vector letters (`F`, `B`, `H`) in the C++ view of the table's signatures, so
+  `ast_builder_builtin_call` expands the x86 builtins as C does.  The
+  headers define hundreds of `static inline` functions over builtins vcc has
+  no rules for: such a function of a system header whose analysis is
+  unsupported is left undefined (`defer_unsupported_body`), one whose
+  lowering fails is dropped (`function_definition_or_drop`), and a use of
+  either is a refusal with the reason.  Tests: `src/test/cxx/run/x86-sse2-intrinsics.cpp`
+  (`bench/cxx-x86.py`: native, vcc -O0..3 against clang; not in CI yet:
+  needs the x86-64 job).  Follow-up (2026-11-20, `cxx/sse2-builtins`):
+  `__builtin_elementwise_add_sat` and `_sub_sat` (integer vectors, vector
+  operations only, shared with C), `__builtin_nontemporal_store` and `_load`
+  (a plain store and load), and the SSE2 builtins that are shuffles, shifts and
+  conversions in `cc_builtin_x86_sse2_build` (C's, so C has them too):
+  `pshufd`, `pshuflw`, `pshufhw`, the byte shifts, the immediate shifts of
+  16-, 32- and 64-bit lanes (counts at and past the width give 0, or the
+  sign for `psra`), `cvttps2dq`, `cvttpd2dq`, `vec_ext_v8hi`, `vec_set_v8hi`,
+  `undef128`, `emms`; the table's signature letters `I` (v4si), `Q` (v2di),
+  `E` (v2df) and `N` (short).  Test: `x86-sse2-ops.cpp`, whose output
+  `bench/cxx-x86.py` compares with clang's.  Not yet (of emmintrin.h):
+  the saturating narrows (`packs*`), `pavg*`, `pmulh*`, `pmaddwd`, `pmuludq`,
+  `psadbw`, the shifts by a vector count (`psll*128`), the float compares and
+  min/max, `cvtps2dq` and `cvtpd2dq` (rounding), `ucomi`/`comi`, `rcp`/`rsqrt`.
+  Not yet: the other `__builtin_ia32_*` (the table
+  has ~30; each needs lanes or an instruction), `__builtin_nontemporal_*`,
+  the other `__builtin_elementwise_*`, the AVX2 and AVX-512 paths of
+  `simd-search.h` (256- and 512-bit vectors, `__target__` features to the
+  assembler's VEX encoding, mask registers), `_Float16` arithmetic.
+- `ext_vector_type` (clang_ext_vector_type) shares V2-V4 (element
+  swizzles `.xyzw` are its own).

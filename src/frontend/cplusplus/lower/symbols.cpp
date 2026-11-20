@@ -81,6 +81,12 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         return fail("a function whose body is not supported",
                     u.node.first_token());
     }
+    if (!declaring_symbols)
+        for (const dropped_function &d : dropped_functions)
+            if (d.entity == e) {
+                failure = d.failure;
+                return 0;
+            }
     uint32_t *slot = &symbols[e];
     if (x.special != special_member::none && variant == 1)
         slot = &complete_symbols[e];

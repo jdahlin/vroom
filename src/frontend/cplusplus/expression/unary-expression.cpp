@@ -232,6 +232,9 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
             return 16;
         case fundamental_type::float128:
             return 16;
+        case fundamental_type::float16:
+        case fundamental_type::bfloat16:
+            return 2;
         case fundamental_type::std_nullptr_t:
             return b.long_width / 8;
         case fundamental_type::builtin_va_list:
@@ -266,6 +269,8 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         return bit_int_layout(record.bound, false);
     case type_kind::ext_vector:
         return ext_vector_layout(record, false);
+    case type_kind::vector:
+        return vector_layout(record, false);
     case type_kind::array:
         if (!record.bound_known)
             return 0;
@@ -320,6 +325,8 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
         return bit_int_layout(record.bound, true);
     case type_kind::ext_vector:
         return ext_vector_layout(record, true);
+    case type_kind::vector:
+        return vector_layout(record, true);
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::array:
@@ -721,6 +728,12 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
                               "expr.unary.op");
         if (m.bit_field_width)
             return address_of_bit_field(n.first_token());
+        if (m.node && semantics[m.node].kind == semantic_kind::subscript &&
+            type_table[semantics[semantics[m.node].a].type.unqualified()]
+                    .kind == type_kind::vector)
+            /* [ext:gnu_vector_size] clang: "address of vector element
+               requested" */
+            return ill_formed(n, "the address of a vector element", "ext.gnu");
         address_of_glvalue(at, m);
         return analysis_result::well_formed;
     }
@@ -731,6 +744,20 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
         /* [expr.unary.op]/7, /8, /10: "arithmetic or unscoped
            enumeration type", "integral or unscoped enumeration type" */
         promote_enumeration(m);
+        if (type_table[m.type.unqualified()].kind == type_kind::vector) {
+            /* [ext:gnu_vector_size] +, - and ~ lane by lane: ~ of integer
+               elements, a vector of the operand's type */
+            if (o == preprocessing_op_or_punc::TILDE &&
+                !is_integral(type_table[m.type.unqualified()].operand))
+                return ill_formed(n,
+                                  "the operand of ~ shall be a vector of "
+                                  "integer elements",
+                                  "ext.gnu");
+            m.type = qualified_type::make(m.type.unqualified(), cv_none);
+            m.evaluation = constness::not_constant;
+            m.beyond_integral_constant = true;
+            break;
+        }
         if (o == preprocessing_op_or_punc::PLUS && is_pointer(m.type)) {
             /* [expr.unary.op]/7: "or pointer type" */
             break;

@@ -1,5 +1,6 @@
 /* vcc front end: declarators */
 #include "common/literal.h"
+#include "frontend/vector-layout.h"
 #include "cc-internal.h"
 
 enum {
@@ -34,7 +35,7 @@ CC_PRIVATE ast_qualified_type cc_declarator_vector_attribute_apply(
     }
     if (kind == AST_TYPE_BOOL || !cc_type_is_arithmetic(c, t) ||
         cc_type_is_complex(c, t) || !cc_type_size(c, t) ||
-        cc_type_size(c, t) > size || size % cc_type_size(c, t)) {
+        !vector_size_fits(size, cc_type_size(c, t))) {
         cc_report_error(c, loc, "invalid vector element type '%s'",
                         tyname(c, t));
         return t;

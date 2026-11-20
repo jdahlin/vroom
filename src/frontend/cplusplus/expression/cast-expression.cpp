@@ -143,6 +143,35 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference)
         return reference_cast(at, to, m, kinds);
+    if ((kinds & (cast_static | cast_reinterpret)) &&
+        (target.kind == type_kind::vector ||
+         type_table[m.type.unqualified()].kind == type_kind::vector)) {
+        /* [ext:gnu_vector_size] a vector to a vector or to a scalar of the
+           same size, or a scalar to a vector: the same bits (clang: "invalid
+           conversion between vector type and ... of different size") */
+        VTRY(r, operand_value(at, m));
+        const struct type &from_type = type_table[m.type.unqualified()];
+        bool scalar_from = is_arithmetic(m.type);
+        bool scalar_to = is_arithmetic(to);
+        if (target.kind == type_kind::vector &&
+            from_type.kind != type_kind::vector && !scalar_from)
+            return not_supported(at, "ext.gnu");
+        if (from_type.kind == type_kind::vector &&
+            target.kind != type_kind::vector && !scalar_to)
+            return not_supported(at, "ext.gnu");
+        if (size_of_type(m.type) != size_of_type(to))
+            return ill_formed(at,
+                              "invalid conversion between vector type and a "
+                              "type of different size",
+                              "ext.gnu");
+        m.evaluation = constness::not_constant;
+        m.beyond_integral_constant = true;
+        m.zero_literal = false;
+        m.category = value_category::prvalue;
+        m.type = qualified_type::make(to.unqualified(), cv_none);
+        converted(m, conversion_kind::vector_cast);
+        return analysis_result::well_formed;
+    }
     if (m.type.unqualified() == to.unqualified() && binary128_or_complex(to)) {
         /* [ext:gnu_float128] a cast to the value's own type yields the
            value */

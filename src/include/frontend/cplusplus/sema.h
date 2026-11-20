@@ -113,6 +113,8 @@ enum class type_kind : uint8_t {
     /* [ext:clang_ext_vector_type] a vector of bound elements of type
        operand, or of the non-type template-parameter entity's value */
     ext_vector,
+    /* [ext:gnu_vector_size] a GNU vector: bound elements of type operand */
+    vector,
 };
 
 struct type {
@@ -189,6 +191,9 @@ class types
     type_index complex_of(qualified_type value);
     type_index block_pointer_to(qualified_type function);
     type_index bit_int(uint64_t width, uint32_t parameter);
+    type_index vector_of(qualified_type element, uint64_t count);
+    type_index vector_mask_of(const type &vector, uint64_t element,
+                              bool long_is_64);
     type_index ext_vector_of(qualified_type element, uint64_t count,
                              uint32_t parameter);
 
@@ -347,6 +352,8 @@ enum gnu_attribute_flag : uint32_t {
     gnu_enable_if = 65536,
     /* mode(M): the type of the typedef or variable (gnu_mode_type) */
     gnu_mode = 131072,
+    /* vector_size(N): the type of the typedef-name or variable */
+    gnu_vector_size = 1u << 30,
     /* [ext:gnu_library_builtins] __builtin_popcountg, __builtin_clzg and
        __builtin_ctzg (with gnu_compiler_builtin): a constant expression
        when its arguments are (bit_count_builtin) */
@@ -1162,6 +1169,12 @@ enum class semantic_kind : uint8_t {
     entity,
     /* op: a conversion_kind; a: the operand */
     conversion,
+    /* [ext:gnu_vector_size] __builtin_shufflevector: a, b: the two vectors;
+       the list: the constant lane indices (-1 any) */
+    vector_shuffle,
+    /* [ext:gnu_compound_literals] (T){...}: a: the initializer list; an object
+       of the type that lives to the end of the enclosing block */
+    compound_literal,
     /* op: the operator (+ - ~ !); a */
     unary,
     /* &a, *a */
@@ -1401,6 +1414,9 @@ enum class conversion_kind : uint8_t {
     /* [ext:clang_convertvector] each element of a vector converted to
        the element type of a vector type of as many elements */
     vector_convert,
+    /* [ext:gnu_vector_size] a cast between a vector and a vector or a
+       scalar of the same size: the same bits */
+    vector_cast,
 };
 
 /* [expr.cast]/4: the casts that may perform an explicit conversion */
@@ -1560,6 +1576,11 @@ class semantic_analysis
     /* the names held (note_held) by the declarations being analysed */
     owned_array<entity_index> held_pending;
     owned_array<unsupported_construct> body_failures;
+    /* whether the token is in a system header (clang's; lowering) */
+    bool token_in_system_header(token_index at) const
+    {
+        return in_system_header(at);
+    }
     owned_array<declared_name> declared;
     owned_array<analysed_expression> expressions;
     /* the semantic tree of every definition analysed */
@@ -1874,7 +1895,7 @@ class semantic_analysis
     struct simple_type_keywords {
         unsigned signed_ = 0, unsigned_ = 0, short_ = 0, long_ = 0, char_ = 0,
                  int_ = 0, double_ = 0, alone = 0, int128 = 0, float128 = 0,
-                 complex = 0;
+                 complex = 0, float16 = 0, bfloat16 = 0;
         fundamental_type alone_type = fundamental_type::none;
         token_index first = 0;
     };
@@ -1908,6 +1929,8 @@ class semantic_analysis
         entity_index gnu_cleanup = 0;
         /* mode (gnu_mode): the mode's identifier */
         token_index mode = 0;
+        /* vector_size's N, in bytes (gnu_vector_size), 0: none */
+        uint64_t vector_bytes = 0;
         /* [ext:gnu_asm_labels] the asm label's string-literal, 0 if none */
         token_index asm_label = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
@@ -2287,6 +2310,8 @@ class semantic_analysis
         entity_index cleanup = 0;
         /* mode (gnu_mode): the mode's identifier */
         token_index mode = 0;
+        /* vector_size's N, in bytes (gnu_vector_size), 0: none */
+        uint64_t vector_bytes = 0;
         /* [ext:clang_ext_vector_type] taken where allowed (an
            alias-declaration): ext_vector_type(N)'s N, or the entity of the
            non-type template-parameter N names */
@@ -2307,6 +2332,11 @@ class semantic_analysis
     bool case_or_default_label(SyntaxElement s) const;
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);
     analysis_result gnu_attribute_specifier(SyntaxRef n, specified &s);
+    analysis_result defer_unsupported_body(SyntaxRef n, entity_index f,
+                                           size_t before, analysis_result r);
+    analysis_result gnu_compound_literal(SyntaxRef n, expression_meaning &m);
+    analysis_result gnu_vector_type(SyntaxRef at, uint64_t bytes,
+                                    qualified_type &type);
     analysis_result gnu_mode_type(SyntaxRef at, token_index mode,
                                   qualified_type &type);
     analysis_result array_element_alignment(SyntaxRef at,
@@ -2875,6 +2905,13 @@ class semantic_analysis
                                  const expression_meaning &left,
                                  const expression_meaning &right,
                                  expression_meaning &m);
+    bool vector_scalar_fits(const expression_meaning &scalar,
+                            qualified_type element) const;
+    analysis_result vector_binary(SyntaxRef n, token_index at,
+                                  preprocessing_op_or_punc op,
+                                  expression_meaning &left,
+                                  expression_meaning &right,
+                                  expression_meaning &m);
     analysis_result arithmetic(SyntaxRef n, preprocessing_op_or_punc op,
                                expression_meaning &left,
                                expression_meaning &right,
@@ -2948,6 +2985,12 @@ class semantic_analysis
                                     uint32_t &built);
     analysis_result clang_convertvector(SyntaxRef n, expression_meaning &m);
     bool builtin_addressof_call(SyntaxRef n);
+    bool builtin_shufflevector_call(SyntaxRef n);
+    int vector_builtin_kind(uint32_t name);
+    analysis_result
+    nontemporal_access(SyntaxRef n, const owned_array<SyntaxElement> &clauses,
+                       bool store, expression_meaning &m);
+    analysis_result builtin_shufflevector(SyntaxRef n, expression_meaning &m);
     /* clang's type-generic bit counts: which one the function e is (1
        popcount, 2 clz, 3 ctz; 0 none), the check of a call's arguments,
        and its value in a constant evaluation */
@@ -2991,6 +3034,7 @@ class semantic_analysis
                                            gnu_attributes &g);
     analysis_result clang_ext_vector_type(SyntaxRef at, const gnu_attributes &g,
                                           qualified_type &type);
+    uint64_t vector_layout(const type &record, bool alignment) const;
     uint64_t ext_vector_layout(const type &record, bool alignment) const;
     uint64_t bit_int_layout(uint64_t width, bool alignment) const;
     entity_index value_parameter_named(SyntaxElement e);

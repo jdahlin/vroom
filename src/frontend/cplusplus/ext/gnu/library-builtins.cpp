@@ -398,7 +398,7 @@ static int query_kind(const char *spelling, size_t length)
 
 /* the scalar letters of the C front end's builtin signatures and their
    types */
-static const char signature_letters[] = "vbcChiulLwWzfdD";
+static const char signature_letters[] = "vbcChiulLwWzfdDFBHIQEN";
 static const fundamental_type signature_types[] = {
     fundamental_type::void_,
     fundamental_type::bool_,
@@ -415,6 +415,17 @@ static const fundamental_type signature_types[] = {
     fundamental_type::float_,
     fundamental_type::double_,
     fundamental_type::long_double,
+    /* F, B and H: the x86 builtins' vectors of 16 bytes (v4sf, v16qi, v8hi),
+       made from these elements */
+    fundamental_type::float_,
+    fundamental_type::char_,
+    fundamental_type::short_int,
+    /* I, Q and E: vectors of 16 bytes of int, long long and double (v4si,
+       v2di, v2df); N: short */
+    fundamental_type::int_,
+    fundamental_type::long_long_int,
+    fundamental_type::double_,
+    fundamental_type::short_int,
 };
 
 /* Float and double infinity and quiet NaN constructors. */
@@ -483,9 +494,15 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
         /* a parameter of type void is no scalar */
         if (!at || (s != signature && *s == 'v'))
             return 0;
-        types_of.append(qualified_type::make(
+        qualified_type made = qualified_type::make(
             type_table.fundamental(signature_types[at - signature_letters]),
-            cv_none));
+            cv_none);
+        if (*s == 'F' || *s == 'B' || *s == 'H' || *s == 'I' || *s == 'Q' ||
+            *s == 'E')
+            /* [ext:gnu_vector_size] a vector of 16 bytes */
+            made = qualified_type::make(
+                type_table.vector_of(made, 16 / size_of_type(made)), cv_none);
+        types_of.append(made);
     }
     /* the result, then the parameters */
     uint32_t flags = gnu_compiler_builtin;
@@ -1199,6 +1216,162 @@ analysis_result semantic_analysis::builtin_addressof(SyntaxRef n,
     if (m.bit_field_width)
         return address_of_bit_field(n.first_token());
     address_of_glvalue(n.first_token(), m);
+    return analysis_result::well_formed;
+}
+
+/* which of clang's vector builtins that nothing declares a name is: 1
+   __builtin_shufflevector, 2 and 3 __builtin_elementwise_min and _max */
+int semantic_analysis::vector_builtin_kind(uint32_t name)
+{
+    static const char shuffle[] = "__builtin_shufflevector";
+    static const char minimum[] = "__builtin_elementwise_min";
+    static const char maximum[] = "__builtin_elementwise_max";
+    static const char add_sat[] = "__builtin_elementwise_add_sat";
+    static const char sub_sat[] = "__builtin_elementwise_sub_sat";
+    static const char store[] = "__builtin_nontemporal_store";
+    static const char load[] = "__builtin_nontemporal_load";
+    if (name == tokens.pp.identifier(shuffle, sizeof shuffle - 1) + 1)
+        return 1;
+    if (name == tokens.pp.identifier(minimum, sizeof minimum - 1) + 1)
+        return 2;
+    if (name == tokens.pp.identifier(maximum, sizeof maximum - 1) + 1)
+        return 3;
+    if (name == tokens.pp.identifier(add_sat, sizeof add_sat - 1) + 1)
+        return 4;
+    if (name == tokens.pp.identifier(sub_sat, sizeof sub_sat - 1) + 1)
+        return 5;
+    if (name == tokens.pp.identifier(store, sizeof store - 1) + 1)
+        return 6;
+    if (name == tokens.pp.identifier(load, sizeof load - 1) + 1)
+        return 7;
+    return 0;
+}
+
+/* clang's __builtin_nontemporal_store(value, pointer) and
+   __builtin_nontemporal_load(pointer): the store and the load through the
+   pointer, which only differ in the cache hint the code does not give */
+analysis_result
+semantic_analysis::nontemporal_access(SyntaxRef n,
+                                      const owned_array<SyntaxElement> &clauses,
+                                      bool store, expression_meaning &m)
+{
+    size_t arguments = 1, pointer_at = 0;
+    if (store) {
+        arguments = 2;
+        pointer_at = 1;
+    }
+    if (clauses.size() != arguments)
+        return ill_formed(n, "wrong number of arguments to the builtin",
+                          "ext.clang");
+    token_index at = n.first_token();
+    expression_meaning pointer;
+    VTRY(r, expression(clauses[pointer_at], pointer));
+    VTRY_SET(r, operand_value(n, pointer));
+    if (!is_object_pointer(pointer.type))
+        return not_supported(n, "ext.clang");
+    VTRY_SET(r, indirection_of(n, at, clauses[pointer_at], pointer));
+    if (!store) {
+        m = pointer;
+        return operand_value(n, m);
+    }
+    expression_meaning value;
+    VTRY_SET(r, expression(clauses[0], value));
+    return assignment_of(n, at, preprocessing_op_or_punc::EQUAL, clauses[1],
+                         clauses[0], pointer, value, m);
+}
+
+/* [ext:gnu_vector_size] clang's __builtin_shufflevector(a, b, i...): a call
+   of that name with nothing declared by it (the C front end's builtin) */
+bool semantic_analysis::builtin_shufflevector_call(SyntaxRef n)
+{
+    if (n.size() != 4 || !n[0].is_identifier() ||
+        !n[2].is(syntax_kind::initializer_list) ||
+        !tokens.files.behavior.has(extension::gnu_library_builtins))
+        return false;
+    uint32_t name = tokens.identifier(n[0].token());
+    if (vector_builtin_kind(name) == 0)
+        return false;
+    lookup_result x = lookup_unqualified(name, lookup_filter::any);
+    return !x.entity && !x.unknown && !x.ambiguous;
+}
+
+/* the lanes of the two vectors of one type, as many as there are indices
+   (constants in [-1, 2N), -1 any lane): a prvalue vector of the same
+   element type; the count a power of two within 64 bytes, as C's front end
+   takes it */
+analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
+                                                         expression_meaning &m)
+{
+    owned_array<SyntaxElement> clauses;
+    VTRY(r, list_clauses(n[2].index(), clauses));
+    int kind = vector_builtin_kind(tokens.identifier(n[0].token()));
+    if (kind >= 6)
+        return nontemporal_access(n, clauses, kind == 6, m);
+    if (kind != 1 && clauses.size() != 2)
+        return ill_formed(n, "this builtin takes two vectors", "ext.gnu");
+    if (clauses.size() < 3 && kind == 1)
+        return ill_formed(n,
+                          "__builtin_shufflevector takes two vectors and the "
+                          "lane indices",
+                          "ext.gnu");
+    expression_meaning a, b;
+    VTRY_SET(r, expression(clauses[0], a));
+    VTRY_SET(r, expression(clauses[1], b));
+    VTRY_SET(r, operand_value(n, a));
+    VTRY_SET(r, operand_value(n, b));
+    const struct type vector = type_table[a.type.unqualified()];
+    if (vector.kind != type_kind::vector ||
+        a.type.unqualified() != b.type.unqualified())
+        return ill_formed(n,
+                          "the first two arguments to __builtin_shufflevector "
+                          "shall be vectors of the same type",
+                          "ext.gnu");
+    owned_array<uint32_t> indices;
+    if (kind != 1) {
+        /* __builtin_elementwise_min, _max, _add_sat and _sub_sat of
+           integer vectors */
+        if (!is_integral(vector.operand))
+            return not_supported(n, "ext.gnu");
+        m = expression_meaning();
+        m.type = qualified_type::make(a.type.unqualified(), cv_none);
+        m.category = value_category::prvalue;
+        m.evaluation = constness::not_constant;
+        m.beyond_integral_constant = true;
+        m.node =
+            expression_node(semantic_kind::vector_shuffle, m, n.first_token(),
+                            a.node, b.node, static_cast<uint8_t>(kind));
+        return analysis_result::well_formed;
+    }
+    for (size_t i = 2; i < clauses.size(); i++) {
+        expression_meaning e;
+        VTRY_SET(r, expression(clauses[i], e));
+        bool constant = false;
+        if (!is_integral(e.type))
+            return not_supported(n, "ext.gnu");
+        VTRY_SET(r, integral_constant_expression(n, e, constant));
+        if (!constant)
+            return not_supported(n, "ext.gnu");
+        __int128 v = integer_value(tokens.files.behavior,
+                                   fundamental_of(e.type), e.value);
+        if (v < -1 || v >= static_cast<__int128>(2 * vector.bound))
+            return ill_formed(n,
+                              "an index of __builtin_shufflevector shall be "
+                              "a constant integer in range",
+                              "ext.gnu");
+        indices.append(e.node);
+    }
+    uint64_t lanes = indices.size();
+    if ((lanes & (lanes - 1)) || lanes * size_of_type(vector.operand) > 64)
+        return not_supported(n, "ext.gnu");
+    m = expression_meaning();
+    m.type = qualified_type::make(type_table.vector_of(vector.operand, lanes),
+                                  cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::not_constant;
+    m.beyond_integral_constant = true;
+    m.node = expression_node(semantic_kind::vector_shuffle, m, n.first_token(),
+                             a.node, b.node);
+    semantics.set_list(m.node, indices.data(), indices.size());
     return analysis_result::well_formed;
 }
 

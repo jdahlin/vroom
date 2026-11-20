@@ -77,6 +77,36 @@ bool is_comparison(int op)
            op == LEX_TOKEN_LESS_EQUAL || op == LEX_TOKEN_GREATER_EQUAL;
 }
 
+/* [ext:gnu_vector_size] v[i]: the lane through a pointer to the first, as
+   C's parser does (frontend/c/expression.cpp): the address of a vector
+   object, the vector rvalue's bits in a temporary (AST_CAST_VECTOR_ADDRESS) */
+uint32_t c_lowering::vector_lane(const semantic_node &n)
+{
+    ast_qualified_type vector = type(node(n.a).type, n.at);
+    ast_qualified_type lane_pointer = pointer_to(type(n.type, n.at));
+    uint32_t first = 0;
+    if (is_glvalue(node(n.a))) {
+        uint32_t object_node = object(n.a);
+        if (!object_node)
+            return 0;
+        first = cast(address_of(object_node, pointer_to(vector)), lane_pointer,
+                     AST_CAST_POINTER_TO_POINTER);
+    } else {
+        uint32_t value = expression(n.a);
+        if (!value)
+            return 0;
+        first = cast(value, lane_pointer, AST_CAST_VECTOR_ADDRESS);
+    }
+    uint32_t index = expression(n.b);
+    if (!first || !index)
+        return 0;
+    uint8_t flags = 0;
+    if (is_glvalue(node(n.a)))
+        flags = AST_NODE_FLAG_LVALUE;
+    return make(AST_NODE_INDEX, type(n.type, n.at), first, to_ptrdiff(index), 0,
+                0, flags);
+}
+
 uint32_t c_lowering::binary(const semantic_node &n)
 {
     int op = c_operator(static_cast<preprocessing_op_or_punc>(n.op));
@@ -97,6 +127,10 @@ uint32_t c_lowering::binary(const semantic_node &n)
     uint32_t a = expression(n.a), b = expression(n.b);
     if (!a || !b)
         return 0;
+    if (is_comparison(op) && record(n.type).kind == type_kind::vector)
+        /* [ext:gnu_vector_size] lane by lane: a signed integer vector */
+        return make(AST_NODE_BINARY, type(n.type, n.at), a, b, 0,
+                    static_cast<uint16_t>(op), 0);
     if (is_comparison(op))
         return to_bool(make(AST_NODE_BINARY,
                             ast_builder_type_basic(AST_TYPE_INT), a, b, 0,

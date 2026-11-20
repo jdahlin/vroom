@@ -150,6 +150,8 @@ uint32_t c_lowering::expression(uint32_t index)
             return temporary_object(index);
         return call(n);
     case semantic_kind::subscript: {
+        if (record(node(n.a).type).kind == type_kind::vector)
+            return vector_lane(n);
         uint32_t a = expression(n.a), b = expression(n.b);
         if (!a || !b)
             return 0;
@@ -186,6 +188,24 @@ uint32_t c_lowering::expression(uint32_t index)
         return make(AST_NODE_ZERO, type(n.type, n.at), 0, 0, 0, 0, 0);
     case semantic_kind::initializer_list:
         return initializer_list(n);
+    case semantic_kind::compound_literal:
+        return compound_literal(n.a);
+    case semantic_kind::vector_shuffle: {
+        uint32_t a = expression(n.a), b = expression(n.b);
+        if (!a || !b)
+            return 0;
+        if (n.op >= 4)
+            return ast_builder_vector_saturate(c, n.op == 5, a, b);
+        if (n.op)
+            return ast_builder_vector_minmax(c, n.op == 3, a, b);
+        const uint32_t *items = analysis.semantics.items(n.first);
+        int32_t indices[64];
+        for (uint32_t i = 0; i < n.count && i < 64; i++)
+            indices[i] = static_cast<int32_t>(node(items[i]).value);
+        return ast_builder_shuffle_vector(
+            c, AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at)), a, b,
+            indices, n.count);
+    }
     case semantic_kind::bind_reference:
         return bind_reference(n);
     case semantic_kind::construct:

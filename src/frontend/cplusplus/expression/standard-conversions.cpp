@@ -697,7 +697,8 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
     const struct type target = type_table[to.unqualified()];
     if (binary128_conversion(m.type, to))
         return not_supported(at, "ext.gnu");
-    if (m.type.unqualified() == to.unqualified() && binary128_or_complex(to)) {
+    if (m.type.unqualified() == to.unqualified() &&
+        (binary128_or_complex(to) || target.kind == type_kind::vector)) {
         /* the identity: the value is passed on as it is */
         m.type = to;
         return analysis_result::well_formed;

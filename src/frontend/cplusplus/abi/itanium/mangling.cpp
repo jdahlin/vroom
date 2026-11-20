@@ -1931,7 +1931,9 @@ bool itanium_mangler::type(qualified_type t)
         number(r.bound);
         text("_");
         done = true;
-    } else if (r.kind == type_kind::ext_vector && !r.entity) {
+    } else if ((r.kind == type_kind::ext_vector ||
+                r.kind == type_kind::vector) &&
+               !r.entity) {
         /* an ext_vector_type ([ext:clang_ext_vector_type]) as clang
            mangles it: Dv, the element count, _ and the element type */
         text("Dv");
@@ -2118,6 +2120,11 @@ bool itanium_mangler::builtin_type(fundamental_type t)
         text("DF");
         number(16);
         text("_");
+        return true;
+    case fundamental_type::bfloat16:
+        /* [impl.clang] DF16b: clang's, as the Itanium ABI's extended
+           floating-point types have it */
+        text("DF16b");
         return true;
     default:
         return false;

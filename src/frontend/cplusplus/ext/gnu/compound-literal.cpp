@@ -17,6 +17,7 @@
  * follow it: (struct s){1, 2}.x.
  */
 #include "../../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
@@ -31,6 +32,31 @@ node_index parser::gnu_compound_literal(size_t mark, token_index first)
         return 0;
     node_index n = finish_node(syntax_kind::gnu_compound_literal, mark, first);
     return postfix_expression_suffixes(mark, first, n);
+}
+
+/* the vector or scalar type's object initialized by the braced list, an
+   lvalue in C and here too; the classes and arrays go with their rules of
+   [dcl.init.list] and are not analysed */
+analysis_result semantic_analysis::gnu_compound_literal(SyntaxRef n,
+                                                        expression_meaning &m)
+{
+    if (n.size() != 4 || !n[1].is(syntax_kind::type_id) ||
+        !n[3].is(syntax_kind::braced_init_list))
+        return not_supported(n, "ext.gnu");
+    qualified_type to;
+    VTRY(r, type_id(n[1], to));
+    if (type_table[to.unqualified()].kind != type_kind::vector)
+        return not_supported(n, "ext.gnu");
+    initialized_value result;
+    VTRY_SET(r, list_initialization(n[3], to, true, result));
+    m = expression_meaning();
+    m.type = to;
+    m.category = value_category::lvalue;
+    m.evaluation = constness::not_constant;
+    m.beyond_integral_constant = true;
+    m.node = expression_node(semantic_kind::compound_literal, m,
+                             n.first_token(), result.node);
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

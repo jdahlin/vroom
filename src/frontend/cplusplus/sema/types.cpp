@@ -262,6 +262,16 @@ type_index types::ext_vector_of(qualified_type element, uint64_t count,
     return intern(t, nullptr);
 }
 
+/* [ext:gnu_vector_size] a vector of count elements */
+type_index types::vector_of(qualified_type element, uint64_t count)
+{
+    type t;
+    t.kind = type_kind::vector;
+    t.operand = element;
+    t.bound = count;
+    return intern(t, nullptr);
+}
+
 /* [ext:clang_blocks] T (^)(...): a block pointer to a function type */
 type_index types::block_pointer_to(qualified_type function)
 {

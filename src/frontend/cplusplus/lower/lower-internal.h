@@ -697,6 +697,7 @@ class c_lowering
     uint32_t read_again(const reread &r);
     bool rereadable_member_pointer(uint32_t n) const;
     uint32_t binary(const semantic_node &n);
+    uint32_t vector_lane(const semantic_node &n);
     uint32_t assignment(const semantic_node &n);
     uint32_t call(const semantic_node &n);
     uint32_t bind_reference(const semantic_node &n);
@@ -733,6 +734,15 @@ class c_lowering
     uint32_t condition(uint32_t n, owned_array<uint32_t> &out);
     uint32_t label(uint32_t identifier);
     bool function_definition(entity_index e);
+    /* a static or inline function of a system header that cannot be lowered
+       is dropped, and a use of it refused: clang emits none that nothing
+       uses (<immintrin.h> defines hundreds over builtins vcc lacks) */
+    bool function_definition_or_drop(entity_index e);
+    struct dropped_function {
+        entity_index entity;
+        lowering_failure failure;
+    };
+    owned_array<dropped_function> dropped_functions;
     bool variable_definition(entity_index e);
     bool constant_initializer(uint32_t n) const;
     bool address_constant(uint32_t n) const;

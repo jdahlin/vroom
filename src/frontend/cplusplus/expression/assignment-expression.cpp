@@ -154,6 +154,7 @@ analysis_result semantic_analysis::assignment_of(
         record.kind != type_kind::pointer &&
         !(record.kind == type_kind::pointer_to_member &&
           op == preprocessing_op_or_punc::EQUAL) &&
+        record.kind != type_kind::vector &&
         !(record.kind == type_kind::enumeration &&
           enumeration_of(assigned_type)))
         return not_supported(n, "expr.ass");
@@ -215,7 +216,11 @@ analysis_result semantic_analysis::assignment_of(
         } else {
             expression_meaning value = left, result;
             r = operand_value(n, value);
-            if (r == analysis_result::well_formed)
+            if (r == analysis_result::well_formed &&
+                record.kind == type_kind::vector)
+                /* [ext:gnu_vector_size] E1 = E1 op E2 lane by lane */
+                r = vector_binary(n, at, arithmetic_op, value, right, result);
+            else if (r == analysis_result::well_formed)
                 r = arithmetic(n, arithmetic_op, value, right, result);
             computation = result.type;
             if (r == analysis_result::well_formed)
