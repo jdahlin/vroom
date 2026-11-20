@@ -1058,8 +1058,10 @@ analysis_result semantic_analysis::gather_clauses(
             }
             continue;
         }
+        /* (a lambda-expression is a primary-expression, [expr.prim.lambda]) */
         if (c.is_node() && !syntax_kind_is_expression(c.kind()) &&
-            !c.is(syntax_kind::braced_init_list))
+            !c.is(syntax_kind::braced_init_list) &&
+            !c.is(syntax_kind::lambda_expression))
             return not_supported(list, "dcl.init.aggr");
         uint32_t count = 1;
         bool expansion =

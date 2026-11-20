@@ -29,7 +29,6 @@ old-enumerator-prvalue	vcc: the rules of [ext.clang] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-friend-templates	vcc: the rules of [expr.prim.req] are not implemented yet
 old-ilist-ctor-not-viable	vcc: the rules of [class.mem] are not implemented yet
-old-implicit-assignment-parts	vcc: the rules of [over.match.oper] are not implemented yet
 old-implicit-assignment-requires	vcc: the rules of [expr.prim.req] are not implemented yet
 old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
 old-initializer-list-local	vcc: the rules of [dcl.init.list] are not implemented yet
