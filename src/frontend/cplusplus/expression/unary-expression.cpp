@@ -405,14 +405,25 @@ analysis_result semantic_analysis::pack_size(SyntaxRef n, expression_meaning &m)
     uint32_t name = tokens.identifier(n[3].token());
     entity_index pack = find_pack(name);
     if (!pack) {
-        /* a name that is no pack at all is the error; one that may be a
-           pack the analysis does not bind (a template's own, ...) is not */
+        /* a name that is certainly no pack is the error; one that may be a
+           pack the analysis does not bind (a function parameter pack of
+           reference type, a template's own) is not */
         lookup_result found = lookup_unqualified(name, lookup_filter::any);
-        if (found.entity && !own_pack_parameter(name))
-            return ill_formed(n,
-                              "the identifier in a sizeof... expression shall "
-                              "name a pack",
-                              "expr.sizeof");
+        if (found.entity && !own_pack_parameter(name)) {
+            const entity &x = entity_table[found.entity];
+            bool no_pack =
+                x.kind == entity_kind::class_type ||
+                x.kind == entity_kind::enumeration ||
+                x.kind == entity_kind::enumerator ||
+                x.kind == entity_kind::function ||
+                x.kind == entity_kind::namespace_entity ||
+                (x.kind == entity_kind::variable && is_namespace(x.enclosing));
+            if (no_pack)
+                return ill_formed(n,
+                                  "the identifier in a sizeof... expression "
+                                  "shall name a pack",
+                                  "expr.sizeof");
+        }
         return not_supported(n, "temp.variadic");
     }
     m.type = qualified_type::make(

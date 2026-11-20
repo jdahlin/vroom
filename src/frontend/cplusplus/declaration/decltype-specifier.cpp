@@ -99,6 +99,24 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
     /* an operand that names a template parameter (or a type that depends
        on one) is type-dependent ([temp.dep.expr]): not analysed */
     if (names_dependent_entity(n.first_token(), n.end_token())) {
+        /* [temp.dep.expr]/4: "Expressions of the following forms are never
+           type-dependent (because the type of the expression cannot be
+           dependent): ... sizeof unary-expression, sizeof ( type-id ),
+           sizeof ... ( identifier ), alignof ( type-id )": decltype of one
+           is std::size_t, whatever the operand names (sizeof or alignof
+           first) */
+        SyntaxElement inner = operand;
+        while (inner.is_node() && inner.size() == 1)
+            inner = inner[0];
+        if (inner.is_node() && inner.is(syntax_kind::unary_expression) &&
+            inner.size() > 1 &&
+            (inner[0].is(standard_keyword::sizeof_) ||
+             inner[0].is(standard_keyword::alignof_))) {
+            type = qualified_type::make(
+                type_table.fundamental(fundamental_type::unsigned_long_int),
+                cv_none);
+            return analysis_result::well_formed;
+        }
         /* [temp.dep.type]/10.3: "denoted by decltype(expression), where
            expression is type-dependent" a dependent type, in a template's
            own declaration (an instantiation's names are bound to

@@ -1,0 +1,2 @@
+sizeof-pack-unnamed-reference.cpp:7:12: error: the rules of [temp.variadic] are not implemented yet
+sizeof-pack-unnamed-reference.cpp:7:12: note: refused by vcc's frontend/cplusplus/expression/unary-expression.cpp:N (pack_size)
