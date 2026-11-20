@@ -103,12 +103,12 @@ class c_lowering
     cc *c;
     int target;
     const char *main_path;
-    /* [basic.start.dynamic]: the variables of namespace scope initialized
-       dynamically, in the order of their definitions */
-    owned_array<entity_index> dynamic;
-    /* per entry of dynamic: 1 if it is constant-initialized and only its
-       destructor is registered ([basic.start.term]/1) */
-    owned_array<uint8_t> destroy_only;
+    /* [basic.start.dynamic]: the calls of the functions initializing the
+       variables of namespace scope dynamically, in the order of their
+       definitions ([basic.start.term]/1: or registering the destruction
+       of a constant-initialized one) */
+    owned_array<uint32_t> initializers;
+    bool global_initializer(entity_index e, bool only_destroy);
     bool dynamic_initialization();
     /* [basic.start.term], [abi:guards]: the run time's functions and
        __dso_handle, 0 until declared */
@@ -118,9 +118,12 @@ class c_lowering
                           ast_qualified_type result,
                           const ast_qualified_type *parameters,
                           const uint32_t *arguments, uint32_t count);
-    uint32_t destructor_registration(entity_index destructor, uint32_t object,
-                                     token_index at);
+    /* __cxa_atexit(d, object, &__dso_handle): d a function of type f */
+    uint32_t destructor_registration(uint32_t d, ast_qualified_type f,
+                                     uint32_t object);
     uint32_t initialization(entity_index e, uint32_t init, token_index at);
+    void static_initialization(entity_index e, uint32_t init,
+                               owned_array<uint32_t> &out, token_index at);
     void guarded_initialization(const semantic_node &n, entity_index destructor,
                                 owned_array<uint32_t> &out);
     uint32_t local_function(const char *name, size_t length);
@@ -441,6 +444,24 @@ class c_lowering
        object, and that class's destructor (0 if none or not a class) */
     entity_index element_destructor(qualified_type type,
                                     qualified_type &object) const;
+    /* the number of elements of type object in an array type (an array
+       of arrays too), 0 if type is not an array */
+    uint64_t element_count(qualified_type type, qualified_type object) const
+    {
+        if (type == object || !analysis.size_of_type(object))
+            return 0;
+        return analysis.size_of_type(type) / analysis.size_of_type(object);
+    }
+    /* [basic.start.term]/1: the destruction of the static object e (an
+       array's elements, last first, by a function of its own) registered
+       with __cxa_atexit, appended to out */
+    void static_destruction(entity_index e, owned_array<uint32_t> &out,
+                            token_index at);
+    /* [impl.clang]: a function lowering makes, named as LLVM names a
+       clash: base, then base.N with one counter for the module */
+    owned_array<const char *> generated_names;
+    unsigned generated_suffix = 0;
+    uint32_t generated_function(const char *base);
     /* [dcl.stc]/8: the class or array of classes type has a mutable
        subobject (a const object of it is not in read-only memory) */
     bool has_mutable_subobject(qualified_type type) const;
@@ -1435,9 +1456,12 @@ uint32_t c_lowering::each_element(uint32_t s, ast_qualified_type array,
     auto constant = [&](uint64_t value) {
         return ast_builder_integer(c, index_type, static_cast<int64_t>(value));
     };
+    /* the elements of an array of arrays too, as one sequence
+       ([dcl.array]/6: contiguous) */
     ast_qualified_type pointer = ast_builder_type_pointer(c, element);
-    uint32_t first =
-        cast(c_variable(c, s, array), pointer, AST_CAST_ARRAY_DECAY);
+    uint32_t first = cast(
+        address_of(c_variable(c, s, array), ast_builder_type_pointer(c, array)),
+        pointer, AST_CAST_POINTER_TO_POINTER);
     uint32_t object = make(AST_NODE_INDEX, element, first, index(), 0, 0,
                            AST_NODE_FLAG_LVALUE);
     uint32_t call =
@@ -3865,21 +3889,11 @@ void c_lowering::initialized_variable(const semantic_node &n,
             root = &node(root->a);
         extended_temporary = root;
     }
-    uint64_t bound = 0;
-    if (!(object == x.type)) {
-        const struct type &array = record(x.type);
-        if (array.operand == object && array.bound_known)
-            bound = array.bound;
-    }
+    uint64_t bound = element_count(x.type, object);
     if (!x.automatic && (destructor || (n.b && !constant_initializer(n.b)))) {
         /* [stmt.dcl]/4: initialized the first time control passes
            through, under a guard */
         guarded_initialization(n, destructor, out);
-        return;
-    }
-    if (destructor && !(object == x.type) && !bound) {
-        /* an array of more than one dimension */
-        fail("an array with a destructor", n.at);
         return;
     }
     if (!n.b || node(n.b).kind != semantic_kind::construct || !x.automatic) {
@@ -6056,10 +6070,6 @@ bool c_lowering::variable_definition(entity_index e)
                         node(x.definition).at);
         qualified_type object;
         entity_index destructor = element_destructor(x.type, object);
-        if (destructor && !(object == x.type))
-            /* [basic.start.term]: clang's __cxx_global_array_dtor */
-            return fail("a static array with a destructor",
-                        node(x.definition).at);
         bool constant = constant_initializer(x.definition);
         if (x.inline_ && (!constant || destructor))
             /* [basic.start.dynamic]/1: partially-ordered, under a guard in
@@ -6070,10 +6080,8 @@ bool c_lowering::variable_definition(entity_index e)
         if (!constant) {
             /* [basic.start.static]/2: zero-initialized, then initialized
                by dynamic_initialization */
-            dynamic.append(e);
-            destroy_only.append(0);
             ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
-            return true;
+            return global_initializer(e, false);
         }
         uint32_t init = expression(x.definition);
         if (!init)
@@ -6082,16 +6090,17 @@ bool c_lowering::variable_definition(entity_index e)
         if (destructor) {
             /* [basic.start.term]/1: constant-initialized, its destructor
                registered at start-up */
-            dynamic.append(e);
-            destroy_only.append(1);
+            if (!global_initializer(e, true))
+                return false;
         }
     } else {
         qualified_type object;
-        if (element_destructor(x.type, object))
-            /* [basic.start.term] */
-            return fail("a static object with a destructor and no "
-                        "initializer",
-                        0);
+        if (element_destructor(x.type, object)) {
+            /* [basic.start.term]/1: zero-initialized (no non-trivial
+               default constructor), its destructor registered */
+            if (!global_initializer(e, true))
+                return false;
+        }
     }
     ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
     return true;
@@ -6123,6 +6132,20 @@ bool c_lowering::static_zero_initialization(const entity &x, uint32_t s,
 
 /* a function void name(void) of internal linkage, named as written (its
    body to come) */
+uint32_t c_lowering::generated_function(const char *base)
+{
+    bool used = false;
+    for (const char *n : generated_names)
+        used = used || !strcmp(n, base);
+    owned_buffer name;
+    vbuffer_string_append(name.get(), base);
+    if (used)
+        vbuffer_format_append(name.get(), ".%u", ++generated_suffix);
+    else
+        generated_names.append(base);
+    return local_function(name.data(), name.size());
+}
+
 uint32_t c_lowering::local_function(const char *name, size_t length)
 {
     ast_qualified_type f = ast_builder_type_function(
@@ -6166,6 +6189,23 @@ uint32_t c_lowering::initialization(entity_index e, uint32_t init,
                 value, 0, 0, 0);
 }
 
+/* [intro.execution]/5.3: the initialization of a static variable, a
+   full-expression whose temporaries are made and destroyed with it */
+void c_lowering::static_initialization(entity_index e, uint32_t init,
+                                       owned_array<uint32_t> &out,
+                                       token_index at)
+{
+    collection k = collect();
+    owned_array<uint32_t> after;
+    uint32_t done = initialization(e, init, at);
+    collected(k, out, after);
+    if (!done)
+        return;
+    out.append(c_statement(c, done));
+    for (uint32_t a : after)
+        out.append(a);
+}
+
 /* a call of the run time's function name (declared on first use, in
    slot) */
 uint32_t c_lowering::runtime_call(uint32_t &slot, const char *name,
@@ -6204,10 +6244,48 @@ uint32_t c_lowering::runtime_call(uint32_t &slot, const char *name,
    is called when the shared object d is unloaded": the complete object
    destructor of the object at address object, registered for
    __dso_handle's module, as clang does */
-uint32_t c_lowering::destructor_registration(entity_index destructor,
-                                             uint32_t object, token_index at)
+void c_lowering::static_destruction(entity_index e, owned_array<uint32_t> &out,
+                                    token_index at)
 {
-    uint32_t d = special_callee(destructor, at);
+    const entity &x = analysis.entity_table[e];
+    qualified_type object;
+    entity_index destructor = element_destructor(x.type, object);
+    if (!destructor)
+        return;
+    uint32_t s = symbol(e, at);
+    if (!s)
+        return;
+    ast_qualified_type t = type(x.type, at);
+    uint64_t count = element_count(x.type, object);
+    uint32_t registered = 0;
+    if (!count) {
+        registered = destructor_registration(
+            special_callee(destructor, at), entity_type(destructor, at),
+            address_of(c_variable(c, s, t), ast_builder_type_pointer(c, t)));
+    } else {
+        /* [class.dtor]/13, [impl.clang]: __cxx_global_array_dtor (then
+           .1, ...), destroying the elements in reverse order */
+        uint32_t f = generated_function("__cxx_global_array_dtor");
+        uint32_t loop =
+            each_element(s, t, type(object, at), count, true, destructor, at);
+        if (!loop)
+            return;
+        ast_builder_symbol_body(c, f, block(&loop, 1));
+        ast_builder_symbol_flags_add(c, f, AST_SYMBOL_FLAG_DEFINED);
+        ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+        registered = destructor_registration(
+            f, ast_builder_type_function(c, v, nullptr, 0, 0),
+            cast(ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_LONG),
+                                     0),
+                 ast_builder_type_pointer(c, v), AST_CAST_INTEGER_TO_POINTER));
+    }
+    if (registered)
+        out.append(c_statement(c, registered));
+}
+
+uint32_t c_lowering::destructor_registration(uint32_t d, ast_qualified_type f,
+                                             uint32_t object)
+{
     if (!d || !object)
         return 0;
     ast_builder_symbol_flags_add(c, d, AST_SYMBOL_FLAG_ADDRESS_TAKEN);
@@ -6222,7 +6300,6 @@ uint32_t c_lowering::destructor_registration(entity_index destructor,
         ast_builder_toplevel(c, dso_handle);
     }
     ast_builder_symbol_flags_add(c, dso_handle, AST_SYMBOL_FLAG_USED);
-    ast_qualified_type f = entity_type(destructor, at);
     uint32_t function =
         cast(make(AST_NODE_VARIABLE, f, d, 0, 0, 0, 0),
              ast_builder_type_pointer(c, f), AST_CAST_FUNCTION_DECAY);
@@ -6253,12 +6330,6 @@ void c_lowering::guarded_initialization(const semantic_node &n,
                                         owned_array<uint32_t> &out)
 {
     entity_index e = n.a;
-    const entity &x = analysis.entity_table[e];
-    qualified_type object = x.type;
-    if (destructor && record(object).kind != type_kind::class_type) {
-        fail("a static array with a destructor", n.at);
-        return;
-    }
     entity_index function = enclosing_function(e);
     if (!function || analysis.entity_table[function].inline_) {
         /* [abi:guards]: the guard and the variable are COMDAT with the
@@ -6311,31 +6382,13 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     auto guard_address = [&]() {
         return address_of(c_variable(c, guard, i64), i64p);
     };
-    /* the initialization's temporaries would be made before the guard:
-       not yet */
-    size_t first = temporaries.size(), first_destruction = destructions.size();
     owned_array<uint32_t> inner;
-    if (!constant) {
-        uint32_t done = initialization(e, n.b, n.at);
-        if (!done)
-            return;
-        inner.append(c_statement(c, done));
-    }
-    if (temporaries.size() != first ||
-        destructions.size() != first_destruction) {
-        fail("temporaries in a guarded local static's initializer", n.at);
+    if (!constant)
+        static_initialization(e, n.b, inner, n.at);
+    if (destructor)
+        static_destruction(e, inner, n.at);
+    if (failure.what)
         return;
-    }
-    if (destructor) {
-        ast_qualified_type t = type(x.type, n.at);
-        uint32_t variable = c_variable(c, s, t);
-        uint32_t registered = destructor_registration(
-            destructor, address_of(variable, ast_builder_type_pointer(c, t)),
-            n.at);
-        if (!registered)
-            return;
-        inner.append(c_statement(c, registered));
-    }
     uint32_t argument = guard_address();
     uint32_t release = runtime_call(guard_release, "__cxa_guard_release", v,
                                     &i64p, &argument, 1);
@@ -6372,65 +6425,44 @@ void c_lowering::guarded_initialization(const semantic_node &n,
  * ...), called in order by _GLOBAL__sub_I_<the source file's name>, which
  * .init_array runs before main ([basic.start.dynamic]/5 lets it).
  */
+/* the function initializing the static variable e (or, only_destroy,
+   registering its destruction), its call appended to initializers */
+bool c_lowering::global_initializer(entity_index e, bool only_destroy)
+{
+    const entity &x = analysis.entity_table[e];
+    const semantic_node &init = node(x.definition);
+    if (!only_destroy && init.kind == semantic_kind::initializer_list)
+        /* an aggregate's elements, some not constant: each stored */
+        return fail("dynamic initialization of an aggregate", init.at);
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    uint32_t f = generated_function("__cxx_global_var_init");
+    in_function = true;
+    labels.clear();
+    live.clear();
+    owned_array<uint32_t> statements;
+    if (!only_destroy)
+        static_initialization(e, x.definition, statements, init.at);
+    /* [basic.start.term]/3: registered with __cxa_atexit once
+       constructed ([abi:dso-dtor]) */
+    if (!failure.what)
+        static_destruction(e, statements, init.at);
+    in_function = false;
+    if (failure.what || statements.empty())
+        return false;
+    ast_builder_symbol_body(c, f, block(statements));
+    ast_builder_symbol_flags_add(
+        c, f, AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED);
+    ast_qualified_type ft = ast_builder_type_function(c, v, nullptr, 0, 0);
+    uint32_t callee =
+        cast(make(AST_NODE_VARIABLE, ft, f, 0, 0, 0, 0),
+             ast_builder_type_pointer(c, ft), AST_CAST_FUNCTION_DECAY);
+    initializers.append(
+        c_statement(c, make(AST_NODE_CALL, v, callee, 0, 0, 0, 0)));
+    return true;
+}
+
 bool c_lowering::dynamic_initialization()
 {
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
-    owned_array<uint32_t> calls;
-    for (size_t i = 0; i < dynamic.size(); i++) {
-        entity_index e = dynamic[i];
-        const entity &x = analysis.entity_table[e];
-        const semantic_node &init = node(x.definition);
-        bool only_destroy = destroy_only[i];
-        if (!only_destroy && init.kind == semantic_kind::initializer_list)
-            /* an aggregate's elements, some not constant: each stored */
-            return fail("dynamic initialization of an aggregate", init.at);
-        qualified_type object = x.type;
-        entity_index destructor = 0;
-        if (record(object).kind == type_kind::class_type)
-            destructor =
-                analysis.entity_table[record(object).entity].destructor;
-        owned_buffer name;
-        vbuffer_string_append(name.get(), "__cxx_global_var_init");
-        if (i)
-            vbuffer_format_append(name.get(), ".%u", static_cast<unsigned>(i));
-        uint32_t f = local_function(name.data(), name.size());
-        in_function = true;
-        labels.clear();
-        live.clear();
-        owned_array<uint32_t> statements;
-        if (!only_destroy) {
-            uint32_t done = initialization(e, x.definition, init.at);
-            if (!done) {
-                in_function = false;
-                return false;
-            }
-            statements.append(c_statement(c, done));
-        }
-        if (destructor && !failure.what) {
-            /* [basic.start.term]/3: registered with __cxa_atexit once
-               constructed ([abi:dso-dtor]) */
-            uint32_t s = symbol(e, init.at);
-            ast_qualified_type t = type(x.type, init.at);
-            uint32_t variable = c_variable(c, s, t);
-            uint32_t registered = destructor_registration(
-                destructor,
-                address_of(variable, ast_builder_type_pointer(c, t)), init.at);
-            if (registered)
-                statements.append(c_statement(c, registered));
-        }
-        in_function = false;
-        if (failure.what || statements.empty())
-            return false;
-        ast_builder_symbol_body(c, f, block(statements));
-        ast_builder_symbol_flags_add(
-            c, f, AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED);
-        ast_qualified_type ft = ast_builder_type_function(c, v, nullptr, 0, 0);
-        uint32_t callee =
-            cast(make(AST_NODE_VARIABLE, ft, f, 0, 0, 0, 0),
-                 ast_builder_type_pointer(c, ft), AST_CAST_FUNCTION_DECAY);
-        uint32_t call = make(AST_NODE_CALL, v, callee, 0, 0, 0, 0);
-        calls.append(c_statement(c, call));
-    }
     owned_buffer name;
     vbuffer_string_append(name.get(), "_GLOBAL__sub_I_");
     const char *base = main_path;
@@ -6450,7 +6482,7 @@ bool c_lowering::dynamic_initialization()
         vbuffer_append(name.get(), &k, 1);
     }
     uint32_t start = local_function(name.data(), name.size());
-    ast_builder_symbol_body(c, start, block(calls));
+    ast_builder_symbol_body(c, start, block(initializers));
     ast_builder_symbol_flags_add(c, start, AST_SYMBOL_FLAG_DEFINED);
     ast_builder_symbol_constructor(c, start);
     return true;
@@ -6531,7 +6563,7 @@ bool c_lowering::translation_unit()
                 return false;
         }
     }
-    if (!dynamic.empty() && !dynamic_initialization())
+    if (!initializers.empty() && !dynamic_initialization())
         return false;
     /* [abi:vague-vtable]: the virtual table of each class whose key
        function this translation unit defines */
