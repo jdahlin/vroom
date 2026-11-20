@@ -540,13 +540,16 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             old.constexpr_ != s.constexpr_ ||
             (s.static_ && old.linkage_of_name != linkage::internal))
             return not_supported(n, "temp.over.link");
-        /* the same names: an instantiation made before the definition
-           binds the first declaration's (instantiate) */
+        /* different names: the definition's are the ones its body uses
+           (instantiate_definition binds the template's own), so a
+           definition takes the record's parameters; a declaration leaves
+           them ([temp.over.link]/6: names do not matter) */
+        bool renamed = false;
         for (uint32_t i = 0; i < f.parameter_count; i++)
             if (entity_table[template_parameter_entities[first + i]].name !=
                 entity_table[template_parameter_entities[f.first_parameter + i]]
                     .name)
-                return not_supported(n, "temp.over.link");
+                renamed = true;
         /* the function types the same once each parameter is the other's
            (the old in terms of the new, exactly) */
         owned_array<template_argument> values;
@@ -575,6 +578,10 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             record.declaration = n;
             record.definition = definition;
             record.declarator = definition;
+            if (renamed) {
+                record.first_parameter = first;
+                entity_table[f.entity].type = type;
+            }
             entity_table[f.entity].defined = true;
         }
         return analysis_result::well_formed;
