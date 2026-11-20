@@ -238,6 +238,39 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
 }
 
 /*
+ * [basic.lookup.classref]/1: after . or -> a name followed by < is looked up
+ * "in the class of the object expression" to tell whether the < begins a
+ * template-argument-list or is the less-than operator; "If the identifier
+ * is not found, it is then looked up in the context of the entire
+ * postfix-expression and shall name a class template".  The parser has no
+ * types, so the class of the object expression is every class it has read:
+ * the name can be a member template only if some class declares one of
+ * that name, or if the context finds a class template (a function template
+ * found in the context is not a template name here, as in clang:
+ * `s.ft<int>(1)` is a less-than).  A name no class declares as a template
+ * is not one in any class, so `l->offset < a || l->offset > (b)` is two
+ * less-than and greater-than operators.  After a nested-name-specifier of
+ * a known class the name is looked up in that class
+ * ([basic.lookup.qual]), whose members the parser knows; a qualifier it
+ * does not know leaves the name possible.
+ */
+bool parser::member_name_may_be_template(uint32_t name, bool qualified,
+                                         bool known, scope_index scope)
+{
+    if (qualified) {
+        if (!known)
+            return true;
+        name_kind found = names.lookup_qualified(scope, name);
+        if (found == name_kind::not_declared)
+            return true;
+        return is_template_kind(found);
+    }
+    if (names.declared_as_member_template(name))
+        return true;
+    return names.lookup_unqualified(name) == name_kind::template_name;
+}
+
+/*
  * The id-expression of an expression ([expr.prim.id]/1):
  *
  *     id-expression:
@@ -384,7 +417,10 @@ node_index parser::id_expression(bool member)
                 if (failed())
                     return 0;
             } else if ((member || (!known && !dependent_qualifier)) &&
-                       !dependent_qualifier && angle_group_follows_call()) {
+                       !dependent_qualifier &&
+                       (!member || member_name_may_be_template(
+                                       name, qualifier != 0, known, scope)) &&
+                       angle_group_follows_call()) {
                 /* a member's name and a name of a class the parser does not
                    know may be a template's: the tokens are a template-id
                    when they parse as one and a call or a '::' follows.
