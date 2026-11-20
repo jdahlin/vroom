@@ -550,6 +550,7 @@ enum class extension_keyword : uint8_t {
     bit_int,
     source_location,
     typeof_,
+    c11_thread_local,
 };
 
 /*

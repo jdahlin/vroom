@@ -1305,6 +1305,22 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (object_alignment > x.alignment)
             x.alignment = object_alignment;
     }
+    /* [ext:clang_c11_thread_local] _Thread_local: a variable of thread
+       storage duration; clang: "'_Thread_local' variables must have global
+       storage" (at block scope, static too) */
+    if (r == analysis_result::well_formed && s.c11_thread_local) {
+        entity &x = entity_table[declared_entity];
+        if (x.kind != entity_kind::variable)
+            return ill_formed(declaration,
+                              "_Thread_local applies only to a variable",
+                              "ext.clang");
+        if (!s.static_ && !s.extern_ && at_block_scope())
+            return ill_formed(declaration,
+                              "a _Thread_local variable at block scope is "
+                              "declared static",
+                              "ext.clang");
+        x.c11_thread_local = true;
+    }
     /* [ext:gnu_asm_labels] the symbol of a function or variable with
        static storage duration; a later declaration may leave it out, a
        different one is clang's error */

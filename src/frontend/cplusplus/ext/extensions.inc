@@ -107,6 +107,10 @@ EXTENSION(clang_no_operator_names, clang,
 EXTENSION(clang_atomic, clang,
           "clang Language Extensions, C11 _Atomic in C++: _Atomic(T) a type with C11's "
           "atomic type's layout (C23 6.2.5)")
+EXTENSION(clang_c11_thread_local, clang,
+          "clang Language Extensions, C11 _Thread_local in C++: a storage-class-specifier with "
+          "C11's rules (constant initialization, trivial destruction, static or namespace "
+          "scope), accessed directly, without thread_local's wrapper functions")
 EXTENSION(clang_availability, clang,
           "clang Attributes, availability: availability(platform, introduced=version, ...), "
           "a version a pp-number such as 10.12.1")

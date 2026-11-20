@@ -197,6 +197,13 @@ bool c_lowering::variable_definition(entity_index e)
         qualified_type object;
         entity_index destructor = element_destructor(x.type, object);
         bool constant = constant_initializer(x.definition);
+        /* clang: "initializer for thread-local variable must be a constant
+           expression", "type of thread-local variable has non-trivial
+           destruction" */
+        if (x.c11_thread_local && (!constant || destructor))
+            return fail("a _Thread_local variable initialized or destroyed "
+                        "at run time",
+                        node(x.definition).at);
         if (x.inline_ && (!constant || destructor))
             /* [basic.start.dynamic]/1: partially-ordered, under a guard in
                a COMDAT group ([abi:guards]) */

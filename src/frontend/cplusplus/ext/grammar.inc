@@ -181,6 +181,10 @@ PRODUCTION(clang_convertvector, "clang-convertvector-expression", "__builtin_con
 PRODUCTION(clang_atomic, "simple-type-specifier", "clang-atomic-type-specifier")
 PRODUCTION(clang_atomic, "clang-atomic-type-specifier", "_Atomic ( type-id )")
 
+/* ---- clang Language Extensions, C11 _Thread_local in C++ ---- */
+
+PRODUCTION(clang_c11_thread_local, "storage-class-specifier", "_Thread_local")
+
 /* ---- clang Language Extensions, _BitInt in C++ ---- */
 
 PRODUCTION(clang_deduction_guide_attributes, "deduction-guide", "attribute-specifier-seq explicit-specifier_opt template-name ( parameter-declaration-clause ) -> simple-template-id ;")

@@ -439,6 +439,9 @@ struct entity {
     /* a variable: [basic.stc.auto]/1, a local variable not declared static
        (or a parameter) */
     bool automatic = false;
+    /* a variable: [ext:clang_c11_thread_local] declared _Thread_local, of
+       thread storage duration ([basic.stc.thread]) with C11's rules */
+    bool c11_thread_local = false;
     /* a block_scope: the scope whose names it shall not redeclare (the
        function parameter scope for the outermost block of a function
        definition, the scope of a statement's condition for its
@@ -1713,6 +1716,8 @@ class semantic_analysis
         bool friend_ = false;
         /* [dcl.stc]/8: mutable (only where mutable_allowed) */
         bool mutable_ = false;
+        /* [ext:clang_c11_thread_local] _Thread_local */
+        bool c11_thread_local = false;
         /* [class.conv.fct]/2: explicit (only where explicit_allowed) */
         bool explicit_ = false;
         /* explicit ( value-dependent condition ): see entity */

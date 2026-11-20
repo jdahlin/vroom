@@ -51,6 +51,7 @@ EXTENSION_KEYWORD(offsetof_, "__builtin_offsetof", gnu_offsetof)
 EXTENSION_KEYWORD(bit_cast, "__builtin_bit_cast", clang_bit_cast)
 EXTENSION_KEYWORD(convertvector, "__builtin_convertvector", clang_convertvector)
 EXTENSION_KEYWORD(atomic, "_Atomic", clang_atomic)
+EXTENSION_KEYWORD(c11_thread_local, "_Thread_local", clang_c11_thread_local)
 EXTENSION_KEYWORD(bit_int, "_BitInt", clang_bit_int)
 EXTENSION_KEYWORD(source_location, "__builtin_source_location", clang_source_location)
 

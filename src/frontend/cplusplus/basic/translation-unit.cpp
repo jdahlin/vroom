@@ -1121,7 +1121,8 @@ analysis_result semantic_analysis::declare_local(
     /* [basic.stc.auto]/1: "Variables that belong to a block or parameter
        scope and are not explicitly declared static, thread_local, or
        extern have automatic storage duration." */
-    entity_table[e].automatic = kind == entity_kind::variable && !s.static_;
+    entity_table[e].automatic =
+        kind == entity_kind::variable && !s.static_ && !s.c11_thread_local;
     entity_table.add_declaration(e, declaration);
     entity_table.bind(scope, name, e);
     declared_entity = e;

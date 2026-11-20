@@ -160,6 +160,10 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
     }
     if (!function)
         symbol_linkage(e, storage, flags);
+    /* [ext:clang_c11_thread_local] thread storage duration, C's
+       _Thread_local (accessed directly: no wrapper function) */
+    if (x.kind == entity_kind::variable && x.c11_thread_local)
+        flags |= AST_SYMBOL_FLAG_THREAD;
     s = ast_builder_symbol(c, kind, name.data(), name.size(), t, storage, flags,
                            0);
     *slot = s;
