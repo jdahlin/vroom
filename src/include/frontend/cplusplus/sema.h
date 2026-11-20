@@ -1248,6 +1248,12 @@ enum class semantic_kind : uint8_t {
     /* [ext:gnu_va_arg] __builtin_va_arg (a, T): a: the va_list (an
        lvalue); a prvalue of the node's type */
     va_arg_,
+    /* [ext:gnu_asm_statements] one operand of an asm statement (the value
+       of its expression is no result): a: the expression (an lvalue for an
+       output; an input is a prvalue, or an lvalue of an object the asm may
+       take in memory), at: the constraint's string-literal token, b: the
+       symbolic name's identifier token (0: none), value: 1 for an output */
+    gnu_asm_operand,
     /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
        under construction or destruction (this), b: its class, whose
        virtual table pointer is stored in it */
@@ -1287,6 +1293,13 @@ enum class semantic_kind : uint8_t {
     continue_statement,
     /* a: the operand, initialized as the result (0: none) */
     return_statement,
+    /* [ext:gnu_asm_statements] asm (...): at: the template's
+       string-literal token; list[first .. first + count): the outputs then
+       the inputs, gnu_asm_operand nodes; a: how many are outputs; b, c:
+       the clobbers' string-literal tokens, list[b .. b + c); d: the labels
+       of asm goto, list[d .. d + value >> 8); value & 1: volatile, & 2:
+       inline, & 4: goto, & 8: extended (a colon) */
+    gnu_asm_statement,
     /* ; */
     null_statement,
     /* a condition that declares: a: the declaration_statement, b: its
@@ -1456,6 +1469,11 @@ struct inherited_call {
     entity_index base = 0, constructor = 0;
     const owned_array<entity_index> *parameters = nullptr;
 };
+
+/* [ext:gnu_asm_statements] the characters of the ordinary string-literal at
+   token t, escape sequences decoded, appended to out (ext/gnu/asm-statement.cpp) */
+void gnu_asm_string_value(token_stream &tokens, token_index t,
+                          owned_buffer &out);
 
 class semantic_analysis
 {
@@ -2763,6 +2781,10 @@ class semantic_analysis
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
     analysis_result gnu_va_arg(SyntaxRef n, expression_meaning &m);
+    /* ---- ext/gnu/asm-statement.cpp ---- */
+    analysis_result gnu_asm_statement(GnuAsmStatement n, uint32_t &built);
+    analysis_result gnu_asm_operand(GnuAsmOperand n, bool output,
+                                    uint32_t &built);
     analysis_result clang_convertvector(SyntaxRef n, expression_meaning &m);
     bool builtin_addressof_call(SyntaxRef n);
     /* clang's type-generic bit counts: which one the function e is (1

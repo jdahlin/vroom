@@ -156,6 +156,11 @@ node_index parser::statement_alternative()
         (k == standard_keyword::default_ &&
          at(preprocessing_op_or_punc::COLON, after + 1)))
         return labeled_statement();
+    /* [ext:gnu_asm_statements] a statement; elsewhere the standard's
+       asm-declaration (a block-declaration) */
+    if (k == standard_keyword::asm_ && !after &&
+        has(extension::gnu_asm_statements))
+        return gnu_asm_statement();
     switch (k) {
     case standard_keyword::if_:
     case standard_keyword::switch_:
@@ -514,6 +519,7 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
            would take them, and report their own subclauses elsewhere) */
         [&](CoroutineReturnStatement c) { return not_supported(c); },
         [&](GnuComputedGoto c) { return not_supported(c); },
+        [&](GnuAsmStatement c) { return gnu_asm_statement(c, built); },
         [&](JumpStatement c) { return jump_statement(c, built); },
         [&](LabeledStatement c) { return labeled_statement(c, built); },
         [&](SimpleDeclaration d) {

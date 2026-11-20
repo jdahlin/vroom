@@ -136,6 +136,8 @@ struct FunctionDefinition;
 struct FunctionTryBlock;
 struct GlobalModuleFragment;
 struct GnuAsmLabel;
+struct GnuAsmOperand;
+struct GnuAsmStatement;
 struct GnuAttribute;
 struct GnuAttributeArguments;
 struct GnuAttributeList;
@@ -2411,6 +2413,7 @@ template <> inline constexpr bool syntax_converts<AttributedStatement, Statement
 template <> inline constexpr bool syntax_converts<CompoundStatement, Statement> = true;
 template <> inline constexpr bool syntax_converts<CoroutineReturnStatement, Statement> = true;
 template <> inline constexpr bool syntax_converts<ExpressionStatement, Statement> = true;
+template <> inline constexpr bool syntax_converts<GnuAsmStatement, Statement> = true;
 template <> inline constexpr bool syntax_converts<GnuComputedGoto, Statement> = true;
 template <> inline constexpr bool syntax_converts<GnuExtensionDeclaration, Statement> = true;
 template <> inline constexpr bool syntax_converts<IterationStatement, Statement> = true;
@@ -2435,6 +2438,7 @@ template <> inline constexpr bool syntax_converts<AttributedStatement, Statement
 template <> inline constexpr bool syntax_converts<CompoundStatement, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<CoroutineReturnStatement, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<ExpressionStatement, StatementSeq> = true;
+template <> inline constexpr bool syntax_converts<GnuAsmStatement, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<GnuComputedGoto, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<GnuExtensionDeclaration, StatementSeq> = true;
 template <> inline constexpr bool syntax_converts<IterationStatement, StatementSeq> = true;
@@ -2756,6 +2760,9 @@ ExplicitSpecifier function_specifier() const;
 FunctionTryBlock function_try_block() const;
 GlobalModuleFragment global_module_fragment() const;
 GnuAsmLabel gnu_asm_label() const;
+GnuAsmOperand gnu_asm_operand() const;
+GnuAsmOperand gnu_asm_operand_list() const;
+GnuAsmStatement gnu_asm_statement() const;
 GnuAttribute gnu_attribute() const;
 GnuAttributeArguments gnu_attribute_arguments() const;
 GnuAttributeList gnu_attribute_list() const;
@@ -6322,6 +6329,50 @@ struct GnuAsmLabel : SyntaxExtra<GnuAsmLabel> {
     SyntaxElement string_literal() const;
 };
 
+/* the gnu-asm-operand node */
+struct GnuAsmOperand : SyntaxExtra<GnuAsmOperand> {
+    using SyntaxExtra<GnuAsmOperand>::SyntaxExtra;
+    GnuAsmOperand() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuAsmOperand(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAsmOperand>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuAsmOperand(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAsmOperand>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
+    static bool accepts(syntax_kind k);
+    Expression expression() const;
+    SyntaxElement string_literal() const;
+};
+
+/* the gnu-asm-statement node */
+struct GnuAsmStatement : SyntaxExtra<GnuAsmStatement> {
+    using SyntaxExtra<GnuAsmStatement>::SyntaxExtra;
+    GnuAsmStatement() = default;
+    /* a node of one of its kinds, as this view: the kind is checked */
+    GnuAsmStatement(const SyntaxRef &r, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAsmStatement>(r)
+    {
+        narrow(!r || accepts(r.kind()), file, line);
+    }
+    GnuAsmStatement(const SyntaxElement &e, const char *file = __builtin_FILE(),
+        int line = __builtin_LINE())
+        : SyntaxExtra<GnuAsmStatement>(e)
+    {
+        narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
+    }
+    static bool accepts(syntax_kind k);
+    SyntaxElement identifier() const;
+    SyntaxElement string_literal() const;
+};
+
 /* the gnu-attribute node */
 struct GnuAttribute : SyntaxExtra<GnuAttribute> {
     using SyntaxExtra<GnuAttribute>::SyntaxExtra;
@@ -9660,7 +9711,7 @@ struct StandardAttributeSpecifier : SyntaxExtra<StandardAttributeSpecifier> {
     SyntaxElement identifier() const;
 };
 
-/* statement: one of alias_declaration, asm_declaration, compound_statement, coroutine_return_statement, expression_statement, gnu_computed_goto, gnu_extension_declaration, iteration_statement, jump_statement, labeled_statement, namespace_alias_definition, opaque_enum_declaration, selection_statement, simple_declaration, statement, static_assert_declaration, try_block, using_declaration, using_directive, using_enum_declaration */
+/* statement: one of alias_declaration, asm_declaration, compound_statement, coroutine_return_statement, expression_statement, gnu_asm_statement, gnu_computed_goto, gnu_extension_declaration, iteration_statement, jump_statement, labeled_statement, namespace_alias_definition, opaque_enum_declaration, selection_statement, simple_declaration, statement, static_assert_declaration, try_block, using_declaration, using_directive, using_enum_declaration */
 struct Statement : SyntaxExtra<Statement> {
     using SyntaxExtra<Statement>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -9691,7 +9742,7 @@ struct Statement : SyntaxExtra<Statement> {
     }
 };
 
-/* statement-seq: one of alias_declaration, asm_declaration, compound_statement, coroutine_return_statement, expression_statement, gnu_computed_goto, gnu_extension_declaration, iteration_statement, jump_statement, labeled_statement, namespace_alias_definition, opaque_enum_declaration, selection_statement, simple_declaration, statement, statement_seq, static_assert_declaration, try_block, using_declaration, using_directive, using_enum_declaration */
+/* statement-seq: one of alias_declaration, asm_declaration, compound_statement, coroutine_return_statement, expression_statement, gnu_asm_statement, gnu_computed_goto, gnu_extension_declaration, iteration_statement, jump_statement, labeled_statement, namespace_alias_definition, opaque_enum_declaration, selection_statement, simple_declaration, statement, statement_seq, static_assert_declaration, try_block, using_declaration, using_directive, using_enum_declaration */
 struct StatementSeq : SyntaxExtra<StatementSeq> {
     using SyntaxExtra<StatementSeq>::SyntaxExtra;
     /* a node of one of its kinds, as this view: the kind is checked */
@@ -10697,7 +10748,7 @@ template <class F> decltype(auto) AbstractDeclarator::visit(F &&f) const
 
 inline bool AdditiveExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -10753,7 +10804,7 @@ inline SyntaxElement AlignmentSpecifier::identifier() const
 
 inline bool AndExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -10809,7 +10860,7 @@ inline bool Assignment::accepts(syntax_kind k)
 
 inline bool AssignmentExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11066,7 +11117,7 @@ inline bool BaseSpecifiers::accepts(syntax_kind k)
 
 inline bool BlockDeclaration::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2080034u, 0x0u, 0x25400u, 0x8u};
+    static const uint64_t kinds[] = {0x2080034u, 0x0u, 0x25400u, 0x20u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11139,7 +11190,7 @@ inline bool Captures::accepts(syntax_kind k)
 
 inline bool CastExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11240,7 +11291,7 @@ inline bool ClangSourceLocationExpression::accepts(syntax_kind k)
 
 inline bool ClangTypeTraitArgument::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11251,7 +11302,7 @@ template <class F> decltype(auto) ClangTypeTraitArgument::visit(F &&f) const
 
 inline bool ClangTypeTraitArgumentList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11354,7 +11405,7 @@ inline bool CommaExpression::accepts(syntax_kind k)
 
 inline bool CompareExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11405,7 +11456,7 @@ inline ConstraintExpression ConceptDefinition::constraint_expression() const
 
 inline bool Condition::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x11c000000000003u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x11c000000000003u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11446,7 +11497,7 @@ inline SyntaxElement ConditionDeclaration::identifier() const
 
 inline bool ConditionalExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11462,7 +11513,7 @@ inline bool ConditionalOperation::accepts(syntax_kind k)
 
 inline bool ConstantExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11483,7 +11534,7 @@ inline bool ConstraintDisjunction::accepts(syntax_kind k)
 
 inline bool ConstraintExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11494,7 +11545,7 @@ template <class F> decltype(auto) ConstraintExpression::visit(F &&f) const
 
 inline bool ConstraintLogicalAndExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0x1ec00u};
+    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0x7b000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11505,7 +11556,7 @@ template <class F> decltype(auto) ConstraintLogicalAndExpression::visit(F &&f) c
 
 inline bool ConstraintLogicalOrExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x1ec00u};
+    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x7b000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11598,7 +11649,7 @@ inline CvQualifierSeq CvQualifierSeq::cv_qualifier_seq() const
 
 inline bool DeclSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fc00u, 0x2000000000000u, 0x4000009000000000u, 0xe1000u};
+    static const uint64_t kinds[] = {0x1fc00u, 0x2000000000000u, 0x4000009000000000u, 0x384000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11624,7 +11675,7 @@ inline SyntaxElement DeclSpecifierSeq::identifier() const
 
 inline bool Declaration::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x208007cu, 0x40000000u, 0x30e00100275c0u, 0x8u};
+    static const uint64_t kinds[] = {0x208007cu, 0x40000000u, 0x30e00100275c0u, 0x20u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11635,7 +11686,7 @@ template <class F> decltype(auto) Declaration::visit(F &&f) const
 
 inline bool DeclarationSeq::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x8u};
+    static const uint64_t kinds[] = {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x20u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11655,7 +11706,7 @@ inline SyntaxRange<Declaration> DeclarationSeq::declarations() const
 
 inline bool DeclarationStatement::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2080034u, 0x0u, 0x25400u, 0x8u};
+    static const uint64_t kinds[] = {0x2080034u, 0x0u, 0x25400u, 0x20u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -11793,7 +11844,7 @@ inline DefiningTypeSpecifierSeq DefiningTypeId::defining_type_specifier_seq() co
 
 inline bool DefiningTypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fc00u, 0x0u, 0x9000000000u, 0xe1000u};
+    static const uint64_t kinds[] = {0x1fc00u, 0x0u, 0x9000000000u, 0x384000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12141,7 +12192,7 @@ inline SyntaxElement EqualInitializer::identifier() const
 
 inline bool EqualityExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12192,7 +12243,7 @@ inline SyntaxElement ExceptionDeclaration::identifier() const
 
 inline bool ExclusiveOrExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12248,7 +12299,7 @@ inline bool ExportDeclaration::accepts(syntax_kind k)
 
 inline bool ExprOrBracedInitList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12259,7 +12310,7 @@ template <class F> decltype(auto) ExprOrBracedInitList::visit(F &&f) const
 
 inline bool Expression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12270,7 +12321,7 @@ template <class F> decltype(auto) Expression::visit(F &&f) const
 
 inline bool ExpressionList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12331,7 +12382,7 @@ inline SyntaxElement ForRangeDeclaration::identifier() const
 
 inline bool ForRangeInitializer::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12426,6 +12477,36 @@ inline SyntaxElement GnuAsmLabel::string_literal() const
     return token_of_kind(token_kind::literal);
 }
 
+inline bool GnuAsmOperand::accepts(syntax_kind k)
+{
+    return k == syntax_kind::gnu_asm_operand;
+}
+
+inline Expression GnuAsmOperand::expression() const
+{
+    return first<Expression>();
+}
+
+inline SyntaxElement GnuAsmOperand::string_literal() const
+{
+    return token_of_kind(token_kind::literal);
+}
+
+inline bool GnuAsmStatement::accepts(syntax_kind k)
+{
+    return k == syntax_kind::gnu_asm_statement;
+}
+
+inline SyntaxElement GnuAsmStatement::identifier() const
+{
+    return token_of_kind(token_kind::identifier);
+}
+
+inline SyntaxElement GnuAsmStatement::string_literal() const
+{
+    return token_of_kind(token_kind::literal);
+}
+
 inline bool GnuAttribute::accepts(syntax_kind k)
 {
     return k == syntax_kind::gnu_attribute;
@@ -12438,7 +12519,7 @@ inline GnuAttributeArguments GnuAttribute::gnu_attribute_arguments() const
 
 inline bool GnuAttributeArguments::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12515,7 +12596,7 @@ inline bool GnuDeclarator::accepts(syntax_kind k)
 
 inline bool GnuDesignation::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x0u, 0x20000000u, 0x0u, 0x200u};
+    static const uint64_t kinds[] = {0x0u, 0x20000000u, 0x0u, 0x800u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12546,7 +12627,7 @@ inline GnuDesignation GnuInitializerClauses::gnu_designation() const
 
 inline bool GnuInitializerList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x1ed70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x7b5c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12694,7 +12775,7 @@ inline IdentifierList IdentifierList::identifier_list() const
 
 inline bool InclusiveOrExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12783,7 +12864,7 @@ template <class F> decltype(auto) Initializer::visit(F &&f) const
 
 inline bool InitializerClause::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12799,7 +12880,7 @@ inline bool InitializerClauses::accepts(syntax_kind k)
 
 inline bool InitializerList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12835,7 +12916,7 @@ inline SyntaxElement Jump::identifier() const
 
 inline bool JumpStatement::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x0u, 0x0u, 0x3u, 0x80u};
+    static const uint64_t kinds[] = {0x0u, 0x0u, 0x3u, 0x200u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -12987,7 +13068,7 @@ inline SyntaxElement LiteralOperatorId::string_literal() const
 
 inline bool LogicalAndExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13003,7 +13084,7 @@ inline bool LogicalAndOperation::accepts(syntax_kind k)
 
 inline bool LogicalOrExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13051,7 +13132,7 @@ inline bool MemInitializers::accepts(syntax_kind k)
 
 inline bool MemberDeclaration::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2080038u, 0x2040000000u, 0xc0010004000u, 0x8u};
+    static const uint64_t kinds[] = {0x2080038u, 0x2040000000u, 0xc0010004000u, 0x20u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13268,7 +13349,7 @@ inline SyntaxElement ModulePartition::identifier() const
 
 inline bool MultiplicativeExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13309,7 +13390,7 @@ inline QualifiedNamespaceSpecifier NamespaceAliasDefinition::qualified_namespace
 
 inline bool NamespaceBody::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x8u};
+    static const uint64_t kinds[] = {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x20u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13775,7 +13856,7 @@ inline SyntaxElement PlaceholderTypeSpecifier::identifier() const
 
 inline bool PmExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13826,7 +13907,7 @@ inline bool PointerToMemberOperation::accepts(syntax_kind k)
 
 inline bool PostfixExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1078000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec20u};
+    static const uint64_t kinds[] = {0x1078000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b080u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13852,7 +13933,7 @@ inline TypenameSpecifier PostfixOperation::typename_specifier() const
 
 inline bool PrimaryExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec00u};
+    static const uint64_t kinds[] = {0x1038000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -13990,7 +14071,7 @@ inline SyntaxElement QualifiedNamespaceSpecifier::identifier() const
 
 inline bool RelationalExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14122,7 +14203,7 @@ inline SyntaxElement SelectionStatement::identifier() const
 
 inline bool ShiftExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14223,7 +14304,7 @@ inline SyntaxElement SimpleTypeName::identifier() const
 
 inline bool SimpleTypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x6400u, 0x0u, 0x1000000000u, 0xe1000u};
+    static const uint64_t kinds[] = {0x6400u, 0x0u, 0x1000000000u, 0x384000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14254,7 +14335,7 @@ inline SyntaxElement StandardAttributeSpecifier::identifier() const
 
 inline bool Statement::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2080034u, 0x6e80000000000000u, 0x25407u, 0x88u};
+    static const uint64_t kinds[] = {0x2080034u, 0x6e80000000000000u, 0x25407u, 0x224u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14265,7 +14346,7 @@ template <class F> decltype(auto) Statement::visit(F &&f) const
 
 inline bool StatementSeq::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x2080034u, 0x7e80000000000000u, 0x25407u, 0x88u};
+    static const uint64_t kinds[] = {0x2080034u, 0x7e80000000000000u, 0x25407u, 0x224u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14325,7 +14406,7 @@ inline ParametersAndQualifiers SuffixedDeclarator::parameters_and_qualifiers() c
 
 inline bool TemplateArgument::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14336,7 +14417,7 @@ template <class F> decltype(auto) TemplateArgument::visit(F &&f) const
 
 inline bool TemplateArgumentList::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14634,7 +14715,7 @@ inline SyntaxElement TypeRequirement::identifier() const
 
 inline bool TypeSpecifier::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x7c00u, 0x0u, 0x9000000000u, 0xe1000u};
+    static const uint64_t kinds[] = {0x7c00u, 0x0u, 0x9000000000u, 0x384000u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -14690,7 +14771,7 @@ inline SyntaxElement TypenameSpecifier::identifier() const
 
 inline bool UnaryExpression::accepts(syntax_kind k)
 {
-    static const uint64_t kinds[] = {0x20813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x1ec70u};
+    static const uint64_t kinds[] = {0x20813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x7b1c0u};
     return syntax_kind_in(k, kinds);
 }
 
@@ -15628,6 +15709,14 @@ template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
         if constexpr (syntax_converts<GnuAsmLabel, S>)
             return syntax_call<>(f, GnuAsmLabel(s.index()));
         break;
+    case syntax_kind::gnu_asm_statement:
+        if constexpr (syntax_converts<GnuAsmStatement, S>)
+            return syntax_call<Statement, StatementSeq>(f, GnuAsmStatement(s.index()));
+        break;
+    case syntax_kind::gnu_asm_operand:
+        if constexpr (syntax_converts<GnuAsmOperand, S>)
+            return syntax_call<>(f, GnuAsmOperand(s.index()));
+        break;
     case syntax_kind::gnu_declarator:
         if constexpr (syntax_converts<GnuDeclarator, S>)
             return syntax_call<>(f, GnuDeclarator(s.index()));
@@ -16253,6 +16342,21 @@ inline GlobalModuleFragment SyntaxRef::global_module_fragment() const
 inline GnuAsmLabel SyntaxRef::gnu_asm_label() const
 {
     return as<GnuAsmLabel>();
+}
+
+inline GnuAsmOperand SyntaxRef::gnu_asm_operand() const
+{
+    return as<GnuAsmOperand>();
+}
+
+inline GnuAsmOperand SyntaxRef::gnu_asm_operand_list() const
+{
+    return as<GnuAsmOperand>();
+}
+
+inline GnuAsmStatement SyntaxRef::gnu_asm_statement() const
+{
+    return as<GnuAsmStatement>();
 }
 
 inline GnuAttribute SyntaxRef::gnu_attribute() const
@@ -17315,220 +17419,222 @@ inline UsingDeclarators SyntaxRef::using_declarators() const
 /* per node kind, the kinds its productions allow as a child node
    ((unparsed) and (erroneous) anywhere) */
 static const uint64_t syntax_allowed_children[][4] = {
-    {0x208007eu, 0x40000000u, 0xf1e00100275c0u, 0x300008u}, /* translation_unit */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x300008u}, /* declaration_seq */
-    {0x18000080u, 0x1c0002038000fcu, 0x40000030801c0000u, 0x300004u}, /* simple_declaration */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* empty_declaration */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* static_assert_declaration */
-    {0x0u, 0x2000u, 0x40000000001c0000u, 0x300000u}, /* alias_declaration */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0x300000u}, /* attribute_declaration */
-    {0x1fc80u, 0x2000000000000u, 0x40000090001c0000u, 0x3e1000u}, /* decl_specifier_seq */
-    {0x7d00u, 0x0u, 0x40000090001c0000u, 0x3e1000u}, /* type_specifier_seq */
-    {0x1fe00u, 0x0u, 0x40000090001c0000u, 0x3e1000u}, /* defining_type_specifier_seq */
-    {0x4000000u, 0x0u, 0x1000000000u, 0x300000u}, /* simple_type_specifier */
-    {0x4000000u, 0x0u, 0x40000010001c0000u, 0x300000u}, /* elaborated_type_specifier */
-    {0x4040000u, 0x0u, 0x0u, 0x300000u}, /* elaborated_enum_specifier */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x31ec70u}, /* decltype_specifier */
-    {0x4000u, 0x0u, 0x800000000u, 0x300000u}, /* placeholder_type_specifier */
-    {0x0u, 0x1400000000u, 0x0u, 0x300000u}, /* class_specifier */
-    {0x1c20000u, 0x0u, 0x0u, 0x300000u}, /* enum_specifier */
-    {0x340000u, 0x0u, 0x40000000001c0000u, 0x300000u}, /* enum_head */
-    {0x4000000u, 0x0u, 0x0u, 0x300000u}, /* enum_head_name */
-    {0x340000u, 0x0u, 0x40000000001c0000u, 0x300000u}, /* opaque_enum_declaration */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* enum_key */
-    {0x100u, 0x0u, 0x0u, 0x300000u}, /* enum_base */
-    {0x1c00000u, 0x0u, 0x0u, 0x300000u}, /* enumerator_list */
-    {0xfffe0813f9000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* enumerator_definition */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0x300000u}, /* enumerator */
-    {0x1000u, 0x0u, 0x0u, 0x300000u}, /* using_enum_declaration */
-    {0x4002000u, 0x0u, 0x1000000000u, 0x300000u}, /* nested_name_specifier */
-    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0x300000u}, /* qualified_id */
-    {0x6000u, 0x0u, 0x1000000000u, 0x300000u}, /* unqualified_id */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x31ec70u}, /* primary_expression */
-    {0xfffe081ff8006400u, 0x1c000006001003u, 0x3000b000000000u, 0x3ffc70u}, /* postfix_expression */
-    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x31ec70u}, /* unary_expression */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x31ec70u}, /* noexcept_expression */
-    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* await_expression */
-    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x31ec70u}, /* yield_expression */
-    {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0x31ec70u}, /* throw_expression */
-    {0x6000000000u, 0x800000000080000u, 0x4c0000000u, 0x300000u}, /* lambda_expression */
-    {0x78000000000u, 0x0u, 0x0u, 0x300000u}, /* lambda_introducer */
-    {0x80u, 0x1e0800u, 0x40000000801c0000u, 0x300000u}, /* lambda_declarator */
-    {0x70000000000u, 0x0u, 0x0u, 0x300000u}, /* lambda_capture */
-    {0x70000000000u, 0x0u, 0x0u, 0x300000u}, /* capture_list */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* simple_capture */
-    {0x0u, 0x3800000u, 0x0u, 0x300000u}, /* init_capture */
-    {0x1300000000000u, 0x2001000u, 0x0u, 0x300000u}, /* new_expression */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x31ec70u}, /* new_placement */
-    {0xc00000000100u, 0x100u, 0x0u, 0x300000u}, /* new_type_id */
-    {0xc00000000000u, 0x100u, 0x0u, 0x300000u}, /* new_declarator */
-    {0xfffe881ff8000000u, 0x1c000000000003u, 0x40300030001c0000u, 0x31ec70u}, /* noptr_new_declarator */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x31ec70u}, /* new_initializer */
-    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* delete_expression */
-    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x31ec70u}, /* cast_expression */
-    {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* pm_expression */
-    {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* multiplicative_expression */
-    {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* additive_expression */
-    {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* shift_expression */
-    {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* compare_expression */
-    {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* relational_expression */
-    {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* equality_expression */
-    {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* and_expression */
-    {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* exclusive_or_expression */
-    {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* inclusive_or_expression */
-    {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* logical_and_expression */
-    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* logical_or_expression */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x31ec70u}, /* conditional_expression */
-    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x31ec70u}, /* assignment_expression */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x31ec70u}, /* expression */
-    {0x18000000u, 0x1c0000000000fcu, 0x3000000000u, 0x300000u}, /* init_declarator_list */
-    {0x18000000u, 0x1c0000038000f0u, 0x3080000000u, 0x300004u}, /* init_declarator */
-    {0x18000000u, 0x1c000000000ce0u, 0x4000003000000000u, 0x300002u}, /* declarator */
-    {0x18000000u, 0x1c0000000001e0u, 0x3000000000u, 0x300000u}, /* ptr_declarator */
-    {0xfffe0813f8000000u, 0x1c0000000004e0u, 0x40300030001c0000u, 0x31ec70u}, /* noptr_declarator */
-    {0x18000000u, 0x1c000000000000u, 0x3000000000u, 0x300000u}, /* declarator_id */
-    {0x4000000u, 0x200u, 0x40000000001c0000u, 0x300000u}, /* ptr_operator */
-    {0x0u, 0x200u, 0x0u, 0x300000u}, /* cv_qualifier_seq */
-    {0x0u, 0x1e0200u, 0x40000000001c0000u, 0x300000u}, /* parameters_and_qualifiers */
-    {0x0u, 0x1000u, 0x0u, 0x300000u}, /* trailing_return_type */
-    {0x100u, 0x1c100u, 0x0u, 0x300000u}, /* type_id */
-    {0x200u, 0x1c100u, 0x0u, 0x300000u}, /* defining_type_id */
-    {0x0u, 0x10c00u, 0x0u, 0x300000u}, /* abstract_declarator */
-    {0x0u, 0x18100u, 0x0u, 0x300000u}, /* ptr_abstract_declarator */
-    {0xfffe0813f8000000u, 0x1c000000018500u, 0x40300030001c0000u, 0x31ec70u}, /* noptr_abstract_declarator */
-    {0x0u, 0xc0000u, 0x0u, 0x300000u}, /* parameter_declaration_clause */
-    {0x0u, 0xc0000u, 0x0u, 0x300000u}, /* parameter_declaration_list */
-    {0xfffe081ff8000080u, 0x1c00000201c1f1u, 0x40300030001c0000u, 0x31ec70u}, /* parameter_declaration */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* noexcept_specifier */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3fffffu}, /* dynamic_exception_specification */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3fffffu}, /* type_id_list */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x31ec70u}, /* initializer */
-    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0x31ec70u}, /* brace_or_equal_initializer */
-    {0xfffe081ff8000000u, 0x1c00001e000001u, 0x30003000000000u, 0x31ed70u}, /* braced_init_list */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x31ec70u}, /* initializer_list */
-    {0x0u, 0x18000000u, 0x0u, 0x300000u}, /* designated_initializer_list */
-    {0x0u, 0x23000000u, 0x0u, 0x300000u}, /* designated_initializer_clause */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* designator */
-    {0x18000080u, 0x1c0101800000f0u, 0x40000030801c0000u, 0x300000u}, /* function_definition */
-    {0x0u, 0x800400000000000u, 0x0u, 0x300000u}, /* function_body */
-    {0x0u, 0x800400000000000u, 0x18u, 0x300000u}, /* function_try_block */
-    {0x0u, 0x200000000u, 0x0u, 0x300000u}, /* identifier_list */
-    {0x0u, 0x40800000000u, 0x40000010001c0000u, 0x300000u}, /* class_head */
-    {0x4000000u, 0x0u, 0x1000000000u, 0x300000u}, /* class_head_name */
-    {0x2080038u, 0x3040000000u, 0xe0010004000u, 0x300008u}, /* member_specification */
-    {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0x300008u}, /* member_declaration */
-    {0x18000000u, 0x1c00c0000000f0u, 0x3080000000u, 0x300000u}, /* member_declarator_list */
-    {0xfffe0813f8000000u, 0x1c0300030000f0u, 0x40300030801c0000u, 0x31ec70u}, /* member_declarator */
-    {0x0u, 0x10000000000u, 0x0u, 0x300000u}, /* virt_specifier_seq */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* pure_specifier */
-    {0x6000u, 0x380000000000u, 0x1000000000u, 0x300000u}, /* base_clause */
-    {0x2000u, 0x380000000000u, 0x1000000000u, 0x300000u}, /* base_specifier_list */
-    {0x2000u, 0x200000000000u, 0x40000010001c0000u, 0x300000u}, /* base_specifier */
-    {0x4000000u, 0x0u, 0x1000000000u, 0x300000u}, /* class_or_decltype */
-    {0x0u, 0x1800000000000u, 0x0u, 0x300000u}, /* ctor_initializer */
-    {0x0u, 0x1800000000000u, 0x0u, 0x300000u}, /* mem_initializer_list */
-    {0xfffe081ff8006000u, 0x1c200006000001u, 0x30003000000000u, 0x31ec70u}, /* mem_initializer */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* explicit_specifier */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* operator_function_id */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* literal_operator_id */
-    {0x100u, 0x20000000000000u, 0x0u, 0x300000u}, /* conversion_function_id */
-    {0x100u, 0x40000000000100u, 0x0u, 0x300000u}, /* conversion_type_id */
-    {0x0u, 0x40000000000100u, 0x0u, 0x300000u}, /* conversion_declarator */
-    {0x0u, 0x6c00000000000000u, 0x40000000001c0007u, 0x300080u}, /* statement */
-    {0x18000080u, 0x1c0000030000f0u, 0x40000030001c0000u, 0x300000u}, /* condition */
-    {0xfffe0813fa080034u, 0x6e9c000000000000u, 0x40300030001e5407u, 0x31ecf8u}, /* labeled_statement */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x31ec70u}, /* expression_statement */
-    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0x300088u}, /* compound_statement */
-    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0x300088u}, /* statement_seq */
-    {0xfffe081ffa080034u, 0x6f9c000000000003u, 0x30003000025407u, 0x31ecf8u}, /* selection_statement */
-    {0xfffe081ffa080034u, 0xef9c000002000003u, 0x30003000025407u, 0x31ecf8u}, /* iteration_statement */
-    {0x18000080u, 0x1c0002000000f0u, 0x40000030001c0000u, 0x300000u}, /* for_range_declaration */
-    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x31ec70u}, /* jump_statement */
-    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0x31ec70u}, /* coroutine_return_statement */
-    {0x0u, 0x800000000000000u, 0x18u, 0x300000u}, /* try_block */
-    {0x0u, 0x0u, 0x18u, 0x300000u}, /* handler_seq */
-    {0x0u, 0x800000000000000u, 0x20u, 0x300000u}, /* handler */
-    {0x18000100u, 0x1c00000001c1f0u, 0x40000030001c0000u, 0x300000u}, /* exception_declaration */
-    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0x300008u}, /* named_namespace_definition */
-    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0x300008u}, /* unnamed_namespace_definition */
-    {0x208007eu, 0x40000000u, 0x30e00100277c0u, 0x300008u}, /* nested_namespace_definition */
-    {0x0u, 0x0u, 0x200u, 0x300000u}, /* enclosing_namespace_specifier */
-    {0x0u, 0x0u, 0x800u, 0x300000u}, /* namespace_alias_definition */
-    {0x4000000u, 0x0u, 0x0u, 0x300000u}, /* qualified_namespace_specifier */
-    {0x4000000u, 0x0u, 0x40000000001c0000u, 0x300000u}, /* using_directive */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x300008u}, /* linkage_specification */
-    {0x0u, 0x0u, 0x4000000000018000u, 0x300000u}, /* using_declaration */
-    {0x0u, 0x0u, 0x4000000000018000u, 0x300000u}, /* using_declarator_list */
-    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0x300000u}, /* using_declarator */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0x300000u}, /* asm_declaration */
-    {0x0u, 0x0u, 0x40000000001c0000u, 0x300000u}, /* attribute_specifier_seq */
-    {0x0u, 0x0u, 0x1e00000u, 0x300000u}, /* attribute_specifier */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0x31ec70u}, /* alignment_specifier */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* attribute_using_prefix */
-    {0x0u, 0x0u, 0x1c00000u, 0x300000u}, /* attribute_list */
-    {0x0u, 0x0u, 0x3000000u, 0x300000u}, /* attribute */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* attribute_scoped_token */
-    {0x0u, 0x0u, 0xc000000u, 0x300000u}, /* attribute_argument_clause */
-    {0x0u, 0x0u, 0xc000000u, 0x300000u}, /* balanced_token_seq */
-    {0x0u, 0x0u, 0xc000000u, 0x300000u}, /* balanced_token */
-    {0x208007cu, 0x2040000000u, 0x30f00300275c0u, 0x300008u}, /* template_declaration */
-    {0x0u, 0x80000u, 0x4c0000000u, 0x300000u}, /* template_head */
-    {0x0u, 0x80000u, 0x440000000u, 0x300000u}, /* template_parameter_list */
-    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x31ec00u}, /* requires_clause */
-    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0x31ec00u}, /* constraint_logical_or_expression */
-    {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0x31ec00u}, /* constraint_logical_and_expression */
-    {0x18000000u, 0x1c000000001000u, 0x3820000000u, 0x300000u}, /* type_parameter */
-    {0xfffe0813fc000000u, 0x1c000000001000u, 0x30007000000000u, 0x31ec70u}, /* type_constraint */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x31ec70u}, /* simple_template_id */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x31ec70u}, /* template_id */
-    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0x31ec70u}, /* template_argument_list */
-    {0x4000000u, 0x0u, 0x1000000000u, 0x300000u}, /* typename_specifier */
-    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* concept_definition */
-    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0x300008u}, /* explicit_instantiation */
-    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0x300008u}, /* explicit_specialization */
-    {0x0u, 0x20000000e0400u, 0x40000010001c0000u, 0x300000u}, /* deduction_guide */
-    {0x0u, 0x0u, 0x40006000001c0000u, 0x300000u}, /* module_declaration */
-    {0x0u, 0x0u, 0x800000000000u, 0x300000u}, /* module_name */
-    {0x0u, 0x0u, 0x800000000000u, 0x300000u}, /* module_partition */
-    {0x0u, 0x0u, 0x800000000000u, 0x300000u}, /* module_name_qualifier */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x300008u}, /* export_declaration */
-    {0x0u, 0x0u, 0x40006000001c0000u, 0x300000u}, /* module_import_declaration */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x300008u}, /* global_module_fragment */
-    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0x300008u}, /* private_module_fragment */
-    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* fold_expression */
-    {0x0u, 0x0u, 0xc0000000000000u, 0x300000u}, /* requires_expression */
-    {0x0u, 0xe0000u, 0x0u, 0x300000u}, /* requirement_parameter_list */
-    {0x0u, 0x0u, 0x2f00000000000000u, 0x300000u}, /* requirement_body */
-    {0x0u, 0x0u, 0x2f00000000000000u, 0x300000u}, /* requirement_seq */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x31ec70u}, /* simple_requirement */
-    {0x4000000u, 0x0u, 0x1000000000u, 0x300000u}, /* type_requirement */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x1030003000000000u, 0x31ec70u}, /* compound_requirement */
-    {0x0u, 0x0u, 0x800000000u, 0x300000u}, /* return_type_requirement */
-    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* nested_requirement */
-    {0x0u, 0x0u, 0x8000000000000000u, 0x300001u}, /* gnu_attribute_specifier */
-    {0x0u, 0x0u, 0x8000000000000000u, 0x300001u}, /* gnu_attribute_list */
-    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0x31ec70u}, /* gnu_attribute */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* gnu_asm_label */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3fffffu}, /* gnu_declarator */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3fffffu}, /* gnu_extension_declaration */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3fffffu}, /* gnu_extension_expression */
-    {0x0u, 0x2001000u, 0x0u, 0x300000u}, /* gnu_compound_literal */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* gnu_label_address */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0x31ec70u}, /* gnu_computed_goto */
-    {0xfffe081ff8000000u, 0x1c000022000001u, 0x30003000000000u, 0x31ef70u}, /* gnu_initializer_list */
-    {0x0u, 0x20000000u, 0x0u, 0x300000u}, /* gnu_designation */
-    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0x31ec70u}, /* gnu_offsetof_expression */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x31ec70u}, /* clang_type_trait_expression */
-    {0x0u, 0x1000u, 0x0u, 0x300000u}, /* clang_type_transformation */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x31ec70u}, /* gnu_va_arg_expression */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x31ec70u}, /* clang_bit_cast_expression */
-    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0x31ec70u}, /* clang_convertvector_expression */
-    {0x0u, 0x0u, 0x0u, 0x300000u}, /* clang_source_location_expression */
-    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0x31ec70u}, /* gnu_typeof_specifier */
-    {0x0u, 0x1000u, 0x0u, 0x300000u}, /* clang_atomic_type_specifier */
-    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0x31ec70u}, /* clang_bit_int_type_specifier */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3fffffu}, /* unparsed */
-    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0x3fffffu}, /* erroneous */
+    {0x208007eu, 0x40000000u, 0xf1e00100275c0u, 0xc00020u}, /* translation_unit */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* declaration_seq */
+    {0x18000080u, 0x1c0002038000fcu, 0x40000030801c0000u, 0xc00010u}, /* simple_declaration */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* empty_declaration */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* static_assert_declaration */
+    {0x0u, 0x2000u, 0x40000000001c0000u, 0xc00000u}, /* alias_declaration */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* attribute_declaration */
+    {0x1fc80u, 0x2000000000000u, 0x40000090001c0000u, 0xf84000u}, /* decl_specifier_seq */
+    {0x7d00u, 0x0u, 0x40000090001c0000u, 0xf84000u}, /* type_specifier_seq */
+    {0x1fe00u, 0x0u, 0x40000090001c0000u, 0xf84000u}, /* defining_type_specifier_seq */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* simple_type_specifier */
+    {0x4000000u, 0x0u, 0x40000010001c0000u, 0xc00000u}, /* elaborated_type_specifier */
+    {0x4040000u, 0x0u, 0x0u, 0xc00000u}, /* elaborated_enum_specifier */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* decltype_specifier */
+    {0x4000u, 0x0u, 0x800000000u, 0xc00000u}, /* placeholder_type_specifier */
+    {0x0u, 0x1400000000u, 0x0u, 0xc00000u}, /* class_specifier */
+    {0x1c20000u, 0x0u, 0x0u, 0xc00000u}, /* enum_specifier */
+    {0x340000u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* enum_head */
+    {0x4000000u, 0x0u, 0x0u, 0xc00000u}, /* enum_head_name */
+    {0x340000u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* opaque_enum_declaration */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* enum_key */
+    {0x100u, 0x0u, 0x0u, 0xc00000u}, /* enum_base */
+    {0x1c00000u, 0x0u, 0x0u, 0xc00000u}, /* enumerator_list */
+    {0xfffe0813f9000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* enumerator_definition */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* enumerator */
+    {0x1000u, 0x0u, 0x0u, 0xc00000u}, /* using_enum_declaration */
+    {0x4002000u, 0x0u, 0x1000000000u, 0xc00000u}, /* nested_name_specifier */
+    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0xc00000u}, /* qualified_id */
+    {0x6000u, 0x0u, 0x1000000000u, 0xc00000u}, /* unqualified_id */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* primary_expression */
+    {0xfffe081ff8006400u, 0x1c000006001003u, 0x3000b000000000u, 0xfff1c0u}, /* postfix_expression */
+    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xc7b1c0u}, /* unary_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* noexcept_expression */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* await_expression */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xc7b1c0u}, /* yield_expression */
+    {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0xc7b1c0u}, /* throw_expression */
+    {0x6000000000u, 0x800000000080000u, 0x4c0000000u, 0xc00000u}, /* lambda_expression */
+    {0x78000000000u, 0x0u, 0x0u, 0xc00000u}, /* lambda_introducer */
+    {0x80u, 0x1e0800u, 0x40000000801c0000u, 0xc00000u}, /* lambda_declarator */
+    {0x70000000000u, 0x0u, 0x0u, 0xc00000u}, /* lambda_capture */
+    {0x70000000000u, 0x0u, 0x0u, 0xc00000u}, /* capture_list */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* simple_capture */
+    {0x0u, 0x3800000u, 0x0u, 0xc00000u}, /* init_capture */
+    {0x1300000000000u, 0x2001000u, 0x0u, 0xc00000u}, /* new_expression */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* new_placement */
+    {0xc00000000100u, 0x100u, 0x0u, 0xc00000u}, /* new_type_id */
+    {0xc00000000000u, 0x100u, 0x0u, 0xc00000u}, /* new_declarator */
+    {0xfffe881ff8000000u, 0x1c000000000003u, 0x40300030001c0000u, 0xc7b1c0u}, /* noptr_new_declarator */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* new_initializer */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* delete_expression */
+    {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xc7b1c0u}, /* cast_expression */
+    {0xe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* pm_expression */
+    {0x1e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* multiplicative_expression */
+    {0x3e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* additive_expression */
+    {0x7e0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* shift_expression */
+    {0xfe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* compare_expression */
+    {0x1fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* relational_expression */
+    {0x3fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* equality_expression */
+    {0x7fe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* and_expression */
+    {0xffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* exclusive_or_expression */
+    {0x1ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* inclusive_or_expression */
+    {0x3ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* logical_and_expression */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* logical_or_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* conditional_expression */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xc7b1c0u}, /* assignment_expression */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* expression */
+    {0x18000000u, 0x1c0000000000fcu, 0x3000000000u, 0xc00000u}, /* init_declarator_list */
+    {0x18000000u, 0x1c0000038000f0u, 0x3080000000u, 0xc00010u}, /* init_declarator */
+    {0x18000000u, 0x1c000000000ce0u, 0x4000003000000000u, 0xc00002u}, /* declarator */
+    {0x18000000u, 0x1c0000000001e0u, 0x3000000000u, 0xc00000u}, /* ptr_declarator */
+    {0xfffe0813f8000000u, 0x1c0000000004e0u, 0x40300030001c0000u, 0xc7b1c0u}, /* noptr_declarator */
+    {0x18000000u, 0x1c000000000000u, 0x3000000000u, 0xc00000u}, /* declarator_id */
+    {0x4000000u, 0x200u, 0x40000000001c0000u, 0xc00000u}, /* ptr_operator */
+    {0x0u, 0x200u, 0x0u, 0xc00000u}, /* cv_qualifier_seq */
+    {0x0u, 0x1e0200u, 0x40000000001c0000u, 0xc00000u}, /* parameters_and_qualifiers */
+    {0x0u, 0x1000u, 0x0u, 0xc00000u}, /* trailing_return_type */
+    {0x100u, 0x1c100u, 0x0u, 0xc00000u}, /* type_id */
+    {0x200u, 0x1c100u, 0x0u, 0xc00000u}, /* defining_type_id */
+    {0x0u, 0x10c00u, 0x0u, 0xc00000u}, /* abstract_declarator */
+    {0x0u, 0x18100u, 0x0u, 0xc00000u}, /* ptr_abstract_declarator */
+    {0xfffe0813f8000000u, 0x1c000000018500u, 0x40300030001c0000u, 0xc7b1c0u}, /* noptr_abstract_declarator */
+    {0x0u, 0xc0000u, 0x0u, 0xc00000u}, /* parameter_declaration_clause */
+    {0x0u, 0xc0000u, 0x0u, 0xc00000u}, /* parameter_declaration_list */
+    {0xfffe081ff8000080u, 0x1c00000201c1f1u, 0x40300030001c0000u, 0xc7b1c0u}, /* parameter_declaration */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* noexcept_specifier */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* dynamic_exception_specification */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* type_id_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* initializer */
+    {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xc7b1c0u}, /* brace_or_equal_initializer */
+    {0xfffe081ff8000000u, 0x1c00001e000001u, 0x30003000000000u, 0xc7b5c0u}, /* braced_init_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* initializer_list */
+    {0x0u, 0x18000000u, 0x0u, 0xc00000u}, /* designated_initializer_list */
+    {0x0u, 0x23000000u, 0x0u, 0xc00000u}, /* designated_initializer_clause */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* designator */
+    {0x18000080u, 0x1c0101800000f0u, 0x40000030801c0000u, 0xc00000u}, /* function_definition */
+    {0x0u, 0x800400000000000u, 0x0u, 0xc00000u}, /* function_body */
+    {0x0u, 0x800400000000000u, 0x18u, 0xc00000u}, /* function_try_block */
+    {0x0u, 0x200000000u, 0x0u, 0xc00000u}, /* identifier_list */
+    {0x0u, 0x40800000000u, 0x40000010001c0000u, 0xc00000u}, /* class_head */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* class_head_name */
+    {0x2080038u, 0x3040000000u, 0xe0010004000u, 0xc00020u}, /* member_specification */
+    {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0xc00020u}, /* member_declaration */
+    {0x18000000u, 0x1c00c0000000f0u, 0x3080000000u, 0xc00000u}, /* member_declarator_list */
+    {0xfffe0813f8000000u, 0x1c0300030000f0u, 0x40300030801c0000u, 0xc7b1c0u}, /* member_declarator */
+    {0x0u, 0x10000000000u, 0x0u, 0xc00000u}, /* virt_specifier_seq */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* pure_specifier */
+    {0x6000u, 0x380000000000u, 0x1000000000u, 0xc00000u}, /* base_clause */
+    {0x2000u, 0x380000000000u, 0x1000000000u, 0xc00000u}, /* base_specifier_list */
+    {0x2000u, 0x200000000000u, 0x40000010001c0000u, 0xc00000u}, /* base_specifier */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* class_or_decltype */
+    {0x0u, 0x1800000000000u, 0x0u, 0xc00000u}, /* ctor_initializer */
+    {0x0u, 0x1800000000000u, 0x0u, 0xc00000u}, /* mem_initializer_list */
+    {0xfffe081ff8006000u, 0x1c200006000001u, 0x30003000000000u, 0xc7b1c0u}, /* mem_initializer */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* explicit_specifier */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* operator_function_id */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* literal_operator_id */
+    {0x100u, 0x20000000000000u, 0x0u, 0xc00000u}, /* conversion_function_id */
+    {0x100u, 0x40000000000100u, 0x0u, 0xc00000u}, /* conversion_type_id */
+    {0x0u, 0x40000000000100u, 0x0u, 0xc00000u}, /* conversion_declarator */
+    {0x0u, 0x6c00000000000000u, 0x40000000001c0007u, 0xc00200u}, /* statement */
+    {0x18000080u, 0x1c0000030000f0u, 0x40000030001c0000u, 0xc00000u}, /* condition */
+    {0xfffe0813fa080034u, 0x6e9c000000000000u, 0x40300030001e5407u, 0xc7b3e4u}, /* labeled_statement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* expression_statement */
+    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0xc00224u}, /* compound_statement */
+    {0x2080034u, 0x7e80000000000000u, 0x25407u, 0xc00224u}, /* statement_seq */
+    {0xfffe081ffa080034u, 0x6f9c000000000003u, 0x30003000025407u, 0xc7b3e4u}, /* selection_statement */
+    {0xfffe081ffa080034u, 0xef9c000002000003u, 0x30003000025407u, 0xc7b3e4u}, /* iteration_statement */
+    {0x18000080u, 0x1c0002000000f0u, 0x40000030001c0000u, 0xc00000u}, /* for_range_declaration */
+    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0xc7b1c0u}, /* jump_statement */
+    {0xfffe081ff8000000u, 0x1c000002000003u, 0x30003000000000u, 0xc7b1c0u}, /* coroutine_return_statement */
+    {0x0u, 0x800000000000000u, 0x18u, 0xc00000u}, /* try_block */
+    {0x0u, 0x0u, 0x18u, 0xc00000u}, /* handler_seq */
+    {0x0u, 0x800000000000000u, 0x20u, 0xc00000u}, /* handler */
+    {0x18000100u, 0x1c00000001c1f0u, 0x40000030001c0000u, 0xc00000u}, /* exception_declaration */
+    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0xc00020u}, /* named_namespace_definition */
+    {0x208007eu, 0x40000000u, 0x40030e00101e75c0u, 0xc00020u}, /* unnamed_namespace_definition */
+    {0x208007eu, 0x40000000u, 0x30e00100277c0u, 0xc00020u}, /* nested_namespace_definition */
+    {0x0u, 0x0u, 0x200u, 0xc00000u}, /* enclosing_namespace_specifier */
+    {0x0u, 0x0u, 0x800u, 0xc00000u}, /* namespace_alias_definition */
+    {0x4000000u, 0x0u, 0x0u, 0xc00000u}, /* qualified_namespace_specifier */
+    {0x4000000u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* using_directive */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* linkage_specification */
+    {0x0u, 0x0u, 0x4000000000018000u, 0xc00000u}, /* using_declaration */
+    {0x0u, 0x0u, 0x4000000000018000u, 0xc00000u}, /* using_declarator_list */
+    {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0xc00000u}, /* using_declarator */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* asm_declaration */
+    {0x0u, 0x0u, 0x40000000001c0000u, 0xc00000u}, /* attribute_specifier_seq */
+    {0x0u, 0x0u, 0x1e00000u, 0xc00000u}, /* attribute_specifier */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xc7b1c0u}, /* alignment_specifier */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* attribute_using_prefix */
+    {0x0u, 0x0u, 0x1c00000u, 0xc00000u}, /* attribute_list */
+    {0x0u, 0x0u, 0x3000000u, 0xc00000u}, /* attribute */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* attribute_scoped_token */
+    {0x0u, 0x0u, 0xc000000u, 0xc00000u}, /* attribute_argument_clause */
+    {0x0u, 0x0u, 0xc000000u, 0xc00000u}, /* balanced_token_seq */
+    {0x0u, 0x0u, 0xc000000u, 0xc00000u}, /* balanced_token */
+    {0x208007cu, 0x2040000000u, 0x30f00300275c0u, 0xc00020u}, /* template_declaration */
+    {0x0u, 0x80000u, 0x4c0000000u, 0xc00000u}, /* template_head */
+    {0x0u, 0x80000u, 0x440000000u, 0xc00000u}, /* template_parameter_list */
+    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0xc7b000u}, /* requires_clause */
+    {0x1038000000u, 0x1c000000000000u, 0x30003300000000u, 0xc7b000u}, /* constraint_logical_or_expression */
+    {0x1038000000u, 0x1c000000000000u, 0x30003200000000u, 0xc7b000u}, /* constraint_logical_and_expression */
+    {0x18000000u, 0x1c000000001000u, 0x3820000000u, 0xc00000u}, /* type_parameter */
+    {0xfffe0813fc000000u, 0x1c000000001000u, 0x30007000000000u, 0xc7b1c0u}, /* type_constraint */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xc7b1c0u}, /* simple_template_id */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xc7b1c0u}, /* template_id */
+    {0xfffe0813f8000000u, 0x1c000000001000u, 0x30007000000000u, 0xc7b1c0u}, /* template_argument_list */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* typename_specifier */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* concept_definition */
+    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0xc00020u}, /* explicit_instantiation */
+    {0x208007cu, 0x2040000000u, 0x30e00100275c0u, 0xc00020u}, /* explicit_specialization */
+    {0x0u, 0x20000000e0400u, 0x40000010001c0000u, 0xc00000u}, /* deduction_guide */
+    {0x0u, 0x0u, 0x40006000001c0000u, 0xc00000u}, /* module_declaration */
+    {0x0u, 0x0u, 0x800000000000u, 0xc00000u}, /* module_name */
+    {0x0u, 0x0u, 0x800000000000u, 0xc00000u}, /* module_partition */
+    {0x0u, 0x0u, 0x800000000000u, 0xc00000u}, /* module_name_qualifier */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* export_declaration */
+    {0x0u, 0x0u, 0x40006000001c0000u, 0xc00000u}, /* module_import_declaration */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* global_module_fragment */
+    {0x208007eu, 0x40000000u, 0x30e00100275c0u, 0xc00020u}, /* private_module_fragment */
+    {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* fold_expression */
+    {0x0u, 0x0u, 0xc0000000000000u, 0xc00000u}, /* requires_expression */
+    {0x0u, 0xe0000u, 0x0u, 0xc00000u}, /* requirement_parameter_list */
+    {0x0u, 0x0u, 0x2f00000000000000u, 0xc00000u}, /* requirement_body */
+    {0x0u, 0x0u, 0x2f00000000000000u, 0xc00000u}, /* requirement_seq */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* simple_requirement */
+    {0x4000000u, 0x0u, 0x1000000000u, 0xc00000u}, /* type_requirement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x1030003000000000u, 0xc7b1c0u}, /* compound_requirement */
+    {0x0u, 0x0u, 0x800000000u, 0xc00000u}, /* return_type_requirement */
+    {0x7ffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* nested_requirement */
+    {0x0u, 0x0u, 0x8000000000000000u, 0xc00001u}, /* gnu_attribute_specifier */
+    {0x0u, 0x0u, 0x8000000000000000u, 0xc00001u}, /* gnu_attribute_list */
+    {0xfffe081ff8000000u, 0x1c000006000001u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_attribute */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* gnu_asm_label */
+    {0x0u, 0x0u, 0x0u, 0xc00008u}, /* gnu_asm_statement */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_asm_operand */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* gnu_declarator */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* gnu_extension_declaration */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* gnu_extension_expression */
+    {0x0u, 0x2001000u, 0x0u, 0xc00000u}, /* gnu_compound_literal */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* gnu_label_address */
+    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_computed_goto */
+    {0xfffe081ff8000000u, 0x1c000022000001u, 0x30003000000000u, 0xc7bdc0u}, /* gnu_initializer_list */
+    {0x0u, 0x20000000u, 0x0u, 0xc00000u}, /* gnu_designation */
+    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_offsetof_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xc7b1c0u}, /* clang_type_trait_expression */
+    {0x0u, 0x1000u, 0x0u, 0xc00000u}, /* clang_type_transformation */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_va_arg_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xc7b1c0u}, /* clang_bit_cast_expression */
+    {0xfffe081ff8000000u, 0x1c000000001001u, 0x30003000000000u, 0xc7b1c0u}, /* clang_convertvector_expression */
+    {0x0u, 0x0u, 0x0u, 0xc00000u}, /* clang_source_location_expression */
+    {0xfffe081ff8000000u, 0x1c000000001003u, 0x30003000000000u, 0xc7b1c0u}, /* gnu_typeof_specifier */
+    {0x0u, 0x1000u, 0x0u, 0xc00000u}, /* clang_atomic_type_specifier */
+    {0xfffe0813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* clang_bit_int_type_specifier */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* unparsed */
+    {0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffffffffffffu, 0xffffffu}, /* erroneous */
 };
 /* the list kinds: a child of the same kind is a list not flattened */
 static const uint64_t syntax_list_kinds[4] = {0x10000400002u, 0x1000004008040004u, 0x100000044000000u, 0x0u};

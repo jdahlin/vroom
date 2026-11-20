@@ -690,6 +690,7 @@ class c_lowering
 
     /* statements */
     uint32_t statement(uint32_t n);
+    uint32_t asm_statement(const semantic_node &n);
     void block_items(uint32_t first, uint32_t count,
                      owned_array<uint32_t> &out);
     void initialized_declaration(const semantic_node &n,

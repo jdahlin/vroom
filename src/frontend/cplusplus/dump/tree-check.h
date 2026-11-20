@@ -278,6 +278,12 @@ struct tree_checker {
         case semantic_kind::va_arg_:
             child(n, node.a, tree_sort::expression, false, "va_list");
             break;
+        case semantic_kind::gnu_asm_operand:
+            child(n, node.a, tree_sort::expression, false, "expression");
+            if (node.value && node.a && node.a < analysis.semantics.size() &&
+                analysis.semantics[node.a].category != value_category::lvalue)
+                problem(n, "an asm output is not an lvalue");
+            break;
         case semantic_kind::vtable_pointer_store:
             child(n, node.a, tree_sort::expression, false, "object address");
             prvalue(n, node.a, "object address");
@@ -376,6 +382,9 @@ struct tree_checker {
         case semantic_kind::break_statement:
         case semantic_kind::continue_statement:
         case semantic_kind::null_statement:
+            break;
+        case semantic_kind::gnu_asm_statement:
+            list(n, tree_sort::expression, "operand");
             break;
         case semantic_kind::condition_declaration:
             child(n, node.a, tree_sort::statement, false, "declaration");

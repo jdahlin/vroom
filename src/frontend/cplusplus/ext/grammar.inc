@@ -127,6 +127,34 @@ PRODUCTION(gnu_typeof, "simple-type-specifier", "gnu-typeof-specifier")
 PRODUCTION(gnu_typeof, "gnu-typeof-specifier", "typeof ( expression )")
 PRODUCTION(gnu_typeof, "gnu-typeof-specifier", "typeof ( type-id )")
 
+/* ---- GCC manual 6.47, Using Assembly Language with C ---- */
+
+/* "::" counts as two ":" (an empty section).  An operand is
+   [ symbolic-name ] constraint ( expression ); the clobbers are string
+   literals, the labels of asm goto identifiers */
+PRODUCTION(gnu_asm_statements, "statement", "gnu-asm-statement")
+PRODUCTION(gnu_asm_statements, "gnu-asm-statement", "asm gnu-asm-qualifier-seq_opt ( string-literal ) ;")
+PRODUCTION(gnu_asm_statements, "gnu-asm-statement",
+           "asm gnu-asm-qualifier-seq_opt ( string-literal : gnu-asm-operand-list_opt ) ;")
+PRODUCTION(gnu_asm_statements, "gnu-asm-statement",
+           "asm gnu-asm-qualifier-seq_opt ( string-literal : gnu-asm-operand-list_opt : gnu-asm-operand-list_opt ) ;")
+PRODUCTION(gnu_asm_statements, "gnu-asm-statement",
+           "asm gnu-asm-qualifier-seq_opt ( string-literal : gnu-asm-operand-list_opt : gnu-asm-operand-list_opt : gnu-asm-clobber-list_opt ) ;")
+PRODUCTION(gnu_asm_statements, "gnu-asm-statement",
+           "asm gnu-asm-qualifier-seq_opt ( string-literal : gnu-asm-operand-list_opt : gnu-asm-operand-list_opt : gnu-asm-clobber-list_opt : gnu-asm-label-list_opt ) ;")
+PRODUCTION(gnu_asm_statements, "gnu-asm-qualifier-seq", "gnu-asm-qualifier-seq_opt gnu-asm-qualifier")
+PRODUCTION(gnu_asm_statements, "gnu-asm-qualifier", "volatile")
+PRODUCTION(gnu_asm_statements, "gnu-asm-qualifier", "inline")
+PRODUCTION(gnu_asm_statements, "gnu-asm-qualifier", "goto")
+PRODUCTION(gnu_asm_statements, "gnu-asm-operand-list", "gnu-asm-operand")
+PRODUCTION(gnu_asm_statements, "gnu-asm-operand-list", "gnu-asm-operand-list , gnu-asm-operand")
+PRODUCTION(gnu_asm_statements, "gnu-asm-operand", "string-literal ( expression )")
+PRODUCTION(gnu_asm_statements, "gnu-asm-operand", "[ identifier ] string-literal ( expression )")
+PRODUCTION(gnu_asm_statements, "gnu-asm-clobber-list", "string-literal")
+PRODUCTION(gnu_asm_statements, "gnu-asm-clobber-list", "gnu-asm-clobber-list , string-literal")
+PRODUCTION(gnu_asm_statements, "gnu-asm-label-list", "identifier")
+PRODUCTION(gnu_asm_statements, "gnu-asm-label-list", "gnu-asm-label-list , identifier")
+
 /* ---- GCC manual 6.12, Complex Numbers ---- */
 
 PRODUCTION(gnu_complex, "simple-type-specifier", "_Complex")

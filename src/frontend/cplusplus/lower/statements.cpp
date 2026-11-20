@@ -553,6 +553,87 @@ uint32_t c_lowering::label(uint32_t identifier)
     return made.label;
 }
 
+/*
+ * [ext:gnu_asm_statements] asm (...) as C's AST_NODE_ASM: the template,
+ * the constraints and the clobbers as the strings they spell, an output
+ * as the lvalue it designates, an input read (a variable usable in a
+ * constant expression as its value, as `read` gives it).  The temporaries
+ * of the operands are the statement's own, destroyed after it.  What the
+ * C front end's asm record has no room for is refused: asm goto, and an
+ * operand that is not a scalar (a class or union object, which C's code
+ * generator cannot put in a register).
+ */
+uint32_t c_lowering::asm_statement(const semantic_node &n)
+{
+    if (n.value & 4)
+        return fail("an asm goto statement (labels as asm operands)", n.at);
+    const uint32_t *items = analysis.semantics.items(n.first);
+    const uint32_t *clobbers = analysis.semantics.items(n.b);
+    /* the strings, in one buffer: the template, then each operand's name
+       and constraint, then the clobbers */
+    owned_buffer pool;
+    owned_array<size_t> ends; /* where each string ends, from 0 */
+    ends.append(0);
+    auto written = [&](token_index t, bool characters) {
+        if (characters)
+            gnu_asm_string_value(tokens, t, pool);
+        else if (t)
+            tokens.spelling(t, pool.get());
+        ends.append(pool.size());
+    };
+    written(n.at, true);
+    for (uint32_t i = 0; i < n.count; i++) {
+        const semantic_node &o = node(items[i]);
+        written(static_cast<token_index>(o.b), false);
+        written(o.at, true);
+        const struct type &t = record(o.type);
+        if (t.kind != type_kind::fundamental && t.kind != type_kind::pointer &&
+            t.kind != type_kind::enumeration)
+            return fail("an asm operand that is not of a scalar type", o.at);
+    }
+    for (uint32_t i = 0; i < n.c; i++)
+        written(clobbers[i], true);
+    auto text = [&](size_t index) {
+        ast_builder_asm_text t;
+        t.text = pool.data() + ends[index];
+        t.length = ends[index + 1] - ends[index];
+        return t;
+    };
+    collection k = collect();
+    owned_array<ast_builder_asm_operand> operands;
+    for (uint32_t i = 0; i < n.count; i++) {
+        const semantic_node &o = node(items[i]);
+        ast_builder_asm_operand made;
+        made.name = text(1 + 2 * i);
+        if (!o.b)
+            made.name.text = nullptr;
+        made.constraint = text(2 + 2 * i);
+        /* an output is the object itself, an input the value read (an
+           lvalue stays one for the code generator to give in memory) */
+        if (o.value)
+            made.expr = object(o.a);
+        else
+            made.expr = read(o.a);
+        if (!made.expr)
+            return 0;
+        operands.append(made);
+    }
+    owned_array<ast_builder_asm_text> clobber_text;
+    for (uint32_t i = 0; i < n.c; i++)
+        clobber_text.append(text(1 + 2 * n.count + i));
+    uint32_t made = ast_builder_asm(c, text(0), n.value & 1, n.value & 2,
+                                    n.value & 8, operands.data(), n.a, n.count,
+                                    clobber_text.data(), n.c);
+    owned_array<uint32_t> before, after;
+    collected(k, before, after);
+    if (before.empty() && after.empty())
+        return made;
+    before.append(made);
+    for (uint32_t a : after)
+        before.append(a);
+    return block(before);
+}
+
 uint32_t c_lowering::statement(uint32_t index)
 {
     if (failure.what || !index)
@@ -579,6 +660,8 @@ uint32_t c_lowering::statement(uint32_t index)
     }
     case semantic_kind::null_statement:
         return c_statement(c, 0);
+    case semantic_kind::gnu_asm_statement:
+        return asm_statement(n);
     case semantic_kind::declaration_statement: {
         /* a substatement that is a declaration: [stmt.pre]/2 its own block
            scope */

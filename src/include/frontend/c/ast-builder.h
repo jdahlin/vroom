@@ -164,4 +164,25 @@ uint32_t ast_builder_label_define(cc *c, uint32_t label, uint32_t statement);
 /* AST_NODE_CASE for value, its statement s */
 uint32_t ast_builder_case(cc *c, int64_t value, uint32_t s);
 
+/* GNU asm: a string (the template, a constraint, a clobber) after its
+   escape sequences, text[0..length) */
+typedef struct ast_builder_asm_text {
+    const char *text;
+    size_t length;
+} ast_builder_asm_text;
+/* one operand: its [symbolic name] (text NULL: none), its constraint and
+   the expression's node (an lvalue for an output) */
+typedef struct ast_builder_asm_operand {
+    ast_builder_asm_text name, constraint;
+    uint32_t expr;
+} ast_builder_asm_operand;
+/* AST_NODE_ASM of an asm statement: operands[0 .. outputs) are the
+   outputs, the rest inputs; extended is false for basic asm (no colon) */
+uint32_t ast_builder_asm(cc *c, ast_builder_asm_text tmpl, bool is_volatile,
+                         bool is_inline, bool extended,
+                         const ast_builder_asm_operand *operands,
+                         uint32_t outputs, uint32_t count,
+                         const ast_builder_asm_text *clobbers,
+                         uint32_t clobber_count);
+
 #endif

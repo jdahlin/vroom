@@ -457,6 +457,59 @@ uint32_t ast_builder_label_define(cc *c, uint32_t l, uint32_t statement)
     return n;
 }
 
+/* a string of c->strs for text, its index + 1 (as the C parser's asm
+   strings are) */
+static uint32_t ast_builder_asm_string(cc *c, ast_builder_asm_text text)
+{
+    char *keep = (char *)cc_heap_allocate(c, text.length + 1);
+    uint32_t i = c->nstr++;
+
+    memcpy(keep, text.text, text.length);
+    keep[text.length] = 0;
+    c->strs[i] =
+        VCC_LITERAL(cstr, keep, (uint32_t)text.length + 1, 1, LEX_TOKEN_STRING);
+    return i + 1;
+}
+
+uint32_t ast_builder_asm(cc *c, ast_builder_asm_text tmpl, bool is_volatile,
+                         bool is_inline, bool extended,
+                         const ast_builder_asm_operand *operands,
+                         uint32_t outputs, uint32_t count,
+                         const ast_builder_asm_text *clobbers,
+                         uint32_t clobber_count)
+{
+    uint32_t ai = c->nasm++;
+    ast_asm_statement *a = &c->asms[ai];
+
+    memset(a, 0, sizeof(*a));
+    a->tmpl = ast_builder_asm_string(c, tmpl);
+    a->vol = is_volatile;
+    a->inl = is_inline;
+    a->extended = extended;
+    a->nout = outputs;
+    a->nin = count - outputs;
+    a->ops = (ast_asm_operand *)cc_heap_allocate(
+        c, (count + 1) * sizeof(ast_asm_operand));
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t name = 0;
+
+        if (operands[i].name.text)
+            name = ast_builder_identifier(c, operands[i].name.text,
+                                          operands[i].name.length);
+        a->ops[i] =
+            VCC_LITERAL(ast_asm_operand, name,
+                        ast_builder_asm_string(c, operands[i].constraint),
+                        operands[i].expr);
+    }
+    a->nclob = clobber_count;
+    a->clob =
+        (uint32_t *)cc_heap_allocate(c, (clobber_count + 1) * sizeof(uint32_t));
+    for (uint32_t i = 0; i < clobber_count; i++)
+        a->clob[i] = ast_builder_asm_string(c, clobbers[i]);
+    a->labels = (uint32_t *)cc_heap_allocate(c, sizeof(uint32_t));
+    return cc_statement_new(c, AST_NODE_ASM, 0, ai, 0, 0);
+}
+
 uint32_t ast_builder_case(cc *c, int64_t value, uint32_t s)
 {
     uint32_t n =
