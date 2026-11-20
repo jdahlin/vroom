@@ -55,7 +55,7 @@ uint32_t lexer::scan_comment(uint32_t at)
             /* a splice continues the comment on the next physical line */
             if (t.extent > 1 && p[at] == '\\')
                 diagnostics.issue(diagnostic_id::ext_multi_line_line_comment,
-                                  start);
+                                  at);
             at += t.extent;
         }
     }
