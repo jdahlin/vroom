@@ -12,6 +12,15 @@ struct Array {
     inline explicit Array(unsigned long k);
     inline ~Array();
 };
+/* an attribute between the specifiers (libc++'s _LIBCPP_HIDE_FROM_ABI) */
+struct Tagged {
+    int t;
+    inline __attribute__((abi_tag("tag"))) explicit Tagged(int v) : t(v) {}
+    explicit __attribute__((visibility("hidden"))) Tagged(long v, int)
+        : t((int)v)
+    {
+    }
+};
 inline Array::Array(unsigned long k) : n(k) {}
 inline Array::~Array() {}
 
@@ -20,6 +29,10 @@ static int run(unsigned seven)
     Day a(seven);
     Day b(7L, 1);
     Array c(3);
+    Tagged t(1);
+    Tagged u(2L, 0);
+    if (t.t + u.t != 3)
+        return 1;
     return a.d + b.d + (int)c.n - 18;
 }
 

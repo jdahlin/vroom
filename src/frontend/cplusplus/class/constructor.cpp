@@ -380,6 +380,11 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
     if (virtual_specified)
         *virtual_specified = false;
     for (SyntaxElement c : seq.elements()) {
+        /* [ext:gnu_attributes] between the specifiers (libc++'s inline
+           _LIBCPP_HIDE_FROM_ABI explicit X(...)): special_member_declarator
+           applies them */
+        if (c.is(syntax_kind::gnu_attribute_specifier))
+            continue;
         if (!c.is_token())
             return false;
         switch (c.keyword()) {
@@ -444,6 +449,16 @@ analysis_result semantic_analysis::special_member_declarator(
        _LIBCPP_HIDE_FROM_ABI) */
     for (uint32_t i = 0; i < leading_gnu_attributes(declaration); i++) {
         VTRY_SET(r, gnu_attribute_specifier(declaration[i], m));
+    }
+    /* ... and between the function-specifiers */
+    uint32_t lead = leading_gnu_attributes(declaration);
+    if (declaration.size() > lead &&
+        declaration[lead].is(syntax_kind::decl_specifier_seq)) {
+        for (SyntaxElement x : declaration[lead].elements()) {
+            if (x.is(syntax_kind::gnu_attribute_specifier)) {
+                VTRY_SET(r, gnu_attribute_specifier(x, m));
+            }
+        }
     }
     /* [dcl.fct.default]: a member function's default arguments are a
        complete-class context ([class.mem]/6): analysed with the class
