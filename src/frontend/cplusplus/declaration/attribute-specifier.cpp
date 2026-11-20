@@ -611,6 +611,10 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
                 flags |= gnu_noreturn;
                 continue;
             }
+            if (name_is(name, length, "no_unique_address")) {
+                flags |= gnu_no_unique_address;
+                continue;
+            }
             if (!attribute_without_effect(nullptr, 0, name, length))
                 return false;
             continue;

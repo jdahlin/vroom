@@ -89,3 +89,4 @@ old-using-operator	vcc: the rules of [namespace.udecl] are not implemented yet
 old-value-init	vcc: the rules of [dcl.init] are not implemented yet
 old-variable-length-array	vcc: the rules of [expr.const] are not implemented yet
 old-virtual	vcc: the rules of [dcl.fct.def.general] are not implemented yet
+no-unique-address-layout	vcc: C++ code generation does not handle a class whose layout is not C's yet

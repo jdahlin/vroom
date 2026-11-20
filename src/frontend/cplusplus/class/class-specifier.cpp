@@ -1819,6 +1819,10 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         if (named > entity_table[e].alignment)
             entity_table[e].alignment = named;
         entity_table[e].gnu_flags = m.gnu_flags & gnu_packed;
+        /* [dcl.attr.nouniqueaddr]/2: the declaration's or the
+           declarator's */
+        entity_table[e].no_unique_address =
+            ((s.gnu_flags | m.gnu_flags) & gnu_no_unique_address) != 0;
         class_members.append(e);
         entity_table[c].member_count++;
     }

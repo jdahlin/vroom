@@ -366,6 +366,10 @@ enum gnu_attribute_flag : uint32_t {
        queries (with gnu_untyped_builtin): a constant expression when their
        arguments are (query_builtin) */
     gnu_query_builtin = 2097152,
+    /* [dcl.attr.nouniqueaddr] [[no_unique_address]] (the standard's, not a
+       GCC attribute): a non-static data member that may share its bytes
+       with another subobject (entity::no_unique_address) */
+    gnu_no_unique_address = 4194304,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -603,6 +607,10 @@ struct entity {
        byte that bit is in); an unnamed one (name 0) is in the layout but
        not a member ([class.bit]/2) */
     bool bit_field = false;
+    /* a non-static data member declared [[no_unique_address]]
+       ([dcl.attr.nouniqueaddr]): potentially-overlapping
+       ([intro.object]/7), laid out by [abi:class-types] II as clang does */
+    bool no_unique_address = false;
     uint16_t bit_width = 0;
     uint64_t bit_offset = 0;
     /* a class: a union ([class.union]/1: "A union is a class defined
