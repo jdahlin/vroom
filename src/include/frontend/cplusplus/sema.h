@@ -1501,6 +1501,26 @@ struct inherited_call {
     const owned_array<entity_index> *parameters = nullptr;
 };
 
+/* [dcl.init.aggr]/3.1 and [ext:gnu_designated_initializers]: the designators
+   of the clauses of a braced-init-list.  Clause i has the designators
+   pool[of[i].first .. of[i].first + of[i].count): each a `designator` node
+   (". identifier" or "[ constant-expression ]" or "[ first ... last ]") or,
+   for GNU's obsolete "identifier :", the identifier token; none for a
+   clause without a designation */
+struct clause_designation {
+    uint32_t first = 0, count = 0;
+};
+struct designated_item {
+    /* the clause, and its designators from pool[chain_first] on */
+    uint32_t clause = 0, chain_first = 0, chain_count = 0;
+};
+struct designation_set {
+    owned_array<SyntaxElement> pool;
+    owned_array<clause_designation> of;
+    /* whether any clause has a designation */
+    bool any = false;
+};
+
 /* [ext:gnu_asm_statements] the characters of the ordinary string-literal at
    token t, escape sequences decoded, appended to out (ext/gnu/asm-statement.cpp) */
 void gnu_asm_string_value(token_stream &tokens, token_index t,
@@ -3252,11 +3272,19 @@ class semantic_analysis
        supported */
     analysis_result list_clauses(SyntaxRef list,
                                  owned_array<SyntaxElement> &clauses,
-                                 owned_array<uint32_t> *packs = nullptr);
+                                 owned_array<uint32_t> *packs = nullptr,
+                                 designation_set *designated = nullptr);
     bool initializer_names_nothing(SyntaxRef init) const;
     analysis_result gather_clauses(SyntaxRef list, SyntaxRef node,
                                    owned_array<SyntaxElement> &clauses,
-                                   owned_array<uint32_t> *packs);
+                                   owned_array<uint32_t> *packs,
+                                   designation_set *designated);
+    /* a clause with the designators chain[0 .. count) (none: count 0):
+       appended to clauses and, when designated is given, to it */
+    void append_clause(SyntaxElement clause, const SyntaxElement *chain,
+                       uint32_t count, owned_array<SyntaxElement> &clauses,
+                       owned_array<uint32_t> *packs, uint32_t pack,
+                       designation_set *designated);
     analysis_result list_initialization_of(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type &type, bool direct, initialized_value &result);
@@ -3268,6 +3296,35 @@ class semantic_analysis
     analysis_result constructor_list_initialization(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type type, bool direct, initialized_value &result);
+    /* [dcl.init.aggr]/3.1 with C99's designators ([ext:gnu_designated_
+       initializers]) */
+    analysis_result designated_list_initialization(
+        SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+        const designation_set &designations, qualified_type &type,
+        initialized_value &result);
+    analysis_result
+    designated_elements(SyntaxRef list,
+                        const owned_array<SyntaxElement> &clauses,
+                        const designation_set &designations,
+                        const owned_array<designated_item> &items,
+                        qualified_type &type, initialized_value &result);
+    /* the elements a designator selects of the aggregate target: first and
+       last (an array range) */
+    analysis_result designator_elements(
+        SyntaxRef list, SyntaxElement designator, const struct type &target,
+        const owned_array<entity_index> &members, uint64_t bound,
+        bool bound_known, uint64_t &first, uint64_t &last);
+    /* [dcl.init.aggr]/5: an element no clause initializes */
+    analysis_result omitted_element_checks(SyntaxRef list,
+                                           qualified_type element,
+                                           bool has_default);
+    analysis_result omitted_element_value(SyntaxRef list,
+                                          qualified_type element,
+                                          SyntaxRef default_initializer,
+                                          initialized_value &one);
+    void aggregate_value(SyntaxRef list, qualified_type type, constness all,
+                         const owned_array<uint32_t> &elements,
+                         initialized_value &result);
     analysis_result too_many_clauses(SyntaxRef list,
                                      const owned_array<SyntaxElement> &clauses,
                                      size_t next);
