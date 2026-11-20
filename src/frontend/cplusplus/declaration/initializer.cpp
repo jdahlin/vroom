@@ -1855,6 +1855,11 @@ analysis_result semantic_analysis::designated_elements(
             i += next - 1;
             after_nested = false;
         }
+        if (last > first && one.evaluation != constness::constant)
+            /* [ext:gnu_designated_initializers]: a range's initializer is
+               evaluated once; the list holds its node once per element, so
+               only a constant (no side effect) is the same for each */
+            return not_supported(list, "dcl.init.aggr");
         if (slots.size() <= last) {
             size_t was = slots.size();
             uint32_t *grown = slots.extend(last + 1 - was);

@@ -38,7 +38,7 @@ static int local()
 {
     int v = 3;
     S l = {.b = v, .a = v + 1, .s = "l"};
-    int a[5] = {[4] = v, [1 ... 2] = v + 1};
+    int a[5] = {[4] = v, [1 ... 2] = 4};
     N n = {.z[2] = v, .in = {.b = 8}};
     return l.a * 10000 + l.b * 1000 + a[4] * 100 + a[1] * 10 + a[2] + n.z[2] + n.in.b;
 }
