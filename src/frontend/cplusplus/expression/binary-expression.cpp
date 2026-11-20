@@ -624,6 +624,18 @@ analysis_result semantic_analysis::binary(SyntaxRef n, expression_meaning &m)
     token_index at = n[1].token();
     expression_meaning left, right;
     VTRY(r, expression(n[0], left));
+    if (type_table[left.type.unqualified()].kind == type_kind::class_type &&
+        overload_set_operand(n[2], right)) {
+        /* [over.over]/1: the name of an overload set as the right operand
+           of an operator function (a manipulator: os << endl) is resolved
+           for the parameter of the function chosen */
+        bool handled = false;
+        VTRY_SET(r, binary_operator_function(n, at, op, n[0], left, n[2], right,
+                                             handled, m));
+        if (!handled)
+            return not_supported(n, "over.over");
+        return r;
+    }
     VTRY_SET(r, expression(n[2], right));
     return binary_of(n, at, op, n[0], left, n[2], right, m);
 }

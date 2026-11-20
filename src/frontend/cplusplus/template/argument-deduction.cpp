@@ -629,6 +629,17 @@ analysis_result semantic_analysis::deduce_from_call(
            explicitly specified do not */
         if (!depends_on_parameter_from(p, specified))
             continue;
+        if (arguments[i].overload_name) {
+            /* [temp.deduct.call]/6: an overload set as the argument of a
+               parameter of function or function pointer type */
+            if (i >= fixed)
+                return not_supported(at, "temp.deduct.call");
+            VTRY(r, deduce_from_overload_set(at, p, arguments[i], values, set,
+                                             failed));
+            if (failed && *failed)
+                return analysis_result::well_formed;
+            continue;
+        }
         qualified_type a = arguments[i].type;
         const struct type ar = type_table[a.unqualified()];
         if (ar.kind == type_kind::none || ar.kind == type_kind::placeholder ||
@@ -723,6 +734,113 @@ analysis_result semantic_analysis::deduce_from_call(
     deduced.clear();
     for (const template_argument &x : values)
         deduced.append(x);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.deduct.funcaddr]/1: "Template arguments can be deduced from the type
+ * specified when taking the address of an overloaded function.  The function
+ * template's function type and the specified type are used as the types of P
+ * and A, and the deduction is done as described in [temp.deduct.type]";
+ * failed (when given) is set when deduction fails, as for a call's.
+ */
+analysis_result semantic_analysis::deduce_from_function_type(
+    SyntaxRef at, uint32_t function_template, qualified_type target,
+    owned_array<template_argument> &deduced, bool &failed)
+{
+    failed = false;
+    const struct function_template &ft =
+        function_templates[function_template - 1];
+    owned_array<template_argument> values;
+    owned_array<bool> set;
+    for (uint32_t i = 0; i < ft.parameter_count; i++) {
+        values.append(template_argument());
+        set.append(false);
+    }
+    uint32_t unknowns = deduction_unknowns;
+    if (!deduce_type(entity_table[ft.entity].type, target, values, set)) {
+        if (deduction_unknowns != unknowns)
+            return not_supported(at, "temp.deduct.type");
+        failed = true;
+        return analysis_result::well_formed;
+    }
+    for (uint32_t i = 0; i < ft.parameter_count; i++)
+        if (template_parameter_is_pack(ft.first_parameter + i) && !set[i])
+            return not_supported(at, "temp.deduct.funcaddr");
+    VTRY(r, default_template_arguments(at, function_template, values, set));
+    bool satisfied = true;
+    VTRY_SET(r, template_constraints_satisfied(function_template, values,
+                                               satisfied));
+    if (!satisfied) {
+        failed = true;
+        return analysis_result::well_formed;
+    }
+    deduced.clear();
+    for (const template_argument &x : values)
+        deduced.append(x);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.deduct.call]/6: "When P is a function type, function pointer type, or
+ * pointer-to-member-function type: If the argument is an overload set
+ * containing one or more function templates, the parameter is treated as a
+ * non-deduced context.  If the argument is an overload set (not containing
+ * function templates), trial argument deduction is attempted using each of
+ * the members of the set.  If deduction succeeds for only one of the
+ * overload set members, that member is used as the argument value for the
+ * deduction.  If deduction succeeds for more than one member of the overload
+ * set the parameter is treated as a non-deduced context."  For a P of
+ * another form, no function type is deduced from the set: deduction fails.
+ */
+analysis_result semantic_analysis::deduce_from_overload_set(
+    SyntaxRef at, qualified_type p, const expression_meaning &argument,
+    owned_array<template_argument> &values, owned_array<bool> &set,
+    bool *failed)
+{
+    qualified_type ft;
+    qualified_type referred = p;
+    const struct type &pr = type_table[p.unqualified()];
+    if (pr.kind == type_kind::lvalue_reference ||
+        pr.kind == type_kind::rvalue_reference)
+        referred = pr.operand;
+    if (!function_target(referred, ft)) {
+        if (!failed)
+            return not_supported(at, "temp.deduct.call");
+        *failed = true;
+        return analysis_result::well_formed;
+    }
+    function_set members;
+    if (!function_set_at(argument.overload_name, members))
+        return not_supported(at, "temp.deduct.call");
+    if (!members.templates.empty())
+        return analysis_result::well_formed;
+    owned_array<template_argument> success;
+    owned_array<bool> success_set;
+    uint32_t count = 0;
+    for (entity_index f : members.functions) {
+        if (entity_table[f].nonstatic_member)
+            return not_supported(at, "temp.deduct.call");
+        owned_array<template_argument> trial;
+        owned_array<bool> trial_set;
+        copy_deduction(values, set, trial, trial_set);
+        uint32_t unknowns = deduction_unknowns;
+        if (!deduce_type(ft, entity_table[f].type, trial, trial_set)) {
+            if (deduction_unknowns != unknowns)
+                return not_supported(at, "temp.deduct.type");
+            continue;
+        }
+        count++;
+        copy_deduction(trial, trial_set, success, success_set);
+    }
+    if (count == 0) {
+        if (!failed)
+            return not_supported(at, "temp.deduct.call");
+        *failed = true;
+        return analysis_result::well_formed;
+    }
+    if (count == 1)
+        copy_deduction(success, success_set, values, set);
     return analysis_result::well_formed;
 }
 
