@@ -370,6 +370,12 @@ enum gnu_attribute_flag : uint32_t {
        GCC attribute): a non-static data member that may share its bytes
        with another subobject (entity::no_unique_address) */
     gnu_no_unique_address = 4194304,
+    /* "gnu_inline: This attribute should be used with a function that is
+       also declared with the inline keyword ... In C++, this attribute does
+       not depend on extern in any way, but it still requires the inline
+       keyword to enable its special behavior": the definition is used only
+       for inlining, never emitted (glibc's __extern_inline) */
+    gnu_inline_definition = 8388608,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */

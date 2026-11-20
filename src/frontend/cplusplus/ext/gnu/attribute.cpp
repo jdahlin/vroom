@@ -191,6 +191,9 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        optimization is specified.  For functions declared inline, this
        attribute inlines the function independent of any restrictions" */
     {"always_inline", gnu_always_inline},
+    /* "gnu_inline: ... the definition is used only for inlining" (in C++
+       whether or not it is declared extern; sema.h) */
+    {"gnu_inline", gnu_inline_definition},
     /* "noreturn: ... cannot return" */
     {"noreturn", gnu_noreturn},
     /* "weak: The weak attribute causes a declaration of an external symbol
