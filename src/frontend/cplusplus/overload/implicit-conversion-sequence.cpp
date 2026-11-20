@@ -336,8 +336,8 @@ bool semantic_analysis::has_implicit_conversion_functions(entity_index c) const
  * derived-to-base) to T.  False without a candidate; with unknown set when
  * the analysis cannot tell (a conversion function template, an explicit
  * one ([over.match.copy]/1.2's last sentence: the first parameter of a copy
- * or move constructor in a direct-initialization), two candidates, which
- * [over.match.best] would rank).
+ * or move constructor in a direct-initialization), a ref-qualified one,
+ * two candidates, which [over.match.best] would rank).
  */
 bool semantic_analysis::conversion_function_to_class(
     const expression_meaning &a, qualified_type to, sequence &found,
@@ -365,7 +365,11 @@ bool semantic_analysis::conversion_function_to_class(
         }
         if (r.entity != c1 && !base_step(r.entity, c1, ambiguous) && !ambiguous)
             continue;
-        if (ambiguous || entity_table[f].explicit_ || chosen) {
+        /* a ref-qualified one: [class.copy.elision]/3's first overload
+           resolution takes the returned lvalue as an rvalue, which the
+           sequence of an argument is not told apart from */
+        if (ambiguous || entity_table[f].explicit_ || chosen ||
+            (entity_table[f].member_cv & (cv_ref_lvalue | cv_ref_rvalue))) {
             unknown = true;
             return false;
         }
