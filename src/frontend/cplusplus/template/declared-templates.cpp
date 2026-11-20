@@ -2475,9 +2475,12 @@ SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
     /* ([ext:gnu_attributes] before the declaration are not among its
        parts) */
     SyntaxTail parts(definition, leading_gnu_attributes(definition));
-    if (parts.size() != 3 || parts[1].is_token())
+    /* (a constructor or destructor has no decl-specifier-seq) */
+    size_t at = parts.size() - 2;
+    if ((parts.size() != 3 && parts.size() != 2) || parts[at].is_token() ||
+        (parts.size() == 3 && !parts[0].is(syntax_kind::decl_specifier_seq)))
         return 0;
-    auto x = parts[1];
+    auto x = parts[at];
     while (x.is(syntax_kind::ptr_declarator)) {
         auto pd = x;
         if (pd.size() != 2 || x[1].is_token())
@@ -2493,10 +2496,15 @@ SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
     /* (an operator function's name is made when the declarator is
        analysed: [over.oper]) */
     bool operator_name = operators && q[1].operator_function_id();
-    if (!operator_name && !q[1].is_identifier())
+    /* ([class.dtor]/1: ~ and the class's name) */
+    bool destructor = q[1].is(syntax_kind::unqualified_id) &&
+                      q[1].size() == 2 && q[1][1].is_identifier();
+    if (!operator_name && !destructor && !q[1].is_identifier())
         return 0;
     auto nested = q[0];
-    if (name && !operator_name)
+    if (name && destructor)
+        *name = q[1][1].token();
+    else if (name && !operator_name)
         *name = q[1].token();
     if (nested.size() != 2 || !nested[0].is(syntax_kind::simple_template_id))
         return 0;
@@ -2524,9 +2532,10 @@ analysis_result semantic_analysis::member_definition_of_template(
     entity_index outer = current_scope;
     owned_array<SyntaxRef> parameters;
     VTRY(r, template_head_parameters(n, parameters));
-    auto def = definition.function_definition();
     SyntaxTail parts(definition, leading_gnu_attributes(definition));
-    if (!def.plain() || parts.size() != 3)
+    /* (a constructor or destructor has no decl-specifier-seq) */
+    if ((parts.size() != 3 && parts.size() != 2) ||
+        !parts[parts.size() - 1].is(syntax_kind::function_body))
         return not_supported(n, "temp.mem.func");
     /* [temp.param]/12: "A default template-argument shall not be specified
        in the template-parameter-lists of the definition of a member of a
@@ -2612,6 +2621,26 @@ analysis_result semantic_analysis::member_definition_of_template(
     return result;
 }
 
+/* [class.ctor]/1, [class.dtor]/1: the constructor or destructor of the
+   specialization that a definition outside the class defines (they are not
+   found by name); 0 for any other member */
+entity_index
+semantic_analysis::defined_special_member(entity_index specialization,
+                                          const template_member_definition &o,
+                                          token_index name)
+{
+    if (tokens.identifier(name) != entity_table[specialization].name)
+        return 0;
+    entity_index d = entity_table[specialization].destructor;
+    if (d && (declared_by(d, o.definition) || declared_by(d, o.declaration)))
+        return d;
+    for (entity_index k = entity_table[specialization].first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (declared_by(k, o.definition) || declared_by(k, o.declaration))
+            return k;
+    return 0;
+}
+
 /*
  * [temp.inst]/4: "the implicit instantiation of a class template
  * specialization causes ... the implicit instantiation of the definitions
@@ -2661,11 +2690,14 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     if (r == analysis_result::well_formed) {
         token_index name = 0;
         out_of_class_member(o.definition, &name);
-        entity_index f =
-            entity_table.find(x.specialization, tokens.identifier(name));
-        if (f && entity_table[f].kind == entity_kind::function &&
-            (declared_by(f, o.definition) || declared_by(f, o.declaration)))
-            defined = f;
+        defined = defined_special_member(x.specialization, o, name);
+        if (!defined) {
+            entity_index f =
+                entity_table.find(x.specialization, tokens.identifier(name));
+            if (f && entity_table[f].kind == entity_kind::function &&
+                (declared_by(f, o.definition) || declared_by(f, o.declaration)))
+                defined = f;
+        }
         if (!defined)
             r = analysis_result::unsupported;
     }

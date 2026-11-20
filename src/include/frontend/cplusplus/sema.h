@@ -3173,7 +3173,8 @@ class semantic_analysis
     /* virtual_specified: in a class, where virtual is one of them */
     bool function_specifiers_only(SyntaxRef seq, bool &constexpr_specified,
                                   bool *virtual_specified = nullptr,
-                                  bool *explicit_specified = nullptr) const;
+                                  bool *explicit_specified = nullptr,
+                                  bool *inline_specified = nullptr) const;
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
     analysis_result special_member_body(FunctionDefinition definition,
@@ -3825,6 +3826,9 @@ class semantic_analysis
                                                   SyntaxRef inner = 0);
     analysis_result define_member_template(uint32_t member, uint32_t index,
                                            bool recorded);
+    entity_index defined_special_member(entity_index specialization,
+                                        const template_member_definition &o,
+                                        token_index name);
     analysis_result member_definition_unsupported(SyntaxRef declaration,
                                                   bool recorded);
     /* template_member_definitions[member] for the class of

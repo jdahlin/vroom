@@ -845,11 +845,13 @@ semantic_analysis::function_definition(FunctionDefinition definition)
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
         return special_member_definition(n, 0);
-    bool constexpr_specified = false;
+    bool constexpr_specified = false, inline_specified = false;
     if (!k && n.size() == 3 &&
-        function_specifiers_only(n[0], constexpr_specified))
-        /* the same, constexpr ([class.ctor]/1): a decl-specifier-seq of
-           constexpr alone has no type, so names no other function */
+        function_specifiers_only(n[0], constexpr_specified, nullptr, nullptr,
+                                 &inline_specified))
+        /* the same, constexpr or inline ([class.ctor]/1): a
+           decl-specifier-seq of those alone has no type, so names no other
+           function */
         return special_member_definition(n, 1);
     if (!n.size())
         return not_supported(n, "dcl.fct.def.general");

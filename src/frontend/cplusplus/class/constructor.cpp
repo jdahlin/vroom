@@ -358,10 +358,13 @@ bool semantic_analysis::copies_bytes(entity_index c) const
 bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
                                                  bool &constexpr_specified,
                                                  bool *virtual_specified,
-                                                 bool *explicit_specified) const
+                                                 bool *explicit_specified,
+                                                 bool *inline_specified) const
 {
     constexpr_specified = false;
-    bool virtual_seen = false, explicit_seen = false;
+    bool virtual_seen = false, explicit_seen = false, inline_seen = false;
+    if (inline_specified)
+        *inline_specified = false;
     if (explicit_specified)
         *explicit_specified = false;
     if (virtual_specified)
@@ -389,11 +392,18 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
             explicit_seen = true;
             *explicit_specified = true;
             break;
+        case standard_keyword::inline_:
+            /* [class.ctor]/1: inline, where the caller takes it */
+            if (!inline_specified || inline_seen)
+                return false;
+            inline_seen = true;
+            *inline_specified = true;
+            break;
         default:
             return false;
         }
     }
-    return constexpr_specified || virtual_seen || explicit_seen;
+    return constexpr_specified || virtual_seen || explicit_seen || inline_seen;
 }
 
 /*
@@ -1963,9 +1973,12 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
 analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
                                                              uint32_t at)
 {
-    /* a decl-specifier-seq before the declarator holds constexpr alone
-       (function_specifiers_only) */
-    bool constexpr_specified = at == 1;
+    /* a decl-specifier-seq before the declarator holds constexpr and inline
+       alone (function_specifiers_only) */
+    bool constexpr_specified = false, inline_specified = false;
+    if (at == 1)
+        function_specifiers_only(n[0], constexpr_specified, nullptr, nullptr,
+                                 &inline_specified);
     auto body = n.function_definition().function_body();
     if (n.size() != at + 2 || !body || body.function_try_block() ||
         at_block_scope() || function_state.active)
@@ -2017,6 +2030,8 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
                                    "than one definition of any function",
                                    "basic.def.odr");
     entity_table[e].defined = true;
+    if (inline_specified)
+        entity_table[e].inline_ = true;
     entity_table.add_declaration(e, n);
     last_declared = e;
     return special_member_body(n, n[at + 1].function_body());
