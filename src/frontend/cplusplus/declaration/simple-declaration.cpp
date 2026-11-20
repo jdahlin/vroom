@@ -1654,6 +1654,15 @@ analysis_result semantic_analysis::declare_with_initializer(
         point.at = m.id;
         function_state.initialized.append(point);
     }
+    /* [ext:clang_vla] clang: "jump bypasses initialization of variable
+       length array", initialized or not */
+    if (r == analysis_result::well_formed && variable_length_array(type) &&
+        entity_table[declared_entity].automatic && function_state.active) {
+        jump_point point;
+        point.scope = current_scope;
+        point.at = m.id;
+        function_state.initialized.append(point);
+    }
     if (r == analysis_result::well_formed && function_state.active &&
         entity_table[declared_entity].automatic) {
         entity_index k = element_class(entity_table[declared_entity].type);

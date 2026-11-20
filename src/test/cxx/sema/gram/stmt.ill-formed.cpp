@@ -45,3 +45,12 @@ void cond1() { if (int f() = 0) ; }
 void fp1() { void (*p)(int) = 0; p(1); p(); }
 void ex1() { extern int e; }
 void st1() { static int s = 1; static int s2 = s; }
+
+// [ext:clang_vla]: a jump into the scope of a variable length array, bypassing
+// its declaration, is ill-formed whether or not it is initialized.
+void vla_goto(int n) { goto L; int v[n]; L: v[0] = 1; }
+void vla_case(int n) { switch (n) { case 1: int v[n]; v[0] = 0; break; default: v[0] = 1; } }
+void vla_ok_block(int n) { switch (n) { case 1: { int v[n]; v[0] = 0; } break; default: break; } }
+void vla_ok_back(int n) { L: int v[n]; v[0] = 0; if (n--) goto L; }
+void vla_ok_out(int n) { { int v[n]; v[0] = 0; goto out; } out:; }
+void vla_ok_over_block(int n) { goto L; { int v[n]; v[0] = 0; } L:; }
