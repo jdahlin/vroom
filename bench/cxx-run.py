@@ -23,7 +23,7 @@ fail at some level: it is counted, not a failure, and passing at every level
 is an error (XPASS), so the fix removes its line.  old-*.cpp are the first
 C++ front end's run programs (removed in 7283c431), most of them listed there.
 """
-import importlib.util, os, re, shlex, subprocess, sys
+import hashlib, importlib.util, json, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
 
 B = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +81,20 @@ def macro_parameters():
             f'int main() {{\n    return (M({arguments})) & 255;\n}}\n')
 
 
+ORACLE = ''   # what clang's answers depend on besides the program: set in main
+
+
+def oracle_key(src, units, cxx):
+    """clang's answers (output, exit status, -O0 symbols) are a function of
+    the sources, the flags, the C run time and clang itself"""
+    h = hashlib.sha1(('cxx-run-oracle-v1 ' + ' '.join(cxx) + ORACLE).encode())
+    for path in [src] + units:
+        h.update(path.encode() + b'\0')
+        with open(path, 'rb') as f:
+            h.update(f.read())
+    return h.hexdigest()[:16]
+
+
 GENERATED = {'generated-macro-parameters': macro_parameters}
 
 
@@ -114,15 +128,29 @@ def one(job):
             objs.append(o)
         return objs, None
 
-    rc, _, err = ct.sh([ct.CL] + cxx + ['-O2', '-c', src, '-o', f'{wd}/ref.o'])
-    objs, why = others(ct.CL, ['-O2'], 'ref')
-    if rc or why:
-        return name, [('ref', 'oracle: ' + (why or ct.first_err(err.decode())))]
-    expected, why = run([f'{wd}/ref.o'] + objs, f'{wd}/ref.elf')
-    if why:
-        return name, [('ref', 'oracle ' + why)]
-    rc, _, err = ct.sh([ct.CL] + cxx + ['-O0', '-c', src, '-o', f'{wd}/ref0.o'])
-    symbols = defined(f'{wd}/ref0.o') if not rc else None
+    key = oracle_key(src, units, cxx)
+    cache = f'{OUT}/oracle/{name}.json'
+    expected = symbols = None
+    try:
+        with open(cache) as f:
+            hit = json.load(f)
+        if hit['key'] == key:
+            expected, symbols = tuple(hit['expected']), hit['symbols']
+    except (OSError, ValueError, KeyError):
+        pass
+    if expected is None:
+        rc, _, err = ct.sh([ct.CL] + cxx + ['-O2', '-c', src, '-o', f'{wd}/ref.o'])
+        objs, why = others(ct.CL, ['-O2'], 'ref')
+        if rc or why:
+            return name, [('ref', 'oracle: ' + (why or ct.first_err(err.decode())))]
+        expected, why = run([f'{wd}/ref.o'] + objs, f'{wd}/ref.elf')
+        if why:
+            return name, [('ref', 'oracle ' + why)]
+        rc, _, err = ct.sh([ct.CL] + cxx + ['-O0', '-c', src, '-o', f'{wd}/ref0.o'])
+        symbols = defined(f'{wd}/ref0.o') if not rc else None
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        with open(cache, 'w') as f:
+            json.dump({'key': key, 'expected': list(expected), 'symbols': symbols}, f)
     for level in levels:
         o, elf = f'{wd}/O{level}.o', f'{wd}/O{level}.elf'
         rc, _, err = ct.sh([VPP] + cxx + [f'-O{level}', '-c', src, '-o', o])
@@ -168,7 +196,9 @@ def main():
             pattern = a
     if not os.path.exists(VPP):
         sys.exit(f'cxx-run: no {VPP} (make -C src vcc)')
-    ct.build_rt()
+    global ORACLE
+    clang = subprocess.run([ct.CL, '--version'], capture_output=True, text=True).stdout
+    ORACLE = ct.build_rt() + clang
     names = sorted([f[:-4] for f in os.listdir(TESTS)
                     if f.endswith('.cpp') and re.search(pattern, f)] +
                    [n for n in GENERATED if re.search(pattern, n + '.cpp')])
