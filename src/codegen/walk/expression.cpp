@@ -48,6 +48,67 @@ walk_unsupported_fail(codegen_context *e, uint32_t n, const char *what)
         e, N(n)->loc, "x86-64: %s is not supported yet (PLAN-x86.md X3)", what);
 }
 
+/* what a node kind is called in a refusal (a statement kind reaching an
+   expression is a bug in the producer of the AST, not a missing feature) */
+static const char *walk_node_kind_name(unsigned op)
+{
+    static const char *const nm[AST_NODE_KIND_COUNT] = {
+        [AST_NODE_NONE] = "an empty expression",
+        [AST_NODE_NUMBER] = "an integer constant",
+        [AST_NODE_FLOAT_NUMBER] = "a floating constant",
+        [AST_NODE_BITINT_NUMBER] = "a _BitInt constant",
+        [AST_NODE_STRING] = "a string literal",
+        [AST_NODE_VARIABLE] = "a variable",
+        [AST_NODE_MEMBER] = "a member",
+        [AST_NODE_INDEX] = "an index",
+        [AST_NODE_CALL] = "a call",
+        [AST_NODE_BUILTIN] = "a builtin",
+        [AST_NODE_CAST] = "a cast",
+        [AST_NODE_UNARY] = "a unary operation",
+        [AST_NODE_ADDRESS] = "an address-of",
+        [AST_NODE_DEREFERENCE] = "a dereference",
+        [AST_NODE_PRE_INCREMENT] = "a pre-increment",
+        [AST_NODE_PRE_DECREMENT] = "a pre-decrement",
+        [AST_NODE_POST_INCREMENT] = "a post-increment",
+        [AST_NODE_POST_DECREMENT] = "a post-decrement",
+        [AST_NODE_BINARY] = "a binary operation",
+        [AST_NODE_LOGICAL_AND] = "a logical and",
+        [AST_NODE_LOGICAL_OR] = "a logical or",
+        [AST_NODE_ASSIGN] = "an assignment",
+        [AST_NODE_CONDITIONAL] = "a conditional",
+        [AST_NODE_COMMA] = "a comma expression",
+        [AST_NODE_SIZEOF_VLA] = "sizeof of a VLA",
+        [AST_NODE_STATEMENT_EXPRESSION] = "a statement expression",
+        [AST_NODE_COMPOUND_LITERAL] = "a compound literal",
+        [AST_NODE_INITIALIZER] = "an initializer list",
+        [AST_NODE_DESIGNATOR] = "a designator outside an initializer",
+        [AST_NODE_LABEL_ADDRESS] = "a label address",
+        [AST_NODE_VA_ARG] = "va_arg",
+        [AST_NODE_ZERO] = "an implicit zero value",
+        [AST_NODE_COMPLEX] = "a complex value",
+        [AST_NODE_BLOCK] = "a block statement in an expression",
+        [AST_NODE_EXPRESSION] = "an expression statement in an expression",
+        [AST_NODE_DECLARATION] = "a declaration in an expression",
+        [AST_NODE_IF] = "an if statement in an expression",
+        [AST_NODE_WHILE] = "a while statement in an expression",
+        [AST_NODE_DO] = "a do statement in an expression",
+        [AST_NODE_FOR] = "a for statement in an expression",
+        [AST_NODE_SWITCH] = "a switch statement in an expression",
+        [AST_NODE_CASE] = "a case label in an expression",
+        [AST_NODE_DEFAULT] = "a default label in an expression",
+        [AST_NODE_LABEL] = "a label in an expression",
+        [AST_NODE_GOTO] = "a goto in an expression",
+        [AST_NODE_GOTO_INDIRECT] = "a computed goto in an expression",
+        [AST_NODE_BREAK] = "a break in an expression",
+        [AST_NODE_CONTINUE] = "a continue in an expression",
+        [AST_NODE_RETURN] = "a return in an expression",
+        [AST_NODE_ASM] = "an asm statement in an expression"};
+
+    if (op < AST_NODE_KIND_COUNT && nm[op])
+        return nm[op];
+    return "this expression";
+}
+
 static void walk_scalar_check(codegen_context *e, uint32_t n,
                               ast_qualified_type t)
 {
@@ -4773,18 +4834,33 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
         d.offset -= 2 * es;
         return walk_value_from_register(WALK_LOWER(laddr)(e, &d));
     }
-    default: {
-        static const char *const nm[AST_NODE_KIND_COUNT] = {
-            [AST_NODE_SIZEOF_VLA] = "sizeof of a VLA",
-            [AST_NODE_COMPOUND_LITERAL] = "a compound literal",
-            [AST_NODE_INITIALIZER] = "an initializer list",
-            [AST_NODE_LABEL_ADDRESS] = "a label address",
-            [AST_NODE_VA_ARG] = "va_arg",
-            [AST_NODE_COMPLEX] = "a complex value",
-            [AST_NODE_MEMBER] = "a member"};
+    case AST_NODE_ZERO:
+        /* a zero value of its type: a scalar's constant, else a zeroed temporary object */
+        if (codegen_type_is_float(c, x->ty))
+            return walk_float_constant(e, x->ty, 0.0, 0);
+        if (codegen_type_is_bitint_big(c, x->ty))
+            walk_unsupported_fail(e, n, "a zero _BitInt wider than 64 bits");
+        if (!walk_type_is_in_memory(e, x->ty) &&
+            !codegen_type_is_record(c, x->ty) &&
+            !codegen_type_is_array(c, x->ty))
+            return walk_value_constant(c, 0, x->ty);
+        /* fall through */
+    case AST_NODE_INITIALIZER: {
+        /* a braced initializer used as a value (a temporary, an argument, an
+           assignment's source): built in a temporary object of its type,
+           and the value is that object, as a compound literal's */
+        uint64_t size = codegen_type_size(c, x->ty);
+        uint32_t align = codegen_type_alignment(c, x->ty);
+        codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
+                            .align = align,
+                            .offset =
+                                walk_slot_temporary(e, size ? size : 1, align)};
 
-        walk_unsupported_fail(e, n, nm[x->op] ? nm[x->op] : "this expression");
+        walk_initializer_emit(e, &l, x->ty, n);
+        return walk_lvalue_load(e, &l, x->ty);
     }
+    default:
+        walk_unsupported_fail(e, n, walk_node_kind_name(x->op));
     }
 }
 

@@ -89,6 +89,7 @@
 #undef walk_lvalue_store_memory
 #undef walk_lvalue_store_register
 #undef walk_memory_call_inline
+#undef walk_node_kind_name
 #undef walk_operation_type
 #undef walk_operation_width
 #undef walk_operator_is_comparison

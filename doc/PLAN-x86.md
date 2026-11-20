@@ -1361,3 +1361,20 @@ runs safely on x86-64 CPUs without SSE4.2.
 Verified: unity build; `vcc-x86.py -j 6 x86_crc32` with assembly and direct
 objects (O0/O2/O3), also `VCC_VIR=bl`; arm64 `vcc-ctests.py -j 6 --suite vcc
 x86_crc32`: each 1/1 pass. No compiler performance change.
+
+### X3 (2026-11-20): braced initializers as values (C++)
+The C++ front end lowers a braced initializer or a value-initialized object
+used as a value (a temporary, an argument, an assignment source, a
+conditional's arm, a result) to AST_NODE_INITIALIZER or AST_NODE_ZERO,
+which C's front end only produces as a declaration's initializer. The walker
+(and arm64's own gen) builds the object in a temporary frame slot with the
+declaration's initialization code and returns it as a compound literal's value;
+a scalar ZERO is the constant. The walker refusals name every node kind now.
+Self-build of vcc as C++ (stage-1 vpp, x86-64, this branch): failed objects
+6 -> 4 (the as unity TU and lower/definitions.cpp compile; the rest is the
+front end: designators, list-initialization). Test
+src/test/cxx/run/braced-initializer-values.cpp (cxx-run.py, -O0..3 on arm64;
+on x86-64 by hand, same exit status as clang++ at -O0..3: vpp
+--target=x86_64-linux-gnu -x c++ -std=gnu++20 -fno-exceptions -fno-rtti
+-nostdinc++ -O$N -c T.cpp, linked with clang++ -no-pie). bench/vcc-x86.py: 2147/2148,
+the one failure (inline ipa-pr92497-1) fails the same with main.

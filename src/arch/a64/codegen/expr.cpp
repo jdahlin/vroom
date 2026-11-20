@@ -1600,9 +1600,23 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
     case AST_NODE_VA_ARG:
         return va_arg_(e, x);
     case AST_NODE_ZERO:
-        return codegen_type_is_bitint_big(c, x->ty)
-                   ? a64_bigconst(e, x->ty, NULL, 0)
-                   : codegen_value_constant(0);
+        if (!codegen_type_is_aggregate(c, x->ty))
+            return codegen_type_is_bitint_big(c, x->ty)
+                       ? a64_bigconst(e, x->ty, NULL, 0)
+                       : codegen_value_constant(0);
+        __attribute__((fallthrough));
+    case AST_NODE_INITIALIZER: {
+        /* a braced initializer (or an aggregate's zero) used as a value: built
+           in a temporary object of its type, which is the value (its address) */
+        codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
+                            .align = codegen_type_alignment(c, x->ty),
+                            .offset = a64_frame_slot_allocate(
+                                e, codegen_type_size(c, x->ty),
+                                codegen_type_alignment(c, x->ty))};
+
+        gen_init_local(e, &d, x->ty, n);
+        return load_free(e, &d, x->ty);
+    }
     case AST_NODE_COMPLEX: { /* a _Complex value: both parts into a temporary, its address */
         ast_qualified_type et = c->tags[T(c, x->ty)->aux].f[0].ty;
         uint64_t es = codegen_type_size(c, et);
