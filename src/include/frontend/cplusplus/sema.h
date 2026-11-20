@@ -3018,9 +3018,16 @@ class semantic_analysis
                                     bool list, initialized_value &result);
     analysis_result list_initialization(SyntaxRef list, qualified_type &type,
                                         bool direct, initialized_value &result);
-    /* the initializer-clauses of the braced-init-list list */
+    /* the initializer-clauses of the braced-init-list list; with packs, a
+       pack expansion is its pattern once per element, packs[i] the element
+       of clauses[i] (no_expansion for another clause), else it is not
+       supported */
     analysis_result list_clauses(SyntaxRef list,
-                                 owned_array<SyntaxElement> &clauses);
+                                 owned_array<SyntaxElement> &clauses,
+                                 owned_array<uint32_t> *packs = nullptr);
+    analysis_result gather_clauses(SyntaxRef list, SyntaxRef node,
+                                   owned_array<SyntaxElement> &clauses,
+                                   owned_array<uint32_t> *packs);
     analysis_result list_initialization_of(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type &type, bool direct, initialized_value &result);
@@ -3043,6 +3050,10 @@ class semantic_analysis
                                       const owned_array<SyntaxElement> &clauses,
                                       size_t &next, qualified_type element,
                                       initialized_value &one);
+    analysis_result aggregate_element_clause(
+        SyntaxRef list, const owned_array<SyntaxElement> &clauses, size_t &next,
+        qualified_type element, initialized_value &one, SyntaxElement clause,
+        SyntaxRef at);
     analysis_result string_initialization(SyntaxRef at,
                                           const expression_meaning &string,
                                           qualified_type &type);
@@ -4116,6 +4127,11 @@ class semantic_analysis
     owned_array<entity_index> pack_elements;
     bool expanding = false;
     uint32_t expansion_element = 0;
+    /* [dcl.init.aggr]/4.2: for the clauses of the list being aggregate
+       initialized, the element of the pack each one expands (a clause that
+       is no pack expansion's pattern: no_expansion), or null */
+    static constexpr uint32_t no_expansion = 0xffffffffu;
+    const owned_array<uint32_t> *clause_packs = nullptr;
     bool bound_pack_is_dependent(entity_index e) const;
     entity_index make_bound_pack(entity_index scope, uint32_t name,
                                  const entity_index *elements, uint32_t count);

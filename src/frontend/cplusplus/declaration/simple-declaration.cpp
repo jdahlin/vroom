@@ -1202,8 +1202,7 @@ analysis_result semantic_analysis::declare_with_initializer(
                                        "a constexpr object shall have "
                                        "literal type",
                                        "dcl.constexpr");
-        if (record.kind == type_kind::enumeration ||
-            record.kind == type_kind::none)
+        if (record.kind == type_kind::none)
             return not_supported(declaration, "basic.types");
         /* an object of class type default-initialized: its default
            constructor ([dcl.init]/7.1), which the evaluator does not run
@@ -1464,8 +1463,11 @@ analysis_result semantic_analysis::declare_with_initializer(
         qualified_type element = type;
         while (type_table[element.unqualified()].kind == type_kind::array)
             element = type_table[element.unqualified()].operand;
+        /* (an array: the evaluator runs its initialization element by
+           element, whatever the element type) */
         bool of_class =
-            type_table[element.unqualified()].kind == type_kind::class_type;
+            type_table[element.unqualified()].kind == type_kind::class_type ||
+            !(element == type);
         if (!value.node) {
             if (s.constexpr_)
                 return not_supported(declaration, "expr.const");

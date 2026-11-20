@@ -879,36 +879,80 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
                                        bool direct, initialized_value &result)
 {
     owned_array<SyntaxElement> clauses;
-    VTRY(gathered, list_clauses(list, clauses));
-    return list_initialization_of(list, clauses, type, direct, result);
+    owned_array<uint32_t> packs;
+    VTRY(gathered, list_clauses(list, clauses, &packs));
+    /* the expansions are known to the array path only: another type's
+       clauses are analysed without them */
+    bool expanded = false;
+    for (size_t i = 0; i < packs.size(); i++)
+        if (packs[i] != no_expansion)
+            expanded = true;
+    if (expanded && type_table[type.unqualified()].kind != type_kind::array)
+        return not_supported(list, "temp.variadic");
+    const owned_array<uint32_t> *saved = clause_packs;
+    clause_packs = nullptr;
+    if (expanded)
+        clause_packs = &packs;
+    analysis_result r =
+        list_initialization_of(list, clauses, type, direct, result);
+    clause_packs = saved;
+    return r;
 }
 
+/*
+ * The initializer-clauses among the children of node, in order.  A clause
+ * followed by an ellipsis is [temp.variadic]/7 a pack expansion: its
+ * pattern once for each element of the pack(s) it expands ([dcl.init.aggr]/
+ * 4.2: the clauses of the list are those after expansion).
+ */
 analysis_result
-semantic_analysis::list_clauses(SyntaxRef list,
-                                owned_array<SyntaxElement> &clauses)
+semantic_analysis::gather_clauses(SyntaxRef list, SyntaxRef node,
+                                  owned_array<SyntaxElement> &clauses,
+                                  owned_array<uint32_t> *packs)
 {
-    for (auto c : list.elements()) {
+    size_t n = node.size();
+    for (size_t k = 0; k < n; k++) {
+        SyntaxElement c = node[k];
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE,
                  preprocessing_op_or_punc::RIGHT_BRACE,
-                 preprocessing_op_or_punc::COMMA))
+                 preprocessing_op_or_punc::COMMA,
+                 preprocessing_op_or_punc::ELLIPSIS))
             continue;
         if (c.is(syntax_kind::initializer_list)) {
-            for (auto item : c.elements()) {
-                if (item.is(preprocessing_op_or_punc::COMMA))
-                    continue;
-                if (item.is(preprocessing_op_or_punc::ELLIPSIS))
-                    return not_supported(list, "temp.variadic");
-                clauses.append(item);
-            }
+            VTRY(r, gather_clauses(list, c.index(), clauses, packs));
             continue;
         }
         if (c.is_node() && !syntax_kind_is_expression(c.kind()) &&
             !c.is(syntax_kind::braced_init_list))
             /* a designated-initializer-list */
             return not_supported(list, "dcl.init.aggr");
-        clauses.append(c);
+        uint32_t count = 1;
+        bool expansion =
+            k + 1 < n && node[k + 1].is(preprocessing_op_or_punc::ELLIPSIS);
+        if (expansion) {
+            if (!packs || c.is_token() ||
+                !expansion_count(c.first_token(), c.end_token(), count))
+                return not_supported(list, "temp.variadic");
+        }
+        for (uint32_t i = 0; i < count; i++) {
+            clauses.append(c);
+            if (!packs)
+                continue;
+            if (expansion)
+                packs->append(i);
+            else
+                packs->append(no_expansion);
+        }
     }
     return analysis_result::well_formed;
+}
+
+analysis_result
+semantic_analysis::list_clauses(SyntaxRef list,
+                                owned_array<SyntaxElement> &clauses,
+                                owned_array<uint32_t> *packs)
+{
+    return gather_clauses(list, list, clauses, packs);
 }
 
 analysis_result semantic_analysis::list_initialization_of(
@@ -1401,6 +1445,27 @@ analysis_result semantic_analysis::aggregate_element(
     SyntaxRef at = list;
     if (!clause.is_token())
         at = clause.index();
+    /* [temp.variadic]/7: the clause of a pack expansion is its pattern for
+       one element */
+    bool saved_expanding = expanding;
+    uint32_t saved_element = expansion_element;
+    if (clause_packs && next < clause_packs->size() &&
+        (*clause_packs)[next] != no_expansion) {
+        expanding = true;
+        expansion_element = (*clause_packs)[next];
+    }
+    analysis_result r =
+        aggregate_element_clause(list, clauses, next, element, one, clause, at);
+    expanding = saved_expanding;
+    expansion_element = saved_element;
+    return r;
+}
+
+analysis_result semantic_analysis::aggregate_element_clause(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses, size_t &next,
+    qualified_type element, initialized_value &one, SyntaxElement clause,
+    SyntaxRef at)
+{
     /* a copy: analysing the clause adds types, which may move
        type_table's */
     const struct type record = type_table[element.unqualified()];
