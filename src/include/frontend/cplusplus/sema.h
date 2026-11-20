@@ -3342,6 +3342,13 @@ class semantic_analysis
                              owned_array<expression_meaning> &out);
     /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
+    /* the tokens of the member-specification of the class being defined
+       (class_specifier), 0 outside one */
+    token_index defining_members_first = 0, defining_members_end = 0;
+    /* [class.mem]/6: whether a name the noexcept-specifier n of a member
+       function uses may be declared later in the class, where a complete-
+       class context would find it */
+    bool noexcept_names_later_member(SyntaxRef n);
     /* [ext:gnu_attributes] the alignment aligned attributes after a
        class-specifier's closing brace ask of the class the
        decl-specifier-seq defines (GCC: they apply to the type), 0 if none;

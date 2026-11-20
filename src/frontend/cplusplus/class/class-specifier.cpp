@@ -548,6 +548,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     owned_array<SyntaxRef> bodies;
     size_t nested_start = nested_bodies.size();
     auto spec = n.class_specifier().member_specification();
+    token_index outer_members_first = defining_members_first;
+    token_index outer_members_end = defining_members_end;
+    defining_members_first = spec.first_token();
+    defining_members_end = spec.end_token();
     for (auto member : spec.elements()) {
         if (member.is_token()) {
             switch (member.keyword()) {
@@ -578,6 +582,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         result =
             worse(result, member_declaration(c, declaration, access, bodies));
     }
+    defining_members_first = outer_members_first;
+    defining_members_end = outer_members_end;
 
     /* [class.mem]/7: complete at the closing }, where its bases and
        members get their offsets and the class its size

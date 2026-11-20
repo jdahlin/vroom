@@ -129,10 +129,11 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
         return analysis_result::well_formed;
     if (n.size() != 4)
         return not_supported(n, "except.spec");
-    if (member)
+    if (member && noexcept_names_later_member(n))
         /* [class.mem]/6: a member function's noexcept-specifier is a
            complete-class context, analysed with the class complete: not
-           deferred yet */
+           deferred yet, so a name that a later member could declare is
+           not decided */
         return not_supported(n, "except.spec");
     bool constant = false, value = false;
     VTRY(r, bool_constant_expression(n, n[2], constant, value));
@@ -147,6 +148,51 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
 }
 
 /*
+ * [class.mem]/6: the noexcept-specifier of a member function is a
+ * complete-class context: a name in it is found among all the members of
+ * the class.  It is analysed where it is written, so it is decided only
+ * when no identifier it uses is also written elsewhere in the class
+ * (where a member of that name might be declared), unless the name is a
+ * template parameter's or another scope's that [temp.local]/6 keeps
+ * members from redeclaring.
+ */
+bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
+{
+    token_index first = n.first_token(), end = n.end_token();
+    for (token_index t = first; t < end; t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        uint32_t name = tokens.identifier(t);
+        bool elsewhere = false;
+        for (token_index u = defining_members_first;
+             !elsewhere && u < defining_members_end; u++)
+            if ((u < first || u >= end) &&
+                tokens[u].kind == token_kind::identifier &&
+                tokens.identifier(u) == name)
+                elsewhere = true;
+        if (!elsewhere)
+            continue;
+        lookup_result found = lookup_unqualified(name, lookup_filter::any);
+        if (!found.found_in || is_namespace(found.found_in))
+            return true;
+        if (found.found_in != defining_class)
+            continue;
+        /* a class scope binds the arguments of a specialization: those
+           have no declaration among the members */
+        if (!found.entity)
+            return true;
+        uint32_t d = entity_table[found.entity].first_declaration;
+        if (d &&
+            entity_table.declaration(d).node.first_token() >=
+                defining_members_first &&
+            entity_table.declaration(d).node.first_token() <
+                defining_members_end)
+            return true;
+    }
+    return false;
+}
+
+/*
  * [basic.scope.param]/1: a scope of its own, made current, where the
  * parameters of function_parameters are bound (a pack's elements as one
  * bound pack): what a declarator names after its
@@ -155,6 +201,10 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
  */
 void semantic_analysis::open_parameter_scope()
 {
+    /* (a member function's declarator, the class being defined: the
+       class's names and its template's parameters are found past it) */
+    if (is_namespace(current_scope) && defining_class)
+        current_scope = defining_class;
     entity_index scope = open_scope(0, true);
     owned_array<entity_index> pack;
     uint32_t pack_name = 0;
@@ -203,7 +253,7 @@ analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
     }
     if (member && in_member_template_declarator == 2)
         member = false;
-    if (n.size() != 4 || member)
+    if (n.size() != 4)
         return noexcept_specifier(n, member, non_throwing);
     entity_index outer = current_scope;
     open_parameter_scope();

@@ -58,7 +58,6 @@ old-member-pointers	vcc: the rules of [temp.res] are not implemented yet
 old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
 old-multiple-polymorphic-bases	link: undefined symbol: operator new(unsigned long)
 old-nested-lists	vcc: the rules of [class.mem] are not implemented yet
-old-nothrow-traits	vcc: the rules of [except.spec] are not implemented yet
 old-nullptr-args	vcc: the rules of [temp.deduct] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
 old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
