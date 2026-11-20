@@ -116,6 +116,42 @@ analysis_result semantic_analysis::deduced_type_supported(SyntaxRef at,
 }
 
 /*
+ * [over.load]/3: functions of one name whose parameter-type-lists differ are
+ * different functions, so a declaration with a placeholder return type of
+ * parameters no function of the name has redeclares none ([dcl.spec.auto]/13
+ * is not analysed for redeclarations).  PRIOR is what the name finds: a
+ * function and its overloads, or the name a function template holds (the
+ * non-template functions of the name are template_name_functions,
+ * [temp.over]/1).  Anything else, or a function of the same parameters, is
+ * not decided here.
+ */
+bool semantic_analysis::other_function_of_placeholder(entity_index prior,
+                                                      entity_index scope,
+                                                      qualified_type type) const
+{
+    const entity &first = entity_table[prior];
+    if (first.kind == entity_kind::function) {
+        for (entity_index o = prior; o; o = entity_table[o].next_overload)
+            if (entity_table[o].kind != entity_kind::function ||
+                same_parameters(type_table, entity_table[o].type.unqualified(),
+                                type.unqualified()))
+                return false;
+        return true;
+    }
+    if (first.kind == entity_kind::none && first.held_by_template &&
+        first.enclosing == scope) {
+        for (const template_name_function &x : template_name_functions)
+            if (x.name == prior &&
+                same_parameters(type_table,
+                                entity_table[x.function].type.unqualified(),
+                                type.unqualified()))
+                return false;
+        return true;
+    }
+    return false;
+}
+
+/*
  * [dcl.spec.auto]/4: "The placeholder type shall appear as one of the
  * decl-specifiers in the decl-specifier-seq and the decl-specifier-seq
  * shall be followed by one or more declarators, each of which shall be
@@ -174,7 +210,10 @@ analysis_result semantic_analysis::placeholder_declaration(
          /* (a member function template's: its name is the
                            template's, held by the class,
                            member-template.cpp) */
-         (m.operator_function && !in_member_template_declarator) ||
+         /* (an allocation function's return type is checked by
+            allocation_function_declaration) */
+         (m.operator_function && !in_member_template_declarator &&
+          m.allocation != allocation_function::none) ||
          m.literal_operator || m.template_id || m.destructor))
         return not_supported(declaration, "dcl.spec.auto");
     if (tokens[m.id].kind != token_kind::identifier)
@@ -192,7 +231,8 @@ analysis_result semantic_analysis::placeholder_declaration(
                 return not_supported(declaration, "dcl.spec.auto");
         return analysis_result::well_formed;
     }
-    if (prior)
+    if (prior && (kind != entity_kind::function ||
+                  !other_function_of_placeholder(prior, scope, type)))
         return not_supported(declaration, "dcl.spec.auto");
     if (kind == entity_kind::variable && !initialized)
         return ill_formed_at_token(m.id,

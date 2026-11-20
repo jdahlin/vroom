@@ -2263,6 +2263,9 @@ class semantic_analysis
                                             qualified_type type,
                                             entity_kind kind, bool placeholder,
                                             bool initialized);
+    /* [over.load]/3: no function of the name has TYPE's parameters */
+    bool other_function_of_placeholder(entity_index prior, entity_index scope,
+                                       qualified_type type) const;
     /* [dcl.spec.auto]/1: the placeholder type of auto or decltype(auto),
        of type-constraint C auto when named_concept is C's entity */
     qualified_type placeholder_type(bool decltype_auto,
