@@ -986,6 +986,7 @@ analysis_result semantic_analysis::template_callee_parts(
         qualified = true;
     }
     owned_array<SyntaxElement> written;
+    owned_array<bool> expansion;
     if (id.is_token()) {
         if (!qualified || tokens[id.token()].kind != token_kind::identifier)
             return analysis_result::well_formed;
@@ -995,9 +996,29 @@ analysis_result semantic_analysis::template_callee_parts(
             return analysis_result::well_formed;
         name = id[0].token();
         for (uint32_t i = 2; i + 1 < id.size(); i++) {
-            for (auto a : id[i].items(syntax_kind::template_argument_list))
-                written.append(a);
+            /* [temp.variadic]/5: an item may be followed by an ellipsis
+               (a lone argument is the template-id's own child) */
+            if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
+                if (written.empty() || expansion.back())
+                    return not_supported(id.index(), "temp.variadic");
+                expansion.back() = true;
+            } else if (id[i].is(syntax_kind::template_argument_list)) {
+                if (!expansion_list(id[i], written, expansion))
+                    return not_supported(id.index(), "temp.variadic");
+            } else {
+                written.append(id[i]);
+                expansion.append(false);
+            }
         }
+        /* a type-id that ends in the ellipsis: its pattern the type-id
+           before it */
+        for (size_t w = 0; w < written.size(); w++)
+            if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
+                written[w][1].is(preprocessing_op_or_punc::ELLIPSIS)) {
+                if (expansion[w])
+                    return not_supported(id.index(), "temp.variadic");
+                expansion[w] = true;
+            }
     } else {
         return analysis_result::well_formed;
     }
@@ -1023,6 +1044,10 @@ analysis_result semantic_analysis::template_callee_parts(
         function_template_overloads(
             function_templates[function_template - 1].name, group);
         if (group.size() > 1) {
+            /* (their expansion is not analysed) */
+            for (bool x : expansion)
+                if (x)
+                    return not_supported(id.index(), "temp.variadic");
             overloaded_written.clear();
             for (SyntaxElement a : written)
                 overloaded_written.append(a);
@@ -1033,15 +1058,47 @@ analysis_result semantic_analysis::template_callee_parts(
     /* [temp.arg.explicit]/6: "The template argument list shall not
        specify more template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
-    for (SyntaxElement a : written) {
-        uint32_t position = explicit_argument_position(
-            function_template, static_cast<uint32_t>(specified.size()));
-        if (position == UINT32_MAX)
-            return not_supported(id.index(), "temp.arg.explicit");
-        template_argument x;
-        VTRY(r, template_argument_for(id.index(), function_template, position,
-                                      a, specified.data(), x));
-        specified.append(x);
+    for (size_t w = 0; w < written.size(); w++) {
+        SyntaxElement a = written[w];
+        /* [temp.variadic]/5: a pack expansion's pattern, once per element
+           of the packs it names ([temp.arg.explicit]/9: the elements
+           specify the trailing pack's first ones); a template's own pack
+           expansion is not analysed */
+        uint32_t times = 1;
+        if (expansion[w]) {
+            token_index first = first_token(a);
+            token_index end = first + 1;
+            if (!a.is_token())
+                end = a.end_token();
+            if (end > first + 1 && SyntaxElement::from_token(end - 1).is(
+                                       preprocessing_op_or_punc::ELLIPSIS))
+                end--;
+            if (!expansion_count(first, end, times))
+                return not_supported(id.index(), "temp.variadic");
+        }
+        for (uint32_t k = 0; k < times; k++) {
+            uint32_t position = explicit_argument_position(
+                function_template, static_cast<uint32_t>(specified.size()));
+            if (position == UINT32_MAX)
+                return not_supported(id.index(), "temp.arg.explicit");
+            template_argument x;
+            bool saved = expanding;
+            uint32_t saved_element = expansion_element;
+            if (expansion[w]) {
+                expanding = true;
+                expansion_element = k;
+                type_id_expansion = true;
+            }
+            analysis_result r =
+                template_argument_for(id.index(), function_template, position,
+                                      a, specified.data(), x);
+            type_id_expansion = false;
+            expanding = saved;
+            expansion_element = saved_element;
+            if (r != analysis_result::well_formed)
+                return r;
+            specified.append(x);
+        }
     }
     return analysis_result::well_formed;
 }
@@ -1082,9 +1139,14 @@ uint32_t semantic_analysis::explicit_argument_position(uint32_t ft,
                                                        uint32_t i) const
 {
     const function_template &f = function_templates[ft - 1];
-    if (i >= f.parameter_count && f.parameter_count &&
-        template_parameter_is_pack(f.first_parameter + f.parameter_count - 1))
-        return f.parameter_count - 1;
+    /* the template parameter pack, wherever it is: explicit arguments from
+       its position on are its elements */
+    for (uint32_t k = f.parameter_count; k-- > 0;)
+        if (template_parameter_is_pack(f.first_parameter + k)) {
+            if (i >= k)
+                return k;
+            return i;
+        }
     if (i >= f.parameter_count)
         return UINT32_MAX;
     return i;

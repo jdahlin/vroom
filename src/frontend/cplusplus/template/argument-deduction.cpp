@@ -589,12 +589,12 @@ analysis_result semantic_analysis::deduce_from_call(
        template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
     uint32_t specified = static_cast<uint32_t>(deduced.size());
-    /* /9: those from a trailing pack's position on its elements; when a
-       function parameter pack would extend the sequence by deduction,
-       refused */
+    /* /9: those from a trailing pack's position on its elements (the
+       parameters after the pack are not specified: [temp.param]/14 they
+       are deduced or have defaults); when a function parameter pack
+       would extend the sequence by deduction, refused */
     uint32_t given = specified;
-    if (specified > pack && pack + 1 == ft.parameter_count &&
-        fixed == f.parameter_count)
+    if (specified > pack && fixed == f.parameter_count)
         given = pack;
     if (given > ft.parameter_count || given > pack)
         return not_supported(at, "temp.arg.explicit");
