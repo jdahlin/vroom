@@ -464,6 +464,9 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
         /* [ext:clang_c11_thread_local]
          *     storage-class-specifier:
          *         _Thread_local
+         * [ext:gnu_thread_local]
+         *     storage-class-specifier:
+         *         __thread
          */
         if (!type_specifiers_only && at(extension_keyword::c11_thread_local)) {
             other_specifier = position;

@@ -167,10 +167,14 @@ uint32_t c_lowering::data_size_assignment(const semantic_node &n, uint32_t a,
     const entity &x = analysis.entity_table[record(n.type).entity];
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
     ast_qualified_type pointer = pointer_to(t);
-    if (!(ast_builder_ast(c)->nodes[b].flags & AST_NODE_FLAG_LVALUE))
-        return fail("an assignment of a class with tail padding from a "
-                    "prvalue",
-                    n.at);
+    if (!(ast_builder_ast(c)->nodes[b].flags & AST_NODE_FLAG_LVALUE)) {
+        /* [basic.lval]/7: materialize the source before copying its data. */
+        uint32_t held = full_expression_temporary(t);
+        uint32_t variable = c_variable(c, held, t);
+        uint32_t stored = assign(t, variable, b);
+        b = dereference(comma(pointer, stored, address_of(variable, pointer)),
+                        t);
+    }
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     ast_qualified_type view = ast_builder_type_record(c, "", 0, false);
     ast_qualified_type data =
