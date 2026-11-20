@@ -127,12 +127,17 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
            then E1.E2 is an lvalue; otherwise E1.E2 is an xvalue. ... The
            type of E1.E2 is "cq12 vq12 T"." */
         uint32_t object = m.node;
-        uint32_t cv = m.type.cv() | x.type.cv();
+        /* "If E2 is declared to be a mutable member, then the type of E1.E2
+           is vq12 T" */
+        uint32_t object_cv = m.type.cv();
+        if (x.mutable_member)
+            object_cv &= ~cv_const;
+        uint32_t cv = object_cv | x.type.cv();
         expression_meaning result;
         result.type = qualified_type::make(x.type.unqualified(), cv);
         /* an array's cv-qualifiers are its elements' ([basic.type.qualifier]/3) */
         if (type_table[x.type.unqualified()].kind == type_kind::array)
-            result.type = add_cv(x.type, m.type.cv());
+            result.type = add_cv(x.type, object_cv);
         result.category = value_category::xvalue;
         if (m.category == value_category::lvalue)
             result.category = value_category::lvalue;

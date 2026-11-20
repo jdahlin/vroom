@@ -23,7 +23,6 @@ old-conditional-class-convert	vcc: the rules of [expr.cond] are not implemented 
 old-conditional-temporaries	vcc: the rules of [class.temporary] are not implemented yet
 old-conditions	vcc: the rules of [class.temporary] are not implemented yet
 old-const-member-default	vcc: the rules of [class.copy.ctor] are not implemented yet
-old-const-this-members	vcc: the rules of [dcl.stc] are not implemented yet
 old-constexpr-case-array-nsdmi	vcc: the rules of [class.base.init] are not implemented yet
 old-conversion-template	vcc: the rules of [temp.mem] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet

@@ -493,6 +493,11 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         /* a bit-field's value is its width's ([class.bit]): not modelled */
         if (entity_table[x.b].bit_field)
             return constness::unknown;
+        /* [expr.const]/5.9: reading a mutable subobject of an object that
+           is usable in constant expressions is not constant: which object
+           this is is not modelled */
+        if (entity_table[x.b].mutable_member)
+            return constness::unknown;
         for (uint32_t i = 0; i < k.member_count; i++)
             if (class_members[k.first_member + i] == x.b) {
                 object = element_place | (o.first + i);

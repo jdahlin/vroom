@@ -1121,8 +1121,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     simple_type_keywords k;
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
-             inline_ = 0, constexpr_ = 0, virtual_ = 0, friend_ = 0,
-             explicit_ = 0, consteval_ = 0;
+             mutable_ = 0, inline_ = 0, constexpr_ = 0, virtual_ = 0,
+             friend_ = 0, explicit_ = 0, consteval_ = 0;
     type_index named = 0;
     bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
@@ -1407,6 +1407,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             kw != standard_keyword::typedef_ &&
             kw != standard_keyword::static_ &&
             kw != standard_keyword::extern_ &&
+            kw != standard_keyword::mutable_ &&
             kw != standard_keyword::inline_ &&
             kw != standard_keyword::virtual_ &&
             kw != standard_keyword::explicit_ &&
@@ -1479,6 +1480,14 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             break;
         case standard_keyword::extern_:
             count(extern_, t, "extern");
+            break;
+        case standard_keyword::mutable_:
+            /* [dcl.stc]/8: "The mutable specifier shall appear only in the
+               declaration of a non-static data member": analysed on a
+               member-declaration's decl-specifier-seq (member_declarator) */
+            if (!mutable_allowed)
+                return not_supported(seq, specifier_subclause(kw));
+            count(mutable_, t, "mutable");
             break;
         case standard_keyword::inline_:
             count(inline_, t, "inline");
@@ -1555,7 +1564,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     /* [dcl.stc]/1: "At most one storage-class-specifier shall appear in a
        given decl-specifier-seq, except that thread_local may appear with
        static or extern." */
-    if (static_ && extern_)
+    if ((static_ && extern_) || (mutable_ && (static_ || extern_)))
         return ill_formed(seq,
                           "at most one storage-class-specifier shall appear "
                           "in a given decl-specifier-seq",
@@ -1563,7 +1572,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     /* [dcl.stc]/1: "If a storage-class-specifier appears in a
        decl-specifier-seq, there can be no typedef specifier in the same
        decl-specifier-seq" */
-    if (typedef_ && (static_ || extern_))
+    if (typedef_ && (static_ || extern_ || mutable_))
         return ill_formed(seq,
                           "if a storage-class-specifier appears in a "
                           "decl-specifier-seq, there can be no typedef "
@@ -1623,6 +1632,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     s.typedef_ = typedef_;
     s.static_ = static_;
     s.extern_ = extern_;
+    s.mutable_ = mutable_ != 0;
     s.inline_ = inline_;
     s.virtual_ = virtual_ != 0;
     s.friend_ = friend_ != 0;

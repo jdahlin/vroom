@@ -439,6 +439,9 @@ struct entity {
     /* a non-static member function: [class.mfct.non-static]/5 the
        cv-qualifier-seq of its declarator, which qualifies `this` */
     uint32_t member_cv = 0;
+    /* a non-static data member declared mutable ([dcl.stc]/8): the type of
+       an access to it takes no const from the object ([expr.ref]/6.2) */
+    bool mutable_member = false;
     /* a non-static data member: its number among the class's and, once
        the class is complete, its offset in bytes ([class.mem]/19,
        [abi:class-types]) */
@@ -1651,6 +1654,8 @@ class semantic_analysis
         bool consteval_ = false;
         /* [class.friend]: the friend specifier (only where friend_allowed) */
         bool friend_ = false;
+        /* [dcl.stc]/8: mutable (only where mutable_allowed) */
+        bool mutable_ = false;
         /* [class.conv.fct]/2: explicit (only where explicit_allowed) */
         bool explicit_ = false;
         /* a class-specifier or elaborated-type-specifier was there: a
@@ -2204,6 +2209,9 @@ class semantic_analysis
        decl-specifier-seq only; a member-declarator's virt-specifiers and
        pure-specifier ([class.mem]/1) for the declarator it holds */
     bool virtual_allowed = false;
+    /* [dcl.stc]/8: mutable is analysed on a member-declaration's
+       decl-specifier-seq only */
+    bool mutable_allowed = false;
     /* [class.friend]: friend is analysed on a friend declaration's
        decl-specifier-seq only */
     bool friend_allowed = false;

@@ -118,8 +118,8 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
                                                           uint8_t access)
 {
     const struct type record = type_table[s.type.unqualified()];
-    if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
-        s.type.cv() || s.aligned || s.gnu_flags ||
+    if (s.typedef_ || s.static_ || s.extern_ || s.mutable_ || s.inline_ ||
+        s.constexpr_ || s.type.cv() || s.aligned || s.gnu_flags ||
         record.kind != type_kind::class_type)
         return not_supported(n, "class.union.anon");
     entity_index u = record.entity;
@@ -1239,8 +1239,11 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         sole_elaborated = first[0].index();
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
+    bool outer_mutable_allowed = mutable_allowed;
+    mutable_allowed = true;
     analysis_result r = decl_specifier_seq(first, s, false);
     virtual_allowed = outer_virtual_allowed;
+    mutable_allowed = outer_mutable_allowed;
     sole_elaborated = 0;
     declaration_access = 0;
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
@@ -1292,8 +1295,8 @@ analysis_result semantic_analysis::member_declarators(
     }
     if (declarators.empty()) {
         /* [class.mem]/3: a member enumeration ([dcl.pre]/5) */
-        bool plain = !s.typedef_ && !s.static_ && !s.extern_ && !s.inline_ &&
-                     !s.constexpr_ && !s.type.cv();
+        bool plain = !s.typedef_ && !s.static_ && !s.extern_ && !s.mutable_ &&
+                     !s.inline_ && !s.constexpr_ && !s.type.cv();
         if (s.declares_enumeration && plain)
             return analysis_result::well_formed;
         auto seq = n[first - 1];
@@ -1421,6 +1424,20 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         return not_supported(declaration, "dcl.type");
     if (s.typedef_)
         return member_typedef(c, declaration, m.id, type, s, m, access);
+    /* [dcl.stc]/8: "The mutable specifier shall appear only in the
+       declaration of a non-static data member whose type is neither
+       const-qualified nor a reference type." */
+    if (s.mutable_ &&
+        (type_table[type.unqualified()].kind == type_kind::function ||
+         (type.cv() & cv_const) ||
+         type_table[type.unqualified()].kind == type_kind::lvalue_reference ||
+         type_table[type.unqualified()].kind == type_kind::rvalue_reference))
+        return ill_formed_at_token(m.id,
+                                   "the mutable specifier shall appear only "
+                                   "in the declaration of a non-static data "
+                                   "member whose type is neither "
+                                   "const-qualified nor a reference type",
+                                   "dcl.stc");
     /* [dcl.constexpr]/1: "The constexpr specifier shall be applied only to
        the definition of a variable or variable template or the declaration
        of a function or function template": a static data member's is not
@@ -1751,6 +1768,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         e = entity_table.make(entity_kind::variable, name, c);
         entity_table[e].type = type;
         entity_table[e].nonstatic_member = true;
+        entity_table[e].mutable_member = s.mutable_;
         entity_table[e].defined = true;
         entity_table[e].field = entity_table[c].member_count;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);

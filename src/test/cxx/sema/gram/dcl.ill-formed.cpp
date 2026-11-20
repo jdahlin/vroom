@@ -42,3 +42,15 @@ long long long lll;
 unsigned short int usi;
 long long int lli;
 long double ldd;
+struct M1 { mutable const int c; };
+struct M2 { mutable int &r; };
+struct M3 { static mutable int s; };
+struct M4 { mutable void f(); };
+struct M5 { mutable int *const q; };
+struct M6 { mutable typedef int T; };
+struct M7 { mutable int a; mutable const int *p; mutable int arr[2]; };
+struct M8 { mutable int a; };
+void m8(const M8 &s) { s.a = 1; }
+void m9(const M7 &s) { s.arr[1] = 1; s.p = 0; }
+struct M10 { int a; };
+void m10(const M10 &s) { s.a = 1; }

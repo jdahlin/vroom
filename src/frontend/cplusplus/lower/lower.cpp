@@ -377,6 +377,9 @@ class c_lowering
        object, and that class's destructor (0 if none or not a class) */
     entity_index element_destructor(qualified_type type,
                                     qualified_type &object) const;
+    /* [dcl.stc]/8: the class or array of classes type has a mutable
+       subobject (a const object of it is not in read-only memory) */
+    bool has_mutable_subobject(qualified_type type) const;
     /* [expr.new], [expr.delete]: the pointer the enclosing new_object or
        delete_object holds (a variable of type allocated_type) */
     uint32_t allocated_symbol = 0;
@@ -1130,13 +1133,13 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
        initialized dynamically is written at start-up, so not in read-only
        memory whatever its type's cv-qualifiers; nor is one whose class
        has a destructor that runs, [class.dtor]/5: "const and volatile
-       semantics are not applied on an object under destruction" (a
-       mutable member, [dcl.stc]: not analysed) */
+       semantics are not applied on an object under destruction"; nor is
+       an object with a mutable subobject, [dcl.stc]/8 */
     qualified_type element;
     if (x.kind == entity_kind::variable && !x.automatic && x.definition &&
         (x.type.cv() & cv_const) &&
         (!constant_initializer(x.definition) ||
-         element_destructor(x.type, element)))
+         element_destructor(x.type, element) || has_mutable_subobject(x.type)))
         t = type(
             qualified_type::make(x.type.unqualified(), x.type.cv() & ~cv_const),
             at);
@@ -3145,6 +3148,23 @@ entity_index c_lowering::element_destructor(qualified_type type,
     if (record(object).kind != type_kind::class_type)
         return 0;
     return analysis.entity_table[record(object).entity].destructor;
+}
+
+bool c_lowering::has_mutable_subobject(qualified_type type) const
+{
+    qualified_type object = type;
+    while (record(object).kind == type_kind::array)
+        object = record(object).operand;
+    if (record(object).kind != type_kind::class_type)
+        return false;
+    const entity &k = analysis.entity_table[record(object).entity];
+    for (uint32_t i = 0; i < k.member_count; i++) {
+        const entity &m =
+            analysis.entity_table[analysis.class_members[k.first_member + i]];
+        if (m.mutable_member || has_mutable_subobject(m.type))
+            return true;
+    }
+    return false;
 }
 
 uint32_t c_lowering::full_expression_temporary(ast_qualified_type t)
