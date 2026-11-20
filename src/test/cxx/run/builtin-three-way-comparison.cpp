@@ -20,7 +20,7 @@ template <class T> concept partial = requires(const T &a, const T &b) { { a <=> 
 template <class T> concept spaceship = requires(const T &a, const T &b) { a <=> b; };
 struct E { };
 enum class K { x };
-static_assert(strong<int> && strong<unsigned long> && strong<char> && strong<int *> && strong<K>);
+static_assert(strong<int> && strong<unsigned long> && strong<char> && strong<int *> && strong<void *> && strong<K>);
 static_assert(partial<double> && partial<float> && !strong<double>);
 static_assert(!spaceship<E> && !spaceship<bool *&> == false && !spaceship<void>);
 template <class T> int kind(const T &) requires strong<T> { return 1; }

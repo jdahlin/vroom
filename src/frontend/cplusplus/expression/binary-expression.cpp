@@ -550,7 +550,11 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
             return not_supported(n, "expr.spaceship");
     } else if (is_pointer(left.type) && is_pointer(right.type)) {
         VTRY(r, composite_pointer_type(n, left, right));
-        if (!is_object_pointer(left.type) || !is_object_pointer(right.type))
+        /* ([basic.compound]/3: an object pointer type includes cv void *) */
+        qualified_type x = type_table[left.type.unqualified()].operand;
+        qualified_type y = type_table[right.type.unqualified()].operand;
+        if (type_table[x.unqualified()].kind == type_kind::function ||
+            type_table[y.unqualified()].kind == type_kind::function)
             return not_supported(n, "expr.spaceship");
     } else if ((!class_operand(left) && !class_operand(right)) &&
                (fundamental_of(left.type) == fundamental_type::none ||
