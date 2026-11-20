@@ -981,6 +981,8 @@ class parser
     node_index gnu_initializer_list();
     /* ---- ext/gnu/compound-literal.cpp: ( type-id ) { ... } */
     node_index gnu_compound_literal(size_t mark, token_index first);
+    node_index gnu_conditional_omitted(size_t mark, token_index first,
+                                       bool *conditional);
     /* ---- ext/clang/type-traits.cpp: __is_same(T, U), __remove_cv(T) */
     node_index clang_type_trait_expression();
     node_index clang_type_transformation();

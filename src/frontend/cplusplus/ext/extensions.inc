@@ -73,6 +73,8 @@ EXTENSION(gnu_alignof_expression, gnu,
           "__alignof__ of an expression, the alignment of its type")
 EXTENSION(gnu_labels_as_values, gnu,
           "GCC manual 6.3, Labels as Values: &&label and goto *expression;")
+EXTENSION(gnu_conditional_omitted, gnu,
+          "GCC manual 6.8, Conditionals with Omitted Operands: x ? : y, x evaluated once")
 EXTENSION(gnu_designated_initializers, gnu,
           "GCC manual 6.29, Designated Initializers: C99's [index] =, .a.b =, a list that "
           "mixes clauses with designators, [first ... last] =, and the obsolete field:")
