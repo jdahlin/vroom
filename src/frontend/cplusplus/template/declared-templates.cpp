@@ -2646,6 +2646,14 @@ analysis_result semantic_analysis::member_definition_of_template(
     VTRY_SET(r, matching_specialization(id, ct, arguments.data(),
                                         static_cast<uint32_t>(arguments.size()),
                                         pattern, deduced));
+    token_index after_declarator_id = 0;
+    if (variable) {
+        after_declarator_id = definition[1][0].end_token();
+    } else {
+        token_index name = 0;
+        out_of_class_member(definition, &name);
+        after_declarator_id = name + 1;
+    }
     const template_argument *mine = arguments.data();
     uint32_t mine_count = static_cast<uint32_t>(arguments.size());
     function_template of = function_templates[ct - 1];
@@ -2675,16 +2683,14 @@ analysis_result semantic_analysis::member_definition_of_template(
             return not_supported(n, "temp.mem.func");
         if (mine_name == class_name)
             continue;
-        /* a function's body finds the class's names */
-        if (!variable)
-            return not_supported(n, "temp.mem.func");
         /* [basic.lookup.qual]/3: "names following the qualified-id being
            declared are looked up in the scope of the member's class", which
            finds the class's template-parameter names, not this
-           definition's: a variable whose initializer writes either of the
-           two names is not analysed */
-        SyntaxRef init = definition[1];
-        for (token_index t = init[0].end_token(); t < init.end_token(); t++)
+           definition's (its decl-specifiers and the template-id's
+           arguments do find them): a definition that writes either of the
+           two names after its declarator-id is not analysed */
+        for (token_index t = after_declarator_id; t < definition.end_token();
+             t++)
             if (tokens[t].kind == token_kind::identifier &&
                 (tokens.identifier(t) == mine_name ||
                  tokens.identifier(t) == class_name))
@@ -2800,9 +2806,9 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     entity_index scope = entity_table.make(
         entity_kind::block_scope, 0, entity_table[x.template_entity].enclosing);
     bool variable = o.definition.is(syntax_kind::simple_declaration);
-    uint32_t names = of.first_parameter;
-    if (variable)
-        names = o.first_parameter;
+    /* [temp.local]/1, [basic.scope.temp]/1: the definition's own parameter
+       names (clang does not find the class's, if they differ) */
+    uint32_t names = o.first_parameter;
     for (uint32_t i = 0; i < of.parameter_count; i++)
         bind_template_argument(scope, template_parameter_entities[names + i],
                                template_arguments[first + i]);
