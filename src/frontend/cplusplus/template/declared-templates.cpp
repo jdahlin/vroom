@@ -628,13 +628,31 @@ semantic_analysis::function_template_definition(SyntaxRef n,
        scope's own declarations, [namespace.udir]/2, unless no namespace
        the directives nominate declares it or has directives of its own) */
     bool own = !entity_table[outer].unknown_names;
-    if (own && entity_table[outer].has_using_directive)
-        for (const using_directive_record &u : using_directives)
-            if (u.scope == outer &&
-                (entity_table[u.nominated].has_using_directive ||
-                 entity_table[u.nominated].unknown_names ||
-                 entity_table.find(u.nominated, name)))
-                own = false;
+    /* (a nominated namespace's own directives lead on: an inline namespace
+       within an inline namespace is no reason by itself, only a namespace
+       reached that declares the name or has names not known) */
+    if (own && entity_table[outer].has_using_directive) {
+        owned_array<entity_index> reached;
+        reached.append(outer);
+        for (size_t i = 0; own && i < reached.size(); i++) {
+            if (!entity_table[reached[i]].has_using_directive)
+                continue;
+            for (const using_directive_record &u : using_directives) {
+                if (u.scope != reached[i])
+                    continue;
+                bool seen = false;
+                for (entity_index r : reached)
+                    if (r == u.nominated)
+                        seen = true;
+                if (seen)
+                    continue;
+                reached.append(u.nominated);
+                if (entity_table[u.nominated].unknown_names ||
+                    entity_table.find(u.nominated, name))
+                    own = false;
+            }
+        }
+    }
     if (prior && group.empty() && own &&
         entity_table[prior].kind == entity_kind::function &&
         entity_table[prior].enclosing == outer &&

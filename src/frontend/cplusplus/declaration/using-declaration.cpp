@@ -214,6 +214,7 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         if (!prior) {
             entity_table.bind(scope, name, held, true);
         } else if (prior != held) {
+            bool poisoned = false;
             if (entity_table[prior].kind == entity_kind::function) {
                 /* (as function_template_definition holds the name of
                    functions declared before a template) */
@@ -224,15 +225,27 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 entity_table.bind(scope, name, prior, true);
                 for (entity_index f : functions)
                     template_name_functions.append({prior, f});
-            } else if (!entity_table[prior].held_by_template ||
-                       !function_template_of(prior)) {
+            } else if (!entity_table[prior].held_by_template) {
                 return not_supported(n, "over");
+            } else if (!function_template_of(prior)) {
+                /* a name whose function templates are all unusable (it
+                   also names something calls of them cannot resolve)
+                   stays so: what joins it is unusable too, and a call of
+                   it is refused */
+                for (const function_template &t : function_templates)
+                    if (t.name == prior && !t.is_class && !t.is_alias &&
+                        !t.is_variable)
+                        poisoned = true;
+                if (!poisoned)
+                    return not_supported(n, "over");
             }
             for (size_t i = 0, k = function_templates.size(); i < k; i++)
                 if (function_templates[i].name == held &&
                     !function_templates[i].unusable) {
                     function_template copy = function_templates[i];
                     copy.name = prior;
+                    if (poisoned)
+                        copy.unusable = true;
                     function_templates.append(copy);
                 }
             for (size_t i = 0, k = template_name_functions.size(); i < k; i++)
