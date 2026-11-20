@@ -10,6 +10,8 @@ char fits_char{100};
 unsigned narrowed_unsigned{-1};
 float narrowed_float{1.0};
 float exact_float{1.0f};
+long double long_double_from_int{1};
+long double long_double_from_big{0x7fffffffffffffffll};
 int too_many(1, 2);
 int scalar_list{1, 2};
 int excess[2] = {1, 2, 3};

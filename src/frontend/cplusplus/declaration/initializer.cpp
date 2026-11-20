@@ -395,6 +395,27 @@ analysis_result semantic_analysis::narrowing(SyntaxRef at,
         narrows = true;
         return analysis_result::well_formed;
     }
+    if (m.evaluation == constness::constant &&
+        fundamental_type_is_integral(f) && t == fundamental_type::long_double) {
+        /* [dcl.init.list]/7.3: the integer's value is kept when the
+           significant bits (from the highest set bit to the lowest) fit
+           long double's significand, the fraction bits and the leading one */
+        __int128 v = integer_value(b, f, m.value);
+        unsigned __int128 magnitude = static_cast<unsigned __int128>(v);
+        if (fundamental_type_is_signed(b, f) && v < 0)
+            magnitude = -magnitude;
+        unsigned significant = 0;
+        if (magnitude) {
+            unsigned high_bit = 127, low_bit = 0;
+            while (!((magnitude >> high_bit) & 1))
+                high_bit--;
+            while (!((magnitude >> low_bit) & 1))
+                low_bit++;
+            significant = high_bit - low_bit + 1;
+        }
+        narrows = significant > b.long_double_fraction_bits + 1u;
+        return analysis_result::well_formed;
+    }
     if (m.evaluation == constness::unknown ||
         f == fundamental_type::long_double ||
         t == fundamental_type::long_double)
