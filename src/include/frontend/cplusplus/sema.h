@@ -3166,6 +3166,12 @@ class semantic_analysis
     /* ---- standard conversions ([conv]) ---- */
     /* the fundamental type of t, none if t is no fundamental type */
     fundamental_type fundamental_of(qualified_type t) const;
+    /* [impl.clang] whether t is a va_list: __builtin_va_list itself
+       (AAPCS64's struct), or on x86-64 System V the array of one
+       __va_list_tag or the pointer to it a parameter or an argument is;
+       cv is the cv-qualification of what the va_list designates (the
+       object, the array's element or the pointee) */
+    bool is_va_list(qualified_type t, uint32_t &cv) const;
     bool is_integral(qualified_type t) const;
     bool is_floating(qualified_type t) const;
     bool is_arithmetic(qualified_type t) const;

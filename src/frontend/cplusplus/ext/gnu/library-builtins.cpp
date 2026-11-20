@@ -572,8 +572,10 @@ semantic_analysis::va_list_builtin_result(SyntaxRef n, entity_index called,
            reads: its cv-qualification is the argument's) */
         uint32_t object = nodes[i];
         while (semantics[object].kind == semantic_kind::conversion &&
-               static_cast<conversion_kind>(semantics[object].op) ==
-                   conversion_kind::lvalue_to_rvalue)
+               (static_cast<conversion_kind>(semantics[object].op) ==
+                    conversion_kind::lvalue_to_rvalue ||
+                static_cast<conversion_kind>(semantics[object].op) ==
+                    conversion_kind::array_to_pointer))
             object = semantics[object].a;
         qualified_type t = semantics[object].type;
         /* (a template's own va_list is dependent: analysed when it is
@@ -582,7 +584,8 @@ semantic_analysis::va_list_builtin_result(SyntaxRef n, entity_index called,
             return not_supported(n, "temp.dep.constexpr");
         /* (the lvalue-to-rvalue conversion argument passing applied is
            the lowering's no-op: the node under it is the object) */
-        if (fundamental_of(t) != fundamental_type::builtin_va_list)
+        uint32_t list_cv = 0;
+        if (!is_va_list(t, list_cv))
             return ill_formed(n,
                               "argument is of type that "
                               "is not 'va_list'",
@@ -590,7 +593,7 @@ semantic_analysis::va_list_builtin_result(SyntaxRef n, entity_index called,
         /* "binding reference of type '__builtin_va_list' to value of type
            'const __builtin_va_list' drops 'const' qualifier" */
         bool written = which != 4 || i == 0;
-        if (written && (t.cv() & cv_const))
+        if (written && (list_cv & cv_const))
             return ill_formed(n,
                               "a va_list argument that is written shall not "
                               "be const",

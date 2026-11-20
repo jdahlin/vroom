@@ -109,6 +109,10 @@ struct implementation_defined_behavior {
     /* [ext:gnu_vector_size] a vector is aligned to its whole size (x86-64);
        else to at most 16 bytes (arm64) */
     bool vector_alignment_uncapped = false;
+    /* [impl.clang] __builtin_va_list is x86-64 System V's
+       __va_list_tag[1], not AAPCS64's struct (a va_list passed as an
+       argument or received as a parameter is a pointer to the tag) */
+    bool va_list_is_array = false;
 
     /* the choices of clang -cc1 -triple aarch64-unknown-linux-gnu -std=... */
     static implementation_defined_behavior for_edition(standard_edition edition,
@@ -415,6 +419,12 @@ enum class fundamental_type : uint8_t {
        struct std::__va_list (B.3: __stack, __gr_top, __vr_top, __gr_offs,
        __vr_offs), 32 bytes aligned to 8; no arithmetic type */
     builtin_va_list,
+    /* [impl.clang] x86-64 System V's struct __va_list_tag (psABI 3.5.7:
+       gp_offset, fp_offset, overflow_arg_area, reg_save_area), 24 bytes
+       aligned to 8; there __builtin_va_list is an array of one of them
+       (implementation_defined_behavior::va_list_is_array), so a va_list
+       parameter is a pointer to it */
+    builtin_va_list_tag,
 };
 
 const char *fundamental_type_name(fundamental_type type);

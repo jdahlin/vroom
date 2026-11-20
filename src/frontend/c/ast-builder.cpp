@@ -120,6 +120,11 @@ ast_qualified_type ast_builder_type_va_list(cc *c)
     return c->t_valist;
 }
 
+ast_qualified_type ast_builder_type_va_list_tag(cc *c)
+{
+    return AST_QUALIFIED_TYPE(c->tags[c->valist_tag].ty, 0);
+}
+
 uint64_t ast_builder_type_size(cc *c, ast_qualified_type t)
 {
     return cc_type_size(c, t);

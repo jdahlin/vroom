@@ -264,8 +264,18 @@ void semantic_analysis::translation_unit()
         static const char name[] = "__builtin_va_list";
         uint32_t id = tokens.pp.identifier(name, sizeof name - 1) + 1;
         entity_index e = entity_table.make(entity_kind::typedef_name, id, 0);
-        entity_table[e].type = qualified_type::make(
-            type_table.fundamental(fundamental_type::builtin_va_list), cv_none);
+        if (tokens.files.behavior.va_list_is_array) {
+            /* x86-64 System V: struct __va_list_tag[1] */
+            qualified_type tag = qualified_type::make(
+                type_table.fundamental(fundamental_type::builtin_va_list_tag),
+                cv_none);
+            entity_table[e].type =
+                qualified_type::make(type_table.array_of(tag, 1), cv_none);
+        } else {
+            entity_table[e].type = qualified_type::make(
+                type_table.fundamental(fundamental_type::builtin_va_list),
+                cv_none);
+        }
         entity_table[e].defined = true;
         entity_table.bind(0, id, e);
     }

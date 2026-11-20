@@ -1866,6 +1866,17 @@ bool itanium_mangler::type(qualified_type t)
         add_candidate(t);
         return true;
     }
+    if (r.kind == type_kind::fundamental && !t.cv() &&
+        r.fundamental == fundamental_type::builtin_va_list_tag) {
+        /* [impl.clang] x86-64 System V's struct __va_list_tag, a
+           <source-name> (a va_list parameter is P13__va_list_tag) and a
+           <substitution> candidate as a <class-enum-type> */
+        if (substitution(t))
+            return true;
+        text("13__va_list_tag");
+        add_candidate(t);
+        return true;
+    }
     if (r.kind == type_kind::fundamental && !t.cv())
         return builtin_type(r.fundamental);
     if (r.kind == type_kind::placeholder && !t.cv()) {
