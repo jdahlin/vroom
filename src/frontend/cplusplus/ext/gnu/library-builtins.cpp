@@ -417,17 +417,40 @@ static const fundamental_type signature_types[] = {
     fundamental_type::long_double,
 };
 
-/* Float and double infinity and quiet NaN constructors. */
-static bool is_floating_constant_builtin(const char *spelling, size_t length)
+enum class floating_builtin {
+    none,
+    infinity,
+    quiet_nan,
+    signaling_nan,
+    infinity_sign,
+    is_signaling,
+};
+
+static floating_builtin floating_builtin_kind(const char *spelling,
+                                              size_t length)
 {
-    static const char *const names[] = {
-        "__builtin_huge_val", "__builtin_huge_valf", "__builtin_inf",
-        "__builtin_inff",     "__builtin_nan",       "__builtin_nanf",
+    static const struct {
+        const char *name;
+        floating_builtin kind;
+    } builtins[] = {
+        {"__builtin_huge_val", floating_builtin::infinity},
+        {"__builtin_huge_valf", floating_builtin::infinity},
+        {"__builtin_inf", floating_builtin::infinity},
+        {"__builtin_inff", floating_builtin::infinity},
+        {"__builtin_nan", floating_builtin::quiet_nan},
+        {"__builtin_nanf", floating_builtin::quiet_nan},
+        {"__builtin_nanl", floating_builtin::quiet_nan},
+        {"__builtin_nans", floating_builtin::signaling_nan},
+        {"__builtin_nansf", floating_builtin::signaling_nan},
+        {"__builtin_nansl", floating_builtin::signaling_nan},
+        {"__builtin_isinf_sign", floating_builtin::infinity_sign},
+        {"__builtin_issignaling", floating_builtin::is_signaling},
     };
-    for (const char *name : names)
-        if (strlen(name) == length && !memcmp(spelling, name, length))
-            return true;
-    return false;
+    for (const auto &builtin : builtins)
+        if (strlen(builtin.name) == length &&
+            !memcmp(spelling, builtin.name, length))
+            return builtin.kind;
+    return floating_builtin::none;
 }
 
 /* a builtin of vcc's C front end (frontend/c/builtin-table.cpp) whose
@@ -441,17 +464,30 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     const char *signature = ast_builder_builtin_signature(spelling, length);
     if (!signature)
         return 0;
-    if (is_floating_constant_builtin(spelling, length)) {
+    floating_builtin floating = floating_builtin_kind(spelling, length);
+    if (floating == floating_builtin::infinity_sign ||
+        floating == floating_builtin::is_signaling)
+        return declare_builtin(
+            name, name,
+            qualified_type::make(type_table.fundamental(fundamental_type::int_),
+                                 cv_none),
+            nullptr, 0, true,
+            gnu_compiler_builtin | gnu_untyped_builtin | gnu_floating_constant);
+    if (floating != floating_builtin::none) {
         fundamental_type type = fundamental_type::double_;
         if (signature[0] == 'f')
             type = fundamental_type::float_;
+        if (signature[0] == 'D')
+            type = fundamental_type::long_double;
+        uint32_t flags = gnu_compiler_builtin;
+        if (type != fundamental_type::long_double)
+            flags |= gnu_floating_constant;
         qualified_type result =
             qualified_type::make(type_table.fundamental(type), cv_none);
         qualified_type parameter = builtin_parameter_type(
             static_cast<uint8_t>(builtin_type::const_char_pointer));
         return declare_builtin(name, name, result, &parameter,
-                               signature[1] == 'S', false,
-                               gnu_compiler_builtin | gnu_floating_constant);
+                               signature[1] == 'S', false, flags);
     }
     owned_array<qualified_type> types_of;
     /* a signature of other than scalar letters (a pointer to any type, a
@@ -771,6 +807,13 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
     size_t length = 0;
     const char *spelling =
         tokens.pp.identifier_spelling(entity_table[called].name - 1, &length);
+    if (entity_table[called].gnu_flags & gnu_floating_constant) {
+        if (nodes.size() != 1 || !fundamental_type_is_floating(
+                                     fundamental_of(semantics[nodes[0]].type)))
+            return ill_formed(n, "expected one floating-point argument",
+                              "ext.gnu");
+        return analysis_result::well_formed;
+    }
     if (int which = query_kind(spelling, length))
         return query_builtin_result(n, which, nodes, result);
     if (int which = va_list_kind(spelling, length)) {
@@ -972,10 +1015,34 @@ semantic_analysis::query_builtin_result(SyntaxRef n, int which,
     return analysis_result::well_formed;
 }
 
-constness
-semantic_analysis::evaluate_floating_builtin(const semantic_node &call,
-                                             constant_value &v)
+constness semantic_analysis::evaluate_floating_builtin(
+    constant_evaluation &state, entity_index builtin, const semantic_node &call,
+    constant_value &v)
 {
+    size_t length = 0;
+    const char *name =
+        tokens.pp.identifier_spelling(entity_table[builtin].name - 1, &length);
+    floating_builtin kind = floating_builtin_kind(name, length);
+    if (kind == floating_builtin::infinity_sign ||
+        kind == floating_builtin::is_signaling) {
+        constant_value argument;
+        constness r =
+            evaluate_node(state, semantics.items(call.first)[0], argument);
+        if (r != constness::constant)
+            return r;
+        if (argument.kind != constant_value_kind::floating)
+            return constness::unknown;
+        uint64_t bits = floating_kept(argument.floating);
+        v = constant_value();
+        v.kind = constant_value_kind::integer;
+        if (kind == floating_builtin::is_signaling)
+            v.integer = floating_is_signaling_nan(bits);
+        else if (bits == UINT64_C(0x7ff0000000000000))
+            v.integer = 1;
+        else if (bits == UINT64_C(0xfff0000000000000))
+            v.integer = static_cast<unsigned __int128>(-1);
+        return constness::constant;
+    }
     double number = __builtin_inf();
     if (call.count) {
         const semantic_node &argument =
@@ -992,14 +1059,14 @@ semantic_analysis::evaluate_floating_builtin(const semantic_node &call,
         int precision = 52;
         if (fundamental_of(call.type) == fundamental_type::float_)
             precision = 23;
+        bool signaling = kind == floating_builtin::signaling_nan;
         unsigned __int128 bits;
-        if (!vsoftfloat_nan_payload(payload.data(), precision, false, &bits))
+        if (!vsoftfloat_nan_payload(payload.data(), precision, signaling,
+                                    &bits))
             return constness::unknown;
         /* Constexpr evaluation holds float values as doubles. Preserve
            the NaN payload in the high fraction bits of that double. */
-        uint64_t encoded = (UINT64_C(0x7ff) << 52) |
-                           static_cast<uint64_t>((bits & Q_M112) >> 60);
-        number = floating_value(encoded);
+        number = floating_value(vsoftfloat_nan_storage(bits, 52, 11));
     }
     v = constant_value();
     v.kind = constant_value_kind::floating;

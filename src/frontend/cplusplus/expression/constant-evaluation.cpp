@@ -1537,7 +1537,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
     if (int which = query_builtin(semantics[callee].a))
         return evaluate_query_builtin(state, which, x, v);
     if (entity_table[semantics[callee].a].gnu_flags & gnu_floating_constant)
-        return evaluate_floating_builtin(x, v);
+        return evaluate_floating_builtin(state, semantics[callee].a, x, v);
     /* [expr.prim.lambda.closure]/4: whether a closure's function call
        operator is constexpr is not decided yet (evaluate_invocation),
        unless its lambda-declarator says constexpr */

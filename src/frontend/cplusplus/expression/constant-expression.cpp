@@ -130,6 +130,28 @@ double floating_value(uint64_t kept)
     return v;
 }
 
+bool floating_is_signaling_nan(uint64_t kept)
+{
+    return (kept & UINT64_C(0x7ff8000000000000)) ==
+               UINT64_C(0x7ff0000000000000) &&
+           (kept & UINT64_C(0x0007ffffffffffff));
+}
+
+uint32_t float_storage_bits(uint64_t kept)
+{
+    /* NaNs are stored in a double with the float fraction left-aligned.
+       A host floating conversion would quiet a signaling NaN. */
+    const uint64_t exponent = UINT64_C(0x7ff) << 52;
+    const uint64_t fraction = (UINT64_C(1) << 52) - 1;
+    if ((kept & exponent) == exponent && (kept & fraction))
+        return ((uint32_t)(kept >> 32) & UINT32_C(0x80000000)) |
+               UINT32_C(0x7f800000) | (uint32_t)((kept & fraction) >> 29);
+    float f = static_cast<float>(floating_value(kept));
+    uint32_t bits;
+    memcpy(&bits, &f, sizeof bits);
+    return bits;
+}
+
 uint64_t floating_kept(double v)
 {
     uint64_t kept;
