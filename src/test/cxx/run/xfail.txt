@@ -99,8 +99,6 @@ temp-mem-variable-template-of-class-template	vcc: the rules of [expr.prim.id.qua
 temp-mem-variable-template-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
 lambda-capture-closure	vcc: the rules of [expr.const] are not implemented yet
 lambda-capture-generic	vcc: the rules of [expr.prim.lambda.closure] are not implemented yet
-lambda-capture-nested	vcc: the rules of [basic.def.odr] are not implemented yet
-lambda-capture-odr-use	vcc: the rules of [basic.def.odr] are not implemented yet
 lambda-capture-pack	vcc: the rules of [temp.variadic] are not implemented yet
 lambda-capture-structured	vcc: the rules of [expr.prim.lambda.capture] are not implemented yet
 lambda-capture-this	symbols: the lambdas in default member initializers are not named as clang names them

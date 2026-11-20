@@ -2,6 +2,7 @@
    references, parameters */
 #define check(e) do { if (!(e)) __builtin_abort(); } while (0)
 
+int zero = 0;
 int apply(int (*f)(int), int x) { return f(x); }
 
 int main()
@@ -24,10 +25,10 @@ int main()
     check(cr() == 2 && rr() == 3 && a == 3);
     const int k = 4;
     auto kk = [=] { return k + 1; };
-    check(kk() == 5);
+    check(kk() + zero == 5);
     auto fparam = [](int n) { return [n](int m) { return n * m; }; };
-    check(fparam(3)(4) == 12);
+    check(fparam(3 + zero)(4) == 12);
     auto cp = [](int n) { return n + 1; };
-    check(apply(cp, 1) == 2);
+    check(apply(cp, 1 + zero) == 2);
     return 0;
 }

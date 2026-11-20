@@ -2653,6 +2653,36 @@ class semantic_analysis
     };
     owned_array<lambda_context> lambdas;
     owned_array<capture_record> lambda_captures;
+    /* [basic.def.odr]/4: a name in a lambda's body of a local variable
+       usable in constant expressions is an odr-use, so a capture, unless
+       its value is read (lvalue-to-rvalue conversion); named by an entity
+       node until the body is analysed: operand_value marks the node read,
+       resolve_pending_uses captures the rest and rewrites their nodes */
+    struct pending_use {
+        uint32_t node = 0;
+        entity_index variable = 0;
+        token_index at = 0;
+        size_t lambda_depth = 0;
+        /* the call operator's this parameter, which the access is made
+           through after the body */
+        entity_index this_entity = 0;
+        bool read = false;
+    };
+    owned_array<pending_use> pending_uses;
+    /* the name being analysed is the capture's own initialization
+       ([expr.prim.lambda.capture]/15): an odr-use */
+    bool forced_odr_use = false;
+    analysis_result resolve_pending_uses(lambda_context &l);
+    /* the elements of the array lvalue a (of array type type) each
+       initialized from the corresponding element, an initializer_list
+       node: an array captured by copy ([expr.prim.lambda.capture]/15) */
+    analysis_result copy_array(SyntaxRef at, token_index t,
+                               expression_meaning array, qualified_type type,
+                               uint32_t &node);
+    /* the capture of local variable e named at t in the current lambda's
+       body, and the access to its member (the odr-use of e) */
+    analysis_result capture_variable(lambda_context &l, token_index t,
+                                     entity_index e, expression_meaning &m);
     /* the lambda whose compound-statement is analysed now (its body, not a
        local class's member function in it), nullptr if none */
     lambda_context *current_lambda();
@@ -2696,7 +2726,8 @@ class semantic_analysis
     /* the entity e of an enclosing function named at t in the body: its
        capture's member ([expr.prim.lambda.capture]/11) */
     analysis_result captured_entity(token_index t, entity_index e,
-                                    expression_meaning &m);
+                                    expression_meaning &m, bool &deferred,
+                                    bool &plain);
     /* this in the body: the captured this ([expr.prim.lambda.capture]/12) */
     analysis_result captured_this(token_index t, expression_meaning &m);
     /* member of the closure object, through the call operator's this */

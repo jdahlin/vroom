@@ -110,6 +110,9 @@ analysis_result semantic_analysis::operand_value(SyntaxRef at,
         /* [conv.lval]/1: "A glvalue of a non-function, non-array type T can
            be converted to a prvalue. ... If T is a non-class type, the type
            of the prvalue is the cv-unqualified version of T." */
+        for (pending_use &u : pending_uses)
+            if (u.node == m.node)
+                u.read = true;
         constness read = constness::unknown;
         if (m.evaluation == constness::not_constant)
             read = constness::not_constant;

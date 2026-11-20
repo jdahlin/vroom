@@ -641,6 +641,7 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     if (x.bound_unknown)
         /* (the initializer analysis has no rules for yet) */
         return not_supported(current_declaration, "dcl.init");
+    bool deferred_use = false;
     m.category = value_category::lvalue;
     m.type = x.type;
     m.entity = e;
@@ -667,9 +668,12 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
             s = entity_table[s].enclosing;
         if (s && entity_table[s].kind == entity_kind::function &&
             s != function_state.function) {
-            if (current_lambda())
-                return captured_entity(t, e, m);
-            return not_supported(current_declaration, "basic.def.odr");
+            if (!current_lambda())
+                return not_supported(current_declaration, "basic.def.odr");
+            bool plain = false;
+            VTRY(r, captured_entity(t, e, m, deferred_use, plain));
+            if (!plain)
+                return analysis_result::well_formed;
         }
         /* [expr.prim.lambda.capture]/6: an init-capture's name designates
            its member */
@@ -689,6 +693,15 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
         m.evaluation = constness::unknown;
     }
     m.node = expression_node(semantic_kind::entity, m, t, e);
+    if (deferred_use) {
+        pending_use u;
+        u.node = m.node;
+        u.variable = e;
+        u.at = t;
+        u.lambda_depth = lambdas.size();
+        u.this_entity = function_state.this_entity;
+        pending_uses.append(u);
+    }
     return analysis_result::well_formed;
 }
 

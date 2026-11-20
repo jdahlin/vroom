@@ -78,9 +78,11 @@ analysis_result semantic_analysis::capture_type(SyntaxRef at, qualified_type t,
         r.kind == type_kind::rvalue_reference)
         object = r.operand;
     const struct type o = type_table[object.unqualified()];
-    /* a function, or an array copied element by element (/15) */
-    if (o.kind == type_kind::function ||
-        (o.kind == type_kind::array && !by_reference))
+    if (o.kind == type_kind::function)
+        return not_supported(at, "expr.prim.lambda.capture");
+    /* an array captured by copy is copied element by element (/15) */
+    if (o.kind == type_kind::array && !by_reference &&
+        (!o.bound_known || !size_of_type(object)))
         return not_supported(at, "expr.prim.lambda.capture");
     if (by_reference) {
         type = reference_to(object, false);
@@ -431,12 +433,18 @@ analysis_result semantic_analysis::closure_member(token_index t,
  */
 analysis_result semantic_analysis::captured_entity(token_index t,
                                                    entity_index e,
-                                                   expression_meaning &m)
+                                                   expression_meaning &m,
+                                                   bool &deferred, bool &plain)
 {
     lambda_context &l = *current_lambda();
     for (size_t i = l.first_capture; i < lambda_captures.size(); i++)
         if (lambda_captures[i].variable == e)
             return closure_member(t, lambda_captures[i].member, m);
+    /* [basic.def.odr]/4: an unevaluated operand odr-uses nothing */
+    if (unevaluated) {
+        plain = true;
+        return analysis_result::well_formed;
+    }
     entity_index owner = enclosing_function(entity_table, e);
     bool reachable = false;
     for (size_t k = lambdas.size(); k-- > 0 && !reachable;)
@@ -446,11 +454,33 @@ analysis_result semantic_analysis::captured_entity(token_index t,
         /* of a function enclosing a local class whose member function
            the lambda is in */
         return not_supported(current_declaration, "basic.def.odr");
-    /* in an unevaluated operand, or a variable whose reading may be no
-       odr-use ([basic.def.odr]/4): whether it is captured is not
-       analysed */
-    if (unevaluated || entity_table[e].usable != constness::not_constant)
-        return not_supported(current_declaration, "basic.def.odr");
+    /* a variable usable in constant expressions is odr-used unless its
+       value is read (/4): decided when the body is analysed
+       (resolve_pending_uses) */
+    const struct type &variable_type =
+        type_table[entity_table[e].type.unqualified()];
+    if (entity_table[e].usable == constness::constant && !forced_odr_use &&
+        (variable_type.kind == type_kind::fundamental ||
+         variable_type.kind == type_kind::enumeration ||
+         variable_type.kind == type_kind::pointer)) {
+        plain = true;
+        deferred = true;
+        return analysis_result::well_formed;
+    }
+    return capture_variable(l, t, e, m);
+}
+
+/*
+ * The implicit capture of local variable e, odr-used at t in the body of
+ * the current lambda: a member of the closure type, and the access to it.
+ * [basic.def.odr]/9 (the lambda has no capture-default that captures it):
+ * ill-formed.
+ */
+analysis_result semantic_analysis::capture_variable(lambda_context &l,
+                                                    token_index t,
+                                                    entity_index e,
+                                                    expression_meaning &m)
+{
     if (l.default_capture == capture_default::none)
         return ill_formed_at_token(t,
                                    "a local entity odr-used in a declarative "
@@ -475,6 +505,46 @@ analysis_result semantic_analysis::captured_entity(token_index t,
     record.member = capture_member_of(l.closure, type);
     lambda_captures.append(record);
     return closure_member(t, record.member, m);
+}
+
+/*
+ * The names of variables usable in constant expressions in the body just
+ * analysed of lambda l (captured_entity): one whose value is read
+ * ([basic.def.odr]/4) is no odr-use and names the variable; any other use
+ * captures it, and its node becomes the access to the member.
+ */
+analysis_result semantic_analysis::resolve_pending_uses(lambda_context &l)
+{
+    size_t depth = lambdas.size();
+    size_t keep = 0;
+    for (size_t i = 0; i < pending_uses.size(); i++) {
+        pending_use u = pending_uses[i];
+        if (u.lambda_depth != depth) {
+            pending_uses[keep++] = u;
+            continue;
+        }
+        if (u.read) {
+            /* lowering folds the read (c_lowering::folded_read) */
+            semantics[u.node].evaluation = constness::constant;
+            continue;
+        }
+        expression_meaning access;
+        entity_index outer_this = function_state.this_entity;
+        function_state.this_entity = u.this_entity;
+        entity_index member = 0;
+        for (size_t k = l.first_capture; k < lambda_captures.size(); k++)
+            if (lambda_captures[k].variable == u.variable)
+                member = lambda_captures[k].member;
+        if (member) {
+            VTRY(r, closure_member(u.at, member, access));
+        } else {
+            VTRY(r, capture_variable(l, u.at, u.variable, access));
+        }
+        function_state.this_entity = outer_this;
+        semantics[u.node] = semantics[access.node];
+    }
+    pending_uses.resize(keep);
+    return analysis_result::well_formed;
 }
 
 /*
@@ -529,6 +599,43 @@ analysis_result semantic_analysis::captured_this(token_index t,
     return analysis_result::well_formed;
 }
 
+analysis_result semantic_analysis::copy_array(SyntaxRef at, token_index t,
+                                              expression_meaning array,
+                                              qualified_type type,
+                                              uint32_t &node)
+{
+    const struct type a = type_table[type.unqualified()];
+    qualified_type element = a.operand;
+    VTRY(r, operand_value(at, array));
+    owned_array<uint32_t> items;
+    for (uint64_t i = 0; i < a.bound; i++) {
+        expression_meaning index =
+            integer_constant(fundamental_type::int_, i, t);
+        expression_meaning object;
+        object.type = element;
+        object.category = value_category::lvalue;
+        object.node = expression_node(semantic_kind::subscript, object, t,
+                                      array.node, index.node);
+        if (type_table[element.unqualified()].kind == type_kind::array) {
+            uint32_t inner = 0;
+            VTRY_SET(r, copy_array(at, t, object, element, inner));
+            items.append(inner);
+            continue;
+        }
+        initialized_value value;
+        VTRY_SET(r, initialize_with(at, object, element, true, false, value));
+        items.append(value.node);
+    }
+    expression_meaning list;
+    list.type = type;
+    list.category = value_category::prvalue;
+    list.evaluation = constness::not_constant;
+    list.node = expression_node(semantic_kind::initializer_list, list, t);
+    semantics.set_list(list.node, items.data(), items.size());
+    node = list.node;
+    return analysis_result::well_formed;
+}
+
 /*
  * [expr.prim.lambda.capture]/15: "When the lambda-expression is evaluated,
  * the entities that are captured by copy are used to direct-initialize
@@ -555,16 +662,24 @@ semantic_analysis::closure_object(lambda_context &l,
         }
         expression_meaning e;
         analysis_result r = analysis_result::well_formed;
-        if (c.variable)
+        if (c.variable) {
+            /* the capture odr-uses the entity (/15) */
+            forced_odr_use = true;
             r = named_entity(c.at, c.variable, e, false);
-        else if (c.star_this)
+            forced_odr_use = false;
+        } else if (c.star_this)
             r = this_object(c.at, e);
         else
             r = this_pointer(c.at, e);
         initialized_value value;
-        if (r == analysis_result::well_formed)
-            VTRY_SET(r, initialize_with(l.at, e, entity_table[c.member].type,
-                                        true, false, value));
+        qualified_type member_type = entity_table[c.member].type;
+        if (r == analysis_result::well_formed &&
+            type_table[member_type.unqualified()].kind == type_kind::array) {
+            VTRY_SET(r, copy_array(l.at, c.at, e, member_type, value.node));
+        } else if (r == analysis_result::well_formed) {
+            VTRY_SET(r,
+                     initialize_with(l.at, e, member_type, true, false, value));
+        }
         elements.append(value.node);
     }
     m = expression_meaning();

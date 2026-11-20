@@ -659,6 +659,10 @@ semantic_analysis::lambda_body(SyntaxRef n, SyntaxElement body,
     last_declared = l.call;
     lambdas.append(l);
     analysis_result r = analyse_function_body(n, body);
+    if (r == analysis_result::well_formed)
+        r = resolve_pending_uses(lambdas.back());
+    else
+        pending_uses.resize(0);
     /* the captures the body made, and the lambda off the stack (an
        enclosing lambda's captures go on after its own) */
     l = lambdas.back();
