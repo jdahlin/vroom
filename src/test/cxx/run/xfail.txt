@@ -28,7 +28,6 @@ old-empty-pack-constexpr	vcc: the rules of [dcl.decl] are not implemented yet
 old-enable-if-overloads	vcc: the rules of [temp.variadic] are not implemented yet
 old-enumerator-prvalue	vcc: the rules of [ext.clang] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
-old-explicit-destructor-instance	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-friend-templates	vcc: the rules of [expr.prim.req] are not implemented yet
 old-gnu-conditional-omitted	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-ilist-ctor-not-viable	vcc: the rules of [class.mem] are not implemented yet
@@ -48,7 +47,6 @@ old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
 old-operators	vcc: the rules of [over.built] are not implemented yet
 old-packs	vcc: the rules of [temp.variadic] are not implemented yet
 old-partial-later	vcc: the rules of [temp.class.spec] are not implemented yet
-old-pseudo-destructor-side-effects	vcc: the rules of [expr.ref] are not implemented yet
 old-range-for-arrays	vcc: the rules of [stmt.ranged] are not implemented yet
 old-requires-params	vcc: the rules of [expr.prim.req] are not implemented yet
 old-reversed-packs	vcc: the rules of [temp.variadic] are not implemented yet
