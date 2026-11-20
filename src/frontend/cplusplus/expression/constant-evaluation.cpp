@@ -1537,8 +1537,25 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
  */
 void semantic_analysis::analyse_postponed_body(entity_index f)
 {
-    if (entity_table[f].definition || defining_class)
+    if (entity_table[f].definition)
         return;
+    for (entity_index d = defining_class; d; d = entity_table[d].enclosing)
+        if (d == entity_table[f].enclosing)
+            return;
+    /* a function template's specialization whose definition was not
+       needed where it was named (an unevaluated operand, instantiate): a
+       constant evaluation needs it ([temp.inst]/5, [expr.const]/11) */
+    for (size_t i = 0; i < instantiations.size(); i++) {
+        const instantiation_record &x = instantiations[i];
+        if (x.specialization != f || x.defined || x.defining)
+            continue;
+        const function_template &ft =
+            function_templates[entity_table[x.template_entity].instantiation -
+                               1];
+        if (ft.definition)
+            instantiate_definition(ft.declaration, static_cast<uint32_t>(i));
+        return;
+    }
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         postponed_body &b = postponed_bodies[i];
         if (!b.c || b.c != entity_table[f].enclosing ||

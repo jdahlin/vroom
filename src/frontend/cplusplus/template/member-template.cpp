@@ -79,6 +79,17 @@ analysis_result semantic_analysis::member_function_template(
     qualified_type type;
     VTRY(r,
          function_template_declarator(definition, lead, c, scope, s, m, type));
+    /* an explicit-specifier's condition ([dcl.fct.spec]/2) may have
+       instantiated templates, whose records came before this one: the
+       parameters name the slot it takes */
+    if (index != function_templates.size()) {
+        index = static_cast<uint32_t>(function_templates.size());
+        for (size_t i = 0; i < parameters.size(); i++) {
+            entity_index e = template_parameter_entities[first + i];
+            if (entity_table[e].kind != entity_kind::template_entity)
+                entity_table[e].instantiation = index + 1;
+        }
+    }
     /* [temp.mem]/3: "A member function template shall not be virtual." */
     if (s.virtual_)
         return ill_formed_at_token(m.id,
