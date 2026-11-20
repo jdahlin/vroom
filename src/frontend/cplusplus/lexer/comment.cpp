@@ -3,6 +3,7 @@
  * preprocessing tokens ([lex.pptoken]/2).
  */
 #include "../cplusplus-internal.h"
+#include "simd-search.h"
 
 namespace cplusplus
 {
@@ -15,6 +16,8 @@ namespace cplusplus
  */
 uint32_t lexer::scan_white_space(uint32_t at)
 {
+    /* OPTIMIZATION: spaces and tabs, 16 or 32 at a time (simd-search.h) */
+    at = lex_search(lex_stop::blank, file.physical_characters, at);
     for (;;) {
         translation_character t = peek(at);
         if (!t.extent || !is_white_space_character(t.character))
@@ -46,7 +49,8 @@ uint32_t lexer::scan_comment(uint32_t at)
             if (at >= file.size || c == '\n' || c == '\r')
                 return at;
             if (c != '\\' && c != '?') {
-                at++;
+                /* OPTIMIZATION: to the next byte that matters (simd-search.h) */
+                at = lex_search(lex_stop::line_comment, p, at + 1);
                 continue;
             }
             translation_character t = peek(at);
@@ -73,7 +77,8 @@ uint32_t lexer::scan_comment(uint32_t at)
         unsigned char c = p[at];
         if (c != '*' && c != '/' && c != '\\' && c != '?') {
             after_star = false;
-            at++;
+            /* OPTIMIZATION: to the next byte that matters (simd-search.h) */
+            at = lex_search(lex_stop::block_comment, p, at + 1);
             continue;
         }
         translation_character t = peek(at);

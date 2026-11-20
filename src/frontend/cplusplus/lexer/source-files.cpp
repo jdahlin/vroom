@@ -9,12 +9,14 @@
 #include <sys/stat.h>
 
 #include "../cplusplus-internal.h"
+#include "simd-search.h"
 
 namespace cplusplus
 {
 
 /* the padding after the physical characters: lookahead never checks the end */
-constexpr uint32_t source_file_padding = 16;
+/* OPTIMIZATION: 64, the widest load of simd-search.h (AVX-512) */
+constexpr uint32_t source_file_padding = 64;
 
 /* the characters (already followed by the padding) become the file's */
 void source_file::take(owned_array<char> text, size_t length)
@@ -74,7 +76,10 @@ void source_file::index_lines()
 {
     physical_line_starts.clear();
     physical_line_starts.append(0);
-    for (uint32_t i = 0; i < size; i++) {
+    /* OPTIMIZATION: from one end of line to the next (simd-search.h) */
+    const unsigned char *p = physical_characters;
+    for (uint32_t i = lex_search(lex_stop::line_end, p, 0); i < size;
+         i = lex_search(lex_stop::line_end, p, i + 1)) {
         unsigned char c = physical_characters[i];
         if (c != '\n' && c != '\r')
             continue;
