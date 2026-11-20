@@ -266,7 +266,20 @@ uint32_t c_lowering::call(const semantic_node &n)
             untyped_builtin = analysis.entity_table[node(named).a].gnu_flags &
                               gnu_untyped_builtin;
         } else {
-            callee = expression(n.a);
+            /* [expr.call]/8: "The postfix-expression is sequenced before
+               each expression in the expression-list": the object
+               expression of a static member's call (a comma's left operand,
+               [expr.ref]/1) is evaluated before the arguments, which C
+               leaves unsequenced with the function designator */
+            uint32_t function = n.a;
+            if (node(named).kind == semantic_kind::comma) {
+                before_call = discard(node(named).a);
+                if (!before_call)
+                    return 0;
+                function = node(named).b;
+                function_type = node(function).type;
+            }
+            callee = expression(function);
             if (!callee)
                 return 0;
             if (record(function_type).kind == type_kind::pointer)
