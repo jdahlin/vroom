@@ -258,10 +258,16 @@ static int pp_feature_query_answer(pp *p, int b, const char *name, uint32_t loc)
              k <= PP_BUILTIN_IS_TARGET_VARIANT_ENVIRONMENT; k++)
             if (!strcmp(name, q[k]))
                 return 1;
-    /* the table is what the kernel and SDK headers asked clang; the front end knows more */
-    if (b == PP_BUILTIN_HAS_BUILTIN && pp_builtin_known &&
-        pp_builtin_known(name))
-        return 1;
+    /* The frontend also knows target builtins absent from the reference tables. */
+    if (b == PP_BUILTIN_HAS_BUILTIN && pp_builtin_known) {
+        const int target = p->options->target;
+        if ((!strncmp(name, "__builtin_ia32_", 15) && !PP_IS_X86_64(target)) ||
+            (!strncmp(name, "__builtin_arm_", 14) &&
+             target != PP_LINUX_AARCH64 && target != PP_DARWIN))
+            return 0;
+        if (pp_builtin_known(name))
+            return 1;
+    }
     return 0;
 }
 
