@@ -350,6 +350,10 @@ enum gnu_attribute_flag : uint32_t {
        own name, with or without noexcept, is of this function, as clang's
        are */
     gnu_library_function = 1048576,
+    /* [ext:gnu_library_builtins] __builtin_constant_p and the lock-free
+       queries (with gnu_untyped_builtin): a constant expression when their
+       arguments are (query_builtin) */
+    gnu_query_builtin = 2097152,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -2637,6 +2641,10 @@ class semantic_analysis
        popcount, 2 clz, 3 ctz; 0 none), the check of a call's arguments,
        and its value in a constant evaluation */
     int bit_count_builtin(entity_index e) const;
+    int query_builtin(entity_index e) const;
+    analysis_result query_builtin_result(SyntaxRef n, int which,
+                                         const owned_array<uint32_t> &nodes,
+                                         qualified_type &result);
     analysis_result bit_count_arguments(SyntaxRef n, entity_index called,
                                         const owned_array<uint32_t> &nodes);
     analysis_result atomic_builtin_result(SyntaxRef n, entity_index called,
@@ -2882,6 +2890,9 @@ class semantic_analysis
                             constant_value &v);
     constness evaluate_statement(constant_evaluation &state, uint32_t node,
                                  bool &returned, constant_value &result);
+    constness evaluate_query_builtin(constant_evaluation &state, int which,
+                                     const semantic_node &call,
+                                     constant_value &v);
     constness evaluate_bit_count(constant_evaluation &state, int which,
                                  const semantic_node &call, constant_value &v);
     constness evaluate_call(constant_evaluation &state, uint32_t node,

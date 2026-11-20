@@ -318,7 +318,19 @@ CC_PRIVATE uint32_t cc_builtin_atomic_lock_free_build(cc *c,
 {
     cc_id_list args;
     cc_builtin_arguments_parse(c, &args);
-    unsigned want = !strcmp(b->name, "__c11_atomic_is_lock_free") ? 1 : 2;
+    return cc_builtin_atomic_lock_free_apply(c, b, &args, loc);
+}
+
+/* the query with its arguments parsed (or built by another front end) */
+CC_PRIVATE uint32_t cc_builtin_atomic_lock_free_apply(cc *c,
+                                                      const cc_builtin *b,
+                                                      cc_id_list *argument_list,
+                                                      uint32_t loc)
+{
+    cc_id_list &args = *argument_list;
+    unsigned want = 2;
+    if (!strcmp(b->name, "__c11_atomic_is_lock_free"))
+        want = 1;
     if (args.n != want) {
         cc_builtin_arity_check(c, loc, want, &args);
         return cc_node_error_new(c, loc);

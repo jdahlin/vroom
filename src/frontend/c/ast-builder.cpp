@@ -342,6 +342,15 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
             cc_id_list_append(c, &atomic, args[i]);
         return cc_builtin_atomic_apply(c, b, &atomic, 0);
     }
+    /* the lock-free queries: constants where the size decides, else the
+       runtime call */
+    if (b->id == CC_BUILTIN_ATOMIC_LOCK_FREE) {
+        cc_id_list query;
+        cc_id_list_init(&query);
+        for (uint32_t i = 0; i < count; i++)
+            cc_id_list_append(c, &query, args[i]);
+        return cc_builtin_atomic_lock_free_apply(c, b, &query, 0);
+    }
     /* the parser's tree of conditionals, as for C */
     if (b->id == CC_BUILTIN_FPCLASSIFY && count == 6)
         return cc_fpclassify_build(c, args, 0);

@@ -382,6 +382,19 @@ static bool is_generic_builtin(const char *spelling, size_t length)
     return false;
 }
 
+/* __builtin_constant_p, __atomic_always_lock_free, __atomic_is_lock_free,
+   __c11_atomic_is_lock_free: 1, 2, 3, 4 */
+static int query_kind(const char *spelling, size_t length)
+{
+    static const char *const names[] = {
+        "__builtin_constant_p", "__atomic_always_lock_free",
+        "__atomic_is_lock_free", "__c11_atomic_is_lock_free"};
+    for (int i = 0; i < 4; i++)
+        if (length == strlen(names[i]) && !memcmp(spelling, names[i], length))
+            return i + 1;
+    return 0;
+}
+
 /* a builtin of vcc's C front end (frontend/c/builtin-table.cpp) whose
    signature has scalar types only, in the table's letters, or one of the
    generic_builtins: lowered to the C front end's builtin node
@@ -414,15 +427,19 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     owned_array<qualified_type> types_of;
     /* a signature of other than scalar letters (a pointer to any type, a
        va_list): one function taking anything whose calls are refused */
+    int query = query_kind(spelling, length);
     for (const char *s = signature; *s; s++)
-        if (!strchr(letters, *s) || (s != signature && *s == 'v')) {
+        if (query || !strchr(letters, *s) || (s != signature && *s == 'v')) {
             if (is_generic_builtin(spelling, length))
                 break;
+            uint32_t flags = gnu_compiler_builtin | gnu_untyped_builtin;
+            if (query)
+                flags |= gnu_query_builtin;
             return declare_builtin(
                 name, name,
                 qualified_type::make(
                     type_table.fundamental(fundamental_type::void_), cv_none),
-                nullptr, 0, true, gnu_compiler_builtin | gnu_untyped_builtin);
+                nullptr, 0, true, flags);
         }
     /* int f(...) */
     bool generic = is_generic_builtin(spelling, length);
@@ -542,6 +559,8 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
     size_t length = 0;
     const char *spelling =
         tokens.pp.identifier_spelling(entity_table[called].name - 1, &length);
+    if (int which = query_kind(spelling, length))
+        return query_builtin_result(n, which, nodes, result);
     int written = 0, kind = 0;
     if (!ast_builder_atomic_shape(spelling, length, &written, &kind))
         return not_supported(n, "ext.gnu");
@@ -626,6 +645,140 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         break;
     }
     return analysis_result::well_formed;
+}
+
+int semantic_analysis::query_builtin(entity_index e) const
+{
+    if (!(entity_table[e].gnu_flags & gnu_query_builtin))
+        return 0;
+    size_t length = 0;
+    const char *spelling =
+        tokens.pp.identifier_spelling(entity_table[e].name - 1, &length);
+    return query_kind(spelling, length);
+}
+
+/* the size in bytes of a lock-free query where clang's answer is the
+   same as the lowering's: 1, 2, 4 and 8 are lock-free, a size above 16 or
+   not a power of two is not; 0 and 16 (clang: lock-free on aarch64, the C
+   front end's lowering: libatomic) are left undecided */
+static bool lock_free_decided(unsigned __int128 size, bool &free)
+{
+    free = size == 1 || size == 2 || size == 4 || size == 8;
+    if (free)
+        return true;
+    return size != 0 && size != 16;
+}
+
+/*
+ * [ext:gnu_library_builtins] clang's int __builtin_constant_p(expr) (the
+ * operand unevaluated), bool __atomic_always_lock_free(size_t, void *),
+ * bool __atomic_is_lock_free(size_t, volatile void *) and
+ * bool __c11_atomic_is_lock_free(size_t) (GCC manual 6.56, clang's
+ * Builtins.td).  Operands are arithmetic, enumeration, pointer or
+ * std::nullptr_t; the size of a lock-free query that is a constant 0 or 16
+ * is not supported (lock_free_decided).
+ */
+analysis_result
+semantic_analysis::query_builtin_result(SyntaxRef n, int which,
+                                        const owned_array<uint32_t> &nodes,
+                                        qualified_type &result)
+{
+    size_t expected = 2;
+    if (which == 1 || which == 4)
+        expected = 1;
+    if (nodes.size() != expected)
+        return ill_formed(n, "a builtin takes the arguments its form does",
+                          "ext.gnu");
+    for (size_t i = 0; i < nodes.size(); i++) {
+        qualified_type t = semantics[nodes[i]].type;
+        fundamental_type f = fundamental_of(t);
+        if (!is_pointer(t) &&
+            (f == fundamental_type::none || f == fundamental_type::void_))
+            return not_supported(n, "ext.gnu");
+    }
+    if (which == 1) {
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::int_), cv_none);
+        return analysis_result::well_formed;
+    }
+    fundamental_type f = fundamental_of(semantics[nodes[0]].type);
+    if (!fundamental_type_is_integral(f) && f != fundamental_type::none)
+        return not_supported(n, "ext.gnu");
+    if (nodes.size() == 2 && !is_pointer(semantics[nodes[1]].type) &&
+        fundamental_of(semantics[nodes[1]].type) !=
+            fundamental_type::std_nullptr_t &&
+        !fundamental_type_is_integral(fundamental_of(semantics[nodes[1]].type)))
+        return not_supported(n, "ext.gnu");
+    constant_value v;
+    bool constant = false;
+    VTRY(r, evaluate_constant(n, nodes[0], v, constant));
+    if (constant && v.kind == constant_value_kind::integer) {
+        bool free = false;
+        if (!lock_free_decided(v.integer, free))
+            return not_supported(n, "ext.gnu");
+    } else if (which == 2) {
+        return ill_formed(n, "the argument must be a constant integer",
+                          "ext.gnu");
+    }
+    result = qualified_type::make(
+        type_table.fundamental(fundamental_type::bool_), cv_none);
+    return analysis_result::well_formed;
+}
+
+/* the value of a query when its operands are constants: __builtin_constant_p
+   of an arithmetic constant is 1 (an operand that is not one is left
+   undecided: pointers and non-constants are not modelled); a lock-free
+   query of a constant size with a null pointer, whose alignment is then
+   no limit */
+constness semantic_analysis::evaluate_query_builtin(constant_evaluation &state,
+                                                    int which,
+                                                    const semantic_node &call,
+                                                    constant_value &v)
+{
+    const uint32_t *items = semantics.items(call.first);
+    constant_value x;
+    constness c = evaluate_node(state, items[0], x);
+    if (c != constness::constant)
+        return constness::unknown;
+    if (which == 1) {
+        if (x.kind != constant_value_kind::integer &&
+            x.kind != constant_value_kind::floating)
+            return constness::unknown;
+        v = constant_value();
+        v.kind = constant_value_kind::integer;
+        v.integer = 1;
+        return constness::constant;
+    }
+    bool free = false;
+    if (x.kind != constant_value_kind::integer ||
+        !lock_free_decided(x.integer, free))
+        return constness::unknown;
+    /* clang folds __c11_atomic_is_lock_free of the sizes that are */
+    if (which == 4 && !free)
+        return constness::unknown;
+    if (call.count == 2) {
+        constant_value p;
+        /* nullptr: a constant of type std::nullptr_t, no value of its own
+           (evaluate_node does not model it) */
+        const semantic_node &pointer = semantics[items[1]];
+        if (pointer.kind == semantic_kind::constant &&
+            fundamental_of(pointer.type) == fundamental_type::std_nullptr_t) {
+            p.kind = constant_value_kind::pointer;
+            c = constness::constant;
+        } else {
+            c = evaluate_node(state, items[1], p);
+        }
+        bool null =
+            (p.kind == constant_value_kind::integer && p.integer == 0) ||
+            (p.kind == constant_value_kind::pointer && !p.designator &&
+             p.offset == 0);
+        if (c != constness::constant || !null)
+            return constness::unknown;
+    }
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer = free;
+    return constness::constant;
 }
 
 int semantic_analysis::bit_count_builtin(entity_index e) const
