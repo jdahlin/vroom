@@ -1519,6 +1519,10 @@ class semantic_analysis
     bool copy_assignment_deleted(entity_index c) const;
     bool default_constructor_deleted(entity_index c) const;
     bool default_constructed(entity_index c, entity_index k) const;
+    /* whether the destructor of subobject class k is not accessible from
+       the destructor or constructor of class c ([class.access.base]/1) */
+    bool subobject_destructor_inaccessible(entity_index c,
+                                           entity_index k) const;
     entity_index implicitly_movable(SyntaxElement operand);
     /* whether destroying an object of class c runs code */
     bool destroys(entity_index c) const;

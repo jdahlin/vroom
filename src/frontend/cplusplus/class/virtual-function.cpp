@@ -292,7 +292,8 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     subobject_classes(c, classes);
     for (entity_index k : classes) {
         entity_index kd = entity_table[k].destructor;
-        if (kd && (entity_table[kd].access || entity_table[kd].deleted))
+        if (subobject_destructor_inaccessible(c, k) ||
+            (kd && entity_table[kd].deleted))
             return not_supported(n, "class.dtor");
     }
     entity_index destructor = entity_table[c].destructor;

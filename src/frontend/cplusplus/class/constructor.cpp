@@ -1419,6 +1419,26 @@ void semantic_analysis::subobject_classes(entity_index c,
     }
 }
 
+/* a protected destructor of a base class is accessible from class c's
+   members, one of a member's class is not ([class.access.base]/1) */
+bool semantic_analysis::subobject_destructor_inaccessible(entity_index c,
+                                                          entity_index k) const
+{
+    entity_index kd = entity_table[k].destructor;
+    if (!kd)
+        return false;
+    uint8_t access = entity_table[kd].access;
+    if (access != 1)
+        return access != 0;
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (!m.base_subobject && element_class(m.type) == k)
+            return true;
+    }
+    return false;
+}
+
 /* whether the implicit default constructor of class c default-constructs a
    subobject of class k: a base, or a member (or array of them) without a
    default member initializer ([class.base.init]/9.1) */
@@ -1581,7 +1601,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         /* [class.copy.ctor]/10.2, [class.default.ctor]/2.7: an
            implicit constructor beside a subobject's inaccessible
            destructor is deleted */
-        if (sub.destructor && entity_table[sub.destructor].access &&
+        if (subobject_destructor_inaccessible(c, k) &&
             (!x.destructor || !declares_copy || !x.first_constructor))
             return not_supported(n, "class.default.ctor");
     }
