@@ -1340,6 +1340,30 @@ analysis_result semantic_analysis::too_many_clauses(
     return analysis_result::well_formed;
 }
 
+/* whether the initializer init has only literals (true, false, nullptr; not string or
+   user-defined: [lex.string], [over.literal]) and operators or
+   punctuators among its tokens: it looks up no name and has no this */
+bool semantic_analysis::initializer_names_nothing(SyntaxRef init) const
+{
+    for (token_index t = init.first_token(); t < init.end_token(); t++) {
+        const struct token &k = tokens[t];
+        if (k.kind == token_kind::operator_or_punctuator)
+            continue;
+        if (k.kind == token_kind::literal &&
+            k.literal != literal_kind::string_literal &&
+            k.literal != literal_kind::user_defined_literal)
+            continue;
+        if (k.kind == token_kind::keyword) {
+            standard_keyword w = this->p.keyword_of(k);
+            if (w == standard_keyword::true_ || w == standard_keyword::false_ ||
+                w == standard_keyword::nullptr_)
+                continue;
+        }
+        return false;
+    }
+    return true;
+}
+
 /*
  * The elements of the aggregate type (an array or an aggregate class),
  * initialized from clauses[next ..], next moved past the clauses used.
@@ -1418,9 +1442,13 @@ analysis_result semantic_analysis::aggregate_elements(
         } else if (defaults[i]) {
             /* (5.1): "If the element has a default member initializer
                ([class.mem]), the element is initialized from that
-               initializer", whose this is the aggregate being initialized:
-               not analysed */
-            return not_supported(list, "dcl.init.aggr");
+               initializer", whose this is the aggregate being initialized
+               and whose names are looked up in the class: analysed here
+               only when it names nothing (literals and operators) */
+            if (!initializer_names_nothing(defaults[i]))
+                return not_supported(list, "dcl.init.aggr");
+            qualified_type member_type = element;
+            VTRY(r, initializer(defaults[i], member_type, one));
         } else {
             /* (5.2): from an empty initializer list: value-initialization
                ([dcl.init.list]/3.11 for a scalar, an aggregate's own
