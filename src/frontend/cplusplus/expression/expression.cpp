@@ -104,7 +104,8 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
     }
     if ((k == type_kind::atomic && (m.category == value_category::prvalue ||
                                     !atomic_value_type(m.type))) ||
-        k == type_kind::bit_int || k == type_kind::ext_vector) {
+        k == type_kind::bit_int || k == type_kind::ext_vector ||
+        k == type_kind::vector) {
         if (e.is_token())
             return not_supported(current_declaration, "ext.clang");
         return not_supported(e.index(), "ext.clang");

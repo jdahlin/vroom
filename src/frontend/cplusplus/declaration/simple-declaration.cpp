@@ -1061,12 +1061,20 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (s.aligned > aligned)
         aligned = s.aligned;
     uint32_t gnu_flags =
-        (m.gnu_flags | s.gnu_flags) & ~(gnu_aligned | gnu_packed | gnu_mode);
+        (m.gnu_flags | s.gnu_flags) &
+        ~(gnu_aligned | gnu_packed | gnu_mode | gnu_vector_size);
     if (m.mode) {
         /* mode: the type of a typedef-name or of a variable */
         if (m.qualifier || m.qualified_namespace)
             return not_supported(declaration, "ext.gnu");
         r = gnu_mode_type(declaration, m.mode, type);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (m.vector_bytes) {
+        if (m.qualifier || m.qualified_namespace)
+            return not_supported(declaration, "ext.gnu");
+        r = gnu_vector_type(declaration, m.vector_bytes, type);
         if (r != analysis_result::well_formed)
             return r;
     }

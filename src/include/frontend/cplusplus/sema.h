@@ -113,6 +113,8 @@ enum class type_kind : uint8_t {
     /* [ext:clang_ext_vector_type] a vector of bound elements of type
        operand, or of the non-type template-parameter entity's value */
     ext_vector,
+    /* [ext:gnu_vector_size] a GNU vector: bound elements of type operand */
+    vector,
 };
 
 struct type {
@@ -189,6 +191,7 @@ class types
     type_index complex_of(qualified_type value);
     type_index block_pointer_to(qualified_type function);
     type_index bit_int(uint64_t width, uint32_t parameter);
+    type_index vector_of(qualified_type element, uint64_t count);
     type_index ext_vector_of(qualified_type element, uint64_t count,
                              uint32_t parameter);
 
@@ -347,6 +350,8 @@ enum gnu_attribute_flag : uint32_t {
     gnu_enable_if = 65536,
     /* mode(M): the type of the typedef or variable (gnu_mode_type) */
     gnu_mode = 131072,
+    /* vector_size(N): the type of the typedef-name or variable */
+    gnu_vector_size = 1u << 30,
     /* [ext:gnu_library_builtins] __builtin_popcountg, __builtin_clzg and
        __builtin_ctzg (with gnu_compiler_builtin): a constant expression
        when its arguments are (bit_count_builtin) */
@@ -1863,6 +1868,8 @@ class semantic_analysis
         entity_index gnu_cleanup = 0;
         /* mode (gnu_mode): the mode's identifier */
         token_index mode = 0;
+        /* vector_size's N, in bytes (gnu_vector_size), 0: none */
+        uint64_t vector_bytes = 0;
         /* [ext:gnu_asm_labels] the asm label's string-literal, 0 if none */
         token_index asm_label = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
@@ -2242,6 +2249,8 @@ class semantic_analysis
         entity_index cleanup = 0;
         /* mode (gnu_mode): the mode's identifier */
         token_index mode = 0;
+        /* vector_size's N, in bytes (gnu_vector_size), 0: none */
+        uint64_t vector_bytes = 0;
         /* [ext:clang_ext_vector_type] taken where allowed (an
            alias-declaration): ext_vector_type(N)'s N, or the entity of the
            non-type template-parameter N names */
@@ -2262,6 +2271,8 @@ class semantic_analysis
     bool case_or_default_label(SyntaxElement s) const;
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);
     analysis_result gnu_attribute_specifier(SyntaxRef n, specified &s);
+    analysis_result gnu_vector_type(SyntaxRef at, uint64_t bytes,
+                                    qualified_type &type);
     analysis_result gnu_mode_type(SyntaxRef at, token_index mode,
                                   qualified_type &type);
     analysis_result array_element_alignment(SyntaxRef at,
@@ -2846,6 +2857,7 @@ class semantic_analysis
                                            gnu_attributes &g);
     analysis_result clang_ext_vector_type(SyntaxRef at, const gnu_attributes &g,
                                           qualified_type &type);
+    uint64_t vector_layout(const type &record, bool alignment) const;
     uint64_t ext_vector_layout(const type &record, bool alignment) const;
     uint64_t bit_int_layout(uint64_t width, bool alignment) const;
     entity_index value_parameter_named(SyntaxElement e);

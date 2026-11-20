@@ -53,6 +53,9 @@ ast_qualified_type ast_builder_type_complex(cc *c, ast_qualified_type element);
 /* clang's ext_vector_type(count) of element (not bool) */
 ast_qualified_type
 ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count);
+/* GNU vector_size of count elements of element (an arithmetic type, not bool) */
+ast_qualified_type ast_builder_type_vector(cc *c, ast_qualified_type element,
+                                           uint64_t count);
 /* known false: an array of unknown bound */
 ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
                                           uint64_t count, bool known);

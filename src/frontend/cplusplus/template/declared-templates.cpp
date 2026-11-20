@@ -1608,6 +1608,8 @@ static bool depends(const types &table, qualified_type t,
     case type_kind::bit_int:
         return r.entity &&
                (!parameters || (*parameters)[r.entity].value >= from);
+    case type_kind::vector:
+        return depends(table, r.operand, parameters, from);
     case type_kind::ext_vector:
         if (r.entity && (!parameters || (*parameters)[r.entity].value >= from))
             return true;

@@ -1186,7 +1186,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             gnu_attributes g;
             VTRY(r, gnu_attribute_specifier(c, g));
             if (!(g.flags & ~gnu_packed) && !g.section && !g.abi_tag &&
-                !g.mode) {
+                !g.mode && !g.vector_bytes) {
                 if (g.aligned > trailing_class_alignment)
                     trailing_class_alignment = static_cast<uint32_t>(g.aligned);
                 trailing_class_flags |= g.flags;

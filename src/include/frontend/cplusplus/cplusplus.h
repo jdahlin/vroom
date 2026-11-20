@@ -106,6 +106,9 @@ struct implementation_defined_behavior {
     /* [basic.fundamental]/8: wchar_t's width and signedness */
     uint8_t wchar_t_width = 32;
     bool wchar_t_is_signed = false;
+    /* [ext:gnu_vector_size] a vector is aligned to its whole size (x86-64);
+       else to at most 16 bytes (arm64) */
+    bool vector_alignment_uncapped = false;
 
     /* the choices of clang -cc1 -triple aarch64-unknown-linux-gnu -std=... */
     static implementation_defined_behavior for_edition(standard_edition edition,

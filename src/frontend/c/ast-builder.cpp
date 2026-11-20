@@ -69,6 +69,13 @@ ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count)
     return AST_QUALIFIED_TYPE(cc_type_intern(c, &v), 0);
 }
 
+ast_qualified_type ast_builder_type_vector(cc *c, ast_qualified_type element,
+                                           uint64_t count)
+{
+    return cc_type_vector(c, element,
+                          (uint32_t)(count * cc_type_size(c, element)));
+}
+
 ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
                                           uint64_t count, bool known)
 {

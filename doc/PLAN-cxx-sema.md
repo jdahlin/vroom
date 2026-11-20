@@ -2347,3 +2347,38 @@ libc++, Skia and nlohmann/json.  Its run tests are kept as
   `-O0` symbols are compared with clang's by `bench/cxx-run.py`.
 - Member template bodies parsed late lost their template depth (e0d34d7c).
   Today: the parser keeps the scope ([temp.mem]).
+
+## GNU vectors and x86 SIMD intrinsics ([ext:gnu_vector_size])
+
+Why: clang's `mmintrin.h` and friends (`<immintrin.h>`, which the lexer's
+`simd-search.h` includes on x86) are written with `vector_size` types, so the
+C++ front end cannot compile any x86 SIMD code without them.  The code
+generator already has vectors (C's `AST_TYPE_VECTOR`, the `AST_CAST_VECTOR_*`
+casts, vector arithmetic in VIR); what the C++ analysis lacks is the analysis
+side, and it lowers through `ast_builder_*` to what C's parser would have made.
+Shared with C, not copied: the layout and validity rule
+(`include/frontend/vector-layout.h`, used by `cc_type_vector` and by
+`vector_layout` / `gnu_vector_type` in `ext/clang/ext-vector.cpp`).
+
+- V1 **Done** (2026-11-20): the type.  `type_kind::vector`;
+  `__attribute__((vector_size(N)))` on a typedef-name or variable
+  (`declaration/simple-declaration.cpp`, like `mode`); size and alignment
+  (x86-64: the whole size; arm64: at most 16, `vector_alignment_uncapped`);
+  Itanium mangling `Dv N _ T`; lowering to C's vector type; clang's "invalid
+  vector element type" and size errors.  Test: `src/test/cxx/run/gnu-vector-size.cpp`
+  (cxx-run, -O0 symbols = clang's).  An expression of vector type is still
+  refused (`expression/expression.cpp`).
+- V2 values: the same-type copy (initialization, assignment, arguments,
+  returns), `sizeof`, vector members in classes.
+- V3 operators: arithmetic, bitwise, shifts, comparisons (result a signed
+  integer vector), unary, `?:`, compound assignment, scalar splat; clang's
+  rules for mixing a vector and a scalar.
+- V4 element access `v[i]` (an lvalue), vector initializer lists, C-style
+  casts between vectors of the same size (the bits), `__builtin_shufflevector`,
+  `__builtin_convertvector` (shares `ext/clang/convertvector.cpp`),
+  `__builtin_elementwise_*`, `__builtin_nontemporal_load/store`.
+- V5 the `__builtin_ia32_*` builtins `<immintrin.h>` calls (a table beside
+  C's builtins), `__target__("sse2")` functions, then `simd-search.h`
+  compiled by vcc on x86-64 as the check.
+- `ext_vector_type` (clang_ext_vector_type) shares V2-V4 (element
+  swizzles `.xyzw` are its own).

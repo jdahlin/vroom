@@ -137,6 +137,9 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::complex:
         made = ast_builder_type_complex(c, type(r.operand, at));
         break;
+    case type_kind::vector:
+        made = ast_builder_type_vector(c, type(r.operand, at), r.bound);
+        break;
     case type_kind::ext_vector:
         made = ast_builder_type_ext_vector(c, type(r.operand, at), r.bound);
         break;
