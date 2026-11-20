@@ -835,7 +835,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     using enum preprocessing_op_or_punc;
     if (d.is_token()) {
         if (d.is(ELLIPSIS)) {
-            /* [dcl.decl.general]/1: noptr-abstract-pack-declarator is "...";
+            /* [dcl.decl]/1: noptr-abstract-pack-declarator is "...";
                [dcl.fct]/21: only in a parameter-declaration, which then
                declares a pack ([temp.param]/17 for a non-type template
                parameter) */
