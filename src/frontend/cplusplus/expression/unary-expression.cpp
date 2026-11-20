@@ -13,7 +13,6 @@
  *         sizeof ( type-id )
  *         sizeof ... ( identifier )
  *         alignof ( type-id )
- *         alignof unary-expression    [ext:gnu_alignof_expression]
  *         noexcept-expression
  *         new-expression
  *         delete-expression
@@ -48,6 +47,21 @@ bool is_unary_operator(const token &t)
 }
 
 } // namespace
+
+/*
+ * [ext:gnu_alignof_expression] (GCC manual 6.46):
+ *
+ *     unary-expression:
+ *         alignof unary-expression
+ */
+
+/*
+ * [ext:clang_datasizeof] (clang's __datasizeof):
+ *
+ *     unary-expression:
+ *         __datasizeof ( type-id )
+ *         __datasizeof unary-expression
+ */
 
 /*
  * [expr.unary]/1: "Expressions with unary operators group right-to-left":
@@ -85,9 +99,12 @@ node_index parser::unary_expression()
             return 0;
         return finish_node(syntax_kind::unary_expression, mark, first);
     }
-    if (at(standard_keyword::sizeof_)) {
+    /* [ext:clang_datasizeof] __datasizeof has sizeof's operands, but
+       sizeof... */
+    bool data_size = at(extension_keyword::datasizeof_);
+    if (at(standard_keyword::sizeof_) || data_size) {
         add_token();
-        if (at(preprocessing_op_or_punc::ELLIPSIS)) {
+        if (!data_size && at(preprocessing_op_or_punc::ELLIPSIS)) {
             /* [expr.sizeof]/5: sizeof ... ( identifier ) (C++11) */
             if (!tokens.files.behavior.has(
                     language_feature::variadic_templates))
@@ -127,9 +144,10 @@ node_index parser::unary_expression()
         if (!parenthesized_type_id(false)) {
             if (failed())
                 return 0;
-            /* [ext:gnu_alignof_expression] alignof unary-expression: the
-               alignment of the expression's type (clang's
-               -Wgnu-alignof-expression) */
+            /* [ext:gnu_alignof_expression] the alignment of the
+               expression's type (clang's -Wgnu-alignof-expression) */
+            if (!tokens.files.behavior.has(extension::gnu_alignof_expression))
+                return expected("a type-id after alignof (", "expr.alignof");
             nesting_level level(*this);
             if (!nesting_within_limit("an expression nested no deeper than "
                                       "this implementation's limit"))
@@ -331,7 +349,8 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
  * [expr.alignof]/2: "The result ... is a prvalue of type std::size_t."
  */
 analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
-                                           expression_meaning &m)
+                                           expression_meaning &m,
+                                           bool data_size)
 {
     qualified_type operand;
     uint32_t typedef_alignment = 0;
@@ -376,6 +395,18 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
     if (r != analysis_result::well_formed)
         return r;
     uint64_t size = size_of_type(operand);
+    if (data_size) {
+        /* [ext:clang_datasizeof] a class's data size ([abi:layout]), the
+           size of the rest */
+        qualified_type t = operand;
+        while (type_table[t.unqualified()].kind ==
+                   type_kind::lvalue_reference ||
+               type_table[t.unqualified()].kind == type_kind::rvalue_reference)
+            t = type_table[t.unqualified()].operand;
+        const struct type record = type_table[t.unqualified()];
+        if (record.kind == type_kind::class_type)
+            size = entity_table[record.entity].data_size;
+    }
     if (alignment) {
         size = alignment_of_type(operand);
         /* [ext:gnu_attributes] alignof of a typedef-name declared with
@@ -634,6 +665,8 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
             return size_of(n, false, m);
         if (kw == standard_keyword::alignof_)
             return size_of(n, true, m);
+        if (p.extension_keyword_of(op) == extension_keyword::datasizeof_)
+            return size_of(n, false, m, true);
         return not_supported(n, "expr.unary");
     }
     if (op.kind != token_kind::operator_or_punctuator || n.size() != 2)
