@@ -1620,7 +1620,7 @@ class semantic_analysis
                                                  bool extern_);
     analysis_result member_explicit_instantiation(SyntaxRef n,
                                                   SyntaxRef declaration,
-                                                  bool extern_);
+                                                  uint32_t lead, bool extern_);
     /* whether the declarator may have a simple-template-id as its
        declarator-id */
     bool declarator_template_id = false;
@@ -1682,8 +1682,9 @@ class semantic_analysis
        instantiation record, which an explicit specialization makes);
        its decl-specifier-seq's meaning in s */
     analysis_result named_specialization(SyntaxRef n, SyntaxRef declaration,
-                                         bool specialization, bool extern_,
-                                         specified &s, uint32_t &index);
+                                         uint32_t lead, bool specialization,
+                                         bool extern_, specified &s,
+                                         uint32_t &index);
     /* [dcl.type.simple] Table 14: the type of the simple-type-specifier
        keywords of a decl-specifier-seq */
     struct simple_type_keywords {

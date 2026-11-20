@@ -157,8 +157,10 @@ node_index parser::explicit_instantiation(node_index (parser::*declaration)())
     if (at(standard_keyword::template_))
         return expected("a declaration after template", "temp.explicit");
     /* [dcl.attr.grammar]/5 as clang reads it: no attribute-specifier-seq
-       begins an explicit instantiation's declaration */
-    if (at_attribute_specifier())
+       begins an explicit instantiation's declaration; a GNU attribute is
+       not one ([ext.gnu]: it is a decl-specifier, as in the declaration
+       libc++ writes, extern template __attribute__((visibility(...))) ...) */
+    if (at_attribute_specifier() && !at_gnu_attribute(0))
         return violates("no attribute-specifier-seq in an explicit "
                         "instantiation",
                         "temp.explicit", position);
