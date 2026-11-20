@@ -42,6 +42,9 @@ EXTENSION(gnu_library_builtins, gnu,
           "of the ISO C library functions")
 EXTENSION(gnu_asm_labels, gnu,
           "GCC manual 6.47.4, Controlling Names Used in Assembler Code: T x asm (\"name\")")
+EXTENSION(gnu_asm_statements, gnu,
+          "GCC manual 6.47, Using Assembly Language with C: asm statements, basic and "
+          "extended (asm volatile (\"...\" : outputs : inputs : clobbers))")
 EXTENSION(gnu_restrict, gnu,
           "GCC manual 7.3, Restricting Pointer Aliasing: __restrict__ as a cv-qualifier")
 EXTENSION(gnu_extension_keyword, gnu,

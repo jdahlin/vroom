@@ -965,6 +965,10 @@ class parser
        declaration (alternative parses what follows) or an expression */
     node_index gnu_extension_prefixed(node_index (parser::*alternative)());
     node_index gnu_extension_expression();
+    /* ---- ext/gnu/asm-statement.cpp: asm volatile ("..." : out : in : clobbers); */
+    node_index gnu_asm_statement();
+    node_index gnu_asm_operand();
+    bool gnu_asm_string(const char *what);
     /* ---- ext/gnu/labels-as-values.cpp: &&label, goto *p; */
     node_index gnu_label_address();
     node_index gnu_computed_goto(size_t mark, token_index first);

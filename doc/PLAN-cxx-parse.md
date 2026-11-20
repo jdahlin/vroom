@@ -842,7 +842,7 @@ The first grammar, about 55 nonterminals.
   nlohmann/json test TUs, the Skia TUs.
 - Each construct that stops one is an extension with a row, a file and a
   test: expected first are `__attribute__` (`ext/gnu/attribute.cpp`),
-  `__extension__`, `__typeof__`, asm labels, `__restrict`, statement
+  `__extension__`, `__typeof__`, asm labels, asm statements (`ext/gnu/asm-statement.cpp`: operands and clobbers lowered, asm goto refused), `__restrict`, statement
   expressions, `__builtin_*` type traits spelled as keywords
   (`ext/clang/`), `__declspec` (`ext/microsoft/`).  With an extension off,
   its syntax is the syntax error the standard says it is, and a test says
