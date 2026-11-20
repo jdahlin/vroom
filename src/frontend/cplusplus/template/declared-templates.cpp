@@ -621,25 +621,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
            expressions involving template parameters"; one that is not is
            another template of the name, an overload ([temp.over]) */
         const function_template f = function_templates[g - 1];
-        if (f.parameter_count != parameters.size() ||
-            !same_template_parameters(first, f.first_parameter,
-                                      f.parameter_count) ||
-            !same_constraints(f.declaration, n))
-            continue;
-        owned_array<template_argument> values;
-        owned_array<bool> set;
-        for (uint32_t i = 0; i < f.parameter_count; i++) {
-            values.append(template_argument());
-            set.append(false);
-        }
-        bool same =
-            deduce_type(entity_table[f.entity].type, type, values, set, true);
-        for (uint32_t i = 0; i < f.parameter_count && same; i++) {
-            entity_index pe = template_parameter_entities[first + i];
-            if (set[i] && (entity_table[pe].kind != entity_kind::typedef_name ||
-                           !(values[i].type == entity_table[pe].type)))
-                same = false;
-        }
+        bool same = equivalent_template(
+            f, n, first, static_cast<uint32_t>(parameters.size()), type);
         /* [namespace.udecl]/13: one a using-declaration introduced joins
            the overload set with this one unless they are equivalent */
         if (same && entity_table[f.entity].enclosing != outer)
@@ -657,10 +640,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
            declarator the specializations are made from has not) */
         if (defaults || f.default_arguments)
             return not_supported(n, "dcl.fct.default");
-        if (old.enclosing != outer || f.parameter_count != parameters.size() ||
-            !same_template_parameters(first, f.first_parameter,
-                                      f.parameter_count) ||
-            old.constexpr_ != s.constexpr_ ||
+        /* (equivalent_template: the same template-head and function
+           type) */
+        if (old.enclosing != outer || old.constexpr_ != s.constexpr_ ||
             (s.static_ && old.linkage_of_name != linkage::internal))
             return not_supported(n, "temp.over.link");
         /* different names: the definition's are the ones its body uses
@@ -673,22 +655,6 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 entity_table[template_parameter_entities[f.first_parameter + i]]
                     .name)
                 renamed = true;
-        /* the function types the same once each parameter is the other's
-           (the old in terms of the new, exactly) */
-        owned_array<template_argument> values;
-        owned_array<bool> set;
-        for (uint32_t i = 0; i < f.parameter_count; i++) {
-            values.append(template_argument());
-            set.append(false);
-        }
-        if (!deduce_type(old.type, type, values, set, true))
-            return not_supported(n, "temp.over.link");
-        for (uint32_t i = 0; i < f.parameter_count; i++) {
-            entity_index pe = template_parameter_entities[first + i];
-            if (set[i] && (entity_table[pe].kind != entity_kind::typedef_name ||
-                           !(values[i].type == entity_table[pe].type)))
-                return not_supported(n, "temp.over.link");
-        }
         /* [dcl.inline]/5: an inline declaration after the definition is
            ill-formed; one before it makes the template inline */
         if (s.inline_ && !old.inline_ && f.definition)
@@ -2618,6 +2584,38 @@ bool semantic_analysis::same_dependent_parameter_type(SyntaxRef a, SyntaxRef b)
         if (!same_token_spelling(a.first_token() + i, b.first_token() + i))
             return false;
     return ea > a.first_token();
+}
+
+/*
+ * [temp.over.link]/7: whether f is equivalent to the template declared by
+ * n, whose template-parameters are template_parameter_entities[first ..
+ * + count) and whose function type is type: the same template-head and
+ * requires-clauses, and the function types the same once each of f's
+ * parameters is the other's.
+ */
+bool semantic_analysis::equivalent_template(const function_template &f,
+                                            SyntaxRef n, uint32_t first,
+                                            uint32_t count, qualified_type type)
+{
+    if (f.parameter_count != count ||
+        !same_template_parameters(first, f.first_parameter, count) ||
+        !same_constraints(f.declaration, n))
+        return false;
+    owned_array<template_argument> values;
+    owned_array<bool> set;
+    for (uint32_t i = 0; i < count; i++) {
+        values.append(template_argument());
+        set.append(false);
+    }
+    if (!deduce_type(entity_table[f.entity].type, type, values, set, true))
+        return false;
+    for (uint32_t i = 0; i < count; i++) {
+        entity_index pe = template_parameter_entities[first + i];
+        if (set[i] && (entity_table[pe].kind != entity_kind::typedef_name ||
+                       !(values[i].type == entity_table[pe].type)))
+            return false;
+    }
+    return true;
 }
 
 bool semantic_analysis::same_template_parameters(uint32_t first,

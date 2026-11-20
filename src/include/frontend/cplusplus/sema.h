@@ -4152,6 +4152,9 @@ class semantic_analysis
        types, count of each */
     bool same_template_parameters(uint32_t first, uint32_t other_first,
                                   uint32_t count);
+    bool equivalent_template(const function_template &f, SyntaxRef n,
+                             uint32_t first, uint32_t count,
+                             qualified_type type);
     /* [temp.mem.func]/1: a member function of a class template (or of a
        partial specialization, [temp.class.spec.mfunc]/1) defined outside
        it: the definition, analysed per specialization of the class
