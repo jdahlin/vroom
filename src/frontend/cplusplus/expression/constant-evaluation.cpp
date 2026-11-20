@@ -376,7 +376,7 @@ entity_index semantic_analysis::evaluated_class(qualified_type t) const
     if (record.kind != type_kind::class_type)
         return 0;
     const entity &x = entity_table[record.entity];
-    if (!x.defined || x.union_ || x.base_count)
+    if (!x.defined || x.union_ || x.dynamic || x.virtual_base_count)
         return 0;
     return record.entity;
 }
@@ -1022,6 +1022,33 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
     return constness::constant;
 }
 
+/*
+ * [temp.inst]/4, [temp.point]/7: the body of a member function of a class
+ * template's specialization that waits for the end of the translation
+ * unit (postponed_bodies) is analysed now, where a constant evaluation
+ * needs it ([expr.const]/11: the function is "needed for constant
+ * evaluation"), unless a class is being defined, whose completeness the
+ * wait was for.
+ */
+void semantic_analysis::analyse_postponed_body(entity_index f)
+{
+    if (entity_table[f].definition || defining_class)
+        return;
+    for (size_t i = 0; i < postponed_bodies.size(); i++) {
+        postponed_body &b = postponed_bodies[i];
+        if (!b.c || b.c != entity_table[f].enclosing ||
+            !declared_by(f, b.body.function_definition()))
+            continue;
+        const postponed_body taken = b;
+        b.c = 0;
+        instantiation_context context;
+        enter_instantiation(context, taken.scope, taken.declaration);
+        instantiated_member_body(taken.c, taken.body);
+        leave_instantiation(context);
+        return;
+    }
+}
+
 constness semantic_analysis::evaluate_invocation(
     constant_evaluation &state, entity_index f, const constant_value &self,
     uint32_t first, uint32_t count, bool &returned, constant_value &result)
@@ -1048,7 +1075,8 @@ constness semantic_analysis::evaluate_invocation(
             return constness::unknown;
         return constness::not_constant;
     }
-    uint32_t body = e.definition;
+    analyse_postponed_body(f);
+    uint32_t body = entity_table[f].definition;
     uint32_t with_this = 0;
     if (self.kind == constant_value_kind::pointer)
         with_this = 1;

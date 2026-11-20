@@ -2870,6 +2870,7 @@ class semantic_analysis
     /* the invocation of function f (a pointer to the object for a
        non-static member function's this, or kind none), the arguments
        list[first .. first + count) */
+    void analyse_postponed_body(entity_index f);
     constness evaluate_invocation(constant_evaluation &state, entity_index f,
                                   const constant_value &self, uint32_t first,
                                   uint32_t count, bool &returned,

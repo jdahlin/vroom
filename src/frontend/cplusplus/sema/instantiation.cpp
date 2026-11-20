@@ -481,6 +481,8 @@ void semantic_analysis::instantiate_pending()
 {
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         const postponed_body b = postponed_bodies[i];
+        if (!b.c)
+            continue;
         instantiation_context context;
         enter_instantiation(context, b.scope, b.declaration);
         instantiated_member_body(b.c, b.body);
