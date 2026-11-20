@@ -4885,6 +4885,10 @@ class semantic_analysis
     /* whether the class s has a non-explicit conversion function that may
        yield the class t or one derived from it ([over.match.copy]/1.2) */
     bool has_implicit_conversion_functions(entity_index c) const;
+    bool conversion_function_to_class(const expression_meaning &a,
+                                      qualified_type to,
+                                      conversion_sequence &found,
+                                      bool &unknown);
     bool conversion_functions_yield_class(entity_index s, entity_index t,
                                           bool explicit_counts = false) const;
     /* ... a base class of c does */
