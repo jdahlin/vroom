@@ -111,6 +111,26 @@ bool parser::at(extension_keyword k, unsigned ahead)
     return extension_keyword_of(peek(ahead)) == k;
 }
 
+/* whether the current token is an extension's keyword that only an
+   expression begins ([ext:gnu_offsetof], [ext:gnu_va_arg], the clang
+   builtins and type traits as expressions): no decl-specifier is one */
+bool parser::at_expression_extension_keyword()
+{
+    switch (extension_keyword_of(peek())) {
+    case extension_keyword::type_trait:
+    case extension_keyword::offsetof_:
+    case extension_keyword::va_arg_:
+    case extension_keyword::bit_cast:
+    case extension_keyword::convertvector:
+    case extension_keyword::datasizeof_:
+    case extension_keyword::source_location:
+    case extension_keyword::source_location_value:
+        return true;
+    default:
+        return false;
+    }
+}
+
 standard_keyword parser::keyword_of(const token &t) const
 {
     if (t.kind != token_kind::keyword || t.keyword < 0 ||
