@@ -807,6 +807,21 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
            declarator-id alone (a static data member's definition,
            [class.static.data]): class-name :: identifier */
         auto q = d.qualified_id();
+        if (declarator_template_id && q.size() == 2 &&
+            q.nested_name_specifier() &&
+            q[1].is(syntax_kind::simple_template_id) &&
+            q[1][0].is_identifier()) {
+            /* [temp.expl.spec]/1: a variable template's specialization
+               named by a qualified template-id */
+            VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
+            if (!m.qualified_namespace)
+                return not_supported(n, "dcl.meaning");
+            declarator_template_id = false;
+            m.template_id = q[1];
+            m.has_id = true;
+            m.id = q[1][0].token();
+            return analysis_result::well_formed;
+        }
         if (q.size() != 2 || !q.nested_name_specifier() || !q.identifier())
             return not_supported(n, "dcl.meaning");
         VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));

@@ -42,8 +42,11 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     if (n.size() != 4 || n[3].is_token())
         return not_supported(n, "temp.expl.spec");
     auto inner = n[3];
+    entity_index qualifier = 0;
     if (SyntaxRef id = variable_specialization_id(inner))
-        return variable_specialization(n, inner, id);
+        return variable_specialization(n, inner, id, qualifier);
+    if (SyntaxRef id = qualified_variable_specialization_id(inner, qualifier))
+        return variable_specialization(n, inner, id, qualifier);
     if (!inner.is(syntax_kind::function_definition,
                   syntax_kind::simple_declaration))
         return not_supported(n, "temp.expl.spec");
@@ -196,6 +199,48 @@ SyntaxRef semantic_analysis::variable_specialization_id(SyntaxRef d) const
     return id;
 }
 
+/* [temp.expl.spec]/1, [dcl.meaning]/1: the same with a qualified
+   template-id, N::name<args>, its qualifier a namespace the template is a
+   member of ([namespace.qual]/2); qualifier is that namespace */
+SyntaxRef
+semantic_analysis::qualified_variable_specialization_id(SyntaxRef d,
+                                                        entity_index &qualifier)
+{
+    qualifier = 0;
+    if (!d.is(syntax_kind::simple_declaration) || d.size() != 3 ||
+        !d[1].is(syntax_kind::init_declarator))
+        return 0;
+    auto item = d[1];
+    if (item.size() != 2 || !item[0].qualified_id())
+        return 0;
+    auto q = item[0].qualified_id();
+    if (q.size() != 2 || !q.nested_name_specifier() ||
+        !q[1].is(syntax_kind::simple_template_id) || !q[1][0].is_identifier())
+        return 0;
+    declarator_meaning m;
+    if (declarator_qualifier(q.nested_name_specifier(), m) !=
+            analysis_result::well_formed ||
+        !m.qualified_namespace)
+        return 0;
+    lookup_result x = lookup_in_namespace(m.namespace_qualifier,
+                                          tokens.identifier(q[1][0].token()),
+                                          lookup_filter::any);
+    entity_index named = x.entity;
+    if (!named)
+        named = x.unknown_entity;
+    if (x.ambiguous || !variable_template_of(named))
+        return 0;
+    /* [temp.expl.spec]/2: declared in a namespace that encloses the
+       template's (clang's error otherwise) */
+    entity_index scope = m.namespace_qualifier;
+    while (scope != current_scope && scope)
+        scope = entity_table[scope].enclosing;
+    if (scope != current_scope)
+        return 0;
+    qualifier = m.namespace_qualifier;
+    return q[1];
+}
+
 /*
  * [temp.expl.spec]/1: a variable template's explicit specialization
  * template<> T name<args> = init;: the specialization's variable, declared
@@ -204,17 +249,29 @@ SyntaxRef semantic_analysis::variable_specialization_id(SyntaxRef d) const
  * inline only if declared so ([temp.expl.spec]/12).  One the program used
  * before is not analysed ([temp.expl.spec]/7: clang's error).
  */
-analysis_result semantic_analysis::variable_specialization(SyntaxRef n,
-                                                           SyntaxRef inner,
-                                                           SyntaxRef id)
+analysis_result
+semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
+                                           SyntaxRef id, entity_index qualifier)
 {
     lookup_result x;
     entity_index named = 0;
-    template_id_name(id, x, named);
+    if (qualifier) {
+        x = lookup_in_namespace(qualifier, tokens.identifier(id[0].token()),
+                                lookup_filter::any);
+        named = x.entity;
+        if (!named)
+            named = x.unknown_entity;
+    } else {
+        template_id_name(id, x, named);
+    }
     uint32_t vt = variable_template_of(named);
     owned_array<template_argument> arguments;
     declaring_specializations++;
-    analysis_result r = template_id_arguments(id, vt, arguments);
+    analysis_result r;
+    if (qualifier)
+        r = template_id_arguments_in(id, vt, qualifier, arguments);
+    else
+        r = template_id_arguments(id, vt, arguments);
     declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;

@@ -3632,6 +3632,8 @@ class semantic_analysis
                                         type_index &type,
                                         uint32_t *cv = nullptr);
     SyntaxRef variable_specialization_id(SyntaxRef d) const;
+    SyntaxRef qualified_variable_specialization_id(SyntaxRef d,
+                                                   entity_index &qualifier);
     /* a partial specialization equivalent to another: the template not
        used */
     void equivalent_partial_specializations(uint32_t added);
@@ -3639,7 +3641,8 @@ class semantic_analysis
                                                     SyntaxRef declaration,
                                                     SyntaxRef id);
     analysis_result variable_specialization(SyntaxRef n, SyntaxRef inner,
-                                            SyntaxRef id);
+                                            SyntaxRef id,
+                                            entity_index qualifier);
     /* [temp.concept]: a concept-definition; the concept the held name e
        is, plus one; [temp.names]/8: a concept-id's value */
     analysis_result concept_definition(SyntaxRef n,
