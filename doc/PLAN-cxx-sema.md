@@ -1431,6 +1431,31 @@ lines:
   no longer among the reasons.  cxx-run 460/460 (115 programs);
   cxx-c-suites 0 wrong; quality redundant_tokens 59310 -> 59684,
   duplicate_runs_across_files 353 -> 360.
+- Status (2026-11-20, step 5: lambda captures and closures): one capture
+  algorithm in `lambda-capture.cpp`.  A local variable usable in constant
+  expressions is captured only by an odr-use ([basic.def.odr]/4: its names
+  stay entity nodes until the body is analysed, a read is none, the rest
+  are captured and rewritten: `pending_uses`); an unevaluated operand
+  captures nothing.  Arrays are captured by copy element by element
+  (/15), structured bindings (C++20, /4), packs (`[xs...]`, `[&xs...]`,
+  `[...ys = xs]`: one capture per element, /17).  A generic lambda (an
+  `auto` parameter, a template-head with packs and non-type parameters)
+  decides its implicit captures where the lambda-expression is
+  (`implicit_captures`: the names of its body), its specializations
+  use them; `constexpr` and `consteval` lambdas, the call operator's
+  implicit constexpr (a constant evaluation of a closure), lambdas in
+  unevaluated operands and in default arguments of member functions
+  (`d_` scope) and default member initializers (`M` data-member prefix,
+  one closure type for the initializer each constructor analyses).
+  Mangling: the template-param-decls of a lambda's template-head (`Ty`,
+  `Tn <type>`, `Tp`; none for an invented one) and `Xsp T_ E` for an own
+  non-type pack.  Found: `default_arguments` held a reference into the
+  entity table across the analysis of an argument.  Not supported (tests
+  in `xfail.txt`, `lambda-capture-*`): the conversion of a generic lambda
+  to a pointer to function, a lambda of an alias template, a closure type
+  as a template argument (linkage of its members), an `auto` parameter
+  pack (the abbreviated function template's own limit).  Tests:
+  `src/test/cxx/run/lambda-capture-*.cpp`, `sema/gram/lambda-capture.ill-formed.cpp`.
 - Status (2026-11-18, step 5 after review): linkage across translation
   units.  A specialization internal only by local classes or closure types
   of an inline or templated function has its template's linkage

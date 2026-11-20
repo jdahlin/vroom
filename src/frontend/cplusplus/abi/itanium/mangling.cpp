@@ -589,6 +589,20 @@ bool itanium_mangler::name(entity_index e)
            <nested-name> */
         if (!function_scope(local))
             return false;
+        /* [abi:mangling-scope] a default argument's scope:
+           d [<number>] _ */
+        entity_index top = e;
+        if (table[top].kind != entity_kind::class_type)
+            top = table[top].enclosing;
+        while (table[top].kind == entity_kind::class_type &&
+               table[table[top].enclosing].kind == entity_kind::class_type)
+            top = table[top].enclosing;
+        if (uint32_t parameter = table[top].default_argument_parameter) {
+            text("d");
+            if (parameter > 1)
+                number(parameter - 2);
+            text("_");
+        }
         return nested_name(e);
     }
     if (table[scope].kind == entity_kind::class_type ||
@@ -967,7 +981,15 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
                declaration): [abi:mangle.function-type]'s pack expansion of the
                parameter, <type> ::= Dp <type> */
             if (entity_index own = analysis.specialization_own_pack(c, i, k)) {
-                /* (a non-type or template pack: not mangled yet) */
+                /* a non-type pack: the expansion of the parameter as an expression
+                   (sp), in a template argument (X ... E) */
+                if (analysis.entity_table[own].kind == entity_kind::none) {
+                    text("Xsp");
+                    template_param(analysis.entity_table[own].value);
+                    text("E");
+                    continue;
+                }
+                /* (a template pack: not mangled yet) */
                 if (analysis.entity_table[own].kind !=
                     entity_kind::typedef_name)
                     return false;
@@ -1698,8 +1720,29 @@ bool itanium_mangler::closure_type_name(entity_index c)
        template-parameter-list: Ty for a type-parameter (the only ones
        analysed) */
     if (table[call].kind == entity_kind::template_entity) {
-        for (uint32_t i = 0; i < analysis.template_parameter_count(call); i++)
-            text("Ty");
+        /* ([impl.clang] the invented ones of an auto parameter have none) */
+        uint32_t explicit_count =
+            analysis.template_parameter_count(call) -
+            analysis.invented_parameter_count(table[c].lambda);
+        /* the template-param-decls: Ty, Tn and the type, Tp before a pack's */
+        for (uint32_t i = 0; i < explicit_count; i++) {
+            bool pack = false;
+            qualified_type value_type;
+            semantic_analysis::template_parameter_form_kind kind =
+                analysis.template_parameter_kind(call, i, pack, value_type);
+            if (kind ==
+                semantic_analysis::template_parameter_form_kind::template_)
+                return false;
+            if (pack)
+                text("Tp");
+            if (kind == semantic_analysis::template_parameter_form_kind::type) {
+                text("Ty");
+            } else {
+                text("Tn");
+                if (!type(value_type))
+                    return false;
+            }
+        }
         /* [impl.clang] the template-head's requires-clause: Q and its
            expression */
         bool trailing = false;
@@ -1721,7 +1764,12 @@ bool itanium_mangler::closure_type_name(entity_index c)
         const entity &k = table[other];
         if (k.kind != entity_kind::class_type || !k.lambda ||
             !k.call_operator || enclosing_function(table, other) != context ||
-            k.closure_variable != variable)
+            k.closure_variable != variable ||
+            k.default_argument_parameter != table[c].default_argument_parameter)
+            continue;
+        /* (a default member initializer analysed in each constructor: the
+           one closure type of its lambda-expression) */
+        if (variable && !table[variable].inline_ && k.lambda == table[c].lambda)
             continue;
         const struct type &a = record(table[k.call_operator].type);
         const struct type &b = record(signature);

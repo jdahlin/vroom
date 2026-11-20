@@ -736,6 +736,15 @@ bool semantic_analysis::abbreviated_parameters(
             list = c;
     if (!list)
         return true;
+    return abbreviated_clause(list, parameters);
+}
+
+/* the generic parameter type placeholders among the parameter-declarations
+   of list (a parameters-and-qualifiers or a lambda-declarator), in order:
+   abbreviated_parameters' */
+bool semantic_analysis::abbreviated_clause(
+    SyntaxElement list, owned_array<SyntaxRef> &parameters) const
+{
     owned_array<SyntaxElement> items;
     flatten_parameters(list, items);
     for (size_t i = 0; i < items.size(); i++) {

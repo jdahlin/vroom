@@ -1538,13 +1538,6 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         return evaluate_query_builtin(state, which, x, v);
     if (entity_table[semantics[callee].a].gnu_flags & gnu_floating_constant)
         return evaluate_floating_builtin(state, semantics[callee].a, x, v);
-    /* [expr.prim.lambda.closure]/4: whether a closure's function call
-       operator is constexpr is not decided yet (evaluate_invocation),
-       unless its lambda-declarator says constexpr */
-    entity_index enclosing = entity_table[semantics[callee].a].enclosing;
-    if (enclosing && entity_table[enclosing].lambda &&
-        !entity_table[semantics[callee].a].constexpr_)
-        return constness::unknown;
     /* [class.this]/1: a non-static member function's this, the address
        of the object expression */
     constant_value self;
@@ -1628,7 +1621,13 @@ constness semantic_analysis::evaluate_invocation(
     const entity &e = entity_table[f];
     if (e.kind != entity_kind::function)
         return constness::unknown;
-    if (!e.constexpr_) {
+    /* [expr.prim.lambda.closure]/4: a closure's function call operator is
+       a constexpr function "if it satisfies the requirements for a
+       constexpr function": evaluated, and not a constant expression where
+       its body is not one */
+    bool implicit_constexpr = e.enclosing && entity_table[e.enclosing].lambda &&
+                              entity_table[e.enclosing].call_operator == f;
+    if (!e.constexpr_ && !implicit_constexpr) {
         /* (a library builtin, declared with C language linkage, may be
            one the evaluator does not know clang evaluates) */
         if (state.potential && e.c_language_linkage)

@@ -740,6 +740,10 @@ struct entity {
     /* a closure type of an inline variable's initializer: the variable,
        the closure's context ([abi:closure-types]) */
     entity_index closure_variable = 0;
+    /* a closure type in a default argument of a member function: its
+       number plus one among that function's ([abi:closure-types]
+       d <number> _) */
+    uint32_t default_argument_parameter = 0;
     /* an init-capture's name ([expr.prim.lambda.capture]/6): the variable
        is the closure's non-static data member this names */
     entity_index capture_member = 0;
@@ -2375,6 +2379,9 @@ class semantic_analysis
     owned_array<parameter_meaning> member_default_parameters;
     /* ... analysed now, of the complete class c */
     bool analysing_member_defaults = false;
+    /* the function whose default argument is analysed: a lambda in it
+       belongs to the function ([abi:closure-types]) */
+    entity_index default_argument_function = 0;
     analysis_result member_default_arguments(entity_index c);
     /* ... of the member function f declared by declaration: kept for then */
     void defer_default_arguments(entity_index f, SyntaxRef declaration,
@@ -2514,6 +2521,9 @@ class semantic_analysis
     /* the variable whose initializer deduces its type now (saved and
        restored around the deduction) */
     entity_index deducing_variable = 0;
+    /* the non-static data member whose default member initializer is
+       analysed (in a constructor), 0 elsewhere */
+    entity_index initialized_member = 0;
     /* [dcl.spec.auto]/11: a use of e, whose type may have an undeduced
        placeholder */
     analysis_result undeduced_use(token_index t, entity_index e);
@@ -2639,6 +2649,8 @@ class semantic_analysis
         bool by_reference = false, star_this = false, init_capture = false;
         token_index at = 0;
         uint32_t initialization = 0;
+        /* an init-capture pack's name (its variables, or none, follow) */
+        uint32_t pack_name = 0;
     };
     /* a lambda-expression whose compound-statement is analysed: its closure
        type, function call operator, the function of the context it is in,
@@ -2648,18 +2660,92 @@ class semantic_analysis
     struct lambda_context {
         entity_index closure = 0, call = 0, enclosing_function = 0;
         capture_default default_capture = capture_default::none;
-        bool mutable_ = false, constexpr_ = false;
+        bool mutable_ = false, constexpr_ = false, immediate = false;
+        /* the closure's members are made: a capture the body would add
+           is not supported (a generic lambda's specialization) */
+        bool sealed = false;
         qualified_type enclosing_this;
         SyntaxRef at = 0;
         uint32_t first_capture = 0;
     };
     owned_array<lambda_context> lambdas;
     owned_array<capture_record> lambda_captures;
+    /* the lambda whose lambda-declarator is analysed (names in it have the
+       types of the members that would capture them) */
+    lambda_context *declaring_lambda = nullptr;
+    bool declared_view_used = false;
+    /* the closure type of a lambda-expression in a default member
+       initializer, which each constructor's analysis of the initializer
+       uses (one type, [class.mem]/10) and the captures it made (this) */
+    struct member_closure {
+        SyntaxRef lambda = 0;
+        entity_index closure = 0, member = 0;
+        uint32_t first_capture = 0, capture_count = 0;
+    };
+    owned_array<member_closure> member_closures;
+    owned_array<capture_record> member_closure_captures;
+    /* a generic lambda's closure: what its specializations' bodies need of
+       the lambda-expression, and the captures it made */
+    struct generic_closure {
+        entity_index closure = 0, enclosing_function = 0;
+        capture_default default_capture = capture_default::none;
+        bool mutable_ = false;
+        qualified_type enclosing_this;
+        uint32_t first_capture = 0, capture_count = 0;
+    };
+    owned_array<generic_closure> generic_closures;
+    owned_array<capture_record> generic_closure_captures;
+    /* [expr.prim.lambda.capture]/7: the entities and this a generic
+       lambda's body names that its capture-default captures */
+    analysis_result
+    implicit_captures(SyntaxRef n, lambda_context &l,
+                      const owned_array<parameter_meaning> &parameters);
+    bool odr_use_in_statement(
+        token_index t, token_index first, token_index end,
+        const owned_array<parameter_meaning> &parameters) const;
+    /* [basic.def.odr]/4: a name in a lambda's body of a local variable
+       usable in constant expressions is an odr-use, so a capture, unless
+       its value is read (lvalue-to-rvalue conversion); named by an entity
+       node until the body is analysed: operand_value marks the node read,
+       resolve_pending_uses captures the rest and rewrites their nodes */
+    struct pending_use {
+        uint32_t node = 0;
+        entity_index variable = 0;
+        token_index at = 0;
+        size_t lambda_depth = 0;
+        /* the call operator's this parameter, which the access is made
+           through after the body */
+        entity_index this_entity = 0;
+        bool read = false;
+    };
+    owned_array<pending_use> pending_uses;
+    /* the name being analysed is the capture's own initialization
+       ([expr.prim.lambda.capture]/15): an odr-use */
+    bool forced_odr_use = false;
+    analysis_result resolve_pending_uses(lambda_context &l);
+    bool local_reachable(entity_index owner) const;
+    analysis_result variable_capture(SyntaxRef n, lambda_context &l,
+                                     entity_index e, token_index name,
+                                     bool by_reference);
+    analysis_result pack_capture(SyntaxRef n, lambda_context &l,
+                                 token_index name, bool by_reference);
+    /* the elements of the array lvalue a (of array type type) each
+       initialized from the corresponding element, an initializer_list
+       node: an array captured by copy ([expr.prim.lambda.capture]/15) */
+    analysis_result copy_array(SyntaxRef at, token_index t,
+                               expression_meaning array, qualified_type type,
+                               uint32_t &node);
+    /* the capture of local variable e named at t in the current lambda's
+       body, and the access to its member (the odr-use of e) */
+    analysis_result capture_variable(lambda_context &l, token_index t,
+                                     entity_index e, expression_meaning &m);
     /* the lambda whose compound-statement is analysed now (its body, not a
        local class's member function in it), nullptr if none */
     lambda_context *current_lambda();
     analysis_result lambda_expression(LambdaExpression n,
                                       expression_meaning &m);
+    analysis_result lambda_expression_analysed(LambdaExpression n,
+                                               expression_meaning &m);
     analysis_result
     lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                      qualified_type &type,
@@ -2698,7 +2784,8 @@ class semantic_analysis
     /* the entity e of an enclosing function named at t in the body: its
        capture's member ([expr.prim.lambda.capture]/11) */
     analysis_result captured_entity(token_index t, entity_index e,
-                                    expression_meaning &m);
+                                    expression_meaning &m, bool &deferred,
+                                    bool &plain);
     /* this in the body: the captured this ([expr.prim.lambda.capture]/12) */
     analysis_result captured_this(token_index t, expression_meaning &m);
     /* member of the closure object, through the call operator's this */
@@ -4166,6 +4253,13 @@ class semantic_analysis
     mutable owned_array<uint32_t> invented_packs;
     bool abbreviated_parameters(SyntaxRef declaration,
                                 owned_array<SyntaxRef> &parameters) const;
+    bool abbreviated_clause(SyntaxElement list,
+                            owned_array<SyntaxRef> &parameters) const;
+    /* [dcl.fct]/22 and a template-parameter-list's rules for the
+       template-parameters (a template-head's or a lambda's) */
+    analysis_result validate_template_parameters(
+        SyntaxRef n, const owned_array<SyntaxRef> &parameters, bool packs,
+        bool pack_anywhere, bool type_constraints);
     /* whether a function-definition declares an abbreviated function
        template ([dcl.fct]/18) */
     bool abbreviated_function(SyntaxRef definition) const
@@ -4711,12 +4805,22 @@ class semantic_analysis
        the lambda-declarator's parameters */
     SyntaxElement lambda_constraint(SyntaxRef n,
                                     bool *trailing = nullptr) const;
+    /* the invented template-parameters of lambda-expression n
+       ([expr.prim.lambda.closure]/3) */
+    uint32_t invented_parameter_count(SyntaxRef n) const;
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
     {
         return function_templates[entity_table[t].instantiation - 1]
             .parameter_count;
     }
+    /* the form of template-parameter i of template entity t: a type
+       parameter, a non-type one (of type value_type) or a template
+       template one, and whether it is a pack */
+    enum class template_parameter_form_kind { type, value, template_ };
+    template_parameter_form_kind
+    template_parameter_kind(entity_index t, uint32_t i, bool &pack,
+                            qualified_type &value_type) const;
     entity_index constraint_parameter(entity_index t, token_index i) const;
     /* what token i names, looked up from scope outward (0: none) */
     entity_index constraint_name(entity_index scope, token_index i) const;

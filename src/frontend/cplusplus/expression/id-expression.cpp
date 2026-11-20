@@ -641,6 +641,8 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     if (x.bound_unknown)
         /* (the initializer analysis has no rules for yet) */
         return not_supported(current_declaration, "dcl.init");
+    bool deferred_use = false;
+    qualified_type captured_view;
     m.category = value_category::lvalue;
     m.type = x.type;
     m.entity = e;
@@ -667,14 +669,44 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
             s = entity_table[s].enclosing;
         if (s && entity_table[s].kind == entity_kind::function &&
             s != function_state.function) {
-            if (current_lambda())
-                return captured_entity(t, e, m);
-            return not_supported(current_declaration, "basic.def.odr");
+            if (!current_lambda())
+                return not_supported(current_declaration, "basic.def.odr");
+            bool plain = false;
+            VTRY(r, captured_entity(t, e, m, deferred_use, plain));
+            if (!plain)
+                return analysis_result::well_formed;
+            if (unevaluated && !deferred_use) {
+                /* [expr.prim.lambda.capture]/12: in an unevaluated operand
+                   the name has the type of the member that would capture
+                   it (decltype((x)) is const float& in a lambda that is
+                   not mutable) */
+                qualified_type seen = enclosing_capture_type(
+                    e, lambdas.size(), lambda_captures.size());
+                const struct type declared = type_table[seen.unqualified()];
+                if (declared.kind == type_kind::lvalue_reference ||
+                    declared.kind == type_kind::rvalue_reference)
+                    seen = declared.operand;
+                captured_view = seen;
+            }
         }
         /* [expr.prim.lambda.capture]/6: an init-capture's name designates
            its member */
         if (x.capture_member)
             return closure_member(t, x.capture_member, m);
+        /* in the lambda-declarator, of the lambda-expression in the body
+           of which the name will be a member's: the type as captured */
+        if (declaring_lambda && unevaluated && s == function_state.function) {
+            lambdas.append(*declaring_lambda);
+            qualified_type seen = enclosing_capture_type(
+                e, lambdas.size(), lambda_captures.size());
+            lambdas.resize(lambdas.size() - 1);
+            const struct type declared = type_table[seen.unqualified()];
+            if (declared.kind == type_kind::lvalue_reference ||
+                declared.kind == type_kind::rvalue_reference)
+                seen = declared.operand;
+            captured_view = seen;
+            declared_view_used = true;
+        }
     }
     const struct type record = type_table[x.type.unqualified()];
     if (record.kind == type_kind::lvalue_reference ||
@@ -688,7 +720,18 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
            initialization": not modelled */
         m.evaluation = constness::unknown;
     }
+    if (captured_view.unqualified())
+        m.type = captured_view;
     m.node = expression_node(semantic_kind::entity, m, t, e);
+    if (deferred_use) {
+        pending_use u;
+        u.node = m.node;
+        u.variable = e;
+        u.at = t;
+        u.lambda_depth = lambdas.size();
+        u.this_entity = function_state.this_entity;
+        pending_uses.append(u);
+    }
     return analysis_result::well_formed;
 }
 
