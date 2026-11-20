@@ -2292,6 +2292,16 @@ class semantic_analysis
        cast's operand), cleared by expression(); every other use of a
        binary128 value is not analysed */
     bool binary128_value_passes = false;
+    /* [ext:clang_atomic] the expression analysed next is the operand of &,
+       sizeof or an assignment's left operand: an atomic object stays one
+       (anywhere else it is read, expression) */
+    bool atomic_object_operand = false;
+    /* [ext:clang_atomic] the value type of an atomic type the operations
+       are analysed for (an integer, enumeration or pointer of 1, 2, 4 or 8
+       bytes, which the code generator reads and writes with one
+       instruction); 0 for any other */
+    type_index atomic_value_type(qualified_type t) const;
+    analysis_result atomic_value_check(SyntaxRef n, qualified_type value);
     /* whether e (analysed as m, of type __float128) is an object's name or
        an identity cast of one: a value that is only passed on */
     analysis_result passed_expression(SyntaxElement e, expression_meaning &m);

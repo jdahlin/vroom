@@ -3,7 +3,8 @@
  * builtins, as GCC's header does.  _Atomic types have clang's layout, and
  * plain loads, stores and operators on them are atomic (seq_cst).  In C++
  * (before C++23's <stdatomic.h>) the same declarations with bool and C
- * language linkage, as clang's header.
+ * language linkage, and the operations on the __c11_atomic builtins, as
+ * clang's header.
  */
 #ifndef __VCC_STDATOMIC_H
 #define __VCC_STDATOMIC_H
@@ -81,7 +82,11 @@ typedef _Atomic(uintmax_t) atomic_uintmax_t;
 #define ATOMIC_POINTER_LOCK_FREE 2
 
 #define ATOMIC_VAR_INIT(v) (v)
+#ifdef __cplusplus
+#define atomic_init(p, v) __c11_atomic_init((p), (v))
+#else
 #define atomic_init(p, v) ((void)(*(p) = (v)))
+#endif
 #define kill_dependency(y) (y)
 
 /* functions as well, as clang's header: their addresses can be taken */
@@ -89,8 +94,50 @@ void atomic_thread_fence(memory_order);
 void atomic_signal_fence(memory_order);
 #define atomic_thread_fence(mo) __atomic_thread_fence(mo)
 #define atomic_signal_fence(mo) __atomic_signal_fence(mo)
+#ifdef __cplusplus
+#define atomic_is_lock_free(p) __c11_atomic_is_lock_free(sizeof(*(p)))
+#else
 #define atomic_is_lock_free(p) __atomic_is_lock_free(sizeof(*(p)), (p))
+#endif
 
+#ifdef __cplusplus
+/* C++ as clang's header: the __c11_atomic builtins, which take a pointer to
+   an _Atomic object (clang's C++ refuses one in the GNU __atomic_*) */
+#define atomic_store_explicit(p, v, mo) __c11_atomic_store((p), (v), (mo))
+#define atomic_store(p, v) __c11_atomic_store((p), (v), __ATOMIC_SEQ_CST)
+#define atomic_load_explicit(p, mo) __c11_atomic_load((p), (mo))
+#define atomic_load(p) __c11_atomic_load((p), __ATOMIC_SEQ_CST)
+#define atomic_exchange_explicit(p, v, mo) __c11_atomic_exchange((p), (v), (mo))
+#define atomic_exchange(p, v) __c11_atomic_exchange((p), (v), __ATOMIC_SEQ_CST)
+#define atomic_compare_exchange_strong_explicit(p, e, d, s, f)                 \
+    __c11_atomic_compare_exchange_strong((p), (e), (d), (s), (f))
+#define atomic_compare_exchange_strong(p, e, d)                                \
+    __c11_atomic_compare_exchange_strong((p), (e), (d), __ATOMIC_SEQ_CST,      \
+                                         __ATOMIC_SEQ_CST)
+#define atomic_compare_exchange_weak_explicit(p, e, d, s, f)                   \
+    __c11_atomic_compare_exchange_weak((p), (e), (d), (s), (f))
+#define atomic_compare_exchange_weak(p, e, d)                                  \
+    __c11_atomic_compare_exchange_weak((p), (e), (d), __ATOMIC_SEQ_CST,        \
+                                       __ATOMIC_SEQ_CST)
+#define atomic_fetch_add_explicit(p, v, mo)                                    \
+    __c11_atomic_fetch_add((p), (v), (mo))
+#define atomic_fetch_add(p, v)                                                 \
+    __c11_atomic_fetch_add((p), (v), __ATOMIC_SEQ_CST)
+#define atomic_fetch_sub_explicit(p, v, mo)                                    \
+    __c11_atomic_fetch_sub((p), (v), (mo))
+#define atomic_fetch_sub(p, v)                                                 \
+    __c11_atomic_fetch_sub((p), (v), __ATOMIC_SEQ_CST)
+#define atomic_fetch_or_explicit(p, v, mo) __c11_atomic_fetch_or((p), (v), (mo))
+#define atomic_fetch_or(p, v) __c11_atomic_fetch_or((p), (v), __ATOMIC_SEQ_CST)
+#define atomic_fetch_xor_explicit(p, v, mo)                                    \
+    __c11_atomic_fetch_xor((p), (v), (mo))
+#define atomic_fetch_xor(p, v)                                                 \
+    __c11_atomic_fetch_xor((p), (v), __ATOMIC_SEQ_CST)
+#define atomic_fetch_and_explicit(p, v, mo)                                    \
+    __c11_atomic_fetch_and((p), (v), (mo))
+#define atomic_fetch_and(p, v)                                                 \
+    __c11_atomic_fetch_and((p), (v), __ATOMIC_SEQ_CST)
+#else
 #define atomic_store_explicit(p, v, mo) __atomic_store_n((p), (v), (mo))
 #define atomic_store(p, v) __atomic_store_n((p), (v), __ATOMIC_SEQ_CST)
 #define atomic_load_explicit(p, mo) __atomic_load_n((p), (mo))
@@ -118,6 +165,7 @@ void atomic_signal_fence(memory_order);
 #define atomic_fetch_xor(p, v) __atomic_fetch_xor((p), (v), __ATOMIC_SEQ_CST)
 #define atomic_fetch_and_explicit(p, v, mo) __atomic_fetch_and((p), (v), (mo))
 #define atomic_fetch_and(p, v) __atomic_fetch_and((p), (v), __ATOMIC_SEQ_CST)
+#endif
 
 typedef struct atomic_flag {
     unsigned char __val;

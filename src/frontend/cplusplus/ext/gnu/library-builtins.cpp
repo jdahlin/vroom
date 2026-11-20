@@ -428,8 +428,14 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     /* a signature of other than scalar letters (a pointer to any type, a
        va_list): one function taking anything whose calls are refused */
     int query = query_kind(spelling, length);
+    /* an atomic builtin's signature is C's builtin layer's ("vc": the weak
+       argument a __c11_atomic_compare_exchange_* call leaves out, inserted
+       there): it takes anything, atomic_builtin_result has the rules */
+    int written = 0, shape = 0;
+    bool atomic = ast_builder_atomic_shape(spelling, length, &written, &shape);
     for (const char *s = signature; *s; s++)
-        if (query || !strchr(letters, *s) || (s != signature && *s == 'v')) {
+        if (query || atomic || !strchr(letters, *s) ||
+            (s != signature && *s == 'v')) {
             if (is_generic_builtin(spelling, length))
                 break;
             uint32_t flags = gnu_compiler_builtin | gnu_untyped_builtin;
@@ -579,6 +585,30 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
                               "ext.gnu");
         pointee = qualified_type::make(
             type_table[first.unqualified()].operand.unqualified(), cv_none);
+        /* [ext:clang_atomic] clang's SemaAtomicOpsOverloaded: a
+           __c11_atomic builtin takes a pointer to an atomic object (the
+           macros of clang's and vcc's <stdatomic.h> pass &a) and operates
+           on its value type; the GNU forms take no atomic object */
+        bool atomic_object =
+            type_table[pointee.unqualified()].kind == type_kind::atomic;
+        bool c11 = spelled_with(spelling, length, "__c11_");
+        if (c11 && !atomic_object)
+            return ill_formed(n,
+                              "address argument to atomic operation must be "
+                              "a pointer to _Atomic type",
+                              "ext.clang");
+        if (!c11 && atomic_object)
+            return ill_formed(n,
+                              "address argument to atomic operation must be "
+                              "a pointer to integer, pointer or supported "
+                              "floating point type",
+                              "ext.clang");
+        if (atomic_object) {
+            type_index value = atomic_value_type(pointee);
+            if (!value)
+                return not_supported(n, "ext.clang");
+            pointee = qualified_type::make(value, cv_none);
+        }
         fundamental_type f = fundamental_of(pointee);
         bool pointer = is_pointer(pointee);
         if (!pointer &&
@@ -619,7 +649,10 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
                                   "an argument of an atomic builtin must be "
                                   "a pointer",
                                   "ext.gnu");
-            if (fundamental_of(t) == fundamental_type::none && !is_pointer(t))
+            /* (an unscoped enumeration converts to an integer: the
+               memory_order of <stdatomic.h>) */
+            if (fundamental_of(t) == fundamental_type::none && !is_pointer(t) &&
+                !enumeration_of(t))
                 return not_supported(n, "ext.gnu");
         }
     }

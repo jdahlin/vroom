@@ -228,6 +228,21 @@ uint32_t c_lowering::conversion(const semantic_node &n)
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
     switch (static_cast<conversion_kind>(n.op)) {
     case conversion_kind::lvalue_to_rvalue:
+        /* [ext:clang_atomic] an atomic object's value: C's atomic load, a
+           conversion of the atomic lvalue to its value type */
+        if (analysis.type_table[node(n.a).type.unqualified()].kind ==
+            type_kind::atomic) {
+            /* (a constant's value, of the value type: clang folds a
+               constexpr atomic's read) */
+            const semantic_node &object = node(n.a);
+            if (folded_read(object)) {
+                semantic_node value = object;
+                value.value = analysis.entity_table[object.a].value;
+                value.type = n.type;
+                return constant(value);
+            }
+            return cast(read(n.a), t, AST_CAST_NOP);
+        }
         return read(n.a);
     case conversion_kind::array_to_pointer: {
         uint32_t a = object(n.a);

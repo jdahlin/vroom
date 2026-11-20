@@ -78,10 +78,15 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
     m = expression_meaning();
     bool passes = binary128_value_passes;
     binary128_value_passes = false;
+    bool atomic_object = atomic_object_operand;
+    atomic_object_operand = false;
     if (e.is(syntax_kind::primary_expression,
-             syntax_kind::gnu_extension_expression))
+             syntax_kind::gnu_extension_expression)) {
         binary128_value_passes = passes;
+        atomic_object_operand = atomic_object;
+    }
     VTRY(r, expression_kind(e, m));
+    atomic_object_operand = false;
     /* [ext:clang_atomic], [ext:clang_bit_int] the operations on an atomic
        object or a _BitInt are not analysed yet */
     type_kind k = type_table[m.type.unqualified()].kind;
@@ -97,8 +102,9 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
             return not_supported(current_declaration, "ext.gnu");
         return not_supported(e.index(), "ext.gnu");
     }
-    if (k == type_kind::atomic || k == type_kind::bit_int ||
-        k == type_kind::ext_vector) {
+    if ((k == type_kind::atomic && (m.category == value_category::prvalue ||
+                                    !atomic_value_type(m.type))) ||
+        k == type_kind::bit_int || k == type_kind::ext_vector) {
         if (e.is_token())
             return not_supported(current_declaration, "ext.clang");
         return not_supported(e.index(), "ext.clang");
@@ -134,6 +140,21 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
             x.placeable = false;
     }
     expressions.append(x);
+    /* [ext:clang_atomic] an atomic object (the expression's type, as
+       clang's) is read where it is not the operand of &, sizeof or an
+       assignment's left operand (C23 6.3.2.1/2: an lvalue of atomic type
+       converts to the value of its type's unqualified, non-atomic
+       version), with one atomic load; the lvalue an assignment or a prefix
+       ++ or -- results in ([expr.ass]/1) is read only where its value is
+       used (operand_value), not where it is discarded */
+    if (k == type_kind::atomic && !atomic_object && m.node &&
+        semantics[m.node].kind != semantic_kind::assignment &&
+        semantics[m.node].kind != semantic_kind::increment) {
+        SyntaxRef at = current_declaration;
+        if (!e.is_token())
+            at = e.index();
+        VTRY_SET(r, operand_value(at, m));
+    }
     return analysis_result::well_formed;
 }
 

@@ -180,6 +180,7 @@ PRODUCTION(clang_convertvector, "clang-convertvector-expression", "__builtin_con
 
 PRODUCTION(clang_atomic, "simple-type-specifier", "clang-atomic-type-specifier")
 PRODUCTION(clang_atomic, "clang-atomic-type-specifier", "_Atomic ( type-id )")
+PRODUCTION(clang_atomic, "decl-specifier", "_Atomic")
 
 /* ---- clang Language Extensions, C11 _Thread_local in C++ ---- */
 
