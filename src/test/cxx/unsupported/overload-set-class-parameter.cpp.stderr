@@ -1,0 +1,2 @@
+overload-set-class-parameter.cpp:6:1: error: the rules of [over.over] are not implemented yet
+overload-set-class-parameter.cpp:6:1: note: refused by vcc's frontend/cplusplus/expression/id-expression.cpp:N (named_entity)

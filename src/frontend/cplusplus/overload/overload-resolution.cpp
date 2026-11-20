@@ -120,8 +120,11 @@ analysis_result semantic_analysis::best_viable_function(
                    there shall exist for each argument an implicit
                    conversion sequence ([over.best.ics]) that converts that
                    argument to the corresponding parameter of F." */
-                a = implicit_conversion_sequence(argument,
-                                                 parameters[i - first], true);
+                if (argument.overload_name)
+                    a = overload_set_sequence(argument, parameters[i - first]);
+                else
+                    a = implicit_conversion_sequence(
+                        argument, parameters[i - first], true);
             } else {
                 /* [over.ics.ellipsis]/1: "An ellipsis conversion sequence
                    occurs when an argument in a function call is matched

@@ -876,17 +876,16 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             owned_array<qualified_type> types;
             for (SyntaxElement a : arguments) {
                 expression_meaning e;
-                token_index name = 0;
-                if (entity_index named = named_overload_set(a, name)) {
+                function_set named_set;
+                if (named_function_set(a, named_set)) {
                     /* [basic.lookup.argdep]/2: "If an argument is the name
                        or address of an overload set, its associated
                        entities and namespaces are the union of those
                        associated with each of the members of the set";
                        the argument is analysed for its parameter
                        ([over.over], call_with) */
-                    owned_array<entity_index> members;
-                    overload_set(named, members);
-                    for (entity_index f : members)
+                    e.overload_name = named_set.at;
+                    for (entity_index f : named_set.functions)
                         types.append(entity_table[f].type);
                 } else if (!a.is(syntax_kind::braced_init_list)) {
                     VTRY_SET(r, passed_expression(a, e));
@@ -1362,9 +1361,11 @@ analysis_result semantic_analysis::template_call(
            is an overload set (not containing function templates), trial
            argument deduction is attempted using each of the members of the
            set": not analysed */
-        token_index set_at = 0;
-        if (named_overload_set(a, set_at))
-            return not_supported(n, "temp.deduct.call");
+        if (overload_set_operand(a, e)) {
+            types.append(e.type);
+            early.append(e);
+            continue;
+        }
         size_t uses_before = name_uses.size();
         VTRY(r, passed_expression(a, e));
         /* (a function's name whose other declarations analysis did not

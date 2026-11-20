@@ -554,6 +554,9 @@ analysis_result semantic_analysis::id_expression(token_index t,
                                                  expression_meaning &m)
 {
     uint32_t name = tokens.identifier(t);
+    /* [over.over]: the function target_expression chose for the name */
+    if (t && t == overload_target_token)
+        return named_entity(t, overload_target_choice, m);
     lookup_result found = lookup_unqualified(name, lookup_filter::any);
     if (found.ambiguous)
         return ill_formed_at_token(t,

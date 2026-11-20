@@ -1100,6 +1100,11 @@ struct expression_meaning {
     /* the expression in the semantic tree, with the conversions applied to
        it so far: 0 while it has none */
     uint32_t node = 0;
+    /* [over.over]/1: the name of an overload set or of function templates
+       as an operand, not yet resolved (it names no one function): the
+       token of the name; node is 0, and the operand is analysed for the
+       type of the parameter it is passed to (call_with) */
+    token_index overload_name = 0;
 };
 
 /* ---- the semantic tree (sema/semantic-tree.cpp) ---- */
@@ -4804,6 +4809,45 @@ class semantic_analysis
     /* the first function of the overload set e names that way (its name's
        token at), 0 if e is no such name */
     entity_index named_overload_set(SyntaxElement e, token_index &at) const;
+    /* the functions and function templates (function_templates' index plus
+       one) a name denotes without arguments ([over.over]/1) */
+    struct function_set {
+        token_index at = 0;
+        owned_array<entity_index> functions;
+        owned_array<uint32_t> templates;
+    };
+    bool function_set_at(token_index at, function_set &out) const;
+    bool named_function_set(SyntaxElement e, function_set &out) const;
+    /* an operand that is such a name, kept as the overload set it is
+       (m.overload_name); false if it is none */
+    bool overload_set_operand(SyntaxElement e, expression_meaning &m) const;
+    /* [over.over]/1-5: the function of the set whose type is ft (the
+       function type of the target): none, one (a function, or a function
+       template and the arguments deduced, [temp.deduct.funcaddr]) or
+       unknown (the reason, a subclause label, in why) */
+    enum class set_selection : uint8_t { none, one, unknown };
+    analysis_result select_for_target(SyntaxRef at, const function_set &set,
+                                      qualified_type ft, set_selection &how,
+                                      entity_index &function,
+                                      uint32_t &template_index,
+                                      owned_array<template_argument> &deduced,
+                                      const char *&why);
+    /* the function type FT of the target of a function pointer, function
+       reference or function type */
+    bool function_target(qualified_type target, qualified_type &ft) const;
+    /* [over.ics.scs]: the overload set a converted to the parameter */
+    conversion_sequence overload_set_sequence(const expression_meaning &a,
+                                              qualified_type parameter);
+    /* [temp.deduct.funcaddr]/1: the arguments of a function template
+       deduced from the type of the function whose address is taken */
+    analysis_result
+    deduce_from_overload_set(SyntaxRef at, qualified_type p,
+                             const expression_meaning &argument,
+                             owned_array<template_argument> &values,
+                             owned_array<bool> &set, bool *failed);
+    analysis_result deduce_from_function_type(
+        SyntaxRef at, uint32_t function_template, qualified_type target,
+        owned_array<template_argument> &deduced, bool &failed);
     /* ... the token of that name and the function chosen, which
        named_entity takes it for (0 elsewhere) */
     token_index overload_target_token = 0;

@@ -118,13 +118,16 @@ semantic_analysis::resolve_call(SyntaxRef n,
         lists.append(clauses[0]);
     }
     for (size_t i = 0; i < early.size(); i++)
-        if (!early[i].node && !arguments[i].is(syntax_kind::braced_init_list))
-            /* an overload set's name as an argument: the conversion
-               sequences of [over.ics.ref] and [over.over] together */
+        if (!early[i].node && !early[i].overload_name &&
+            !arguments[i].is(syntax_kind::braced_init_list))
             return not_supported(n, "over.over");
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
-        if (!arguments[i].is(syntax_kind::braced_init_list)) {
+        /* [over.over]/1: an overload set's name as an argument stays the
+           set; best_viable_function converts it for each candidate's
+           parameter (overload_set_sequence) and call_with resolves it */
+        bool is_set = overload_set_operand(arguments[i], e);
+        if (!is_set && !arguments[i].is(syntax_kind::braced_init_list)) {
             VTRY(r, passed_expression(arguments[i], e));
         }
         early.append(e);
