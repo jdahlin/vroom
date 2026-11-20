@@ -2036,6 +2036,12 @@ bool semantic_analysis::deduce_argument(const template_argument &x,
         return deduce_type(x.type, y.type, d, set, true);
     if (!x.template_entity)
         return x == y;
+    /* [temp.deduct.type]/5.5: a value-dependent argument other than a
+       parameter's name (is_integral<T>::value) is a non-deduced context:
+       the match is the one of the substituted arguments
+       (substitute_specialization) */
+    if (entity_table[x.template_entity].kind == entity_kind::dependent_value)
+        return true;
     if (set[x.value])
         return d[x.value] == y;
     d[x.value] = y;
