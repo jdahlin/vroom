@@ -20,6 +20,7 @@
  * && followed by an identifier is otherwise no expression's beginning.
  */
 #include "../../cplusplus-internal.h"
+#include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
