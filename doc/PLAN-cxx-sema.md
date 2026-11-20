@@ -2295,9 +2295,10 @@ lines:
   quiet NaN and signaling NaN builtins used by libc++'s `<limits>`, plus
   `__builtin_isinf_sign` and `__builtin_issignaling` on those types.
   Signaling NaNs keep their exact bits in `__builtin_bit_cast` and
-  emitted data. Skia's `SkBlendModeBlender.cpp` gets past the `constexpr`
-  declarations in `SkFloatingPoint.h` and still hits overload resolution
-  errors in `SkPoint.h` and incomplete-type errors in `SkRefCnt.h`.
+  emitted data. A declaration imported through two using-declaration paths
+  enters the overload set once ([namespace.udecl]/1, /9), so Skia's
+  `SkBlendModeBlender.cpp` gets past the `std::abs(float)` calls in
+  `SkPoint.h`. Its first remaining errors are in `SkRefCnt.h`.
 - Diagnostics in vcc's system; tuning starts from `cxxsema -stats`.
 
 ### S9. The rest of C++20
