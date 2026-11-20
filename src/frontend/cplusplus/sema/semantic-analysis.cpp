@@ -130,6 +130,7 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     d.node = n;
     current_declaration = n;
     size_t unsupported_before = unsupported.size();
+    size_t held_before = held_pending.size();
     if (is_namespace_definition(tree, n)) {
         /* the declarations of its body are analysed as declarations of
            their own: one of them not parsed does not make the namespace
@@ -154,6 +155,13 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     if (d.result != analysis_result::well_formed &&
         tree[n].kind != syntax_kind::linkage_specification)
         hold_names(n);
+    /* the names a template-declaration held while it was refused say why */
+    for (size_t i = held_before; i < held_pending.size(); i++) {
+        entity &held = entity_table[held_pending[i]];
+        if (d.has_unsupported && !held.held_because)
+            held.held_because = unsupported[unsupported_before].subclause;
+    }
+    held_pending.resize(held_before);
     declarations.append(d);
     return d.result;
 }

@@ -117,6 +117,7 @@ analysis_result semantic_analysis::member_function_template(
         if (!prior) {
             prior = entity_table.make(entity_kind::none, name, c);
             entity_table[prior].held_by_template = true;
+            note_held(prior);
             entity_table[head].member_templates = prior;
         }
     } else if (prior && (entity_table[prior].enclosing != c ||
@@ -152,6 +153,7 @@ analysis_result semantic_analysis::member_function_template(
         if (!prior) {
             prior = entity_table.make(entity_kind::none, name, c);
             entity_table[prior].held_by_template = true;
+            note_held(prior);
             entity_table[c].constructor_templates = prior;
         }
     }
