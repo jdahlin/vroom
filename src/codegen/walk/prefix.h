@@ -91,6 +91,7 @@
 #define walk_lvalue_store_memory WALK_NAME(walk_lvalue_store_memory)
 #define walk_lvalue_store_register WALK_NAME(walk_lvalue_store_register)
 #define walk_memory_call_inline WALK_NAME(walk_memory_call_inline)
+#define walk_node_kind_name WALK_NAME(walk_node_kind_name)
 #define walk_operation_type WALK_NAME(walk_operation_type)
 #define walk_operation_width WALK_NAME(walk_operation_width)
 #define walk_operator_is_comparison WALK_NAME(walk_operator_is_comparison)
