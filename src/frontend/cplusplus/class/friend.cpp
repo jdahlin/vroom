@@ -53,7 +53,7 @@ bool semantic_analysis::grants(entity_index k, entity_index e) const
    accessible() walks them */
 bool semantic_analysis::in_friend_of(entity_index k) const
 {
-    entity_index starts[3] = {0, defining_class, 0};
+    entity_index starts[4] = {0, defining_class, 0, access_class};
     if (function_state.active)
         starts[0] = function_state.function;
     if (!is_namespace(current_scope))

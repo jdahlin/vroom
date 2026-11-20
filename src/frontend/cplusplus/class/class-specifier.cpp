@@ -1036,7 +1036,7 @@ bool semantic_analysis::accessible(entity_index member,
             return true;
         return base_step(object_class, k, ambiguous) != 0;
     };
-    entity_index starts[3] = {0, defining_class, 0};
+    entity_index starts[4] = {0, defining_class, 0, access_class};
     if (function_state.active)
         starts[0] = function_state.function;
     if (!is_namespace(current_scope))
