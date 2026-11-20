@@ -964,7 +964,10 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         if (!at(preprocessing_op_or_punc::LEFT_BRACE))
             return expected("'{' to begin the member-specification",
                             "class.pre");
-        if (template_id && explicit_declaration && primary)
+        /* [temp.expl.spec]/7, [temp.class.spec.mfunc]/1: an explicit or a
+           partial specialization has its own members, which a member
+           defined outside it (a mem-initializer's names) finds */
+        if (template_id && primary)
             specialization_regions.append(
                 {primary, region, template_id_first, template_id_end});
         class_body(name, region, template_id);
