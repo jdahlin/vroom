@@ -1165,9 +1165,14 @@ lines:
   bases).  They go into a record of their own per class, in a table
   beside `class_members` and `class_bases`, added by R6; the fields
   `entity` has today stay where they are until S3 and S6 have merged.
-- `lower/lower.cpp` (2573 lines) is edited by every track.  New lowering
-  for S4 goes into files of its own in `lower/` (classes, virtual tables,
-  initialization at start-up).
+- Lowering is `lower/`, files by topic (2026-11-20, split from the
+  6500-line `lower.cpp`): `lower-internal.h` (the `c_lowering` class and
+  the C node helpers), `types.cpp`, `symbols.cpp`, `scopes.cpp`,
+  `initialization.cpp`, `values.cpp`, `operators-and-calls.cpp`,
+  `expression.cpp`, `statements.cpp`, `member-pointers.cpp`,
+  `new-delete.cpp`, `vtables.cpp`, `virtual-bases.cpp`,
+  `static-storage.cpp`, `definitions.cpp`; each compiles alone.  New
+  lowering goes into the file of its topic.
 - [dcl.init.ref] and the copy constructor's selection are S3's; R4 and R5
   call them and do not re-implement them.
 - A class template's instantiation (S6b) completes a class from entities,
