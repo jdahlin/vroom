@@ -1683,6 +1683,11 @@ class semantic_analysis
     {
         return k && entity_table[k].kind == entity_kind::class_type;
     }
+    /* whether t, cv-qualified or not, is a class type or a union */
+    bool is_class_type(qualified_type t) const
+    {
+        return type_table[t.unqualified()].kind == type_kind::class_type;
+    }
     bool abstract_class(qualified_type t) const;
     /* the keyword node n begins with, none when it begins with a node or
        a token that is not a keyword */
@@ -3128,6 +3133,19 @@ class semantic_analysis
     entity_index value_parameter_named(SyntaxElement e);
     analysis_result potentially_throwing(SyntaxRef n, uint32_t x,
                                          bool &throwing);
+    analysis_result conditional_void_operand(SyntaxRef n,
+                                             const expression_meaning &c,
+                                             const expression_meaning &e2,
+                                             const expression_meaning &e3,
+                                             expression_meaning &m);
+    analysis_result conditional_conversion(SyntaxRef n,
+                                           const expression_meaning &from,
+                                           const expression_meaning &to,
+                                           bool apply, bool &possible,
+                                           expression_meaning &converted);
+    analysis_result conditional_class_operands(SyntaxRef n,
+                                               expression_meaning &e2,
+                                               expression_meaning &e3);
     analysis_result conditional_operands(SyntaxRef n,
                                          const expression_meaning &c,
                                          expression_meaning e2,
@@ -5319,13 +5337,13 @@ class semantic_analysis
     /* [over.match.viable], [over.match.best]: the best viable function of
        the candidates for the arguments (and the object expression of a
        member function call, or none): its index; ill-formed when there is
-       no unique one */
-    analysis_result
-    best_viable_function(SyntaxRef at,
-                         const owned_array<overload_candidate> &candidates,
-                         const expression_meaning *object,
-                         const owned_array<expression_meaning> &arguments,
-                         size_t &chosen, bool *none_viable = nullptr);
+       no unique one; user_defined false: no argument converts by a
+       user-defined conversion ([over.best.ics]/4) */
+    analysis_result best_viable_function(
+        SyntaxRef at, const owned_array<overload_candidate> &candidates,
+        const expression_meaning *object,
+        const owned_array<expression_meaning> &arguments, size_t &chosen,
+        bool *none_viable = nullptr, bool user_defined = true);
     /* the functions of the overload set whose first is e
        (entity::next_overload), each once, added to out */
     void overload_set(entity_index e, owned_array<entity_index> &out) const;

@@ -81,7 +81,7 @@ analysis_result semantic_analysis::best_viable_function(
     SyntaxRef at, const owned_array<overload_candidate> &candidates,
     const expression_meaning *object,
     const owned_array<expression_meaning> &arguments, size_t &chosen,
-    bool *none_viable)
+    bool *none_viable, bool user_defined)
 {
     size_t n = arguments.size();
     /* each candidate's conversion sequences: the implicit object
@@ -147,7 +147,7 @@ analysis_result semantic_analysis::best_viable_function(
                     a = overload_set_sequence(argument, parameters[i - first]);
                 else
                     a = implicit_conversion_sequence(
-                        argument, parameters[i - first], true);
+                        argument, parameters[i - first], user_defined);
             } else {
                 /* [over.ics.ellipsis]/1: "An ellipsis conversion sequence
                    occurs when an argument in a function call is matched

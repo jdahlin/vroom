@@ -424,6 +424,26 @@ analysis_result semantic_analysis::composite_pointer_type(SyntaxRef at,
             qualified_type c =
                 qualified_type::make(x.unqualified(), x.cv() | y.cv());
             composite = qualified_type::make(type_table.pointer_to(c), cv_none);
+        } else if (type_table[x.unqualified()].kind == type_kind::class_type &&
+                   type_table[y.unqualified()].kind == type_kind::class_type) {
+            /* "if T1 is "pointer to cv1 C1" and T2 is "pointer to cv2 C2",
+               where C1 is reference-related to C2 or C2 is
+               reference-related to C1, the cv-combined type of T2 and T1 or
+               the cv-combined type of T1 and T2, respectively": the base
+               class's */
+            entity_index cx = type_table[x.unqualified()].entity;
+            entity_index cy = type_table[y.unqualified()].entity;
+            bool ambiguous = false;
+            qualified_type base = x;
+            if (base_step(cx, cy, ambiguous))
+                base = y;
+            else if (!base_step(cy, cx, ambiguous))
+                return not_supported(at, "expr.type");
+            if (ambiguous)
+                return not_supported(at, "expr.type");
+            qualified_type c =
+                qualified_type::make(base.unqualified(), x.cv() | y.cv());
+            composite = qualified_type::make(type_table.pointer_to(c), cv_none);
         } else {
             return not_supported(at, "expr.type");
         }
@@ -825,13 +845,221 @@ analysis_result semantic_analysis::conditional(SyntaxRef n,
         return not_supported(n, "expr.cond");
     expression_meaning c, e2, e3;
     analysis_result r = expression(n[0], c);
-    if (r == analysis_result::well_formed)
-        r = contextual_bool(n, c);
-    if (r == analysis_result::well_formed)
-        r = expression(n[2], e2);
-    if (r == analysis_result::well_formed)
-        VTRY_SET(r, expression(n[4], e3));
+    VTRY_SET(r, contextual_bool(n, c));
+    VTRY_SET(r, expression(n[2], e2));
+    VTRY_SET(r, expression(n[4], e3));
     return conditional_operands(n, c, e2, e3, m);
+}
+
+/*
+ * [expr.cond]/2: "If either the second or the third operand has type void,
+ * one of the following shall hold: (2.1) The second or the third operand
+ * (but not both) is a throw-expression; the result is of the type and value
+ * category of the other.  (2.2) Both the second and the third operands have
+ * type void; the result is of type void and is a prvalue."  Called with at
+ * least one void operand.
+ */
+analysis_result semantic_analysis::conditional_void_operand(
+    SyntaxRef n, const expression_meaning &c, const expression_meaning &e2,
+    const expression_meaning &e3, expression_meaning &m)
+{
+    bool void2 = fundamental_of(e2.type) == fundamental_type::void_;
+    bool void3 = fundamental_of(e3.type) == fundamental_type::void_;
+    bool throw2 = semantics[e2.node].kind == semantic_kind::throw_exception;
+    bool throw3 = semantics[e3.node].kind == semantic_kind::throw_exception;
+    if (throw2 == throw3 && !(void2 && void3))
+        return ill_formed(n,
+                          "one operand has type void, so the other is a "
+                          "throw-expression or also has type void",
+                          "expr.cond");
+    /* the operand that is not the throw-expression (the second when both
+       are, or neither is) */
+    const expression_meaning *kept_operand = &e2;
+    if (throw2 && !throw3)
+        kept_operand = &e3;
+    const expression_meaning &kept = *kept_operand;
+    bool thrown_chosen = false;
+    if (c.evaluation == constness::constant) {
+        thrown_chosen = throw3;
+        if (c.value)
+            thrown_chosen = throw2;
+    }
+    m = expression_meaning();
+    m.type = kept.type;
+    m.category = kept.category;
+    m.bit_field_width = kept.bit_field_width;
+    m.beyond_integral_constant = c.beyond_integral_constant ||
+                                 e2.beyond_integral_constant ||
+                                 e3.beyond_integral_constant;
+    /* a throw-expression is never constant: only the other operand chosen
+       by a constant condition keeps the result's constness */
+    if (void2 && void3) {
+        m.evaluation = constness::not_constant;
+    } else if (c.evaluation == constness::constant && !thrown_chosen) {
+        m.evaluation = kept.evaluation;
+        m.entity = kept.entity;
+        m.value = kept.value;
+    } else if (thrown_chosen) {
+        m.evaluation = constness::not_constant;
+    } else {
+        m.evaluation = constness::unknown;
+    }
+    m.node = expression_node(semantic_kind::conditional, m, n.first_token(),
+                             c.node, e2.node);
+    semantics[m.node].c = e3.node;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.cond]/4: "an attempt is made to form an implicit conversion sequence
+ * from each of these operands to the type of the other": whether the operand
+ * from converts to match to, and its conversion.  "(4.1) If E2 is an lvalue,
+ * the target type is 'lvalue reference to T2', subject to the constraint that
+ * in the conversion the reference must bind directly to an lvalue": a class
+ * lvalue converts to a base class lvalue.  "(4.3) if E2 is a prvalue or if
+ * neither of the conversion sequences above can be formed and at least one of
+ * the operands has (possibly cv-qualified) class type: (4.3.1) if T1 and T2
+ * are the same class type ... (4.3.2) otherwise, if T2 is a base class of T1,
+ * the target type is cv1 T2 ... (4.3.3) otherwise, the target type is the
+ * type that E2 would have after applying the lvalue-to-rvalue,
+ * array-to-pointer, and function-to-pointer standard conversions."  "If E1
+ * and E2 have class type, and the underlying class types are the same or one
+ * is a base class of the other: E1 can be converted to match E2 if the class
+ * of T2 is the same type as, or a base class of, the class of T1, and the
+ * cv-qualification of T2 is the same cv-qualification as, or a greater
+ * cv-qualification than, the cv-qualification of T1."  Applied (apply) it
+ * makes the converted operand; else only whether it can.
+ */
+analysis_result semantic_analysis::conditional_conversion(
+    SyntaxRef n, const expression_meaning &from, const expression_meaning &to,
+    bool apply, bool &possible, expression_meaning &converted)
+{
+    possible = false;
+    /* (copies: analysis below can move the type table) */
+    const struct type source = type_table[from.type.unqualified()];
+    const struct type target = type_table[to.type.unqualified()];
+    bool source_class = source.kind == type_kind::class_type;
+    bool target_class = target.kind == type_kind::class_type;
+    bool ambiguous = false;
+    bool to_is_base = source_class && target_class &&
+                      base_step(source.entity, target.entity, ambiguous) != 0;
+    bool from_is_base = source_class && target_class &&
+                        base_step(target.entity, source.entity, ambiguous) != 0;
+    bool cv_included = (from.type.cv() & ~to.type.cv()) == 0;
+    if (ambiguous)
+        return not_supported(n, "class.member.lookup");
+    if (to.category == value_category::xvalue &&
+        (to_is_base ||
+         (source_class && has_conversion_functions(source.entity))))
+        /* /4.2's rvalue reference bound directly */
+        return not_supported(n, "expr.cond");
+    if (to.category == value_category::lvalue && source_class && !to_is_base &&
+        converts_to_lvalue_reference(source.entity))
+        /* /4.1 through a conversion function returning an lvalue reference */
+        return not_supported(n, "over.match.ref");
+    if (to_is_base && cv_included && to.category == value_category::lvalue &&
+        from.category == value_category::lvalue) {
+        possible = true;
+        if (!apply)
+            return analysis_result::well_formed;
+        converted = from;
+        VTRY(r, to_base(n.first_token(), target.entity, converted));
+        converted.type =
+            qualified_type::make(converted.type.unqualified(), to.type.cv());
+        return analysis_result::well_formed;
+    }
+    qualified_type wanted = to.type;
+    if (to_is_base || from_is_base) {
+        /* related classes: only the derived class converts, to its base
+           class, with at least its cv-qualification */
+        if (!to_is_base || !cv_included)
+            return analysis_result::well_formed;
+    } else if (!target_class) {
+        /* [impl.clang] clang forms no conversion sequence to an array or
+           function type: it does not apply /4.3.3's array-to-pointer and
+           function-to-pointer conversions to the target (conditional-expr.cpp:
+           String and "" convert only one way) */
+        if (target.kind == type_kind::array ||
+            target.kind == type_kind::function)
+            return analysis_result::well_formed;
+        expression_meaning decayed = to;
+        VTRY(r, operand_value(n, decayed));
+        wanted = decayed.type;
+    }
+    /* what no constructor or conversion function of a class can do */
+    if (!to_is_base && target_class &&
+        !entity_table[target.entity].first_constructor &&
+        !(source_class && has_conversion_functions(source.entity)))
+        return analysis_result::well_formed;
+    if (!to_is_base && source_class && !target_class &&
+        !has_conversion_functions(source.entity))
+        return analysis_result::well_formed;
+    expression_meaning operand = from;
+    initialized_value made;
+    if (!apply) {
+        bool ok = false;
+        VTRY(r, try_initialization(n, operand, wanted, false, made, ok));
+        possible = ok;
+        return analysis_result::well_formed;
+    }
+    VTRY(r, initialize_with(n, operand, wanted, false, false, made));
+    possible = true;
+    converted = operand;
+    converted.node = made.node;
+    converted.category = value_category::prvalue;
+    if (target_class) {
+        converted.type = wanted;
+        converted.evaluation = constness::not_constant;
+        converted.value = 0;
+        converted.entity = 0;
+        converted.zero_literal = false;
+        converted.bit_field_width = 0;
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.cond]/4 for operands of different types, one a class: "If exactly one
+ * conversion sequence can be formed, that conversion is applied to the chosen
+ * operand and the converted operand is used in place of the original operand
+ * for the remainder of this subclause.  Otherwise, if both sequences can be
+ * formed, or one can be formed but it is the ambiguous conversion sequence,
+ * the program is ill-formed."  If neither can, /6's built-in candidates
+ * ([over.match.oper]) are for operands with conversion functions only.
+ */
+analysis_result semantic_analysis::conditional_class_operands(
+    SyntaxRef n, expression_meaning &e2, expression_meaning &e3)
+{
+    bool second = false, third = false;
+    expression_meaning converted2, converted3;
+    VTRY(r, conditional_conversion(n, e2, e3, false, second, converted2));
+    VTRY_SET(r, conditional_conversion(n, e3, e2, false, third, converted3));
+    if (second && third)
+        return ill_formed(n, "each operand converts to the type of the other",
+                          "expr.cond");
+    if (!second && !third) {
+        bool conversions = false;
+        const struct type t2 = type_table[e2.type.unqualified()];
+        const struct type t3 = type_table[e3.type.unqualified()];
+        if (t2.kind == type_kind::class_type)
+            conversions = has_conversion_functions(t2.entity);
+        if (t3.kind == type_kind::class_type)
+            conversions = conversions || has_conversion_functions(t3.entity);
+        if (conversions)
+            return not_supported(n, "over.match.oper");
+        return ill_formed(n,
+                          "the operands cannot be converted to a common type",
+                          "expr.cond");
+    }
+    if (second) {
+        VTRY_SET(r,
+                 conditional_conversion(n, e2, e3, true, second, converted2));
+        e2 = converted2;
+        return analysis_result::well_formed;
+    }
+    VTRY_SET(r, conditional_conversion(n, e3, e2, true, third, converted3));
+    e3 = converted3;
+    return analysis_result::well_formed;
 }
 
 /* [expr.cond]/2-7: the conditional expression of condition c (converted
@@ -843,7 +1071,10 @@ analysis_result semantic_analysis::conditional_operands(
     analysis_result r = analysis_result::well_formed;
     if (fundamental_of(e2.type) == fundamental_type::void_ ||
         fundamental_of(e3.type) == fundamental_type::void_)
-        return not_supported(n, "expr.cond");
+        return conditional_void_operand(n, c, e2, e3, m);
+    if (e2.type.unqualified() != e3.type.unqualified() &&
+        (is_class_type(e2.type) || is_class_type(e3.type)))
+        VTRY_SET(r, conditional_class_operands(n, e2, e3));
     bool chosen_known = c.evaluation == constness::constant;
     expression_meaning *chosen_operand = &e3;
     if (c.value)
@@ -887,6 +1118,35 @@ analysis_result semantic_analysis::conditional_operands(
             return analysis_result::well_formed;
         }
     }
+    if (is_class_type(e2.type) &&
+        e2.type.unqualified() == e3.type.unqualified()) {
+        /* [expr.cond]/6: "the result is a prvalue", whose object is
+           initialized from the selected operand: a glvalue operand is
+           copied (a move from an xvalue) */
+        uint32_t cv2 = e2.type.cv(), cv3 = e3.type.cv();
+        if ((cv2 & ~cv3) && (cv3 & ~cv2))
+            return ill_formed(n,
+                              "the class operands' cv-qualifications are not "
+                              "ordered",
+                              "expr.cond");
+        qualified_type common =
+            qualified_type::make(e2.type.unqualified(), cv2 | cv3);
+        expression_meaning *operands[2] = {&e2, &e3};
+        for (expression_meaning *operand : operands) {
+            if (operand->category == value_category::prvalue)
+                continue;
+            initialized_value copy;
+            VTRY_SET(r,
+                     initialize_with(n, *operand, common, false, false, copy));
+            operand->node = copy.node;
+            operand->type = common;
+            operand->category = value_category::prvalue;
+            operand->evaluation = constness::not_constant;
+            operand->value = 0;
+            operand->entity = 0;
+            operand->bit_field_width = 0;
+        }
+    }
     /* [expr.cond]/6: "Otherwise, the result is a prvalue."  /7:
        "Lvalue-to-rvalue, array-to-pointer, and function-to-pointer standard
        conversions are performed on the second and third operands." */
@@ -906,6 +1166,7 @@ analysis_result semantic_analysis::conditional_operands(
            a common type" */
         usual_arithmetic_conversions(e2, e3);
     } else if (is_pointer(e2.type) || is_pointer(e3.type) ||
+               is_member_pointer(e2.type) || is_member_pointer(e3.type) ||
                fundamental_of(e2.type) == fundamental_type::std_nullptr_t ||
                fundamental_of(e3.type) == fundamental_type::std_nullptr_t) {
         /* "pointer conversions, function pointer conversions, and
@@ -913,11 +1174,19 @@ analysis_result semantic_analysis::conditional_operands(
            composite pointer type"; "Both the second and third operands have
            type std::nullptr_t or one has that type and the other is a null
            pointer constant." */
-        if (!(is_pointer(e2.type) || zero2 ||
-              fundamental_of(e2.type) == fundamental_type::std_nullptr_t) ||
-            !(is_pointer(e3.type) || zero3 ||
-              fundamental_of(e3.type) == fundamental_type::std_nullptr_t))
+        auto pointer_like = [&](const expression_meaning &x, bool zero) {
+            return is_pointer(x.type) || is_member_pointer(x.type) || zero ||
+                   fundamental_of(x.type) == fundamental_type::std_nullptr_t;
+        };
+        if (!pointer_like(e2, zero2) || !pointer_like(e3, zero3)) {
+            if (is_arithmetic(e2.type) || is_arithmetic(e3.type))
+                return ill_formed(n,
+                                  "a pointer and an operand that is not a "
+                                  "null pointer constant have no composite "
+                                  "pointer type",
+                                  "expr.type");
             return not_supported(n, "expr.cond");
+        }
         VTRY_SET(r, composite_pointer_type(n, e2, e3));
     } else {
         if (fundamental_of(e2.type) == fundamental_type::none ||
@@ -931,6 +1200,11 @@ analysis_result semantic_analysis::conditional_operands(
     }
     m = expression_meaning();
     m.type = e2.type;
+    if (is_class_type(e2.type))
+        /* [expr.cond]/4.3: the operand of the less cv-qualified class type
+           is converted to the other's type */
+        m.type = qualified_type::make(e2.type.unqualified(),
+                                      e2.type.cv() | e3.type.cv());
     m.category = value_category::prvalue;
     m.beyond_integral_constant = c.beyond_integral_constant ||
                                  e2.beyond_integral_constant ||

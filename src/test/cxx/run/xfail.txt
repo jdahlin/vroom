@@ -15,7 +15,6 @@ old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
 old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
 old-class-pack-params	vcc: the rules of [temp.spec] are not implemented yet
 old-class-scalar-operand	vcc: the rules of [dcl.fct] are not implemented yet
-old-conditional-class-convert	vcc: the rules of [expr.cond] are not implemented yet
 old-constexpr-case-array-nsdmi	vcc: the rules of [class.base.init] are not implemented yet
 old-conversion-template	vcc: the rules of [temp.mem] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet

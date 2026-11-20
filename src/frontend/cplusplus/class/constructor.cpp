@@ -1073,8 +1073,12 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
         candidates.append(moving);
     }
     size_t best = 0;
-    VTRY(resolved,
-         best_viable_function(at, candidates, nullptr, arguments, best));
+    /* [over.best.ics]/4: "when considering the argument of a constructor
+       ... that is a candidate by [over.match.copy]", copy-initialization of
+       a class by a user-defined conversion, "user-defined conversion
+       sequences are not considered" */
+    VTRY(resolved, best_viable_function(at, candidates, nullptr, arguments,
+                                        best, nullptr, !copy));
     entity_index chosen = candidates[best].function;
     if (uint32_t g = candidates[best].template_index) {
         /* the chosen specialization's definition ([temp.inst]/4) */
