@@ -90,6 +90,8 @@ arm64)
 	step cxx-sema-claims env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py selftest
 	# C++ programs lowered to C's AST (vpp -c, -O0..-O3) run as clang++'s under qemu
 	step cxx-run      python3 bench/cxx-run.py -j "$J"
+	# programs using libc++ headers: OK or a clean refusal, never a crash (needs libc++ headers; skipped without)
+	[ -d "${LIBCXX_INC:-/usr/lib/llvm-23/include/c++/v1}" ] && step cxx-libcxx-apps python3 bench/cxx-libcxx-apps.py -j "$J" --bin-dir "$BUILD"
 	# the suites at each code generator (doc/OPTIMIZATION.md): -O2 VIR (the default), -O1 the
 	# direct emitter, -O3 VIR with the vectorizer and its checks (verifier, allocation check)
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
