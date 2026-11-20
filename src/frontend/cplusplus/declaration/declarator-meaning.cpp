@@ -834,6 +834,16 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
 {
     using enum preprocessing_op_or_punc;
     if (d.is_token()) {
+        if (d.is(ELLIPSIS)) {
+            /* [dcl.decl]/1: noptr-abstract-pack-declarator is "...";
+               [dcl.fct]/21: only in a parameter-declaration, which then
+               declares a pack ([temp.param]/17 for a non-type template
+               parameter) */
+            if (!pack_declarator || m.pack)
+                return not_supported(declaration, "temp.variadic");
+            m.pack = d.token();
+            return analysis_result::well_formed;
+        }
         if (!d.is_identifier())
             return not_supported(declaration, "dcl.decl");
         m.has_id = true;

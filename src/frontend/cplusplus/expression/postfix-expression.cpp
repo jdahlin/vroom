@@ -1059,14 +1059,16 @@ analysis_result semantic_analysis::template_callee_parts(
     SyntaxElement id = callee;
     nominated_scope scope;
     if (callee.is(syntax_kind::qualified_id)) {
-        /* [namespace.qual]: a function template of a namespace */
-        if (callee.size() != 2 ||
+        /* [namespace.qual]: a function template of a namespace;
+           [expr.prim.id.qual]/2: a member function template of a class,
+           with the keyword template ([temp.names]/4) or without */
+        bool keyword =
+            callee.size() == 3 && callee[1].is(standard_keyword::template_);
+        if ((callee.size() != 2 && !keyword) ||
             !callee[0].is(syntax_kind::nested_name_specifier))
             return analysis_result::well_formed;
-        id = callee[1];
+        id = callee[callee.size() - 1];
         VTRY(r, nested_name_specifier(callee[0], scope));
-        if (!is_namespace(scope.entity))
-            return analysis_result::well_formed;
         qualified = true;
     }
     owned_array<SyntaxElement> written;
@@ -1107,12 +1109,19 @@ analysis_result semantic_analysis::template_callee_parts(
         return analysis_result::well_formed;
     }
     lookup_result x;
+    bool member = qualified && !is_namespace(scope.entity);
     if (qualified)
         x = lookup_qualified(scope.entity, tokens.identifier(name),
                              lookup_filter::any);
     else
         x = lookup_unqualified(tokens.identifier(name), lookup_filter::any);
-    function_template = function_template_of(x.unknown_entity);
+    function_template = function_template_of(x.unknown_entity, member);
+    if (member && function_template &&
+        entity_table[function_templates[function_template - 1].entity]
+            .nonstatic_member)
+        /* [class.mfct.non-static]/3: C::f(args) names a non-static member
+           function, called on (*this) (or an error outside one) */
+        return not_supported(id.index(), "class.mfct.non-static");
     if (!function_template) {
         /* a template-id of no function template analysis knows: what it
            was before */

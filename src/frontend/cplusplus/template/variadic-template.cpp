@@ -91,6 +91,14 @@ bool semantic_analysis::template_parameter_form(
     } else if (!out.type && k < p.size() && !p[k].is_token()) {
         out.has_declarator = true;
         out.declarator = p[k];
+        /* [dcl.decl]/1: the pack is the "..." ending a
+           ptr-abstract-declarator (int&...) */
+        SyntaxElement last = p[k];
+        while (last.is(syntax_kind::ptr_abstract_declarator) &&
+               last.size() == 2)
+            last = last[1];
+        if (last.is(preprocessing_op_or_punc::ELLIPSIS))
+            out.pack = true;
         out.id = declarator_id(p[k]);
         out.named = out.id != 0;
         k++;

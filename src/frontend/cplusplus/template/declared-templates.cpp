@@ -895,11 +895,12 @@ analysis_result semantic_analysis::declare_template_parameters(
             qualified_type type = sp.type;
             if (r == analysis_result::well_formed && form.has_declarator) {
                 declarator_meaning dm;
+                flag_set pack(pack_declarator, true);
                 r = declarator(node, form.declarator, type, dm);
                 if (r == analysis_result::well_formed &&
-                    (dm.qualifier || dm.qualified_namespace || dm.pack ||
-                     dm.gnu_flags || dm.aligned || dm.template_id ||
-                     dm.has_id != form.named))
+                    (dm.qualifier || dm.qualified_namespace ||
+                     !dm.pack != !form.pack || dm.gnu_flags || dm.aligned ||
+                     dm.template_id || dm.has_id != form.named))
                     r = not_supported(node, "temp.param");
             }
             current_scope = saved;

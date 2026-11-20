@@ -23,7 +23,6 @@ old-decltype-returns	vcc: the rules of [class.static.data] are not implemented y
 old-defaulted-assignment	vcc: the rules of [class.mem] are not implemented yet
 old-defaulted-ctor-out-of-class	vcc: the rules of [class.copy.ctor] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
-old-dependent-member-params	vcc: the rules of [over] are not implemented yet
 old-empty-base-assign	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-empty-member-copy	vcc: the rules of [class.ctor] are not implemented yet
 old-empty-pack-constexpr	vcc: the rules of [dcl.decl] are not implemented yet
@@ -79,4 +78,3 @@ temp-names-concept-id	vcc: the rules of [temp.func.order] are not implemented ye
 temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implemented yet
 temp-names-member-template-call	vcc: the rules of [expr.ref] are not implemented yet
 temp-names-operator-template-id	vcc: the rules of [expr.ref] are not implemented yet
-temp-names-template-disambiguator	vcc: the rules of [expr.prim.id.qual] are not implemented yet
