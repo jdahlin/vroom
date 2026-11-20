@@ -79,7 +79,8 @@ EXTENSION(clang_flt_eval_method, clang,
           "__FLT_EVAL_METHOD__, as #pragma clang fp eval_method sets it (0 on this target)")
 EXTENSION(clang_later_edition_features, clang,
           "a later edition's preprocessor in an earlier one, with a warning: #elifdef, #elifndef, "
-          "#warning (C++23), omitted variable arguments (C++20), variadic macros (C++11)")
+          "#warning (C++23), omitted variable arguments (C++20), variadic macros (C++11); "
+          "an alias-declaration as an init-statement (P2360R0, C++23)")
 EXTENSION(clang_import_directive, clang, "Objective-C's #import, an include done once")
 EXTENSION(clang_embed, clang,
           "C23 6.10.4 #embed and __has_embed (C++26's [cpp.embed], P1967R14) in C++")

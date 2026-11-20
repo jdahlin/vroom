@@ -367,8 +367,15 @@ node_index parser::init_statement()
             return expression_statement();
         r = reading_at(0);
     }
-    if (at(standard_keyword::using_, after))
-        return beyond_this_step();
+    if (at(standard_keyword::using_, after)) {
+        /* P2360R0's alias-declaration; before C++23 clang's extension,
+           [ext:clang_later_edition_features] */
+        if (after || !at_identifier(1) ||
+            !at(preprocessing_op_or_punc::EQUAL, 2))
+            return beyond_this_step();
+        flag_set block(block_scope, true);
+        return alias_declaration();
+    }
     return declaration_or_expression(
         r,
         [&] {

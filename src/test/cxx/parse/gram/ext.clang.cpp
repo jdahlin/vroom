@@ -45,3 +45,19 @@ template <> struct handle<void> {
   void destroy() const { __builtin_coro_destroy(raw); }
   void* raw = nullptr;
 };
+
+// [ext:clang_later_edition_features] P2360R0 (C++23): an alias-declaration is
+// an init-statement; clang accepts it in C++20 with a warning.
+template <class T>
+int init_alias(T t)
+{
+    if constexpr (using U = T; sizeof(U) == 4)
+        return 1;
+    if (using V = T; sizeof(V) == 8)
+        return 2;
+    switch (using W = T; sizeof(W)) {
+    }
+    for (using X = T; X i = t; i++) {
+    }
+    return 0;
+}
