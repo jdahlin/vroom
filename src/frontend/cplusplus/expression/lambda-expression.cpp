@@ -346,11 +346,25 @@ semantic_analysis::lambda_context *semantic_analysis::current_lambda()
 analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
                                                      expression_meaning &m)
 {
-    /* a lambda in a default argument or member initializer, in an
-       unevaluated operand or while a candidate template is substituted;
-       outside a function body only at namespace scope */
+    /* [expr.prim.lambda.closure]/1 (C++20): a lambda-expression may be in
+       an unevaluated operand; its compound-statement is no unevaluated
+       operand, the function call operator being a function of its own */
+    unsigned outer_unevaluated = unevaluated;
+    unevaluated = 0;
+    analysis_result r = lambda_expression_analysed(n, m);
+    unevaluated = outer_unevaluated;
+    return r;
+}
+
+analysis_result
+semantic_analysis::lambda_expression_analysed(LambdaExpression n,
+                                              expression_meaning &m)
+{
+    /* a lambda in a default argument or member initializer or while a
+       candidate template is substituted; outside a function body only at
+       namespace scope */
     if ((!function_state.active && !is_namespace(current_scope)) ||
-        unevaluated || substituting || n.size() < 2)
+        substituting || n.size() < 2)
         return not_supported(n, "expr.prim.lambda");
     /* [expr.prim.lambda]/5: a template-parameter-list makes a generic
        lambda, whose call operator is a template
@@ -413,8 +427,25 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
     }
 
     /* the closure type, a local class with no name */
-    entity_index c =
-        entity_table.make(entity_kind::class_type, 0, current_scope);
+    entity_index scope = current_scope;
+    entity_index member = 0;
+    /* [abi:closure-types] a closure type in a default member initializer
+       belongs to the data member, whose class is its scope */
+    if (initialized_member && !current_lambda()) {
+        member = initialized_member;
+        scope = entity_table[member].enclosing;
+    }
+    if (member)
+        for (const member_closure &k : member_closures)
+            if (k.lambda == n.index() && k.member == member) {
+                l.closure = k.closure;
+                owned_array<capture_record> again;
+                for (uint32_t i = 0; i < k.capture_count; i++)
+                    again.append(member_closure_captures[k.first_capture + i]);
+                return closure_object(l, again, m);
+            }
+    entity_index c = entity_table.make(entity_kind::class_type, 0, scope);
+    entity_table[c].closure_variable = member;
     entity_table[c].type = qualified_type::make(
         type_table.of_entity(type_kind::class_type, c), cv_none);
     entity_table[c].lambda = n;
@@ -484,6 +515,17 @@ analysis_result semantic_analysis::lambda_expression(LambdaExpression n,
         entity_table[c].kind = entity_kind::none;
         entity_table[c].size = 0;
         return r;
+    }
+    if (member) {
+        member_closure k;
+        k.lambda = n.index();
+        k.closure = c;
+        k.member = member;
+        k.first_capture = static_cast<uint32_t>(member_closure_captures.size());
+        k.capture_count = static_cast<uint32_t>(captures.size());
+        for (const capture_record &x : captures)
+            member_closure_captures.append(x);
+        member_closures.append(k);
     }
     return closure_object(l, captures, m);
 }

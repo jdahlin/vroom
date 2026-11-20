@@ -16,6 +16,19 @@ struct S {
     int w = [&] { return v + 200; }();
 };
 
+/* a default member initializer analysed by each constructor: one closure type */
+struct Two {
+    int a = [] { return 1; }();
+    int b = [this] { return a + 1; }();
+    Two() {}
+    Two(int x) : a(x) {}
+};
+
+template <class T> struct Tpl {
+    T v = [] { return T(7); }();
+    T w = [this] { return v + T(1); }();
+};
+
 int main()
 {
     S s;
@@ -31,5 +44,10 @@ int main()
     s.v = 8;
     auto f = [c = s] { return c.v; };
     check(f() == 8);
+    Two t1, t2(5);
+    check(t1.a == 1 && t1.b == 2 && t2.a == 5 && t2.b == 6);
+    Tpl<int> ti;
+    Tpl<long> tl;
+    check(ti.v == 7 && ti.w == 8 && tl.v == 7 && tl.w == 8);
     return 0;
 }

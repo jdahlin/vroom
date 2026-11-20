@@ -2512,6 +2512,9 @@ class semantic_analysis
     /* the variable whose initializer deduces its type now (saved and
        restored around the deduction) */
     entity_index deducing_variable = 0;
+    /* the non-static data member whose default member initializer is
+       analysed (in a constructor), 0 elsewhere */
+    entity_index initialized_member = 0;
     /* [dcl.spec.auto]/11: a use of e, whose type may have an undeduced
        placeholder */
     analysis_result undeduced_use(token_index t, entity_index e);
@@ -2653,6 +2656,16 @@ class semantic_analysis
     };
     owned_array<lambda_context> lambdas;
     owned_array<capture_record> lambda_captures;
+    /* the closure type of a lambda-expression in a default member
+       initializer, which each constructor's analysis of the initializer
+       uses (one type, [class.mem]/10) and the captures it made (this) */
+    struct member_closure {
+        SyntaxRef lambda = 0;
+        entity_index closure = 0, member = 0;
+        uint32_t first_capture = 0, capture_count = 0;
+    };
+    owned_array<member_closure> member_closures;
+    owned_array<capture_record> member_closure_captures;
     /* [basic.def.odr]/4: a name in a lambda's body of a local variable
        usable in constant expressions is an odr-use, so a capture, unless
        its value is read (lvalue-to-rvalue conversion); named by an entity
@@ -2688,6 +2701,8 @@ class semantic_analysis
     lambda_context *current_lambda();
     analysis_result lambda_expression(LambdaExpression n,
                                       expression_meaning &m);
+    analysis_result lambda_expression_analysed(LambdaExpression n,
+                                               expression_meaning &m);
     analysis_result
     lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                      qualified_type &type,

@@ -1723,6 +1723,10 @@ bool itanium_mangler::closure_type_name(entity_index c)
             !k.call_operator || enclosing_function(table, other) != context ||
             k.closure_variable != variable)
             continue;
+        /* (a default member initializer analysed in each constructor: the
+           one closure type of its lambda-expression) */
+        if (variable && !table[variable].inline_ && k.lambda == table[c].lambda)
+            continue;
         const struct type &a = record(table[k.call_operator].type);
         const struct type &b = record(signature);
         if (a.variadic == b.variadic &&

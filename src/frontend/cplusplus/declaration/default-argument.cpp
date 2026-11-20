@@ -61,7 +61,9 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                           "parameter-declaration-clause of a function "
                           "declaration",
                           "dcl.fct.default");
-    entity &x = entity_table[f];
+    /* (a copy of the entity: analysing an argument, a lambda-expression's
+       for one, makes entities, which moves the table) */
+    const entity x = entity_table[f];
     bool member = analysing_member_defaults &&
                   entity_table[x.enclosing].kind == entity_kind::class_type;
     /* ([temp.inst]/12: a specialization's are its template's, in the
@@ -75,7 +77,6 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
     size_t count = function.parameter_count;
     if (function_parameters.size() != count)
         return not_supported(n, "dcl.fct.default");
-    const qualified_type *types = type_table.parameters(x.type.unqualified());
     /* the default arguments the function has so far, and this
        declaration's */
     owned_array<uint32_t> nodes;
@@ -162,7 +163,8 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                 if (q.id && tokens[t].kind == token_kind::identifier &&
                     tokens.identifier(t) == tokens.identifier(q.id))
                     return not_supported(p.declaration, "dcl.fct.default");
-        qualified_type type = types[i];
+        qualified_type type =
+            type_table.parameters(entity_table[f].type.unqualified())[i];
         initialized_value value;
         /* [ext:clang_source_location] the call's place is the value of a
            builtin that names it */
@@ -197,10 +199,11 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
     }
     if (default_argument_nodes.empty())
         default_argument_nodes.append(0);
-    x.first_default = static_cast<uint32_t>(default_argument_nodes.size());
+    entity_table[f].first_default =
+        static_cast<uint32_t>(default_argument_nodes.size());
     for (size_t i = 0; i < count; i++)
         default_argument_nodes.append(nodes[i]);
-    x.default_arguments = trailing;
+    entity_table[f].default_arguments = trailing;
     return analysis_result::well_formed;
 }
 

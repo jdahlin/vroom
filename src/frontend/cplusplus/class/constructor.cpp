@@ -290,7 +290,12 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
         }
     } bound = {source_location_at, source_location_at};
     source_location_at = at;
-    VTRY_SET(r, initializer(init, type, value));
+    entity_index outer_member = initialized_member;
+    initialized_member = e;
+    r = initializer(init, type, value);
+    initialized_member = outer_member;
+    if (r != analysis_result::well_formed)
+        return r;
     if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         (semantics[value.node].kind != semantic_kind::construct ||
          semantics[value.node].a))
