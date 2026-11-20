@@ -2640,6 +2640,22 @@ analysis_result semantic_analysis::class_direct_initialization(
                          ambiguous))))
             return not_supported(n, "expr.type.conv");
         r = initialize_with(n, arguments[0], type, true, false, value);
+    } else if (is_aggregate(c) && arguments.empty()) {
+        /* T() of an aggregate with default member initializers:
+           [dcl.init]/9 value-initialization zero-initializes the object
+           and then default-initializes it with the implicit, non-trivial
+           default constructor.  When every member has an initializer the
+           zeros are overwritten, so the constructor alone gives the
+           value; a member without one stays zero, which is not analysed
+           (zero-initialization then a constructor) */
+        const entity &x = entity_table[c];
+        if (x.base_count)
+            return not_supported(n, "dcl.init");
+        for (uint32_t i = 0; i < x.member_count; i++)
+            if (!entity_table[class_members[x.first_member + i]]
+                     .default_initializer)
+                return not_supported(n, "dcl.init");
+        r = construct(n, type, arguments, 0, value);
     } else if (is_aggregate(c) &&
                (arguments.size() != 1 ||
                 arguments[0].type.unqualified() != type.unqualified())) {

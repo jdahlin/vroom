@@ -52,16 +52,27 @@ bool is_comparison(preprocessing_op_or_punc op)
 /* whether class c may convert to a built-in candidate's parameter type:
    [over.built] has no class-typed parameters, and a conversion function to
    a class type ([over.best.ics]/4: no second user-defined conversion)
-   never makes one viable.  A base class's or a template conversion
+   never makes one viable, a base class's included.  A template conversion
    function is not analysed: assumed to convert.  An explicit conversion
    function ([class.conv.fct]/2) is no implicit conversion of a built-in
    candidate's parameter ([over.best.ics]), unless explicit_counts */
 bool semantic_analysis::converts_to_non_class(entity_index c,
                                               bool explicit_counts) const
 {
-    if (entity_table[c].kind != entity_kind::class_type ||
-        base_has_conversion_functions(c))
+    if (entity_table[c].kind != entity_kind::class_type)
         return true;
+    /* [class.conv.fct]/1, [class.member.lookup]: the conversion functions of
+       a base class are the derived class's; each base's are looked at the
+       same way (a derived class's function that hides a base's of the same
+       type is not told apart: assumed to convert) */
+    for (uint32_t i = 0; i < entity_table[c].base_count; i++)
+        if (converts_to_non_class(
+                type_table
+                    [entity_table[class_bases[entity_table[c].first_base + i]]
+                         .type.unqualified()]
+                        .entity,
+                explicit_counts))
+            return true;
     for (entity_index f = own_conversion_functions(c); f;
          f = entity_table[f].next_overload) {
         if (!entity_table[f].conversion_function)
@@ -77,9 +88,15 @@ bool semantic_analysis::converts_to_non_class(entity_index c,
 
 bool semantic_analysis::converts_to_lvalue_reference(entity_index c) const
 {
-    if (entity_table[c].kind != entity_kind::class_type ||
-        base_has_conversion_functions(c))
+    if (entity_table[c].kind != entity_kind::class_type)
         return true;
+    for (uint32_t i = 0; i < entity_table[c].base_count; i++)
+        if (converts_to_lvalue_reference(
+                type_table
+                    [entity_table[class_bases[entity_table[c].first_base + i]]
+                         .type.unqualified()]
+                        .entity))
+            return true;
     for (entity_index f = own_conversion_functions(c); f;
          f = entity_table[f].next_overload) {
         if (!entity_table[f].conversion_function)

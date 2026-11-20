@@ -67,17 +67,18 @@ struct tree_checker {
         return k >= semantic_kind::block && k <= semantic_kind::null_statement;
     }
 
-    /* [expr.prim.lambda.closure]/2: a lambda-expression's closure object,
-       a prvalue its captures initialize (closure_object) */
-    bool closure_object(uint32_t c) const
+    /* a class prvalue an initializer list builds where an expression is
+       wanted: [expr.prim.lambda.closure]/2's closure object, which its
+       captures initialize, and an aggregate's T{...} bound to a reference
+       ([dcl.init.ref]/5.4: held in a temporary) (class_object) */
+    bool class_object(uint32_t c) const
     {
         const semantic_node &node = analysis.semantics[c];
         if (node.kind != semantic_kind::initializer_list)
             return false;
         const struct type &record =
             analysis.type_table[node.type.unqualified()];
-        return record.kind == type_kind::class_type &&
-               analysis.entity_table[record.entity].lambda;
+        return record.kind == type_kind::class_type;
     }
 
     bool is_bool(qualified_type t) const
@@ -106,7 +107,7 @@ struct tree_checker {
         semantic_kind k = analysis.semantics[c].kind;
         bool right = is_statement(k);
         if (sort == tree_sort::expression)
-            right = is_expression(k) || closure_object(c);
+            right = is_expression(k) || class_object(c);
         else if (sort == tree_sort::initializer)
             right = is_initializer(k);
         if (!right) {
@@ -349,7 +350,9 @@ struct tree_checker {
             condition(n, node.b);
             break;
         case semantic_kind::for_statement:
-            child(n, node.a, tree_sort::statement, false, "init-statement");
+            /* none in the loop [stmt.ranged]/1 expands to: its declarations
+               precede it in a block */
+            child(n, node.a, tree_sort::statement, true, "init-statement");
             child(n, node.b, tree_sort::expression, true, "condition");
             condition(n, node.b);
             child(n, node.c, tree_sort::expression, true, "expression");
