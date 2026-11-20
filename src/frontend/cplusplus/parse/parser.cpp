@@ -632,6 +632,12 @@ node_index parser::unparsed_declaration()
         }
         consume();
     }
+    /* the declaration is not read, so a member template it declares is not
+       known: any name in it may be one
+       (declared_names::declared_as_member_template) */
+    for (token_index i = first; i < position; i++)
+        if (tokens[i].kind == token_kind::identifier)
+            names.assume_member_template(tokens.identifier(i));
     syntax_kind kind = syntax_kind::unparsed;
     if (erroneous)
         kind = syntax_kind::erroneous;

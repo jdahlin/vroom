@@ -135,6 +135,24 @@ void declared_names::declare_in(scope_index in, uint32_t name, name_kind kind,
                 kind = name_kind::function_template;
     scopes[in].declarations.append({name, kind, region, dependent});
     journal.append(in);
+    if (scopes[in].kind == scope_kind::class_ && is_template_kind(kind))
+        assume_member_template(name);
+}
+
+void declared_names::assume_member_template(uint32_t name)
+{
+    size_t old = member_template_names.size();
+    if (name >= old) {
+        member_template_names.resize(name + 1);
+        for (size_t i = old; i <= name; i++)
+            member_template_names[i] = false;
+    }
+    member_template_names[name] = true;
+}
+
+bool declared_names::declared_as_member_template(uint32_t name) const
+{
+    return name < member_template_names.size() && member_template_names[name];
 }
 
 void declared_names::declare_template_parameter(uint32_t name, name_kind kind)
