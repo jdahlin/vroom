@@ -140,8 +140,12 @@ analysis_result semantic_analysis::member_template_declaration(
     if (head_constraint(n))
         return not_supported(n, "temp.constr");
     if (at < inner.size() && inner[at].is(syntax_kind::decl_specifier_seq)) {
+        /* (the template-parameters are not in scope here: a condition is
+           analysed with the template's declarator, member_function_template;
+           a template only declared records no explicit-ness, as with the
+           keyword) */
         specified s;
-        VTRY(r, constructor_specifiers(inner[at], s));
+        VTRY(r, constructor_specifiers(inner[at], s, false));
         at++;
     }
     /* a constructor's declarator, not a destructor's (which [temp.mem]/3
@@ -163,7 +167,8 @@ analysis_result semantic_analysis::member_template_declaration(
  * analysed.
  */
 analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
-                                                          specified &s)
+                                                          specified &s,
+                                                          bool conditions)
 {
     for (SyntaxElement x : seq.elements()) {
         if (x.is(syntax_kind::gnu_attribute_specifier)) {
@@ -171,10 +176,29 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
             continue;
         }
         /* [dcl.fct.spec]/2: explicit ( constant-expression ), a
-           constructor template's too ([temp.mem]/1); the condition is
-           not evaluated: the constructor counts as not explicit */
-        if (x.is(syntax_kind::explicit_specifier))
+           constructor template's too ([temp.mem]/1): "explicit(true)" is
+           explicit; a value-dependent condition is decided where the
+           specialization is declared */
+        if (x.is(syntax_kind::explicit_specifier)) {
+            if (!conditions)
+                continue;
+            if (!instantiating && !class_instantiating && !substituting &&
+                names_dependent_entity(x.first_token(), x.end_token())) {
+                s.explicit_dependent = true;
+                continue;
+            }
+            bool constant = false, value = false;
+            VTRY(r, bool_constant_expression(x, x[2], constant, value));
+            if (!constant)
+                return ill_formed(x,
+                                  "the constant-expression of an "
+                                  "explicit-specifier shall be a "
+                                  "contextually converted constant "
+                                  "expression of type bool",
+                                  "dcl.fct.spec");
+            s.explicit_ = value;
             continue;
+        }
         if (!x.is_token())
             return not_supported(seq, "temp.mem");
         switch (x.keyword()) {

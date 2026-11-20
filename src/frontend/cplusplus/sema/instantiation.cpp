@@ -562,7 +562,10 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].member_cv = t.member_cv;
     entity_table[e].access = t.access;
     entity_table[e].special = t.special;
+    /* [dcl.fct.spec]/2: a dependent condition is the specialization's own */
     entity_table[e].explicit_ = t.explicit_;
+    if (t.explicit_dependent)
+        entity_table[e].explicit_ = s.explicit_;
     entity_table.add_declaration(e, declaration);
     const function_template ft = function_templates[t.instantiation - 1];
     entity_table[e].gnu_flags = ft.gnu_flags;

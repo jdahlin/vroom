@@ -162,6 +162,13 @@ bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
     for (token_index t = first; t < end; t++) {
         if (tokens[t].kind != token_kind::identifier)
             continue;
+        /* after ::, the name is looked up in that scope, not in ours
+           ([basic.lookup.qual]/1) */
+        if (t > first &&
+            tokens[t - 1].kind == token_kind::operator_or_punctuator &&
+            preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc) ==
+                preprocessing_op_or_punc::COLON_COLON)
+            continue;
         uint32_t name = tokens.identifier(t);
         bool elsewhere = false;
         for (token_index u = defining_members_first;
@@ -182,6 +189,11 @@ bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
         if (!found.entity)
             return true;
         uint32_t d = entity_table[found.entity].first_declaration;
+        /* a type alias declared before: no later member of the name
+           can overload it ([class.mem]/6 sees the same alias) */
+        if (d && entity_table[found.entity].kind == entity_kind::typedef_name &&
+            entity_table.declaration(d).node.first_token() < first)
+            continue;
         if (d &&
             entity_table.declaration(d).node.first_token() >=
                 defining_members_first &&

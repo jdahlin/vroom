@@ -147,6 +147,7 @@ analysis_result semantic_analysis::member_function_template(
            keeps its templates' (construct, class_sequence) */
         entity_table[t].special = special_member::constructor;
         entity_table[t].explicit_ = s.explicit_;
+        entity_table[t].explicit_dependent = s.explicit_dependent;
         prior = entity_table[c].constructor_templates;
         if (!prior) {
             prior = entity_table.make(entity_kind::none, name, c);
@@ -202,6 +203,12 @@ analysis_result semantic_analysis::constructor_template_candidates(
     function_template_overloads(entity_table[c].constructor_templates, group);
     if (copy) {
         size_t kept = 0;
+        for (uint32_t g : group)
+            if (entity_table[function_templates[g - 1].entity]
+                    .explicit_dependent)
+                /* [dcl.fct.spec]/2: whether this specialization is explicit
+                   is known after deduction: not filtered here yet */
+                return not_supported(n, "dcl.fct.spec");
         for (uint32_t g : group)
             if (!entity_table[function_templates[g - 1].entity].explicit_)
                 group[kept++] = g;

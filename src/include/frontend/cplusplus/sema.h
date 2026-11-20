@@ -586,6 +586,10 @@ struct entity {
        conversion_function_name's, shared by all; explicit_ when declared
        explicit ([class.conv.fct]/2) */
     bool conversion_function = false, explicit_ = false;
+    /* [dcl.fct.spec]/2: a constructor template's explicit(condition) whose
+       condition is value-dependent: decided per specialization, so unknown
+       on the template itself */
+    bool explicit_dependent = false;
     /* a class: the copy assignment operators it declares
        ([class.copy.assign]/1) not deleted on their first declaration */
     uint32_t user_copy_assignments = 0;
@@ -1701,6 +1705,8 @@ class semantic_analysis
         bool mutable_ = false;
         /* [class.conv.fct]/2: explicit (only where explicit_allowed) */
         bool explicit_ = false;
+        /* explicit ( value-dependent condition ): see entity */
+        bool explicit_dependent = false;
         /* a class-specifier or elaborated-type-specifier was there: a
            declaration with no declarator declares the class
            ([dcl.pre]/5) */
@@ -4605,7 +4611,10 @@ class semantic_analysis
        is deduced (as written's are) */
     /* [temp.over]/1: the member function templates named held, as member
        candidates (member-template.cpp) */
-    analysis_result constructor_specifiers(SyntaxRef seq, specified &s);
+    /* conditions: evaluate an explicit-specifier's condition (in the scope
+       of the template-parameters), else skip it */
+    analysis_result constructor_specifiers(SyntaxRef seq, specified &s,
+                                           bool conditions = true);
     analysis_result constructor_template_declarator(SyntaxRef definition,
                                                     SyntaxElement d,
                                                     qualified_type &type,
