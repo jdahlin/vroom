@@ -61,5 +61,12 @@ int main()
     volatile double dv = 2.5;
     if (o(v) + o(dv) + o(&c) != 2 + 4 + 10)
         return 8;
+    int multiplier = 3;
+    auto captured = overloaded{[&](int x) { return x + base; },
+                               [&](double d) {
+                                   return static_cast<int>(d) * multiplier;
+                               }};
+    if (captured(one_) != 8 || captured(dv) != 6)
+        return 9;
     return 0;
 }

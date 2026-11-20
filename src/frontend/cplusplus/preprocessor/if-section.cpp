@@ -64,14 +64,14 @@ struct preprocessor::expression_reader {
     void advance()
     {
         if (!p.read_expanded(token)) {
-            token = preprocessing_token{};
+            token = preprocessing_token();
             token.location = p.directive_end;
         }
     }
     void advance_unexpanded()
     {
         if (!p.read_unexpanded(token)) {
-            token = preprocessing_token{};
+            token = preprocessing_token();
             token.location = p.directive_end;
         }
     }
@@ -295,7 +295,7 @@ static bool evaluate_value(preprocessor &p, preprocessor::expression_reader &r,
                            preprocessor::value &v, bool live)
 {
     using op = preprocessing_op_or_punc;
-    v = preprocessor::value{};
+    v = preprocessor::value();
     const preprocessing_token t = r.token;
     switch (t.kind) {
     case preprocessing_token_kind::identifier: {
@@ -769,7 +769,7 @@ bool preprocessor::evaluate_expression(const preprocessing_token *tokens,
     size_t depth = contexts.size();
     push_tokens(tokens, count, -1, true);
     in_condition++;
-    expression_reader r{*this, {}};
+    expression_reader r{*this, preprocessing_token()};
     r.advance();
     value v;
     bool ok = evaluate_value(*this, r, v, true);

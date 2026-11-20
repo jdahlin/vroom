@@ -272,7 +272,7 @@ bool character_type(fundamental_type t)
 }
 
 /* a string-literal, not in parentheses */
-bool is_string_literal(token_stream &tokens, syntax_child c)
+bool is_unparenthesized_string_literal(token_stream &tokens, syntax_child c)
 {
     return c.is_token() && tokens[c.index()].kind == token_kind::literal &&
            tokens[c.index()].literal == literal_kind::string_literal;
@@ -635,9 +635,8 @@ analysis_result semantic_analysis::converted_temporary_binding(
            type "cv3 T3"" by a conversion function ([over.match.ref]) */
         bool converted = false;
         VTRY(c, conversion_function_call(at, m, made_type, false, converted));
-        if (!converted)
-            return not_supported(at, "over.match.ref");
-        return analysis_result::well_formed;
+        if (converted)
+            return analysis_result::well_formed;
     }
     converting_binds++;
     initialized_value value;
@@ -739,7 +738,7 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
         /* [dcl.init]/17.3: "If the destination type is an array of
            characters, ... and the initializer is a string-literal, see
            [dcl.init.string]." */
-        if (is_string_literal(tokens, clause) &&
+        if (is_unparenthesized_string_literal(tokens, clause) &&
             character_type(fundamental_of(target.operand))) {
             VTRY(r, expression(clause, m));
             result.evaluation = constness::constant;
@@ -1101,7 +1100,8 @@ analysis_result semantic_analysis::list_initialization_of(
            initializer list has a single element that is an
            appropriately-typed string-literal, initialization is performed
            as described in that subclause" */
-        if (clauses.size() == 1 && is_string_literal(tokens, clauses[0]) &&
+        if (clauses.size() == 1 &&
+            is_unparenthesized_string_literal(tokens, clauses[0]) &&
             character_type(fundamental_of(target.operand)))
             return initialize_from(list, clauses[0], type, direct, true,
                                    result);
@@ -1112,7 +1112,7 @@ analysis_result semantic_analysis::list_initialization_of(
             while (inner.is(syntax_kind::primary_expression) &&
                    inner.size() == 3)
                 inner = inner[1];
-            if (is_string_literal(tokens, inner))
+            if (is_unparenthesized_string_literal(tokens, inner))
                 return not_supported(list, "dcl.init.string");
         }
         /* [dcl.init.aggr]/9: "An array of unknown bound initialized with a
@@ -1842,9 +1842,9 @@ analysis_result semantic_analysis::aggregate_element_clause(
         (record.kind == type_kind::class_type &&
          entity_table[record.entity].kind == entity_kind::class_type &&
          is_aggregate(record.entity));
-    if (braced ||
-        (record.kind == type_kind::array && is_string_literal(tokens, clause) &&
-         character_type(fundamental_of(record.operand)))) {
+    if (braced || (record.kind == type_kind::array &&
+                   is_unparenthesized_string_literal(tokens, clause) &&
+                   character_type(fundamental_of(record.operand)))) {
         next++;
         return initialize_from(at, clause, element, false, true, one);
     }

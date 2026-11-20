@@ -39,19 +39,19 @@ constexpr op_or_punc_description op_or_punc_descriptions[] = {
  * (doc/RESEARCH-cxx-performance.md).
  */
 struct op_or_punc_candidates {
-    uint8_t count = 0;
-    uint8_t row[8] = {};    /* indexes into op_or_punc_descriptions */
-    uint8_t length[8] = {}; /* of the row's spelling */
+    uint8_t count;
+    uint8_t row[8];    /* indexes into op_or_punc_descriptions */
+    uint8_t length[8]; /* of the row's spelling */
 };
 
 struct op_or_punc_index {
     op_or_punc_candidates starting_with[128]; /* by basic character */
-    uint8_t longest = 0;                      /* spelling of the table */
+    uint8_t longest;                          /* spelling of the table */
 };
 
 constexpr op_or_punc_index make_op_or_punc_index()
 {
-    op_or_punc_index index;
+    op_or_punc_index index{};
     uint8_t rows = static_cast<uint8_t>(preprocessing_op_or_punc::count);
     for (uint8_t i = 0; i < rows; i++) {
         const char *spelling = op_or_punc_descriptions[i].spelling;

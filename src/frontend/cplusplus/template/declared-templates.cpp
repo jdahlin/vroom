@@ -2851,7 +2851,7 @@ SyntaxRef semantic_analysis::out_of_class_nested(SyntaxRef definition,
         *name = q[1].operator_function_id().operator_keyword().token();
     else if (name)
         *name = q[1].token();
-    return nested;
+    return nested.index();
 }
 
 /*

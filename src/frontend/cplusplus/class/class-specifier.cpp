@@ -2066,6 +2066,8 @@ semantic_analysis::member_function_definition(entity_index c,
             return deleted_definition(definition, f);
         if (!body.plain())
             return not_supported(definition, "dcl.fct.def.general");
+        function_parameters.clear();
+        function_empty_pack = 0;
         entity_index saved_class = defining_class;
         defining_class = c;
         analysis_result r =

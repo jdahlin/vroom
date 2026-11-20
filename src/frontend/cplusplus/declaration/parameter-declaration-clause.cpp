@@ -244,7 +244,7 @@ analysis_result semantic_analysis::parameter_declaration(
        decl-specifier-seq appertains to the parameter: those without effect
        (libc++'s [[__maybe_unused__]]), and GCC's whose rules set nothing
        (libc++'s __attribute__((noescape))), are left out */
-    using enum preprocessing_op_or_punc;
+    using punct = preprocessing_op_or_punc;
     uint32_t lead = 0;
     while (n[lead].is_node()) {
         auto c = n[lead];
@@ -288,7 +288,7 @@ analysis_result semantic_analysis::parameter_declaration(
        argument" (default_arguments analyses it) */
     uint32_t declarator_count = child_count;
     for (uint32_t i = 1; i + 1 < child_count; i++)
-        if (at(i).is(EQUAL)) {
+        if (at(i).is(punct::EQUAL)) {
             if (i + 2 != child_count)
                 return not_supported(n, "dcl.fct.default");
             default_argument = at(i + 1);
@@ -371,7 +371,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                           "array or function",
                           "dcl.fct");
     }
-    using enum preprocessing_op_or_punc;
+    using punct = preprocessing_op_or_punc;
     /* the parameter-declarations and the ellipsis, from the clause and its
        list: ( clause ) is the first and last child */
     owned_array<SyntaxRef> declarations;
@@ -385,7 +385,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     SyntaxRef exceptions = 0;
     for (uint32_t i = parameters.size(); i-- > 0;) {
         auto c = parameters[i];
-        if (c.is(RIGHT_PARENTHESIS)) {
+        if (c.is(punct::RIGHT_PARENTHESIS)) {
             closed = true;
         } else if (!closed) {
             /* a lambda-declarator's decl-specifier-seq (mutable, constexpr,
@@ -441,8 +441,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
             }
             /* [dcl.fct]/1 ref-qualifier: a member function's own is kept
                with the cv-qualifier-seq (cv_ref_lvalue, cv_ref_rvalue) */
-            if (c.is(AMPERSAND) || c.is(AMPERSAND_AMPERSAND)) {
-                bool lvalue = c.is(AMPERSAND);
+            if (c.is(punct::AMPERSAND) || c.is(punct::AMPERSAND_AMPERSAND)) {
+                bool lvalue = c.is(punct::AMPERSAND);
                 if (may_qualify) {
                     if (cv & (cv_ref_lvalue | cv_ref_rvalue))
                         return not_supported(parameters, "dcl.fct");
@@ -477,16 +477,16 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     /* a function declarator of the parameters is not the member's */
     in_member_declarator = false;
     for (auto c : parameters.elements()) {
-        if (c.is(RIGHT_PARENTHESIS))
+        if (c.is(punct::RIGHT_PARENTHESIS))
             break;
-        if (!c.is(LEFT_PARENTHESIS))
+        if (!c.is(punct::LEFT_PARENTHESIS))
             work.append(c);
     }
     for (size_t k = 0; k < work.size(); k++) {
         auto c = work[k];
-        if (c.is(COMMA))
+        if (c.is(punct::COMMA))
             continue;
-        if (c.is(ELLIPSIS)) {
+        if (c.is(punct::ELLIPSIS)) {
             variadic = true;
             clause_ellipsis = c.token();
             continue;

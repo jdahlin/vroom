@@ -166,7 +166,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                                                     qualified_type &type,
                                                     declarator_meaning &m)
 {
-    using enum preprocessing_op_or_punc;
+    using punct = preprocessing_op_or_punc;
     entity_index member_class = 0;
     type_index member_dependent = 0;
     for (auto c : op.elements()) {
@@ -208,7 +208,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             member_class = scope.entity;
             continue;
         }
-        if (c.is(STAR)) {
+        if (c.is(punct::STAR)) {
             /* [dcl.ref]/5: "There shall be ... no pointers to references." */
             type_kind k = type_table[type.unqualified()].kind;
             if (k == type_kind::lvalue_reference ||
@@ -243,7 +243,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             }
             VTRY(r, misplaced_function_qualifiers(op, type, false));
             type = qualified_type::make(type_table.pointer_to(type), cv_none);
-        } else if (c.is(CARET)) {
+        } else if (c.is(punct::CARET)) {
             /* [ext:clang_blocks] "a block pointer to function type"; clang
                rejects one to any other type */
             if (type_table[type.unqualified()].kind != type_kind::function)
@@ -253,10 +253,10 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                                   "ext.clang");
             type = qualified_type::make(type_table.block_pointer_to(type),
                                         cv_none);
-        } else if (c.is(AMPERSAND)) {
+        } else if (c.is(punct::AMPERSAND)) {
             VTRY(r, misplaced_function_qualifiers(op, type, false));
             VTRY_SET(r, reference(op, false, type, m));
-        } else if (c.is(AMPERSAND_AMPERSAND)) {
+        } else if (c.is(punct::AMPERSAND_AMPERSAND)) {
             if (!tokens.files.behavior.has(language_feature::rvalue_references))
                 /* [ext.clang] an rvalue reference before C++11, an
                    extension (an error with -pedantic-errors) */
@@ -404,7 +404,7 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
                           "conversion is not narrowing",
                           "dcl.array");
     /* an array too large for the address space: clang's error, by size */
-    if (value > (__int128(1) << 40))
+    if (value > (UINT64_C(1) << 40))
         return not_supported(at, "dcl.array");
     /* "N shall be greater than zero": zero is clang's extension */
     if (!value) {
@@ -935,9 +935,9 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                                               qualified_type &type,
                                               declarator_meaning &m)
 {
-    using enum preprocessing_op_or_punc;
+    using punct = preprocessing_op_or_punc;
     if (d.is_token()) {
-        if (d.is(ELLIPSIS)) {
+        if (d.is(punct::ELLIPSIS)) {
             /* [dcl.decl]/1: noptr-abstract-pack-declarator is "...";
                [dcl.fct]/21: only in a parameter-declaration, which then
                declares a pack ([temp.param]/17 for a non-type template
@@ -1057,7 +1057,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     SyntaxElement head = {};
     auto parts = NoptrDeclaratorParts(n);
     auto id = parts.declarator_id();
-    if (d[0].is(LEFT_PARENTHESIS)) {
+    if (d[0].is(punct::LEFT_PARENTHESIS)) {
         auto inner = parts.parenthesized();
         if (!inner)
             return not_supported(n, "dcl.decl");
@@ -1188,8 +1188,8 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                 }
             suffixes.append({true, i, false});
             i++;
-        } else if (c.is(LEFT_BRACKET)) {
-            bool has_bound = d[i + 1] && !d[i + 1].is(RIGHT_BRACKET);
+        } else if (c.is(punct::LEFT_BRACKET)) {
+            bool has_bound = d[i + 1] && !d[i + 1].is(punct::RIGHT_BRACKET);
             suffixes.append({false, i + 1, has_bound});
             i += 2;
             if (has_bound)

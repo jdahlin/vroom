@@ -42,6 +42,8 @@ preprocessor::preprocessor(source_files &f, const preprocessor_options &o)
         condition_behavior.long_long_width = 64;
     condition_file.from_memory("", "", 0);
     condition_lexer.files = &files;
+    memset(date, 0, sizeof date);
+    memset(time_of_day, 0, sizeof time_of_day);
 }
 
 /* [cpp.pre]: the directive names "appearing after a # in the syntax";
@@ -99,7 +101,7 @@ directive_kind find_directive(const implementation_defined_behavior &b,
 void preprocessor::execute_definitions(source_files::entry &file)
 {
     inclusions.clear();
-    inclusions.append({&file, -1, 0, 0, false, false, {}});
+    inclusions.append({&file, -1, 0, 0, false, false, preprocessing_token()});
     for (preprocessing_token t = next();
          t.kind != preprocessing_token_kind::end_of_file; t = next())
         ;
@@ -137,7 +139,8 @@ bool preprocessor::start(const char *path)
     struct stat st;
     if (stat(path, &st) == 0)
         entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
-    inclusions.append({main_file, -1, 0, 0, false, false, {}});
+    inclusions.append(
+        {main_file, -1, 0, 0, false, false, preprocessing_token()});
 
     /* [cpp.predefined]/1: "The date of translation of the source file" */
     time_t now = ::time(nullptr);

@@ -7,6 +7,8 @@ struct Int {
 };
 struct Flag {
     int on;
+    /* The constructor's parameter is out of scope in the conversion. */
+    Flag(int on) : on(on) {}
     explicit operator bool() const { return on != 0; }
 };
 static const char text[] = "xyz";

@@ -43,6 +43,16 @@ struct Plain {
     int a, b;
 };
 
+struct WithDefault {
+    int first = 6;
+    int second;
+};
+
+template <class T, class... Args> T *make_new(Args... args)
+{
+    return new T(args...);
+}
+
 // class-specific allocation and deallocation ([class.free])
 static char arena[64];
 static int arena_used, arena_freed;
@@ -76,6 +86,13 @@ int main()
     failures += c->value != 7;
     delete c; // the destructor, then operator delete(void*, size_t)
     failures += destroyed != 7;
+
+    WithDefault *zeroed = make_new<WithDefault>();
+    failures += zeroed->first != 6 || zeroed->second != 0;
+    delete zeroed;
+    Counter *from_pack = make_new<Counter>(3);
+    failures += from_pack->value != 3;
+    delete from_pack;
 
     Plain *x = new Plain{1, 2};
     failures += x->a + x->b != 3;

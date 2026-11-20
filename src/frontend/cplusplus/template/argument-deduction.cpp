@@ -620,6 +620,9 @@ analysis_result semantic_analysis::deduce_from_call(
         values[pack] = make_pack(&deduced[pack], specified - pack);
         set[pack] = true;
     }
+    /* A specified pack occupies one template parameter, regardless of
+       the number of explicit arguments it takes. */
+    uint32_t first_deducible = given + (given < specified);
     owned_array<template_argument> elements;
     if (f.variadic && count > fixed)
         count = fixed;
@@ -632,7 +635,7 @@ analysis_result semantic_analysis::deduce_from_call(
            parameter if the parameter type contains no template-parameters
            that participate in template argument deduction", which those
            explicitly specified do not */
-        if (!depends_on_parameter_from(p, specified))
+        if (!depends_on_parameter_from(p, first_deducible))
             continue;
         if (arguments[i].overload_name) {
             /* [temp.deduct.call]/6: an overload set as the argument of a

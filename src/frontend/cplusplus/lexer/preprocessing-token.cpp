@@ -137,7 +137,7 @@ preprocessing_token lexer::lex(bool header_name_permitted)
     for (;;) {
         uint32_t start = position;
         translation_character t = peek(start);
-        token = preprocessing_token{};
+        token = preprocessing_token();
         token.location = start;
         token.at_start_of_line = at_start_of_line;
         token.after_white_space = after_white_space;

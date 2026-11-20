@@ -248,7 +248,7 @@ static bool dump_value_claim(const semantic_analysis &analysis,
     fundamental_type t = record.fundamental;
     if (fundamental_type_is_integral(t)) {
         __int128 v = integer_value(b, t, m.value);
-        if (v < 0 && v == -(__int128(1) << 63))
+        if (v < 0 && v == -(static_cast<__int128>(1) << 63))
             vbuffer_string_append(out, "(-9223372036854775807LL - 1)");
         else if (v < 0)
             vbuffer_format_append(out, "(-%lluLL)",

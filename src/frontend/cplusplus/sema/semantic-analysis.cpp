@@ -34,7 +34,7 @@ semantic_analysis::semantic_analysis(const syntax_tree &tree,
                                      token_stream &tokens, const parser &p,
                                      diagnostic_consumer &diagnostics)
     : tree(tree), tokens(tokens), p(p), diagnostics(diagnostics),
-      syntax_cx{tree, tokens, p}
+      syntax_cx(tree, tokens, p)
 {
     unsupported.append(unsupported_construct());
 }

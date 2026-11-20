@@ -20,6 +20,12 @@ template <class T> struct one {
 template <class T> T value_of(const one<T> &o);
 template <class T> T value_of(const one<T> &o) { return o.v + 1; }
 
+/* [temp.arg.explicit]/9: the explicit arguments fill Ts, while F
+   and V are still deduced from the call. */
+template <class... Ts, class F, class V>
+int call_with_pack(F &f, V v) { return sizeof...(Ts) + f(v); }
+struct double_value { int operator()(int v) { return 2 * v; } };
+
 int main(void)
 {
     pack<int, char> two;
@@ -33,6 +39,9 @@ int main(void)
     o.v = 6;
     if (value_of(o) != 7)
         failures |= 4;
+    double_value double_it;
+    if (call_with_pack<int, char, short, long>(double_it, 3) != 10)
+        failures |= 8;
     printf("%d\n", failures);
     return failures;
 }
