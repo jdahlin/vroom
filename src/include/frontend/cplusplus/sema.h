@@ -3836,6 +3836,17 @@ class semantic_analysis
        operator function, its operator keyword's token) */
     SyntaxRef out_of_class_member(SyntaxRef definition,
                                   token_index *name = nullptr) const;
+    SyntaxRef out_of_class_nested(SyntaxRef definition,
+                                  token_index *name = nullptr) const;
+    entity_index plain_class_nominated(SyntaxRef nested);
+    analysis_result define_plain_member_template(SyntaxRef n,
+                                                 SyntaxRef definition,
+                                                 entity_index c);
+    analysis_result define_member_template_of(entity_index c,
+                                              SyntaxRef declaration,
+                                              SyntaxRef inner,
+                                              SyntaxRef definition,
+                                              bool recorded);
     analysis_result member_definition_of_template(SyntaxRef n,
                                                   SyntaxRef definition,
                                                   SyntaxRef inner = 0);

@@ -38,6 +38,9 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
                which it is declared." */
             if (out_of_class_member(f))
                 return member_definition_of_template(t, f);
+            if (SyntaxRef nested = out_of_class_nested(f))
+                if (entity_index c = plain_class_nominated(nested))
+                    return define_plain_member_template(t, f, c);
             return function_template_definition(t, f);
         },
         /* [temp.mem]/1: "A member template can be defined within or
@@ -2483,6 +2486,18 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
 SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
                                                  token_index *name) const
 {
+    SyntaxRef nested = out_of_class_nested(definition, name);
+    if (!nested || nested.size() != 2 ||
+        !nested[0].is(syntax_kind::simple_template_id))
+        return 0;
+    return nested[0].index();
+}
+
+/* a function-definition's declarator-id N::f (behind ptr-operators): the
+   nested-name-specifier N::, else 0; and the member's name */
+SyntaxRef semantic_analysis::out_of_class_nested(SyntaxRef definition,
+                                                 token_index *name) const
+{
     /* ([ext:gnu_attributes] before the declaration are not among its
        parts) */
     SyntaxTail parts(definition, leading_gnu_attributes(definition));
@@ -2492,6 +2507,10 @@ SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
         (parts.size() == 3 && !parts[0].is(syntax_kind::decl_specifier_seq)))
         return 0;
     auto x = parts[at];
+    /* (a trailing-return-type follows the declarator it belongs to) */
+    if (x.is(syntax_kind::declarator) && x.size() == 2 &&
+        x[1].is(syntax_kind::trailing_return_type))
+        x = x[0];
     while (x.is(syntax_kind::ptr_declarator)) {
         auto pd = x;
         if (pd.size() != 2 || x[1].is_token())
@@ -2519,9 +2538,7 @@ SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
         *name = q[1].operator_function_id().operator_keyword().token();
     else if (name)
         *name = q[1].token();
-    if (nested.size() != 2 || !nested[0].is(syntax_kind::simple_template_id))
-        return 0;
-    return nested[0].index();
+    return nested;
 }
 
 /*
@@ -2631,6 +2648,38 @@ analysis_result semantic_analysis::member_definition_of_template(
             result = one;
     }
     return result;
+}
+
+/* the class (not a specialization of a class template) that a
+   nested-name-specifier names, in the current scope; else 0 */
+entity_index semantic_analysis::plain_class_nominated(SyntaxRef nested)
+{
+    if (!nested.is(syntax_kind::nested_name_specifier) || nested.size() != 2 ||
+        !nested[0].is_identifier())
+        return 0;
+    nominated_scope scope;
+    if (nested_name_specifier(nested, scope) != analysis_result::well_formed)
+        return 0;
+    if (!scope.entity ||
+        entity_table[scope.entity].kind != entity_kind::class_type ||
+        !entity_table[scope.entity].size)
+        return 0;
+    return scope.entity;
+}
+
+/*
+ * [temp.mem]/1: "A member template can be defined within or outside its
+ * class definition": template<class T> R C::f(P) {...} for a class C that
+ * is no template; the definition of the member template C declares, as
+ * define_member_template does for a specialization of a class template.
+ */
+analysis_result semantic_analysis::define_plain_member_template(
+    SyntaxRef n, SyntaxRef definition, entity_index c)
+{
+    /* [class.mfct]/2: in a namespace scope enclosing the class definition */
+    if (!namespace_encloses(current_scope, entity_table[c].enclosing))
+        return not_supported(n, "class.mfct");
+    return define_member_template_of(c, n, n, definition, false);
 }
 
 /* [class.ctor]/1, [class.dtor]/1: the constructor or destructor of the
@@ -2756,20 +2805,30 @@ analysis_result semantic_analysis::define_member_template(uint32_t member,
                                                           bool recorded)
 {
     const template_member_definition o = template_member_definitions[member];
-    entity_index c = instantiations[index].specialization;
+    return define_member_template_of(instantiations[index].specialization,
+                                     o.declaration, o.inner, o.definition,
+                                     recorded);
+}
+
+/* the member template of class c that the template-declaration
+   (declaration, whose template-head is inner) defines */
+analysis_result semantic_analysis::define_member_template_of(
+    entity_index c, SyntaxRef declaration, SyntaxRef inner,
+    SyntaxRef definition, bool recorded)
+{
     owned_array<SyntaxRef> parameters;
     instantiation_context context;
-    enter_instantiation(context, entity_table[c].enclosing, o.declaration);
-    if (template_head_parameters(o.inner, parameters, true, true, true, true) !=
+    enter_instantiation(context, entity_table[c].enclosing, declaration);
+    if (template_head_parameters(inner, parameters, true, true, true, true) !=
             analysis_result::well_formed ||
-        head_constraint(o.inner) || trailing_constraint(o.inner)) {
+        head_constraint(inner) || trailing_constraint(inner)) {
         leave_instantiation(context);
-        return member_definition_unsupported(o.declaration, recorded);
+        return member_definition_unsupported(declaration, recorded);
     }
     for (SyntaxRef x : parameters)
         if (template_parameter_has_default(x)) {
             leave_instantiation(context);
-            return member_definition_unsupported(o.declaration, recorded);
+            return member_definition_unsupported(declaration, recorded);
         }
     current_scope = c;
     uint32_t number = 0, first = 0;
@@ -2777,14 +2836,14 @@ analysis_result semantic_analysis::define_member_template(uint32_t member,
     specified s;
     declarator_meaning m;
     qualified_type type;
-    uint32_t lead = leading_gnu_attributes(o.definition);
-    analysis_result r = template_parameter_scope(o.inner, parameters, c, 0,
-                                                 number, scope, first);
+    uint32_t lead = leading_gnu_attributes(definition);
+    analysis_result r =
+        template_parameter_scope(inner, parameters, c, 0, number, scope, first);
     /* (the parameters' scope stands for the namespace of the qualified
        declarator-id, as define_template_member's) */
     template_member_scope = scope;
     if (r == analysis_result::well_formed)
-        r = function_template_declarator(o.definition, lead, c, scope, s, m,
+        r = function_template_declarator(definition, lead, c, scope, s, m,
                                          type);
     uint32_t cv = function_cv;
     leave_instantiation(context);
@@ -2794,7 +2853,7 @@ analysis_result semantic_analysis::define_member_template(uint32_t member,
     if (held)
         held = member_templates_of(held);
     if (!held)
-        return member_definition_unsupported(o.declaration, recorded);
+        return member_definition_unsupported(declaration, recorded);
     /* the declaration the definition matches: not defined yet, the same
        template-parameters and function type ([temp.over.link]/7) */
     owned_array<uint32_t> group;
@@ -2828,12 +2887,12 @@ analysis_result semantic_analysis::define_member_template(uint32_t member,
         if (!same)
             continue;
         function_template &record = function_templates[g - 1];
-        record.declaration = o.declaration;
-        record.definition = o.definition;
+        record.declaration = declaration;
+        record.definition = definition;
         entity_table[f.entity].defined = true;
         return analysis_result::well_formed;
     }
-    return member_definition_unsupported(o.declaration, recorded);
+    return member_definition_unsupported(declaration, recorded);
 }
 
 /* a template's entity named name in outer, declared by n
