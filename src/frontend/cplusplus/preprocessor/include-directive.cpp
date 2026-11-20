@@ -231,7 +231,8 @@ void preprocessor::directive_include(const preprocessing_token &name,
         return;
     }
     struct stat st;
-    stat(path.data(), &st);
+    /* OPTIMIZATION: the guard only for a file stat identifies */
+    bool identified = stat(path.data(), &st) == 0;
     for (const included_once &o : once_files)
         if (o.device == (uint64_t)st.st_dev && o.inode == (uint64_t)st.st_ino)
             return;
@@ -244,7 +245,7 @@ void preprocessor::directive_include(const preprocessing_token &name,
     entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
     /* OPTIMIZATION: the multiple-include guard; a file it skips was opened
        before, so an #import of it is recorded as if entered */
-    if (guard_skips((uint64_t)st.st_dev, (uint64_t)st.st_ino)) {
+    if (identified && guard_skips((uint64_t)st.st_dev, (uint64_t)st.st_ino)) {
         if (kind == directive_kind::import)
             once_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
         return;
@@ -266,7 +267,8 @@ void preprocessor::directive_include(const preprocessing_token &name,
                        false,
                        {}});
     inclusion &entered = inclusions.back();
-    entered.guard_state = 1;
+    if (identified)
+        entered.guard_state = 1;
     entered.device = (uint64_t)st.st_dev;
     entered.inode = (uint64_t)st.st_ino;
 }
