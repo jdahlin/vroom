@@ -1,0 +1,44 @@
+// [expr.sizeof], [expr.alignof] and [temp.variadic]'s sizeof...: operands
+// that make the program ill-formed, one per line, and their near misses that
+// are well-formed (clang's extensions among them: sizeof of void and of a
+// function type); bench/cxx-sema.py compares each verdict with clang's.
+struct Incomplete;
+template <class T> struct Declared;
+template <class T> struct Defined { T t; };
+struct Bits { int b : 3; int c; };
+extern int unknown[];
+enum class Opaque : short;
+void func();
+unsigned long incomplete_class = sizeof(Incomplete);
+unsigned long incomplete_array_of = sizeof(Incomplete[2]);
+unsigned long incomplete_template = sizeof(Declared<int>);
+unsigned long incomplete_array_type = sizeof(int[]);
+unsigned long incomplete_array_object = sizeof(unknown);
+unsigned long incomplete_alignof = alignof(Incomplete);
+unsigned long incomplete_alignof_array = alignof(Incomplete[2]);
+unsigned long bit_field = sizeof(Bits::b);
+unsigned long bit_field_object = sizeof(((Bits *)0)->b);
+unsigned long not_a_pack = sizeof...(bit_field);
+unsigned long pointer_to_incomplete = sizeof(Incomplete *) + sizeof(Incomplete &);
+unsigned long reference_to_incomplete = sizeof(Incomplete &&) + alignof(Incomplete &);
+unsigned long pointer_to_member_of_incomplete = sizeof(int Incomplete::*);
+unsigned long complete_template = sizeof(Defined<int>);
+unsigned long opaque_enum = sizeof(Opaque) + alignof(Opaque);
+unsigned long complete_member = sizeof(Bits::c) + sizeof(Bits);
+unsigned long void_type = sizeof(void);
+unsigned long void_alignof = alignof(void);
+unsigned long function_type = sizeof(void());
+unsigned long function_alignof = alignof(int(int));
+unsigned long function_expression = sizeof(func);
+unsigned long incomplete_array_alignof = alignof(int[]);
+unsigned long expression_alignof = alignof(bit_field);
+unsigned long expression_gnu_alignof = __alignof__(complete_member);
+unsigned long type_of_pointer = sizeof(&unknown) + sizeof(*unknown);
+unsigned long incomplete_through_decltype = sizeof(decltype(unknown));
+unsigned long incomplete_through_typeof = sizeof(__typeof__(unknown));
+unsigned long incomplete_new_array = sizeof(new Incomplete);
+unsigned long negative_array_bound = sizeof(int[-1]);
+unsigned long no_operand = sizeof();
+unsigned long type_with_declarator_name = sizeof(int x);
+unsigned long unevaluated_call_of_incomplete = sizeof(*(Incomplete *)0);
+unsigned long void_expression = sizeof((void)0);

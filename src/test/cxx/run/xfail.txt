@@ -99,3 +99,7 @@ temp-mem-using-declaration	vcc: the rules of [temp.mem] are not implemented yet
 temp-mem-variable-template-constexpr	vcc: the rules of [class.mem] are not implemented yet
 temp-mem-variable-template-of-class-template	vcc: the rules of [expr.prim.id.qual] are not implemented yet
 temp-mem-variable-template-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
+sizeof-default-argument	vcc: the rules of [dcl.fct.default] are not implemented yet
+sizeof-expressions	vcc: the rules of [expr.prim.id] are not implemented yet
+sizeof-flexible-array	vcc: the rules of [class.mem] are not implemented yet
+sizeof-templates	vcc: the rules of [expr.sizeof] are not implemented yet
