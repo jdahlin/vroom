@@ -3201,6 +3201,8 @@ class semantic_analysis
     /* [class.access]: whether a member with this access can be named
        here */
     bool accessible(entity_index member, entity_index object_class = 0) const;
+    bool copy_argument_candidate(
+        entity_index c, const owned_array<expression_meaning> &arguments) const;
     /* [class.derived]: class c's base class subobject of class base,
        found through c's bases (0 if base is no base of c); ambiguous
        when more than one path leads to it ([class.member.lookup]) */

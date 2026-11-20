@@ -849,6 +849,31 @@ analysis_result semantic_analysis::expression_list_meanings(
  * implicitly-declared copy constructor ([class.copy.ctor]/6), which for a
  * class that declares none copies the object's bytes (copies_bytes).
  */
+/*
+ * Whether the deleted implicit copy constructor of class c can take part
+ * in a construction from these arguments ([over.match.ctor]/1): its one
+ * parameter binds a single argument of class c or derived from it
+ * ([dcl.init.ref]/5); any other argument only reaches it through a
+ * user-defined conversion, which it is not a candidate for
+ * ([over.best.ics]/4), and the declared constructors decide.
+ */
+bool semantic_analysis::copy_argument_candidate(
+    entity_index c, const owned_array<expression_meaning> &arguments) const
+{
+    if (arguments.size() != 1)
+        return false;
+    const struct type &t = type_table[arguments[0].type.unqualified()];
+    if (t.kind == type_kind::fundamental || t.kind == type_kind::pointer ||
+        t.kind == type_kind::enumeration)
+        return false;
+    /* anything else not analysed is taken as a candidate */
+    if (t.kind != type_kind::class_type)
+        return true;
+    entity_index from = t.entity;
+    bool ambiguous = false;
+    return from == c || base_step(from, c, ambiguous);
+}
+
 analysis_result
 semantic_analysis::construct(SyntaxRef at, qualified_type type,
                              owned_array<expression_meaning> &arguments,
@@ -868,7 +893,7 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
        deleted implicit copy constructor takes part in (copy elision,
        [dcl.init]/17.6.2's aggregate) is not analysed */
     if (!arguments.empty() && x.implicit_copy_deleted &&
-        !x.defaulted_move_constructor)
+        !x.defaulted_move_constructor && copy_argument_candidate(c, arguments))
         return not_supported(at, "class.copy.ctor");
     if (arguments.empty() && trivial_defaulted_default_constructor(c))
         /* value-initialization through a trivial X() = default
@@ -1576,9 +1601,18 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
          q = entity_table[q].next_constructor)
         if (is_copy_constructor(c, q))
             declares_copy = true;
+    /* [class.copy.ctor]/8: "If the definition of a class X does not
+       explicitly declare a move constructor, a non-explicit one will be
+       implicitly declared as defaulted if and only if X does not have a
+       user-declared copy constructor, copy assignment operator, move
+       assignment operator, or destructor": otherwise a copy copies each
+       subobject by its copy constructor */
+    bool move_implicitly_declared =
+        !declares_copy && !x.destructor && !x.user_copy_assignments &&
+        !x.defaulted_copy_assignment && !x.defaulted_move_assignment;
     for (entity_index k : classes) {
         const entity &sub = entity_table[k];
-        if (declares_move_constructor(k))
+        if (declares_move_constructor(k) && move_implicitly_declared)
             /* [class.copy.ctor]/8: the implicit move constructor, which
                moves the subobject, is not declared yet */
             return not_supported(n, "class.copy.ctor");
