@@ -40,18 +40,70 @@ enum class builtin_form : uint8_t {
     unsupported,
 };
 
-/* how a constant expression evaluates a call, where it may */
+/* how a constant expression evaluates a call, where it may (the row's
+   `which` says which operation of the group) */
 enum class builtin_fold : uint8_t {
     none,
     constant_p,
     lock_free,
     overflow,
     bit_count,
-    floating_classify,
+    /* the integer builtins (builtin_integer_op) */
+    integer,
+    /* the classifications, comparisons and sign operations of floating
+       values (builtin_float_op) */
+    floating,
+    /* the string and memory functions on arrays of constants
+       (builtin_string_op) */
+    string,
     floating_constant,
     /* the first argument's value */
     identity,
     bswap,
+};
+
+enum class builtin_integer_op : uint8_t {
+    clz,
+    ctz,
+    popcount,
+    ffs,
+    parity,
+    clrsb,
+    bswap,
+    bitreverse,
+    rotate_left,
+    rotate_right,
+    absolute,
+    expect,
+};
+
+enum class builtin_float_op : uint8_t {
+    isnan,
+    isinf,
+    isfinite,
+    isnormal,
+    signbit,
+    isinf_sign,
+    fpclassify,
+    isgreater,
+    isgreaterequal,
+    isless,
+    islessequal,
+    islessgreater,
+    isunordered,
+    fabs,
+    copysign,
+};
+
+enum class builtin_string_op : uint8_t {
+    strlen,
+    strcmp,
+    strncmp,
+    memcmp,
+    memchr,
+    wcslen,
+    wmemcmp,
+    wmemchr,
 };
 
 /* what lowering makes of a call, where it is not the C front end's builtin

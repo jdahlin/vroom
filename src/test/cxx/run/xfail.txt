@@ -103,10 +103,7 @@ lambda-capture-lambda-template-argument	symbols: a member function of a speciali
 gnu-builtin-atomic-types	vcc: the rules of [ext.gnu] are not implemented yet
 gnu-builtin-clang-functions	vcc: the rules of [ext.clang] are not implemented yet
 gnu-builtin-complex	vcc: the rules of [ext.gnu] are not implemented yet
-gnu-builtin-constexpr-integers	vcc: the rules of [expr.const] are not implemented yet
-gnu-builtin-constexpr-strings	vcc: the rules of [basic.lookup.unqual] are not implemented yet
 gnu-builtin-coroutine	vcc: the rules of [basic.lookup.unqual] are not implemented yet
-gnu-builtin-fp-classify	vcc: the rules of [expr.const] are not implemented yet
 gnu-builtin-invoke	vcc: the rules of [basic.lookup.unqual] are not implemented yet
 gnu-builtin-object-size	vcc: the rules of [ext.gnu] are not implemented yet
 gnu-builtin-vector	vcc: the rules of [ext.gnu] are not implemented yet

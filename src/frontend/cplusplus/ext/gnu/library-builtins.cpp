@@ -331,6 +331,7 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
             e = declare_builtin(name, symbol, types_of[0], types_of.data() + 1,
                                 types_of.size() - 1, variadic,
                                 gnu_library_function, true);
+            entity_table[e].gnu_builtin_row = row;
             return e;
         }
         if (known && types_of.size()) {
@@ -411,8 +412,14 @@ entity_index semantic_analysis::library_function_builtin(uint32_t name,
             flags |= gnu_noreturn;
     /* bound under its __builtin_ name: the program's own declaration of the
        library function is another */
-    return declare_builtin(name, library, types_of[0], types_of.data() + 1,
-                           types_of.size() - 1, variadic, flags, true);
+    entity_index e =
+        declare_builtin(name, library, types_of[0], types_of.data() + 1,
+                        types_of.size() - 1, variadic, flags, true);
+    /* (a row of the registry says how a constant expression folds it) */
+    uint16_t row = 0;
+    if (gnu_builtin_find(spelling, length, &row))
+        entity_table[e].gnu_builtin_row = row;
+    return e;
 }
 
 entity_index semantic_analysis::library_builtin(uint32_t name)

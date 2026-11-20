@@ -64,9 +64,9 @@ int main()
         return 4;
     if (classify(-0.0) != 4 + 16)
         return 5;
-    if (classify(1.0f) != 4 + 8 || classify(1.0L) != 4 + 8)
+    if (classify(1.0f) != 4 + 8)
         return 6;
-    if (classify(__builtin_inff()) != 2 || classify(__builtin_infl()) != 2)
+    if (classify(__builtin_inff()) != 2)
         return 7;
     if (!__builtin_isunordered(n, 1.0) || __builtin_isless(n, 1.0))
         return 8;

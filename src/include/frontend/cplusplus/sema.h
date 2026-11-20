@@ -19,6 +19,7 @@
 
 #include "frontend/cplusplus/parse.h"
 #include "frontend/cplusplus/syntax.h"
+#include "frontend/cplusplus/builtin-registry.h"
 
 namespace cplusplus
 {
@@ -3237,6 +3238,26 @@ class semantic_analysis
                                      constant_value &v);
     constness evaluate_bit_count(constant_evaluation &state, int which,
                                  const semantic_node &call, constant_value &v);
+    constness evaluate_builtin_fold(constant_evaluation &state,
+                                    const gnu_builtin &b,
+                                    const semantic_node &call,
+                                    constant_value &v);
+    constness evaluate_integer_builtin(constant_evaluation &state,
+                                       const gnu_builtin &b,
+                                       const semantic_node &call,
+                                       constant_value &v);
+    constness evaluate_floating_classification(constant_evaluation &state,
+                                               const gnu_builtin &b,
+                                               const semantic_node &call,
+                                               constant_value &v);
+    constness evaluate_string_builtin(constant_evaluation &state,
+                                      const gnu_builtin &b,
+                                      const semantic_node &call,
+                                      constant_value &v);
+    constness evaluate_overflow_builtin(constant_evaluation &state,
+                                        const gnu_builtin &b,
+                                        const semantic_node &call,
+                                        constant_value &v);
     constness evaluate_bswap(constant_evaluation &state,
                              const semantic_node &call, constant_value &v);
     constness evaluate_call(constant_evaluation &state, uint32_t node,

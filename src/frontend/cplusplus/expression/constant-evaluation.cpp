@@ -1548,7 +1548,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         case builtin_fold::bswap:
             return evaluate_bswap(state, x, v);
         default:
-            break;
+            return evaluate_builtin_fold(state, b, x, v);
         }
     }
     /* [class.this]/1: a non-static member function's this, the address

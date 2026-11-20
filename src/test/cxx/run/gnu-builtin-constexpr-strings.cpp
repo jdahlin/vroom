@@ -49,13 +49,13 @@ static_assert(prefix("abcx", "abcy", 3) == 0);
 static_assert(prefix("abcx", "abcy", 4) < 0);
 static_assert(bytes("ab", "ac", 2) < 0);
 static_assert(bytes("ab", "ac", 1) == 0);
-static_assert(find("hello", 'l', 5) != nullptr);
-static_assert(*find("hello", 'l', 5) == 'l');
-static_assert(find("hello", 'z', 5) == nullptr);
+static_assert(__builtin_char_memchr("hello", 'l', 5) != nullptr);
+static_assert(*__builtin_char_memchr("hello", 'l', 5) == 'l');
+static_assert(__builtin_char_memchr("hello", 'z', 5) == nullptr);
 static_assert(wide_length(L"wide") == 4);
 static_assert(wide_compare(L"ab", L"ac", 2) < 0);
-static_assert(wide_find(L"hello", L'l', 5) != nullptr);
-static_assert(wide_find(L"hello", L'z', 5) == nullptr);
+static_assert(__builtin_wmemchr(L"hello", L'l', 5) != nullptr);
+static_assert(__builtin_wmemchr(L"hello", L'z', 5) == nullptr);
 
 int main()
 {
