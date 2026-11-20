@@ -1098,8 +1098,12 @@ analysis_result semantic_analysis::constructor_list_initialization(
         if (p.kind == type_kind::lvalue_reference ||
             p.kind == type_kind::rvalue_reference)
             first = p.operand;
-        const struct type &named = type_table[first.unqualified()];
-        if (named.kind == type_kind::class_type && named.entity != c)
+        const struct type &p0 = type_table[first.unqualified()];
+        if (p0.kind == type_kind::class_type && p0.entity != c &&
+            named(p0.entity, "initializer_list") &&
+            std_namespace(entity_table[p0.entity].enclosing))
+            /* [over.match.list]/1.1: initializer-list constructors, the
+               first phase, are not analysed */
             return not_supported(list, "over.match.list");
     }
     owned_array<expression_meaning> arguments;
