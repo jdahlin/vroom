@@ -317,11 +317,8 @@ class c_lowering
             subobjects
         } kind = object;
         uint32_t symbol = 0;
-        ast_qualified_type type = 0;
-        entity_index destructor = 0;
-        /* an array's: its element type and bound (0: not an array) */
-        ast_qualified_type element = 0;
-        uint64_t bound = 0;
+        /* an object's type: a class or an array of classes */
+        qualified_type object_type;
         /* an object constructed in an operand that may not be evaluated:
            the bool variable set once it is ([class.temporary]/4), 0 if
            none */
@@ -511,18 +508,16 @@ class c_lowering
        symbol, declared in temporaries */
     uint32_t full_expression_temporary(ast_qualified_type t);
     /* the temporary's destructor call, in destructions */
-    void destroyed_after(entity_index destructor, uint32_t temporary,
-                         ast_qualified_type t, token_index at,
-                         uint32_t flag = 0);
     /* [class.temporary]/6: the prvalue whose temporary lives as long as
        the reference it initializes (a declared variable's), not to the
        end of the full-expression */
     const semantic_node *extended_temporary = nullptr;
     /* the destruction of the temporary of the prvalue n: at the end of
        the full-expression, or with the block's variables */
-    void destroyed_temporary(const semantic_node &n, entity_index destructor,
-                             uint32_t temporary, ast_qualified_type t,
+    void destroyed_temporary(const semantic_node &n, uint32_t temporary,
                              token_index at, uint32_t flag = 0);
+    uint32_t destruction(uint32_t s, qualified_type object_type,
+                         token_index at);
     unsigned conditional_depth = 0;
     owned_array<uint32_t> temporaries, destructions;
     uint32_t conditional(const semantic_node &n);
@@ -1428,22 +1423,31 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
         }
         if (r.kind != scope_record::object)
             continue;
-        if (r.bound) {
-            /* [class.dtor]/13: "the elements of an array are destroyed in
-               reverse order of their construction" */
-            uint32_t loop = each_element(r.symbol, r.type, r.element, r.bound,
-                                         true, r.destructor, at);
-            if (loop)
-                out.append(if_constructed(loop, r.flag));
-            continue;
-        }
-        uint32_t object = c_variable(c, r.symbol, r.type);
-        uint32_t call = special_call(
-            r.destructor,
-            address_of(object, ast_builder_type_pointer(c, r.type)), nullptr, 0,
-            at);
-        out.append(if_constructed(c_statement(c, call), r.flag));
+        uint32_t destroyed = destruction(r.symbol, r.object_type, at);
+        if (destroyed)
+            out.append(if_constructed(destroyed, r.flag));
     }
+}
+
+/* [class.dtor]/13: the destruction of the object in symbol s, of a class
+   or array of classes type; "the elements of an array are destroyed in
+   reverse order of their construction" */
+uint32_t c_lowering::destruction(uint32_t s, qualified_type object_type,
+                                 token_index at)
+{
+    qualified_type element;
+    entity_index destructor = element_destructor(object_type, element);
+    ast_qualified_type t = type(object_type, at);
+    if (uint64_t count = element_count(object_type, element))
+        return each_element(s, t, type(element, at), count, true, destructor,
+                            at);
+    uint32_t call = special_call(
+        destructor,
+        address_of(c_variable(c, s, t), ast_builder_type_pointer(c, t)),
+        nullptr, 0, at);
+    if (!call)
+        return 0;
+    return c_statement(c, call);
 }
 
 uint32_t c_lowering::each_element(uint32_t s, ast_qualified_type array,
@@ -3227,7 +3231,7 @@ uint32_t c_lowering::temporary_object(uint32_t n)
     if (!made)
         return 0;
     if (destructor)
-        destroyed_temporary(x, destructor, held, t, x.at, flag);
+        destroyed_temporary(x, held, x.at, flag);
     ast_qualified_type pointer = ast_builder_type_pointer(c, t);
     uint32_t variable = c_variable(c, held, t);
     return make(AST_NODE_DEREFERENCE, t,
@@ -3273,13 +3277,13 @@ uint32_t c_lowering::full_expression_temporary(ast_qualified_type t)
     return temporary;
 }
 
-void c_lowering::destroyed_temporary(const semantic_node &n,
-                                     entity_index destructor,
-                                     uint32_t temporary, ast_qualified_type t,
+void c_lowering::destroyed_temporary(const semantic_node &n, uint32_t temporary,
                                      token_index at, uint32_t flag)
 {
     if (&n != extended_temporary) {
-        destroyed_after(destructor, temporary, t, at, flag);
+        uint32_t destroyed = destruction(temporary, n.type, at);
+        if (destroyed)
+            destructions.append(if_constructed(destroyed, flag));
         return;
     }
     /* [class.temporary]/6: "The temporary object to which the reference
@@ -3288,22 +3292,10 @@ void c_lowering::destroyed_temporary(const semantic_node &n,
     scope_record r;
     r.kind = scope_record::object;
     r.symbol = temporary;
-    r.type = t;
-    r.destructor = destructor;
+    r.object_type = n.type;
     r.flag = flag;
     r.owner = declaring;
     live.append(r);
-}
-
-void c_lowering::destroyed_after(entity_index destructor, uint32_t temporary,
-                                 ast_qualified_type t, token_index at,
-                                 uint32_t flag)
-{
-    uint32_t object = c_variable(c, temporary, t);
-    uint32_t call = special_call(
-        destructor, address_of(object, ast_builder_type_pointer(c, t)), nullptr,
-        0, at);
-    destructions.append(if_constructed(c_statement(c, call), flag));
 }
 
 /* the automatic variable a return statement's operand copies (a copy
@@ -3904,7 +3896,6 @@ void c_lowering::initialized_variable(const semantic_node &n,
             root = &node(root->a);
         extended_temporary = root;
     }
-    uint64_t bound = element_count(x.type, object);
     if (!x.automatic && (destructor || (n.b && !constant_initializer(n.b)))) {
         /* [stmt.dcl]/4: initialized the first time control passes
            through, under a guard */
@@ -3926,13 +3917,8 @@ void c_lowering::initialized_variable(const semantic_node &n,
         scope_record r;
         r.kind = scope_record::object;
         r.symbol = symbol(e, n.at);
-        r.type = type(x.type, n.at);
-        r.destructor = destructor;
+        r.object_type = x.type;
         r.owner = e;
-        if (bound) {
-            r.element = type(object, n.at);
-            r.bound = bound;
-        }
         live.append(r);
     }
 }
@@ -6240,8 +6226,7 @@ void c_lowering::static_destruction(entity_index e, owned_array<uint32_t> &out,
         /* [class.dtor]/13, [impl.clang]: __cxx_global_array_dtor (then
            .1, ...), destroying the elements in reverse order */
         uint32_t f = generated_function("__cxx_global_array_dtor");
-        uint32_t loop =
-            each_element(s, t, type(object, at), count, true, destructor, at);
+        uint32_t loop = destruction(s, x.type, at);
         if (!loop)
             return;
         ast_builder_symbol_body(c, f, block(&loop, 1));
