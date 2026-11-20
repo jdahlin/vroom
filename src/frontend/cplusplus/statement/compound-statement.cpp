@@ -78,12 +78,25 @@ analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
     token_index place = claim_place;
     entity_index place_scope = claim_scope;
     owned_array<uint32_t> statements;
-    for (SyntaxElement s : items) {
+    for (size_t i = 0; i < items.size(); i++) {
+        SyntaxElement s = items[i];
         claim_place = s.token();
         if (!s.is_token())
             claim_place = s.end_token() - 1;
         claim_scope = current_scope;
         uint32_t one = 0;
+        /* [dcl.attr.fallthrough]/1: "The next statement that would be
+           executed after a fallthrough statement shall be a labeled
+           statement whose label is a case label or default label for the
+           same switch statement": the next one of the block, else not
+           analysed (clang: "fallthrough annotation does not directly
+           precede switch label") */
+        if (fallthrough_statement(s) &&
+            (i + 1 == items.size() || !case_or_default_label(items[i + 1]))) {
+            result = worse(result, not_supported(s, "dcl.attr.fallthrough"));
+            statements.append(one);
+            continue;
+        }
         result = worse(result, statement(s, one));
         statements.append(one);
     }

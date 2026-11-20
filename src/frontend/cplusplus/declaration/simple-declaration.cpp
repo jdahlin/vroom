@@ -1076,6 +1076,12 @@ analysis_result semantic_analysis::declare_with_initializer(
     token_index abi_tag = m.abi_tag;
     if (!abi_tag)
         abi_tag = s.abi_tag;
+    uint32_t gnu_priority = m.gnu_priority;
+    if (!gnu_priority)
+        gnu_priority = s.gnu_priority;
+    entity_index cleanup_function = m.gnu_cleanup;
+    if (!cleanup_function)
+        cleanup_function = s.gnu_cleanup;
     bool is_function_type =
         type_table[type.unqualified()].kind == type_kind::function;
     /* [ext:gnu_attributes] aligned on a typedef-name changes the alignment
@@ -1104,6 +1110,12 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (!s.typedef_ && !is_function_type)
         object_alignment =
             typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
+    if (!is_function_type) {
+        VTRY(checked, array_element_alignment(
+                          declaration, type,
+                          typedef_alignment_of(s.type.unqualified(), type,
+                                               s.typedef_aligned)));
+    }
     /* (a member defined outside its class may repeat the declaration's
        abi_tag and visibility: checked against the member below; and
        exclude_from_explicit_instantiation, which only marks the member) */
@@ -1318,7 +1330,26 @@ analysis_result semantic_analysis::declare_with_initializer(
             /* a local's, a second tag, or a tag the member's declaration
                lacks (clang: it must precede the definition) */
             return not_supported(declaration, "ext.gnu");
+        /* "constructor" and "destructor" apply to a function, "cleanup" to
+           a variable of automatic storage duration whose type needs no
+           destruction of its own (the function runs, then C++'s
+           destructor: not analysed) and whose cleanup function takes one
+           parameter, a pointer */
+        if ((gnu_flags & (gnu_constructor | gnu_destructor)) &&
+            (x.kind != entity_kind::function ||
+             ((gnu_flags & gnu_constructor) && (gnu_flags & gnu_destructor))))
+            return not_supported(declaration, "ext.gnu");
+        if (gnu_flags & gnu_cleanup) {
+            entity_index k = element_class(x.type);
+            if (x.kind != entity_kind::variable || !x.automatic ||
+                (k && !trivial_class(k)) ||
+                !gnu_cleanup_takes_pointer(cleanup_function))
+                return not_supported(declaration, "ext.gnu");
+            x.gnu_cleanup = cleanup_function;
+        }
         x.gnu_flags |= gnu_flags;
+        if (gnu_flags & (gnu_constructor | gnu_destructor))
+            x.gnu_priority = gnu_priority;
         if (section)
             x.section = section;
         if (abi_tag)

@@ -73,6 +73,29 @@ uint32_t semantic_analysis::typedef_alignment_of(type_index specified,
     return typedef_aligned;
 }
 
+/*
+ * clang: "size of array element of type 'T' (N bytes) isn't a multiple of
+ * its alignment (M bytes)": an array of a typedef-name declared with
+ * aligned, whose alignment (`through`, typedef_alignment_of) the element
+ * size must divide.
+ */
+analysis_result semantic_analysis::array_element_alignment(
+    SyntaxRef at, qualified_type declared, uint32_t through)
+{
+    if (!through || type_table[declared.unqualified()].kind != type_kind::array)
+        return analysis_result::well_formed;
+    qualified_type element = declared;
+    while (type_table[element.unqualified()].kind == type_kind::array)
+        element = type_table[element.unqualified()].operand;
+    uint64_t size = size_of_type(element);
+    if (size && size % through)
+        return ill_formed(at,
+                          "the size of an array's element is a multiple of "
+                          "its alignment",
+                          "ext.gnu");
+    return analysis_result::well_formed;
+}
+
 analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type,
                                            uint32_t *typedef_alignment)
 {

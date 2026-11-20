@@ -555,6 +555,12 @@ const char *class_layout::data_member(entity &m)
 const char *class_layout::allocation_of_members()
 {
     const entity &x = table[c];
+    /* [ext:gnu_attributes] a packed class's members have no padding; with
+       a base or a virtual table pointer clang packs them too, in rules this
+       does not follow yet */
+    if ((x.gnu_flags & gnu_packed) &&
+        (x.base_count || x.virtual_base_count || x.dynamic))
+        return "ext.gnu";
     for (uint32_t i = 0; i < x.base_count; i++) {
         entity &b = table[analysis.class_bases[x.first_base + i]];
         if (b.virtual_base)
@@ -568,6 +574,10 @@ const char *class_layout::allocation_of_members()
         if (m.base_subobject)
             continue;
         if (m.bit_field) {
+            /* a packed bit-field starts at the next bit whatever its
+               type's alignment */
+            if ((m.gnu_flags | x.gnu_flags) & gnu_packed)
+                return "ext.gnu";
             bit_field(m);
             continue;
         }

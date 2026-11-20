@@ -195,6 +195,23 @@ void ast_builder_symbol_constructor(cc *c, uint32_t s)
     ast_builder_attributes(c, s)->constructor = 1;
 }
 
+void ast_builder_symbol_destructor(cc *c, uint32_t s)
+{
+    ast_builder_attributes(c, s)->destructor = 1;
+}
+
+void ast_builder_symbol_priority(cc *c, uint32_t s, uint32_t priority)
+{
+    ast_builder_attributes(c, s)->prio = (uint16_t)priority;
+}
+
+void ast_builder_symbol_cleanup(cc *c, uint32_t s, uint32_t function)
+{
+    ast_builder_attributes(c, s)->cleanup = function;
+    c->syms[function].flags |=
+        AST_SYMBOL_FLAG_REFERENCED | AST_SYMBOL_FLAG_USED;
+}
+
 void ast_builder_symbol_keep(cc *c, uint32_t s)
 {
     ast_builder_attributes(c, s)->used = 1;

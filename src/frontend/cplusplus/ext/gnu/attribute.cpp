@@ -230,6 +230,24 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     /* clang's using_if_exists: a using-declarator whose name is not
        found declares nothing */
     {"using_if_exists", gnu_using_if_exists},
+    /* "constructor", "constructor (priority)", "destructor",
+       "destructor (priority)": "The constructor attribute causes the
+       function to be called automatically before execution enters main ().
+       Similarly, the destructor attribute causes the function to be called
+       automatically after main () completes or exit () is called."  "You
+       may provide an optional integer priority to control the order in
+       which constructor and destructor functions are run.  A constructor
+       with a smaller priority number runs before a constructor with a
+       larger priority number; the opposite relationship holds for
+       destructors." (below) */
+    {"constructor", gnu_constructor},
+    {"destructor", gnu_destructor},
+    /* "cleanup (cleanup_function)": "The cleanup attribute runs a function
+       when the variable goes out of scope.  This attribute can only be
+       applied to auto function scope variables ... The function must take
+       one parameter, a pointer to a type compatible with the variable."
+       (below) */
+    {"cleanup", gnu_cleanup},
     /* "aligned (alignment)" (below) */
     {"aligned", gnu_aligned},
     /* "mode (mode)": the size of the type of a typedef or variable by the
@@ -243,6 +261,16 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        vcc does not do (noclone, cold, hot, flatten, no_icf, no_reorder,
        artificial, no_instrument_function), or ask for an instrumentation vcc does not
        add (no_sanitize("cfi"): libc++'s _LIBCPP_NO_CFI) */
+    /* "may_alias: Accesses through pointers to types with this attribute
+       are not subject to type-based alias analysis, but are instead
+       assumed to be able to alias any other type of objects" (vcc does no
+       type-based alias analysis); "nonstring: ... an object or member
+       declaration with type array of char, signed char, or unsigned char,
+       or pointer to such a type is intended to store character arrays that
+       do not necessarily contain a terminating NUL" (a diagnostic's
+       hint) */
+    {"may_alias", 0},
+    {"nonstring", 0},
     {"unused", 0},
     {"maybe_unused", 0},
     {"noclone", 0},
@@ -539,16 +567,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
         if (rule->flag == gnu_aligned) {
             uint64_t alignment = 16;
             if (count == 4) {
-                expression_meaning e;
-                VTRY(r, expression(a[2], e));
-                if (!is_integral(e.type) ||
-                    e.category != value_category::prvalue)
-                    return not_supported(at, "ext.gnu");
-                bool constant = false;
-                VTRY_SET(r, constant_expression(at, e, constant));
-                if (!constant)
-                    return not_supported(at, "ext.gnu");
-                alignment = e.value;
+                VTRY(r, gnu_integer_argument(at, a[2], alignment));
                 if (!alignment || (alignment & (alignment - 1)) ||
                     alignment > (1u << 28))
                     /* clang: "requested alignment is not a power of 2" */
@@ -558,6 +577,26 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             }
             if (alignment > g.aligned)
                 g.aligned = alignment;
+            continue;
+        }
+        if (rule->flag == gnu_constructor || rule->flag == gnu_destructor) {
+            /* the priority: an integer constant, 0 to 65535 (clang:
+               "'constructor' attribute requires integer constant between 0
+               and 65535 inclusive") */
+            uint64_t priority = 0;
+            if (count == 4) {
+                VTRY(r, gnu_integer_argument(at, a[2], priority));
+                if (priority > 65535)
+                    return not_supported(at, "ext.gnu");
+            } else if (count > 1 && count != 3) {
+                return not_supported(at, "ext.gnu");
+            }
+            g.flags |= rule->flag;
+            g.priority = static_cast<uint32_t>(priority);
+            continue;
+        }
+        if (rule->flag == gnu_cleanup) {
+            VTRY(r, gnu_cleanup_function(at, a, count, g));
             continue;
         }
         if (rule->flag == gnu_mode) {
@@ -612,6 +651,72 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
         g.flags |= rule->flag;
     }
     return analysis_result::well_formed;
+}
+
+/* an attribute's argument that is an integer constant expression */
+analysis_result semantic_analysis::gnu_integer_argument(SyntaxRef at,
+                                                        SyntaxElement argument,
+                                                        uint64_t &value)
+{
+    expression_meaning e;
+    VTRY(r, expression(argument, e));
+    if (!is_integral(e.type) || e.category != value_category::prvalue)
+        return not_supported(at, "ext.gnu");
+    bool constant = false;
+    VTRY_SET(r, constant_expression(at, e, constant));
+    if (!constant)
+        return not_supported(at, "ext.gnu");
+    value = e.value;
+    return analysis_result::well_formed;
+}
+
+/*
+ * cleanup (GCC manual 6.34.1, Common Variable Attributes): "The cleanup
+ * attribute runs a function when the variable goes out of scope.  This
+ * attribute can only be applied to auto function scope variables; it may
+ * not be applied to parameters or variables with static storage duration.
+ * The function must take one parameter, a pointer to a type compatible
+ * with the variable.  The return value of the function (if any) is
+ * ignored."  The argument is the unqualified name of one function that is
+ * not overloaded (clang: "'cleanup' argument not a function" otherwise);
+ * where the variable is automatic and what the function takes is checked
+ * where the declaration is.
+ */
+analysis_result semantic_analysis::gnu_cleanup_function(SyntaxRef at,
+                                                        SyntaxElement a,
+                                                        uint32_t count,
+                                                        gnu_attributes &g)
+{
+    if (count != 4 || !a[2].is_token() ||
+        tokens[a[2].token()].kind != token_kind::identifier || g.cleanup)
+        return not_supported(at, "ext.gnu");
+    lookup_result found =
+        lookup_unqualified(tokens.identifier(a[2].token()), lookup_filter::any);
+    if (!found.entity || found.unknown || found.ambiguous ||
+        entity_table[found.entity].kind != entity_kind::function ||
+        (entity_table[found.entity].enclosing &&
+         entity_table[entity_table[found.entity].enclosing].kind ==
+             entity_kind::class_type))
+        /* (a member function needs an object: not GCC's cleanup) */
+        return not_supported(at, "ext.gnu");
+    owned_array<entity_index> set;
+    overload_set(found.entity, set);
+    if (set.size() != 1)
+        return not_supported(at, "ext.gnu");
+    g.cleanup = found.entity;
+    g.flags |= gnu_cleanup;
+    return analysis_result::well_formed;
+}
+
+/* a cleanup function takes one parameter, a pointer ("a pointer to a type
+   compatible with the variable": the conversion is C's) */
+bool semantic_analysis::gnu_cleanup_takes_pointer(entity_index function) const
+{
+    type_index f = entity_table[function].type.unqualified();
+    return type_table[f].kind == type_kind::function &&
+           type_table[f].parameter_count == 1 &&
+           type_table[type_table.parameters(f)[0].unqualified()].kind ==
+               type_kind::pointer;
 }
 
 /*
@@ -750,7 +855,11 @@ semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
     g.section = m.section;
     g.abi_tag = m.abi_tag;
     g.mode = m.mode;
+    g.priority = m.gnu_priority;
+    g.cleanup = m.gnu_cleanup;
     analysis_result r = gnu_attribute_specifier(n, g);
+    m.gnu_priority = g.priority;
+    m.gnu_cleanup = g.cleanup;
     m.mode = g.mode;
     m.aligned = g.aligned;
     m.gnu_flags = g.flags;
@@ -767,7 +876,11 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     g.flags = s.gnu_flags;
     g.section = s.section;
     g.abi_tag = s.abi_tag;
+    g.priority = s.gnu_priority;
+    g.cleanup = s.gnu_cleanup;
     analysis_result r = gnu_attribute_specifier(n, g);
+    s.gnu_priority = g.priority;
+    s.gnu_cleanup = g.cleanup;
     if (g.mode)
         /* the mode of a decl-specifier's attribute: not analysed */
         return not_supported(n, "ext.gnu");

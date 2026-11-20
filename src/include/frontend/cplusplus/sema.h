@@ -376,6 +376,14 @@ enum gnu_attribute_flag : uint32_t {
        keyword to enable its special behavior": the definition is used only
        for inlining, never emitted (glibc's __extern_inline) */
     gnu_inline_definition = 8388608,
+    /* "constructor (priority)", "destructor (priority)": the function runs
+       before main, or after it returns or exit is called, as an entry of
+       .init_array or .fini_array (the priority is gnu_priority) */
+    gnu_constructor = 16777216,
+    gnu_destructor = 33554432,
+    /* "cleanup (cleanup_function)": a local variable's function, called
+       with its address when it goes out of scope (gnu_cleanup) */
+    gnu_cleanup = 67108864,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -647,6 +655,10 @@ struct entity {
     token_index section = 0;
     /* ... and an abi_tag attribute's string-literal, 0 if none */
     token_index abi_tag = 0;
+    /* ... gnu_constructor's or gnu_destructor's priority (0: the default)
+       and gnu_cleanup's function */
+    uint32_t gnu_priority = 0;
+    entity_index gnu_cleanup = 0;
     /* [ext:gnu_asm_labels] a function's or variable's asm label: the
        string-literal that is its symbol, 0 if none */
     token_index asm_label = 0;
@@ -1788,6 +1800,8 @@ class semantic_analysis
            decl-specifiers and before them */
         uint32_t gnu_flags = 0;
         token_index section = 0, abi_tag = 0;
+        uint32_t gnu_priority = 0;
+        entity_index gnu_cleanup = 0;
         uint64_t aligned = 0;
         /* [ext:gnu_attributes] the alignment a typedef-name among the
            type-specifiers was declared with (aligned), 0 if none: a
@@ -1845,6 +1859,8 @@ class semantic_analysis
         uint64_t aligned = 0;
         uint32_t gnu_flags = 0;
         token_index section = 0, abi_tag = 0;
+        uint32_t gnu_priority = 0;
+        entity_index gnu_cleanup = 0;
         /* mode (gnu_mode): the mode's identifier */
         token_index mode = 0;
         /* [ext:gnu_asm_labels] the asm label's string-literal, 0 if none */
@@ -2222,6 +2238,8 @@ class semantic_analysis
         uint64_t aligned = 0;
         uint32_t flags = 0;
         token_index section = 0, abi_tag = 0;
+        uint32_t priority = 0;
+        entity_index cleanup = 0;
         /* mode (gnu_mode): the mode's identifier */
         token_index mode = 0;
         /* [ext:clang_ext_vector_type] taken where allowed (an
@@ -2234,10 +2252,21 @@ class semantic_analysis
     analysis_result gnu_attribute_specifier(SyntaxRef n, gnu_attributes &g);
     analysis_result add_gnu_abi_tag(SyntaxRef at, token_index literal,
                                     gnu_attributes &g);
+    analysis_result gnu_integer_argument(SyntaxRef at, SyntaxElement argument,
+                                         uint64_t &value);
+    analysis_result gnu_cleanup_function(SyntaxRef at, SyntaxElement a,
+                                         uint32_t count, gnu_attributes &g);
+    bool gnu_cleanup_takes_pointer(entity_index function) const;
+    bool code_align_argument(token_index at) const;
+    bool fallthrough_statement(SyntaxElement s) const;
+    bool case_or_default_label(SyntaxElement s) const;
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);
     analysis_result gnu_attribute_specifier(SyntaxRef n, specified &s);
     analysis_result gnu_mode_type(SyntaxRef at, token_index mode,
                                   qualified_type &type);
+    analysis_result array_element_alignment(SyntaxRef at,
+                                            qualified_type declared,
+                                            uint32_t through);
     uint32_t leading_gnu_attributes(SyntaxRef n) const;
     bool same_abi_tag(token_index a, token_index b) const;
     bool class_specifier_before(SyntaxRef seq, uint32_t i) const;
@@ -3597,6 +3626,8 @@ class semantic_analysis
        decl-specifier-seq defines (GCC: they apply to the type), 0 if none;
        class_specifier takes it before the class is laid out */
     uint32_t trailing_class_alignment = 0;
+    /* ... and its other attributes (gnu_packed) */
+    uint32_t trailing_class_flags = 0;
     /* the access of the member-declaration analysed (an enumeration's and
        its enumerators' in a class) */
     uint8_t declaration_access = 0;
