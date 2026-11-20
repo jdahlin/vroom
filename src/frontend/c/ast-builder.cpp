@@ -444,6 +444,11 @@ uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
                             CC_BUILTIN_SHUFFLEVECTOR, 0);
 }
 
+uint32_t ast_builder_vector_saturate(cc *c, bool sub, uint32_t a, uint32_t b)
+{
+    return cc_vector_saturate(c, sub, a, b, 0);
+}
+
 uint32_t ast_builder_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b)
 {
     return cc_vector_minmax(c, max, a, b, 0);

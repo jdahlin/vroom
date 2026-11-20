@@ -194,6 +194,8 @@ uint32_t c_lowering::expression(uint32_t index)
         uint32_t a = expression(n.a), b = expression(n.b);
         if (!a || !b)
             return 0;
+        if (n.op >= 4)
+            return ast_builder_vector_saturate(c, n.op == 5, a, b);
         if (n.op)
             return ast_builder_vector_minmax(c, n.op == 3, a, b);
         const uint32_t *items = analysis.semantics.items(n.first);

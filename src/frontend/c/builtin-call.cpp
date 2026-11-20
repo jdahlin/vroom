@@ -236,6 +236,8 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
         return cc_builtin_elementwise_abs_build(c, b, loc);
     case CC_BUILTIN_ELEMENTWISE_MIN:
     case CC_BUILTIN_ELEMENTWISE_MAX:
+    case CC_BUILTIN_ELEMENTWISE_ADD_SAT:
+    case CC_BUILTIN_ELEMENTWISE_SUB_SAT:
         return cc_builtin_elementwise_minmax_build(c, b, loc);
     case CC_BUILTIN_ISFPCLASS:
     case CC_BUILTIN_ISSUBNORMAL:

@@ -29,6 +29,25 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_elementwise_abs", CC_BUILTIN_ELEMENTWISE_ABS, 1, "i."},
     {"__builtin_elementwise_min", CC_BUILTIN_ELEMENTWISE_MIN, 1, "i."},
     {"__builtin_elementwise_max", CC_BUILTIN_ELEMENTWISE_MAX, 1, "i."},
+    {"__builtin_elementwise_add_sat", CC_BUILTIN_ELEMENTWISE_ADD_SAT, 1, "i."},
+    {"__builtin_elementwise_sub_sat", CC_BUILTIN_ELEMENTWISE_SUB_SAT, 1, "i."},
+    {"__builtin_ia32_pshufd", CC_BUILTIN_X86_SIMD, 1, "IIi"},
+    {"__builtin_ia32_pshuflw", CC_BUILTIN_X86_SIMD, 1, "HHi"},
+    {"__builtin_ia32_pshufhw", CC_BUILTIN_X86_SIMD, 1, "HHi"},
+    {"__builtin_ia32_pslldqi128_byteshift", CC_BUILTIN_X86_SIMD, 1, "BBi"},
+    {"__builtin_ia32_psrldqi128_byteshift", CC_BUILTIN_X86_SIMD, 1, "BBi"},
+    {"__builtin_ia32_cvttps2dq", CC_BUILTIN_X86_SIMD, 1, "IF"},
+    {"__builtin_ia32_cvttpd2dq", CC_BUILTIN_X86_SIMD, 1, "IE"},
+    {"__builtin_ia32_undef128", CC_BUILTIN_X86_SIMD, 1, "Q"},
+    {"__builtin_ia32_emms", CC_BUILTIN_X86_SIMD, 1, "v"},
+    {"__builtin_ia32_vec_ext_v8hi", CC_BUILTIN_X86_SIMD, 1, "NHi"},
+    {"__builtin_ia32_vec_set_v8hi", CC_BUILTIN_X86_SIMD, 1, "HHNi"},
+    {"__builtin_ia32_pslldi128", CC_BUILTIN_X86_SIMD, 1, "IIi"},
+    {"__builtin_ia32_psllqi128", CC_BUILTIN_X86_SIMD, 1, "QQi"},
+    {"__builtin_ia32_psrldi128", CC_BUILTIN_X86_SIMD, 1, "IIi"},
+    {"__builtin_ia32_psrlqi128", CC_BUILTIN_X86_SIMD, 1, "QQi"},
+    {"__builtin_ia32_psrawi128", CC_BUILTIN_X86_SIMD, 1, "HHi"},
+    {"__builtin_ia32_psradi128", CC_BUILTIN_X86_SIMD, 1, "IIi"},
     {"__builtin_ia32_pmovmskb128", CC_BUILTIN_X86_SIMD, 1, "iB"},
     {"__builtin_ia32_movmskps", CC_BUILTIN_X86_SIMD, 1, "iF"},
     {"__builtin_ia32_shufps", CC_BUILTIN_X86_SIMD, 1, "FFFi"},
@@ -518,6 +537,14 @@ CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch)
         return cc_type_basic(AST_TYPE_CHAR);
     case 'B':
         return cc_type_vector(c, cc_type_basic(AST_TYPE_CHAR), 16);
+    case 'I':
+        return cc_type_vector(c, cc_type_basic(AST_TYPE_INT), 16);
+    case 'Q':
+        return cc_type_vector(c, cc_type_basic(AST_TYPE_LONG_LONG), 16);
+    case 'E':
+        return cc_type_vector(c, cc_type_basic(AST_TYPE_DOUBLE), 16);
+    case 'N':
+        return cc_type_basic(AST_TYPE_SHORT);
     case 'H':
         return cc_type_vector(c, cc_type_basic(AST_TYPE_SHORT), 16);
     case 'D':

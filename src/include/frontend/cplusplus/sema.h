@@ -2900,6 +2900,9 @@ class semantic_analysis
     bool builtin_addressof_call(SyntaxRef n);
     bool builtin_shufflevector_call(SyntaxRef n);
     int vector_builtin_kind(uint32_t name);
+    analysis_result
+    nontemporal_access(SyntaxRef n, const owned_array<SyntaxElement> &clauses,
+                       bool store, expression_meaning &m);
     analysis_result builtin_shufflevector(SyntaxRef n, expression_meaning &m);
     /* clang's type-generic bit counts: which one the function e is (1
        popcount, 2 clz, 3 ctz; 0 none), the check of a call's arguments,

@@ -133,6 +133,12 @@ CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want,
                                        const cc_id_list *args);
 CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch);
 CC_PRIVATE ast_qualified_type cc_builtin_type(cc *c, const cc_builtin *b);
+CC_PRIVATE uint32_t cc_vector_saturate(cc *c, bool sub, uint32_t a, uint32_t b,
+                                       uint32_t loc);
+CC_PRIVATE bool cc_builtin_x86_sse2_build(cc *c, const char *name,
+                                          cc_id_list *args,
+                                          ast_qualified_type rt, uint32_t loc,
+                                          uint32_t *out);
 CC_PRIVATE uint32_t cc_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b,
                                      uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_elementwise_minmax_build(cc *c,

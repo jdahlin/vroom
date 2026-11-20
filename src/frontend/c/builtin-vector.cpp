@@ -382,7 +382,347 @@ CC_PRIVATE uint32_t cc_builtin_elementwise_minmax_build(cc *c,
         cc_builtin_arity_check(c, loc, 2, &args);
         return cc_node_error_new(c, loc);
     }
+    if (b->id == CC_BUILTIN_ELEMENTWISE_ADD_SAT ||
+        b->id == CC_BUILTIN_ELEMENTWISE_SUB_SAT)
+        return cc_vector_saturate(c, b->id == CC_BUILTIN_ELEMENTWISE_SUB_SAT,
+                                  cc_conversion_decay(c, args.v[0]),
+                                  cc_conversion_decay(c, args.v[1]), loc);
     return cc_vector_minmax(c, b->id == CC_BUILTIN_ELEMENTWISE_MAX,
                             cc_conversion_decay(c, args.v[0]),
                             cc_conversion_decay(c, args.v[1]), loc);
+}
+
+/* ---- vector helpers of the builtins below, in the AST's vector operations */
+
+/* value held in an automatic temporary: *pre assigns it, the result reads it */
+static uint32_t cc_vector_hold(cc *c, uint32_t value, ast_qualified_type t,
+                               uint32_t *pre, uint32_t loc)
+{
+    uint32_t sym = cc_symbol_new(c, AST_SYMBOL_VARIABLE, 0, t, loc);
+    c->syms[sym].sc = AST_STORAGE_AUTO;
+    uint32_t var = cc_node_new(c, AST_NODE_VARIABLE, t, loc);
+    AST_NODE(var)->a = sym;
+    AST_NODE(var)->flags = AST_NODE_FLAG_LVALUE;
+    uint32_t assign =
+        cc_node_new_operands(c, AST_NODE_ASSIGN, t, loc, var, value);
+    *pre = *pre ? cc_lowering_sequence(c, *pre, assign) : assign;
+    return var;
+}
+
+static uint32_t cc_vector_op(cc *c, int op, ast_qualified_type t, uint32_t l,
+                             uint32_t r, uint32_t loc)
+{
+    return cc_node_binary_new(c, op, t, l, r, loc);
+}
+
+/* a vector's lanes picked from a and b by indices (a, then b), of type rt */
+static uint32_t cc_vector_pick(cc *c, ast_qualified_type rt, uint32_t a,
+                               uint32_t b, const int *indices, unsigned n,
+                               uint32_t loc)
+{
+    cc_id_list list;
+    cc_id_list_init(&list);
+    cc_id_list_append(c, &list, a);
+    cc_id_list_append(c, &list, b);
+    for (unsigned i = 0; i < n; i++)
+        cc_id_list_append(c, &list,
+                          cc_node_integer_new(
+                              c, indices[i], cc_type_basic(AST_TYPE_INT), loc));
+    return cc_builtin_node_new(c, CC_BUILTIN_SHUFFLEVECTOR, rt, loc, &list);
+}
+
+/* __builtin_elementwise_add_sat and _sub_sat of two vectors of one integer
+ * type: the result clamped to the element's range, by vector operations
+ * only.  Unsigned: a + b | (r < a), a - b & (a >= b); signed: the lanes
+ * whose sign overflowed take INT_MAX or INT_MIN by a's sign. */
+CC_PRIVATE uint32_t cc_vector_saturate(cc *c, bool sub, uint32_t a, uint32_t b,
+                                       uint32_t loc)
+{
+    a = cc_node_rvalue(c, a), b = cc_node_rvalue(c, b);
+    ast_qualified_type vt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(a)->ty);
+    if (!cc_type_is_vector(c, vt) ||
+        !cc_type_is_compatible(
+            c, vt, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(b)->ty)) ||
+        !cc_type_is_integer(c, AST_TYPE(c, vt)->base)) {
+        cc_report_error(c, loc,
+                        "arguments to '__builtin_elementwise_%s_sat' must be "
+                        "vectors of one integer type",
+                        sub ? "sub" : "add");
+        return cc_node_error_new(c, loc);
+    }
+    ast_qualified_type et = AST_TYPE(c, vt)->base;
+    int bits = (int)cc_type_size(c, et) * 8;
+    uint32_t pre = 0;
+    uint32_t x = cc_vector_hold(c, a, vt, &pre, loc);
+    uint32_t y = cc_vector_hold(c, b, vt, &pre, loc);
+    uint32_t xr = cc_node_rvalue(c, x), yr = cc_node_rvalue(c, y);
+    uint32_t r = cc_vector_op(c, sub ? LEX_TOKEN_MINUS : LEX_TOKEN_PLUS, vt, xr,
+                              yr, loc);
+    ast_qualified_type mask_type = cc_type_vector_mask(c, vt);
+    uint32_t result;
+    if (!cc_type_is_signed(c, et)) {
+        uint32_t held = cc_vector_hold(c, r, vt, &pre, loc);
+        uint32_t m;
+        if (sub)
+            m = cc_vector_op(c, LEX_TOKEN_GREATER_EQUAL, mask_type,
+                             cc_node_rvalue(c, x), cc_node_rvalue(c, y), loc);
+        else
+            m = cc_vector_op(c, LEX_TOKEN_LESS, mask_type,
+                             cc_node_rvalue(c, held), cc_node_rvalue(c, x),
+                             loc);
+        m = cc_cast_insert(c, m, vt, AST_CAST_NOP);
+        result = cc_vector_op(c, sub ? LEX_TOKEN_AMPERSAND : LEX_TOKEN_PIPE, vt,
+                              cc_node_rvalue(c, held), m, loc);
+    } else {
+        uint32_t rr;
+        uint32_t held = cc_vector_hold(c, r, vt, &pre, loc);
+        rr = cc_node_rvalue(c, held);
+        uint32_t ovf;
+        if (sub)
+            ovf = cc_vector_op(c, LEX_TOKEN_AMPERSAND, vt,
+                               cc_vector_op(c, LEX_TOKEN_CARET, vt,
+                                            cc_node_rvalue(c, x),
+                                            cc_node_rvalue(c, y), loc),
+                               cc_vector_op(c, LEX_TOKEN_CARET, vt,
+                                            cc_node_rvalue(c, x), rr, loc),
+                               loc);
+        else
+            ovf = cc_vector_op(c, LEX_TOKEN_AMPERSAND, vt,
+                               cc_vector_op(c, LEX_TOKEN_CARET, vt,
+                                            cc_node_rvalue(c, x), rr, loc),
+                               cc_vector_op(c, LEX_TOKEN_CARET, vt,
+                                            cc_node_rvalue(c, y),
+                                            cc_node_rvalue(c, held), loc),
+                               loc);
+        ovf = cc_vector_op(c, LEX_TOKEN_GREATER_GREATER, vt, ovf,
+                           cc_node_integer_new(c, bits - 1, et, loc), loc);
+        i128 top = ((i128)1 << (bits - 1)) - 1;
+        uint32_t sat = cc_vector_op(
+            c, LEX_TOKEN_CARET, vt,
+            cc_vector_op(c, LEX_TOKEN_GREATER_GREATER, vt, cc_node_rvalue(c, x),
+                         cc_node_integer_new(c, bits - 1, et, loc), loc),
+            cc_node_integer_new(c, top, et, loc), loc);
+        uint32_t diff =
+            cc_vector_op(c, LEX_TOKEN_AMPERSAND, vt,
+                         cc_vector_op(c, LEX_TOKEN_CARET, vt,
+                                      cc_node_rvalue(c, held), sat, loc),
+                         ovf, loc);
+        result = cc_vector_op(c, LEX_TOKEN_CARET, vt, cc_node_rvalue(c, held),
+                              diff, loc);
+    }
+    return cc_lowering_sequence(c, pre, result);
+}
+
+static bool cc_x86_constant(cc *c, uint32_t n, const char *name, uint32_t loc,
+                            i128 *v)
+{
+    if (cc_expression_has_side_effects(c, n) || !cc_constant_integer(c, n, v)) {
+        cc_report_error(c, loc, "argument to '%s' must be a constant integer",
+                        name);
+        return false;
+    }
+    return true;
+}
+
+/* the SSE2 builtins that are shuffles, shifts and conversions: ordinary
+ * vector operations (a shuffle, a shift by a splat, a converted vector), so
+ * that code generation picks the instructions; true when name is one */
+CC_PRIVATE bool cc_builtin_x86_sse2_build(cc *c, const char *name,
+                                          cc_id_list *args,
+                                          ast_qualified_type rt, uint32_t loc,
+                                          uint32_t *out)
+{
+    ast_qualified_type bytes =
+        cc_type_vector(c, cc_type_basic(AST_TYPE_CHAR), 16);
+    ast_qualified_type it = cc_type_basic(AST_TYPE_INT);
+    i128 imm = 0;
+    int idx[16];
+    if (!strcmp(name, "emms")) {
+        *out = cc_cast_insert(c, cc_node_integer_new(c, 0, it, loc),
+                              cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID);
+        return true;
+    }
+    if (!strcmp(name, "undef128")) {
+        /* any value: a fresh automatic variable's */
+        uint32_t sym = cc_symbol_new(c, AST_SYMBOL_VARIABLE, 0, rt, loc);
+        c->syms[sym].sc = AST_STORAGE_AUTO;
+        uint32_t var = cc_node_new(c, AST_NODE_VARIABLE, rt, loc);
+        AST_NODE(var)->a = sym;
+        AST_NODE(var)->flags = AST_NODE_FLAG_LVALUE;
+        *out = cc_node_rvalue(c, var);
+        return true;
+    }
+    if (!strcmp(name, "pshufd") || !strcmp(name, "pshuflw") ||
+        !strcmp(name, "pshufhw")) {
+        if (args->n != 2 || !cc_x86_constant(c, args->v[1], name, loc, &imm)) {
+            *out = cc_node_error_new(c, loc);
+            return true;
+        }
+        unsigned n = name[5] == 'd' ? 4 : 8, lo = name[5] == 'l',
+                 hi = name[5] == 'h';
+        for (unsigned i = 0; i < n; i++) {
+            unsigned pick = (unsigned)(imm >> (2 * (i & 3))) & 3;
+            idx[i] = (int)i;
+            if (n == 4 || (lo && i < 4))
+                idx[i] = (int)pick;
+            else if (hi && i >= 4)
+                idx[i] = (int)(4 + pick);
+        }
+        uint32_t pre = 0;
+        uint32_t v = cc_vector_hold(c, args->v[0], rt, &pre, loc);
+        *out = cc_lowering_sequence(c, pre,
+                                    cc_vector_pick(c, rt, cc_node_rvalue(c, v),
+                                                   cc_node_rvalue(c, v), idx, n,
+                                                   loc));
+        return true;
+    }
+    if (!strcmp(name, "pslldqi128_byteshift") ||
+        !strcmp(name, "psrldqi128_byteshift")) {
+        if (args->n != 2 || !cc_x86_constant(c, args->v[1], name, loc, &imm)) {
+            *out = cc_node_error_new(c, loc);
+            return true;
+        }
+        bool left = name[2] == 'l';
+        long n = imm < 0 || imm > 16 ? 16 : (long)imm;
+        for (int i = 0; i < 16; i++) {
+            long from = left ? i - n : i + n;
+            /* index 0..15: the zero vector (first operand), 16..31: the data */
+            idx[i] = from >= 0 && from < 16 ? 16 + (int)from : 0;
+        }
+        uint32_t pre = 0;
+        uint32_t v =
+            cc_vector_hold(c,
+                           cc_cast_insert(c, cc_node_rvalue(c, args->v[0]),
+                                          bytes, AST_CAST_NOP),
+                           bytes, &pre, loc);
+        uint32_t zero =
+            cc_vector_op(c, LEX_TOKEN_CARET, bytes, cc_node_rvalue(c, v),
+                         cc_node_rvalue(c, v), loc);
+        uint32_t shifted =
+            cc_vector_pick(c, bytes, zero, cc_node_rvalue(c, v), idx, 16, loc);
+        *out = cc_lowering_sequence(
+            c, pre, cc_cast_insert(c, shifted, rt, AST_CAST_NOP));
+        return true;
+    }
+    if (!strcmp(name, "cvttps2dq")) {
+        cc_id_list one;
+        cc_id_list_init(&one);
+        cc_id_list_append(c, &one, args->v[0]);
+        *out = cc_builtin_node_new(c, CC_BUILTIN_CONVERTVECTOR, rt, loc, &one);
+        return true;
+    }
+    if (!strcmp(name, "cvttpd2dq")) {
+        ast_qualified_type pair = cc_type_vector(c, it, 8);
+        cc_id_list one;
+        cc_id_list_init(&one);
+        cc_id_list_append(c, &one, args->v[0]);
+        uint32_t pre = 0;
+        uint32_t narrowed = cc_vector_hold(
+            c,
+            cc_builtin_node_new(c, CC_BUILTIN_CONVERTVECTOR, pair, loc, &one),
+            pair, &pre, loc);
+        for (int i = 0; i < 4; i++)
+            idx[i] = i;
+        uint32_t zero =
+            cc_vector_op(c, LEX_TOKEN_CARET, pair, cc_node_rvalue(c, narrowed),
+                         cc_node_rvalue(c, narrowed), loc);
+        *out = cc_lowering_sequence(c, pre,
+                                    cc_vector_pick(c, rt,
+                                                   cc_node_rvalue(c, narrowed),
+                                                   zero, idx, 4, loc));
+        return true;
+    }
+    if (!strcmp(name, "vec_ext_v8hi") || !strcmp(name, "vec_set_v8hi")) {
+        bool set = name[4] == 's';
+        uint32_t index = args->v[set ? 2 : 1];
+        if (args->n != (set ? 3u : 2u) ||
+            !cc_x86_constant(c, index, name, loc, &imm) || imm < 0 || imm > 7) {
+            *out = cc_node_error_new(c, loc);
+            return true;
+        }
+        ast_qualified_type vt =
+            AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(args->v[0])->ty);
+        ast_qualified_type et = cc_type_basic(AST_TYPE_SHORT);
+        uint32_t pre = 0;
+        uint32_t v = cc_vector_hold(c, args->v[0], vt, &pre, loc);
+        if (!set) {
+            *out = cc_lowering_sequence(
+                c, pre,
+                cc_node_rvalue(
+                    c, cc_builtin_vector_lane(c, v, et, (unsigned)imm, loc)));
+            return true;
+        }
+        uint32_t store = cc_node_new_operands(
+            c, AST_NODE_ASSIGN, et, loc,
+            cc_builtin_vector_lane(c, v, et, (unsigned)imm, loc), args->v[1]);
+        *out = cc_lowering_sequence(
+            c, pre, cc_lowering_sequence(c, store, cc_node_rvalue(c, v)));
+        return true;
+    }
+    /* shifts of every lane by one count: pslliw.. as left shifts, psrli.. as
+       logical (unsigned lanes) and psrai.. as arithmetic right shifts; a
+       count at or past the lane's width gives 0 (sign bits for psra) */
+    if (name[0] == 'p' && name[1] == 's' && strlen(name) == 9 &&
+        !strcmp(name + 5, "i128") && (name[2] == 'l' || name[2] == 'r') &&
+        (name[3] == 'l' || name[3] == 'a')) {
+        char width = name[4];
+        if (args->n != 2 || (width != 'w' && width != 'd' && width != 'q')) {
+            *out = cc_node_error_new(c, loc);
+            return true;
+        }
+        bool left = name[2] == 'l', arithmetic = name[3] == 'a';
+        ast_qualified_type vt =
+            AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(args->v[0])->ty);
+        ast_qualified_type et = AST_TYPE(c, vt)->base;
+        ast_qualified_type work = vt;
+        if (!arithmetic)
+            work = cc_type_vector(c, cc_type_unsigned(c, et), 16);
+        ast_qualified_type wet = AST_TYPE(c, work)->base;
+        int bits = (int)cc_type_size(c, et) * 8;
+        int op = left ? LEX_TOKEN_LESS_LESS : LEX_TOKEN_GREATER_GREATER;
+        uint32_t pre = 0;
+        uint32_t v =
+            cc_vector_hold(c,
+                           cc_cast_insert(c, cc_node_rvalue(c, args->v[0]),
+                                          work, AST_CAST_NOP),
+                           work, &pre, loc);
+        uint32_t count =
+            cc_conversion_apply(c, cc_node_rvalue(c, args->v[1]),
+                                cc_type_basic(AST_TYPE_UNSIGNED_INT));
+        uint32_t held = cc_vector_hold(
+            c, count, cc_type_basic(AST_TYPE_UNSIGNED_INT), &pre, loc);
+        uint32_t cnt = cc_node_rvalue(c, held);
+        ast_qualified_type ut = cc_type_basic(AST_TYPE_UNSIGNED_INT);
+        uint32_t valid =
+            cc_node_binary_new(c, LEX_TOKEN_LESS, it, cnt,
+                               cc_node_integer_new(c, bits, ut, loc), loc);
+        uint32_t result;
+        if (arithmetic) {
+            /* the count clamped to bits - 1 */
+            uint32_t clamped = cc_conditional_build(
+                c, valid, cc_node_rvalue(c, held),
+                cc_node_integer_new(c, bits - 1, ut, loc), loc);
+            result = cc_vector_op(c, op, work, cc_node_rvalue(c, v),
+                                  cc_conversion_apply(c, clamped, wet), loc);
+        } else {
+            uint32_t low = cc_node_binary_new(
+                c, LEX_TOKEN_AMPERSAND, ut, cc_node_rvalue(c, held),
+                cc_node_integer_new(c, bits - 1, ut, loc), loc);
+            uint32_t moved =
+                cc_vector_op(c, op, work, cc_node_rvalue(c, v),
+                             cc_conversion_apply(c, low, wet), loc);
+            /* all ones where the count is below the width, else 0 */
+            uint32_t keep = cc_conditional_build(
+                c, valid,
+                cc_node_integer_new(c, cc_constant_truncate(c, -1, wet), wet,
+                                    loc),
+                cc_node_integer_new(c, 0, wet, loc), loc);
+            result =
+                cc_vector_op(c, LEX_TOKEN_AMPERSAND, work, moved, keep, loc);
+        }
+        *out = cc_lowering_sequence(
+            c, pre, cc_cast_insert(c, result, rt, AST_CAST_NOP));
+        return true;
+    }
+    return false;
 }

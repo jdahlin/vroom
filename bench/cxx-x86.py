@@ -3,7 +3,7 @@
 
 Each src/test/cxx/run/x86-*.cpp is built by clang++ -O2 and by vcc's driver
 (vpp --target=x86_64-linux-gnu -c) at -O0..-O3, linked with clang against
-the host's libc, and run: the exit status must be clang's.  They use clang's
+the host's libc, and run: the exit status and the output must be clang's.  They use clang's
 resource headers (<emmintrin.h>, ...) whose functions the program does not
 use are left out (doc/PLAN-cxx-sema.md, GNU vectors V5).
 
@@ -42,7 +42,8 @@ def main():
                 print(f'FAIL {name}: clang++: {r.stderr[:300]}')
                 failed += 1
                 continue
-            want = run([ref]).returncode
+            ref_run = run([ref])
+            want = (ref_run.returncode, ref_run.stdout)
             for level in levels:
                 o, exe = f'{d}/t{level}.o', f'{d}/t{level}'
                 r = run([VPP, '--target=x86_64-linux-gnu', '-x', 'c++', '-c',
@@ -53,9 +54,13 @@ def main():
                     failed += 1
                     continue
                 r = run(['clang', o, '-o', exe, '-lstdc++'])
-                got = run([exe]).returncode if not r.returncode else -1
+                got = (-1, '')
+                if not r.returncode:
+                    ran = run([exe])
+                    got = (ran.returncode, ran.stdout)
                 if got != want:
-                    print(f'FAIL {name} -O{level}: ran {got}, clang {want}')
+                    print(f'FAIL {name} -O{level}: ran {got[0]}, clang {want[0]}'
+                          f'{" (output differs)" if got[1] != want[1] else ""}')
                     failed += 1
                 else:
                     passed += 1

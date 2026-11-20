@@ -2423,7 +2423,21 @@ Shared with C, not copied: the layout and validity rule
   lowering fails is dropped (`function_definition_or_drop`), and a use of
   either is a refusal with the reason.  Tests: `src/test/cxx/run/x86-sse2-intrinsics.cpp`
   (`bench/cxx-x86.py`: native, vcc -O0..3 against clang; not in CI yet:
-  needs the x86-64 job).  Not yet: the other `__builtin_ia32_*` (the table
+  needs the x86-64 job).  Follow-up (2026-11-20, `cxx/sse2-builtins`):
+  `__builtin_elementwise_add_sat` and `_sub_sat` (integer vectors, vector
+  operations only, shared with C), `__builtin_nontemporal_store` and `_load`
+  (a plain store and load), and the SSE2 builtins that are shuffles, shifts and
+  conversions in `cc_builtin_x86_sse2_build` (C's, so C has them too):
+  `pshufd`, `pshuflw`, `pshufhw`, the byte shifts, the immediate shifts of
+  16-, 32- and 64-bit lanes (counts at and past the width give 0, or the
+  sign for `psra`), `cvttps2dq`, `cvttpd2dq`, `vec_ext_v8hi`, `vec_set_v8hi`,
+  `undef128`, `emms`; the table's signature letters `I` (v4si), `Q` (v2di),
+  `E` (v2df) and `N` (short).  Test: `x86-sse2-ops.cpp`, whose output
+  `bench/cxx-x86.py` compares with clang's.  Not yet (of emmintrin.h):
+  the saturating narrows (`packs*`), `pavg*`, `pmulh*`, `pmaddwd`, `pmuludq`,
+  `psadbw`, the shifts by a vector count (`psll*128`), the float compares and
+  min/max, `cvtps2dq` and `cvtpd2dq` (rounding), `ucomi`/`comi`, `rcp`/`rsqrt`.
+  Not yet: the other `__builtin_ia32_*` (the table
   has ~30; each needs lanes or an instruction), `__builtin_nontemporal_*`,
   the other `__builtin_elementwise_*`, the AVX2 and AVX-512 paths of
   `simd-search.h` (256- and 512-bit vectors, `__target__` features to the

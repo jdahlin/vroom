@@ -43,6 +43,11 @@ CC_PRIVATE uint32_t cc_builtin_x86_simd_build(cc *c, const cc_builtin *b,
                                               uint32_t loc)
 {
     const char *name = b->name + sizeof("__builtin_ia32_") - 1;
+    {
+        uint32_t done;
+        if (cc_builtin_x86_sse2_build(c, name, args, rt, loc, &done))
+            return done;
+    }
     if (!strcmp(name, "shufps")) {
         i128 imm;
         if (args->n != 3 || !cc_constant_integer(c, args->v[2], &imm) ||
