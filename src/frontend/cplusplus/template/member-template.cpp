@@ -166,6 +166,15 @@ analysis_result semantic_analysis::member_function_template(
     }
     function_template record = new_template(
         name, c, n, index, first, static_cast<uint32_t>(parameters.size()));
+    /* [dcl.fct.default]/4: the trailing parameters with a default
+       argument, which a call may leave out (deduce_from_call) and its
+       specializations take (instantiate) */
+    for (const parameter_meaning &p : function_parameters) {
+        if (!p.default_argument)
+            record.default_arguments = 0;
+        else
+            record.default_arguments++;
+    }
     record.gnu_flags = gnu_flags;
     record.abi_tag = abi_tag;
     if (defines)
