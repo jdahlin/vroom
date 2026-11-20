@@ -81,3 +81,10 @@ old-value-init	vcc: the rules of [dcl.init] are not implemented yet
 old-variable-length-array	vcc: the rules of [expr.const] are not implemented yet
 old-virtual	vcc: the rules of [dcl.fct.def.general] are not implemented yet
 no-unique-address-layout	vcc: C++ code generation does not handle a class whose layout is not C's yet
+temp-names-class-template-id-base-member	vcc: the rules of [class.base.init] are not implemented yet
+temp-names-concept-id	vcc: the rules of [temp.func.order] are not implemented yet
+temp-names-function-template-id-address	vcc: the rules of [temp.names] are not implemented yet
+temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implemented yet
+temp-names-member-template-call	vcc: the rules of [expr.ref] are not implemented yet
+temp-names-operator-template-id	vcc: the rules of [expr.ref] are not implemented yet
+temp-names-template-disambiguator	vcc: the rules of [expr.prim.id.qual] are not implemented yet
