@@ -119,11 +119,20 @@ const char *
 semantic_analysis::unknown_name_subclause(entity_index e,
                                           const char *otherwise) const
 {
-    /* [temp.names]/1: "A template specialization ... can be referred to
-       by a template-id" */
-    if (e && entity_table[e].held_by_template)
+    /* a name a refused template-declaration held: that declaration's
+       reason (a use of it must not hide it), else [temp.names]/1: "A
+       template specialization ... can be referred to by a template-id" */
+    if (e && entity_table[e].held_by_template) {
+        if (entity_table[e].held_because)
+            return entity_table[e].held_because;
         return "temp.names";
+    }
     return otherwise;
+}
+
+void semantic_analysis::note_held(entity_index e)
+{
+    held_pending.append(e);
 }
 
 void semantic_analysis::found_also(lookup_result &r, entity_index e,

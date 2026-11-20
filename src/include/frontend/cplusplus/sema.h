@@ -425,6 +425,11 @@ struct entity {
        template-declaration or explicit-specialization declared it: what
        it denotes needs [temp]'s rules */
     bool held_by_template = false;
+    /* the subclause whose missing rules made the declaration that
+       hold_names held this name not analysed (declaration() sets it from
+       that declaration's first refusal): a use of the name is refused for
+       that reason, not for [temp.names] */
+    const char *held_because = nullptr;
     /* a scope (a namespace, 0 the global one, or a block): a
        using-directive appears in it ([namespace.udir]; an unnamed or
        inline namespace's implied one in its enclosing namespace) */
@@ -1453,6 +1458,8 @@ class semantic_analysis
     entities entity_table;
     owned_array<analysed_declaration> declarations;
     owned_array<unsupported_construct> unsupported;
+    /* the names held (note_held) by the declarations being analysed */
+    owned_array<entity_index> held_pending;
     owned_array<unsupported_construct> body_failures;
     owned_array<declared_name> declared;
     owned_array<analysed_expression> expressions;
@@ -1847,6 +1854,9 @@ class semantic_analysis
     analysis_result declarator_qualifier(SyntaxRef nested,
                                          declarator_meaning &m);
     void hold_names(SyntaxRef declaration);
+    /* e was just held by a template-declaration (held_by_template): the
+       declaration being analysed gives it its reason when it is refused */
+    void note_held(entity_index e);
     bool declared_by(entity_index e, SyntaxRef node) const;
     analysis_result declare_local(SyntaxRef declaration, token_index id,
                                   entity_kind kind, qualified_type type,

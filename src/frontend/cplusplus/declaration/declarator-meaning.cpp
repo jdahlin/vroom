@@ -739,6 +739,8 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
             entity_index e =
                 entity_table.make(entity_kind::none, name, current_scope);
             entity_table[e].held_by_template = by_template;
+            if (by_template)
+                note_held(e);
             entity_table[e].hidden_type = found;
             entity_table.bind(current_scope, name, e);
             continue;
@@ -749,8 +751,10 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                what the name denotes is not known from here on */
             if (!declared_by(found, declaration)) {
                 entity_table[found].kind = entity_kind::none;
-                if (by_template)
+                if (by_template) {
                     entity_table[found].held_by_template = true;
+                    note_held(found);
+                }
                 /* a function template's name declared again (an explicit
                    specialization, an overload): its calls need more than
                    the template */
@@ -763,6 +767,8 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         entity_index e =
             entity_table.make(entity_kind::none, name, current_scope);
         entity_table[e].held_by_template = by_template;
+        if (by_template)
+            note_held(e);
         entity_table.bind(current_scope, name, e);
     }
 }
