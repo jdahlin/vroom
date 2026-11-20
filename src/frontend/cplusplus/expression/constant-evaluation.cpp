@@ -691,7 +691,17 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         for (uint32_t i = 0; i < k.member_count; i++)
             if (class_members[k.first_member + i] == x.b) {
                 object = element_place | (o.first + i);
-                return constness::constant;
+                type_kind mk =
+                    type_table[entity_table[x.b].type.unqualified()].kind;
+                if (mk != type_kind::lvalue_reference &&
+                    mk != type_kind::rvalue_reference)
+                    return constness::constant;
+                /* [expr.type]/1: a member of reference type designates
+                   the object it is bound to */
+                const constant_value r = place_value(state, object);
+                if (r.kind != constant_value_kind::pointer || !r.count)
+                    return constness::unknown;
+                return pointed_place(state, r, object);
             }
         return constness::unknown;
     }
@@ -813,6 +823,39 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         if (c != constness::constant)
             return c;
         return evaluate_object(state, x.b, object);
+    }
+    /* [lex.string]/9: "Evaluating a string-literal results in a string
+       literal object with static storage duration, initialized from the
+       given characters", the code units and the terminating zero; "it is
+       unspecified whether distinct string-literals are distinct objects"
+       (each evaluation makes one) */
+    case semantic_kind::string_literal: {
+        const struct type &array = type_table[x.type.unqualified()];
+        fundamental_type f = evaluated_type(array.operand);
+        if (array.kind != type_kind::array || !array.bound_known ||
+            array.bound > constant_full_expression_limit ||
+            f == fundamental_type::none)
+            return constness::unknown;
+        const uint32_t *units = tokens.files.phase7().string_code_units();
+        const literal_value &lit = tokens.files.value_of(tokens[x.at]);
+        uint32_t count = static_cast<uint32_t>(array.bound);
+        constant_value a;
+        a.kind = constant_value_kind::array;
+        a.first = static_cast<uint32_t>(state.elements.size());
+        a.count = count;
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t u = 0;
+            if (i < lit.string_length)
+                u = units[lit.string_offset + i];
+            state.elements.append(value_of(f, u));
+            state.element_read_only.append(1);
+        }
+        constant_evaluation::object o;
+        o.read_only = true;
+        o.value = a;
+        object = static_cast<uint32_t>(state.objects.size());
+        state.objects.append(o);
+        return constness::constant;
     }
     default:
         break;
