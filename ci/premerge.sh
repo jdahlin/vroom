@@ -75,6 +75,7 @@ arm64)
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
+	step builtin-tests-generated python3 src/tools/gen-builtin-tests.py --check
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	# the C++ front end's citations and quoted grammar against docs/cxx-spec
 	step cxx-spec-refs python3 bench/cxx-spec-refs.py
