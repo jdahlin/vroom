@@ -1996,15 +1996,6 @@ analysis_result semantic_analysis::designated_elements(
     return analysis_result::well_formed;
 }
 
-/*
- * The elements a designator selects of the aggregate target, first to last
- * (more than one for GNU's "[ first ... last ]").  [dcl.init.aggr]/3.1:
- * ". identifier" names a direct non-static data member of a class; C99's
- * "[ constant-expression ]" ([ext:gnu_designated_initializers]) an element
- * of an array, "the constant-expression shall be an integer constant
- * expression ... within the array bounds" (C17 6.7.9/6); the obsolete
- * "identifier :" is a field designator.
- */
 /* Whether the class declares a member named name, or has an anonymous union
    or structure member that does ([class.union.anon]/1) */
 bool semantic_analysis::anonymous_member_declares(entity_index cls,
@@ -2015,7 +2006,7 @@ bool semantic_analysis::anonymous_member_declares(entity_index cls,
         const entity &m = entity_table[class_members[x.first_member + i]];
         if (m.name == name)
             return true;
-        if (m.name || m.bit_field)
+        if (m.name || m.bit_field || m.base_subobject)
             continue;
         const struct type mt = type_table[m.type.unqualified()];
         if (mt.kind == type_kind::class_type &&
@@ -2025,6 +2016,15 @@ bool semantic_analysis::anonymous_member_declares(entity_index cls,
     return false;
 }
 
+/*
+ * The elements a designator selects of the aggregate target, first to last
+ * (more than one for GNU's "[ first ... last ]").  [dcl.init.aggr]/3.1:
+ * ". identifier" names a direct non-static data member of a class; C99's
+ * "[ constant-expression ]" ([ext:gnu_designated_initializers]) an element
+ * of an array, "the constant-expression shall be an integer constant
+ * expression ... within the array bounds" (C17 6.7.9/6); the obsolete
+ * "identifier :" is a field designator.
+ */
 analysis_result semantic_analysis::designator_elements(
     SyntaxRef list, SyntaxElement designator, const struct type &target,
     const owned_array<entity_index> &members, uint64_t bound, bool bound_known,
@@ -2058,7 +2058,7 @@ analysis_result semantic_analysis::designator_elements(
            designator then names the member in it */
         for (size_t i = 0; i < members.size(); i++) {
             const entity &m = entity_table[members[i]];
-            if (m.name)
+            if (m.name || m.base_subobject)
                 continue;
             const struct type mt = type_table[m.type.unqualified()];
             if (mt.kind == type_kind::class_type &&
