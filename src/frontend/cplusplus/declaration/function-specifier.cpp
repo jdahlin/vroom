@@ -20,11 +20,10 @@ namespace cplusplus
 {
 
 /* explicit ( constant-expression ): P0892R2 (C++20); before it explicit
-   followed by ( is [ext.clang] clang's extension, P9's */
+   followed by ( is clang's extension with a warning
+   ([ext:clang_later_edition_features]; libc++ uses it in every mode) */
 node_index parser::explicit_specifier()
 {
-    if (!tokens.files.behavior.has(language_feature::conditional_explicit))
-        return beyond_this_step();
     size_t mark = begin_node();
     token_index first = position;
     add_token(); /* explicit */
