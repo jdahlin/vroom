@@ -78,6 +78,17 @@ analysis_result semantic_analysis::not_supported(SyntaxRef n,
     return analysis_result::unsupported;
 }
 
+/* the last refusal recorded names the identifier at t: "NAME what" */
+void semantic_analysis::name_unsupported_detail(token_index t, const char *what)
+{
+    owned_buffer text;
+    tokens.spelling(t, text.get());
+    vbuffer_string_append(text.get(), " ");
+    vbuffer_string_append(text.get(), what);
+    owned_string &detail = detail_texts.make(text.data(), text.size());
+    unsupported[unsupported.size() - 1].detail = detail.c_str();
+}
+
 analysis_result semantic_analysis::not_supported_builtin(SyntaxRef n,
                                                          const char *subclause,
                                                          entity_index called,

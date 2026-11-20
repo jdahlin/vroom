@@ -305,7 +305,6 @@ static const char *const builtins_not_had[] = {
     "__builtin_clear_padding",
     "__builtin_coro_noop",
     "__builtin_is_implicit_lifetime",
-    "__builtin_is_virtual_base_of",
     "__builtin_is_within_lifetime",
     "__builtin_lt_synthesizes_from_spaceship",
     "__builtin_operator_delete",

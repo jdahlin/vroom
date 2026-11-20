@@ -158,6 +158,7 @@ bool semantic_analysis::derives_from(entity_index d, entity_index b) const
    Derived that is an incomplete class other than Base is ill-formed
    ([meta.rel]/5: "complete type"), left unsupported. */
 analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
+                                                       bool virtual_base,
                                                        expression_meaning &m)
 {
     qualified_type b, d;
@@ -172,7 +173,20 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
         if (entity_table[bk.entity].kind != entity_kind::class_type ||
             entity_table[dk.entity].kind != entity_kind::class_type)
             return not_supported(n, "meta.rel");
-        if (bk.entity == dk.entity) {
+        if (virtual_base) {
+            /* __builtin_is_virtual_base_of(B, D): B is one of D's virtual
+               bases, direct or indirect ([class.mi]/4); a class is none of
+               its own */
+            if (!entity_table[dk.entity].size)
+                return not_supported(n, "meta.rel");
+            const entity &x = entity_table[dk.entity];
+            for (uint32_t i = 0; i < x.virtual_base_count; i++)
+                if (type_table[entity_table[class_virtual_bases
+                                                [x.first_virtual_base + i]]
+                                   .type.unqualified()]
+                        .entity == bk.entity)
+                    value = true;
+        } else if (bk.entity == dk.entity) {
             value = !entity_table[bk.entity].union_;
         } else {
             if (!entity_table[dk.entity].size)

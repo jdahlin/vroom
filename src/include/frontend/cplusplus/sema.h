@@ -1737,6 +1737,7 @@ class semantic_analysis
                                           entity_index called, const char *what,
                                           call_site where = call_site());
     owned_objects<owned_string> detail_texts;
+    void name_unsupported_detail(token_index t, const char *what);
     analysis_result not_supported(SyntaxRef n, const char *subclause,
                                   call_site where = call_site());
     /* whether the parser gave up on a part of the declaration */
@@ -2942,7 +2943,8 @@ class semantic_analysis
     /* ext/clang/class-traits.cpp: the traits that ask about a class */
     bool class_property_trait(int which, qualified_type t, bool &answer);
     bool derives_from(entity_index d, entity_index b) const;
-    analysis_result clang_base_of_trait(SyntaxRef n, expression_meaning &m);
+    analysis_result clang_base_of_trait(SyntaxRef n, bool virtual_base,
+                                        expression_meaning &m);
     bool polymorphic_class(entity_index c) const;
     bool virtual_destructor(entity_index c) const;
     bool triviality_unknown(entity_index c) const;
