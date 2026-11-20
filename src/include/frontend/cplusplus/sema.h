@@ -447,6 +447,9 @@ struct entity {
     /* a variable: [ext:clang_c11_thread_local] declared _Thread_local, of
        thread storage duration ([basic.stc.thread]) with C11's rules */
     bool c11_thread_local = false;
+    /* a variable: [dcl.constinit]/1 declared constinit (by any of its
+       declarations) */
+    bool constinit_ = false;
     /* a block_scope: the scope whose names it shall not redeclare (the
        function parameter scope for the outermost block of a function
        definition, the scope of a statement's condition for its
@@ -1733,6 +1736,10 @@ class semantic_analysis
         bool mutable_ = false;
         /* [ext:clang_c11_thread_local] _Thread_local */
         bool c11_thread_local = false;
+        /* [dcl.stc]/1: thread_local (c11_thread_local too) */
+        bool cxx_thread_local = false;
+        /* [dcl.constinit]/1: constinit */
+        bool constinit_ = false;
         /* [class.conv.fct]/2: explicit (only where explicit_allowed) */
         bool explicit_ = false;
         /* explicit ( value-dependent condition ): see entity */

@@ -526,7 +526,11 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         return not_supported(at, "temp.arg.nontype");
     const entity x = entity_table[e];
     if ((x.kind != entity_kind::variable && x.kind != entity_kind::function) ||
-        x.instantiation || x.next_overload || !is_namespace(x.enclosing))
+        x.instantiation || x.next_overload || !is_namespace(x.enclosing) ||
+        x.c11_thread_local)
+        /* (an object of thread storage duration has no address that is
+           the same in each thread: [temp.arg.nontype]/2's constant
+           expression is clang's error) */
         return not_supported(at, "temp.arg.nontype");
     const struct type &xr = type_table[x.type.unqualified()];
     bool same = false;

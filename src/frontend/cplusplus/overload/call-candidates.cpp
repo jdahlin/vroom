@@ -152,10 +152,11 @@ semantic_analysis::resolve_call(SyntaxRef n,
     for (entity_index e : set) {
         /* [over.match.funcs]/2: "the set of candidate functions can contain
            both member and non-member functions to be resolved against the
-           same argument list": a static member function among non-static
-           ones is called without its object, not analysed */
-        if (entity_table[e].nonstatic_member != (object != 0))
-            return not_supported(n, "over.match.funcs");
+           same argument list"; /4: "For static member functions, the
+           implicit object parameter is considered to match any object"
+           (object_sequence); a call without an object is made of the
+           non-static ones' with no implied argument too, and the chosen one is
+           refused below ([class.mfct.non-static]/3) */
         overload_candidate c;
         c.function = e;
         c.type = entity_table[e].type;
@@ -167,6 +168,11 @@ semantic_analysis::resolve_call(SyntaxRef n,
         implied_object = &implied;
     VTRY(r, best_viable_function(n, candidates, implied_object, early, chosen));
     entity_index c = set[chosen];
+    if (entity_table[c].nonstatic_member != (object != 0))
+        /* a static member function chosen for a call with an object
+           (called without it), or a non-static one without an object
+           ([class.mfct.non-static]/3, ill-formed): not analysed */
+        return not_supported(n, "over.match.funcs");
     /* a copy: deleted_use may define an implicit member, adding entities
        that may move entity_table's */
     const entity x = entity_table[c];

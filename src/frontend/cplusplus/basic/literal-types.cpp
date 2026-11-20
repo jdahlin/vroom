@@ -93,6 +93,15 @@ constness semantic_analysis::literal_class(entity_index c) const
              k = entity_table[k].next_constructor)
             if (entity_table[k].constexpr_ && !is_copy_constructor(c, k))
                 constructor = constness::constant;
+        /* an implicit constructor that is no copy or move one (the
+           defaulted default constructor beside user-provided ones) is
+           constexpr when it would satisfy [dcl.constexpr]'s rules, which
+           analysis does not check: not decided */
+        for (entity_index k = x.first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (entity_table[k].implicit && !is_copy_constructor(c, k) &&
+                constructor == constness::not_constant)
+                constructor = constness::unknown;
         result = both(result, constructor);
     }
     /* the subobjects: each non-volatile and literal, or for a union one
