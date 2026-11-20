@@ -97,7 +97,12 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
         if (lead && item.is(item[0], syntax_kind::simple_template_id))
             return not_supported(t, "temp.pre");
         if (SyntaxRef id = variable_specialization_id(s))
-            return variable_partial_specialization(t, s, id);
+            return variable_partial_specialization(t, s, id, 0);
+        /* [dcl.meaning]/1: the same named by a qualified template-id,
+           template<class T> constexpr bool N::v<T*> = true; */
+        entity_index qualifier = 0;
+        if (SyntaxRef id = qualified_variable_specialization_id(s, qualifier))
+            return variable_partial_specialization(t, s, id, qualifier);
         /* [temp.static]/1: a static data member of a class template,
            defined outside it */
         if (out_of_class_variable_member(s))
@@ -1008,17 +1013,33 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
  * deduced arguments.
  */
 analysis_result semantic_analysis::variable_partial_specialization(
-    SyntaxRef n, SyntaxRef declaration, SyntaxRef id)
+    SyntaxRef n, SyntaxRef declaration, SyntaxRef id, entity_index qualifier)
 {
     entity_index outer = current_scope;
+    /* [basic.lookup.qual]/3: what follows the qualified-id is looked up in
+       the template's namespace */
+    if (qualifier)
+        outer = qualifier;
     owned_array<SyntaxRef> parameters;
     /* [temp.param]/14: a partial specialization's packs are deduced,
        wherever they are */
     VTRY(r, template_head_parameters(n, parameters, true, true, true, true));
     lookup_result x;
     entity_index named = 0;
-    template_id_name(id, x, named);
+    if (qualifier) {
+        x = lookup_in_namespace(qualifier, tokens.identifier(id[0].token()),
+                                lookup_filter::any);
+        named = x.entity;
+        if (!named)
+            named = x.unknown_entity;
+        if (x.ambiguous)
+            return not_supported(n, "temp.class.spec");
+    } else {
+        template_id_name(id, x, named);
+    }
     uint32_t vt = variable_template_of(named);
+    if (!vt)
+        return not_supported(n, "temp.class.spec");
     const function_template primary = function_templates[vt - 1];
     if (parameters.empty() || function_templates[vt - 1].name != named ||
         entity_table[primary.entity].enclosing != outer)
@@ -1959,6 +1980,13 @@ analysis_result semantic_analysis::substitute_specialization(
     SyntaxRef id = 0;
     if (s.is_variable) {
         id = variable_specialization_id(s.declarator);
+        /* named by a qualified template-id, N::v<args> ([dcl.meaning]/1;
+           it was checked where the specialization was declared) */
+        if (!id && s.declarator.size() == 3 &&
+            s.declarator[1].is(syntax_kind::init_declarator) &&
+            s.declarator[1][0].qualified_id() &&
+            s.declarator[1][0].qualified_id().size() == 2)
+            id = s.declarator[1][0].qualified_id()[1].index();
     } else {
         SyntaxRef head = s.definition[0].index();
         id = class_head_name(head).index();

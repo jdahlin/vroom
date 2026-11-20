@@ -230,8 +230,22 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
-    VTRY_SET(r, declarator(n, tail[1], type, m));
+    entity_index class_before = defining_class;
+    friend_declarator = true;
+    r = declarator(n, tail[1], type, m);
+    friend_declarator = false;
+    defining_class = class_before;
+    if (r != analysis_result::well_formed)
+        return r;
     VTRY_SET(r, misplaced_function_qualifiers(n, type, false));
+    if (m.qualified_namespace && !m.qualifier) {
+        if (defines || !m.has_id || m.operator_function || m.destructor ||
+            m.conversion_function || m.literal_operator || m.aligned ||
+            m.gnu_flags || function_cv || c_language ||
+            type_table[type.unqualified()].kind != type_kind::function)
+            return not_supported(n, "class.friend");
+        return qualified_friend_function(c, n, m, type);
+    }
     /* an operator function ([over.oper]: its declaration's checks are
        operator_function_declaration's), not an allocation function */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
@@ -311,6 +325,63 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     if (m.operator_function) {
         VTRY(o, operator_function_declaration(n, befriended));
     }
+    entity_table.add_declaration(befriended, n);
+    friend_record f;
+    f.granting = c;
+    f.befriended = befriended;
+    friends.append(f);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.friend]/1, [dcl.meaning]/1: a friend function named by a qualified
+ * name, friend R ns::f(P);: "the declaration shall refer to a previously
+ * declared member of the ... namespace to which the qualifier refers" (of an
+ * element of its inline namespace set); it is that function, with its
+ * return type ([over.load]/2).  /6: it is not a definition.
+ */
+analysis_result
+semantic_analysis::qualified_friend_function(entity_index c, SyntaxRef n,
+                                             const declarator_meaning &m,
+                                             qualified_type type)
+{
+    uint32_t name = tokens.identifier(m.id);
+    entity_index scope = m.namespace_qualifier;
+    lookup_result found = lookup_in_namespace(scope, name, lookup_filter::any);
+    if (found.ambiguous || found.unknown)
+        return not_supported(n, "dcl.meaning");
+    if (!found.entity)
+        return ill_formed_at_token(m.id,
+                                   "a qualified friend declaration shall "
+                                   "refer to a previously declared member "
+                                   "of the namespace",
+                                   "dcl.meaning");
+    entity_index prior = found.entity;
+    entity_index in = entity_table[prior].enclosing;
+    if (entity_table[prior].kind != entity_kind::function ||
+        entity_table.find(found.found_in, name) != prior ||
+        found.found_in != in)
+        /* a template, or named by a using-declaration or directive */
+        return not_supported(n, "class.friend");
+    for (entity_index y = in; y != scope; y = entity_table[y].enclosing)
+        if (!y || !entity_table[y].inline_)
+            return not_supported(n, "dcl.meaning");
+    entity_index befriended = 0;
+    for (entity_index o = prior;
+         o && !befriended && entity_table[o].kind == entity_kind::function;
+         o = entity_table[o].next_overload)
+        if (same_parameters(type_table, entity_table[o].type.unqualified(),
+                            type.unqualified()))
+            befriended = o;
+    if (!befriended)
+        return ill_formed_at_token(m.id,
+                                   "a qualified friend declaration shall "
+                                   "refer to a previously declared member "
+                                   "of the namespace",
+                                   "dcl.meaning");
+    if (!(entity_table[befriended].type == type) ||
+        entity_table[befriended].c_language_linkage)
+        return not_supported(n, "class.friend");
     entity_table.add_declaration(befriended, n);
     friend_record f;
     f.granting = c;

@@ -1948,6 +1948,9 @@ class semantic_analysis
                                        owned_array<SyntaxRef> &bodies);
     analysis_result friend_class(entity_index c, SyntaxRef n,
                                  SyntaxElement type);
+    analysis_result qualified_friend_function(entity_index c, SyntaxRef n,
+                                              const declarator_meaning &m,
+                                              qualified_type type);
     analysis_result friend_function(entity_index c, SyntaxRef n,
                                     owned_array<SyntaxRef> &bodies);
     /* [class.friend]/6: the functions friend declarations define */
@@ -2222,6 +2225,9 @@ class semantic_analysis
     /* [class.friend]: friend is analysed on a friend declaration's
        decl-specifier-seq only */
     bool friend_allowed = false;
+    /* a friend function's declarator: a qualified declarator-id leaves the
+       class being defined ([class.friend]/1, [basic.lookup.qual]/3) */
+    bool friend_declarator = false;
     /* [ext:gnu_float128] the expression analysed next may name an object of
        type __float128 (or a copy of one through an identity cast): set by
        the contexts that only pass the value on (a function's argument, a
@@ -3700,7 +3706,8 @@ class semantic_analysis
     void equivalent_partial_specializations(uint32_t added);
     analysis_result variable_partial_specialization(SyntaxRef n,
                                                     SyntaxRef declaration,
-                                                    SyntaxRef id);
+                                                    SyntaxRef id,
+                                                    entity_index qualifier);
     analysis_result variable_specialization(SyntaxRef n, SyntaxRef inner,
                                             SyntaxRef id,
                                             entity_index qualifier);
