@@ -438,7 +438,9 @@ class c_lowering
        lvalue object, with n's arguments */
     uint32_t construct_at(const semantic_node &n, uint32_t object, uint32_t vtt,
                           token_index at);
-    uint32_t initialize_into(uint32_t s, ast_qualified_type t, uint32_t n);
+    /* the object in symbol s, of type object_type (C type t) */
+    uint32_t initialize_into(uint32_t s, qualified_type object_type,
+                             ast_qualified_type t, uint32_t n);
     uint32_t temporary_object(uint32_t n);
     /* the class or array of classes type: its innermost element type in
        object, and that class's destructor (0 if none or not a class) */
@@ -3168,18 +3170,31 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
    (of C type t) itself: a constructor's call on it, a conditional's
    operand chosen at run time initializing it ([expr.cond]/7), else its
    value stored */
-uint32_t c_lowering::initialize_into(uint32_t s, ast_qualified_type t,
-                                     uint32_t n)
+uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
+                                     ast_qualified_type t, uint32_t n)
 {
     const semantic_node &x = node(n);
     uint32_t object = c_variable(c, s, t);
-    if (x.kind == semantic_kind::construct && !x.a)
-        return construct_at(x, object, 0, x.at);
+    qualified_type element;
+    element_destructor(object_type, element);
+    if (x.kind == semantic_kind::construct && !x.a) {
+        uint64_t count = element_count(object_type, element);
+        if (!count)
+            return construct_at(x, object, 0, x.at);
+        /* [dcl.init]/7.2: each element, first to last */
+        uint32_t loop =
+            each_element(s, t, type(element, x.at), count, false, x.b, x.at);
+        if (!loop)
+            return 0;
+        return make(AST_NODE_STATEMENT_EXPRESSION,
+                    ast_builder_type_basic(AST_TYPE_VOID), block(&loop, 1), 0,
+                    0, 0, 0);
+    }
     if (x.kind == semantic_kind::conditional && !is_glvalue(x)) {
         uint32_t cond = truth(expression(x.a));
         conditional_depth++;
-        uint32_t b = initialize_into(s, t, x.b);
-        uint32_t c_ = initialize_into(s, t, x.c);
+        uint32_t b = initialize_into(s, object_type, t, x.b);
+        uint32_t c_ = initialize_into(s, object_type, t, x.c);
         conditional_depth--;
         if (!cond || !b || !c_)
             return 0;
@@ -3208,7 +3223,7 @@ uint32_t c_lowering::temporary_object(uint32_t n)
     uint32_t flag = 0;
     if (destructor)
         flag = constructed_flag();
-    uint32_t made = mark_constructed(initialize_into(held, t, n), flag);
+    uint32_t made = mark_constructed(initialize_into(held, x.type, t, n), flag);
     if (!made)
         return 0;
     if (destructor)
@@ -3900,38 +3915,12 @@ void c_lowering::initialized_variable(const semantic_node &n,
         /* a block's object, whose destructor is called below */
         out.append(declaration(n));
     } else {
-        const semantic_node &init = node(n.b);
         uint32_t s = symbol(e, n.at);
-        if (!s)
+        uint32_t made = initialization(e, n.b, n.at);
+        if (!made)
             return;
-        owned_array<uint32_t> arguments;
-        const uint32_t *items = analysis.semantics.items(init.first);
-        for (uint32_t i = 0; i < init.count; i++) {
-            uint32_t a = expression(items[i]);
-            if (!a)
-                return;
-            arguments.append(a);
-        }
-        ast_qualified_type t = type(x.type, n.at);
         out.append(c_declare(c, s));
-        if (bound) {
-            /* [dcl.init]/7.2: each element, first to last */
-            uint32_t loop = each_element(s, t, type(object, n.at), bound, false,
-                                         init.b, n.at);
-            if (!loop)
-                return;
-            out.append(loop);
-        }
-        uint32_t variable = c_variable(c, s, t);
-        uint32_t call = 0;
-        if (!bound)
-            call = special_call(
-                init.b, address_of(variable, ast_builder_type_pointer(c, t)),
-                arguments.data(), init.count, n.at);
-        if (call)
-            out.append(c_statement(c, call));
-        else if (!bound)
-            return;
+        out.append(c_statement(c, made));
     }
     if (destructor && e != named_return) {
         scope_record r;
@@ -6167,26 +6156,11 @@ uint32_t c_lowering::local_function(const char *name, size_t length)
 uint32_t c_lowering::initialization(entity_index e, uint32_t init,
                                     token_index at)
 {
-    const entity &x = analysis.entity_table[e];
-    const semantic_node &n = node(init);
     uint32_t s = symbol(e, at);
     if (!s)
         return 0;
-    ast_qualified_type t = type(x.type, at);
-    uint32_t variable = c_variable(c, s, t);
-    if (n.kind == semantic_kind::construct)
-        return construct_at(n, variable, 0, at);
-    if (is_reference(x.type)) {
-        uint32_t value = expression(init);
-        if (!value)
-            return 0;
-        return make(AST_NODE_ASSIGN, t, variable, value, 0, 0, 0);
-    }
-    uint32_t value = initializer(init);
-    if (!value)
-        return 0;
-    return make(AST_NODE_ASSIGN, AST_QUALIFIED_TYPE_UNQUALIFIED(t), variable,
-                value, 0, 0, 0);
+    qualified_type t = analysis.entity_table[e].type;
+    return initialize_into(s, t, type(t, at), init);
 }
 
 /* [intro.execution]/5.3: the initialization of a static variable, a
