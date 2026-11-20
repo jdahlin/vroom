@@ -32,3 +32,18 @@ template <class P, class I> void sift(I last) {
   int t(incomplete_ops<P>::move(last));
   int u = incomplete_ops<P>::move(last);
 }
+
+// [namespace.udecl]/1, [temp.dep.type]/6: a using-declaration of a member of
+// a dependent base declares a name that is no type: a call of it in an
+// out-of-class member definition is an expression (libc++'s __split_buffer).
+template <class T> struct ud_base { static const int v = 1; int f(int); };
+template <class T> struct ud_derived : ud_base<T> {
+  using ud_base<T>::v;
+  using ud_base<T>::f;
+  int h(int);
+};
+template <class T> int ud_derived<T>::h(int p) {
+  f(p);
+  bool b = v < 3;
+  return b + (v > 2);
+}

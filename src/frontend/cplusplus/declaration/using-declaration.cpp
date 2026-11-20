@@ -100,8 +100,16 @@ node_index parser::using_declarator()
             /* [temp.dep.type]/9: a type named through a dependent
                nested-name-specifier is dependent */
             dependent = qualifier_dependent;
-        } else if (known)
+        } else if (known) {
             kind = names.lookup_qualified(scope, name);
+        } else if (qualifier_dependent) {
+            /* [temp.dep.type]/6, [temp.res]/4: what a dependent base's
+               member is, the parser cannot tell, but it names no type
+               without typename: it is declared as something that is no
+               type, as a call of it in a member's body needs */
+            kind = name_kind::other;
+            dependent = true;
+        }
         if (kind != name_kind::not_declared &&
             kind != name_kind::namespace_name)
             names.declare(name, kind, 0, dependent);
