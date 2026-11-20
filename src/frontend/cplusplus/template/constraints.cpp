@@ -545,22 +545,46 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
     return 0;
 }
 
-entity_index semantic_analysis::constraint_concept(entity_index scope,
-                                                   token_index i) const
+/* what token i names, looked up from scope outward, the global namespace
+   (0) last: the entity of the nearest scope that declares the name */
+entity_index semantic_analysis::constraint_name(entity_index scope,
+                                                token_index i) const
 {
     uint32_t name = tokens.identifier(i);
     if (!name)
         return 0;
-    /* scope's scopes outward, the global namespace (0) last */
     for (entity_index s = scope;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
-        if (e && concept_of(e))
+        if (e || !s)
             return e;
-        if (e)
-            return 0;
-        if (!s)
-            return 0;
     }
+}
+
+entity_index semantic_analysis::constraint_concept(entity_index scope,
+                                                   token_index i) const
+{
+    entity_index e = constraint_name(scope, i);
+    if (e && concept_of(e))
+        return e;
+    return 0;
+}
+
+entity_index semantic_analysis::constraint_template(entity_index scope,
+                                                    token_index i) const
+{
+    entity_index e = constraint_name(scope, i);
+    if (e && (concept_of(e) || variable_template_of(e)))
+        return e;
+    return 0;
+}
+
+entity_index semantic_analysis::constraint_class(entity_index scope,
+                                                 token_index i) const
+{
+    entity_index e = constraint_name(scope, i);
+    if (e && entity_table[e].kind == entity_kind::class_type)
+        return e;
+    return 0;
 }
 
 analysis_result semantic_analysis::template_constraints_satisfied(

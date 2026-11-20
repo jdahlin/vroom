@@ -448,7 +448,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         return constraint_expression(t, c[0]) && constraint_expression(t, c[2]);
     }
     case syntax_kind::simple_template_id: {
-        if (!c[0].is_token() || !analysis.constraint_concept(t, c[0].token()))
+        if (!c[0].is_token() || !analysis.constraint_template(t, c[0].token()))
             return false;
         if (!source_name(analysis.token_identifier(c[0].token())))
             return false;
@@ -472,7 +472,15 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             if (!a.is_token())
                 return false;
             entity_index pe = analysis.constraint_parameter(t, a.token());
-            if (!pe || !type(analysis.entity_table[pe].type))
+            if (pe) {
+                if (!type(analysis.entity_table[pe].type))
+                    return false;
+                continue;
+            }
+            /* a class of the template's scope */
+            entity_index k = analysis.constraint_class(
+                analysis.entity_table[t].enclosing, a.token());
+            if (!k || !type(analysis.entity_table[k].type))
                 return false;
         }
         text("E");

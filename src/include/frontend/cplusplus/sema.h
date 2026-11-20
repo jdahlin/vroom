@@ -4612,8 +4612,16 @@ class semantic_analysis
             .parameter_count;
     }
     entity_index constraint_parameter(entity_index t, token_index i) const;
+    /* what token i names, looked up from scope outward (0: none) */
+    entity_index constraint_name(entity_index scope, token_index i) const;
     /* the concept token i names, looked up from scope outward (0: none) */
     entity_index constraint_concept(entity_index scope, token_index i) const;
+    /* the concept or variable template token i names in a requires-clause
+       ([temp.names]/8, [abi:expressions]'s <unresolved-name>), looked up from
+       scope outward (0: none) */
+    entity_index constraint_template(entity_index scope, token_index i) const;
+    /* the class token i names, looked up from scope outward (0: none) */
+    entity_index constraint_class(entity_index scope, token_index i) const;
     /* [abi:mangle.function-param]: the position plus one of function
        template t's parameter named by token i (0: none) */
     uint32_t function_parameter_position(entity_index t, token_index i) const;

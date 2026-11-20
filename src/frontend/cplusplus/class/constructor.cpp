@@ -138,8 +138,10 @@ analysis_result semantic_analysis::member_template_declaration(
         inner[at].is(syntax_kind::decl_specifier_seq) &&
         !declares_special_member(c, inner[at + 1]))
         return member_function_template(c, n, inner, access);
-    /* a constrained constructor template ([temp.constr.decl]) */
-    if (head_constraint(n))
+    /* a constrained constructor template only declared ([temp.constr.decl]);
+       a defined one is a member_function_template, whose deduction checks
+       the constraints ([temp.deduct]/5) */
+    if (head_constraint(n) && !inner.is(syntax_kind::function_definition))
         return not_supported(n, "temp.constr");
     if (at < inner.size() && inner[at].is(syntax_kind::decl_specifier_seq)) {
         /* (the template-parameters are not in scope here: a condition is
