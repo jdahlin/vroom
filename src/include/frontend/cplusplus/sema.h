@@ -3510,6 +3510,11 @@ class semantic_analysis
         token_index at = 0;
     };
     owned_array<inheriting_declaration> inheriting;
+    /* the constraints being checked, template and arguments as a key
+       (template_constraints_satisfied): one that needs its own
+       satisfaction is the program's error ([temp.constr.constr]; clang's
+       "satisfaction of constraint depends on itself"), not analysed */
+    owned_array<uint64_t> constraints_in_progress;
     analysis_result inheriting_using(UsingDeclarator n, token_index at,
                                      entity_index base);
     analysis_result inherit_constructors(entity_index c, SyntaxRef n);

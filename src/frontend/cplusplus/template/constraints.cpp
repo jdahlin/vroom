@@ -642,8 +642,26 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     }
     if (!constraint || !satisfied)
         return analysis_result::well_formed;
-    return constraint_satisfied(constraint, scope, ft.declaration.first_token(),
-                                satisfied);
+    /* [temp.constr.constr]: a constraint whose satisfaction asks for its own
+       (a constructor template constrained by __is_constructible of its
+       class) */
+    uint64_t key = function_template;
+    for (const template_argument &a : values) {
+        key = key * 1099511628211u + static_cast<uint64_t>(a.kind);
+        key = key * 1099511628211u + a.type.unqualified();
+        key = key * 1099511628211u + static_cast<uint64_t>(a.type.cv());
+        key = key * 1099511628211u + a.value;
+        key = key * 1099511628211u + a.template_entity;
+        key = key * 1099511628211u + a.count;
+    }
+    for (uint64_t k : constraints_in_progress)
+        if (k == key)
+            return not_supported(constraint, "temp.constr");
+    constraints_in_progress.append(key);
+    analysis_result r = constraint_satisfied(
+        constraint, scope, ft.declaration.first_token(), satisfied);
+    constraints_in_progress.resize(constraints_in_progress.size() - 1);
+    return r;
 }
 
 } // namespace cplusplus
