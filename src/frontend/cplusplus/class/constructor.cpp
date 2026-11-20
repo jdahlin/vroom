@@ -2178,7 +2178,10 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
     subobject_classes(c, classes);
     for (entity_index k : classes)
         if (entity_table[k].kind == entity_kind::class_type &&
-            default_constructor_deleted(k))
+            default_constructed(c, k) && default_constructor_deleted(k))
+            /* a member with a default member initializer is not
+               default-initialized by the constructor ([class.base.init]/9.1),
+               and a deleted function it would call does not delete this one */
             return true;
     return false;
 }

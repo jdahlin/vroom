@@ -1240,7 +1240,11 @@ analysis_result semantic_analysis::reference_list_initialization(
         /* a class or an array initialized from it: the clause is analysed
            again by the list-initialization of the prvalue */
     }
-    VTRY(r, list_initialization_of(list, clauses, prvalue_type, false, made));
+    /* [dcl.init.list]/3.10 as clang has it (and as C++11 to C++17 worded
+       it): by copy-list-initialization or direct-list-initialization,
+       depending on the kind of initialization for the reference; the
+       text since CWG 2267 always copies */
+    VTRY(r, list_initialization_of(list, clauses, prvalue_type, direct, made));
     m.evaluation = made.evaluation;
     m.value = made.value;
     m.node = made.node;
