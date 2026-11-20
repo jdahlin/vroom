@@ -1819,11 +1819,13 @@ class semantic_analysis
     /* [basic.lookup.argdep]: the functions named name in the namespaces
        associated with arguments of these types, added to found (each
        once); false if one of those namespaces has a declaration of the
-       name that analysis did not follow */
-    bool argument_dependent_lookup(uint32_t name,
-                                   const owned_array<qualified_type> &arguments,
-                                   owned_array<entity_index> &found,
-                                   entity_index known = 0) const;
+       name that analysis did not follow.  The function templates found
+       (their held names, each once) go to templates; without it a
+       function template is one analysis did not follow too */
+    bool argument_dependent_lookup(
+        uint32_t name, const owned_array<qualified_type> &arguments,
+        owned_array<entity_index> &found, entity_index known = 0,
+        owned_array<entity_index> *templates = nullptr) const;
     /* [basic.lookup.argdep]/2: the associated classes and namespaces of
        arguments of these types, with the inline namespaces /2 adds; false
        as associated_with */

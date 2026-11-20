@@ -208,10 +208,11 @@ analysis_result semantic_analysis::overloaded_operator(
         lookup_result found = lookup_unqualified(name, lookup_filter::any);
         /* [temp.over]/1: operator function templates by that name, whose
            specializations deduced from the operands are candidates too */
-        uint32_t function_template = 0;
-        if (found.unknown && !found.ambiguous)
-            function_template = function_template_of(found.unknown_entity);
-        if ((found.unknown && !function_template) || found.ambiguous)
+        owned_array<entity_index> held_names;
+        if (found.unknown && !found.ambiguous &&
+            function_template_of(found.unknown_entity))
+            held_names.append(found.unknown_entity);
+        else if (found.unknown || found.ambiguous)
             return not_supported(n, "over.match.oper");
         owned_array<entity_index> set;
         if (found.entity) {
@@ -224,17 +225,22 @@ analysis_result semantic_analysis::overloaded_operator(
         owned_array<qualified_type> types;
         for (const expression_meaning &e : operands)
             types.append(e.type);
-        uint32_t held = 0;
-        if (function_template)
-            held = function_templates[function_template - 1].name;
-        if (!argument_dependent_lookup(name, types, set, held))
+        entity_index known = 0;
+        if (!held_names.empty())
+            known = held_names[0];
+        if (!argument_dependent_lookup(name, types, set, known, &held_names))
             return not_supported(n, "basic.lookup.argdep");
-        if (function_template) {
+        if (!held_names.empty()) {
             owned_array<uint32_t> group;
-            function_template_overloads(held, group);
-            for (const template_name_function &x : template_name_functions)
-                if (x.name == held)
-                    set.append(x.function);
+            for (entity_index held : held_names) {
+                owned_array<uint32_t> one;
+                function_template_overloads(held, one);
+                for (uint32_t t : one)
+                    group.append(t);
+                for (const template_name_function &x : template_name_functions)
+                    if (x.name == held)
+                        set.append(x.function);
+            }
             owned_array<expression_meaning> in_order;
             for (size_t i = 0; i < count; i++)
                 in_order.append(operand(i));

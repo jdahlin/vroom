@@ -64,7 +64,6 @@ old-nullptr-args	vcc: the rules of [temp.deduct] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
 old-ooc-member-template-overloads	vcc: the rules of [temp.mem] are not implemented yet
 old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
-old-operator-member-vs-free	vcc: the rules of [basic.lookup.argdep] are not implemented yet
 old-operators	vcc: the rules of [over.built] are not implemented yet
 old-overload-set-argument	vcc: the rules of [temp.names] are not implemented yet
 old-overloaded-comma	vcc: the rules of [expr.ref] are not implemented yet
