@@ -302,7 +302,7 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         /* value-initialization of a class ([dcl.init]/8) calls a default
            constructor, and a member's default member initializer
            ([class.mem]/10) is not in the tree: neither is modelled */
-        if (zero)
+        if (zero && count)
             return constness::unknown;
     }
     if (init && !zero) {
@@ -704,12 +704,15 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
     constness c;
     if (x.evaluation == constness::constant &&
         x.category == value_category::prvalue) {
-        /* [basic.fundamental]: an integer or a double analysis folded */
+        /* [basic.fundamental]: an integer or a double analysis folded;
+           an object of class type (`E{}`) is made by the cases below */
         fundamental_type f = evaluated_type(x.type);
-        if (f == fundamental_type::none)
+        if (f != fundamental_type::none) {
+            v = value_of(f, x.value);
+            return constness::constant;
+        }
+        if (type_table[x.type.unqualified()].kind != type_kind::class_type)
             return constness::unknown;
-        v = value_of(f, x.value);
-        return constness::constant;
     }
     if (x.category != value_category::prvalue &&
         x.kind != semantic_kind::increment) {
@@ -1128,8 +1131,13 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
     const entity &k = entity_table[x.b];
     entity_index c_entity = evaluated_class(entity_table[k.enclosing].type);
     if (k.implicit) {
-        if (!x.count)
+        /* [class.default.ctor]/1: the implicit default constructor of a
+           class with no members and no bases does nothing */
+        if (!x.count) {
+            if (c_entity && !entity_table[c_entity].member_count)
+                return constness::constant;
             return constness::unknown;
+        }
         if (x.count != 1 || !c_entity || !is_copy_constructor(c_entity, x.b))
             return constness::unknown;
         uint32_t argument = semantics.items(x.first)[0];
