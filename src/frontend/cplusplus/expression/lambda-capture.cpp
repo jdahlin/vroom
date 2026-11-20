@@ -625,6 +625,7 @@ analysis_result semantic_analysis::resolve_pending_uses(lambda_context &l)
 {
     size_t depth = lambdas.size();
     size_t keep = 0;
+    analysis_result result = analysis_result::well_formed;
     for (size_t i = 0; i < pending_uses.size(); i++) {
         pending_use u = pending_uses[i];
         if (u.lambda_depth != depth) {
@@ -636,6 +637,8 @@ analysis_result semantic_analysis::resolve_pending_uses(lambda_context &l)
             semantics[u.node].evaluation = constness::constant;
             continue;
         }
+        if (result != analysis_result::well_formed)
+            continue;
         expression_meaning access;
         entity_index outer_this = function_state.this_entity;
         function_state.this_entity = u.this_entity;
@@ -643,16 +646,19 @@ analysis_result semantic_analysis::resolve_pending_uses(lambda_context &l)
         for (size_t k = l.first_capture; k < lambda_captures.size(); k++)
             if (lambda_captures[k].variable == u.variable)
                 member = lambda_captures[k].member;
-        if (member) {
-            VTRY(r, closure_member(u.at, member, access));
-        } else {
-            VTRY(r, capture_variable(l, u.at, u.variable, access));
-        }
+        analysis_result r = analysis_result::well_formed;
+        if (member)
+            r = closure_member(u.at, member, access);
+        else
+            r = capture_variable(l, u.at, u.variable, access);
         function_state.this_entity = outer_this;
-        semantics[u.node] = semantics[access.node];
+        if (r != analysis_result::well_formed)
+            result = r;
+        else
+            semantics[u.node] = semantics[access.node];
     }
     pending_uses.resize(keep);
-    return analysis_result::well_formed;
+    return result;
 }
 
 /*
