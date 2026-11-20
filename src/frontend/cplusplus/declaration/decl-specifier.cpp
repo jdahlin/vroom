@@ -45,6 +45,26 @@ namespace
  * template.  With template_ids, a < after any other name makes the name
  * unknown (a declaration's caller cannot tell a type from what follows).
  */
+/* [temp.dep.type]/1: whether a template-argument-list, the tokens from
+   first to end (its '<' and '>' included), names a template parameter or
+   a dependent name: the specialization is then dependent, and so are the
+   members it has ([temp.res]/4: not types without typename) */
+static bool arguments_dependent(parser &p, unsigned first, unsigned end)
+{
+    for (unsigned i = first + 1; i + 1 < end; i++) {
+        if (!p.at_identifier(i) ||
+            p.at(preprocessing_op_or_punc::COLON_COLON, i - 1))
+            continue;
+        scope_index found = 0;
+        bool found_dependent = false;
+        p.names.lookup_unqualified(p.tokens.identifier(p.position + i), &found,
+                                   &found_dependent);
+        if (found_dependent)
+            return true;
+    }
+    return false;
+}
+
 name_class classify(parser &p, unsigned ahead, unsigned *length,
                     bool template_ids)
 {
@@ -122,6 +142,9 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
                 *length = after - ahead;
                 return name_class::unknown;
             }
+            if (p.at(preprocessing_op_or_punc::COLON_COLON, end) &&
+                arguments_dependent(p, after, end))
+                dependent = true;
             after = end;
             arguments = true;
         }
@@ -199,6 +222,12 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
         case name_kind::concept_name:
             return name_class::concept_;
         case name_kind::not_declared:
+            /* [temp.dep.type]/6: a member of a dependent specialization the
+               parser finds nothing for (the primary template is incomplete,
+               or the member is a base's) is a member of an unknown
+               specialization: no type without typename ([temp.res]/4) */
+            if (class_name && dependent)
+                return name_class::dependent;
             return name_class::unknown;
         default:
             return name_class::not_a_type;
