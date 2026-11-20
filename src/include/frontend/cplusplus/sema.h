@@ -1869,6 +1869,7 @@ class semantic_analysis
     /* e was just held by a template-declaration (held_by_template): the
        declaration being analysed gives it its reason when it is refused */
     void note_held(entity_index e);
+    entity_index make_held_name(uint32_t name, entity_index scope);
     bool declared_by(entity_index e, SyntaxRef node) const;
     analysis_result declare_local(SyntaxRef declaration, token_index id,
                                   entity_kind kind, qualified_type type,
@@ -4715,6 +4716,10 @@ class semantic_analysis
         uint32_t count, bool copy, owned_array<overload_candidate> &candidates,
         owned_array<uint32_t> *first_arguments = nullptr,
         owned_array<template_argument> *all = nullptr);
+    void
+    function_candidates(const owned_array<entity_index> &functions, bool member,
+                        owned_array<overload_candidate> &candidates,
+                        owned_array<uint32_t> *first_arguments = nullptr) const;
     analysis_result member_template_candidates(
         SyntaxRef n, entity_index held, bool with_object,
         const expression_meaning *arguments, uint32_t count,

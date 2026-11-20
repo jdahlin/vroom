@@ -1532,13 +1532,7 @@ analysis_result semantic_analysis::template_call(
         owned_array<overload_candidate> candidates;
         owned_array<uint32_t> first_arguments;
         owned_array<template_argument> all;
-        for (entity_index e : functions) {
-            overload_candidate c;
-            c.function = e;
-            c.type = entity_table[e].type;
-            candidates.append(c);
-            first_arguments.append(0);
-        }
+        function_candidates(functions, false, candidates, &first_arguments);
         const owned_array<SyntaxElement> *given_written = nullptr;
         if (written_at)
             given_written = &written;
