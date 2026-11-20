@@ -213,6 +213,8 @@ namespace
 struct constexpr_body {
     bool returns = false;
     token_index not_in_cplusplus_11 = 0;
+    /* [ext:gnu_labels_as_values] a computed goto (0: none) */
+    token_index computed_goto = 0;
     /* the declaration statements of automatic variables */
     owned_array<uint32_t> variables;
 };
@@ -236,6 +238,10 @@ void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
         return;
     case semantic_kind::declaration_statement:
         found.variables.append(n);
+        return;
+    case semantic_kind::indirect_goto_statement:
+        if (!found.computed_goto)
+            found.computed_goto = x.at;
         return;
     /* (clang allows the other statements as extensions, expression
        statements too; an evaluation that modifies an object is what C++11
@@ -287,7 +293,10 @@ analysis_result semantic_analysis::analyse_function_body(
     function_state.breakable = 0;
     function_state.labels.clear();
     function_state.gotos.clear();
+    function_state.indirect_gotos.clear();
+    function_state.label_addresses.clear();
     function_state.initialized.clear();
+    function_state.destroyed.clear();
     function_state.switches.clear();
     function_state.case_values.clear();
     analysis_result result = analysis_result::well_formed;
@@ -450,6 +459,15 @@ analysis_result semantic_analysis::analyse_function_body(
         constexpr_body found;
         walk_constexpr_body(semantics, block, found);
         bool returns_void = fundamental_of(returns) == fundamental_type::void_;
+        /* clang: "statement not allowed in constexpr function" for GNU's
+           computed goto in every edition (a goto is allowed from C++23) */
+        if (found.computed_goto)
+            result =
+                worse(result, ill_formed_at_token(
+                                  found.computed_goto,
+                                  "the body of a constexpr function shall not "
+                                  "contain a computed goto statement",
+                                  "ext.gnu"));
         /* C++11's [dcl.constexpr]/3: the function-body "shall be ... a
            compound-statement that contains only" null statements,
            static_assert-declarations, typedefs, using-declarations and
@@ -571,6 +589,7 @@ analysis_result semantic_analysis::analyse_function_body(
                                       "declarations with initialization",
                                       "stmt.dcl"));
     }
+    result = worse(result, check_indirect_gotos());
     current_scope = outer_scope;
     claim_place = 0;
     claim_scope = outer_scope;

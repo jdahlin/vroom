@@ -519,7 +519,7 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
         /* (jump-statement's sum also has these two kinds: the sum's case
            would take them, and report their own subclauses elsewhere) */
         [&](CoroutineReturnStatement c) { return not_supported(c); },
-        [&](GnuComputedGoto c) { return not_supported(c); },
+        [&](GnuComputedGoto c) { return gnu_computed_goto(c, built); },
         [&](GnuAsmStatement c) { return gnu_asm_statement(c, built); },
         [&](JumpStatement c) { return jump_statement(c, built); },
         [&](LabeledStatement c) { return labeled_statement(c, built); },

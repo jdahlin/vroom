@@ -188,6 +188,11 @@ uint32_t ast_builder_string(cc *c, ast_qualified_type element,
    AST_NODE_LABEL node made with ast_builder_label_define */
 uint32_t ast_builder_label(cc *c, const char *name, size_t length);
 uint32_t ast_builder_label_define(cc *c, uint32_t label, uint32_t statement);
+/* &&label (GNU): an AST_NODE_LABEL_ADDRESS of type void *; the label's
+   address is taken, so a computed goto may reach it */
+uint32_t ast_builder_label_address(cc *c, uint32_t label);
+/* goto *address; (GNU): address a void * node */
+uint32_t ast_builder_goto_indirect(cc *c, uint32_t address);
 /* AST_NODE_CASE for value, its statement s */
 uint32_t ast_builder_case(cc *c, int64_t value, uint32_t s);
 

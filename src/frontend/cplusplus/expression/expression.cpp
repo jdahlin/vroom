@@ -237,6 +237,8 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
         return clang_type_trait(e, m);
     case syntax_kind::gnu_offsetof_expression:
         return gnu_offsetof(e, m);
+    case syntax_kind::gnu_label_address:
+        return gnu_label_address(e, m);
     case syntax_kind::gnu_va_arg_expression:
         return gnu_va_arg(e, m);
     case syntax_kind::gnu_compound_literal:

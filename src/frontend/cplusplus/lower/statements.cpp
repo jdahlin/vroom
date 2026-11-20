@@ -254,6 +254,9 @@ bool c_lowering::address_constant(uint32_t n) const
 {
     const semantic_node &x = node(n);
     switch (x.kind) {
+    case semantic_kind::label_address:
+        /* the linker resolves it ([ext:gnu_labels_as_values]) */
+        return true;
     case semantic_kind::address:
         return static_lvalue(x.a);
     case semantic_kind::conversion:
@@ -758,6 +761,18 @@ uint32_t c_lowering::statement(uint32_t index)
         destroy(from, items, n.at);
         items.append(jump);
         return block(items);
+    }
+    case semantic_kind::indirect_goto_statement: {
+        /* the target is unknown here: no object's destructor is run on the
+           way out, so a computed goto in an object's scope is refused */
+        if (leaving_objects())
+            return fail("a computed goto in the scope of an object with a "
+                        "destructor",
+                        n.at);
+        uint32_t address = expression(n.a);
+        if (!address)
+            return 0;
+        return ast_builder_goto_indirect(c, address);
     }
     case semantic_kind::break_statement:
     case semantic_kind::continue_statement: {

@@ -293,6 +293,7 @@ struct tree_checker {
                 problem(n, "an asm output is not an lvalue");
             break;
         case semantic_kind::source_location:
+        case semantic_kind::label_address:
             break;
         case semantic_kind::default_argument:
             child(n, node.a, tree_sort::initializer, false, "argument");
@@ -390,6 +391,10 @@ struct tree_checker {
             break;
         case semantic_kind::return_statement:
             child(n, node.a, tree_sort::initializer, true, "operand");
+            break;
+        case semantic_kind::indirect_goto_statement:
+            child(n, node.a, tree_sort::expression, false, "address");
+            prvalue(n, node.a, "address");
             break;
         case semantic_kind::goto_statement:
         case semantic_kind::break_statement:

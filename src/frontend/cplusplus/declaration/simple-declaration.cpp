@@ -1569,6 +1569,7 @@ analysis_result semantic_analysis::declare_with_initializer(
         kind == entity_kind::variable && declared_in_scope == current_scope &&
         !is_namespace(entity_table[declared_entity].enclosing))
         block_variables.append(declared_entity);
+    bool default_constructed = false;
     if (r == analysis_result::well_formed && !initialized &&
         kind == entity_kind::variable &&
         entity_table[declared_entity].defined && !s.extern_) {
@@ -1607,6 +1608,7 @@ analysis_result semantic_analysis::declare_with_initializer(
             initialized_value value;
             VTRY_SET(r, construct(declaration, object, none, 0, value));
             entity_table[declared_entity].definition = value.node;
+            default_constructed = true;
         }
     }
     if (r == analysis_result::well_formed && !initialized &&
@@ -1618,6 +1620,31 @@ analysis_result semantic_analysis::declare_with_initializer(
         entity_index k = element_class(entity_table[declared_entity].type);
         if (is_class_entity(k) && !assigned_bitwise(k))
             return not_supported(declaration, "stmt.dcl");
+    }
+    /* [ext:gnu_labels_as_values] a computed goto shall not leave the scope
+       of a variable with a non-trivial destructor (clang's "jump exits
+       scope of variable with non-trivial destructor") */
+    if (r == analysis_result::well_formed && function_state.active &&
+        entity_table[declared_entity].automatic && default_constructed &&
+        !tokens.files.behavior.microsoft_extensions &&
+        !tokens.files.behavior.microsoft_compatibility) {
+        /* [stmt.dcl]/3: a non-vacuous initialization is a declaration with
+           initialization (Microsoft's modes make the jump past one a
+           warning, which analysis does not tell apart) */
+        jump_point point;
+        point.scope = current_scope;
+        point.at = m.id;
+        function_state.initialized.append(point);
+    }
+    if (r == analysis_result::well_formed && function_state.active &&
+        entity_table[declared_entity].automatic) {
+        entity_index k = element_class(entity_table[declared_entity].type);
+        if (is_class_entity(k) && entity_table[k].destructor) {
+            jump_point point;
+            point.scope = current_scope;
+            point.at = m.id;
+            function_state.destroyed.append(point);
+        }
     }
     if (r != analysis_result::well_formed || !initialized)
         return r;
