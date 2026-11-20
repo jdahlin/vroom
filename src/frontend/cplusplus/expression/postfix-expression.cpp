@@ -1810,11 +1810,19 @@ analysis_result semantic_analysis::immediate_invocation(SyntaxRef n,
     constant_value v;
     bool constant = false;
     VTRY(r, evaluate_constant(n, m.node, v, constant));
-    if (!constant)
+    if (!constant) {
+        /* a lambda's function call operator is immediate-escalating
+           (P2564R3, a defect report clang applies to every edition): not
+           analysed */
+        entity_index owner = function_state.function;
+        if (owner && entity_table[owner].enclosing &&
+            entity_table[entity_table[owner].enclosing].lambda)
+            return not_supported(n, "expr.const");
         return ill_formed(n,
                           "an immediate invocation shall be a constant "
                           "expression",
                           "expr.const");
+    }
     /* a value of class type is not one an expression_meaning keeps */
     if (m.category != value_category::prvalue ||
         evaluated_type(m.type) == fundamental_type::none)

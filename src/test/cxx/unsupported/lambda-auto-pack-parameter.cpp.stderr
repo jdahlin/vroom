@@ -1,0 +1,2 @@
+lambda-auto-pack-parameter.cpp:6:21: error: the rules of [dcl.spec.auto] are not implemented yet
+lambda-auto-pack-parameter.cpp:6:21: note: refused by vcc's frontend/cplusplus/declaration/decl-specifier.cpp:N (decl_specifier_seq)

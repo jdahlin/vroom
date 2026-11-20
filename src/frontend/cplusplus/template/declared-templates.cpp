@@ -312,6 +312,14 @@ analysis_result semantic_analysis::template_head_parameters(
         return not_supported(n, "temp.variadic");
     if (head_constraint(n) && !constrained)
         return not_supported(n, "temp.constr");
+    return validate_template_parameters(n, parameters, packs, pack_anywhere,
+                                        type_constraints);
+}
+
+analysis_result semantic_analysis::validate_template_parameters(
+    SyntaxRef n, const owned_array<SyntaxRef> &parameters, bool packs,
+    bool pack_anywhere, bool type_constraints)
+{
     /* a type-parameter class identifier_opt, a template template-parameter
        template < type-parameters > class identifier_opt, a
        parameter-declaration decl-specifier-seq identifier_opt, each with =

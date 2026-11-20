@@ -825,8 +825,21 @@ analysis_result semantic_analysis::structured_binding_use(token_index t,
     while (s && entity_table[s].kind == entity_kind::block_scope)
         s = entity_table[s].enclosing;
     if (entity_table[x.binding_object].automatic &&
-        (!function_state.active || s != function_state.function))
-        return not_supported(current_declaration, "expr.prim.lambda.capture");
+        (!function_state.active || s != function_state.function)) {
+        /* [expr.prim.lambda.capture]/4 (C++20): a structured binding is a
+           local entity, captured as a variable of its type; in a local
+           class's member function it is not odr-usable
+           ([basic.def.odr]/10) */
+        if (!function_state.active || !current_lambda())
+            return not_supported(current_declaration, "basic.def.odr");
+        bool deferred = false, plain = false;
+        VTRY(captured, captured_entity(t, b, m, deferred, plain));
+        if (!plain) {
+            m.entity = 0;
+            m.binding = b;
+            return analysis_result::well_formed;
+        }
+    }
     analysis_result r = analysis_result::well_formed;
     if (x.binding_target &&
         entity_table[x.binding_target].kind == entity_kind::variable &&

@@ -155,6 +155,25 @@ bool semantic_analysis::template_parameter_is_pack(uint32_t i) const
     return template_parameter_form(template_parameter_nodes[i], x) && x.pack;
 }
 
+semantic_analysis::template_parameter_form_kind
+semantic_analysis::template_parameter_kind(entity_index t, uint32_t i,
+                                           bool &pack,
+                                           qualified_type &value_type) const
+{
+    uint32_t index =
+        function_templates[entity_table[t].instantiation - 1].first_parameter +
+        i;
+    pack = template_parameter_is_pack(index);
+    entity_index e = template_parameter_entities[index];
+    value_type = qualified_type();
+    if (entity_table[e].kind == entity_kind::typedef_name)
+        return template_parameter_form_kind::type;
+    if (entity_table[e].kind == entity_kind::template_entity)
+        return template_parameter_form_kind::template_;
+    value_type = entity_table[e].type;
+    return template_parameter_form_kind::value;
+}
+
 /* whether t is the name of a template parameter pack */
 bool semantic_analysis::names_template_parameter_pack(qualified_type t) const
 {
