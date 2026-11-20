@@ -107,17 +107,49 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
             first = p.default_argument.token();
             end = first + 1;
         }
+        /* /8: "The keyword this shall not be used in a default argument of
+           a member function" */
+        for (token_index t = first; t < end && member; t++)
+            if (tokens[t].kind == token_kind::keyword &&
+                this->p.keyword_of(tokens[t]) == standard_keyword::this_)
+                return ill_formed(p.declaration,
+                                  "the keyword this shall not be used in a "
+                                  "default argument of a member function",
+                                  "dcl.fct.default");
+        /* /9: "A non-static member shall not appear in a default argument
+           unless it appears as the id-expression of a class member access
+           expression or unless it is used to form a pointer to member":
+           a name that may be one is not analysed, except in an unevaluated
+           operand ([expr.prim.id]/3: sizeof(m) is no use of the member) */
+        auto unevaluated_operand = [&](token_index k) {
+            if (tokens[k].kind != token_kind::keyword)
+                return false;
+            standard_keyword kw = this->p.keyword_of(tokens[k]);
+            return kw == standard_keyword::sizeof_ ||
+                   kw == standard_keyword::alignof_ ||
+                   kw == standard_keyword::decltype_ ||
+                   kw == standard_keyword::noexcept_;
+        };
+        int depth = 0;
+        int unevaluated_depth = -1;
         for (token_index t = first; t < end && member; t++) {
-            /* /9: "A non-static member shall not appear in a default
-               argument unless it appears as the id-expression of a class
-               member access expression or unless it is used to form a
-               pointer to member"; /8: "The keyword this shall not be
-               used in a default argument of a member function": a name
-               that may be one is not analysed */
-            if (tokens[t].kind == token_kind::keyword)
-                if (this->p.keyword_of(tokens[t]) == standard_keyword::this_)
-                    return not_supported(p.declaration, "dcl.fct.default");
-            if (tokens[t].kind != token_kind::identifier)
+            if (is_operator(tokens[t],
+                            preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+                if (unevaluated_depth < 0 && t > first &&
+                    unevaluated_operand(t - 1))
+                    unevaluated_depth = depth;
+                depth++;
+                continue;
+            }
+            if (is_operator(tokens[t],
+                            preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+                depth--;
+                if (depth == unevaluated_depth)
+                    unevaluated_depth = -1;
+                continue;
+            }
+            if (tokens[t].kind != token_kind::identifier ||
+                unevaluated_depth >= 0)
                 continue;
             lookup_result found = lookup_qualified(
                 x.enclosing, tokens.identifier(t), lookup_filter::any);
@@ -132,9 +164,19 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                     return not_supported(p.declaration, "dcl.fct.default");
         qualified_type type = types[i];
         initialized_value value;
+        /* [ext:clang_source_location] the call's place is the value of a
+           builtin that names it */
+        uint32_t site_nodes = call_site_nodes;
+        struct call_site_scope {
+            unsigned &depth;
+            ~call_site_scope()
+            {
+                depth--;
+            }
+        } at_call = {++call_site_depth};
         VTRY(r, initialize_from(p.declaration, p.default_argument, type, false,
                                 false, value));
-        nodes[i] = value.node;
+        nodes[i] = wrap_call_site(value.node, first, site_nodes);
     }
     /* /4: "In a given function declaration, each parameter subsequent to a
        parameter with a default argument shall have a default argument

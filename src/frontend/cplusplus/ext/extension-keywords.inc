@@ -58,10 +58,16 @@ EXTENSION_KEYWORD(offsetof_, "__builtin_offsetof", gnu_offsetof)
 EXTENSION_KEYWORD(va_arg_, "__builtin_va_arg", gnu_va_arg)
 EXTENSION_KEYWORD(bit_cast, "__builtin_bit_cast", clang_bit_cast)
 EXTENSION_KEYWORD(convertvector, "__builtin_convertvector", clang_convertvector)
+EXTENSION_KEYWORD(datasizeof_, "__datasizeof", clang_datasizeof)
 EXTENSION_KEYWORD(atomic, "_Atomic", clang_atomic)
 EXTENSION_KEYWORD(c11_thread_local, "_Thread_local", clang_c11_thread_local)
 EXTENSION_KEYWORD(bit_int, "_BitInt", clang_bit_int)
 EXTENSION_KEYWORD(source_location, "__builtin_source_location", clang_source_location)
+EXTENSION_KEYWORD(source_location_value, "__builtin_FILE", clang_source_location)
+EXTENSION_KEYWORD(source_location_value, "__builtin_FILE_NAME", clang_source_location)
+EXTENSION_KEYWORD(source_location_value, "__builtin_FUNCTION", clang_source_location)
+EXTENSION_KEYWORD(source_location_value, "__builtin_LINE", clang_source_location)
+EXTENSION_KEYWORD(source_location_value, "__builtin_COLUMN", clang_source_location)
 
 /* [ext:clang_type_traits] (clang Language Extensions, Type Trait
  * Primitives): an expression trait ( type-id, ... ) and a type

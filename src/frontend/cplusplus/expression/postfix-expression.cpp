@@ -1750,8 +1750,9 @@ analysis_result semantic_analysis::call_with(
        argument for the parameter is used." ([dcl.fct.default]/9: evaluated
        at each call) */
     for (size_t i = arguments.size(); i < count; i++)
-        argument_nodes.append(
-            default_argument_nodes[entity_table[called].first_default + i]);
+        argument_nodes.append(bind_call_site(
+            default_argument_nodes[entity_table[called].first_default + i],
+            n.first_token()));
     if (called && (entity_table[called].gnu_flags & gnu_bit_count)) {
         VTRY_SET(r, bit_count_arguments(n, called, argument_nodes));
     }
@@ -1776,7 +1777,8 @@ analysis_result semantic_analysis::call_with(
     if (called && !entity_table[called].constexpr_ &&
         !(entity_table[called].enclosing &&
           entity_table[entity_table[called].enclosing].lambda) &&
-        !(entity_table[called].gnu_flags & (gnu_bit_count | gnu_query_builtin)))
+        !(entity_table[called].gnu_flags &
+          (gnu_bit_count | gnu_query_builtin | gnu_floating_constant)))
         m.evaluation = constness::not_constant;
     /* a constexpr member function's invocation is the evaluator's */
     if (called && entity_table[called].constexpr_) {

@@ -66,6 +66,9 @@ EXTENSION(gnu_vector_size, gnu,
 EXTENSION(gnu_typeof, gnu,
           "GCC manual 6.7, Referring to a Type with typeof: typeof, __typeof and __typeof__ "
           "(expression) or (type-id), a type-specifier (glibc's <math.h> casts through it)")
+EXTENSION(gnu_alignof_expression, gnu,
+          "GCC manual 6.46, Inquiring on Alignment of Types or Variables: alignof and "
+          "__alignof__ of an expression, the alignment of its type")
 EXTENSION(gnu_labels_as_values, gnu,
           "GCC manual 6.3, Labels as Values: &&label and goto *expression;")
 EXTENSION(gnu_designated_initializers, gnu,
@@ -144,10 +147,15 @@ EXTENSION(clang_blocks, clang,
           "function type (Darwin's SDK declares functions taking one under __BLOCKS__)")
 EXTENSION(clang_source_location, clang,
           "clang Language Extensions, Source location builtins: __builtin_source_location(), "
-          "std::source_location::current's primitive")
+          "std::source_location::current's primitive, and __builtin_FILE(), __builtin_FILE_NAME(), "
+          "__builtin_FUNCTION(), __builtin_LINE() and __builtin_COLUMN(), which in a default "
+          "argument are the call's")
 EXTENSION(clang_bit_cast, clang,
           "clang Language Extensions: __builtin_bit_cast (type, expression), "
           "std::bit_cast ([bit.cast]) as a primitive")
+EXTENSION(clang_datasizeof, clang,
+          "clang Language Extensions: __datasizeof (type-id) and __datasizeof expression, "
+          "the size without the tail padding of a class ([abi:layout]'s data size)")
 EXTENSION(clang_convertvector, clang,
           "clang Language Extensions, Vector Operations: __builtin_convertvector (vector, type), "
           "each element converted to the vector type's element type")

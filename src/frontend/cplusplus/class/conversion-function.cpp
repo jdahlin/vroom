@@ -23,9 +23,10 @@
  * of one by [over.match.conv] for an initialization of an object of
  * non-class type ([dcl.init]/17.7), a reference to one
  * ([dcl.init.ref]/5), a contextual conversion to bool and an implicit
- * conversion sequence of overload resolution ([over.ics.user]).  Not
- * analysed: a definition outside the class, a virtual one, conversion
- * function templates, inherited ones (/4), [over.match.copy]'s and
+ * conversion sequence of overload resolution ([over.ics.user]), also by
+ * the conversion functions of the bases (/4: inherited, unless hidden).
+ * Not analysed: a definition outside the class, a virtual one, conversion
+ * function templates, [over.match.copy]'s and
  * [over.match.ref]'s candidate sets where they differ, and built-in
  * operator candidates ([over.built]) for an operand of such a class.
  */
@@ -286,6 +287,55 @@ semantic_analysis::conversion_function_result(entity_index f) const
 }
 
 /*
+ * [class.conv.fct]/4: "Conversion functions are inherited."  [class.member.lookup]:
+ * a conversion function of a class hides those of its bases that convert to
+ * the same type, which are no candidates of [over.match.conv]/1 ("not
+ * hidden within S").  A function reached by two paths (a virtual base's) is
+ * one candidate; a non-virtual base twice makes its derived-to-base
+ * conversion ambiguous, which the conversion refuses.
+ */
+bool semantic_analysis::visible_conversion_functions(
+    entity_index c, owned_array<entity_index> &out) const
+{
+    size_t first = out.size();
+    for (entity_index f = own_conversion_functions(c); f;
+         f = entity_table[f].next_overload) {
+        /* [temp.mem]/1: a conversion function template, held under the
+           name, needs [temp.deduct.conv]: not analysed */
+        if (!entity_table[f].conversion_function)
+            return false;
+        out.append(f);
+    }
+    size_t own_end = out.size();
+    for (uint32_t i = 0; i < entity_table[c].base_count; i++) {
+        entity_index b =
+            type_table[entity_table[class_bases[entity_table[c].first_base + i]]
+                           .type.unqualified()]
+                .entity;
+        if (entity_table[b].kind != entity_kind::class_type)
+            return false;
+        owned_array<entity_index> inherited;
+        if (!visible_conversion_functions(b, inherited))
+            return false;
+        for (entity_index f : inherited) {
+            /* the declared type: operator int and operator int& convert to
+               different types, though both give an int */
+            type_index to = type_table[entity_table[f].type.unqualified()]
+                                .operand.unqualified();
+            bool hidden = false;
+            for (size_t k = first; k < own_end && !hidden; k++)
+                hidden = type_table[entity_table[out[k]].type.unqualified()]
+                             .operand.unqualified() == to;
+            for (size_t k = own_end; k < out.size() && !hidden; k++)
+                hidden = out[k] == f;
+            if (!hidden)
+                out.append(f);
+        }
+    }
+    return true;
+}
+
+/*
  * [over.match.conv]/1: "The conversion functions of S and its base classes
  * are considered.  Those non-explicit conversion functions that are not
  * hidden within S and yield type T or a type that can be converted to type
@@ -298,9 +348,8 @@ semantic_analysis::conversion_function_result(entity_index f) const
  * context is an initialization by user-defined conversion ... and the
  * standard conversion sequence from the return type of F1 to the
  * destination type ... is a better conversion sequence than the standard
- * conversion sequence from the return type of F2".  Only the class's own
- * conversion functions: one with base classes that have some is not
- * analysed.
+ * conversion sequence from the return type of F2".  A base's function takes
+ * the object by a derived-to-base conversion (object_sequence, [over.ics.rank]/4.4).
  */
 entity_index
 semantic_analysis::conversion_function_for(const expression_meaning &m,
@@ -313,24 +362,15 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
         unknown = true;
         return 0;
     }
-    /* a base class's conversion functions (inherited by
-       [class.conv.fct]/4) are not analysed: a class with them is
-       unknown */
-    if (base_has_conversion_functions(c)) {
+    owned_array<entity_index> candidates;
+    if (!visible_conversion_functions(c, candidates)) {
         unknown = true;
         return 0;
     }
     entity_index best = 0;
     sequence best_object, best_second;
-    for (entity_index f = own_conversion_functions(c); f;
-         f = entity_table[f].next_overload) {
+    for (entity_index f : candidates) {
         const entity &x = entity_table[f];
-        /* [temp.mem]/1: a conversion function template, held under the
-           name, needs [temp.deduct.conv]: not analysed */
-        if (!x.conversion_function) {
-            unknown = true;
-            return 0;
-        }
         expression_meaning value = conversion_function_result(f);
         /* explicit: the type itself or a qualification conversion to it */
         if (x.explicit_ &&
@@ -423,6 +463,17 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
     address.category = value_category::prvalue;
     address.evaluation = constness::not_constant;
     address.node = expression_node(semantic_kind::address, address, t, m.node);
+    /* [over.match.funcs]/4-5, [class.conv.fct]/4: a function of a base class
+       takes the object's base class subobject (the implied object argument's
+       derived-to-base conversion) */
+    entity_index owner = x.enclosing;
+    if (owner != c) {
+        qualified_type base_type = qualified_type::make(
+            entity_table[owner].type.unqualified(), m.type.cv());
+        qualified_type to_pointer =
+            qualified_type::make(type_table.pointer_to(base_type), cv_none);
+        VTRY_SET(r, pointer_to_base(t, c, owner, to_pointer, address));
+    }
     expression_meaning callee;
     callee.type = x.type;
     callee.category = value_category::lvalue;

@@ -273,7 +273,7 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
     bool of_current =
         cls && (member_of == cls || base_step(cls, member_of, ambiguous));
     expression_meaning object;
-    if (!function_state.this_entity && unevaluated && of_current &&
+    if ((!function_state.this_entity || !of_current) && unevaluated &&
         entity_table[e].kind == entity_kind::variable &&
         entity_table[e].nonstatic_member) {
         /* [expr.prim.id]/3: "An id-expression that denotes a non-static
@@ -281,9 +281,10 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
            access in which the object expression refers to the member's
            class or a class derived from that class, or to form a pointer to
            member, or if that id-expression denotes a non-static data member
-           and it appears in an unevaluated operand."  The object is the
-           class's, an lvalue, not evaluated */
-        object.type = entity_table[cls].type;
+           and it appears in an unevaluated operand."  Any class's, S::m in
+           sizeof included: the object is the member's class's, an lvalue,
+           not evaluated */
+        object.type = entity_table[member_of].type;
         object.category = value_category::lvalue;
         object.evaluation = constness::not_constant;
         object.node =

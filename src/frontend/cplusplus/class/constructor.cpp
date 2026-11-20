@@ -278,6 +278,16 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     expression_meaning object;
     VTRY(r, subobject(at, e, object));
     initialized_value value;
+    /* [ext:clang_source_location] a builtin in it is the constructor's */
+    struct bound_at {
+        token_index &place;
+        token_index before;
+        ~bound_at()
+        {
+            place = before;
+        }
+    } bound = {source_location_at, source_location_at};
+    source_location_at = at;
     VTRY_SET(r, initializer(init, type, value));
     if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         (semantics[value.node].kind != semantic_kind::construct ||
@@ -1114,7 +1124,8 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
         if (k.unknown_defaults || !k.first_default ||
             !default_argument_nodes[k.first_default + i])
             return not_supported(at, "dcl.fct.default");
-        nodes.append(default_argument_nodes[k.first_default + i]);
+        nodes.append(bind_call_site(default_argument_nodes[k.first_default + i],
+                                    at.first_token()));
     }
     expression_meaning made;
     made.type = qualified_type::make(type.unqualified(), cv_none);

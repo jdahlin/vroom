@@ -36,6 +36,15 @@ using vec __attribute__((__ext_vector_type__(N))) = T;
 template <class T, unsigned long N>
 vec<long, N> as_mask(vec<T, N> v) { return __builtin_convertvector(v == v, vec<long, N>); }
 
+// [ext:clang_source_location] __builtin_FILE(), __builtin_FILE_NAME(),
+// __builtin_FUNCTION(), __builtin_LINE() and __builtin_COLUMN(), as default
+// arguments (the call's place).
+const char *at_file(const char *file = __builtin_FILE(),
+                    const char *name = __builtin_FILE_NAME(),
+                    const char *function = __builtin_FUNCTION(),
+                    unsigned line = __builtin_LINE(),
+                    unsigned column = __builtin_COLUMN());
+
 // [ext:clang_builtin_functions] a builtin function's name is no type-name, so
 // a call of it that starts a statement is an expression ([stmt.ambig]/1), as
 // libc++'s <__coroutine/coroutine_handle.h> calls them.

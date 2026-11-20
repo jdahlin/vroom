@@ -130,6 +130,15 @@ PRODUCTION(gnu_typeof, "simple-type-specifier", "gnu-typeof-specifier")
 PRODUCTION(gnu_typeof, "gnu-typeof-specifier", "typeof ( expression )")
 PRODUCTION(gnu_typeof, "gnu-typeof-specifier", "typeof ( type-id )")
 
+/* ---- GCC manual 6.46, Inquiring on Alignment of Types or Variables ---- */
+
+PRODUCTION(gnu_alignof_expression, "unary-expression", "alignof unary-expression")
+
+/* ---- clang Language Extensions, __datasizeof ---- */
+
+PRODUCTION(clang_datasizeof, "unary-expression", "__datasizeof unary-expression")
+PRODUCTION(clang_datasizeof, "unary-expression", "__datasizeof ( type-id )")
+
 /* ---- GCC manual 6.47, Using Assembly Language with C ---- */
 
 /* "::" counts as two ":" (an empty section).  An operand is
@@ -234,6 +243,11 @@ PRODUCTION(clang_bit_int, "clang-bit-int-type-specifier", "_BitInt ( constant-ex
 
 PRODUCTION(clang_source_location, "primary-expression", "clang-source-location-expression")
 PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_source_location ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_FILE ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_FILE_NAME ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_FUNCTION ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_LINE ( )")
+PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_COLUMN ( )")
 
 /* ---- clang Language Extensions, Type Trait Primitives ---- */
 

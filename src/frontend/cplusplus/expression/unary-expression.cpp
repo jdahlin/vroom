@@ -49,6 +49,21 @@ bool is_unary_operator(const token &t)
 } // namespace
 
 /*
+ * [ext:gnu_alignof_expression] (GCC manual 6.46):
+ *
+ *     unary-expression:
+ *         alignof unary-expression
+ */
+
+/*
+ * [ext:clang_datasizeof] (clang's __datasizeof):
+ *
+ *     unary-expression:
+ *         __datasizeof ( type-id )
+ *         __datasizeof unary-expression
+ */
+
+/*
  * [expr.unary]/1: "Expressions with unary operators group right-to-left":
  * the operand of an operator is a cast-expression.
  *
@@ -84,9 +99,12 @@ node_index parser::unary_expression()
             return 0;
         return finish_node(syntax_kind::unary_expression, mark, first);
     }
-    if (at(standard_keyword::sizeof_)) {
+    /* [ext:clang_datasizeof] __datasizeof has sizeof's operands, but
+       sizeof... */
+    bool data_size = at(extension_keyword::datasizeof_);
+    if (at(standard_keyword::sizeof_) || data_size) {
         add_token();
-        if (at(preprocessing_op_or_punc::ELLIPSIS)) {
+        if (!data_size && at(preprocessing_op_or_punc::ELLIPSIS)) {
             /* [expr.sizeof]/5: sizeof ... ( identifier ) (C++11) */
             if (!tokens.files.behavior.has(
                     language_feature::variadic_templates))
@@ -126,8 +144,17 @@ node_index parser::unary_expression()
         if (!parenthesized_type_id(false)) {
             if (failed())
                 return 0;
-            /* [ext.gnu] alignof of an expression: P9 */
-            return beyond_this_step();
+            /* [ext:gnu_alignof_expression] the alignment of the
+               expression's type (clang's -Wgnu-alignof-expression) */
+            if (!tokens.files.behavior.has(extension::gnu_alignof_expression))
+                return expected("a type-id after alignof (", "expr.alignof");
+            nesting_level level(*this);
+            if (!nesting_within_limit("an expression nested no deeper than "
+                                      "this implementation's limit"))
+                return 0;
+            unary_expression();
+            if (failed())
+                return 0;
         }
         return finish_node(syntax_kind::unary_expression, mark, first);
     }
@@ -329,16 +356,18 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
  * [expr.alignof]/2: "The result ... is a prvalue of type std::size_t."
  */
 analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
-                                           expression_meaning &m)
+                                           expression_meaning &m,
+                                           bool data_size)
 {
     qualified_type operand;
     uint32_t typedef_alignment = 0;
     if (n.size() == 4 && n[2].is(syntax_kind::type_id)) {
         VTRY(r, type_id(n[2], operand, &typedef_alignment));
-    } else if (n.size() == 2 && !alignment) {
+    } else if (n.size() == 2) {
         /* [expr.sizeof]/3: "The lvalue-to-rvalue, array-to-pointer, and
            function-to-pointer standard conversions are not applied to the
-           operand of sizeof." */
+           operand of sizeof."  [ext:gnu_alignof_expression] alignof of an
+           expression is the alignment of its type */
         expression_meaning e;
         /* [expr.sizeof]/1: "The operand is either an expression, which is
            an unevaluated operand ([expr.prop])" */
@@ -349,60 +378,49 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
         if (r != analysis_result::well_formed)
             return r;
         /* [expr.sizeof]/1: "The sizeof operator shall not be applied to
-           ... an lvalue that designates a bit-field." */
-        if (e.bit_field_width)
-            return not_supported(n, "class.bit");
+           ... a glvalue that designates a bit-field." */
+        if (e.bit_field_width) {
+            if (alignment)
+                return ill_formed(n,
+                                  "the operand of alignof shall not be a "
+                                  "glvalue that designates a bit-field",
+                                  "expr.alignof");
+            return ill_formed(n,
+                              "the sizeof operator shall not be applied to a "
+                              "glvalue that designates a bit-field",
+                              "expr.sizeof");
+        }
         operand = e.type;
     } else if (!alignment && n.size() == 5 &&
                n[1].is(preprocessing_op_or_punc::ELLIPSIS) && n[3].is_token() &&
                n[3].is_identifier()) {
-        /* [expr.sizeof]/4: "The identifier in a sizeof... expression shall
-           name a pack.  The sizeof... operator yields the number of
-           elements in the pack ([temp.variadic]).  A sizeof... expression
-           is a pack expansion ([temp.variadic])."  An instantiation's pack;
-           a template's own is not analysed */
-        entity_index pack = find_pack(tokens.identifier(n[3].token()));
-        if (!pack)
-            return not_supported(n, "expr.sizeof");
-        m.type = qualified_type::make(
-            type_table.fundamental(fundamental_type::unsigned_long_int),
-            cv_none);
-        m.category = value_category::prvalue;
-        m.evaluation = constness::constant;
-        m.value = entity_table[pack].member_count;
-        m.node = expression_node(semantic_kind::constant, m, n.first_token());
-        return analysis_result::well_formed;
+        return pack_size(n, m);
     } else {
-        /* alignof of an expression (GCC's) */
-        return not_supported(n, "expr.sizeof");
+        VBUG("sizeof or alignof node of an unknown shape");
     }
-    const struct type record = type_table[operand.unqualified()];
-    if (record.kind == type_kind::function ||
-        (record.kind == type_kind::fundamental &&
-         record.fundamental == fundamental_type::void_))
-        /* GCC's sizeof(void) and sizeof of a function type, extensions
-           clang has too */
-        return not_supported(n, "expr.sizeof");
-    if (record.kind == type_kind::array && !record.bound_known) {
-        if (alignment)
-            /* "or an array thereof": alignof(T[]) */
-            operand = record.operand;
-        else
-            return ill_formed(n,
-                              "the sizeof operator shall not be applied to an "
-                              "expression that has function or incomplete "
-                              "type, or to the parenthesized name of such "
-                              "types",
-                              "expr.sizeof");
-    }
+    analysis_result r = sized_operand(n, alignment, operand);
+    if (r != analysis_result::well_formed)
+        return r;
     uint64_t size = size_of_type(operand);
-    if (alignment)
+    if (data_size) {
+        /* [ext:clang_datasizeof] a class's data size ([abi:layout]), the
+           size of the rest */
+        qualified_type t = operand;
+        while (type_table[t.unqualified()].kind ==
+                   type_kind::lvalue_reference ||
+               type_table[t.unqualified()].kind == type_kind::rvalue_reference)
+            t = type_table[t.unqualified()].operand;
+        const struct type record = type_table[t.unqualified()];
+        if (record.kind == type_kind::class_type)
+            size = entity_table[record.entity].data_size;
+    }
+    if (alignment) {
         size = alignment_of_type(operand);
-    /* [ext:gnu_attributes] alignof of a typedef-name declared with aligned */
-    if (alignment && typedef_alignment > size)
-        size = typedef_alignment;
-    if (!size)
-        return not_supported(n, "expr.sizeof");
+        /* [ext:gnu_attributes] alignof of a typedef-name declared with
+           aligned */
+        if (typedef_alignment > size)
+            size = typedef_alignment;
+    }
     m.type = qualified_type::make(
         type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
     m.category = value_category::prvalue;
@@ -411,6 +429,124 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
     /* the operand is unevaluated ([expr.sizeof]/1): the constant alone */
     m.node = expression_node(semantic_kind::constant, m, n.first_token());
     return analysis_result::well_formed;
+}
+
+/*
+ * [expr.sizeof]/4: "The identifier in a sizeof... expression shall name a
+ * pack.  The sizeof... operator yields the number of elements in the pack
+ * ([temp.variadic]).  A sizeof... expression is a pack expansion
+ * ([temp.variadic])."  An instantiation's pack; a template's own is not
+ * analysed.
+ */
+analysis_result semantic_analysis::pack_size(SyntaxRef n, expression_meaning &m)
+{
+    uint32_t name = tokens.identifier(n[3].token());
+    entity_index pack = find_pack(name);
+    if (!pack) {
+        /* a name that is certainly no pack is the error; one that may be a
+           pack the analysis does not bind (a function parameter pack of
+           reference type, a template's own) is not */
+        lookup_result found = lookup_unqualified(name, lookup_filter::any);
+        if (found.entity && !own_pack_parameter(name)) {
+            const entity &x = entity_table[found.entity];
+            bool no_pack =
+                x.kind == entity_kind::class_type ||
+                x.kind == entity_kind::enumeration ||
+                x.kind == entity_kind::enumerator ||
+                x.kind == entity_kind::function ||
+                x.kind == entity_kind::namespace_entity ||
+                (x.kind == entity_kind::variable && is_namespace(x.enclosing));
+            if (no_pack)
+                return ill_formed(n,
+                                  "the identifier in a sizeof... expression "
+                                  "shall name a pack",
+                                  "expr.sizeof");
+        }
+        return not_supported(n, "temp.variadic");
+    }
+    m.type = qualified_type::make(
+        type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::constant;
+    m.value = entity_table[pack].member_count;
+    m.node = expression_node(semantic_kind::constant, m, n.first_token());
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.sizeof]/1: "The sizeof operator shall not be applied to an
+ * expression that has function or incomplete type, to the parenthesized
+ * name of such types, or to a glvalue that designates a bit-field."
+ * [expr.alignof]/1: "The operand shall be a type-id representing a complete
+ * object type, or an array thereof, or a reference to one of those types."
+ * [expr.sizeof]/2 and [expr.alignof]/3: a reference's operand is the
+ * referenced type.  The one place that says whether a type has a size and an
+ * alignment: size_of_type and alignment_of_type give 0 for the rest.
+ */
+analysis_result semantic_analysis::sized_operand(SyntaxRef n, bool alignment,
+                                                 qualified_type operand)
+{
+    const char *subclause = "expr.sizeof";
+    const char *incomplete =
+        "the sizeof operator shall not be applied to an expression that has "
+        "function or incomplete type, or to the parenthesized name of such "
+        "types";
+    if (alignment) {
+        subclause = "expr.alignof";
+        incomplete = "the operand of alignof shall represent a complete "
+                     "object type, or an array thereof, or a reference to "
+                     "one of those types";
+    }
+    qualified_type t = operand;
+    /* a reference's operand is the referenced type's */
+    while (type_table[t.unqualified()].kind == type_kind::lvalue_reference ||
+           type_table[t.unqualified()].kind == type_kind::rvalue_reference)
+        t = type_table[t.unqualified()].operand;
+    /* an array: its element's, an unknown bound only for alignof ("or an
+       array thereof") */
+    while (type_table[t.unqualified()].kind == type_kind::array) {
+        if (!type_table[t.unqualified()].bound_known && !alignment)
+            return ill_formed(n, incomplete, subclause);
+        t = type_table[t.unqualified()].operand;
+    }
+    const struct type record = type_table[t.unqualified()];
+    switch (record.kind) {
+    case type_kind::function:
+        return ill_formed(n, incomplete, subclause);
+    case type_kind::fundamental:
+        if (record.fundamental == fundamental_type::void_)
+            return ill_formed(n, incomplete, subclause);
+        return analysis_result::well_formed;
+    case type_kind::class_type: {
+        const entity &c = entity_table[record.entity];
+        if (c.kind != entity_kind::class_type)
+            /* a class whose definition was not analysed */
+            return not_supported(n, "class.pre");
+        /* [class.mem]/6: a class is incomplete until its closing brace
+           (the size is 0 until then; an empty class's is 1) */
+        if (!c.size)
+            return ill_formed(n, incomplete, subclause);
+        return analysis_result::well_formed;
+    }
+    case type_kind::enumeration:
+        /* [dcl.enum]/6: an enumeration is incomplete until its underlying
+           type is fixed or its enumerators are defined */
+        if (entity_table[record.entity].underlying == fundamental_type::none)
+            return ill_formed(n, incomplete, subclause);
+        return analysis_result::well_formed;
+    case type_kind::template_parameter:
+    case type_kind::dependent:
+    case type_kind::pack_expansion:
+    case type_kind::placeholder:
+    case type_kind::none:
+        /* [temp.dep.constexpr]/2: value-dependent (or, a placeholder, not
+           yet a type): the operand of a template's own declaration */
+        return not_supported(n, "temp.dep.constexpr");
+    default:
+        if (!size_of_type(t))
+            return not_supported(n, "basic.compound");
+        return analysis_result::well_formed;
+    }
 }
 
 /*
@@ -536,6 +672,8 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
             return size_of(n, false, m);
         if (kw == standard_keyword::alignof_)
             return size_of(n, true, m);
+        if (p.extension_keyword_of(op) == extension_keyword::datasizeof_)
+            return size_of(n, false, m, true);
         return not_supported(n, "expr.unary");
     }
     if (op.kind != token_kind::operator_or_punctuator || n.size() != 2)

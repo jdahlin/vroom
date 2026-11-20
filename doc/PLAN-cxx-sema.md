@@ -2266,6 +2266,11 @@ lines:
 - libstdc++ and libc++, json's 71 TUs passing their tests, the extensions
   and builtins they need (`ext/`), then PLAN-cxx's measurements: time
   against clang, the instantiation cache (X5), Skia.
+- Status: the C++ constant evaluator folds float and double infinity and
+  quiet NaN builtins used by libc++'s `<limits>`. Skia's
+  `SkBlendModeBlender.cpp` gets past the `constexpr` declarations in
+  `SkFloatingPoint.h` and still hits overload resolution errors in
+  `SkPoint.h` and incomplete-type errors in `SkRefCnt.h`.
 - Diagnostics in vcc's system; tuning starts from `cxxsema -stats`.
 
 ### S9. The rest of C++20

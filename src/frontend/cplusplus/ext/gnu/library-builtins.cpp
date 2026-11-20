@@ -14,6 +14,7 @@
  * under the library's name, which is its symbol.
  */
 #include "../../cplusplus-internal.h"
+#include "common/softfloat.h"
 #include "frontend/c/ast-builder.h"
 #include "frontend/cplusplus/sema.h"
 
@@ -421,6 +422,19 @@ static const fundamental_type signature_types[] = {
     fundamental_type::short_int,
 };
 
+/* Float and double infinity and quiet NaN constructors. */
+static bool is_floating_constant_builtin(const char *spelling, size_t length)
+{
+    static const char *const names[] = {
+        "__builtin_huge_val", "__builtin_huge_valf", "__builtin_inf",
+        "__builtin_inff",     "__builtin_nan",       "__builtin_nanf",
+    };
+    for (const char *name : names)
+        if (strlen(name) == length && !memcmp(spelling, name, length))
+            return true;
+    return false;
+}
+
 /* a builtin of vcc's C front end (frontend/c/builtin-table.cpp) whose
    signature has scalar types only, in the table's letters, or one of the
    generic_builtins: lowered to the C front end's builtin node
@@ -432,6 +446,18 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     const char *signature = ast_builder_builtin_signature(spelling, length);
     if (!signature)
         return 0;
+    if (is_floating_constant_builtin(spelling, length)) {
+        fundamental_type type = fundamental_type::double_;
+        if (signature[0] == 'f')
+            type = fundamental_type::float_;
+        qualified_type result =
+            qualified_type::make(type_table.fundamental(type), cv_none);
+        qualified_type parameter = builtin_parameter_type(
+            static_cast<uint8_t>(builtin_type::const_char_pointer));
+        return declare_builtin(name, name, result, &parameter,
+                               signature[1] == 'S', false,
+                               gnu_compiler_builtin | gnu_floating_constant);
+    }
     owned_array<qualified_type> types_of;
     /* a signature of other than scalar letters (a pointer to any type, a
        va_list): one function taking anything whose calls are refused */
@@ -954,6 +980,41 @@ semantic_analysis::query_builtin_result(SyntaxRef n, int which,
     result = qualified_type::make(
         type_table.fundamental(fundamental_type::bool_), cv_none);
     return analysis_result::well_formed;
+}
+
+constness
+semantic_analysis::evaluate_floating_builtin(const semantic_node &call,
+                                             constant_value &v)
+{
+    double number = __builtin_inf();
+    if (call.count) {
+        const semantic_node &argument =
+            semantics[semantics.items(call.first)[0]];
+        if (argument.kind != semantic_kind::conversion ||
+            static_cast<conversion_kind>(argument.op) !=
+                conversion_kind::array_to_pointer)
+            return constness::unknown;
+        const semantic_node &literal = semantics[argument.a];
+        if (literal.kind != semantic_kind::string_literal)
+            return constness::unknown;
+        owned_buffer payload;
+        gnu_asm_string_value(tokens, literal.at, payload);
+        int precision = 52;
+        if (fundamental_of(call.type) == fundamental_type::float_)
+            precision = 23;
+        unsigned __int128 bits;
+        if (!vsoftfloat_nan_payload(payload.data(), precision, false, &bits))
+            return constness::unknown;
+        /* Constexpr evaluation holds float values as doubles. Preserve
+           the NaN payload in the high fraction bits of that double. */
+        uint64_t encoded = (UINT64_C(0x7ff) << 52) |
+                           static_cast<uint64_t>((bits & Q_M112) >> 60);
+        number = floating_value(encoded);
+    }
+    v = constant_value();
+    v.kind = constant_value_kind::floating;
+    v.floating = number;
+    return constness::constant;
 }
 
 /* the value of a query when its operands are constants: __builtin_constant_p

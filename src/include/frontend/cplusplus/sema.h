@@ -391,6 +391,8 @@ enum gnu_attribute_flag : uint32_t {
     /* "cleanup (cleanup_function)": a local variable's function, called
        with its address when it goes out of scope (gnu_cleanup) */
     gnu_cleanup = 67108864,
+    /* Float and double infinity and quiet NaN compiler builtins. */
+    gnu_floating_constant = 134217728,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -1279,6 +1281,16 @@ enum class semantic_kind : uint8_t {
        take in memory), at: the constraint's string-literal token, b: the
        symbolic name's identifier token (0: none), value: 1 for an output */
     gnu_asm_operand,
+    /* [ext:clang_source_location] __builtin_FILE() and the like: op: a
+       source_location_builtin; at: where it is written; b: the function it
+       is written in (0: none); a prvalue of type unsigned int or const
+       char*.  Inside a default_argument it is the call's */
+    source_location,
+    /* [dcl.fct.default]/5: a default argument whose value depends on the
+       call that uses it (source_location nodes inside): a: the argument's
+       initialization; at: the call (the constructor of a default member
+       initializer), b: the function the call is in (0: none) */
+    default_argument,
     /* [class.cdtor]/4, [abi:vtable-ctor]: a: the address of the object
        under construction or destruction (this), b: its class, whose
        virtual table pointer is stored in it */
@@ -1340,6 +1352,15 @@ enum class semantic_kind : uint8_t {
        (0: none); evaluation not_constant when the body's analysis was not
        well-formed (a tree in part, which the evaluator does not run) */
     function_body,
+};
+
+/* [ext:clang_source_location]: the value a source_location node has */
+enum class source_location_builtin : uint8_t {
+    file,      /* __builtin_FILE: the presumed file name */
+    file_name, /* __builtin_FILE_NAME: its last component */
+    function,  /* __builtin_FUNCTION: the function's name, "" outside one */
+    line,      /* __builtin_LINE */
+    column,    /* __builtin_COLUMN */
 };
 
 const char *semantic_kind_name(semantic_kind kind);
@@ -1496,6 +1517,26 @@ enum class unary_trait_kind {
 struct inherited_call {
     entity_index base = 0, constructor = 0;
     const owned_array<entity_index> *parameters = nullptr;
+};
+
+/* [dcl.init.aggr]/3.1 and [ext:gnu_designated_initializers]: the designators
+   of the clauses of a braced-init-list.  Clause i has the designators
+   pool[of[i].first .. of[i].first + of[i].count): each a `designator` node
+   (". identifier" or "[ constant-expression ]" or "[ first ... last ]") or,
+   for GNU's obsolete "identifier :", the identifier token; none for a
+   clause without a designation */
+struct clause_designation {
+    uint32_t first = 0, count = 0;
+};
+struct designated_item {
+    /* the clause, and its designators from pool[chain_first] on */
+    uint32_t clause = 0, chain_first = 0, chain_count = 0;
+};
+struct designation_set {
+    owned_array<SyntaxElement> pool;
+    owned_array<clause_designation> of;
+    /* whether any clause has a designation */
+    bool any = false;
 };
 
 /* [ext:gnu_asm_statements] the characters of the ordinary string-literal at
@@ -2713,7 +2754,11 @@ class semantic_analysis
     analysis_result parenthesized(SyntaxRef n, expression_meaning &m);
     /* [expr.unary] */
     analysis_result unary(SyntaxRef n, expression_meaning &m);
-    analysis_result size_of(SyntaxRef n, bool alignment, expression_meaning &m);
+    analysis_result size_of(SyntaxRef n, bool alignment, expression_meaning &m,
+                            bool data_size = false);
+    analysis_result pack_size(SyntaxRef n, expression_meaning &m);
+    analysis_result sized_operand(SyntaxRef n, bool alignment,
+                                  qualified_type operand);
     analysis_result increment(SyntaxRef n, SyntaxElement operand,
                               bool decrement, bool postfix,
                               expression_meaning &m);
@@ -2877,6 +2922,19 @@ class semantic_analysis
                                           qualified_type &result);
     analysis_result builtin_addressof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_source_location(SyntaxRef n, expression_meaning &m);
+    analysis_result clang_source_location_object(SyntaxRef n,
+                                                 expression_meaning &m);
+    /* a default argument's value is the call's: its source_location nodes
+       are made while call_site_depth is up, and counted; a default
+       argument that made some is wrapped (bind_call_site makes each call's
+       copy).  source_location_at: the place they are bound to at once (a
+       default member initializer: the constructor) */
+    unsigned call_site_depth = 0;
+    uint32_t call_site_nodes = 0;
+    token_index source_location_at = 0;
+    uint32_t wrap_call_site(uint32_t node, token_index at,
+                            uint32_t nodes_before);
+    uint32_t bind_call_site(uint32_t node, token_index call);
     analysis_result clang_atomic_type(SyntaxRef n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
     analysis_result clang_bit_int_type(SyntaxRef n, qualified_type &type);
@@ -3116,6 +3174,8 @@ class semantic_analysis
                             constant_value &v);
     constness evaluate_statement(constant_evaluation &state, uint32_t node,
                                  bool &returned, constant_value &result);
+    constness evaluate_floating_builtin(const semantic_node &call,
+                                        constant_value &v);
     constness evaluate_query_builtin(constant_evaluation &state, int which,
                                      const semantic_node &call,
                                      constant_value &v);
@@ -3261,11 +3321,19 @@ class semantic_analysis
        supported */
     analysis_result list_clauses(SyntaxRef list,
                                  owned_array<SyntaxElement> &clauses,
-                                 owned_array<uint32_t> *packs = nullptr);
+                                 owned_array<uint32_t> *packs = nullptr,
+                                 designation_set *designated = nullptr);
     bool initializer_names_nothing(SyntaxRef init) const;
     analysis_result gather_clauses(SyntaxRef list, SyntaxRef node,
                                    owned_array<SyntaxElement> &clauses,
-                                   owned_array<uint32_t> *packs);
+                                   owned_array<uint32_t> *packs,
+                                   designation_set *designated);
+    /* a clause with the designators chain[0 .. count) (none: count 0):
+       appended to clauses and, when designated is given, to it */
+    void append_clause(SyntaxElement clause, const SyntaxElement *chain,
+                       uint32_t count, owned_array<SyntaxElement> &clauses,
+                       owned_array<uint32_t> *packs, uint32_t pack,
+                       designation_set *designated);
     analysis_result list_initialization_of(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type &type, bool direct, initialized_value &result);
@@ -3277,6 +3345,35 @@ class semantic_analysis
     analysis_result constructor_list_initialization(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type type, bool direct, initialized_value &result);
+    /* [dcl.init.aggr]/3.1 with C99's designators ([ext:gnu_designated_
+       initializers]) */
+    analysis_result designated_list_initialization(
+        SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+        const designation_set &designations, qualified_type &type,
+        initialized_value &result);
+    analysis_result
+    designated_elements(SyntaxRef list,
+                        const owned_array<SyntaxElement> &clauses,
+                        const designation_set &designations,
+                        const owned_array<designated_item> &items,
+                        qualified_type &type, initialized_value &result);
+    /* the elements a designator selects of the aggregate target: first and
+       last (an array range) */
+    analysis_result designator_elements(
+        SyntaxRef list, SyntaxElement designator, const struct type &target,
+        const owned_array<entity_index> &members, uint64_t bound,
+        bool bound_known, uint64_t &first, uint64_t &last);
+    /* [dcl.init.aggr]/5: an element no clause initializes */
+    analysis_result omitted_element_checks(SyntaxRef list,
+                                           qualified_type element,
+                                           bool has_default);
+    analysis_result omitted_element_value(SyntaxRef list,
+                                          qualified_type element,
+                                          SyntaxRef default_initializer,
+                                          initialized_value &one);
+    void aggregate_value(SyntaxRef list, qualified_type type, constness all,
+                         const owned_array<uint32_t> &elements,
+                         initialized_value &result);
     analysis_result too_many_clauses(SyntaxRef list,
                                      const owned_array<SyntaxElement> &clauses,
                                      size_t next);
@@ -3655,6 +3752,11 @@ class semantic_analysis
                              owned_array<expression_meaning> &out);
     /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
+    /* [class.access]/6: the class a member's qualified declarator-id
+       nominates while its declaration is analysed, 0 otherwise (declarator_access_class) */
+    entity_index access_class = 0;
+    entity_index declarator_access_class(SyntaxRef declaration,
+                                         SyntaxRef specifiers) const;
     /* the tokens of the member-specification of the class being defined
        (class_specifier), 0 outside one */
     token_index defining_members_first = 0, defining_members_end = 0;
@@ -4925,6 +5027,12 @@ class semantic_analysis
     /* the first conversion function class c itself declares (the others
        follow by next_overload), 0 if none */
     entity_index own_conversion_functions(entity_index c) const;
+    /* [class.conv.fct]/4, [over.match.conv]/1: the conversion functions of
+       class c and of its bases that no conversion function to the same type
+       in a nearer class hides, appended to out; false when one is a
+       template, which analysis does not follow */
+    bool visible_conversion_functions(entity_index c,
+                                      owned_array<entity_index> &out) const;
     /* the value a call of the conversion function f gives: its type and
        value category ([expr.call]/14) */
     expression_meaning conversion_function_result(entity_index f) const;

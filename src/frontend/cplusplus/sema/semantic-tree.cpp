@@ -60,6 +60,8 @@ const char *semantic_kind_name(semantic_kind kind)
         "type_identification",
         "va_arg",
         "gnu_asm_operand",
+        "source_location",
+        "default_argument",
         "vtable_pointer_store",
         "block",
         "expression_statement",
