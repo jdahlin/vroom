@@ -102,6 +102,8 @@ LANGUAGE_FEATURE(constexpr_destructors, cplusplus_20, never,
                  "P0784R7: a destructor may be constexpr")
 LANGUAGE_FEATURE(non_literal_constexpr_variables, cplusplus_23, never,
                  "P2242R3: a constexpr function may define a variable of non-literal type")
+LANGUAGE_FEATURE(unknown_references_in_constant_expressions, cplusplus_23, never,
+                 "P2280R4: a reference whose referent is unknown may be named in a constant expression")
 LANGUAGE_FEATURE(range_for_init_statement, cplusplus_20, never,
                  "P0614R1: an init-statement in the range-based for statement")
 LANGUAGE_FEATURE(labels_anywhere, cplusplus_23, never,

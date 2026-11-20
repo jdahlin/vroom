@@ -652,6 +652,20 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 return constness::unknown;
             return c;
         }
+        /* [expr.const]/5.12 (before P2280R4): "an id-expression that
+           refers to a variable or data member of reference type unless the
+           reference has a preceding initialization and either it is usable
+           in constant expressions or its lifetime began within the
+           evaluation of E": a reference parameter of the function whose
+           body holds the expression has neither (its value is the
+           caller's) */
+        if (!tokens.files.behavior.has(
+                language_feature::unknown_references_in_constant_expressions) &&
+            e.kind == entity_kind::variable && e.automatic &&
+            entity_table[e.enclosing].parameter_scope &&
+            (tk == type_kind::lvalue_reference ||
+             tk == type_kind::rvalue_reference))
+            return constness::not_constant;
         /* an automatic variable whose lifetime did not begin within the
            evaluation: [expr.const]/5.8 forbids an lvalue-to-rvalue
            conversion of it, not designating it (the object expression of
@@ -909,12 +923,19 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     bool scalar = evaluated_type(x.type) != fundamental_type::none;
     if (!scalar && tk != type_kind::pointer && tk != type_kind::class_type)
         return constness::unknown;
-    if (scalar && x.kind == semantic_kind::entity &&
+    if ((scalar || tk == type_kind::pointer) &&
+        x.kind == semantic_kind::entity &&
         frame_object(state, x.a) == no_frame_object) {
         /* [expr.const]/5.8.1: "a non-volatile glvalue that refers to an
-           object that is usable in constant expressions" */
+           object that is usable in constant expressions" (a pointer
+           variable of the enclosing function, a parameter or a local, is
+           one only when constexpr, whose value analysis does not keep:
+           unknown) */
         const entity &e = entity_table[x.a];
-        if (e.kind != entity_kind::variable || e.usable == constness::unknown)
+        /* ([expr.prim.this]'s `this` is the one variable of no name: its
+           rules are not these) */
+        if (e.kind != entity_kind::variable || e.usable == constness::unknown ||
+            !e.name)
             return constness::unknown;
         if (e.usable == constness::not_constant) {
             /* [expr.const]/4: only a const or constexpr object may be
