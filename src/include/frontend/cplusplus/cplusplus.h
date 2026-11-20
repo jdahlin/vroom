@@ -871,6 +871,10 @@ class preprocessor
         bool system_header;
         bool has_lookahead;
         preprocessing_token lookahead;
+        /* OPTIMIZATION: the multiple-include guard (include-directive.cpp) */
+        uint8_t guard_state = 0;
+        uint32_t guard_name = 0, guard_conditional = 0;
+        uint64_t device = 0, inode = 0;
     };
     owned_array<inclusion> inclusions;
     source_files::entry *main_file = nullptr;
@@ -931,6 +935,18 @@ class preprocessor
     /* every file entered, for #import ([ext.clang]) */
     owned_array<included_once> entered_files;
     bool include_limit_reached = false;
+    /* OPTIMIZATION: files whose contents are one #ifndef group: entered
+       again only while the guard macro is not defined (include-directive.cpp) */
+    struct guarded_file {
+        uint64_t device, inode;
+        uint32_t name;
+    };
+    owned_array<guarded_file> guarded_files;
+    int64_t defined_condition_operand = -1;
+    void guard_token();
+    void guard_directive(directive_kind kind);
+    void guard_end_of_file();
+    bool guard_skips(uint64_t device, uint64_t inode);
     void directive_include(const preprocessing_token &name,
                            directive_kind kind);
     bool header_name_from_tokens(const preprocessing_token &first,

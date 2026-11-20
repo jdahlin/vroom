@@ -88,6 +88,8 @@ arm64)
 	step cxx-selftest "$BUILD/vpp" -x c++ -fsyntax-only -fcxx-dump=selftest "$BUILD/empty.cpp"
 	# the type claims' path through clang, on claims written by hand (doc/PLAN-cxx-sema.md C4)
 	step cxx-sema-claims env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py selftest
+	# the multiple-include guard skip: text and diagnostics as clang -E -P (src/test/cxx/include-guard)
+	step cxx-include-guard env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-include-guard.py --bin-dir "$BUILD"
 	# C++ programs lowered to C's AST (vpp -c, -O0..-O3) run as clang++'s under qemu
 	step cxx-run      python3 bench/cxx-run.py -j "$J"
 	# programs using libc++ headers: OK or a clean refusal, never a crash (needs libc++ headers; skipped without)

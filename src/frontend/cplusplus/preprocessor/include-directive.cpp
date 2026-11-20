@@ -231,7 +231,8 @@ void preprocessor::directive_include(const preprocessing_token &name,
         return;
     }
     struct stat st;
-    stat(path.data(), &st);
+    /* OPTIMIZATION: the guard only for a file stat identifies */
+    bool identified = stat(path.data(), &st) == 0;
     for (const included_once &o : once_files)
         if (o.device == (uint64_t)st.st_dev && o.inode == (uint64_t)st.st_ino)
             return;
@@ -242,6 +243,13 @@ void preprocessor::directive_include(const preprocessing_token &name,
                 o.inode == (uint64_t)st.st_ino)
                 return;
     entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
+    /* OPTIMIZATION: the multiple-include guard; a file it skips was opened
+       before, so an #import of it is recorded as if entered */
+    if (identified && guard_skips((uint64_t)st.st_dev, (uint64_t)st.st_ino)) {
+        if (kind == directive_kind::import)
+            once_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
+        return;
+    }
     source_files::entry *file = files.open(path.data());
     if (!file) {
         diagnostics.issue(diagnostic_id::err_pp_file_not_found, at)
@@ -258,6 +266,58 @@ void preprocessor::directive_include(const preprocessing_token &name,
                        system,
                        false,
                        {}});
+    inclusion &entered = inclusions.back();
+    if (identified)
+        entered.guard_state = 1;
+    entered.device = (uint64_t)st.st_dev;
+    entered.inode = (uint64_t)st.st_ino;
+}
+
+/*
+ * OPTIMIZATION: the multiple-include guard (clang's MultipleIncludeOpt,
+ * the old preprocessor's guard skip in frontend/pp/include.cpp).  A file
+ * whose every token and directive lies in one if-section opened by
+ *
+ *     #ifndef NAME
+ *     ...
+ *     #endif
+ *
+ * with no #elif or #else, makes nothing and changes nothing when included
+ * again while NAME is defined: [cpp.cond]/13 skips the group, and the file
+ * ends.  So it is not opened, read or skipped again.  The state of an
+ * inclusion: 0 not watched (the main file, text), 1 nothing seen yet, 2 in
+ * the guard's group, 3 after its #endif, 4 not guarded.  Removing these
+ * hooks changes no output.
+ */
+void preprocessor::guard_token()
+{
+    inclusion &in = inclusions.back();
+    if (in.guard_state == 1 || in.guard_state == 3)
+        in.guard_state = 4;
+}
+
+void preprocessor::guard_directive(directive_kind kind)
+{
+    inclusion &in = inclusions.back();
+    if (in.guard_state == 3)
+        in.guard_state = 4;
+    if (in.guard_state == 1 && kind != directive_kind::ifndef)
+        in.guard_state = 4;
+}
+
+void preprocessor::guard_end_of_file()
+{
+    inclusion &in = inclusions.back();
+    if (in.guard_state == 3)
+        guarded_files.append({in.device, in.inode, in.guard_name});
+}
+
+bool preprocessor::guard_skips(uint64_t device, uint64_t inode)
+{
+    for (const guarded_file &g : guarded_files)
+        if (g.device == device && g.inode == inode)
+            return identifiers[g.name].macro >= 0;
+    return false;
 }
 
 /* #pragma once: the current file is not included again */
