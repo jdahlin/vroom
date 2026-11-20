@@ -1883,8 +1883,19 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         declare_implicit(c, special_member::constructor, false, true);
     }
     if (!user_constructors && !entity_table[c].implicit_default_deleted &&
-        (construction || entity_table[c].first_constructor))
-        declare_implicit(c, special_member::constructor, false);
+        (construction || entity_table[c].first_constructor)) {
+        /* [class.default.ctor]/2: "A defaulted default constructor for
+           class X is defined as deleted if ... any non-variant non-static
+           data member with no default member initializer is of reference
+           type" (or a const one without a brace-or-equal-initializer): a
+           deleted function has no definition ([dcl.fct.def.delete]), and an
+           aggregate with such members is initialized by a braced list,
+           which calls no constructor ([dcl.init.aggr]) */
+        if (default_constructor_deleted(c))
+            entity_table[c].implicit_default_deleted = true;
+        else
+            declare_implicit(c, special_member::constructor, false);
+    }
     if (destruction && !entity_table[c].destructor)
         declare_implicit(c, special_member::destructor, false);
     return inherit_constructors(c, n);
