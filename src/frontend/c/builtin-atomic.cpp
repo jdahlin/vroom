@@ -10,8 +10,8 @@
  *   compare_exchange(P, AST_TYPE *expected, AST_TYPE *desired, bool weak, M, M) -> bool
  *   fetch_op / op_fetch(P, AST_TYPE, M) -> AST_TYPE (integers; pointers: bytes, as GCC)
  */
-CC_PRIVATE uint32_t cc_builtin_atomic_build(cc *c, const cc_builtin *b,
-                                            uint32_t loc)
+/* the number of arguments the builtin's node has (the orders included) */
+static int atomic_arguments(int id)
 {
     static const uint8_t nargs[] = {
         [CC_BUILTIN_ATOMIC_LOAD_N - CC_BUILTIN_ATOMIC_LOAD_N] = 2,
@@ -23,20 +23,99 @@ CC_PRIVATE uint32_t cc_builtin_atomic_build(cc *c, const cc_builtin *b,
         [CC_BUILTIN_ATOMIC_EXCHANGE - CC_BUILTIN_ATOMIC_LOAD_N] = 4,
         [CC_BUILTIN_ATOMIC_CMPXCHG - CC_BUILTIN_ATOMIC_LOAD_N] = 6,
     };
-    int id = b->id,
-        want = id <= CC_BUILTIN_ATOMIC_CMPXCHG
-                   ? nargs[id - CC_BUILTIN_ATOMIC_LOAD_N]
-               : id == CC_BUILTIN_SYNC_VAL_CAS || id == CC_BUILTIN_SYNC_BOOL_CAS
-                   ? 4
-               : id == CC_BUILTIN_SYNC_SYNCHRONIZE ? 1
-               : id == CC_BUILTIN_ATOMIC_TEST_AND_SET ||
-                       id == CC_BUILTIN_ATOMIC_CLEAR
-                   ? 2
-                   : 3;
+    if (id <= CC_BUILTIN_ATOMIC_CMPXCHG)
+        return nargs[id - CC_BUILTIN_ATOMIC_LOAD_N];
+    if (id == CC_BUILTIN_SYNC_VAL_CAS || id == CC_BUILTIN_SYNC_BOOL_CAS)
+        return 4;
+    if (id == CC_BUILTIN_SYNC_SYNCHRONIZE)
+        return 1;
+    if (id == CC_BUILTIN_ATOMIC_TEST_AND_SET || id == CC_BUILTIN_ATOMIC_CLEAR)
+        return 2;
+    return 3;
+}
+
+/* whether b is one of the calls cc_builtin_atomic_build makes */
+CC_PRIVATE bool cc_builtin_is_atomic(const cc_builtin *b)
+{
+    int id = b->id;
+    return (id >= CC_BUILTIN_ATOMIC_LOAD_N &&
+            id <= CC_BUILTIN_ATOMIC_MIN_FETCH) ||
+           id == CC_BUILTIN_ATOMIC_TEST_AND_SET ||
+           id == CC_BUILTIN_ATOMIC_CLEAR || id == CC_BUILTIN_SYNC_VAL_CAS ||
+           id == CC_BUILTIN_SYNC_BOOL_CAS ||
+           id == CC_BUILTIN_SYNC_LOCK_RELEASE ||
+           id == CC_BUILTIN_SYNC_SYNCHRONIZE;
+}
+
+/* the arguments of a call of b as written, and what it returns: 0 void, 1
+   bool, 2 the type pointed to by the first argument, 3 int, 4 unsigned */
+CC_PRIVATE void cc_builtin_atomic_shape(const cc_builtin *b, int *written,
+                                        int *result)
+{
+    int id = b->id;
+    *written = atomic_arguments(id);
+    if (b->sig[0] == 's')
+        (*written)--;
+    if (b->sig[1] == 'c')
+        (*written)--;
+    if (id == CC_BUILTIN_SYNC_LOCK_RELEASE)
+        *written = 1;
+    switch (id) {
+    case CC_BUILTIN_ATOMIC_CMPXCHG_N:
+    case CC_BUILTIN_ATOMIC_CMPXCHG:
+    case CC_BUILTIN_SYNC_BOOL_CAS:
+    case CC_BUILTIN_ATOMIC_TEST_AND_SET:
+        *result = 1;
+        break;
+    case CC_BUILTIN_ATOMIC_STORE_N:
+    case CC_BUILTIN_ATOMIC_LOAD:
+    case CC_BUILTIN_ATOMIC_STORE:
+    case CC_BUILTIN_ATOMIC_EXCHANGE:
+    case CC_BUILTIN_ATOMIC_CLEAR:
+    case CC_BUILTIN_SYNC_LOCK_RELEASE:
+    case CC_BUILTIN_SYNC_SYNCHRONIZE:
+        *result = 0;
+        break;
+    default:
+        *result = 2;
+        if (b->sig[1] == 'i')
+            *result = 3;
+        if (b->sig[1] == 'u')
+            *result = 4;
+        break;
+    }
+}
+
+CC_PRIVATE uint32_t cc_builtin_atomic_build(cc *c, const cc_builtin *b,
+                                            uint32_t loc)
+{
     cc_id_list args;
-    ast_qualified_type pt, t, rt = cc_type_basic(AST_TYPE_VOID), tp;
 
     cc_builtin_arguments_parse(c, &args);
+    if (b->sig[0] == 's' && (b->id == CC_BUILTIN_ATOMIC_FETCH_NAND ||
+                             b->id == CC_BUILTIN_ATOMIC_NAND_FETCH)) {
+        diag_span r = {loc,
+                       pp_token_end_find(c->p, loc)}; /* the builtin's name */
+
+        cc_report_warning(
+            c, "sync-fetch-and-nand-semantics-changed", true, NULL, c->args_rp,
+            &r, 1, NULL, 0,
+            "the semantics of this intrinsic changed with GCC version 4.4 - "
+            "the newer semantics are provided here");
+    }
+    return cc_builtin_atomic_apply(c, b, &args, loc);
+}
+
+/* the call of b with the arguments parsed (or built by another front end):
+   their conversions and the node */
+CC_PRIVATE uint32_t cc_builtin_atomic_apply(cc *c, const cc_builtin *b,
+                                            cc_id_list *argument_list,
+                                            uint32_t loc)
+{
+    int id = b->id, want = atomic_arguments(id);
+    cc_id_list &args = *argument_list;
+    ast_qualified_type pt, t, rt = cc_type_basic(AST_TYPE_VOID), tp;
+
     for (uint32_t i = 0; i < args.n; i++)
         args.v[i] = cc_conversion_decay(c, args.v[i]);
     if (id ==
@@ -71,17 +150,6 @@ CC_PRIVATE uint32_t cc_builtin_atomic_build(cc *c, const cc_builtin *b,
         cc_id_list_append(c, &args, args.v[4]);
         args.v[4] = args.v[3];
         args.v[3] = cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc);
-    }
-    if (b->sig[0] == 's' && (id == CC_BUILTIN_ATOMIC_FETCH_NAND ||
-                             id == CC_BUILTIN_ATOMIC_NAND_FETCH)) {
-        diag_span r = {loc,
-                       pp_token_end_find(c->p, loc)}; /* the builtin's name */
-
-        cc_report_warning(
-            c, "sync-fetch-and-nand-semantics-changed", true, NULL, c->args_rp,
-            &r, 1, NULL, 0,
-            "the semantics of this intrinsic changed with GCC version 4.4 - "
-            "the newer semantics are provided here");
     }
     if ((int)args.n != want) {
         cc_builtin_arity_check(c, loc, (unsigned)want, &args);

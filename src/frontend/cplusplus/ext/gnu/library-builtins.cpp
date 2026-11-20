@@ -412,6 +412,18 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     if (!signature)
         return 0;
     owned_array<qualified_type> types_of;
+    /* a signature of other than scalar letters (a pointer to any type, a
+       va_list): one function taking anything whose calls are refused */
+    for (const char *s = signature; *s; s++)
+        if (!strchr(letters, *s) || (s != signature && *s == 'v')) {
+            if (is_generic_builtin(spelling, length))
+                break;
+            return declare_builtin(
+                name, name,
+                qualified_type::make(
+                    type_table.fundamental(fundamental_type::void_), cv_none),
+                nullptr, 0, true, gnu_compiler_builtin | gnu_untyped_builtin);
+        }
     /* int f(...) */
     bool generic = is_generic_builtin(spelling, length);
     for (const char *s = signature; *s && !(generic && s != signature); s++) {
@@ -502,6 +514,116 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
        the library function is another */
     return declare_builtin(name, library, result, parameters.data(),
                            parameters.size(), variadic, flags);
+}
+
+/* whether the spelling has the text in it */
+static bool spelled_with(const char *spelling, size_t length, const char *text)
+{
+    return memmem(spelling, length, text, strlen(text)) != nullptr;
+}
+
+/*
+ * [ext:gnu_library_builtins] a call of an __atomic_*, __sync_* or
+ * __c11_atomic_* builtin (GCC manual 6.55, 6.56; clang's Builtins.td, Sema's
+ * SemaAtomicOpsOverloaded): "The first argument is a pointer to an object
+ * of integral or pointer type of 1, 2, 4 or 8 bytes" (the generic forms any
+ * scalar one); the call's type is by the builtin (cc_builtin_atomic_shape)
+ * void, bool or the type the first argument points to without its
+ * cv-qualifiers; the value arguments are converted to it when lowered.
+ * What these rules do not cover is not supported.
+ */
+analysis_result
+semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
+                                         const owned_array<uint32_t> &nodes,
+                                         qualified_type &result)
+{
+    size_t length = 0;
+    const char *spelling =
+        tokens.pp.identifier_spelling(entity_table[called].name - 1, &length);
+    int written = 0, kind = 0;
+    if (!ast_builder_atomic_shape(spelling, length, &written, &kind))
+        return not_supported(n, "ext.gnu");
+    if (nodes.size() != static_cast<size_t>(written))
+        return ill_formed(n,
+                          "an atomic builtin takes the arguments its form "
+                          "does",
+                          "ext.gnu");
+    qualified_type pointee;
+    if (written > 0) {
+        qualified_type first = semantics[nodes[0]].type;
+        if (!is_pointer(first))
+            return ill_formed(n,
+                              "address argument to atomic builtin must be a "
+                              "pointer",
+                              "ext.gnu");
+        pointee = qualified_type::make(
+            type_table[first.unqualified()].operand.unqualified(), cv_none);
+        fundamental_type f = fundamental_of(pointee);
+        bool pointer = is_pointer(pointee);
+        if (!pointer &&
+            (f == fundamental_type::none || f == fundamental_type::void_ ||
+             f == fundamental_type::std_nullptr_t ||
+             fundamental_type_width(tokens.files.behavior, f) > 64))
+            return not_supported(n, "ext.gnu");
+        /* the operations that compute: an integer (a pointer for the
+           additive ones) */
+        bool computes = spelled_with(spelling, length, "fetch");
+        bool selecting = spelled_with(spelling, length, "max") ||
+                         spelled_with(spelling, length, "min") ||
+                         spelled_with(spelling, length, "nand");
+        if (computes && ((pointer && selecting) ||
+                         (!pointer && (!fundamental_type_is_integral(f) ||
+                                       f == fundamental_type::bool_))))
+            return not_supported(n, "ext.gnu");
+        /* the arguments that are pointers to the object's type: the
+           generic __atomic_load, __atomic_store, __atomic_exchange and
+           __atomic_compare_exchange take them in place of values */
+        size_t pointers = 0;
+        bool generic = !spelled_with(spelling, length, "_n") &&
+                       !spelled_with(spelling, length, "__c11_") &&
+                       !spelled_with(spelling, length, "__sync_");
+        if (spelled_with(spelling, length, "compare_exchange")) {
+            pointers = 1;
+            if (generic)
+                pointers = 2;
+        } else if (generic && (spelled_with(spelling, length, "load") ||
+                               spelled_with(spelling, length, "store")))
+            pointers = 1;
+        else if (generic && spelled_with(spelling, length, "exchange"))
+            pointers = 2;
+        for (size_t i = 1; i < nodes.size(); i++) {
+            qualified_type t = semantics[nodes[i]].type;
+            if (i <= pointers && !is_pointer(t))
+                return ill_formed(n,
+                                  "an argument of an atomic builtin must be "
+                                  "a pointer",
+                                  "ext.gnu");
+            if (fundamental_of(t) == fundamental_type::none && !is_pointer(t))
+                return not_supported(n, "ext.gnu");
+        }
+    }
+    switch (kind) {
+    case 1:
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::bool_), cv_none);
+        break;
+    case 2:
+        result = pointee;
+        break;
+    case 3:
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::int_), cv_none);
+        break;
+    case 4:
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::unsigned_int), cv_none);
+        break;
+    default:
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+        break;
+    }
+    return analysis_result::well_formed;
 }
 
 int semantic_analysis::bit_count_builtin(entity_index e) const

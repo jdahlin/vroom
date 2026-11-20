@@ -130,6 +130,12 @@ const char *ast_builder_builtin_signature(const char *name, size_t length);
 uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
                                   ast_qualified_type t, const uint32_t *args,
                                   uint32_t count);
+/* whether name is one of the __atomic_*, __sync_* and __c11_atomic_* calls:
+   the number of arguments as written (the orders a __sync_ call lacks not
+   counted), and the result: 0 void, 1 bool, 2 the type the first argument
+   points to, 3 int, 4 unsigned int */
+bool ast_builder_atomic_shape(const char *name, size_t length, int *written,
+                              int *result);
 /* __builtin_convertvector(vector, t): each element of vector converted
    to the element type of t, a vector type of as many elements */
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,

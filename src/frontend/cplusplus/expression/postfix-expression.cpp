@@ -1394,7 +1394,12 @@ analysis_result semantic_analysis::call_with(
        xvalue if the result type is an rvalue reference to object type, and
        a prvalue otherwise." */
     m = expression_meaning();
-    call_result(function.operand, m);
+    qualified_type result_type = function.operand;
+    /* [ext:gnu_library_builtins] the call's type is by its arguments */
+    if (called && (entity_table[called].gnu_flags & gnu_untyped_builtin))
+        VTRY_SET(r,
+                 atomic_builtin_result(n, called, argument_nodes, result_type));
+    call_result(result_type, m);
     /* [expr.const]/5.2: "an invocation of a non-constexpr function"; a
        constexpr function's invocation is the evaluator's
        (evaluate_constant), and a pointer or reference may be to a function

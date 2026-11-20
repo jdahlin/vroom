@@ -422,6 +422,15 @@ static bool declares_by_declarator(SyntaxRef d)
     return false;
 }
 
+/* the alias-declaration a declaration is, or a template-declaration's (an
+   alias template), else the declaration itself */
+static SyntaxRef alias_declaration_of(SyntaxRef d)
+{
+    while (d.template_declaration() && d.size() && d.back().is_node())
+        d = d.back();
+    return d;
+}
+
 /*
  * A declaration not analysed (unsupported or not parsed) still declares
  * its names, and a later declaration of one of them is a redeclaration whose
@@ -510,6 +519,15 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                     ids.append(c.token());
             }
         }
+    } else if (alias_declaration_of(declaration)
+                   .is(syntax_kind::alias_declaration)) {
+        /* [dcl.typedef]/2: an alias-declaration declares the identifier
+           after using; the names in its type-id are used, not declared
+           (holding them would hide a using-declaration's name from every
+           later lookup) */
+        SyntaxRef alias = alias_declaration_of(declaration);
+        if (alias.size() > 1 && alias[1].is_identifier())
+            ids.append(alias[1].token());
     } else if (!by_declarator) {
         /* the declarators are not known (a declaration not parsed, or of
            a kind analysis has no rules for: a template, a

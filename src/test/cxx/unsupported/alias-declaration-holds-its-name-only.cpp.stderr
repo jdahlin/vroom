@@ -1,0 +1,2 @@
+alias-declaration-holds-its-name-only.cpp:14:5: error: the rules of [dcl.stc] are not implemented yet
+alias-declaration-holds-its-name-only.cpp:14:5: note: refused by vcc's frontend/cplusplus/declaration/decl-specifier.cpp:N (decl_specifier_seq)

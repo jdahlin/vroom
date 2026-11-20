@@ -339,6 +339,12 @@ enum gnu_attribute_flag : uint32_t {
        __builtin_ctzg (with gnu_compiler_builtin): a constant expression
        when its arguments are (bit_count_builtin) */
     gnu_bit_count = 262144,
+    /* [ext:gnu_library_builtins] a builtin of vcc's C front end whose
+       arguments or result are not those of one function type
+       (__atomic_*, __sync_*, __c11_atomic_*, __builtin_va_start): declared
+       as a function taking anything, so that lookup finds it; a call is not
+       supported yet (call_with) */
+    gnu_untyped_builtin = 524288,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -2577,6 +2583,9 @@ class semantic_analysis
     int bit_count_builtin(entity_index e) const;
     analysis_result bit_count_arguments(SyntaxRef n, entity_index called,
                                         const owned_array<uint32_t> &nodes);
+    analysis_result atomic_builtin_result(SyntaxRef n, entity_index called,
+                                          const owned_array<uint32_t> &nodes,
+                                          qualified_type &result);
     analysis_result builtin_addressof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_source_location(SyntaxRef n, expression_meaning &m);
     analysis_result clang_atomic_type(SyntaxRef n, qualified_type &type);

@@ -2958,6 +2958,7 @@ uint32_t c_lowering::call(const semantic_node &n)
     qualified_type function_type = node(n.a).type;
     uint32_t callee = 0;
     uint32_t builtin = 0;
+    bool untyped_builtin = false;
     owned_array<uint32_t> arguments;
     /* a call through a pointer to member function: its statements
        first ([expr.mptr.oper]/6) */
@@ -3010,10 +3011,13 @@ uint32_t c_lowering::call(const semantic_node &n)
         if (node(named).kind == semantic_kind::entity &&
             (analysis.entity_table[node(named).a].gnu_flags &
              gnu_compiler_builtin))
-            /* [ext:gnu_library_builtins] no function: the C front end's
+        /* [ext:gnu_library_builtins] no function: the C front end's
                builtin node, made below */
+        {
             builtin = analysis.entity_table[node(named).a].name;
-        else {
+            untyped_builtin = analysis.entity_table[node(named).a].gnu_flags &
+                              gnu_untyped_builtin;
+        } else {
             callee = expression(n.a);
             if (!callee)
                 return 0;
@@ -3052,6 +3056,9 @@ uint32_t c_lowering::call(const semantic_node &n)
         arguments.append(a);
     }
     qualified_type result = record(function_type).operand;
+    /* an atomic builtin's type is by its arguments: the call's */
+    if (untyped_builtin)
+        result = n.type;
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(result, n.at));
     uint32_t count = static_cast<uint32_t>(arguments.size());
     bool initializes = here;
