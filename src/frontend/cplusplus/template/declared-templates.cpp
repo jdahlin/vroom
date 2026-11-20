@@ -309,14 +309,36 @@ analysis_result semantic_analysis::function_template_declarator(
     analysis_result r = analysis_result::well_formed;
     if (constructor && specifiers)
         r = constructor_specifiers(definition[lead], s);
-    else if (specifiers)
+    else if (specifiers) {
+        /* [class.conv.fct]/2: a conversion function may be explicit */
+        SyntaxRef conversion;
+        if (member_of)
+            conversion = conversion_function_id_of(definition);
+        bool outer_explicit = explicit_allowed;
+        explicit_allowed = outer_explicit || conversion;
         r = decl_specifier_seq(definition[lead], s, false);
+        explicit_allowed = outer_explicit;
+    }
     for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
         r = gnu_attribute_specifier(definition[i], s);
     if (r == analysis_result::well_formed) {
         type = s.type;
         function_cv = 0;
         function_parameters.clear();
+        /* [class.conv.fct]/1: a conversion function template's type is
+           its conversion-type-id's, in the template-parameters' scope */
+        SyntaxRef conversion;
+        if (member_of)
+            conversion = conversion_function_id_of(definition);
+        if (conversion && s.has_type)
+            r = ill_formed(definition[lead],
+                           "no return type can be specified for a "
+                           "conversion function",
+                           "class.conv.fct");
+        else if (conversion)
+            r = conversion_type(conversion, type);
+    }
+    if (r == analysis_result::well_formed) {
         if (member_of)
             member_template_declarator(1);
         if (constructor)

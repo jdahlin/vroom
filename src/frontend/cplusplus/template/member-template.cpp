@@ -47,6 +47,8 @@ analysis_result semantic_analysis::member_function_template(
     uint32_t specifiers =
         tail.size() > 0 && tail[0].is(syntax_kind::decl_specifier_seq);
     bool constructor = declares_special_member(c, tail[specifiers]);
+    /* [temp.mem]/1: a conversion function template ([class.conv.fct]) */
+    bool conversion = static_cast<bool>(conversion_function_id_of(definition));
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
     uint32_t trailing = static_cast<bool>(trailing_constraint(n));
@@ -56,13 +58,14 @@ analysis_result semantic_analysis::member_function_template(
        outside it (member_template_definition_of_template): a
        member-declaration of a decl-specifier-seq and a declarator */
     bool defines = definition.is(syntax_kind::function_definition);
-    if (!defines && (constructor || !specifiers || trailing ||
+    if (!defines && (constructor || conversion || !specifiers || trailing ||
                      tail.size() != 3 || tail[1].is_token() ||
                      !tail[2].is(preprocessing_op_or_punc::SEMICOLON)))
         return not_supported(n, "temp.mem");
     if (defines &&
         (tail.size() != 2 + specifiers + trailing ||
-         (!specifiers && !constructor) || tail[specifiers].is_token() ||
+         (!specifiers && !constructor && !conversion) ||
+         tail[specifiers].is_token() ||
          !tail[specifiers + 1 + trailing].is(syntax_kind::function_body)))
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
@@ -83,8 +86,7 @@ analysis_result semantic_analysis::member_function_template(
                                    "virtual",
                                    "temp.mem");
     if (!m.has_id || m.qualifier || m.qualified_namespace || m.destructor ||
-        m.conversion_function || m.literal_operator ||
-        (s.explicit_ && !constructor) ||
+        m.literal_operator || (s.explicit_ && !constructor && !conversion) ||
         m.allocation != allocation_function::none ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.mem");
