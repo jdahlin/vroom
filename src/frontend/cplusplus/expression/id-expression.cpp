@@ -571,6 +571,8 @@ analysis_result semantic_analysis::id_expression(token_index t,
         builtin_spelled(name))
         e = library_builtin(name);
     if (!e)
+        e = allocation_builtin(name);
+    if (!e)
         return not_supported(current_declaration,
                              unknown_name_subclause(found.unknown_entity,
                                                     "basic.lookup.unqual"));

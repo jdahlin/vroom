@@ -2132,6 +2132,7 @@ class semantic_analysis
     /* [ext:gnu_library_builtins] the function __builtin_NAME (an
        identifier) declares at its first use, 0 if it is not one */
     entity_index library_builtin(uint32_t name);
+    entity_index allocation_builtin(uint32_t name);
     /* [ext:gnu_library_builtins] whether the name is spelled __builtin_...:
        [lex.name]/3 reserves it to the implementation, so a scope with
        names analysis did not follow does not hide the builtin */
@@ -4672,6 +4673,12 @@ class semantic_analysis
        functions implicitly declared, declared once */
     void implicit_allocation_functions();
     bool allocation_functions_declared = false;
+    void declare_implicit_allocation_function(allocation_function kind,
+                                              qualified_type result,
+                                              const qualified_type *parameters,
+                                              uint32_t count);
+    void implicit_aligned_allocation_functions();
+    bool aligned_allocation_declared = false;
     /* the declarations of allocation and deallocation functions analysed;
        when the translation unit spells operator new or operator delete
        more often, a function lookup misses may be the one a call would

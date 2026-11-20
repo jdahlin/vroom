@@ -69,32 +69,114 @@ void semantic_analysis::implicit_allocation_functions()
         } else if (f.sized) {
             count = 2;
         }
-        uint32_t name = allocation_function_name(f.kind);
-        entity_index e = entity_table.make(entity_kind::function, name, 0);
-        entity &x = entity_table[e];
-        /* [basic.stc.dynamic]/2: the deallocation functions are declared
-           noexcept, part of their type since C++17 */
-        bool non_throwing =
-            !allocation &&
-            tokens.files.behavior.has(
-                language_feature::exception_specification_in_type);
-        x.type = qualified_type::make(
-            type_table.function(result, parameters, count, false, non_throwing),
-            cv_none);
-        x.linkage_of_name = linkage::external;
-        x.operator_function = true;
-        x.allocation = f.kind;
-        x.implicit = true;
-        entity_index first = entity_table.find(0, name);
-        if (!first) {
-            entity_table.bind(0, name, e);
-            continue;
-        }
-        entity_index last = first;
-        while (entity_table[last].next_overload)
-            last = entity_table[last].next_overload;
-        entity_table[last].next_overload = e;
+        declare_implicit_allocation_function(f.kind, result, parameters, count);
     }
+}
+
+/* one implicit declaration, appended to the global overloads of its name */
+void semantic_analysis::declare_implicit_allocation_function(
+    allocation_function kind, qualified_type result,
+    const qualified_type *parameters, uint32_t count)
+{
+    bool allocation = kind == allocation_function::new_ ||
+                      kind == allocation_function::new_array;
+    uint32_t name = allocation_function_name(kind);
+    entity_index e = entity_table.make(entity_kind::function, name, 0);
+    entity &x = entity_table[e];
+    /* [basic.stc.dynamic]/2: the deallocation functions are declared
+       noexcept, part of their type since C++17 */
+    bool non_throwing =
+        !allocation && tokens.files.behavior.has(
+                           language_feature::exception_specification_in_type);
+    x.type = qualified_type::make(
+        type_table.function(result, parameters, count, false, non_throwing),
+        cv_none);
+    x.linkage_of_name = linkage::external;
+    x.operator_function = true;
+    x.allocation = kind;
+    x.implicit = true;
+    entity_index first = entity_table.find(0, name);
+    if (!first) {
+        entity_table.bind(0, name, e);
+        return;
+    }
+    entity_index last = first;
+    for (entity_index k = first; k; k = entity_table[k].next_overload) {
+        last = k;
+        if (k != e && entity_table[k].type == x.type)
+            /* the program declared it already: the same function */
+            return;
+    }
+    entity_table[last].next_overload = e;
+}
+
+/*
+ * The forms with std::align_val_t ([new.delete.single]/1, the declarations
+ * of <new>), which clang also declares implicitly for its __builtin_operator_new
+ * and __builtin_operator_delete when aligned allocation is on, before <new>
+ * is included: declared when std::align_val_t has been, once.  The sized
+ * form follows the other deallocation functions.
+ */
+void semantic_analysis::implicit_aligned_allocation_functions()
+{
+    if (aligned_allocation_declared)
+        return;
+    entity_index std_ =
+        entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
+    if (!std_ || !is_namespace(std_) || !std_namespace(std_))
+        return;
+    lookup_result found = lookup_in_namespace(
+        std_, tokens.pp.identifier("align_val_t", 11) + 1, lookup_filter::any);
+    if (found.ambiguous || !found.entity ||
+        entity_table[found.entity].kind != entity_kind::enumeration)
+        return;
+    aligned_allocation_declared = true;
+    qualified_type align = qualified_type::make(
+        entity_table[found.entity].type.unqualified(), cv_none);
+    qualified_type size = qualified_type::make(
+        type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
+    qualified_type v = qualified_type::make(
+        type_table.fundamental(fundamental_type::void_), cv_none);
+    qualified_type pointer =
+        qualified_type::make(type_table.pointer_to(v), cv_none);
+    qualified_type new_parameters[2] = {size, align};
+    declare_implicit_allocation_function(allocation_function::new_, pointer,
+                                         new_parameters, 2);
+    qualified_type delete_parameters[3] = {pointer, align, align};
+    declare_implicit_allocation_function(allocation_function::delete_, v,
+                                         delete_parameters, 2);
+    if (tokens.files.behavior.has(language_feature::sized_deallocation)) {
+        delete_parameters[1] = size;
+        delete_parameters[2] = align;
+        declare_implicit_allocation_function(allocation_function::delete_, v,
+                                             delete_parameters, 3);
+    }
+}
+
+/*
+ * [ext:gnu_library_builtins] clang's __builtin_operator_new and
+ * __builtin_operator_delete (libc++'s <__new/allocate.h>): a call of the
+ * replaceable global allocation or deallocation function, found as
+ * ::operator new or ::operator delete is ([basic.stc.dynamic]/1, [expr.new]/9
+ * for the forms the program declares, such as std::align_val_t's); a class's
+ * own operator is not considered.  The name of any other spelling is 0.
+ */
+entity_index semantic_analysis::allocation_builtin(uint32_t name)
+{
+    if (!tokens.files.behavior.has(extension::gnu_library_builtins))
+        return 0;
+    size_t length = 0;
+    const char *spelling = tokens.pp.identifier_spelling(name - 1, &length);
+    allocation_function kind;
+    if (length == 22 && !memcmp(spelling, "__builtin_operator_new", 22))
+        kind = allocation_function::new_;
+    else if (length == 25 && !memcmp(spelling, "__builtin_operator_delete", 25))
+        kind = allocation_function::delete_;
+    else
+        return 0;
+    implicit_allocation_functions();
+    implicit_aligned_allocation_functions();
+    return entity_table.find(0, allocation_function_name(kind));
 }
 
 /* the operator new and operator delete tokens of the translation unit:
