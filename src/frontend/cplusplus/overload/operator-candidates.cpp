@@ -261,13 +261,7 @@ analysis_result semantic_analysis::overloaded_operator(
            function calls ([basic.lookup.argdep]) except that all member
            functions are ignored." */
         if (member_only) {
-            for (entity_index e : members) {
-                overload_candidate c;
-                c.function = e;
-                c.type = entity_table[e].type;
-                c.member = true;
-                candidates.append(c);
-            }
+            function_candidates(members, true, candidates);
             return analysis_result::well_formed;
         }
         lookup_result found =
@@ -321,14 +315,11 @@ analysis_result semantic_analysis::overloaded_operator(
         }
         for (entity_index e : set)
             overload_set(e, others);
-        for (entity_index e : members) {
-            overload_candidate c;
-            c.function = e;
-            c.type = entity_table[e].type;
-            c.member = true;
-            c.rewritten = rewritten;
-            c.reversed = reversed;
-            candidates.append(c);
+        size_t first_member = candidates.size();
+        function_candidates(members, true, candidates);
+        for (size_t i = first_member; i < candidates.size(); i++) {
+            candidates[i].rewritten = rewritten;
+            candidates[i].reversed = reversed;
         }
         /* "However, if no operand has a class type, only those non-member
            functions in the lookup set that have a first parameter of type T1

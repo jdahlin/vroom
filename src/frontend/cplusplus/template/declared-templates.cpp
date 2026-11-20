@@ -776,9 +776,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         !entity_table[prior].nonstatic_member &&
         !entity_table.bound_by_using(outer, name)) {
         overload_set(prior, functions);
-        prior = entity_table.make(entity_kind::none, name, outer);
-        entity_table[prior].held_by_template = true;
-        note_held(prior);
+        prior = make_held_name(name, outer);
         entity_table.bind(outer, name, prior);
     }
     size_t before = entity_table.size();
@@ -792,9 +790,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     entity_index held = entity_table.find(outer, name);
     if (!held && m.operator_function) {
         /* (hold_names holds identifiers: an operator's name is held here) */
-        held = entity_table.make(entity_kind::none, name, outer);
-        entity_table[held].held_by_template = true;
-        note_held(held);
+        held = make_held_name(name, outer);
         entity_table.bind(outer, name, held);
     }
     record.name = held;
@@ -1939,9 +1935,7 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
             if (other.name == held)
                 other.unusable = true;
     } else {
-        held = entity_table.make(entity_kind::none, name, outer);
-        entity_table[held].held_by_template = true;
-        note_held(held);
+        held = make_held_name(name, outer);
         entity_table.bind(outer, name, held);
     }
     record.name = held;

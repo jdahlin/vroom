@@ -135,6 +135,18 @@ void semantic_analysis::note_held(entity_index e)
     held_pending.append(e);
 }
 
+/* a name that the member function templates, or the constructor
+   templates, of scope hold: no entity of its own kind ([temp.over]/1),
+   noted for the declaration analysed */
+entity_index semantic_analysis::make_held_name(uint32_t name,
+                                               entity_index scope)
+{
+    entity_index held = entity_table.make(entity_kind::none, name, scope);
+    entity_table[held].held_by_template = true;
+    note_held(held);
+    return held;
+}
+
 void semantic_analysis::found_also(lookup_result &r, entity_index e,
                                    entity_index in) const
 {

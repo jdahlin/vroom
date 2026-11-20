@@ -61,8 +61,10 @@ bool semantic_analysis::declares_special_member(entity_index c,
 
 /*
  * [temp.mem]/1: "A template can be declared within a class or class
- * template; such a template is called a member template."  [temp.mem]/5:
- * a constructor template is never a copy or move constructor; it is a
+ * template; such a template is called a member template."
+ * [class.copy.ctor]/5: "A member function template is never instantiated to
+ * produce such a constructor signature": a constructor template is never a
+ * copy or move constructor; it is a
  * user-declared constructor ([dcl.init.aggr]/1.1, [class.default.ctor]/1:
  * no default constructor is implicitly declared).  Only a constructor
  * template of a class of namespace scope is known.  One defined in the

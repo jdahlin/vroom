@@ -299,12 +299,7 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
             integer_constant(fundamental_type::unsigned_long_int,
                              tokens.files.value_of(k).string_length, t));
         owned_array<overload_candidate> candidates;
-        for (entity_index f : set) {
-            overload_candidate c;
-            c.function = f;
-            c.type = entity_table[f].type;
-            candidates.append(c);
-        }
+        function_candidates(set, false, candidates);
         size_t index = 0;
         VTRY(r, best_viable_function(current_declaration, candidates, nullptr,
                                      arguments, index));

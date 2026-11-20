@@ -126,14 +126,20 @@ analysis_result semantic_analysis::member_function_template(
         entity_index head = prior;
         prior = entity_table[head].member_templates;
         if (!prior) {
-            prior = entity_table.make(entity_kind::none, name, c);
-            entity_table[prior].held_by_template = true;
-            note_held(prior);
+            prior = make_held_name(name, c);
             entity_table[head].member_templates = prior;
         }
-    } else if (prior && (entity_table[prior].enclosing != c ||
-                         !member_function_template_of(prior)))
+    } else if (prior && entity_table[prior].enclosing != c) {
+        /* a name a using-declaration or a member enumeration's enumerator
+           brought into the class (class_member_declaration) */
+        return not_supported(n, "class.mem");
+    } else if (prior && !member_function_template_of(prior)) {
+        /* [temp.mem]/8: a conversion function template beside a
+           non-template conversion function (or a member of another kind):
+           the best conversion function among them ([over.match.conv]) is
+           not weighed */
         return not_supported(n, "temp.mem");
+    }
     function_template record = new_template(
         name, c, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.gnu_flags = gnu_flags;
@@ -162,9 +168,7 @@ analysis_result semantic_analysis::member_function_template(
         entity_table[t].explicit_dependent = s.explicit_dependent;
         prior = entity_table[c].constructor_templates;
         if (!prior) {
-            prior = entity_table.make(entity_kind::none, name, c);
-            entity_table[prior].held_by_template = true;
-            note_held(prior);
+            prior = make_held_name(name, c);
             entity_table[c].constructor_templates = prior;
         }
     }
@@ -305,14 +309,8 @@ analysis_result semantic_analysis::member_template_call(
     if (!written && entity_table[held].kind == entity_kind::function) {
         owned_array<entity_index> functions;
         overload_set(held, functions);
-        for (entity_index f : functions) {
-            overload_candidate c;
-            c.function = f;
-            c.type = entity_table[f].type;
-            c.member = object != nullptr;
-            candidates.append(c);
-            first_arguments.append(0);
-        }
+        function_candidates(functions, object != nullptr, candidates,
+                            &first_arguments);
     }
     VTRY(r, member_template_candidates(
                 n, templates, object != nullptr, early.data(),
