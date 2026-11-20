@@ -30,6 +30,11 @@ ALTERNATE_KEYWORD("__asm__", asm_, gnu_alternate_keywords)
 ALTERNATE_KEYWORD("__alignof", alignof_, gnu_alternate_keywords)
 ALTERNATE_KEYWORD("__alignof__", alignof_, gnu_alternate_keywords)
 
+/* [ext:clang_c11_keywords] */
+ALTERNATE_KEYWORD("_Static_assert", static_assert_, clang_c11_keywords)
+ALTERNATE_KEYWORD("_Alignas", alignas_, clang_c11_keywords)
+ALTERNATE_KEYWORD("_Alignof", alignof_, clang_c11_keywords)
+
 EXTENSION_KEYWORD(attribute, "__attribute", gnu_attributes)
 EXTENSION_KEYWORD(attribute, "__attribute__", gnu_attributes)
 EXTENSION_KEYWORD(restrict, "__restrict", gnu_restrict)

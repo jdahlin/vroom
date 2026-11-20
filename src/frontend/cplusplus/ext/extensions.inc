@@ -110,6 +110,10 @@ EXTENSION(clang_no_operator_names, clang,
 EXTENSION(clang_atomic, clang,
           "clang Language Extensions, C11 _Atomic in C++: _Atomic(T) a type with C11's "
           "atomic type's layout (C23 6.2.5)")
+EXTENSION(clang_c11_keywords, clang,
+          "clang Language Extensions, C11 keywords in C++: _Static_assert, _Alignas and "
+          "_Alignof, other spellings of static_assert, alignas and alignof with the same "
+          "meaning (clang: -Wc11-extensions)")
 EXTENSION(clang_c11_thread_local, clang,
           "clang Language Extensions, C11 _Thread_local in C++: a storage-class-specifier with "
           "C11's rules (constant initialization, trivial destruction, static or namespace "
