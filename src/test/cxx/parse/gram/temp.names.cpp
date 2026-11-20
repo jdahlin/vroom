@@ -53,3 +53,14 @@ template <class T> struct lit_r2<true, T> { typedef T type; };
 template <class T> struct lit_ph { static const int value = 1; };
 template <class T>
 typename lit_r2<0 < lit_ph<T>::value, T>::type lit_pick(T t) { return t; }
+
+// A non-type template-parameter's default argument ends at '>', and is no
+// complete-class context ([class.mem]/6): the member-specification's first
+// pass must not skip the rest of the declaration.  (nlohmann/json's
+// basic_json::get_impl, enable_if_t<...> = 0.)
+template <class B>
+struct R {
+  B get_impl(B *) const { return B(); }
+  template <class V, int = 0> V get_impl(int) const { return V(7); }
+  template <class V> V get() const { return get_impl<V>(0); }
+};
