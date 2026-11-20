@@ -777,8 +777,13 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
     /* a second one, or beside a user-declared copy assignment operator */
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
-    if (found.entity || found.unknown || found.ambiguous ||
-        x.defaulted_copy_assignment || x.defaulted_move_assignment)
+    /* [class.member.lookup]: an operator= found in a base class is not a
+       declaration of c; one copy and one move assignment operator may be
+       defaulted ([class.copy.assign]/2, /3) */
+    bool declared_here = found.entity && found.found_in == c;
+    if (found.unknown || found.ambiguous || declared_here ||
+        (move && x.defaulted_move_assignment) ||
+        (!move && x.defaulted_copy_assignment))
         return not_supported(n, "class.mem");
     if (move)
         entity_table[c].defaulted_move_assignment = true;
