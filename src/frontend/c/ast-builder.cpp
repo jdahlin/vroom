@@ -53,6 +53,11 @@ ast_qualified_type ast_builder_type_atomic(cc *c, ast_qualified_type value)
     return cc_type_atomic(c, value, 0);
 }
 
+ast_qualified_type ast_builder_type_complex(cc *c, ast_qualified_type element)
+{
+    return cc_type_complex(c, element);
+}
+
 ast_qualified_type
 ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count)
 {
@@ -310,6 +315,16 @@ const char *ast_builder_builtin_signature(const char *name, size_t length)
     return b ? b->sig : NULL;
 }
 
+bool ast_builder_atomic_shape(const char *name, size_t length, int *written,
+                              int *result)
+{
+    const cc_builtin *b = ast_builder_builtin(name, length);
+    if (!b || !cc_builtin_is_atomic(b))
+        return false;
+    cc_builtin_atomic_shape(b, written, result);
+    return true;
+}
+
 uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
                                   ast_qualified_type t, const uint32_t *args,
                                   uint32_t count)
@@ -317,9 +332,40 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     const cc_builtin *b = ast_builder_builtin(name, length);
     if (!b)
         return 0;
+    /* an __atomic_*, __sync_* or __c11_atomic_* call: the conversions of
+       the parsed call, then its node (the C++ front end has checked the
+       arguments) */
+    if (cc_builtin_is_atomic(b)) {
+        cc_id_list atomic;
+        cc_id_list_init(&atomic);
+        for (uint32_t i = 0; i < count; i++)
+            cc_id_list_append(c, &atomic, args[i]);
+        return cc_builtin_atomic_apply(c, b, &atomic, 0);
+    }
+    /* the lock-free queries: constants where the size decides, else the
+       runtime call */
+    if (b->id == CC_BUILTIN_ATOMIC_LOCK_FREE) {
+        cc_id_list query;
+        cc_id_list_init(&query);
+        for (uint32_t i = 0; i < count; i++)
+            cc_id_list_append(c, &query, args[i]);
+        return cc_builtin_atomic_lock_free_apply(c, b, &query, 0);
+    }
     /* the parser's tree of conditionals, as for C */
     if (b->id == CC_BUILTIN_FPCLASSIFY && count == 6)
         return cc_fpclassify_build(c, args, 0);
+    /* the generic bit counts: the operand's precision, lowered from the
+       nodes as for C (the C++ front end has checked the arguments) */
+    if ((b->id == CC_BUILTIN_CLZG || b->id == CC_BUILTIN_CTZG ||
+         b->id == CC_BUILTIN_POPCOUNTG) &&
+        count >= 1 && count <= 2) {
+        uint32_t fallback = 0;
+        if (count == 2)
+            fallback =
+                cc_conversion_apply(c, args[1], cc_type_basic(AST_TYPE_INT));
+        return cc_builtin_bit_count_lower(
+            c, b->id, false, cc_conversion_decay(c, args[0]), fallback, 0);
+    }
     cc_id_list list;
     cc_id_list_init(&list);
     for (uint32_t i = 0; i < count; i++)

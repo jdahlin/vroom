@@ -325,8 +325,12 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
     for (entity_index f = own_conversion_functions(c); f;
          f = entity_table[f].next_overload) {
         const entity &x = entity_table[f];
-        if (!x.conversion_function)
-            continue;
+        /* [temp.mem]/1: a conversion function template, held under the
+           name, needs [temp.deduct.conv]: not analysed */
+        if (!x.conversion_function) {
+            unknown = true;
+            return 0;
+        }
         expression_meaning value = conversion_function_result(f);
         /* explicit: the type itself or a qualification conversion to it */
         if (x.explicit_ &&

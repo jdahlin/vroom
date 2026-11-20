@@ -42,8 +42,11 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     if (n.size() != 4 || n[3].is_token())
         return not_supported(n, "temp.expl.spec");
     auto inner = n[3];
+    entity_index qualifier = 0;
     if (SyntaxRef id = variable_specialization_id(inner))
-        return variable_specialization(n, inner, id);
+        return variable_specialization(n, inner, id, qualifier);
+    if (SyntaxRef id = qualified_variable_specialization_id(inner, qualifier))
+        return variable_specialization(n, inner, id, qualifier);
     if (!inner.is(syntax_kind::function_definition,
                   syntax_kind::simple_declaration))
         return not_supported(n, "temp.expl.spec");
@@ -53,7 +56,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         return not_supported(n, "temp.expl.spec");
     specified s;
     uint32_t index = 0;
-    VTRY(r, named_specialization(n, inner, true, false, s, index));
+    VTRY(r, named_specialization(n, inner, 0, true, false, s, index));
     /* [temp.expl.spec]/14 (Note): the template's exception specification
        is instantiated for the comparison: not here */
     if (dependent_exception_specification(
@@ -98,35 +101,49 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
     if (!is_namespace(current_scope) || defining_class || function_state.active)
         return not_supported(n, "temp.explicit");
     auto d = n[n.size() - 1];
-    if (!d.is(syntax_kind::simple_declaration) || leading_gnu_attributes(d))
+    if (!d.is(syntax_kind::simple_declaration))
         return not_supported(n, "temp.explicit");
-    if (d.size() == 2 && d[0].is(syntax_kind::decl_specifier_seq) &&
-        d[0].size() == 1 &&
-        d[0][0].is(syntax_kind::elaborated_type_specifier)) {
+    /* [ext:gnu_attributes] before the declaration, as libc++'s
+       extern template _LIBCPP_EXPORTED_FROM_ABI void f<T>(T): only those
+       that change nothing vcc generates (visibility("default")) */
+    uint32_t lead = leading_gnu_attributes(d);
+    for (uint32_t i = 0; i < lead; i++)
+        if (!d[i].is(syntax_kind::gnu_attribute_specifier) ||
+            !gnu_attributes_without_effect(d[i]))
+            return not_supported(n, "temp.explicit");
+    SyntaxTail tail(d, lead);
+    if (tail.size() == 2 && tail[0].is(syntax_kind::decl_specifier_seq) &&
+        tail[0].size() == 1 &&
+        tail[0][0].is(syntax_kind::elaborated_type_specifier)) {
         /* [temp.explicit]/3: "If the explicit instantiation is for a
            class or member class, the elaborated-type-specifier in the
            declaration shall include a simple-template-id": class-key
-           simple-template-id */
-        auto e = d[0][0];
+           simple-template-id, with the attributes clang allows after the
+           class-key (template class __attribute__((...)) C<int>) */
+        auto e = tail[0][0];
         auto ec = e;
-        if (e.size() != 2 || !ec[0].is_token() ||
-            !ec[1].is(syntax_kind::simple_template_id) ||
+        uint32_t id = 1;
+        if (e.size() == 3 && ec[1].is(syntax_kind::gnu_attribute_specifier) &&
+            gnu_attributes_without_effect(ec[1]))
+            id = 2;
+        if (e.size() != id + 1 || !ec[0].is_token() ||
+            !ec[id].is(syntax_kind::simple_template_id) ||
             (ec[0].keyword() != standard_keyword::struct_ &&
              ec[0].keyword() != standard_keyword::class_))
             return not_supported(n, "temp.explicit");
-        return class_explicit_instantiation(n, ec[1], extern_);
+        return class_explicit_instantiation(n, ec[id], extern_);
     }
-    if (d.size() != 3 || !d[0].is(syntax_kind::decl_specifier_seq) ||
-        d[1].is_token() || !d[2].is(preprocessing_op_or_punc::SEMICOLON))
+    if (tail.size() != 3 || !tail[0].is(syntax_kind::decl_specifier_seq) ||
+        tail[1].is_token() || !tail[2].is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported(n, "temp.explicit");
     /* a member function of a class template's specialization:
        S<A>::f(...) */
-    if (d[1].is(syntax_kind::noptr_declarator) && d[1].size() &&
-        d[1][0].is(syntax_kind::qualified_id))
-        return member_explicit_instantiation(n, d, extern_);
+    if (tail[1].is(syntax_kind::noptr_declarator) && tail[1].size() &&
+        tail[1][0].is(syntax_kind::qualified_id))
+        return member_explicit_instantiation(n, d, lead, extern_);
     specified s;
     uint32_t index = 0;
-    VTRY(r, named_specialization(n, d, false, extern_, s, index));
+    VTRY(r, named_specialization(n, d, lead, false, extern_, s, index));
     entity_index e = instantiations[index].specialization;
     if (extern_)
         entity_table[e].explicitly_instantiated =
@@ -196,6 +213,48 @@ SyntaxRef semantic_analysis::variable_specialization_id(SyntaxRef d) const
     return id;
 }
 
+/* [temp.expl.spec]/1, [dcl.meaning]/1: the same with a qualified
+   template-id, N::name<args>, its qualifier a namespace the template is a
+   member of ([namespace.qual]/2); qualifier is that namespace */
+SyntaxRef
+semantic_analysis::qualified_variable_specialization_id(SyntaxRef d,
+                                                        entity_index &qualifier)
+{
+    qualifier = 0;
+    if (!d.is(syntax_kind::simple_declaration) || d.size() != 3 ||
+        !d[1].is(syntax_kind::init_declarator))
+        return 0;
+    auto item = d[1];
+    if (item.size() != 2 || !item[0].qualified_id())
+        return 0;
+    auto q = item[0].qualified_id();
+    if (q.size() != 2 || !q.nested_name_specifier() ||
+        !q[1].is(syntax_kind::simple_template_id) || !q[1][0].is_identifier())
+        return 0;
+    declarator_meaning m;
+    if (declarator_qualifier(q.nested_name_specifier(), m) !=
+            analysis_result::well_formed ||
+        !m.qualified_namespace)
+        return 0;
+    lookup_result x = lookup_in_namespace(m.namespace_qualifier,
+                                          tokens.identifier(q[1][0].token()),
+                                          lookup_filter::any);
+    entity_index named = x.entity;
+    if (!named)
+        named = x.unknown_entity;
+    if (x.ambiguous || !variable_template_of(named))
+        return 0;
+    /* [temp.expl.spec]/2: declared in a namespace that encloses the
+       template's (clang's error otherwise) */
+    entity_index scope = m.namespace_qualifier;
+    while (scope != current_scope && scope)
+        scope = entity_table[scope].enclosing;
+    if (scope != current_scope)
+        return 0;
+    qualifier = m.namespace_qualifier;
+    return q[1];
+}
+
 /*
  * [temp.expl.spec]/1: a variable template's explicit specialization
  * template<> T name<args> = init;: the specialization's variable, declared
@@ -204,17 +263,29 @@ SyntaxRef semantic_analysis::variable_specialization_id(SyntaxRef d) const
  * inline only if declared so ([temp.expl.spec]/12).  One the program used
  * before is not analysed ([temp.expl.spec]/7: clang's error).
  */
-analysis_result semantic_analysis::variable_specialization(SyntaxRef n,
-                                                           SyntaxRef inner,
-                                                           SyntaxRef id)
+analysis_result
+semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
+                                           SyntaxRef id, entity_index qualifier)
 {
     lookup_result x;
     entity_index named = 0;
-    template_id_name(id, x, named);
+    if (qualifier) {
+        x = lookup_in_namespace(qualifier, tokens.identifier(id[0].token()),
+                                lookup_filter::any);
+        named = x.entity;
+        if (!named)
+            named = x.unknown_entity;
+    } else {
+        template_id_name(id, x, named);
+    }
     uint32_t vt = variable_template_of(named);
     owned_array<template_argument> arguments;
     declaring_specializations++;
-    analysis_result r = template_id_arguments(id, vt, arguments);
+    analysis_result r;
+    if (qualifier)
+        r = template_id_arguments_in(id, vt, qualifier, arguments);
+    else
+        r = template_id_arguments(id, vt, arguments);
     declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;
@@ -254,26 +325,25 @@ analysis_result semantic_analysis::variable_specialization(SyntaxRef n,
  * which no instantiation defines then ([temp.expl.spec]/7: it shall be
  * declared before a use that would instantiate it).
  */
-analysis_result
-semantic_analysis::named_specialization(SyntaxRef n, SyntaxRef declaration,
-                                        bool specialization, bool extern_,
-                                        specified &s, uint32_t &index)
+analysis_result semantic_analysis::named_specialization(
+    SyntaxRef n, SyntaxRef declaration, uint32_t lead, bool specialization,
+    bool extern_, specified &s, uint32_t &index)
 {
     index = 0;
     const char *rule = "temp.explicit";
     if (specialization)
         rule = "temp.expl.spec";
-    if (leading_gnu_attributes(declaration) || declaration.size() != 3 ||
-        !declaration[0].is(syntax_kind::decl_specifier_seq) ||
-        declaration[1].is_token() ||
-        (!declaration[1].is(syntax_kind::noptr_declarator,
-                            syntax_kind::ptr_declarator)))
+    SyntaxTail tail(declaration, lead);
+    if (leading_gnu_attributes(declaration) != lead || tail.size() != 3 ||
+        !tail[0].is(syntax_kind::decl_specifier_seq) || tail[1].is_token() ||
+        (!tail[1].is(syntax_kind::noptr_declarator,
+                     syntax_kind::ptr_declarator)))
         return not_supported(n, rule);
     if (declaration.is(syntax_kind::function_definition) &&
         !declaration.function_definition().plain())
         return not_supported(n, rule);
     if (declaration.is(syntax_kind::simple_declaration) &&
-        !declaration[2].is(preprocessing_op_or_punc::SEMICOLON))
+        !tail[2].is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported(n, rule);
     if (!is_namespace(current_scope) || defining_class || function_state.active)
         return not_supported(n, rule);
@@ -287,16 +357,20 @@ semantic_analysis::named_specialization(SyntaxRef n, SyntaxRef declaration,
         static_cast<owned_array<parameter_meaning> &&>(function_parameters);
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = decl_specifier_seq(declaration[0], s, false);
+    analysis_result r = decl_specifier_seq(tail[0], s, false);
     uint32_t cv = 0;
     if (r == analysis_result::well_formed) {
         type = s.type;
         function_cv = 0;
         function_parameters.clear();
         declarator_template_id = true;
-        r = declarator(declaration, declaration[1], type, m);
+        r = declarator(declaration, tail[1], type, m);
         declarator_template_id = false;
         cv = function_cv;
+        if (r == analysis_result::well_formed)
+            r = misplaced_function_qualifiers(
+                declaration, type,
+                entity_table[current_scope].kind == entity_kind::class_type);
     }
     bool defaults = false;
     for (const parameter_meaning &p : function_parameters)
@@ -524,8 +598,9 @@ analysis_result semantic_analysis::class_explicit_instantiation(SyntaxRef n,
  * class template's specialization, S<A>::f(...), defined.
  */
 analysis_result semantic_analysis::member_explicit_instantiation(
-    SyntaxRef n, SyntaxRef declaration, bool extern_)
+    SyntaxRef n, SyntaxRef declaration, uint32_t lead, bool extern_)
 {
+    SyntaxTail tail(declaration, lead);
     size_t expressions_before = expressions.size();
     size_t uses_before = name_uses.size();
     entity_index outer = current_scope;
@@ -535,14 +610,18 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     specified s;
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = decl_specifier_seq(declaration[0], s, false);
+    analysis_result r = decl_specifier_seq(tail[0], s, false);
     uint32_t cv = 0;
     if (r == analysis_result::well_formed) {
         type = s.type;
         function_cv = 0;
         function_parameters.clear();
-        r = declarator(declaration, declaration[1], type, m);
+        r = declarator(declaration, tail[1], type, m);
         cv = function_cv;
+        if (r == analysis_result::well_formed)
+            r = misplaced_function_qualifiers(
+                declaration, type,
+                entity_table[current_scope].kind == entity_kind::class_type);
     }
     bool defaults = false;
     for (const parameter_meaning &p : function_parameters)

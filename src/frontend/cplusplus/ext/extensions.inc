@@ -49,6 +49,14 @@ EXTENSION(gnu_extension_keyword, gnu,
 EXTENSION(gnu_int128, gnu,
           "GCC manual 6.9, 128-bit Integers: __int128 and unsigned __int128, an extended "
           "integer type ([basic.fundamental]/2)")
+EXTENSION(gnu_float128, gnu,
+          "GCC manual 6.12, Additional Floating Types: __float128, IEEE binary128")
+EXTENSION(gnu_complex, gnu,
+          "GCC manual 6.12, Complex Numbers: _Complex, __complex__ and __complex with float, "
+          "double and long double")
+EXTENSION(gnu_typeof, gnu,
+          "GCC manual 6.7, Referring to a Type with typeof: typeof, __typeof and __typeof__ "
+          "(expression) or (type-id), a type-specifier (glibc's <math.h> casts through it)")
 EXTENSION(gnu_labels_as_values, gnu,
           "GCC manual 6.3, Labels as Values: &&label and goto *expression;")
 EXTENSION(gnu_designated_initializers, gnu,
@@ -66,12 +74,16 @@ EXTENSION(clang_feature_checks, clang,
 EXTENSION(clang_has_include_next, clang, "clang Language Extensions: __has_include_next")
 EXTENSION(clang_builtin_templates, clang,
           "clang's BuiltinTemplates.td: __builtin_common_type, ...")
+EXTENSION(clang_builtin_functions, clang,
+          "clang Language Extensions, Builtin Functions: __builtin_NAME functions that are not "
+          "C library functions, such as __builtin_coro_resume")
 EXTENSION(clang_file_name_macro, clang, "clang Language Extensions: __FILE_NAME__")
 EXTENSION(clang_flt_eval_method, clang,
           "__FLT_EVAL_METHOD__, as #pragma clang fp eval_method sets it (0 on this target)")
 EXTENSION(clang_later_edition_features, clang,
           "a later edition's preprocessor in an earlier one, with a warning: #elifdef, #elifndef, "
-          "#warning (C++23), omitted variable arguments (C++20), variadic macros (C++11)")
+          "#warning (C++23), omitted variable arguments (C++20), variadic macros (C++11); "
+          "an alias-declaration as an init-statement (P2360R0, C++23)")
 EXTENSION(clang_import_directive, clang, "Objective-C's #import, an include done once")
 EXTENSION(clang_embed, clang,
           "C23 6.10.4 #embed and __has_embed (C++26's [cpp.embed], P1967R14) in C++")

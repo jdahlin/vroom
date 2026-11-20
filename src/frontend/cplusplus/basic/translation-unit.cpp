@@ -210,6 +210,9 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                            entity_index &declared_entity)
 {
     declared_entity = 0;
+    if (kind != entity_kind::typedef_name) {
+        VTRY(r, misplaced_function_qualifiers(declaration, type, false));
+    }
     if (variable_instantiating && kind == entity_kind::variable)
         return declare_variable_specialization(declaration, type, s,
                                                declared_entity);
@@ -306,7 +309,12 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                 if (!x.c_language_linkage || x.kind != kind || x.name != name ||
                     !is_namespace(x.enclosing))
                     continue;
-                if (!(x.type == type))
+                /* [impl.clang] the library function a builtin declares
+                   implicitly is noexcept, and a declaration of the
+                   library's name without noexcept is of it */
+                bool library = x.gnu_flags & gnu_library_function;
+                if (!(x.type == type) &&
+                    !(library && differ_in_exceptions(x.type, type)))
                     return not_supported(declaration, "dcl.link");
                 prior = e;
                 entity_table.bind(scope, name, e);
@@ -539,6 +547,18 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                 entity_table[x.function].type.unqualified(),
                                 type.unqualified()))
                 prior = x.function;
+        if (!prior && !qualified) {
+            /* [namespace.memdef]/3: a function a friend declaration
+               declared first, its name not bound: it is now one of the
+               non-template functions of the name */
+            prior = declared_unbound(scope, name, type);
+            if (prior) {
+                template_name_function x;
+                x.name = held_name;
+                x.function = prior;
+                template_name_functions.append(x);
+            }
+        }
     }
     if (prior && kind == entity_kind::function &&
         entity_table[prior].kind == entity_kind::function) {

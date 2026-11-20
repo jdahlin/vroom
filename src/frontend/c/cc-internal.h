@@ -107,8 +107,17 @@ CC_PRIVATE const cc_builtin *cc_builtin_table_get(void);
 CC_PRIVATE uint32_t cc_builtin_atomic_lock_free_build(cc *c,
                                                       const cc_builtin *b,
                                                       uint32_t loc);
+CC_PRIVATE uint32_t cc_builtin_atomic_lock_free_apply(cc *c,
+                                                      const cc_builtin *b,
+                                                      cc_id_list *argument_list,
+                                                      uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_atomic_build(cc *c, const cc_builtin *b,
                                             uint32_t loc);
+CC_PRIVATE uint32_t cc_builtin_atomic_apply(cc *c, const cc_builtin *b,
+                                            cc_id_list *args, uint32_t loc);
+CC_PRIVATE bool cc_builtin_is_atomic(const cc_builtin *b);
+CC_PRIVATE void cc_builtin_atomic_shape(const cc_builtin *b, int *written,
+                                        int *result);
 CC_PRIVATE uint32_t cc_builtin_rotate_build(cc *c, const cc_builtin *b,
                                             uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc);

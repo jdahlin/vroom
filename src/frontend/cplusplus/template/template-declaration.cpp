@@ -157,8 +157,10 @@ node_index parser::explicit_instantiation(node_index (parser::*declaration)())
     if (at(standard_keyword::template_))
         return expected("a declaration after template", "temp.explicit");
     /* [dcl.attr.grammar]/5 as clang reads it: no attribute-specifier-seq
-       begins an explicit instantiation's declaration */
-    if (at_attribute_specifier())
+       begins an explicit instantiation's declaration; a GNU attribute is
+       not one ([ext.gnu]: it is a decl-specifier, as in the declaration
+       libc++ writes, extern template __attribute__((visibility(...))) ...) */
+    if (at_attribute_specifier() && !at_gnu_attribute(0))
         return violates("no attribute-specifier-seq in an explicit "
                         "instantiation",
                         "temp.explicit", position);
@@ -271,9 +273,10 @@ node_index parser::constraint_logical_or_expression()
     auto primary = [&]() -> node_index {
         token_index at_first = position;
         unsigned length = 0;
+        /* a dependent qualified name without typename names a value
+           ([temp.res]/5), so T::v { is no braced-init-list of a type */
         bool type = at_identifier() &&
-                    (classify_name(0, &length, false) == name_class::type ||
-                     classify_name(0, &length, false) == name_class::dependent);
+                    classify_name(0, &length, false) == name_class::type;
         node_index n = primary_expression();
         if (failed())
             return 0;

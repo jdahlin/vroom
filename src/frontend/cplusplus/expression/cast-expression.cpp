@@ -136,9 +136,20 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
 {
     const struct type target = type_table[to.unqualified()];
     bool by_static = kinds & cast_static;
+    if (!(target.kind == type_kind::fundamental &&
+          target.fundamental == fundamental_type::void_) &&
+        binary128_conversion(m.type, to))
+        return not_supported(at, "ext.gnu");
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference)
         return reference_cast(at, to, m, kinds);
+    if (m.type.unqualified() == to.unqualified() && binary128_or_complex(to)) {
+        /* [ext:gnu_float128] a cast to the value's own type yields the
+           value */
+        VTRY(r, operand_value(at, m));
+        m.type = qualified_type::make(to.unqualified(), cv_none);
+        return analysis_result::well_formed;
+    }
     if (target.kind == type_kind::fundamental &&
         target.fundamental == fundamental_type::void_) {
         if (!by_static)
@@ -739,8 +750,14 @@ analysis_result semantic_analysis::cast(SyntaxRef n, expression_meaning &m)
     qualified_type to;
     analysis_result r = type_id(n[1], to);
     /* [over.over]/1: "an explicit type conversion" */
-    if (r == analysis_result::well_formed)
-        VTRY_SET(r, target_expression(n[3], to, m));
+    if (r == analysis_result::well_formed) {
+        /* [ext:gnu_float128] the operand's value is only passed on */
+        binary128_value_passes = true;
+        r = target_expression(n[3], to, m);
+        binary128_value_passes = false;
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     /* C++03 [expr.const]/1: "Floating literals can appear only if they are
        cast to integral or enumeration types." */
     bool floating_literal_to_integral =

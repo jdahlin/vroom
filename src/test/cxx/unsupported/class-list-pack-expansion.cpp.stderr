@@ -1,0 +1,2 @@
+class-list-pack-expansion.cpp:9:11: error: the rules of [temp.variadic] are not implemented yet
+class-list-pack-expansion.cpp:9:11: note: refused by vcc's frontend/cplusplus/declaration/initializer.cpp:N (list_initialization)

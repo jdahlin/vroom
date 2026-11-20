@@ -64,6 +64,14 @@ token lexer::convert(const preprocessing_token &pp)
                      !memcmp(spelling_buffer.data(), "nullptr", 7))
                 out.literal = literal_kind::pointer_literal,
                 out.type = fundamental_type::std_nullptr_t;
+            else if (spelling_buffer.size() == 6 &&
+                     !memcmp(spelling_buffer.data(), "__null", 6))
+                /* [ext.gnu] GCC's and clang's __null: a null pointer
+                   constant of the integer type as wide as a pointer, long;
+                   it has the literal's value 0 */
+                out.literal = literal_kind::integer_literal,
+                out.type = fundamental_type::long_int, add_value(out).value = 0,
+                out.value_known = true;
         } else
             out.kind = token_kind::identifier;
         break;

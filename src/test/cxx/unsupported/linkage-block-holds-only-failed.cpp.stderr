@@ -1,0 +1,1 @@
+linkage-block-holds-only-failed.cpp:24:27: error: a qualified name shall name a member of the class its nested-name-specifier nominates ([basic.lookup.qual])

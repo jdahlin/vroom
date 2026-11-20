@@ -48,6 +48,8 @@ ast_qualified_type ast_builder_type_qualified(cc *c, ast_qualified_type t,
 ast_qualified_type ast_builder_type_pointer(cc *c, ast_qualified_type to);
 /* _Atomic(value), with C11's layout */
 ast_qualified_type ast_builder_type_atomic(cc *c, ast_qualified_type value);
+/* _Complex of a floating-point element */
+ast_qualified_type ast_builder_type_complex(cc *c, ast_qualified_type element);
 /* clang's ext_vector_type(count) of element (not bool) */
 ast_qualified_type
 ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count);
@@ -128,6 +130,12 @@ const char *ast_builder_builtin_signature(const char *name, size_t length);
 uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
                                   ast_qualified_type t, const uint32_t *args,
                                   uint32_t count);
+/* whether name is one of the __atomic_*, __sync_* and __c11_atomic_* calls:
+   the number of arguments as written (the orders a __sync_ call lacks not
+   counted), and the result: 0 void, 1 bool, 2 the type the first argument
+   points to, 3 int, 4 unsigned int */
+bool ast_builder_atomic_shape(const char *name, size_t length, int *written,
+                              int *result);
 /* __builtin_convertvector(vector, t): each element of vector converted
    to the element type of t, a vector type of as many elements */
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,

@@ -77,9 +77,12 @@ name_kind parser::declared_kind(name_kind plain)
  * '>' ([temp.names]/3) from C++11 on.  This is how far a name that is a
  * template-name reaches, for the decisions taken before the parse (what a
  * decl-specifier-seq or a statement starts with); the parse itself is
- * template_argument_list's.  A '>>' (or '>=', '>>=') whose first '>' ends
+ * template_argument_list's.  A '>>' (or '>>=') whose first '>' ends
  * the group leaves its rest as the next token: the end is that token's
  * index, so that what follows the group is never taken for '::' or '<'.
+ * A < right after a literal is the operator, not a group's opening.
+ * A '>=' is the operator, as after an expression in the parse
+ * (binary_expression); it is split only after a type-id.
  */
 unsigned parser::angle_group_end(unsigned ahead)
 {
@@ -91,13 +94,13 @@ unsigned parser::angle_group_end(unsigned ahead)
             return 0;
         const token &t = peek(i);
         if (is_operator(t, preprocessing_op_or_punc::LESS)) {
-            depth++;
+            /* a < after a literal is the less-than operator, as in
+               R<0 < N<T>::value, T>: it opens no group */
+            if (i == ahead || peek(i - 1).kind != token_kind::literal)
+                depth++;
         } else if (is_operator(t, preprocessing_op_or_punc::GREATER)) {
             if (!--depth)
                 return i + 1;
-        } else if (is_operator(t, preprocessing_op_or_punc::GREATER_EQUAL)) {
-            if (!--depth)
-                return i;
         } else if (right_angles &&
                    (is_operator(t, preprocessing_op_or_punc::GREATER_GREATER) ||
                     is_operator(

@@ -178,7 +178,13 @@ bool parser::constructor_parameters_follow(unsigned ahead)
 node_index parser::class_body(uint32_t name, scope_index region,
                               bool specialization)
 {
-    if (collecting_members)
+    /* [class.union.anon]/1: the members of an unnamed class that declares
+       nothing else (an anonymous union, clang's anonymous struct) are
+       names of the enclosing class, which a mem-initializer-id or a
+       member function's body before it may use: read in the first pass */
+    bool anonymous_members =
+        !name && at(preprocessing_op_or_punc::SEMICOLON, group_end(0));
+    if (collecting_members && !anonymous_members)
         /* a nested class in its enclosing class's first pass: its members
            are its own, read when the enclosing class is read in full */
         return unparsed_group();

@@ -58,6 +58,7 @@ const char *fundamental_type_name(fundamental_type type)
         "unsigned short",
         "__int128",
         "unsigned __int128",
+        "__float128",
         "__builtin_va_list",
     };
     return names[static_cast<int>(type)];

@@ -8,6 +8,9 @@ exactly X.cpp.stderr: the error at the construct, with the subclause, and
 the note naming the check in vcc that refused it.  The note's line number
 in vcc's source is compared as N (it moves with every edit there).
 /* diag-vpp-flags: F */ in a test adds flags (-fcxx-speculation-limit=N).
+/* cxx-unsupported: lowering */ in a test: only -c fails (the analysis accepts
+it, as for a member function of a class template that is unsupported and
+used: lowering refuses the use, -fsyntax-only does not).
 
     bench/cxx-unsupported.py [-v] [--bless] [--bin-dir DIR] [PATTERN]
 """
@@ -36,7 +39,10 @@ def main():
         outs = []
         m = re.search(r'/\*\s*diag-vpp-flags:\s*(.*?)\s*\*/', open(f'{D}/{name}').read())
         extra = m.group(1).split() if m else []
-        for mode in (['-fsyntax-only'], ['-c', '-o', '/dev/null']):
+        modes = [['-fsyntax-only'], ['-c', '-o', '/dev/null']]
+        if 'cxx-unsupported: lowering' in open(f'{D}/{name}').read():
+            modes = modes[1:]
+        for mode in modes:
             r = subprocess.run([VPP] + FLAGS + extra + mode + [name], cwd=D, capture_output=True, text=True)
             outs.append((mode[0], r.returncode, normal(r.stderr)))
         snap = f'{D}/{name}.stderr'

@@ -43,6 +43,23 @@ bool semantic_analysis::address_parameter_type(qualified_type t) const
     return k == type_kind::pointer || k == type_kind::lvalue_reference;
 }
 
+/* [temp.dep.type]/9: a pack bound to the arguments of a specialization
+   (make_bound_pack) one of which names a dependent type, as when an alias
+   template is used with an enclosing template's parameters */
+bool semantic_analysis::bound_pack_is_dependent(entity_index e) const
+{
+    const entity &p = entity_table[e];
+    if (p.kind != entity_kind::pack)
+        return false;
+    for (uint32_t i = 0; i < p.member_count; i++) {
+        const entity &x = entity_table[pack_elements[p.value + i]];
+        if (x.kind == entity_kind::typedef_name &&
+            depends_on_template_parameter(x.type))
+            return true;
+    }
+    return false;
+}
+
 /* the parameter's name in scope as its argument: [temp.arg.type]'s type,
    or [temp.arg.nontype]'s value, a prvalue ([temp.param]/8) that
    enumerator_value gives as an enumerator's */
@@ -84,10 +101,10 @@ void semantic_analysis::bind_template_argument(entity_index scope,
         return;
     }
     if (a.kind == template_argument::kind_t::template_name) {
-        /* [temp.arg.template]: the class template's name */
+        /* [temp.arg.template]: the class or alias template's name */
         for (const function_template &t : function_templates)
-            if (t.entity == static_cast<entity_index>(a.value) && t.is_class &&
-                !t.primary) {
+            if (t.entity == static_cast<entity_index>(a.value) &&
+                (t.is_class || t.is_alias) && !t.primary) {
                 entity_table.bind(scope, name, t.name);
                 return;
             }
@@ -315,7 +332,11 @@ analysis_result semantic_analysis::template_argument_for(
             before[typed_by].kind != template_argument::kind_t::type)
             return not_supported(at, "temp.arg.nontype");
         to = qualified_type::make(before[typed_by].type.unqualified(), cv_none);
-        if (!structural_parameter_type(to))
+        /* (a type that is itself a template parameter, in a partial
+           specialization's arguments: a name of the same type or a
+           value-dependent expression below, else refused there) */
+        if (!depends_on_template_parameter(to) &&
+            !structural_parameter_type(to))
             return not_supported(at, "temp.arg.nontype");
     } else if (depends_on_template_parameter(to)) {
         /* another dependent type: the parameter's type with the arguments
@@ -395,12 +416,15 @@ analysis_result semantic_analysis::template_argument_for(
             lookup_unqualified(tokens.identifier(t), lookup_filter::any);
         entity_index e = x.entity;
         if (!e)
+            e = find_pack(tokens.identifier(t));
+        if (!e)
             continue;
         const entity &named = entity_table[e];
         /* (or an alias template's parameter bound to such an argument) */
         bool parameter = (named.kind == entity_kind::none &&
                           named.instantiation && !named.held_by_template) ||
-                         named.kind == entity_kind::dependent_value;
+                         named.kind == entity_kind::dependent_value ||
+                         bound_pack_is_dependent(e);
         if (!parameter && (named.kind == entity_kind::none ||
                            !depends_on_template_parameter(named.type)))
             continue;
@@ -517,6 +541,68 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
 }
 
 /*
+ * [temp.arg.template]/3: the argument's template-parameter-list matches
+ * the parameter's when each parameter of the one has the same form
+ * (kind, and a non-type parameter's type) as the other's; a pack of the
+ * parameter's list matches zero or more of the argument's parameters of
+ * its form; a pack of the argument's accepts any number of the
+ * parameter's; and one the parameter's list leaves over has a default
+ * template-argument or is a pack (P0522R0, as clang's default).  A
+ * template template-parameter among them matches only when its own list
+ * is the same (anything else is unsupported, by the caller).
+ */
+bool semantic_analysis::template_parameters_match(
+    const function_template &wanted, const function_template &given)
+{
+    if (given.parameter_count == wanted.parameter_count &&
+        same_template_parameters(given.first_parameter, wanted.first_parameter,
+                                 wanted.parameter_count))
+        return true;
+    auto same_form = [&](uint32_t i, uint32_t j) {
+        const entity &x =
+            entity_table[template_parameter_entities[wanted.first_parameter +
+                                                     i]];
+        const entity &y =
+            entity_table[template_parameter_entities[given.first_parameter +
+                                                     j]];
+        if (x.kind != y.kind)
+            return false;
+        if (x.kind == entity_kind::none)
+            return x.type == y.type;
+        if (x.kind == entity_kind::template_entity) {
+            const function_template p = function_templates[x.instantiation - 1];
+            const function_template q = function_templates[y.instantiation - 1];
+            return p.parameter_count == q.parameter_count &&
+                   same_template_parameters(
+                       p.first_parameter, q.first_parameter, p.parameter_count);
+        }
+        return true;
+    };
+    uint32_t j = 0;
+    for (uint32_t i = 0; i < wanted.parameter_count; i++) {
+        if (template_parameter_is_pack(wanted.first_parameter + i)) {
+            while (j < given.parameter_count && same_form(i, j))
+                j++;
+            continue;
+        }
+        if (j >= given.parameter_count || !same_form(i, j))
+            return false;
+        if (!template_parameter_is_pack(given.first_parameter + j))
+            j++;
+    }
+    for (; j < given.parameter_count; j++) {
+        if (template_parameter_is_pack(given.first_parameter + j))
+            continue;
+        template_parameter_parts form;
+        if (!template_parameter_form(
+                template_parameter_nodes[given.first_parameter + j], form) ||
+            !form.has_default)
+            return false;
+    }
+    return true;
+}
+
+/*
  * [temp.arg.template]/1: "A template-argument for a template
  * template-parameter shall be the name of a class template or an alias
  * template, expressed as id-expression."  A class template here (as a
@@ -574,14 +660,14 @@ analysis_result semantic_analysis::template_template_argument(
     /* (an injected-class-name names its class template here,
        [temp.local]/1) */
     uint32_t a = class_template_of(named);
+    if (!a)
+        a = alias_template_of(named);
     if (!a || function_templates[a - 1].primary)
         return not_supported(at, "temp.arg.template");
     const function_template given = function_templates[a - 1];
     const function_template wanted =
         function_templates[entity_table[parameter].instantiation - 1];
-    if (given.parameter_count != wanted.parameter_count ||
-        !same_template_parameters(given.first_parameter, wanted.first_parameter,
-                                  wanted.parameter_count))
+    if (!template_parameters_match(wanted, given))
         return not_supported(at, "temp.arg.template");
     out.kind = template_argument::kind_t::template_name;
     if (given.is_parameter) {
@@ -616,10 +702,14 @@ analysis_result semantic_analysis::default_template_arguments(
             return not_supported(at, "temp.arg");
         entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                                entity_table[t].enclosing);
+        /* the names of the declaration that gave the default
+           ([temp.param]/12, merged: they may differ from the
+           definition's) */
+        uint32_t names =
+            template_parameter_default_names[ft.first_parameter + i];
         for (uint32_t k = 0; k < i; k++)
             bind_template_argument(
-                scope, template_parameter_entities[ft.first_parameter + k],
-                arguments[k]);
+                scope, template_parameter_entities[names + k], arguments[k]);
         current_scope = scope;
         lookup_horizon = ft.declaration.first_token();
         template_argument a;

@@ -12,12 +12,54 @@
  *         __int128
  *
  * __int128 alone or with signed, and with unsigned, as GCC's types.
+ * [ext:gnu_float128] adds a row:
+ *
+ *     simple-type-specifier:
+ *         __float128
+ *
+ * the type alone.  [ext:gnu_complex] adds _Complex (or __complex__,
+ * __complex), a modifier that goes with float, double, long double and
+ * __float128 in any order:
+ *
+ *     simple-type-specifier:
+ *         _Complex
+ *
+ * alone it is _Complex double.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
 
 namespace cplusplus
 {
+
+/*
+ * [ext:gnu_complex] (GCC manual 6.12): "_Complex float", "double _Complex"
+ * and "long double _Complex"; _Complex alone is _Complex double, as clang
+ * and GCC read it.  A complex integer type (_Complex int) is not analysed.
+ */
+analysis_result semantic_analysis::complex_type(SyntaxRef seq,
+                                                const simple_type_keywords &k,
+                                                unsigned keywords,
+                                                type_index &type)
+{
+    if (k.complex > 1)
+        return ill_formed(seq, "_Complex appears at most once", "ext.gnu");
+    fundamental_type t = fundamental_type::double_;
+    if (k.double_ && k.long_ == 1 && keywords == 2)
+        t = fundamental_type::long_double;
+    else if (k.double_ && keywords == 1)
+        t = fundamental_type::double_;
+    else if (k.alone && keywords == 1 &&
+             k.alone_type == fundamental_type::float_)
+        t = fundamental_type::float_;
+    else if (k.float128 == 1 && keywords == 1)
+        t = fundamental_type::float128;
+    else if (keywords != 0)
+        return not_supported(seq, "ext.gnu");
+    type = type_table.complex_of(
+        qualified_type::make(type_table.fundamental(t), cv_none));
+    return analysis_result::well_formed;
+}
 
 /*
  * [dcl.type]/2: "As a general rule, at most one defining-type-specifier is
@@ -38,9 +80,23 @@ analysis_result semantic_analysis::simple_type(SyntaxRef seq,
                        "short, or int, short or long with int, long with "
                        "double, and long with long";
     unsigned keywords = k.signed_ + k.unsigned_ + k.short_ + k.long_ + k.char_ +
-                        k.int_ + k.double_ + k.alone + k.int128;
+                        k.int_ + k.double_ + k.alone + k.int128 + k.float128;
+    if (k.float128 && tokens.files.behavior.long_double_fraction_bits != 63)
+        /* clang: "__float128 is not supported on this target" (x86-64's) */
+        return ill_formed(seq, "__float128 is not supported on this target",
+                          "ext.gnu");
+    if (k.complex)
+        return complex_type(seq, k, keywords, type);
     fundamental_type t = fundamental_type::none;
-    if (k.int128) {
+    if (k.float128) {
+        /* [ext:gnu_float128] (GCC manual 6.12): the type alone */
+        if (k.float128 > 1 || keywords != k.float128)
+            return ill_formed(seq,
+                              "__float128 is not combined with other "
+                              "type specifiers",
+                              "ext.gnu");
+        t = fundamental_type::float128;
+    } else if (k.int128) {
         /* [ext:gnu_int128] (GCC manual 6.9): "__int128 for signed 128-bit
            integers, and unsigned __int128 for unsigned 128-bit integers" */
         if (k.int128 > 1 || k.signed_ + k.unsigned_ > 1 ||

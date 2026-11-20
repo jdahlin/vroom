@@ -81,6 +81,16 @@ analysis_result semantic_analysis::member_template_declaration(
         parameters.empty())
         return not_supported(n, "temp.mem");
     auto inner = n[1];
+    /* [temp.friend]/1: a friend template */
+    if (inner.is(syntax_kind::member_declaration,
+                 syntax_kind::function_definition)) {
+        uint32_t lead = leading_gnu_attributes(inner);
+        if (lead < inner.size() &&
+            inner[lead].is(syntax_kind::decl_specifier_seq))
+            for (auto x : inner[lead].elements())
+                if (x.is(standard_keyword::friend_))
+                    return friend_function_template(c, n, inner);
+    }
     /* [temp.alias]/1: a member alias template, of a class of namespace
        scope: an alias template declared in the class's scope */
     if (inner.is(syntax_kind::alias_declaration) &&
@@ -120,12 +130,22 @@ analysis_result semantic_analysis::member_template_declaration(
           inner[at].is(syntax_kind::decl_specifier_seq) &&
           declares_special_member(c, inner[at + 1])))
         return member_function_template(c, n, inner, access);
+    /* [temp.mem]/1: a member function template only declared (defined
+       outside the class) */
+    if (inner.is(syntax_kind::member_declaration) && at + 1 < inner.size() &&
+        inner[at].is(syntax_kind::decl_specifier_seq) &&
+        !declares_special_member(c, inner[at + 1]))
+        return member_function_template(c, n, inner, access);
     /* a constrained constructor template ([temp.constr.decl]) */
     if (head_constraint(n))
         return not_supported(n, "temp.constr");
     if (at < inner.size() && inner[at].is(syntax_kind::decl_specifier_seq)) {
+        /* (the template-parameters are not in scope here: a condition is
+           analysed with the template's declarator, member_function_template;
+           a template only declared records no explicit-ness, as with the
+           keyword) */
         specified s;
-        VTRY(r, constructor_specifiers(inner[at], s));
+        VTRY(r, constructor_specifiers(inner[at], s, false));
         at++;
     }
     /* a constructor's declarator, not a destructor's (which [temp.mem]/3
@@ -147,11 +167,36 @@ analysis_result semantic_analysis::member_template_declaration(
  * analysed.
  */
 analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
-                                                          specified &s)
+                                                          specified &s,
+                                                          bool conditions)
 {
     for (SyntaxElement x : seq.elements()) {
         if (x.is(syntax_kind::gnu_attribute_specifier)) {
             VTRY(r, gnu_attribute_specifier(x, s));
+            continue;
+        }
+        /* [dcl.fct.spec]/2: explicit ( constant-expression ), a
+           constructor template's too ([temp.mem]/1): "explicit(true)" is
+           explicit; a value-dependent condition is decided where the
+           specialization is declared */
+        if (x.is(syntax_kind::explicit_specifier)) {
+            if (!conditions)
+                continue;
+            if (!instantiating && !class_instantiating && !substituting &&
+                names_dependent_entity(x.first_token(), x.end_token())) {
+                s.explicit_dependent = true;
+                continue;
+            }
+            bool constant = false, value = false;
+            VTRY(r, bool_constant_expression(x, x[2], constant, value));
+            if (!constant)
+                return ill_formed(x,
+                                  "the constant-expression of an "
+                                  "explicit-specifier shall be a "
+                                  "contextually converted constant "
+                                  "expression of type bool",
+                                  "dcl.fct.spec");
+            s.explicit_ = value;
             continue;
         }
         if (!x.is_token())
@@ -212,6 +257,19 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     VTRY(r, subobject(at, e, object));
     initialized_value value;
     VTRY_SET(r, initializer(init, type, value));
+    /* [except.spec]/7: the initializer's own exceptions, which a
+       constructor's exception specification when implicit is made of */
+    bool throwing = false;
+    size_t unsupported_before = unsupported.size();
+    if (potentially_throwing(init, value.node, throwing) ==
+        analysis_result::well_formed) {
+        entity_table[e].initializer_throws =
+            initializer_exception::cannot_throw;
+        if (throwing)
+            entity_table[e].initializer_throws =
+                initializer_exception::may_throw;
+    }
+    unsupported.resize(unsupported_before);
     statement = subobject_store(object, type, at, value.node);
     return analysis_result::well_formed;
 }
@@ -339,15 +397,23 @@ bool semantic_analysis::copies_bytes(entity_index c) const
 bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
                                                  bool &constexpr_specified,
                                                  bool *virtual_specified,
-                                                 bool *explicit_specified) const
+                                                 bool *explicit_specified,
+                                                 bool *inline_specified) const
 {
     constexpr_specified = false;
-    bool virtual_seen = false, explicit_seen = false;
+    bool virtual_seen = false, explicit_seen = false, inline_seen = false;
+    if (inline_specified)
+        *inline_specified = false;
     if (explicit_specified)
         *explicit_specified = false;
     if (virtual_specified)
         *virtual_specified = false;
     for (SyntaxElement c : seq.elements()) {
+        /* [ext:gnu_attributes] between the specifiers (libc++'s inline
+           _LIBCPP_HIDE_FROM_ABI explicit X(...)): special_member_declarator
+           applies them */
+        if (c.is(syntax_kind::gnu_attribute_specifier))
+            continue;
         if (!c.is_token())
             return false;
         switch (c.keyword()) {
@@ -370,11 +436,18 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
             explicit_seen = true;
             *explicit_specified = true;
             break;
+        case standard_keyword::inline_:
+            /* [class.ctor]/1: inline, where the caller takes it */
+            if (!inline_specified || inline_seen)
+                return false;
+            inline_seen = true;
+            *inline_specified = true;
+            break;
         default:
             return false;
         }
     }
-    return constexpr_specified || virtual_seen || explicit_seen;
+    return constexpr_specified || virtual_seen || explicit_seen || inline_seen;
 }
 
 /*
@@ -389,7 +462,7 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
 analysis_result semantic_analysis::special_member_declarator(
     entity_index c, SyntaxRef declaration, SyntaxElement d, uint8_t access,
     bool definition, bool constexpr_specified, bool virtual_specified,
-    bool explicit_specified)
+    bool explicit_specified, bool inline_specified)
 {
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -405,6 +478,16 @@ analysis_result semantic_analysis::special_member_declarator(
        _LIBCPP_HIDE_FROM_ABI) */
     for (uint32_t i = 0; i < leading_gnu_attributes(declaration); i++) {
         VTRY_SET(r, gnu_attribute_specifier(declaration[i], m));
+    }
+    /* ... and between the function-specifiers */
+    uint32_t lead = leading_gnu_attributes(declaration);
+    if (declaration.size() > lead &&
+        declaration[lead].is(syntax_kind::decl_specifier_seq)) {
+        for (SyntaxElement x : declaration[lead].elements()) {
+            if (x.is(syntax_kind::gnu_attribute_specifier)) {
+                VTRY_SET(r, gnu_attribute_specifier(x, m));
+            }
+        }
     }
     /* [dcl.fct.default]: a member function's default arguments are a
        complete-class context ([class.mem]/6): analysed with the class
@@ -522,7 +605,7 @@ analysis_result semantic_analysis::special_member_declarator(
        [dcl.constexpr]/1: "A function or static data member declared with
        the constexpr or consteval specifier is implicitly an inline
        function or variable" */
-    x.inline_ = definition || constexpr_specified;
+    x.inline_ = definition || constexpr_specified || inline_specified;
     x.constexpr_ = constexpr_specified;
     x.defined = definition;
     x.access = access;
@@ -607,7 +690,7 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     }
     if (!form.defaulted())
         return not_supported(n, "dcl.fct.def.general");
-    if (access || constexpr_specified)
+    if (access)
         return not_supported(n, "dcl.fct.def.default");
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -628,6 +711,14 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     if (f.variadic)
         return not_supported(n, "dcl.fct.def.default");
     entity &x = entity_table[c];
+    /* [dcl.fct.def.default]/3: constexpr only if constexpr-compatible.  The
+       default constructor of a class without virtual bases is
+       ([class.default.ctor]/4 with [dcl.constexpr]/4 as of C++20, which
+       no longer asks for every member to be initialized); the other
+       functions are not analysed */
+    if (constexpr_specified &&
+        (m.destructor || f.parameter_count || x.virtual_base_count))
+        return not_supported(n, "dcl.fct.def.default");
     if (m.destructor) {
         /* [class.dtor]/4: as the implicitly-declared destructor */
         if (x.destructor || f.parameter_count || explicit_specified)
@@ -740,8 +831,13 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
     /* a second one, or beside a user-declared copy assignment operator */
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
-    if (found.entity || found.unknown || found.ambiguous ||
-        x.defaulted_copy_assignment || x.defaulted_move_assignment)
+    /* [class.member.lookup]: an operator= found in a base class is not a
+       declaration of c; one copy and one move assignment operator may be
+       defaulted ([class.copy.assign]/2, /3) */
+    bool declared_here = found.entity && found.found_in == c;
+    if (found.unknown || found.ambiguous || declared_here ||
+        (move && x.defaulted_move_assignment) ||
+        (!move && x.defaulted_copy_assignment))
         return not_supported(n, "class.mem");
     if (move)
         entity_table[c].defaulted_move_assignment = true;
@@ -782,6 +878,31 @@ analysis_result semantic_analysis::expression_list_meanings(
  * implicitly-declared copy constructor ([class.copy.ctor]/6), which for a
  * class that declares none copies the object's bytes (copies_bytes).
  */
+/*
+ * Whether the deleted implicit copy constructor of class c can take part
+ * in a construction from these arguments ([over.match.ctor]/1): its one
+ * parameter binds a single argument of class c or derived from it
+ * ([dcl.init.ref]/5); any other argument only reaches it through a
+ * user-defined conversion, which it is not a candidate for
+ * ([over.best.ics]/4), and the declared constructors decide.
+ */
+bool semantic_analysis::copy_argument_candidate(
+    entity_index c, const owned_array<expression_meaning> &arguments) const
+{
+    if (arguments.size() != 1)
+        return false;
+    const struct type &t = type_table[arguments[0].type.unqualified()];
+    if (t.kind == type_kind::fundamental || t.kind == type_kind::pointer ||
+        t.kind == type_kind::enumeration)
+        return false;
+    /* anything else not analysed is taken as a candidate */
+    if (t.kind != type_kind::class_type)
+        return true;
+    entity_index from = t.entity;
+    bool ambiguous = false;
+    return from == c || base_step(from, c, ambiguous);
+}
+
 analysis_result
 semantic_analysis::construct(SyntaxRef at, qualified_type type,
                              owned_array<expression_meaning> &arguments,
@@ -801,7 +922,7 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
        deleted implicit copy constructor takes part in (copy elision,
        [dcl.init]/17.6.2's aggregate) is not analysed */
     if (!arguments.empty() && x.implicit_copy_deleted &&
-        !x.defaulted_move_constructor)
+        !x.defaulted_move_constructor && copy_argument_candidate(c, arguments))
         return not_supported(at, "class.copy.ctor");
     if (arguments.empty() && trivial_defaulted_default_constructor(c))
         /* value-initialization through a trivial X() = default
@@ -1377,6 +1498,26 @@ void semantic_analysis::subobject_classes(entity_index c,
     }
 }
 
+/* a protected destructor of a base class is accessible from class c's
+   members, one of a member's class is not ([class.access.base]/1) */
+bool semantic_analysis::subobject_destructor_inaccessible(entity_index c,
+                                                          entity_index k) const
+{
+    entity_index kd = entity_table[k].destructor;
+    if (!kd)
+        return false;
+    uint8_t access = entity_table[kd].access;
+    if (access != 1)
+        return access != 0;
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (!m.base_subobject && element_class(m.type) == k)
+            return true;
+    }
+    return false;
+}
+
 /* whether the implicit default constructor of class c default-constructs a
    subobject of class k: a base, or a member (or array of them) without a
    default member initializer ([class.base.init]/9.1) */
@@ -1489,9 +1630,18 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
          q = entity_table[q].next_constructor)
         if (is_copy_constructor(c, q))
             declares_copy = true;
+    /* [class.copy.ctor]/8: "If the definition of a class X does not
+       explicitly declare a move constructor, a non-explicit one will be
+       implicitly declared as defaulted if and only if X does not have a
+       user-declared copy constructor, copy assignment operator, move
+       assignment operator, or destructor": otherwise a copy copies each
+       subobject by its copy constructor */
+    bool move_implicitly_declared =
+        !declares_copy && !x.destructor && !x.user_copy_assignments &&
+        !x.defaulted_copy_assignment && !x.defaulted_move_assignment;
     for (entity_index k : classes) {
         const entity &sub = entity_table[k];
-        if (declares_move_constructor(k))
+        if (declares_move_constructor(k) && move_implicitly_declared)
             /* [class.copy.ctor]/8: the implicit move constructor, which
                moves the subobject, is not declared yet */
             return not_supported(n, "class.copy.ctor");
@@ -1539,7 +1689,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         /* [class.copy.ctor]/10.2, [class.default.ctor]/2.7: an
            implicit constructor beside a subobject's inaccessible
            destructor is deleted */
-        if (sub.destructor && entity_table[sub.destructor].access &&
+        if (subobject_destructor_inaccessible(c, k) &&
             (!x.destructor || !declares_copy || !x.first_constructor))
             return not_supported(n, "class.default.ctor");
     }
@@ -1936,9 +2086,12 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
 analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
                                                              uint32_t at)
 {
-    /* a decl-specifier-seq before the declarator holds constexpr alone
-       (function_specifiers_only) */
-    bool constexpr_specified = at == 1;
+    /* a decl-specifier-seq before the declarator holds constexpr and inline
+       alone (function_specifiers_only) */
+    bool constexpr_specified = false, inline_specified = false;
+    if (at == 1)
+        function_specifiers_only(n[0], constexpr_specified, nullptr, nullptr,
+                                 &inline_specified);
     auto body = n.function_definition().function_body();
     if (n.size() != at + 2 || !body || body.function_try_block() ||
         at_block_scope() || function_state.active)
@@ -1990,6 +2143,8 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
                                    "than one definition of any function",
                                    "basic.def.odr");
     entity_table[e].defined = true;
+    if (inline_specified)
+        entity_table[e].inline_ = true;
     entity_table.add_declaration(e, n);
     last_declared = e;
     return special_member_body(n, n[at + 1].function_body());

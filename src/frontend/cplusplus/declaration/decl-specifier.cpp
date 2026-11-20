@@ -45,6 +45,26 @@ namespace
  * template.  With template_ids, a < after any other name makes the name
  * unknown (a declaration's caller cannot tell a type from what follows).
  */
+/* [temp.dep.type]/1: whether a template-argument-list, the tokens from
+   first to end (its '<' and '>' included), names a template parameter or
+   a dependent name: the specialization is then dependent, and so are the
+   members it has ([temp.res]/4: not types without typename) */
+static bool arguments_dependent(parser &p, unsigned first, unsigned end)
+{
+    for (unsigned i = first + 1; i + 1 < end; i++) {
+        if (!p.at_identifier(i) ||
+            p.at(preprocessing_op_or_punc::COLON_COLON, i - 1))
+            continue;
+        scope_index found = 0;
+        bool found_dependent = false;
+        p.names.lookup_unqualified(p.tokens.identifier(p.position + i), &found,
+                                   &found_dependent);
+        if (found_dependent)
+            return true;
+    }
+    return false;
+}
+
 name_class classify(parser &p, unsigned ahead, unsigned *length,
                     bool template_ids)
 {
@@ -90,9 +110,18 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
         name_kind kind = name_kind::not_declared;
         bool found_dependent = false;
         if (!opaque) {
-            if (qualified)
+            /* [basic.lookup.qual]/1: before a :: only namespaces, types
+               and templates count */
+            bool nested = p.at(preprocessing_op_or_punc::COLON_COLON, i + 1);
+            if (qualified && nested)
+                kind = p.names.lookup_qualified_nested(scope, name, &found,
+                                                       &found_dependent);
+            else if (qualified)
                 kind = p.names.lookup_qualified(scope, name, &found,
                                                 &found_dependent);
+            else if (nested)
+                kind = p.names.lookup_unqualified_nested(name, &found,
+                                                         &found_dependent);
             else
                 kind =
                     p.names.lookup_unqualified(name, &found, &found_dependent);
@@ -113,6 +142,9 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
                 *length = after - ahead;
                 return name_class::unknown;
             }
+            if (p.at(preprocessing_op_or_punc::COLON_COLON, end) &&
+                arguments_dependent(p, after, end))
+                dependent = true;
             after = end;
             arguments = true;
         }
@@ -190,6 +222,12 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
         case name_kind::concept_name:
             return name_class::concept_;
         case name_kind::not_declared:
+            /* [temp.dep.type]/6: a member of a dependent specialization the
+               parser finds nothing for (the primary template is incomplete,
+               or the member is a base's) is a member of an unknown
+               specialization: no type without typename ([temp.res]/4) */
+            if (class_name && dependent)
+                return name_class::dependent;
             return name_class::unknown;
         default:
             return name_class::not_a_type;
@@ -241,14 +279,24 @@ struct type_specifier_count {
 
     /* [ext:gnu_int128]: __int128, with signed or unsigned only */
     unsigned int128 = 0;
+    /* [ext:gnu_float128]: __float128, alone */
+    unsigned float128 = 0;
 
     /* adds the specifier: false if the sequence now breaks the rule */
-    bool add(standard_keyword k, bool is_int128)
+    bool add(standard_keyword k, extension_keyword ext)
     {
-        if (is_int128) {
+        /* [ext:gnu_complex]: a modifier, which analysis checks */
+        if (ext == extension_keyword::complex)
+            return true;
+        if (ext == extension_keyword::float128) {
+            float128++;
+            return float128 == 1 && !char_ && !int_ && !double_ && !other &&
+                   !short_ && !long_ && !sign && !int128;
+        }
+        if (ext == extension_keyword::int128) {
             int128++;
             return int128 == 1 && !char_ && !int_ && !double_ && !other &&
-                   !short_ && !long_;
+                   !short_ && !long_ && !float128;
         }
         switch (k) {
         case standard_keyword::const_:
@@ -278,13 +326,13 @@ struct type_specifier_count {
             other++;
             break;
         }
-        unsigned base = char_ + int_ + double_ + other + int128;
+        unsigned base = char_ + int_ + double_ + other + int128 + float128;
         if (base > 1 || sign > 1 || short_ > 1 || long_ > 2 ||
             (short_ && long_))
             return false;
-        if (sign && (double_ || other))
+        if (sign && (double_ || other || float128))
             return false;
-        if ((short_ || long_) && (char_ || other || int128))
+        if ((short_ || long_) && (char_ || other || int128 || float128))
             return false;
         if (short_ && double_)
             return false;
@@ -348,8 +396,10 @@ bool parser::at_decl_specifier(bool unknown_names)
     case standard_keyword::union_:
     case standard_keyword::enum_:
     case standard_keyword::typename_:
-    case standard_keyword::extension:
         return true;
+    case standard_keyword::extension:
+        /* a keyword that is a literal (__null) is an operand */
+        return peek().literal == literal_kind::none;
     default:
         break;
     }
@@ -530,12 +580,30 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
             if (failed())
                 return 0;
             facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::typeof_)) {
+            /* [ext:gnu_typeof] a simple-type-specifier */
+            if (facts.has_defining_type_specifier)
+                break;
+            gnu_typeof_specifier();
+            if (failed())
+                return 0;
+            facts.has_defining_type_specifier = true;
         } else if (at(extension_keyword::int128)) {
             /* [ext:gnu_int128] a simple-type-specifier */
             add_token();
             facts.has_defining_type_specifier = true;
-        } else if (k == standard_keyword::extension) {
-            /* an extension's keyword (P9) */
+        } else if (at(extension_keyword::float128)) {
+            /* [ext:gnu_float128] a simple-type-specifier */
+            add_token();
+            facts.has_defining_type_specifier = true;
+        } else if (at(extension_keyword::complex)) {
+            /* [ext:gnu_complex] a modifier of float and double, as signed
+               is of int; what it combines with is analysis's */
+            add_token();
+        } else if (k == standard_keyword::extension &&
+                   peek().literal == literal_kind::none) {
+            /* an extension's keyword (P9); one that is a literal, __null,
+               is an operand, no decl-specifier */
             return beyond_this_step();
         } else if (at_identifier() ||
                    at(preprocessing_op_or_punc::COLON_COLON)) {
@@ -623,8 +691,7 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
         if (k == standard_keyword::auto_ && !storage_class_auto)
             has_auto = true;
         if (type_specifier &&
-            !count.add(k, extension_keyword_of(tokens[specifier]) ==
-                              extension_keyword::int128)) {
+            !count.add(k, extension_keyword_of(tokens[specifier]))) {
             /* auto int x: C++03's storage-class-specifier auto
                ([diff.cpp03.dcl.dcl]/1), in a later edition [ext.clang]
                clang's extension: P9 */
@@ -710,9 +777,6 @@ node_index parser::simple_type_specifier_with_name()
         kind = names.lookup_unqualified(name, &region, &dependent);
     else if (known)
         kind = names.lookup_qualified(scope, name, &region, &dependent);
-    /* the class the type-name names (a class template's, for one of its
-       specializations): a typedef-name of it names its members too */
-    last_type_region = region;
     if (kind == name_kind::template_name && !at(preprocessing_op_or_punc::LESS))
         tree.template_names_as_types.append(name_first);
     if (at(preprocessing_op_or_punc::LESS) && qualifier &&
@@ -736,6 +800,12 @@ node_index parser::simple_type_specifier_with_name()
         return expected("a simple-template-id after template",
                         "dcl.type.simple");
     }
+    /* the class the type-name names (a class template's, for one of its
+       specializations): a typedef-name of it names its members too.  Set
+       after the template-argument-list, whose own type-names set it too
+       ([dcl.typedef]/2: typedef duration<long, ratio<3>> hours;
+       hours::rep). */
+    last_type_region = region;
     if (!qualifier)
         return 0;
     return finish_node(syntax_kind::simple_type_specifier, mark, first);
@@ -808,6 +878,8 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
     }
     uint32_t name = 0;
     bool template_id = false;
+    scope_index primary = 0;
+    token_index template_id_first = 0, template_id_end = 0;
     if (qualifier)
         accept(standard_keyword::template_);
     if (at_identifier()) {
@@ -824,9 +896,9 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
             if (!qualifier || known) {
                 name_kind kind;
                 if (qualifier)
-                    kind = names.lookup_qualified(scope, name);
+                    kind = names.lookup_qualified(scope, name, &primary);
                 else
-                    kind = names.lookup_unqualified(name);
+                    kind = names.lookup_unqualified(name, &primary);
                 if (kind != name_kind::template_name)
                     return violates("a class template's name before the "
                                     "template-argument-list",
@@ -837,6 +909,8 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
             if (failed())
                 return 0;
             template_id = true;
+            template_id_first = id_first;
+            template_id_end = position;
         }
     } else if (qualifier) {
         return expected("an identifier after the nested-name-specifier",
@@ -890,9 +964,22 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
         if (!at(preprocessing_op_or_punc::LEFT_BRACE))
             return expected("'{' to begin the member-specification",
                             "class.pre");
+        /* [temp.expl.spec]/7, [temp.class.spec.mfunc]/1: an explicit or a
+           partial specialization has its own members, which a member
+           defined outside it (a mem-initializer's names) finds */
+        if (template_id && primary)
+            specialization_regions.append(
+                {primary, region, template_id_first, template_id_end});
         class_body(name, region, template_id);
         if (failed())
             return 0;
+        /* [class.union.anon]/1: "The names of the members of an anonymous
+           union are bound in the scope inherited from the scope of the
+           anonymous union declaration"; an unnamed struct so is clang's
+           extension: a name in the enclosing class finds them */
+        if (!name && !qualifier && at(preprocessing_op_or_punc::SEMICOLON) &&
+            names.kind_of(names.declaring_scope()) == scope_kind::class_)
+            names.add_base(names.declaring_scope(), region);
         facts.declares_type = true;
         return finish_node(syntax_kind::class_specifier, mark, first);
     }
@@ -1034,8 +1121,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     simple_type_keywords k;
     uint32_t cv = cv_none;
     unsigned const_ = 0, volatile_ = 0, typedef_ = 0, static_ = 0, extern_ = 0,
-             inline_ = 0, constexpr_ = 0, virtual_ = 0, friend_ = 0,
-             explicit_ = 0, consteval_ = 0;
+             mutable_ = 0, inline_ = 0, constexpr_ = 0, virtual_ = 0,
+             friend_ = 0, explicit_ = 0, consteval_ = 0;
     type_index named = 0;
     bool declares_class = false, declares_enumeration = false;
     token_index named_at = 0, duplicate = 0;
@@ -1059,6 +1146,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                                  syntax_kind::typename_specifier,
                                  syntax_kind::simple_template_id,
                                  syntax_kind::decltype_specifier,
+                                 syntax_kind::gnu_typeof_specifier,
                                  syntax_kind::clang_type_transformation,
                                  syntax_kind::clang_atomic_type_specifier,
                                  syntax_kind::clang_bit_int_type_specifier,
@@ -1153,6 +1241,12 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 r = decltype_type(c, denoted);
                 class_type = denoted.unqualified();
                 cv |= denoted.cv();
+            } else if (c.is(syntax_kind::gnu_typeof_specifier)) {
+                /* [ext:gnu_typeof] */
+                qualified_type denoted;
+                r = gnu_typeof_type(c, denoted);
+                class_type = denoted.unqualified();
+                cv |= denoted.cv();
             } else if (c.is(syntax_kind::clang_type_transformation)) {
                 /* [ext:clang_type_traits] */
                 qualified_type denoted;
@@ -1227,6 +1321,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             if (!c.is(syntax_kind::simple_type_specifier,
                       syntax_kind::typename_specifier,
                       syntax_kind::decltype_specifier,
+                      syntax_kind::gnu_typeof_specifier,
                       syntax_kind::clang_type_transformation,
                       syntax_kind::clang_atomic_type_specifier,
                       syntax_kind::clang_bit_int_type_specifier,
@@ -1278,12 +1373,27 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 k.alone++;
             named = entity_table[e].type.unqualified();
             cv |= entity_table[e].type.cv();
+            s.typedef_aligned = entity_table[e].alignment;
             named_at = t;
             continue;
         }
         /* [ext:clang_nullability]: no effect on the type */
         if (p.extension_keyword_of(tok) == extension_keyword::nullability)
             continue;
+        if (p.extension_keyword_of(tok) == extension_keyword::complex) {
+            /* [ext:gnu_complex] */
+            if (!k.first)
+                k.first = t;
+            k.complex++;
+            continue;
+        }
+        if (p.extension_keyword_of(tok) == extension_keyword::float128) {
+            /* [ext:gnu_float128] */
+            if (!k.first)
+                k.first = t;
+            k.float128++;
+            continue;
+        }
         if (p.extension_keyword_of(tok) == extension_keyword::int128) {
             /* [ext:gnu_int128] */
             if (!k.first)
@@ -1297,6 +1407,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             kw != standard_keyword::typedef_ &&
             kw != standard_keyword::static_ &&
             kw != standard_keyword::extern_ &&
+            kw != standard_keyword::mutable_ &&
             kw != standard_keyword::inline_ &&
             kw != standard_keyword::virtual_ &&
             kw != standard_keyword::explicit_ &&
@@ -1369,6 +1480,14 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             break;
         case standard_keyword::extern_:
             count(extern_, t, "extern");
+            break;
+        case standard_keyword::mutable_:
+            /* [dcl.stc]/8: "The mutable specifier shall appear only in the
+               declaration of a non-static data member": analysed on a
+               member-declaration's decl-specifier-seq (member_declarator) */
+            if (!mutable_allowed)
+                return not_supported(seq, specifier_subclause(kw));
+            count(mutable_, t, "mutable");
             break;
         case standard_keyword::inline_:
             count(inline_, t, "inline");
@@ -1445,7 +1564,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     /* [dcl.stc]/1: "At most one storage-class-specifier shall appear in a
        given decl-specifier-seq, except that thread_local may appear with
        static or extern." */
-    if (static_ && extern_)
+    if ((static_ && extern_) || (mutable_ && (static_ || extern_)))
         return ill_formed(seq,
                           "at most one storage-class-specifier shall appear "
                           "in a given decl-specifier-seq",
@@ -1453,7 +1572,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     /* [dcl.stc]/1: "If a storage-class-specifier appears in a
        decl-specifier-seq, there can be no typedef specifier in the same
        decl-specifier-seq" */
-    if (typedef_ && (static_ || extern_))
+    if (typedef_ && (static_ || extern_ || mutable_))
         return ill_formed(seq,
                           "if a storage-class-specifier appears in a "
                           "decl-specifier-seq, there can be no typedef "
@@ -1479,8 +1598,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                           "dcl.constexpr");
     type_index type = 0;
     bool keywords = k.signed_ || k.unsigned_ || k.short_ || k.long_ ||
-                    k.char_ || k.int_ || k.double_ || k.int128 ||
-                    k.alone_type != fundamental_type::none;
+                    k.char_ || k.int_ || k.double_ || k.int128 || k.float128 ||
+                    k.complex || k.alone_type != fundamental_type::none;
     if (named && keywords)
         /* [dcl.type]/2: "As a general rule, at most one
            defining-type-specifier is allowed in the complete
@@ -1513,6 +1632,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     s.typedef_ = typedef_;
     s.static_ = static_;
     s.extern_ = extern_;
+    s.mutable_ = mutable_ != 0;
     s.inline_ = inline_;
     s.virtual_ = virtual_ != 0;
     s.friend_ = friend_ != 0;
@@ -1613,6 +1733,10 @@ analysis_result semantic_analysis::named_member_type(SyntaxRef n, token_index t,
                                    "be used only by members and friends of "
                                    "the class in which it is declared",
                                    "class.access");
+    /* [ext:gnu_attributes] a qualified typedef-name's aligned */
+    if (entity_table[e].kind == entity_kind::typedef_name &&
+        entity_table[e].alignment)
+        return not_supported(n, "ext.gnu");
     used(t, e);
     type = entity_table[e].type.unqualified();
     if (entity_table[e].kind == entity_kind::typedef_name)

@@ -273,6 +273,11 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
                     r.unknown = true;
             }
         } else if (entity_table[s].kind == entity_kind::class_type) {
+            if (filter == lookup_filter::non_members) {
+                if (r.unknown || r.ambiguous || !s)
+                    break;
+                continue;
+            }
             /* [class.member.lookup]: a class scope's lookup includes its
                bases'; an ambiguous one finds nothing analysis uses */
             bool ambiguous = false;
@@ -629,7 +634,8 @@ bool semantic_analysis::associated_namespaces(
  */
 bool semantic_analysis::argument_dependent_lookup(
     uint32_t name, const owned_array<qualified_type> &arguments,
-    owned_array<entity_index> &found, entity_index known) const
+    owned_array<entity_index> &found, entity_index known,
+    owned_array<entity_index> *templates) const
 {
     owned_array<entity_index> classes, namespaces;
     if (!associated_namespaces(arguments, classes, namespaces))
@@ -642,8 +648,19 @@ bool semantic_analysis::argument_dependent_lookup(
            function template's, is no other) */
         if (!e || e == known)
             continue;
-        if (entity_table[e].kind == entity_kind::none)
-            return false;
+        if (entity_table[e].kind == entity_kind::none) {
+            /* [temp.over]/1: a function template's specializations are
+               candidates too */
+            if (!templates || !function_template_of(e))
+                return false;
+            bool listed = false;
+            for (entity_index other : *templates)
+                if (other == e)
+                    listed = true;
+            if (!listed)
+                templates->append(e);
+            continue;
+        }
         if (entity_table[e].kind != entity_kind::function)
             continue;
         bool seen = false;

@@ -1,0 +1,2 @@
+complex-expression.cpp:6:1: error: the rules of [ext.gnu] are not implemented yet
+complex-expression.cpp:6:1: note: refused by vcc's frontend/cplusplus/expression/expression.cpp:N (expression)

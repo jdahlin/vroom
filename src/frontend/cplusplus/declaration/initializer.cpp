@@ -395,6 +395,27 @@ analysis_result semantic_analysis::narrowing(SyntaxRef at,
         narrows = true;
         return analysis_result::well_formed;
     }
+    if (m.evaluation == constness::constant &&
+        fundamental_type_is_integral(f) && t == fundamental_type::long_double) {
+        /* [dcl.init.list]/7.3: the integer's value is kept when the
+           significant bits (from the highest set bit to the lowest) fit
+           long double's significand, the fraction bits and the leading one */
+        __int128 v = integer_value(b, f, m.value);
+        unsigned __int128 magnitude = static_cast<unsigned __int128>(v);
+        if (fundamental_type_is_signed(b, f) && v < 0)
+            magnitude = -magnitude;
+        unsigned significant = 0;
+        if (magnitude) {
+            unsigned high_bit = 127, low_bit = 0;
+            while (!((magnitude >> high_bit) & 1))
+                high_bit--;
+            while (!((magnitude >> low_bit) & 1))
+                low_bit++;
+            significant = high_bit - low_bit + 1;
+        }
+        narrows = significant > b.long_double_fraction_bits + 1u;
+        return analysis_result::well_formed;
+    }
     if (m.evaluation == constness::unknown ||
         f == fundamental_type::long_double ||
         t == fundamental_type::long_double)
@@ -418,6 +439,24 @@ analysis_result semantic_analysis::narrowing(SyntaxRef at,
 }
 
 /*
+ * [dcl.init.ref]/5.3.2 and [class.temporary]/6: a prvalue of class type
+ * with no destructor (a lambda's closure object, built from its captures)
+ * bound to a reference of its own class: the lowering holds it in a
+ * temporary of the enclosing block as C's compound literal is.  A
+ * destructor ([class.temporary]/4) and a base class's reference (the
+ * conversion to the base, [class.temporary]/2) stay refused.
+ */
+bool semantic_analysis::closure_prvalue_binding(
+    const expression_meaning &m) const
+{
+    const struct type y = type_table[m.type.unqualified()];
+    if (y.kind != type_kind::class_type)
+        return false;
+    const entity &c = entity_table[y.entity];
+    return c.lambda && !c.destructor;
+}
+
+/*
  * [dcl.init.ref]/5: "A reference to type "cv1 T1" is initialized by an
  * expression of type "cv2 T2" as follows: ..."  [dcl.init.ref]/4: ""cv1
  * T1" is reference-related to "cv2 T2" if T1 is similar to T2, or T1 is a
@@ -431,7 +470,7 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
 {
     const struct type r = type_table[reference.unqualified()];
     bool rvalue_reference = r.kind == type_kind::rvalue_reference;
-    if (aggregate_prvalue(m))
+    if (aggregate_prvalue(m) && !closure_prvalue_binding(m))
         return not_supported(at, "class.temporary");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const one is bound to a temporary (not
@@ -441,8 +480,18 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     qualified_type t1 = r.operand, t2 = m.type;
     const struct type x = type_table[t1.unqualified()];
     const struct type y = type_table[t2.unqualified()];
-    if (x.kind == type_kind::class_type && y.kind == type_kind::class_type)
+    if (x.kind == type_kind::class_type && y.kind == type_kind::class_type) {
+        entity_index c1 = x.entity, c2 = y.entity;
+        bool ambiguous = false;
+        if (entity_table[c1].kind == entity_kind::class_type &&
+            entity_table[c2].kind == entity_kind::class_type &&
+            entity_table[c2].size && c1 != c2 && !base_step(c2, c1, ambiguous))
+            return converted_temporary_binding(at, m, reference);
         return class_reference_binding(at, m, reference);
+    }
+    if (x.kind == type_kind::class_type && y.kind != type_kind::class_type &&
+        y.kind != type_kind::none)
+        return converted_temporary_binding(at, m, reference);
     if (y.kind == type_kind::class_type &&
         (x.kind == type_kind::fundamental || x.kind == type_kind::pointer)) {
         /* [dcl.init.ref]/5.1.2, /5.3.2, /5.4.1: "has a class type (i.e., T2
@@ -541,6 +590,59 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
 }
 
 /*
+ * [dcl.init.ref]/5.4.1 and /5.4.4: the initializer is not reference-related
+ * to the class T1, so it is "implicitly converted to a prvalue of type "cv1
+ * T1"" (a user-defined conversion: a converting constructor of T1
+ * ([class.conv.ctor], [over.match.copy]/1.1)), "the temporary
+ * materialization conversion is applied and the reference is bound to the
+ * result" ([class.temporary]/6: the temporary lives as long as the reference
+ * or to the end of the full-expression).  A temporary made by a constructor
+ * that binds one again nests: bounded, a clean refusal at 16.
+ */
+analysis_result semantic_analysis::converted_temporary_binding(
+    SyntaxRef at, expression_meaning &m, qualified_type reference)
+{
+    const struct type r = type_table[reference.unqualified()];
+    bool rvalue_reference = r.kind == type_kind::rvalue_reference;
+    qualified_type t1 = r.operand;
+    /* /5.2: an lvalue reference to a non-const (or volatile) type binds to
+       nothing converted */
+    if (!rvalue_reference && (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile)))
+        return ill_formed(at,
+                          "an lvalue reference to a type that is not "
+                          "const-qualified or is volatile-qualified binds "
+                          "only to a reference-compatible lvalue",
+                          "dcl.init.ref");
+    if (converting_binds >= 16)
+        return not_supported(at, "dcl.init.ref");
+    qualified_type made_type = qualified_type::make(t1.unqualified(), cv_none);
+    const struct type &source = type_table[m.type.unqualified()];
+    if (source.kind == type_kind::class_type &&
+        has_conversion_functions(source.entity)) {
+        /* /5.1.2, /5.3.2: "can be converted to an lvalue [or rvalue] of
+           type "cv3 T3"" by a conversion function ([over.match.ref]) */
+        bool converted = false;
+        VTRY(c, conversion_function_call(at, m, made_type, false, converted));
+        if (!converted)
+            return not_supported(at, "over.match.ref");
+        return analysis_result::well_formed;
+    }
+    converting_binds++;
+    initialized_value value;
+    analysis_result a = initialize_with(at, m, made_type, false, false, value);
+    converting_binds--;
+    if (a != analysis_result::well_formed)
+        return a;
+    expression_meaning made;
+    made.type = made_type;
+    made.category = value_category::prvalue;
+    made.evaluation = constness::not_constant;
+    made.node = value.node;
+    m = made;
+    return analysis_result::well_formed;
+}
+
+/*
  * [dcl.init.ref]/5 for a class: "(5.1) If the reference is an lvalue
  * reference and the initializer expression (5.1.1) is an lvalue (but is
  * not a bit-field), and "cv1 T1" is reference-compatible with "cv2 T2"
@@ -564,8 +666,11 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
     entity_index c1 = type_table[t1.unqualified()].entity;
     entity_index c2 = type_table[t2.unqualified()].entity;
     if (entity_table[c1].kind != entity_kind::class_type ||
-        entity_table[c2].kind != entity_kind::class_type ||
-        !entity_table[c2].size)
+        entity_table[c2].kind != entity_kind::class_type)
+        return not_supported(at, "dcl.init.ref");
+    /* the same class binds even when incomplete (an lvalue of it); a base
+       needs the complete derived class */
+    if (c1 != c2 && !entity_table[c2].size)
         return not_supported(at, "dcl.init.ref");
     bool ambiguous = false;
     bool related = c1 == c2 || base_step(c2, c1, ambiguous);
@@ -596,10 +701,6 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
                           "if the reference is an rvalue reference, the "
                           "initializer expression shall not be an lvalue",
                           "dcl.init.ref");
-    if (!lvalue && destroys(c2))
-        /* [class.temporary]/6: the temporary bound lives as long as the
-           reference */
-        return not_supported(at, "class.temporary");
     if (c1 == c2)
         return analysis_result::well_formed;
     return to_base(at.first_token(), c1, m);
@@ -796,36 +897,80 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
                                        bool direct, initialized_value &result)
 {
     owned_array<SyntaxElement> clauses;
-    VTRY(gathered, list_clauses(list, clauses));
-    return list_initialization_of(list, clauses, type, direct, result);
+    owned_array<uint32_t> packs;
+    VTRY(gathered, list_clauses(list, clauses, &packs));
+    /* the expansions are known to the array path only: another type's
+       clauses are analysed without them */
+    bool expanded = false;
+    for (size_t i = 0; i < packs.size(); i++)
+        if (packs[i] != no_expansion)
+            expanded = true;
+    if (expanded && type_table[type.unqualified()].kind != type_kind::array)
+        return not_supported(list, "temp.variadic");
+    const owned_array<uint32_t> *saved = clause_packs;
+    clause_packs = nullptr;
+    if (expanded)
+        clause_packs = &packs;
+    analysis_result r =
+        list_initialization_of(list, clauses, type, direct, result);
+    clause_packs = saved;
+    return r;
 }
 
+/*
+ * The initializer-clauses among the children of node, in order.  A clause
+ * followed by an ellipsis is [temp.variadic]/7 a pack expansion: its
+ * pattern once for each element of the pack(s) it expands ([dcl.init.aggr]/
+ * 4.2: the clauses of the list are those after expansion).
+ */
 analysis_result
-semantic_analysis::list_clauses(SyntaxRef list,
-                                owned_array<SyntaxElement> &clauses)
+semantic_analysis::gather_clauses(SyntaxRef list, SyntaxRef node,
+                                  owned_array<SyntaxElement> &clauses,
+                                  owned_array<uint32_t> *packs)
 {
-    for (auto c : list.elements()) {
+    size_t n = node.size();
+    for (size_t k = 0; k < n; k++) {
+        SyntaxElement c = node[k];
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE,
                  preprocessing_op_or_punc::RIGHT_BRACE,
-                 preprocessing_op_or_punc::COMMA))
+                 preprocessing_op_or_punc::COMMA,
+                 preprocessing_op_or_punc::ELLIPSIS))
             continue;
         if (c.is(syntax_kind::initializer_list)) {
-            for (auto item : c.elements()) {
-                if (item.is(preprocessing_op_or_punc::COMMA))
-                    continue;
-                if (item.is(preprocessing_op_or_punc::ELLIPSIS))
-                    return not_supported(list, "temp.variadic");
-                clauses.append(item);
-            }
+            VTRY(r, gather_clauses(list, c.index(), clauses, packs));
             continue;
         }
         if (c.is_node() && !syntax_kind_is_expression(c.kind()) &&
             !c.is(syntax_kind::braced_init_list))
             /* a designated-initializer-list */
             return not_supported(list, "dcl.init.aggr");
-        clauses.append(c);
+        uint32_t count = 1;
+        bool expansion =
+            k + 1 < n && node[k + 1].is(preprocessing_op_or_punc::ELLIPSIS);
+        if (expansion) {
+            if (!packs || c.is_token() ||
+                !expansion_count(c.first_token(), c.end_token(), count))
+                return not_supported(list, "temp.variadic");
+        }
+        for (uint32_t i = 0; i < count; i++) {
+            clauses.append(c);
+            if (!packs)
+                continue;
+            if (expansion)
+                packs->append(i);
+            else
+                packs->append(no_expansion);
+        }
     }
     return analysis_result::well_formed;
+}
+
+analysis_result
+semantic_analysis::list_clauses(SyntaxRef list,
+                                owned_array<SyntaxElement> &clauses,
+                                owned_array<uint32_t> *packs)
+{
+    return gather_clauses(list, list, clauses, packs);
 }
 
 analysis_result semantic_analysis::list_initialization_of(
@@ -1102,8 +1247,12 @@ analysis_result semantic_analysis::constructor_list_initialization(
         if (p.kind == type_kind::lvalue_reference ||
             p.kind == type_kind::rvalue_reference)
             first = p.operand;
-        const struct type &named = type_table[first.unqualified()];
-        if (named.kind == type_kind::class_type && named.entity != c)
+        const struct type &p0 = type_table[first.unqualified()];
+        if (p0.kind == type_kind::class_type && p0.entity != c &&
+            named(p0.entity, "initializer_list") &&
+            std_namespace(entity_table[p0.entity].enclosing))
+            /* [over.match.list]/1.1: initializer-list constructors, the
+               first phase, are not analysed */
             return not_supported(list, "over.match.list");
     }
     owned_array<expression_meaning> arguments;
@@ -1314,6 +1463,27 @@ analysis_result semantic_analysis::aggregate_element(
     SyntaxRef at = list;
     if (!clause.is_token())
         at = clause.index();
+    /* [temp.variadic]/7: the clause of a pack expansion is its pattern for
+       one element */
+    bool saved_expanding = expanding;
+    uint32_t saved_element = expansion_element;
+    if (clause_packs && next < clause_packs->size() &&
+        (*clause_packs)[next] != no_expansion) {
+        expanding = true;
+        expansion_element = (*clause_packs)[next];
+    }
+    analysis_result r =
+        aggregate_element_clause(list, clauses, next, element, one, clause, at);
+    expanding = saved_expanding;
+    expansion_element = saved_element;
+    return r;
+}
+
+analysis_result semantic_analysis::aggregate_element_clause(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses, size_t &next,
+    qualified_type element, initialized_value &one, SyntaxElement clause,
+    SyntaxRef at)
+{
     /* a copy: analysing the clause adds types, which may move
        type_table's */
     const struct type record = type_table[element.unqualified()];

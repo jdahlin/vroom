@@ -77,19 +77,26 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         bool constructor = t.special == special_member::constructor;
         analysis_result r = analysis_result::well_formed;
         bool lambda = ft.declarator.is(syntax_kind::lambda_expression);
+        /* [temp.deduct.guide]/1: a deduction guide's function type, its
+           parameters returning the class template's specialization */
+        bool guide = ft.guide_of != 0;
         qualified_type lambda_type;
-        if (lambda)
+        if (guide)
+            r = deduction_guide_type(ft.declarator, lambda_type);
+        else if (lambda)
             r = lambda_specialization(ft.declarator, false, lambda_type, 0);
         else if (constructor && specifiers)
             r = constructor_specifiers(d_syntax[d_skip], s);
         else if (specifiers)
             r = decl_specifier_seq(d_syntax[d_skip], s, false);
         qualified_type type = s.type;
+        if (guide)
+            type = lambda_type;
         if (lambda) {
             type = lambda_type;
             s.constexpr_ = t.constexpr_;
         }
-        if (r == analysis_result::well_formed && !lambda) {
+        if (r == analysis_result::well_formed && !lambda && !guide) {
             function_cv = 0;
             /* (a member function template's cv-qualifier-seq,
                [temp.mem]) */
@@ -215,6 +222,10 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
        ([temp.mem]): its declarator's cv-qualifier-seq the member's */
     member_template_declarator(
         2 * !is_namespace(entity_table[template_entity].enclosing));
+    /* (defined outside its class, [temp.mem]/1: its qualified declarator-id
+       is at the scope of the template-parameters' names) */
+    if (ft.definition != ft.declarator)
+        template_member_scope = instantiations[index].scope;
     analysis_result r = analysis_result::well_formed;
     if (entity_table[template_entity].special == special_member::constructor) {
         /* a constructor template's ([temp.mem]/1): its declarator again
@@ -286,8 +297,16 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
         uint32_t k = prior - 1;
         const instantiation_record x = instantiations[k];
         c = x.specialization;
-        if (!c || entity_table[c].kind != entity_kind::class_type)
+        if (!c || entity_table[c].kind != entity_kind::class_type) {
+            /* the definition failed earlier, perhaps where the failure was
+               dropped (a substitution, a default argument): the use reports
+               what went wrong there, not a refusal of its own */
+            if (x.has_failure) {
+                unsupported.append(x.failure);
+                return analysis_result::unsupported;
+            }
             return not_supported(at, "temp.inst");
+        }
         /* a specialization named before its template was defined
            ([temp.inst]/2's "declared specialization" is not one): defined
            now that the template is */
@@ -455,7 +474,10 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
        instantiation, not the template, ill-formed (clang reports it at the
        use, "in instantiation of"); the use cannot go on without the class
        and is not judged */
-    (void)unsupported_before;
+    if (unsupported.size() > unsupported_before) {
+        instantiations[index].failure = unsupported[unsupported_before];
+        instantiations[index].has_failure = true;
+    }
     c = 0;
     return not_supported(at, "temp.inst");
 }
@@ -466,9 +488,11 @@ void semantic_analysis::instantiate_pending()
 {
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         const postponed_body b = postponed_bodies[i];
+        if (!b.c)
+            continue;
         instantiation_context context;
         enter_instantiation(context, b.scope, b.declaration);
-        member_function_body(b.c, b.body);
+        instantiated_member_body(b.c, b.body);
         leave_instantiation(context);
     }
     postponed_bodies.clear();
@@ -538,7 +562,10 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].member_cv = t.member_cv;
     entity_table[e].access = t.access;
     entity_table[e].special = t.special;
+    /* [dcl.fct.spec]/2: a dependent condition is the specialization's own */
     entity_table[e].explicit_ = t.explicit_;
+    if (t.explicit_dependent)
+        entity_table[e].explicit_ = s.explicit_;
     entity_table.add_declaration(e, declaration);
     const function_template ft = function_templates[t.instantiation - 1];
     entity_table[e].gnu_flags = ft.gnu_flags;

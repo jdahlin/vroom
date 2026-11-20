@@ -72,11 +72,11 @@ analysis_result semantic_analysis::literal_operator_id(LiteralOperatorId id,
     }
     if (!id.size() || !id.operator_keyword().is_token() || !suffix.size())
         return not_supported(id, "over.literal");
-    /* [usrlit.suffix]/1: "Literal suffix identifiers that do not start
-       with an underscore are reserved for future standardization": the
-       standard library's, and clang's rules for them, are not analysed */
-    if (suffix.data()[0] != '_')
-        return not_supported(id, "over.literal");
+    /* [usrlit.suffix]/1: suffixes that do not start with an underscore are
+       "reserved for future standardization": a program's declaration is
+       ill-formed, no diagnostic required, and clang only warns
+       (-Wuser-defined-literals); the standard library declares them, so
+       they are accepted */
     m.has_id = true;
     m.id = id.operator_keyword().token();
     m.literal_operator = true;

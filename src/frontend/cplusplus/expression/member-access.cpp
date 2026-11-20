@@ -127,12 +127,17 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
            then E1.E2 is an lvalue; otherwise E1.E2 is an xvalue. ... The
            type of E1.E2 is "cq12 vq12 T"." */
         uint32_t object = m.node;
-        uint32_t cv = m.type.cv() | x.type.cv();
+        /* "If E2 is declared to be a mutable member, then the type of E1.E2
+           is vq12 T" */
+        uint32_t object_cv = m.type.cv();
+        if (x.mutable_member)
+            object_cv &= ~cv_const;
+        uint32_t cv = object_cv | x.type.cv();
         expression_meaning result;
         result.type = qualified_type::make(x.type.unqualified(), cv);
         /* an array's cv-qualifiers are its elements' ([basic.type.qualifier]/3) */
         if (type_table[x.type.unqualified()].kind == type_kind::array)
-            result.type = add_cv(x.type, m.type.cv());
+            result.type = add_cv(x.type, object_cv);
         result.category = value_category::xvalue;
         if (m.category == value_category::lvalue)
             result.category = value_category::lvalue;
@@ -253,12 +258,34 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
     while (entity_table[member_of].anonymous_object)
         member_of =
             entity_table[entity_table[member_of].anonymous_object].enclosing;
-    if (!function_state.this_entity ||
-        (member_of != current_class() &&
-         !base_step(current_class(), member_of, ambiguous)))
-        /* in a static member function, or unevaluated ([expr.prim.id]/2) */
-        return not_supported(current_declaration, "expr.prim.id");
+    entity_index cls = current_class();
+    if (!cls)
+        cls = defining_class;
+    bool of_current =
+        cls && (member_of == cls || base_step(cls, member_of, ambiguous));
     expression_meaning object;
+    if (!function_state.this_entity && unevaluated && of_current &&
+        entity_table[e].kind == entity_kind::variable &&
+        entity_table[e].nonstatic_member) {
+        /* [expr.prim.id]/3: "An id-expression that denotes a non-static
+           data member ... can only be used: as part of a class member
+           access in which the object expression refers to the member's
+           class or a class derived from that class, or to form a pointer to
+           member, or if that id-expression denotes a non-static data member
+           and it appears in an unevaluated operand."  The object is the
+           class's, an lvalue, not evaluated */
+        object.type = entity_table[cls].type;
+        object.category = value_category::lvalue;
+        object.evaluation = constness::not_constant;
+        object.node =
+            expression_node(semantic_kind::indirection, object, at, 0);
+        VTRY(r, member_access(at, e, object));
+        m = object;
+        return analysis_result::well_formed;
+    }
+    if (!function_state.this_entity || !of_current)
+        /* in a static member function, or a member function unevaluated */
+        return not_supported(current_declaration, "expr.prim.id");
     VTRY(r, this_object(at, object));
     VTRY_SET(r, member_access(at, e, object));
     m = object;
@@ -279,15 +306,26 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
                                                     expression_meaning &m)
 {
     bool arrow = n[1].is(preprocessing_op_or_punc::ARROW);
-    if (!n[2].is_identifier())
-        /* template, a qualified-id, a destructor's name, an operator
-           function's */
+    token_index name = 0;
+    if (n[2].is_identifier()) {
+        name = n[2].token();
+    } else if (auto function = n[2].operator_function_id()) {
+        /* [over.oper]/1: x.operator->() names the member operator
+           function: the keyword's token takes the operator's name */
+        declarator_meaning function_name;
+        VTRY(r, operator_function_id(function, function_name));
+        name = function_name.id;
+    } else {
+        /* template, a qualified-id, a destructor's name, a conversion
+           function's or a literal operator's */
         return not_supported(n, "expr.ref");
-    token_index name = n[2].token();
+    }
     /* (the call's callee name, which analysing the object expression's
        calls changes) */
     token_index callee = overloaded_callee;
     VTRY(r, expression(n[0], m));
+    /* (a call in the object expression left it unset) */
+    overloaded_callee = callee;
     /* [over.ref]/1: "An expression x->m is interpreted as
        (x.operator->())->m for a class object x of type T if T::operator->()
        exists and if the operator is selected as the best match function by
@@ -350,10 +388,12 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     entity_index e = class_member_lookup(c, tokens.identifier(name), ambiguous);
     if (ambiguous)
         return not_supported(n, "class.member.lookup");
-    if (e && entity_table[e].kind == entity_kind::none) {
+    if (e && (entity_table[e].kind == entity_kind::none ||
+              entity_table[e].member_templates)) {
         /* [temp.mem]/1: member function templates, called: the call
-           deduces their arguments (member_template_call) */
-        if (name == callee && member_function_template_of(e)) {
+           deduces their arguments (member_template_call), with the
+           functions of the name ([temp.mem]/2) */
+        if (name == callee && member_templates_of(e)) {
             member_template_name = e;
             member_template_object = m;
             return analysis_result::well_formed;

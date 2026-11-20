@@ -90,24 +90,140 @@ analysis_result semantic_analysis::concept_id(SyntaxRef n, uint32_t ct,
 }
 
 /*
+ * [expr.prim.req.compound]/1.3 and [temp.param]/4: whether the
+ * immediately-declared constraint of the type-constraint q, C<U, A...>,
+ * is satisfied for the type u (the current scope has the template
+ * arguments bound).  A substitution failure in A... is "not satisfied".
+ */
+analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
+                                                             qualified_type u,
+                                                             bool &satisfied)
+{
+    satisfied = false;
+    uint32_t parts = q.size();
+    if (q.is_token() || (parts != 1 && parts < 3) || !q[0].is_token())
+        return not_supported(q, "temp.param");
+    entity_index named = constraint_concept(current_scope, q[0].token());
+    uint32_t ct = 0;
+    if (named)
+        ct = concept_of(named);
+    if (!ct ||
+        (parts == 1 && function_templates[ct - 1].parameter_count != 1) ||
+        template_parameter_is_pack(function_templates[ct - 1].first_parameter))
+        return not_supported(q, "temp.param");
+    owned_array<template_argument> arguments;
+    template_argument first;
+    first.kind = template_argument::kind_t::type;
+    first.type = u;
+    arguments.append(first);
+    if (parts != 1) {
+        substitution_mark mark = mark_substitution();
+        analysis_result r = template_id_arguments(q, ct, arguments);
+        if (r == analysis_result::ill_formed && undo_substitution(mark))
+            return analysis_result::well_formed;
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    for (const template_argument &a : arguments)
+        if (a.kind == template_argument::kind_t::pack ||
+            depends_on_template_parameter(a.type) || a.template_entity)
+            return not_supported(q, "temp.constr");
+    return concept_satisfied(q, ct, arguments, satisfied);
+}
+
+/*
+ * [expr.prim.req]/5-6: whether the requirement r of a requires-expression
+ * holds, the local parameters and the template arguments bound in the
+ * current scope, in an unevaluated operand.  What does not substitute
+ * validly is not satisfied; what is valid but not understood is refused.
+ */
+analysis_result semantic_analysis::requirement_satisfied(SyntaxElement r,
+                                                         bool &satisfied)
+{
+    satisfied = true;
+    substitution_mark mark = mark_substitution();
+    analysis_result result = analysis_result::well_formed;
+    if (r.is(syntax_kind::type_requirement)) {
+        /* [expr.prim.req.type]/1: "A type-requirement asserts the validity
+           of a type" */
+        type_index type = 0;
+        uint32_t cv = 0;
+        result = typename_type(r, type, cv);
+        if (result == analysis_result::well_formed &&
+            depends_on_template_parameter(qualified_type::make(type, cv_none)))
+            return not_supported(r, "expr.prim.req");
+    } else if (r.is(syntax_kind::simple_requirement)) {
+        /* [expr.prim.req.simple]/1: "A simple-requirement asserts the
+           validity of an expression", an unevaluated operand */
+        expression_meaning v;
+        result = expression(r[0], v);
+        if (result == analysis_result::well_formed &&
+            depends_on_template_parameter(v.type))
+            return not_supported(r, "expr.prim.req");
+    } else if (r.is(syntax_kind::nested_requirement)) {
+        /* [expr.prim.req.nested]/1: "A nested-requirement can be used to
+           specify additional constraints in terms of local parameters" */
+        return constraint_satisfied(r[1], current_scope, lookup_horizon,
+                                    satisfied);
+    } else if (r.is(syntax_kind::compound_requirement)) {
+        /* [expr.prim.req.compound]/1: the expression's validity, then
+           (1.2) noexcept, (1.3) the return-type-requirement's
+           type-constraint for decltype((E)) */
+        expression_meaning v;
+        result = expression(r[1], v);
+        if (result == analysis_result::well_formed) {
+            if (depends_on_template_parameter(v.type))
+                return not_supported(r, "expr.prim.req.compound");
+            for (uint32_t i = 3; i < r.size(); i++) {
+                if (r[i].is(standard_keyword::noexcept_)) {
+                    bool throwing = false;
+                    VTRY(t, potentially_throwing(r, v.node, throwing));
+                    if (throwing)
+                        satisfied = false;
+                } else if (r[i].is(syntax_kind::return_type_requirement) &&
+                           satisfied) {
+                    qualified_type u;
+                    if (!decltype_of(v, false, u))
+                        return not_supported(r, "expr.prim.req.compound");
+                    VTRY(t, type_constraint_satisfied(r[i][1], u, satisfied));
+                }
+            }
+        }
+    } else {
+        return not_supported(r, "expr.prim.req");
+    }
+    if (result == analysis_result::ill_formed && undo_substitution(mark)) {
+        satisfied = false;
+        return analysis_result::well_formed;
+    }
+    return result;
+}
+
+/*
  * [expr.prim.req]/6: "The substitution of template arguments into a
  * requires-expression may result in the formation of invalid types or
- * expressions in its requirements ... In such cases, the
- * requires-expression evaluates to false"; "If substitution (if any) and
- * semantic constraint checking succeed, the requires-expression evaluates
- * to true."  Of type-requirements typename nested-name-specifier
- * type-name; (/1 a prvalue of type bool), checked in lexical order.  A
- * requirement-parameter-list, a simple, compound or nested requirement:
- * not analysed.
+ * expressions in its requirements or the violation of the semantic
+ * constraints of those requirements.  In such cases, the requires-expression
+ * evaluates to false"; "If substitution (if any) and semantic constraint
+ * checking succeed, the requires-expression evaluates to true."  The
+ * requirement-parameter-list's parameters are local to the requirement-body
+ * (/3, /5), the requirements checked in lexical order in unevaluated
+ * operands.
  */
 analysis_result semantic_analysis::requires_expression(RequiresExpression n,
                                                        expression_meaning &m)
 {
-    if (n.size() != 2 || !substituting)
+    if (!substituting || n.size() < 2 || n.size() > 3)
         return not_supported(n, "expr.prim.req");
+    SyntaxElement list;
+    if (n.size() == 3) {
+        list = n[1];
+        if (!list.is(syntax_kind::requirement_parameter_list))
+            return not_supported(n, "expr.prim.req");
+    }
     /* { requirement-seq }: the requirements between the braces, or the
        requirement-seq's */
-    auto requirements = n[1];
+    auto requirements = n[n.size() - 1];
     uint32_t first = 1;
     uint32_t count = requirements.size() - 2;
     if (count == 1 && requirements[1].is(syntax_kind::requirement_seq)) {
@@ -115,25 +231,46 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
         first = 0;
         count = requirements.size();
     }
+    entity_index outer = current_scope;
     bool satisfied = true;
-    for (uint32_t i = first; i < first + count && satisfied; i++) {
-        if (!requirements[i].is(syntax_kind::type_requirement))
-            return not_supported(n, "expr.prim.req");
-        /* [expr.prim.req.type]/1: "A type-requirement asserts the validity
-           of a type" */
+    analysis_result result = analysis_result::well_formed;
+    if (list) {
+        /* [expr.prim.req]/5: the local parameters, their types
+           substituted first */
+        owned_array<parameter_meaning> saved_parameters =
+            static_cast<owned_array<parameter_meaning> &&>(function_parameters);
+        uint32_t saved_cv = function_cv;
+        uint32_t saved_pack = function_empty_pack;
+        bool saved_specified = function_exceptions_specified;
+        bool saved_member = in_member_declarator;
+        function_parameters.clear();
         substitution_mark mark = mark_substitution();
-        type_index type = 0;
-        uint32_t cv = 0;
-        analysis_result r = typename_type(requirements[i], type, cv);
-        if (r == analysis_result::ill_formed && undo_substitution(mark)) {
+        qualified_type type = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+        result = function(list, type);
+        if (result == analysis_result::well_formed)
+            open_parameter_scope();
+        else if (result == analysis_result::ill_formed &&
+                 undo_substitution(mark)) {
             satisfied = false;
-            continue;
+            result = analysis_result::well_formed;
         }
-        if (r != analysis_result::well_formed)
-            return r;
-        if (depends_on_template_parameter(qualified_type::make(type, cv_none)))
-            return not_supported(n, "expr.prim.req");
+        function_cv = saved_cv;
+        function_empty_pack = saved_pack;
+        function_exceptions_specified = saved_specified;
+        in_member_declarator = saved_member;
+        function_parameters =
+            static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
     }
+    unevaluated++;
+    for (uint32_t i = first; result == analysis_result::well_formed &&
+                             satisfied && i < first + count;
+         i++)
+        result = requirement_satisfied(requirements[i], satisfied);
+    unevaluated--;
+    current_scope = outer;
+    if (result != analysis_result::well_formed)
+        return result;
     m = integer_constant(fundamental_type::bool_, satisfied, n.first_token());
     return analysis_result::well_formed;
 }
@@ -149,8 +286,6 @@ analysis_result semantic_analysis::concept_satisfied(
         for (uint32_t i = 0; i < s.count && same; i++)
             same = satisfaction_arguments[s.first + i] == arguments[i];
         if (same) {
-            if (s.unknown)
-                return not_supported(at, "temp.constr.atomic");
             satisfied = s.satisfied;
             return analysis_result::well_formed;
         }
@@ -164,10 +299,10 @@ analysis_result semantic_analysis::concept_satisfied(
             arguments[i]);
     analysis_result r = constraint_satisfied(
         c.definition, scope, c.declaration.first_token(), satisfied);
-    if (r != analysis_result::well_formed && r != analysis_result::unsupported)
+    /* (what is not decided is not kept: asked again it names its reason) */
+    if (r != analysis_result::well_formed)
         return r;
     satisfaction s;
-    s.unknown = r == analysis_result::unsupported;
     s.concept_template = ct;
     s.first = static_cast<uint32_t>(satisfaction_arguments.size());
     s.count = static_cast<uint32_t>(arguments.size());

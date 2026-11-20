@@ -1,0 +1,2 @@
+builtin-in-scope-with-unknown-names.cpp:15:1: error: the C++ front end does not handle a declaration the parser kept as tokens yet
+builtin-in-scope-with-unknown-names.cpp:17:9: note: the parser stopped at '_Float16': grammar it does not parse yet

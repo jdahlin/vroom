@@ -46,8 +46,8 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
         /* attributes, a brace-or-equal-initializer */
         return not_supported(d.index(), "class.bit");
     SyntaxElement width_expression = d[k + 1];
-    if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
-        s.constexpr_ || s.aligned || s.gnu_flags)
+    if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.mutable_ ||
+        s.inline_ || s.constexpr_ || s.aligned || s.gnu_flags)
         return not_supported(declaration, "class.bit");
     qualified_type type = s.type;
     const struct type record = type_table[type.unqualified()];

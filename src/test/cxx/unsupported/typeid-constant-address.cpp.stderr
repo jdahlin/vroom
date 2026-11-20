@@ -1,0 +1,2 @@
+typeid-constant-address.cpp:12:1: error: the rules of [expr.const] are not implemented yet
+typeid-constant-address.cpp:12:1: note: refused by vcc's frontend/cplusplus/declaration/simple-declaration.cpp:N (declare_with_initializer)

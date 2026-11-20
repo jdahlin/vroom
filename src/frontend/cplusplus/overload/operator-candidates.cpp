@@ -53,8 +53,29 @@ bool is_comparison(preprocessing_op_or_punc op)
    [over.built] has no class-typed parameters, and a conversion function to
    a class type ([over.best.ics]/4: no second user-defined conversion)
    never makes one viable.  A base class's or a template conversion
-   function is not analysed: assumed to convert */
-bool semantic_analysis::converts_to_non_class(entity_index c) const
+   function is not analysed: assumed to convert.  An explicit conversion
+   function ([class.conv.fct]/2) is no implicit conversion of a built-in
+   candidate's parameter ([over.best.ics]), unless explicit_counts */
+bool semantic_analysis::converts_to_non_class(entity_index c,
+                                              bool explicit_counts) const
+{
+    if (entity_table[c].kind != entity_kind::class_type ||
+        base_has_conversion_functions(c))
+        return true;
+    for (entity_index f = own_conversion_functions(c); f;
+         f = entity_table[f].next_overload) {
+        if (!entity_table[f].conversion_function)
+            return true;
+        if (entity_table[f].explicit_ && !explicit_counts)
+            continue;
+        qualified_type to = conversion_function_result(f).type;
+        if (type_table[to.unqualified()].kind != type_kind::class_type)
+            return true;
+    }
+    return false;
+}
+
+bool semantic_analysis::converts_to_lvalue_reference(entity_index c) const
 {
     if (entity_table[c].kind != entity_kind::class_type ||
         base_has_conversion_functions(c))
@@ -64,7 +85,7 @@ bool semantic_analysis::converts_to_non_class(entity_index c) const
         if (!entity_table[f].conversion_function)
             return true;
         qualified_type to = conversion_function_result(f).type;
-        if (type_table[to.unqualified()].kind != type_kind::class_type)
+        if (type_table[to.unqualified()].kind == type_kind::lvalue_reference)
             return true;
     }
     return false;
@@ -94,10 +115,14 @@ analysis_result semantic_analysis::overloaded_operator(
        contextually converted to bool ([over.match.oper]/7,
        [expr.unary.op]/9, [expr.log.and]/1, [expr.log.or]/1) by the
        built-in operator, not by this function */
+    bool logical = op == preprocessing_op_or_punc::EXCLAMATION ||
+                   op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
+                   op == preprocessing_op_or_punc::BAR_BAR;
     bool converts = false;
     for (const expression_meaning &e : operands) {
         const struct type &t = type_table[e.type.unqualified()];
-        if (t.kind == type_kind::class_type && converts_to_non_class(t.entity))
+        if (t.kind == type_kind::class_type &&
+            converts_to_non_class(t.entity, logical))
             converts = true;
     }
     /* [over.call.object]/2: a captureless lambda's surrogate call function
@@ -112,9 +137,50 @@ analysis_result semantic_analysis::overloaded_operator(
                 cv_const)
             converts = false;
     }
-    bool logical = op == preprocessing_op_or_punc::EXCLAMATION ||
-                   op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
-                   op == preprocessing_op_or_punc::BAR_BAR;
+    /* [over.match.oper]/3.3, [over.built]: the built-in candidates of = are
+       operator=(L VQ &, R) of arithmetic or pointer L; no conversion binds
+       the class left operand to a reference to one ([over.match.oper]/4,
+       [over.ics.ref]), so none is viable */
+    if (converts && op == preprocessing_op_or_punc::EQUAL &&
+        type_table[operands[0].type.unqualified()].kind ==
+            type_kind::class_type)
+        converts = false;
+    /* [over.built]/3-4, /18-19: ++ -- and the compound assignments'
+       built-in candidates take their left operand by L VQ &: a class
+       operand whose conversion functions return no lvalue reference binds
+       to none, so only the right operand can make one viable */
+    if (converts && !logical &&
+        type_table[operands[0].type.unqualified()].kind ==
+            type_kind::class_type) {
+        switch (op) {
+        case preprocessing_op_or_punc::PLUS_PLUS:
+        case preprocessing_op_or_punc::MINUS_MINUS:
+        case preprocessing_op_or_punc::PLUS_EQUAL:
+        case preprocessing_op_or_punc::MINUS_EQUAL:
+        case preprocessing_op_or_punc::STAR_EQUAL:
+        case preprocessing_op_or_punc::SLASH_EQUAL:
+        case preprocessing_op_or_punc::PERCENT_EQUAL:
+        case preprocessing_op_or_punc::LESS_LESS_EQUAL:
+        case preprocessing_op_or_punc::GREATER_GREATER_EQUAL:
+        case preprocessing_op_or_punc::AMPERSAND_EQUAL:
+        case preprocessing_op_or_punc::CARET_EQUAL:
+        case preprocessing_op_or_punc::BAR_EQUAL:
+            if (!converts_to_lvalue_reference(
+                    type_table[operands[0].type.unqualified()].entity)) {
+                converts = false;
+                for (size_t i = 1; i < operands.size(); i++) {
+                    const struct type &t =
+                        type_table[operands[i].type.unqualified()];
+                    if (t.kind == type_kind::class_type &&
+                        converts_to_non_class(t.entity, false))
+                        converts = true;
+                }
+            }
+            break;
+        default:
+            break;
+        }
+    }
     if (converts && !logical)
         return not_supported(n, "over.built");
     /* [over.match.oper], Table 15: a=b, a[b] and (by [over.call.object]) a(b)
@@ -158,8 +224,13 @@ analysis_result semantic_analysis::overloaded_operator(
                 !entity_table[c].size)
                 return not_supported(n, "over.match.oper");
             lookup_result found = lookup_qualified(c, name, lookup_filter::any);
+            entity_index templates = 0;
             if (found.unknown && !found.ambiguous && !found.entity &&
-                member_function_template_of(found.unknown_entity)) {
+                member_function_template_of(found.unknown_entity))
+                templates = found.unknown_entity;
+            else if (found.entity && !found.ambiguous)
+                templates = member_templates_of(found.entity);
+            if (templates) {
                 /* [temp.mem]/1: member operator function templates, their
                    specializations deduced from the other operands
                    ([temp.over]/1) member candidates */
@@ -168,7 +239,7 @@ analysis_result semantic_analysis::overloaded_operator(
                     rest.append(operand(i));
                 size_t first = candidates.size();
                 VTRY(r, member_template_candidates(
-                            n, found.unknown_entity, rest.data(),
+                            n, templates, rest.data(),
                             static_cast<uint32_t>(rest.size()), candidates));
                 for (size_t i = first; i < candidates.size(); i++) {
                     candidates[i].rewritten = rewritten;
@@ -188,8 +259,7 @@ analysis_result semantic_analysis::overloaded_operator(
            unqualified lookup of operator@ in the context of the expression
            according to the usual rules for name lookup in unqualified
            function calls ([basic.lookup.argdep]) except that all member
-           functions are ignored."  A member found is not passed over: not
-           analysed */
+           functions are ignored." */
         if (member_only) {
             for (entity_index e : members) {
                 overload_candidate c;
@@ -200,13 +270,15 @@ analysis_result semantic_analysis::overloaded_operator(
             }
             return analysis_result::well_formed;
         }
-        lookup_result found = lookup_unqualified(name, lookup_filter::any);
+        lookup_result found =
+            lookup_unqualified(name, lookup_filter::non_members);
         /* [temp.over]/1: operator function templates by that name, whose
            specializations deduced from the operands are candidates too */
-        uint32_t function_template = 0;
-        if (found.unknown && !found.ambiguous)
-            function_template = function_template_of(found.unknown_entity);
-        if ((found.unknown && !function_template) || found.ambiguous)
+        owned_array<entity_index> held_names;
+        if (found.unknown && !found.ambiguous &&
+            function_template_of(found.unknown_entity))
+            held_names.append(found.unknown_entity);
+        else if (found.unknown || found.ambiguous)
             return not_supported(n, "over.match.oper");
         owned_array<entity_index> set;
         if (found.entity) {
@@ -219,17 +291,22 @@ analysis_result semantic_analysis::overloaded_operator(
         owned_array<qualified_type> types;
         for (const expression_meaning &e : operands)
             types.append(e.type);
-        uint32_t held = 0;
-        if (function_template)
-            held = function_templates[function_template - 1].name;
-        if (!argument_dependent_lookup(name, types, set, held))
+        entity_index known = 0;
+        if (!held_names.empty())
+            known = held_names[0];
+        if (!argument_dependent_lookup(name, types, set, known, &held_names))
             return not_supported(n, "basic.lookup.argdep");
-        if (function_template) {
+        if (!held_names.empty()) {
             owned_array<uint32_t> group;
-            function_template_overloads(held, group);
-            for (const template_name_function &x : template_name_functions)
-                if (x.name == held)
-                    set.append(x.function);
+            for (entity_index held : held_names) {
+                owned_array<uint32_t> one;
+                function_template_overloads(held, one);
+                for (uint32_t t : one)
+                    group.append(t);
+                for (const template_name_function &x : template_name_functions)
+                    if (x.name == held)
+                        set.append(x.function);
+            }
             owned_array<expression_meaning> in_order;
             for (size_t i = 0; i < count; i++)
                 in_order.append(operand(i));

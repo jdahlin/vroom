@@ -300,6 +300,8 @@ class c_lowering
                           ast_qualified_type element, uint64_t bound,
                           bool reverse, entity_index e, token_index at);
 
+    /* declaring every function's symbol, which uses none */
+    bool declaring_symbols = false;
     uint32_t fail(const char *what, token_index at)
     {
         if (!failure.what) {
@@ -375,6 +377,9 @@ class c_lowering
        object, and that class's destructor (0 if none or not a class) */
     entity_index element_destructor(qualified_type type,
                                     qualified_type &object) const;
+    /* [dcl.stc]/8: the class or array of classes type has a mutable
+       subobject (a const object of it is not in read-only memory) */
+    bool has_mutable_subobject(qualified_type type) const;
     /* [expr.new], [expr.delete]: the pointer the enclosing new_object or
        delete_object holds (a variable of type allocated_type) */
     uint32_t allocated_symbol = 0;
@@ -415,13 +420,23 @@ class c_lowering
     entity_index returned_variable(uint32_t return_operand) const;
     void find_named_return(uint32_t statement, entity_index &found,
                            bool &mixed) const;
-    uint32_t materialize(uint32_t value, qualified_type t, token_index at);
+    uint32_t materialize(const semantic_node &n, uint32_t value,
+                         qualified_type t, token_index at);
     /* a temporary of type t of the full-expression being collected: its
        symbol, declared in temporaries */
     uint32_t full_expression_temporary(ast_qualified_type t);
     /* the temporary's destructor call, in destructions */
     void destroyed_after(entity_index destructor, uint32_t temporary,
                          ast_qualified_type t, token_index at);
+    /* [class.temporary]/6: the prvalue whose temporary lives as long as
+       the reference it initializes (a declared variable's), not to the
+       end of the full-expression */
+    const semantic_node *extended_temporary = nullptr;
+    /* the destruction of the temporary of the prvalue n: at the end of
+       the full-expression, or with the block's variables */
+    void destroyed_temporary(const semantic_node &n, entity_index destructor,
+                             uint32_t temporary, ast_qualified_type t,
+                             token_index at);
     unsigned conditional_depth = 0;
     owned_array<uint32_t> temporaries, destructions;
     uint32_t conditional(const semantic_node &n);
@@ -585,6 +600,11 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
         return ast_builder_type_basic(AST_TYPE_LONG_DOUBLE);
     case fundamental_type::float16:
         return ast_builder_type_basic(AST_TYPE_FLOAT16);
+    case fundamental_type::float128:
+        /* as C: a type of its own on x86-64, long double elsewhere */
+        if (target == PP_LINUX_X86_64)
+            return ast_builder_type_basic(AST_TYPE_FLOAT128);
+        return ast_builder_type_basic(AST_TYPE_LONG_DOUBLE);
     case fundamental_type::std_nullptr_t:
         /* [basic.fundamental]/14: "A value of type std::nullptr_t is a
            null pointer constant"; it has a pointer's size */
@@ -658,6 +678,9 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
         break;
     case type_kind::atomic:
         made = ast_builder_type_atomic(c, type(r.operand, at));
+        break;
+    case type_kind::complex:
+        made = ast_builder_type_complex(c, type(r.operand, at));
         break;
     case type_kind::ext_vector:
         made = ast_builder_type_ext_vector(c, type(r.operand, at), r.bound);
@@ -994,7 +1017,8 @@ ast_qualified_type c_lowering::entity_type(entity_index e, token_index at)
     if (x.kind != entity_kind::function || !x.nonstatic_member)
         return type(x.type, at);
     qualified_type object = qualified_type::make(
-        analysis.entity_table[x.enclosing].type.unqualified(), x.member_cv);
+        analysis.entity_table[x.enclosing].type.unqualified(),
+        object_cv(x.member_cv));
     return member_function_type(object, x.type, at);
 }
 
@@ -1074,6 +1098,19 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
 uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
 {
     const entity &x = analysis.entity_table[e];
+    if (x.unsupported_body && !declaring_symbols) {
+        /* [temp.inst]/4: the definition of a member function used: its body
+           has a construct the analysis has no rules for */
+        const unsupported_construct &u =
+            analysis.body_failures[x.unsupported_body - 1];
+        failure.subclause = u.subclause;
+        failure.file = u.file;
+        failure.line = u.line;
+        failure.function = u.function;
+        failure.front_end = true;
+        return fail("a function whose body is not supported",
+                    u.node.first_token());
+    }
     uint32_t *slot = &symbols[e];
     if (x.special != special_member::none && variant == 1)
         slot = &complete_symbols[e];
@@ -1097,13 +1134,13 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
        initialized dynamically is written at start-up, so not in read-only
        memory whatever its type's cv-qualifiers; nor is one whose class
        has a destructor that runs, [class.dtor]/5: "const and volatile
-       semantics are not applied on an object under destruction" (a
-       mutable member, [dcl.stc]: not analysed) */
+       semantics are not applied on an object under destruction"; nor is
+       an object with a mutable subobject, [dcl.stc]/8 */
     qualified_type element;
     if (x.kind == entity_kind::variable && !x.automatic && x.definition &&
         (x.type.cv() & cv_const) &&
         (!constant_initializer(x.definition) ||
-         element_destructor(x.type, element)))
+         element_destructor(x.type, element) || has_mutable_subobject(x.type)))
         t = type(
             qualified_type::make(x.type.unqualified(), x.type.cv() & ~cv_const),
             at);
@@ -1400,10 +1437,33 @@ uint32_t c_lowering::construct(const semantic_node &n)
     if (!in_function)
         return fail("dynamic initialization of a variable", n.at);
     entity_index cls = record(n.type).entity;
-    if (analysis.entity_table[cls].destructor && !here)
-        /* [class.temporary]/4: destroyed at the end of the full-expression */
-        return fail("a temporary with a destructor", n.at);
+    entity_index destructor = analysis.entity_table[cls].destructor;
     ast_qualified_type t = type(n.type, n.at);
+    if (destructor && !here) {
+        /* [class.temporary]/4: destroyed at the end of the full-expression
+           (the object, *(construct(&t), &t)) */
+        if (!collecting)
+            return fail("a temporary with a destructor outside a statement",
+                        n.at);
+        if (conditional_depth)
+            return fail("a temporary with a destructor in a conditional "
+                        "operand",
+                        n.at);
+        ast_qualified_type pointer = ast_builder_type_pointer(c, t);
+        uint32_t held = full_expression_temporary(t);
+        auto variable = [&] {
+            return make(AST_NODE_VARIABLE, t, held, 0, 0, 0,
+                        AST_NODE_FLAG_LVALUE);
+        };
+        uint32_t made = construct_at(n, variable(), 0, n.at);
+        if (!made)
+            return 0;
+        destroyed_temporary(n, destructor, held, t, n.at);
+        uint32_t address = make(AST_NODE_COMMA, pointer, made,
+                                address_of(variable(), pointer), 0, 0, 0);
+        return make(AST_NODE_DEREFERENCE, t, address, 0, 0, 0,
+                    AST_NODE_FLAG_LVALUE);
+    }
     uint32_t temporary =
         ast_builder_symbol(c, AST_SYMBOL_VARIABLE, "", 0, t, AST_STORAGE_AUTO,
                            AST_SYMBOL_FLAG_ADDRESS_TAKEN, 1);
@@ -2902,6 +2962,7 @@ uint32_t c_lowering::call(const semantic_node &n)
     qualified_type function_type = node(n.a).type;
     uint32_t callee = 0;
     uint32_t builtin = 0;
+    bool untyped_builtin = false;
     owned_array<uint32_t> arguments;
     /* a call through a pointer to member function: its statements
        first ([expr.mptr.oper]/6) */
@@ -2954,10 +3015,13 @@ uint32_t c_lowering::call(const semantic_node &n)
         if (node(named).kind == semantic_kind::entity &&
             (analysis.entity_table[node(named).a].gnu_flags &
              gnu_compiler_builtin))
-            /* [ext:gnu_library_builtins] no function: the C front end's
+        /* [ext:gnu_library_builtins] no function: the C front end's
                builtin node, made below */
+        {
             builtin = analysis.entity_table[node(named).a].name;
-        else {
+            untyped_builtin = analysis.entity_table[node(named).a].gnu_flags &
+                              gnu_untyped_builtin;
+        } else {
             callee = expression(n.a);
             if (!callee)
                 return 0;
@@ -2996,6 +3060,9 @@ uint32_t c_lowering::call(const semantic_node &n)
         arguments.append(a);
     }
     qualified_type result = record(function_type).operand;
+    /* an atomic builtin's type is by its arguments: the call's */
+    if (untyped_builtin)
+        result = n.type;
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(type(result, n.at));
     uint32_t count = static_cast<uint32_t>(arguments.size());
     bool initializes = here;
@@ -3019,7 +3086,7 @@ uint32_t c_lowering::call(const semantic_node &n)
                  0, 0, 0, 0);
     }
     if (passed_indirectly(result) && !initializes)
-        return materialize(made, result, n.at);
+        return materialize(n, made, result, n.at);
     if (!is_reference(result))
         return made;
     return make(AST_NODE_DEREFERENCE, type(n.type, n.at), made, 0, 0, 0,
@@ -3084,6 +3151,23 @@ entity_index c_lowering::element_destructor(qualified_type type,
     return analysis.entity_table[record(object).entity].destructor;
 }
 
+bool c_lowering::has_mutable_subobject(qualified_type type) const
+{
+    qualified_type object = type;
+    while (record(object).kind == type_kind::array)
+        object = record(object).operand;
+    if (record(object).kind != type_kind::class_type)
+        return false;
+    const entity &k = analysis.entity_table[record(object).entity];
+    for (uint32_t i = 0; i < k.member_count; i++) {
+        const entity &m =
+            analysis.entity_table[analysis.class_members[k.first_member + i]];
+        if (m.mutable_member || has_mutable_subobject(m.type))
+            return true;
+    }
+    return false;
+}
+
 uint32_t c_lowering::full_expression_temporary(ast_qualified_type t)
 {
     uint32_t temporary =
@@ -3093,6 +3177,26 @@ uint32_t c_lowering::full_expression_temporary(ast_qualified_type t)
                                         ast_builder_type_basic(AST_TYPE_VOID),
                                         temporary, 0, 0, 0, 0));
     return temporary;
+}
+
+void c_lowering::destroyed_temporary(const semantic_node &n,
+                                     entity_index destructor,
+                                     uint32_t temporary, ast_qualified_type t,
+                                     token_index at)
+{
+    if (&n != extended_temporary) {
+        destroyed_after(destructor, temporary, t, at);
+        return;
+    }
+    /* [class.temporary]/6: "The temporary object to which the reference
+       is bound ... persists for the lifetime of the reference" */
+    extended_temporary = nullptr;
+    scope_record r;
+    r.kind = scope_record::object;
+    r.symbol = temporary;
+    r.type = t;
+    r.destructor = destructor;
+    live.append(r);
 }
 
 void c_lowering::destroyed_after(entity_index destructor, uint32_t temporary,
@@ -3112,8 +3216,8 @@ void c_lowering::destroyed_after(entity_index destructor, uint32_t temporary,
    prvalue of a class returned by address that initializes no object, held
    in a temporary destroyed at the end of the full-expression; *(t =
    value, &t) */
-uint32_t c_lowering::materialize(uint32_t value, qualified_type type_,
-                                 token_index at)
+uint32_t c_lowering::materialize(const semantic_node &n, uint32_t value,
+                                 qualified_type type_, token_index at)
 {
     entity_index destructor =
         analysis.entity_table[record(type_).entity].destructor;
@@ -3129,7 +3233,7 @@ uint32_t c_lowering::materialize(uint32_t value, qualified_type type_,
                     AST_NODE_FLAG_LVALUE);
     };
     if (destructor)
-        destroyed_after(destructor, temporary, t, at);
+        destroyed_temporary(n, destructor, temporary, t, at);
     uint32_t stored = make(AST_NODE_ASSIGN, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
                            variable(), value, 0, 0, 0);
     uint32_t address = make(AST_NODE_COMMA, pointer, stored,
@@ -3282,6 +3386,17 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
     }
     if (!in_function)
         return fail("a temporary bound to a reference of static storage", n.at);
+    entity_index cls = record(bound.type).entity;
+    if (record(bound.type).kind == type_kind::class_type &&
+        analysis.entity_table[cls].destructor) {
+        /* [class.temporary]/4 and /6: a temporary with a destructor,
+           destroyed by the full-expression or as the reference dies: the
+           object construct() or call() made */
+        uint32_t held = object(n.a);
+        if (!held)
+            return 0;
+        return address_of(held, pointer);
+    }
     uint32_t literal = compound_literal(n.a);
     if (!literal)
         return 0;
@@ -3579,6 +3694,8 @@ uint32_t c_lowering::expression(uint32_t index)
         return delete_object(n);
     case semantic_kind::throw_exception:
         return fail("a throw-expression (no exception support)", n.at);
+    case semantic_kind::type_identification:
+        return fail("a typeid expression (no run-time type information)", n.at);
     case semantic_kind::array_count:
         if (!count_symbol)
             return fail("an array count outside new or delete", n.at);
@@ -3670,6 +3787,16 @@ void c_lowering::initialized_declaration(const semantic_node &n,
     const entity &x = analysis.entity_table[e];
     qualified_type object;
     entity_index destructor = element_destructor(x.type, object);
+    if (n.b && x.automatic && node(n.b).kind == semantic_kind::bind_reference) {
+        /* [class.temporary]/6: "The temporary object to which the
+           reference is bound ... persists for the lifetime of the
+           reference" (through the base subobjects it names) */
+        const semantic_node *root = &node(node(n.b).a);
+        while (root->kind == semantic_kind::member &&
+               !is_glvalue(node(root->a)))
+            root = &node(root->a);
+        extended_temporary = root;
+    }
     uint64_t bound = 0;
     if (!(object == x.type)) {
         const struct type &array = record(x.type);
@@ -5330,7 +5457,7 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
     parameter_types.append(ast_builder_type_pointer(
         c, type(qualified_type::make(
                     analysis.entity_table[x.enclosing].type.unqualified(),
-                    x.member_cv),
+                    object_cv(x.member_cv)),
                 at)));
     for (uint32_t k = 0; k < ft.parameter_count; k++)
         parameter_types.append(parameter_type(types[k], at));
@@ -6239,7 +6366,10 @@ bool c_lowering::translation_unit()
             if (!mangled)
                 continue;
         }
-        if (!symbol(d.entity, 0))
+        declaring_symbols = true;
+        bool made = symbol(d.entity, 0);
+        declaring_symbols = false;
+        if (!made)
             return false;
     }
     owned_array<entity_index> done;
@@ -6287,6 +6417,8 @@ bool c_lowering::translation_unit()
     for (const semantic_analysis::definition_record &d : analysis.definitions) {
         const entity &x = analysis.entity_table[d.entity];
         bool friend_ = analysis.defined_by_friend(d.entity);
+        if (!x.defined && !friend_)
+            continue;
         if (x.kind != entity_kind::function ||
             (!friend_ &&
              (!x.enclosing || analysis.entity_table[x.enclosing].kind !=

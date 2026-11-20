@@ -97,13 +97,21 @@ struct statement_parts {
 analysis_result semantic_analysis::selection_statement(SelectionStatement n,
                                                        uint32_t &built)
 {
-    if (n.size() < 5 || !n[0].is_token() ||
-        !n[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
-        /* if constexpr, if consteval */
+    if (n.size() < 5 || !n[0].is_token())
+        return not_supported(n, "stmt.if");
+    /* [stmt.if]/1: if constexpr */
+    bool constexpr_if =
+        n[1].is_token() && n[1].keyword() == standard_keyword::constexpr_;
+    uint32_t open = 1;
+    if (constexpr_if)
+        open = 2;
+    if (n.size() < open + 4 ||
+        !n[open].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        /* if consteval */
         return not_supported(n, "stmt.if");
     bool is_switch = n[0].keyword() == standard_keyword::switch_;
     statement_parts parts;
-    uint32_t i = 2;
+    uint32_t i = open + 1;
     owned_array<SyntaxElement> inside;
     for (; i < n.size(); i++) {
         if (n[i].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
@@ -138,6 +146,65 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
     analysis_result c = condition(parts.condition, is_switch, m);
     result = worse(result, c);
     token_index at = n[0].token();
+    if (constexpr_if) {
+        /* [stmt.if]/2: "The condition shall be a contextually converted
+           constant expression of type bool"; "If the value of the converted
+           condition is false, the first substatement is a discarded
+           statement, otherwise the second substatement, if present, is a
+           discarded statement." */
+        bool constant = false;
+        if (c == analysis_result::well_formed &&
+            parts.condition.is(syntax_kind::condition)) {
+            current_scope = outer;
+            return not_supported(n, "stmt.if");
+        }
+        if (c == analysis_result::well_formed)
+            result = worse(result, constant_expression(node_of(parts.condition),
+                                                       m, constant));
+        if (c == analysis_result::well_formed && !constant &&
+            result == analysis_result::well_formed)
+            result = ill_formed(node_of(parts.condition),
+                                "the condition of if constexpr shall be a "
+                                "contextually converted constant expression "
+                                "of type bool",
+                                "stmt.if");
+        /* [dcl.type.auto.deduct]/2: only a non-discarded return statement
+           deduces; which substatement is discarded is not known when the
+           condition is not analysed (or not constant yet): neither is */
+        if (result == analysis_result::unsupported && function_state.deducing) {
+            current_scope = outer;
+            built = statement_node(semantic_kind::if_statement, at, m.node, 0,
+                                   0, init);
+            return worse(result, analysis_result::unsupported);
+        }
+        bool taken = constant && m.value != 0;
+        /* "During the instantiation of an enclosing templated entity, if
+           the condition is not value-dependent after its instantiation, the
+           discarded substatement (if any) is not instantiated": it is
+           not analysed then.  Elsewhere it is analysed, but not odr-used
+           (here: as an unevaluated operand). */
+        bool templated = instantiation_depth != 0;
+        auto substatement_of = [&](SyntaxElement s, bool discarded,
+                                   uint32_t &node) {
+            if (!discarded)
+                return substatement(s, statement_scope, node);
+            if (templated)
+                return analysis_result::well_formed;
+            scoped_value<unsigned> unused(unevaluated, unevaluated + 1);
+            uint32_t dropped = 0;
+            return substatement(s, statement_scope, dropped);
+        };
+        bool known = constant;
+        result =
+            worse(result, substatement_of(parts.body, known && !taken, body));
+        if (parts.has_otherwise)
+            result = worse(result, substatement_of(parts.otherwise,
+                                                   known && taken, otherwise));
+        current_scope = outer;
+        built = statement_node(semantic_kind::if_statement, at, m.node, body,
+                               otherwise, init);
+        return result;
+    }
     if (!is_switch) {
         result = worse(result, substatement(parts.body, statement_scope, body));
         if (parts.has_otherwise)

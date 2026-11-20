@@ -591,6 +591,7 @@ bool semantic_analysis::differ_in_exceptions(qualified_type a,
     const struct type y = type_table[b.unqualified()];
     if (x.kind != type_kind::function || y.kind != type_kind::function ||
         x.non_throwing == y.non_throwing || !(x.operand == y.operand) ||
+        x.function_cv != y.function_cv || x.function_ref != y.function_ref ||
         x.variadic != y.variadic || x.parameter_count != y.parameter_count ||
         a.cv() != b.cv())
         return false;
@@ -685,6 +686,13 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                        "ill-formed";
     to = qualified_type::make(to.unqualified(), cv_none);
     const struct type target = type_table[to.unqualified()];
+    if (binary128_conversion(m.type, to))
+        return not_supported(at, "ext.gnu");
+    if (m.type.unqualified() == to.unqualified() && binary128_or_complex(to)) {
+        /* the identity: the value is passed on as it is */
+        m.type = to;
+        return analysis_result::well_formed;
+    }
     if (type_table[m.type.unqualified()].kind == type_kind::enumeration ||
         target.kind == type_kind::enumeration) {
         if (m.type.unqualified() == to.unqualified()) {

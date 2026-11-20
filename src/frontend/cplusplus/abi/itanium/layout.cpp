@@ -56,6 +56,18 @@ entity_index class_of_component(const semantic_analysis &a, const entity &m)
 }
 
 /*
+ * [dcl.attr.nouniqueaddr]/2: a member declared [[no_unique_address]]
+ * "may have the same address as another non-static data member"
+ * ([intro.object]/7: potentially-overlapping); [impl.clang] one of class
+ * type only, an array's elements are laid out as any member's.
+ */
+bool potentially_overlapping_class(const semantic_analysis &a, const entity &m)
+{
+    return m.no_unique_address &&
+           a.type_table[m.type.unqualified()].kind == type_kind::class_type;
+}
+
+/*
  * [abi:definitions]: an empty class has no non-static data members (an
  * unnamed bit-field of width zero is none), and only empty base classes.
  * A base class that is not empty is among the class's members
@@ -73,6 +85,11 @@ bool empty_class(const semantic_analysis &a, entity_index c)
         if (m.bit_field && !m.bit_width)
             continue;
         if (m.base_subobject && empty_class(a, class_of_component(a, m)))
+            continue;
+        /* [impl.clang] [dcl.attr.nouniqueaddr]: a potentially-overlapping
+           member of an empty class's type takes no bytes of its own */
+        if (m.no_unique_address && potentially_overlapping_class(a, m) &&
+            empty_class(a, class_of_component(a, m)))
             continue;
         return false;
     }
@@ -211,6 +228,8 @@ class class_layout
     const char *base(entity &b);
     void bit_field(entity &m);
     const char *data_member(entity &m);
+    void potentially_overlapping_member(entity &m, entity_index of,
+                                        uint64_t member_alignment);
 };
 
 /*
@@ -429,6 +448,39 @@ void class_layout::bit_field(entity &m)
 }
 
 /*
+ * [impl.clang] [abi:class-types] II, a member of class type `of` declared
+ * [[no_unique_address]] ([dcl.attr.nouniqueaddr]): an empty class's takes
+ * no bytes, so it starts at offset 0, moving (as an empty base does) to
+ * dsize(C) rounded up and then by its alignment while an empty subobject
+ * of the same type is there; it leaves dsize(C) where it was and raises
+ * sizeof(C) to cover its byte.  Another class's takes its data size, not
+ * its size: a later member may use its tail padding (a POD for the
+ * purpose of layout, [abi:pod], has none, its data size being its size).
+ */
+void class_layout::potentially_overlapping_member(entity &m, entity_index of,
+                                                  uint64_t member_alignment)
+{
+    if (empty_class(analysis, of)) {
+        m.offset = 0;
+        if (conflicts(of, 0, true)) {
+            m.offset = align_up(data_size(), member_alignment);
+            while (conflicts(of, m.offset, true))
+                m.offset += member_alignment;
+        }
+        record(of, m.offset, true);
+        raise_size(m.offset + table[of].size);
+    } else {
+        m.offset = align_up(data_size(), member_alignment);
+        while (conflicts(of, m.offset, true))
+            m.offset += member_alignment;
+        record(of, m.offset, true);
+        data_bits = (m.offset + table[of].data_size) * 8;
+        raise_size(data_size());
+    }
+    raise_alignment(member_alignment);
+}
+
+/*
  * [abi:class-types] II, any other data member: at dsize(C) rounded up to
  * the member's alignment, taking its size.  [class.mem]/19 (Note):
  * "Non-static data members of a (non-union) class with the same access
@@ -467,6 +519,12 @@ const char *class_layout::data_member(entity &m)
         /* [abi:class-types] II: a member of class type (each element of
            an array of them) that conflicts moves by its alignment */
         entity_index of = class_of_component(analysis, m);
+        if (potentially_overlapping_class(analysis, m)) {
+            potentially_overlapping_member(m, of, member_alignment);
+            if (too_many)
+                return "class.derived";
+            return nullptr;
+        }
         uint64_t element = 0, count = 0;
         if (of) {
             element = table[of].size;

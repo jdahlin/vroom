@@ -94,13 +94,25 @@ node_index parser::using_declarator()
                         "namespace.udecl", position);
     if (name) {
         name_kind kind = name_kind::not_declared;
-        if (typename_)
+        bool dependent = false;
+        if (typename_) {
             kind = name_kind::type_name;
-        else if (known)
+            /* [temp.dep.type]/9: a type named through a dependent
+               nested-name-specifier is dependent */
+            dependent = qualifier_dependent;
+        } else if (known) {
             kind = names.lookup_qualified(scope, name);
+        } else if (qualifier_dependent) {
+            /* [temp.dep.type]/6, [temp.res]/4: what a dependent base's
+               member is, the parser cannot tell, but it names no type
+               without typename: it is declared as something that is no
+               type, as a call of it in a member's body needs */
+            kind = name_kind::other;
+            dependent = true;
+        }
         if (kind != name_kind::not_declared &&
             kind != name_kind::namespace_name)
-            names.declare(name, kind);
+            names.declare(name, kind, 0, dependent);
     }
     return finish_node(syntax_kind::using_declarator, mark, first);
 }
@@ -202,6 +214,7 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         if (!prior) {
             entity_table.bind(scope, name, held, true);
         } else if (prior != held) {
+            bool poisoned = false;
             if (entity_table[prior].kind == entity_kind::function) {
                 /* (as function_template_definition holds the name of
                    functions declared before a template) */
@@ -212,15 +225,27 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 entity_table.bind(scope, name, prior, true);
                 for (entity_index f : functions)
                     template_name_functions.append({prior, f});
-            } else if (!entity_table[prior].held_by_template ||
-                       !function_template_of(prior)) {
+            } else if (!entity_table[prior].held_by_template) {
                 return not_supported(n, "over");
+            } else if (!function_template_of(prior)) {
+                /* a name whose function templates are all unusable (it
+                   also names something calls of them cannot resolve)
+                   stays so: what joins it is unusable too, and a call of
+                   it is refused */
+                for (const function_template &t : function_templates)
+                    if (t.name == prior && !t.is_class && !t.is_alias &&
+                        !t.is_variable)
+                        poisoned = true;
+                if (!poisoned)
+                    return not_supported(n, "over");
             }
             for (size_t i = 0, k = function_templates.size(); i < k; i++)
                 if (function_templates[i].name == held &&
                     !function_templates[i].unusable) {
                     function_template copy = function_templates[i];
                     copy.name = prior;
+                    if (poisoned)
+                        copy.unusable = true;
                     function_templates.append(copy);
                 }
             for (size_t i = 0, k = template_name_functions.size(); i < k; i++)

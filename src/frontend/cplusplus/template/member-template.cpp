@@ -36,7 +36,7 @@ analysis_result semantic_analysis::member_function_template(
     entity_index saved_class = defining_class;
     defining_class = 0;
     analysis_result head =
-        template_head_parameters(n, parameters, false, true, false, true);
+        template_head_parameters(n, parameters, true, true, true, true);
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;
@@ -47,22 +47,31 @@ analysis_result semantic_analysis::member_function_template(
     uint32_t specifiers =
         tail.size() > 0 && tail[0].is(syntax_kind::decl_specifier_seq);
     bool constructor = declares_special_member(c, tail[specifiers]);
+    /* [temp.mem]/1: a conversion function template ([class.conv.fct]) */
+    bool conversion = static_cast<bool>(conversion_function_id_of(definition));
     /* [dcl.decl]/4: a trailing requires-clause (trailing_constraint),
        where the template-head has none */
     uint32_t trailing = static_cast<bool>(trailing_constraint(n));
     if (trailing && head_constraint(n))
         return not_supported(n, "temp.constr");
-    if (tail.size() != 2 + specifiers + trailing ||
-        (!specifiers && !constructor) || tail[specifiers].is_token() ||
-        !tail[specifiers + 1 + trailing].is(syntax_kind::function_body))
+    /* [temp.mem]/1: a member template declared in the class, defined
+       outside it (member_template_definition_of_template): a
+       member-declaration of a decl-specifier-seq and a declarator */
+    bool defines = definition.is(syntax_kind::function_definition);
+    if (!defines && (constructor || conversion || !specifiers || trailing ||
+                     tail.size() != 3 || tail[1].is_token() ||
+                     !tail[2].is(preprocessing_op_or_punc::SEMICOLON)))
+        return not_supported(n, "temp.mem");
+    if (defines &&
+        (tail.size() != 2 + specifiers + trailing ||
+         (!specifiers && !constructor && !conversion) ||
+         tail[specifiers].is_token() ||
+         !tail[specifiers + 1 + trailing].is(syntax_kind::function_body)))
         return not_supported(n, "temp.mem");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY(declared,
          template_parameter_scope(n, parameters, c, 0, index, scope, first));
-    for (uint32_t i = 0; i < parameters.size(); i++)
-        if (template_parameter_is_pack(first + i))
-            return not_supported(n, "temp.variadic");
     /* the declarator, in the template-parameters' scope (whose enclosing
        scope is the class, [basic.scope.class]) */
     specified s;
@@ -77,8 +86,7 @@ analysis_result semantic_analysis::member_function_template(
                                    "virtual",
                                    "temp.mem");
     if (!m.has_id || m.qualifier || m.qualified_namespace || m.destructor ||
-        m.conversion_function || m.literal_operator ||
-        (s.explicit_ && !constructor) ||
+        m.literal_operator || (s.explicit_ && !constructor && !conversion) ||
         m.allocation != allocation_function::none ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.mem");
@@ -94,23 +102,36 @@ analysis_result semantic_analysis::member_function_template(
                                              abi_tag));
     uint32_t name = tokens.identifier(m.id);
     /* [temp.over]/1: other member function templates of the name are
-       overloads; a non-template member of the name too ([temp.mem]/2),
-       which a call would weigh against them: not analysed */
+       overloads; a non-template member of the name too ([temp.mem]/2):
+       the first of its chain keeps the templates' held name
+       (entity::member_templates), and a call weighs them together */
     entity_index prior = 0;
     if (!constructor)
         prior = entity_table.find(c, name);
-    if (prior && (entity_table[prior].enclosing != c ||
-                  !member_function_template_of(prior)))
+    if (prior && entity_table[prior].enclosing == c &&
+        entity_table[prior].kind == entity_kind::function &&
+        entity_table[prior].special == special_member::none &&
+        !entity_table[prior].conversion_function) {
+        entity_index head = prior;
+        prior = entity_table[head].member_templates;
+        if (!prior) {
+            prior = entity_table.make(entity_kind::none, name, c);
+            entity_table[prior].held_by_template = true;
+            entity_table[head].member_templates = prior;
+        }
+    } else if (prior && (entity_table[prior].enclosing != c ||
+                         !member_function_template_of(prior)))
         return not_supported(n, "temp.mem");
     function_template record = new_template(
         name, c, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.gnu_flags = gnu_flags;
     record.abi_tag = abi_tag;
-    record.definition = definition;
+    if (defines)
+        record.definition = definition;
     record.declarator = definition;
     entity_index t = record.entity;
     entity_table[t].type = type;
-    entity_table[t].defined = true;
+    entity_table[t].defined = defines;
     entity_table[t].linkage_of_name = entity_table[c].linkage_of_name;
     entity_table[t].nonstatic_member = !s.static_;
     entity_table[t].member_cv = function_cv;
@@ -126,6 +147,7 @@ analysis_result semantic_analysis::member_function_template(
            keeps its templates' (construct, class_sequence) */
         entity_table[t].special = special_member::constructor;
         entity_table[t].explicit_ = s.explicit_;
+        entity_table[t].explicit_dependent = s.explicit_dependent;
         prior = entity_table[c].constructor_templates;
         if (!prior) {
             prior = entity_table.make(entity_kind::none, name, c);
@@ -182,6 +204,12 @@ analysis_result semantic_analysis::constructor_template_candidates(
     if (copy) {
         size_t kept = 0;
         for (uint32_t g : group)
+            if (entity_table[function_templates[g - 1].entity]
+                    .explicit_dependent)
+                /* [dcl.fct.spec]/2: whether this specialization is explicit
+                   is known after deduction: not filtered here yet */
+                return not_supported(n, "dcl.fct.spec");
+        for (uint32_t g : group)
             if (!entity_table[function_templates[g - 1].entity].explicit_)
                 group[kept++] = g;
         group.resize(kept);
@@ -224,7 +252,25 @@ analysis_result semantic_analysis::member_template_call(
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
             return not_supported(n, "temp.deduct.call");
     owned_array<overload_candidate> candidates;
-    VTRY(r, member_template_candidates(n, held, early.data(),
+    /* [temp.mem]/2: the non-template member functions of the name
+       (held is the first of them, or the templates' name alone) are
+       candidates with the templates' specializations
+       ([over.match.funcs]/2: member candidates) */
+    entity_index templates = member_templates_of(held);
+    if (entity_table[held].kind == entity_kind::function) {
+        owned_array<entity_index> functions;
+        overload_set(held, functions);
+        for (entity_index f : functions) {
+            if (!entity_table[f].nonstatic_member)
+                return not_supported(n, "temp.mem");
+            overload_candidate c;
+            c.function = f;
+            c.type = entity_table[f].type;
+            c.member = true;
+            candidates.append(c);
+        }
+    }
+    VTRY(r, member_template_candidates(n, templates, early.data(),
                                        static_cast<uint32_t>(early.size()),
                                        candidates));
     if (candidates.empty())
@@ -240,6 +286,10 @@ analysis_result semantic_analysis::member_template_call(
     if (none_viable)
         return not_supported(n, "over.match.viable");
     const overload_candidate &k = candidates[chosen];
+    if (!k.template_index)
+        /* [over.match.best]/2.4: a non-template function is the better
+           of two that convert equally well */
+        return bound_member_call(n, k.function, object, arguments, early, m);
     owned_array<template_argument> deduced;
     r = deduce_from_call(n, k.template_index, early.data(),
                          static_cast<uint32_t>(early.size()), deduced);

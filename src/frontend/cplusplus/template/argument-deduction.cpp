@@ -221,6 +221,23 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     case type_kind::rvalue_reference:
     case type_kind::pack_expansion:
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
+    case type_kind::pointer_to_member: {
+        /* [temp.deduct.type]/8's T C::*, "T (C::*)()": C deduced from the
+           class of A's, whose type is entity's */
+        if (pr.entity) {
+            if (pr.entity != ar.entity || pr.bound != ar.bound)
+                return false;
+        } else {
+            qualified_type pc = qualified_type::make(pr.bound, cv_none);
+            qualified_type ac = qualified_type::make(ar.bound, cv_none);
+            if (ar.entity)
+                ac = qualified_type::make(
+                    entity_table[ar.entity].type.unqualified(), cv_none);
+            if (!deduce_type(pc, ac, deduced, set, exact))
+                return false;
+        }
+        return deduce_type(pr.operand, ar.operand, deduced, set, exact);
+    }
     case type_kind::array:
         if (pr.entity && ar.entity && exact) {
             /* [temp.over.link]/7: the same parameter's position */
@@ -240,15 +257,63 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::function: {
         if (pr.variadic != ar.variadic || pr.non_throwing != ar.non_throwing ||
-            pr.parameter_count != ar.parameter_count)
-            return false;
-        if (!deduce_type(pr.operand, ar.operand, deduced, set, exact))
+            pr.function_cv != ar.function_cv ||
+            pr.function_ref != ar.function_ref)
             return false;
         const qualified_type *pp = type_table.parameters(p.unqualified());
         const qualified_type *ap = type_table.parameters(a.unqualified());
+        /* [temp.deduct.type]/10: "if the parameter-declaration
+           corresponding to P_i is a function parameter pack, then the type
+           of its declarator-id is compared with each remaining parameter
+           type in the parameter-type-list of A"; a pack not at the end is
+           a non-deduced context ([temp.deduct.type]/5.7), and a pattern
+           other than the pack's own name is not analysed */
+        uint32_t fixed = pr.parameter_count;
         for (uint32_t i = 0; i < pr.parameter_count; i++)
+            if (type_table[pp[i].unqualified()].kind ==
+                type_kind::pack_expansion) {
+                const struct type &name =
+                    type_table[type_table[pp[i].unqualified()]
+                                   .operand.unqualified()];
+                if (i + 1 != pr.parameter_count ||
+                    name.kind != type_kind::template_parameter ||
+                    type_table[pp[i].unqualified()].operand.cv() ||
+                    entity_table[name.entity].value >= deduced.size()) {
+                    deduction_unknowns++;
+                    return false;
+                }
+                fixed = i;
+            }
+        if (fixed == pr.parameter_count) {
+            if (pr.parameter_count != ar.parameter_count)
+                return false;
+        } else if (ar.parameter_count < fixed) {
+            return false;
+        }
+        if (!deduce_type(pr.operand, ar.operand, deduced, set, exact))
+            return false;
+        for (uint32_t i = 0; i < fixed; i++)
             if (!deduce_type(pp[i], ap[i], deduced, set, exact))
                 return false;
+        if (fixed != pr.parameter_count) {
+            owned_array<template_argument> rest;
+            for (uint32_t i = fixed; i < ar.parameter_count; i++) {
+                template_argument element;
+                element.type = ap[i];
+                rest.append(element);
+            }
+            template_argument pack =
+                make_pack(rest.data(), static_cast<uint32_t>(rest.size()));
+            uint64_t at =
+                entity_table[type_table[type_table[pp[fixed].unqualified()]
+                                            .operand.unqualified()]
+                                 .entity]
+                    .value;
+            if (set[at])
+                return deduced[at] == pack;
+            deduced[at] = pack;
+            set[at] = true;
+        }
         return true;
     }
     default:
@@ -377,8 +442,12 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
     if (pr.kind != type_kind::dependent ||
         !entity_table[pr.entity].instantiation)
         return -1;
-    /* (an arithmetic or enumeration A is no class, nor derived from one) */
-    if (ar.kind == type_kind::fundamental || ar.kind == type_kind::enumeration)
+    /* (an arithmetic, enumeration, pointer or pointer-to-member A is no
+       class, nor derived from one: /4.3's derived class D is a class, and
+       a pointer to D matches a pointer P, which this P is not) */
+    if (ar.kind == type_kind::fundamental ||
+        ar.kind == type_kind::enumeration || ar.kind == type_kind::pointer ||
+        ar.kind == type_kind::pointer_to_member)
         return 0;
     if (ar.kind != type_kind::class_type ||
         template_template_parameter(specialized_template(pr.entity)))
@@ -524,12 +593,12 @@ analysis_result semantic_analysis::deduce_from_call(
        template-arguments than there are corresponding
        template-parameters" (clang: no candidate) */
     uint32_t specified = static_cast<uint32_t>(deduced.size());
-    /* /9: those from a trailing pack's position on its elements; when a
-       function parameter pack would extend the sequence by deduction,
-       refused */
+    /* /9: those from a trailing pack's position on its elements (the
+       parameters after the pack are not specified: [temp.param]/14 they
+       are deduced or have defaults); when a function parameter pack
+       would extend the sequence by deduction, refused */
     uint32_t given = specified;
-    if (specified > pack && pack + 1 == ft.parameter_count &&
-        fixed == f.parameter_count)
+    if (specified > pack && fixed == f.parameter_count)
         given = pack;
     if (given > ft.parameter_count || given > pack)
         return not_supported(at, "temp.arg.explicit");

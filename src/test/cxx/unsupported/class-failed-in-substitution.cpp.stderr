@@ -1,0 +1,2 @@
+class-failed-in-substitution.cpp:10:37: error: the rules of [ext.clang] are not implemented yet
+class-failed-in-substitution.cpp:10:37: note: refused by vcc's frontend/cplusplus/ext/clang/type-traits.cpp:N (clang_type_trait)

@@ -295,13 +295,16 @@ analysis_result semantic_analysis::parameter_declaration(
             declarator_count = i;
         }
     if (declarator_count == 1)
-        return analysis_result::well_formed;
+        return misplaced_function_qualifiers(n, type, false);
     if (declarator_count > 2)
         return not_supported(n, "dcl.fct");
     declarator_meaning m;
     pack_declarator = true;
     r = declarator(n, at(1), type, m);
     pack_declarator = false;
+    if (r == analysis_result::well_formed) {
+        VTRY_SET(r, misplaced_function_qualifiers(n, type, false));
+    }
     declared_pack = m.pack;
     unnamed = !m.has_id;
     if (m.has_id)
@@ -313,6 +316,37 @@ analysis_result semantic_analysis::parameter_declaration(
         (m.gnu_flags || m.aligned || m.section || m.asm_label))
         return not_supported(n, "ext.gnu");
     return r;
+}
+
+/*
+ * [dcl.fct]/6: "A function type with a cv-qualifier-seq or a ref-qualifier
+ * (including a type named by typedef-name) shall appear only as: the
+ * function type for a non-static member function, the function type to
+ * which a pointer to member refers, the top-level function type of a
+ * function typedef declaration or alias-declaration, the type-id of a
+ * template-argument for a type-parameter, or the type-id of the default
+ * argument of a type-parameter."  Whether type, the type of what n
+ * declares (or an operand of a pointer, a reference, a parameter or a
+ * return type), is such a type where it may not appear; a member declared
+ * by a typedef-name of one is a member function whose cv-qualifier-seq
+ * analysis keeps as the entity's, not analysed.
+ */
+analysis_result semantic_analysis::misplaced_function_qualifiers(
+    SyntaxRef n, qualified_type type, bool member)
+{
+    const struct type &f = type_table[type.unqualified()];
+    if (f.kind != type_kind::function || (!f.function_cv && !f.function_ref))
+        return analysis_result::well_formed;
+    if (member)
+        return not_supported(n, "dcl.fct");
+    return ill_formed(n,
+                      "a function type with a cv-qualifier-seq or a "
+                      "ref-qualifier shall appear only as the function type "
+                      "for a non-static member function, the function type "
+                      "to which a pointer to member refers, the top-level "
+                      "function type of a typedef declaration or "
+                      "alias-declaration, or a template-argument",
+                      "dcl.fct");
 }
 
 /*
@@ -329,18 +363,22 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     /* [dcl.fct]/11: "Functions shall not have a return type of type array or
        function" */
     type_kind returned = type_table[type.unqualified()].kind;
-    if (returned == type_kind::array || returned == type_kind::function)
+    if (returned == type_kind::array || returned == type_kind::function) {
+        /* a qualified function type is the more specific rule's */
+        VTRY(r, misplaced_function_qualifiers(parameters, type, false));
         return ill_formed(parameters,
                           "functions shall not have a return type of type "
                           "array or function",
                           "dcl.fct");
+    }
     using enum preprocessing_op_or_punc;
     /* the parameter-declarations and the ellipsis, from the clause and its
        list: ( clause ) is the first and last child */
     owned_array<SyntaxRef> declarations;
     bool variadic = false, closed = false;
+    token_index clause_ellipsis = 0;
     owned_array<SyntaxElement> work;
-    uint32_t cv = cv_none;
+    uint32_t cv = cv_none, type_cv = cv_none, type_ref = 0;
     bool may_qualify = in_member_declarator;
     /* [except.spec]/1: the noexcept-specifier */
     bool specified_exceptions = false, non_throwing = false;
@@ -362,19 +400,65 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
             if (c.is_node() && only_gnu_attributes(tree, c))
                 continue;
             /* [dcl.fct]/1: the cv-qualifier-seq of a member function's
-               declarator ([class.mfct.non-static]/5) */
+               declarator ([class.mfct.non-static]/5); [dcl.fct]/6 of
+               another function type: part of the type, valid where the
+               type is a pointer to member's or a typedef-name's
+               (checked where the function type is used) */
+            uint32_t *qualified = &cv;
+            if (!may_qualify)
+                qualified = &type_cv;
+            if (auto seq = c.cv_qualifier_seq()) {
+                bool all = true;
+                uint32_t added = 0;
+                for (auto q : seq.elements()) {
+                    standard_keyword k = standard_keyword::none;
+                    if (q.is_token())
+                        k = q.keyword();
+                    if (k == standard_keyword::const_)
+                        added |= cv_const;
+                    else if (k == standard_keyword::volatile_)
+                        added |= cv_volatile;
+                    else
+                        all = false;
+                }
+                if (all && !(*qualified & added)) {
+                    *qualified |= added;
+                    continue;
+                }
+                return not_supported(parameters, "dcl.fct");
+            }
             standard_keyword kw = standard_keyword::none;
             if (c.is_token())
                 kw = c.keyword();
-            if (may_qualify && kw == standard_keyword::const_ &&
-                !(cv & cv_const)) {
-                cv |= cv_const;
+            if (kw == standard_keyword::const_ && !(*qualified & cv_const)) {
+                *qualified |= cv_const;
                 continue;
             }
-            if (may_qualify && kw == standard_keyword::volatile_ &&
-                !(cv & cv_volatile)) {
-                cv |= cv_volatile;
+            if (kw == standard_keyword::volatile_ &&
+                !(*qualified & cv_volatile)) {
+                *qualified |= cv_volatile;
                 continue;
+            }
+            /* [dcl.fct]/1 ref-qualifier: a member function's own is kept
+               with the cv-qualifier-seq (cv_ref_lvalue, cv_ref_rvalue) */
+            if (c.is(AMPERSAND) || c.is(AMPERSAND_AMPERSAND)) {
+                bool lvalue = c.is(AMPERSAND);
+                if (may_qualify) {
+                    if (cv & (cv_ref_lvalue | cv_ref_rvalue))
+                        return not_supported(parameters, "dcl.fct");
+                    if (lvalue)
+                        cv |= cv_ref_lvalue;
+                    else
+                        cv |= cv_ref_rvalue;
+                    continue;
+                }
+                if (!type_ref) {
+                    if (lvalue)
+                        type_ref = 1;
+                    else
+                        type_ref = 2;
+                    continue;
+                }
             }
             if (c.noexcept_specifier() && !specified_exceptions) {
                 /* analysed once the parameters are known */
@@ -404,6 +488,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
             continue;
         if (c.is(ELLIPSIS)) {
             variadic = true;
+            clause_ellipsis = c.token();
             continue;
         }
         if (c.is(syntax_kind::parameter_declaration_clause,
@@ -432,9 +517,20 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         VTRY(r, parameter_pack_expansion(
                     declarations[k], k + 1 == declarations.size() && !variadic,
                     elements, ellipsis));
+        /* [dcl.fct]/22: the clause's own "..." after the last parameter,
+           whose type names a pack, is that pack's expansion (an
+           instantiation's: R (*)(A...) with A bound to its elements) */
+        bool clause_expansion = false;
+        if (!ellipsis && variadic && k + 1 == declarations.size() &&
+            expansion_count(declarations[k].first_token(),
+                            declarations[k].end_token(), elements)) {
+            clause_expansion = true;
+            ellipsis = clause_ellipsis;
+        }
         if (ellipsis) {
             uint32_t pack_name = 0;
-            if (tokens[ellipsis + 1].kind == token_kind::identifier)
+            if (!clause_expansion &&
+                tokens[ellipsis + 1].kind == token_kind::identifier)
                 pack_name = tokens.identifier(ellipsis + 1);
             bool saved = expanding;
             uint32_t saved_element = expansion_element;
@@ -447,8 +543,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 expansion_element = saved_element;
                 if (r != analysis_result::well_formed)
                     return r;
-                if (declared_pack != ellipsis || default_argument ||
-                    depends_on_template_parameter(t))
+                if ((!clause_expansion && declared_pack != ellipsis) ||
+                    default_argument || depends_on_template_parameter(t))
                     return not_supported(declarations[k], "temp.variadic");
                 const struct type &element = type_table[t.unqualified()];
                 if ((element.kind == type_kind::fundamental &&
@@ -469,6 +565,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
             /* an empty pack's name: the pack of no parameters */
             if (!elements)
                 empty_pack = pack_name;
+            if (clause_expansion)
+                variadic = false;
             continue;
         }
         VTRY_SET(r, parameter_declaration(declarations[k], t, unnamed, id,
@@ -526,6 +624,15 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         parameter.default_argument = default_argument;
         named.append(parameter);
     }
+    /* [dcl.fct]/22: a trailing "..." after a parameter whose type is a
+       template parameter pack (R (*)(A...)) is that pack's expansion, not
+       C's ellipsis */
+    if (variadic && !list.empty() &&
+        names_template_parameter_pack(list.back())) {
+        list.back() = qualified_type::make(
+            type_table.pack_expansion_of(list.back()), cv_none);
+        variadic = false;
+    }
     /* the last function declarator to finish is a function definition's
        own: the ones in its parameters finish before it */
     function_parameters.clear();
@@ -546,10 +653,10 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     if (!tokens.files.behavior.has(
             language_feature::exception_specification_in_type))
         non_throwing = false;
-    type =
-        qualified_type::make(type_table.function(type, list.data(), list.size(),
-                                                 variadic, non_throwing),
-                             cv_none);
+    type = qualified_type::make(
+        type_table.function(type, list.data(), list.size(), variadic,
+                            non_throwing, type_cv, type_ref),
+        cv_none);
     return analysis_result::well_formed;
 }
 
@@ -567,6 +674,38 @@ bool semantic_analysis::generic_placeholder(SyntaxRef seq) const
             return true;
     }
     return false;
+}
+
+/* whether a declarator's ... precedes its declarator-id, outside the
+   parameters of a function declarator in it */
+static bool declares_pack(SyntaxElement n)
+{
+    /* (a parameter-declaration's declarator, or one nested in it; not a
+       parameters-and-qualifiers or an array bound's expression) */
+    for (auto c : n.elements()) {
+        if (c.is(preprocessing_op_or_punc::ELLIPSIS))
+            return true;
+        if (c.is(syntax_kind::ptr_declarator, syntax_kind::noptr_declarator,
+                 syntax_kind::ptr_abstract_declarator,
+                 syntax_kind::noptr_abstract_declarator) &&
+            declares_pack(c))
+            return true;
+    }
+    return false;
+}
+
+/* the parameter-declarations of a parameter-declaration-clause (or its
+   list) and the "..." tokens, in order */
+static void flatten_parameters(SyntaxElement n,
+                               owned_array<SyntaxElement> &items)
+{
+    for (auto c : n.elements()) {
+        if (c.is(syntax_kind::parameter_declaration_clause,
+                 syntax_kind::parameter_declaration_list))
+            flatten_parameters(c, items);
+        else
+            items.append(c);
+    }
 }
 
 bool semantic_analysis::abbreviated_parameters(
@@ -598,14 +737,9 @@ bool semantic_analysis::abbreviated_parameters(
     if (!list)
         return true;
     owned_array<SyntaxElement> items;
-    for (auto c : list.elements()) {
-        if (c.is(syntax_kind::parameter_declaration_list))
-            for (auto item : c.elements())
-                items.append(item);
-        else
-            items.append(c);
-    }
-    for (auto c : items) {
+    flatten_parameters(list, items);
+    for (size_t i = 0; i < items.size(); i++) {
+        auto c = items[i];
         if (!c.parameter_declaration())
             continue;
         for (auto seq : c.elements()) {
@@ -615,11 +749,39 @@ bool semantic_analysis::abbreviated_parameters(
                 break;
             /* [dcl.fct]/22: "The invented type template-parameter is a
                template parameter pack if the corresponding parameter-
-               declaration declares a function parameter pack" */
-            for (token_index t = c.first_token(); t < c.end_token(); t++)
-                if (SyntaxElement::from_token(t).is(
-                        preprocessing_op_or_punc::ELLIPSIS))
+               declaration declares a function parameter pack": its
+               declarator's ... (not one of a nested function
+               declarator's parameters), or the clause's own after the
+               parameter (auto&&...: [dcl.fct]/21's ambiguity resolves to
+               a pack, as the placeholder's type depends on its
+               invented parameter) */
+            bool pack = declares_pack(c);
+            if (i + 1 < items.size() &&
+                items[i + 1].is(preprocessing_op_or_punc::ELLIPSIS) && !pack) {
+                /* the clause's ...: after a declarator-id C's variadic
+                   ellipsis ([dcl.fct]/21: auto x...), after no
+                   declarator or one of ptr-operators a pack (clang:
+                   auto&&...); another abstract declarator ((*)(int)...)
+                   is not decided here */
+                bool named = false, plain = true;
+                for (auto d : c.elements()) {
+                    if (d.decl_specifier_seq() || d.is_token())
+                        continue;
+                    if (!d.is(syntax_kind::ptr_abstract_declarator))
+                        named = true;
+                    for (auto q : d.elements())
+                        if (!q.is(syntax_kind::ptr_operator))
+                            plain = false;
+                }
+                if (named)
+                    pack = false;
+                else if (plain)
+                    pack = true;
+                else
                     return false;
+            }
+            if (pack && !invented_pack(seq))
+                invented_packs.append(seq.index().index());
             parameters.append(seq);
             break;
         }
@@ -633,6 +795,14 @@ uint32_t semantic_analysis::invented_parameter_name(SyntaxRef seq) const
     int length =
         snprintf(spelling, sizeof spelling, "auto:%u", seq.index().index());
     return tokens.pp.identifier(spelling, static_cast<size_t>(length)) + 1;
+}
+
+bool semantic_analysis::invented_pack(SyntaxRef seq) const
+{
+    for (uint32_t k : invented_packs)
+        if (k == seq.index().index())
+            return true;
+    return false;
 }
 
 bool semantic_analysis::invented_parameter_type(SyntaxRef seq,

@@ -26,7 +26,7 @@ types::types()
 uint32_t types::hash(const type &t, const qualified_type *parameters) const
 {
     /* the record's members as words: its padding is not part of the type */
-    uint32_t key[8] = {static_cast<uint32_t>(t.kind),
+    uint32_t key[9] = {static_cast<uint32_t>(t.kind),
                        static_cast<uint32_t>(t.fundamental),
                        static_cast<uint32_t>(t.non_throwing) << 2 |
                            static_cast<uint32_t>(t.variadic) << 1 |
@@ -35,7 +35,9 @@ uint32_t types::hash(const type &t, const qualified_type *parameters) const
                        t.entity,
                        static_cast<uint32_t>(t.bound),
                        static_cast<uint32_t>(t.bound >> 32),
-                       t.parameter_count};
+                       t.parameter_count,
+                       static_cast<uint32_t>(t.function_cv) << 8 |
+                           t.function_ref};
     uint32_t h = vhash_string(reinterpret_cast<const char *>(key), sizeof key);
     if (t.parameter_count)
         h ^= vhash_string(reinterpret_cast<const char *>(parameters),
@@ -49,6 +51,8 @@ bool types::same(const type &a, const qualified_type *a_parameters,
     const type &other = records[b];
     if (a.kind != other.kind || a.fundamental != other.fundamental ||
         a.variadic != other.variadic || a.non_throwing != other.non_throwing ||
+        a.function_cv != other.function_cv ||
+        a.function_ref != other.function_ref ||
         a.bound_known != other.bound_known || !(a.operand == other.operand) ||
         a.entity != other.entity || a.bound != other.bound ||
         a.parameter_count != other.parameter_count)
@@ -168,15 +172,27 @@ type_index types::array_of_unknown_bound_of(qualified_type element)
 type_index types::function(qualified_type result,
                            const qualified_type *parameters,
                            size_t parameter_count, bool variadic,
-                           bool non_throwing)
+                           bool non_throwing, uint32_t function_cv,
+                           uint32_t function_ref)
 {
     type t;
     t.kind = type_kind::function;
     t.operand = result;
     t.variadic = variadic;
     t.non_throwing = non_throwing;
+    t.function_cv = static_cast<uint8_t>(function_cv);
+    t.function_ref = static_cast<uint8_t>(function_ref);
     t.parameter_count = static_cast<uint32_t>(parameter_count);
     return intern(t, parameters);
+}
+
+type_index types::function_qualified(type_index f, uint32_t function_cv,
+                                     uint32_t function_ref)
+{
+    type t = records[f];
+    t.function_cv = static_cast<uint8_t>(function_cv);
+    t.function_ref = static_cast<uint8_t>(function_ref);
+    return intern(t, parameters(f));
 }
 
 /* a class ([class.name]/1: "A class definition introduces a new type") or
@@ -196,6 +212,19 @@ type_index types::pointer_to_member(uint32_t class_entity,
     type t;
     t.kind = type_kind::pointer_to_member;
     t.entity = class_entity;
+    t.operand = member;
+    return intern(t, nullptr);
+}
+
+/* [dcl.mptr]/1 in a template's own declaration: a pointer to member of a
+   class that is a dependent type ([temp.dep.type]/9), a template parameter
+   or a member of one: R (C::*)(); its class is the type class_type */
+type_index types::dependent_pointer_to_member(type_index class_type,
+                                              qualified_type member)
+{
+    type t;
+    t.kind = type_kind::pointer_to_member;
+    t.bound = class_type;
     t.operand = member;
     return intern(t, nullptr);
 }
@@ -247,6 +276,15 @@ type_index types::atomic_of(qualified_type value)
 {
     type t;
     t.kind = type_kind::atomic;
+    t.operand = value;
+    return intern(t, nullptr);
+}
+
+/* [ext:gnu_complex] _Complex T */
+type_index types::complex_of(qualified_type value)
+{
+    type t;
+    t.kind = type_kind::complex;
     t.operand = value;
     return intern(t, nullptr);
 }

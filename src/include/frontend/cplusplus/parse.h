@@ -430,6 +430,17 @@ class declared_names
        looked up according to [basic.lookup.unqual] but ignoring any
        non-type names that have been declared" */
     name_kind lookup_elaborated(uint32_t name);
+    /* [basic.lookup.qual]/1: "lookup of the name preceding that :: considers
+       only namespaces, types, and templates whose specializations are
+       types": a variable, function or enumerator of that name, found first,
+       is ignored; the same of a name after one :: in a nested-name-specifier
+       (the _nested forms, for a name a :: follows) */
+    name_kind lookup_unqualified_nested(uint32_t name,
+                                        scope_index *scope = nullptr,
+                                        bool *dependent = nullptr);
+    name_kind lookup_qualified_nested(scope_index in, uint32_t name,
+                                      scope_index *scope = nullptr,
+                                      bool *dependent = nullptr);
     /* [basic.lookup.qual]: the name in the namespace a
        nested-name-specifier named */
     name_kind lookup_qualified(scope_index in, uint32_t name,
@@ -486,6 +497,8 @@ class declared_names
                             unsigned depth = 0) const;
     /* find skips the names of no type (lookup_elaborated) */
     bool ignoring_non_types = false;
+    /* lookup_unqualified_nested: also keeps namespace-names */
+    bool ignoring_non_scopes = false;
 };
 
 /* ---- the parser ---------------------------------------------------------- */
@@ -527,6 +540,8 @@ enum class extension_keyword : uint8_t {
     type_trait,
     type_transformation,
     int128,
+    float128,
+    complex,
     nullability,
     offsetof_,
     bit_cast,
@@ -534,6 +549,7 @@ enum class extension_keyword : uint8_t {
     atomic,
     bit_int,
     source_location,
+    typeof_,
 };
 
 /*
@@ -966,6 +982,8 @@ class parser
     node_index clang_convertvector_expression();
     /* ---- ext/clang/source-location.cpp: __builtin_source_location() */
     node_index clang_source_location_expression();
+    /* ---- ext/gnu/typeof.cpp: typeof(e), typeof(T) */
+    node_index gnu_typeof_specifier();
     /* ---- ext/clang/atomic.cpp: _Atomic(T) */
     node_index clang_atomic_type_specifier();
     /* ---- ext/clang/bit-int.cpp: _BitInt(N) */
@@ -1301,6 +1319,18 @@ class parser
     /* the last name of the last nested-name-specifier parsed, before its
        template-argument-list if any ([class.qual]/2) */
     uint32_t last_qualifier_name = 0;
+    /* [temp.expl.spec]/1: the region of each explicit specialization of a
+       class template defined so far, with the tokens of its template-id:
+       an out-of-class member definition's declarator-id C<args>::m names a
+       member of that class, not of the primary template ([class.mfct]/1) */
+    struct specialization_region {
+        scope_index primary;
+        scope_index region;
+        token_index first;
+        token_index end;
+    };
+    owned_array<specialization_region> specialization_regions;
+    bool same_template_id(token_index a, token_index b, token_index length);
     bool abstract_pack_follows();
     /* the token ends a template-argument-list: '>', or '>>', '>=', '>>='
        of which the first '>' does ([temp.names]/3) */

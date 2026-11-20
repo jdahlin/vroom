@@ -36,6 +36,11 @@ bool orderable(const types &table, qualified_type t, bool packs)
         return true;
     case type_kind::pack_expansion:
         return packs && orderable(table, r.operand, packs);
+    case type_kind::pointer_to_member:
+        if (!r.entity &&
+            !orderable(table, qualified_type::make(r.bound, cv_none), packs))
+            return false;
+        return orderable(table, r.operand, packs);
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
@@ -221,11 +226,16 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
     for (uint32_t x : both) {
         const function_template t = function_templates[x - 1];
         for (uint32_t i = 0; i < t.parameter_count; i++) {
-            /* (a type-parameter, or an invented one, [dcl.fct]/22) */
+            /* (a type-parameter, or an invented one, [dcl.fct]/22; a
+               non-type parameter takes no part: [temp.deduct.partial]/12,
+               "a template parameter may remain without a value provided
+               it is not used in the types being used for partial
+               ordering", and a use in a parameter type is a type orderable
+               refuses) */
             template_parameter_parts form;
             if (!template_parameter_form(
                     template_parameter_nodes[t.first_parameter + i], form) ||
-                !form.type || form.template_template)
+                form.template_template || (!form.type && form.pack))
                 unknown = true;
         }
         qualified_type type = entity_table[t.entity].type;

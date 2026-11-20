@@ -198,9 +198,13 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         case fundamental_type::double_:
             return 8;
         case fundamental_type::long_double:
-            if (b.long_double_fraction_bits == 112)
-                return 16;
-            return 8;
+            /* binary128 (aarch64), and x87's 80 bits padded to 16 bytes
+               (x86-64); 8 where it is a double (Darwin) */
+            if (b.long_double_fraction_bits == 52)
+                return 8;
+            return 16;
+        case fundamental_type::float128:
+            return 16;
         case fundamental_type::std_nullptr_t:
             return b.long_width / 8;
         case fundamental_type::builtin_va_list:
@@ -228,6 +232,9 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         return size_of_type(record.operand);
     case type_kind::atomic:
         return atomic_layout(record.operand, false);
+    case type_kind::complex:
+        /* [ext:gnu_complex] struct { T re, im; } */
+        return 2 * size_of_type(record.operand);
     case type_kind::bit_int:
         return bit_int_layout(record.bound, false);
     case type_kind::ext_vector:
@@ -280,6 +287,8 @@ uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
     switch (record.kind) {
     case type_kind::atomic:
         return atomic_layout(record.operand, true);
+    case type_kind::complex:
+        return alignment_of_type(record.operand);
     case type_kind::bit_int:
         return bit_int_layout(record.bound, true);
     case type_kind::ext_vector:
@@ -316,8 +325,9 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
                                            expression_meaning &m)
 {
     qualified_type operand;
+    uint32_t typedef_alignment = 0;
     if (n.size() == 4 && n[2].is(syntax_kind::type_id)) {
-        VTRY(r, type_id(n[2], operand));
+        VTRY(r, type_id(n[2], operand, &typedef_alignment));
     } else if (n.size() == 2 && !alignment) {
         /* [expr.sizeof]/3: "The lvalue-to-rvalue, array-to-pointer, and
            function-to-pointer standard conversions are not applied to the
@@ -380,6 +390,9 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
     uint64_t size = size_of_type(operand);
     if (alignment)
         size = alignment_of_type(operand);
+    /* [ext:gnu_attributes] alignof of a typedef-name declared with aligned */
+    if (alignment && typedef_alignment > size)
+        size = typedef_alignment;
     if (!size)
         return not_supported(n, "expr.sizeof");
     m.type = qualified_type::make(
@@ -722,13 +735,23 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
                                    "a pointer to member shall not point to a "
                                    "member with reference type",
                                    "dcl.mptr");
-    if (x.kind == entity_kind::function && x.member_cv)
-        /* the function types analysis makes have no cv-qualifier-seq
-           ([dcl.fct]/1) */
-        return not_supported(current_declaration, "dcl.fct");
+    /* [dcl.fct]/1: the function type of a member function with a
+       cv-qualifier-seq has it (the entity keeps it as member_cv) */
+    qualified_type pointee = x.type;
+    if (x.kind == entity_kind::function && x.member_cv) {
+        uint8_t ref = 0;
+        if (x.member_cv & cv_ref_lvalue)
+            ref = 1;
+        if (x.member_cv & cv_ref_rvalue)
+            ref = 2;
+        pointee = qualified_type::make(
+            type_table.function_qualified(x.type.unqualified(),
+                                          object_cv(x.member_cv), ref),
+            cv_none);
+    }
     m = expression_meaning();
     m.type =
-        qualified_type::make(type_table.pointer_to_member(c, x.type), cv_none);
+        qualified_type::make(type_table.pointer_to_member(c, pointee), cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::unknown;
     m.node = expression_node(semantic_kind::member_pointer, m, t, e);
@@ -781,6 +804,10 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
     while (!work.empty() && !throwing) {
         uint32_t k = work.back();
         work.resize(work.size() - 1);
+        /* an operand with no node of its own (a declval<T>() of the
+           traits) cannot throw */
+        if (!k)
+            continue;
         const semantic_node s = semantics[k];
         switch (s.kind) {
         case semantic_kind::constant:
@@ -848,12 +875,18 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
         }
         case semantic_kind::construct: {
             /* /6.2: the constructor; an implicit one's exception
-               specification ([except.spec]/8) is not worked out here */
+               specification is its subobjects' ([except.spec]/8-9) */
             if (s.b) {
                 const entity &c = entity_table[s.b];
-                if (c.implicit)
-                    return not_supported(n, "expr.unary.noexcept");
-                if (!type_table[c.type.unqualified()].non_throwing) {
+                if (c.implicit) {
+                    bool known = true;
+                    if (implicit_constructor_throws(s.b, known)) {
+                        throwing = true;
+                        break;
+                    }
+                    if (!known)
+                        return not_supported(n, "except.spec");
+                } else if (!type_table[c.type.unqualified()].non_throwing) {
                     throwing = true;
                     break;
                 }

@@ -119,10 +119,24 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
         r = target_expression(n[2], left.type, right);
     else if (r == analysis_result::well_formed)
         VTRY_SET(r, expression(n[2], right));
+    if (r != analysis_result::well_formed)
+        return r;
+    return assignment_of(n, n[1].token(), op, n[0], n[2], left, right, m);
+}
+
+/* [expr.ass] of the analysed operands: the operator function the overload
+   rules select, or the built-in assignment (the traits ask it of declval
+   operands too) */
+analysis_result semantic_analysis::assignment_of(
+    SyntaxRef n, token_index at, preprocessing_op_or_punc op,
+    SyntaxElement left_syntax, SyntaxElement right_syntax,
+    expression_meaning &left, expression_meaning &right, expression_meaning &m)
+{
+    analysis_result r = analysis_result::well_formed;
     /* [over.match.oper]/2: an operand of class or enumeration type */
     bool handled = false;
-    r = binary_operator_function(n, n[1].token(), op, n[0], left, n[2], right,
-                                 handled, m);
+    r = binary_operator_function(n, at, op, left_syntax, left, right_syntax,
+                                 right, handled, m);
     if (r != analysis_result::well_formed || handled)
         return r;
     const struct type record = type_table[left.type.unqualified()];
@@ -204,8 +218,8 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
     m.evaluation = constness::not_constant;
     m.entity = 0;
     m.beyond_integral_constant = true;
-    m.node = expression_node(semantic_kind::assignment, m, n[1].token(),
-                             assigned, right.node, static_cast<uint8_t>(op));
+    m.node = expression_node(semantic_kind::assignment, m, at, assigned,
+                             right.node, static_cast<uint8_t>(op));
     semantics[m.node].computation = computation;
     return analysis_result::well_formed;
 }

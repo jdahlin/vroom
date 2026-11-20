@@ -15,14 +15,88 @@
 namespace cplusplus
 {
 
+/* [ext:gnu_float128]: a name of an object, or a cast (which analysis
+   allows only to the type itself or void), is a value only passed on */
+bool semantic_analysis::passes_binary128(SyntaxElement e,
+                                         const expression_meaning &m) const
+{
+    SyntaxElement operand = e;
+    while (operand.is(syntax_kind::primary_expression) && operand.size() == 3 &&
+           operand[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        operand = operand[1];
+    if (operand.is(syntax_kind::cast_expression))
+        return true;
+    if (!m.node || m.category != value_category::lvalue)
+        return false;
+    const semantic_node &n = semantics[m.node];
+    return (n.kind == semantic_kind::entity && n.a) ||
+           (n.kind == semantic_kind::member && n.b);
+}
+
+/* [ext:gnu_float128], [ext:gnu_complex] */
+bool semantic_analysis::binary128_or_complex(qualified_type t) const
+{
+    const struct type record = type_table[t.unqualified()];
+    return record.kind == type_kind::complex ||
+           (record.kind == type_kind::fundamental &&
+            record.fundamental == fundamental_type::float128);
+}
+
+/* [ext:gnu_float128], [ext:gnu_complex]: the conversions of a binary128 or
+   complex value are not analysed: only an identity is */
+bool semantic_analysis::binary128_conversion(qualified_type from,
+                                             qualified_type to) const
+{
+    if (from.unqualified() == to.unqualified())
+        return false;
+    return binary128_or_complex(from) || binary128_or_complex(to);
+}
+
+/* [ext:gnu_float128] the operand of a call: a binary128 object's name is
+   a value that is only passed on */
+analysis_result semantic_analysis::passed_expression(SyntaxElement e,
+                                                     expression_meaning &m)
+{
+    binary128_value_passes = true;
+    analysis_result r = expression(e, m);
+    binary128_value_passes = false;
+    return r;
+}
+
+analysis_result semantic_analysis::passed_target_expression(
+    SyntaxElement e, qualified_type target, expression_meaning &m)
+{
+    binary128_value_passes = true;
+    analysis_result r = target_expression(e, target, m);
+    binary128_value_passes = false;
+    return r;
+}
+
 analysis_result semantic_analysis::expression(SyntaxElement e,
                                               expression_meaning &m)
 {
     m = expression_meaning();
+    bool passes = binary128_value_passes;
+    binary128_value_passes = false;
+    if (e.is(syntax_kind::primary_expression,
+             syntax_kind::gnu_extension_expression))
+        binary128_value_passes = passes;
     VTRY(r, expression_kind(e, m));
     /* [ext:clang_atomic], [ext:clang_bit_int] the operations on an atomic
        object or a _BitInt are not analysed yet */
     type_kind k = type_table[m.type.unqualified()].kind;
+    bool binary128 = k == type_kind::fundamental &&
+                     type_table[m.type.unqualified()].fundamental ==
+                         fundamental_type::float128;
+    if (binary128 && passes && passes_binary128(e, m))
+        binary128 = false;
+    if (k == type_kind::complex || binary128) {
+        /* [ext:gnu_complex], [ext:gnu_float128] complex and binary128
+           arithmetic is not analysed yet */
+        if (e.is_token())
+            return not_supported(current_declaration, "ext.gnu");
+        return not_supported(e.index(), "ext.gnu");
+    }
     if (k == type_kind::atomic || k == type_kind::bit_int ||
         k == type_kind::ext_vector) {
         if (e.is_token())

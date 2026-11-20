@@ -789,6 +789,18 @@ uint32_t semantic_analysis::leading_gnu_attributes(SyntaxRef n) const
     return k;
 }
 
+/* [ext:gnu_attributes] whether two abi_tag string-literals are the same tag
+   (a member's declaration and its definition write it twice) */
+bool semantic_analysis::same_abi_tag(token_index a, token_index b) const
+{
+    if (a == b)
+        return true;
+    owned_buffer x, y;
+    tokens.spelling(a, x.get());
+    tokens.spelling(b, y.get());
+    return x.size() == y.size() && !memcmp(x.data(), y.data(), x.size());
+}
+
 /* GCC's attributes, or standard ones without effect
    (attributes_without_effect), which gnu_attribute_specifier passes over:
    [[nodiscard]] before libc++'s functions */
@@ -796,7 +808,7 @@ bool semantic_analysis::gnu_or_without_effect(SyntaxRef n) const
 {
     uint32_t flags = 0;
     if (n.is(syntax_kind::attribute_specifier))
-        return attributes_as_gnu(n, flags);
+        return attributes_as_gnu(n, flags) || scoped_gnu_abi_tag(n);
     if (!n.is(syntax_kind::attribute_specifier_seq))
         return only_gnu_attributes(tree, n);
     for (SyntaxElement c : n.elements()) {
@@ -833,11 +845,13 @@ semantic_analysis::function_definition(FunctionDefinition definition)
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
         return special_member_definition(n, 0);
-    bool constexpr_specified = false;
+    bool constexpr_specified = false, inline_specified = false;
     if (!k && n.size() == 3 &&
-        function_specifiers_only(n[0], constexpr_specified))
-        /* the same, constexpr ([class.ctor]/1): a decl-specifier-seq of
-           constexpr alone has no type, so names no other function */
+        function_specifiers_only(n[0], constexpr_specified, nullptr, nullptr,
+                                 &inline_specified))
+        /* the same, constexpr or inline ([class.ctor]/1): a
+           decl-specifier-seq of those alone has no type, so names no other
+           function */
         return special_member_definition(n, 1);
     if (!n.size())
         return not_supported(n, "dcl.fct.def.general");
@@ -1047,7 +1061,15 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (s.aligned > aligned)
         aligned = s.aligned;
     uint32_t gnu_flags =
-        (m.gnu_flags | s.gnu_flags) & ~(gnu_aligned | gnu_packed);
+        (m.gnu_flags | s.gnu_flags) & ~(gnu_aligned | gnu_packed | gnu_mode);
+    if (m.mode) {
+        /* mode: the type of a typedef-name or of a variable */
+        if (m.qualifier || m.qualified_namespace)
+            return not_supported(declaration, "ext.gnu");
+        r = gnu_mode_type(declaration, m.mode, type);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
     token_index section = m.section;
     if (!section)
         section = s.section;
@@ -1056,8 +1078,40 @@ analysis_result semantic_analysis::declare_with_initializer(
         abi_tag = s.abi_tag;
     bool is_function_type =
         type_table[type.unqualified()].kind == type_kind::function;
+    /* [ext:gnu_attributes] aligned on a typedef-name changes the alignment
+       of the type through that name (a type this table does not tell
+       apart from the aliased one); one equal to the type's own changes
+       nothing (linux/types.h's __u128, __aligned_u64) */
+    uint32_t typedef_alignment = 0;
+    if (s.typedef_ && !is_function_type) {
+        /* the alignment through the name: this declaration's, or a
+           typedef-name's it names; a smaller one than the type's own
+           (clang lets a typedef decrease it) is not supported */
+        uint64_t natural = alignment_of_type(type);
+        if (aligned && aligned < natural)
+            return not_supported(declaration, "ext.gnu");
+        if (aligned > natural)
+            typedef_alignment = static_cast<uint32_t>(aligned);
+        uint32_t inherited =
+            typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
+        if (inherited > typedef_alignment)
+            typedef_alignment = inherited;
+        aligned = 0;
+    }
+    /* [ext:gnu_attributes] an object of a typedef-name's type declared
+       with aligned */
+    uint32_t object_alignment = 0;
+    if (!s.typedef_ && !is_function_type)
+        object_alignment =
+            typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
+    /* (a member defined outside its class may repeat the declaration's
+       abi_tag and visibility: checked against the member below; and
+       exclude_from_explicit_instantiation, which only marks the member) */
+    uint32_t others = gnu_flags & ~(gnu_abi_tag | gnu_hidden_visibility |
+                                    gnu_exclude_from_explicit_instantiation);
     if ((aligned && (s.typedef_ || is_function_type)) ||
-        ((aligned || gnu_flags) && (m.qualifier || m.qualified_namespace)))
+        ((aligned || others) && (m.qualifier || m.qualified_namespace)) ||
+        (gnu_flags && m.qualified_namespace))
         return not_supported(declaration, "ext.gnu");
     /* [basic.lookup.qual]/3: "names following the qualified-id are looked up in
        the scope of the member's class or namespace": the initializer of a
@@ -1072,6 +1126,16 @@ analysis_result semantic_analysis::declare_with_initializer(
         }
     } restore = {current_scope, current_scope};
     entity_index declared_in_scope = current_scope;
+    if (m.qualifier && instantiating &&
+        type_table[type.unqualified()].kind == type_kind::function) {
+        /* [temp.mem]/1: the definition outside the class of a member
+           function template's specialization declares the specialization
+           (instantiate_definition) */
+        entity_index declared = 0;
+        VTRY(r, declare_specialization(declaration, m.id, type, s, declared));
+        last_declared = declared;
+        return r;
+    }
     if (m.qualifier &&
         type_table[type.unqualified()].kind == type_kind::function) {
         if (initialized)
@@ -1138,8 +1202,7 @@ analysis_result semantic_analysis::declare_with_initializer(
                                        "a constexpr object shall have "
                                        "literal type",
                                        "dcl.constexpr");
-        if (record.kind == type_kind::enumeration ||
-            record.kind == type_kind::none)
+        if (record.kind == type_kind::none)
             return not_supported(declaration, "basic.types");
         /* an object of class type default-initialized: its default
            constructor ([dcl.init]/7.1), which the evaluator does not run
@@ -1213,8 +1276,11 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r == analysis_result::well_formed && placeholder &&
         kind == entity_kind::function)
         entity_table[declared_entity].placeholder_return = true;
+    if (r == analysis_result::well_formed && typedef_alignment &&
+        entity_table[declared_entity].kind == entity_kind::typedef_name)
+        entity_table[declared_entity].alignment = typedef_alignment;
     if (r == analysis_result::well_formed && !s.typedef_ &&
-        (aligned || gnu_flags)) {
+        (aligned || gnu_flags || object_alignment)) {
         entity &x = entity_table[declared_entity];
         /* GCC: "The section attribute specifies that a function lives in
            a particular section"; on a variable of automatic storage
@@ -1223,8 +1289,11 @@ analysis_result semantic_analysis::declare_with_initializer(
         if ((gnu_flags & gnu_section) && x.automatic)
             return not_supported(declaration, "ext.gnu");
         if ((gnu_flags & (gnu_abi_tag | gnu_hidden_visibility)) &&
-            (x.automatic || (x.abi_tag && abi_tag && x.abi_tag != abi_tag)))
-            /* a local's, or a second tag */
+            (x.automatic ||
+             (x.abi_tag && abi_tag && !same_abi_tag(x.abi_tag, abi_tag)) ||
+             (m.qualifier && abi_tag != 0 && x.abi_tag == 0)))
+            /* a local's, a second tag, or a tag the member's declaration
+               lacks (clang: it must precede the definition) */
             return not_supported(declaration, "ext.gnu");
         x.gnu_flags |= gnu_flags;
         if (section)
@@ -1233,6 +1302,8 @@ analysis_result semantic_analysis::declare_with_initializer(
             x.abi_tag = abi_tag;
         if (aligned > x.alignment)
             x.alignment = static_cast<uint32_t>(aligned);
+        if (object_alignment > x.alignment)
+            x.alignment = object_alignment;
     }
     /* [ext:gnu_asm_labels] the symbol of a function or variable with
        static storage duration; a later declaration may leave it out, a
@@ -1392,8 +1463,11 @@ analysis_result semantic_analysis::declare_with_initializer(
         qualified_type element = type;
         while (type_table[element.unqualified()].kind == type_kind::array)
             element = type_table[element.unqualified()].operand;
+        /* (an array: the evaluator runs its initialization element by
+           element, whatever the element type) */
         bool of_class =
-            type_table[element.unqualified()].kind == type_kind::class_type;
+            type_table[element.unqualified()].kind == type_kind::class_type ||
+            !(element == type);
         if (!value.node) {
             if (s.constexpr_)
                 return not_supported(declaration, "expr.const");

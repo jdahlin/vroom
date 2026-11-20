@@ -39,11 +39,6 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
     for (const parameter_meaning &p : function_parameters)
         if (p.default_argument)
             any = true;
-    if (any && entity_table[current_scope].kind == entity_kind::class_type &&
-        entity_table[current_scope].instantiation)
-        /* [temp.inst]/3: a member of a class template's specialization
-           has its default arguments instantiated when a call uses them */
-        return not_supported(n, "temp.inst");
     if (!any)
         return analysis_result::well_formed;
     /* [temp.inst]/4: a function template specialization a default
@@ -182,12 +177,32 @@ analysis_result semantic_analysis::member_default_arguments(entity_index c)
             function_parameters.append(member_default_parameters[p.first + i]);
         current_scope = c;
         analysing_member_defaults = true;
-        analysis_result r =
-            default_arguments(p.declaration, p.function, entity_kind::function);
+        analysis_result r;
+        if (entity_table[c].instantiation) {
+            /* [temp.inst]/3: a default argument of a member of an implicit
+               instantiation is instantiated only when a call uses it, and
+               one that is ill-formed for these arguments is no error of the
+               class: analysed quietly, and one that fails is left unknown
+               (a call that needs it is not supported) */
+            size_t unsupported_before = unsupported.size();
+            {
+                diagnostics_suppressed hush(diagnostics);
+                r = default_arguments(p.declaration, p.function,
+                                      entity_kind::function);
+            }
+            if (r != analysis_result::well_formed) {
+                unsupported.resize(unsupported_before);
+                r = analysis_result::well_formed;
+                entity_table[p.function].unknown_defaults = true;
+            }
+        } else {
+            r = default_arguments(p.declaration, p.function,
+                                  entity_kind::function);
+            if (r != analysis_result::well_formed)
+                entity_table[p.function].unknown_defaults = true;
+        }
         analysing_member_defaults = false;
         current_scope = scope;
-        if (r != analysis_result::well_formed)
-            entity_table[p.function].unknown_defaults = true;
         result = worse(result, r);
     }
     pending_defaults.clear();

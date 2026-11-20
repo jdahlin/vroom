@@ -1,0 +1,2 @@
+abbreviated-pack-use.cpp:4:11: error: the rules of [dcl.spec.auto] are not implemented yet
+abbreviated-pack-use.cpp:4:11: note: refused by vcc's frontend/cplusplus/declaration/decl-specifier.cpp:N (decl_specifier_seq)

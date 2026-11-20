@@ -169,6 +169,7 @@ class itanium_mangler
     entity_index local_function(entity_index e) const;
     bool function_scope(entity_index function);
     bool nested_name(entity_index e);
+    void member_qualifiers(const entity &x);
     bool prefix(entity_index scope);
     bool class_enum_type(qualified_type t);
     bool dependent_member_name(entity_index e);
@@ -303,12 +304,8 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         if (member && local && !function_scope(local))
             return false;
         text("N");
-        if (member && x.nonstatic_member) {
-            if (x.member_cv & cv_volatile)
-                text("V");
-            if (x.member_cv & cv_const)
-                text("K");
-        }
+        if (member && x.nonstatic_member)
+            member_qualifiers(x);
         if (!prefix(scope))
             return false;
     } else if (scope) {
@@ -595,24 +592,35 @@ bool itanium_mangler::name(entity_index e)
     return local_name(e, function);
 }
 
+/* "<nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] ..." of a
+   non-static member function x: "<ref-qualifier> ::= R # & ref-qualifier,
+   O # && ref-qualifier" */
+void itanium_mangler::member_qualifiers(const entity &x)
+{
+    if (x.member_cv & cv_volatile)
+        text("V");
+    if (x.member_cv & cv_const)
+        text("K");
+    if (x.member_cv & cv_ref_lvalue)
+        text("R");
+    if (x.member_cv & cv_ref_rvalue)
+        text("O");
+}
+
 /*
  * [abi:mangle.name]:
  *
  *     <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <prefix> <unqualified-name> E
  *
- * The CV-qualifiers are a non-static member function's (the ones of its
- * declarator, which qualify `this`); there is no ref-qualifier yet.
+ * The CV-qualifiers and ref-qualifier are a non-static member function's
+ * (the ones of its declarator).
  */
 bool itanium_mangler::nested_name(entity_index e)
 {
     const entity &x = analysis.entity_table[e];
     text("N");
-    if (x.kind == entity_kind::function && x.nonstatic_member) {
-        if (x.member_cv & cv_volatile)
-            text("V");
-        if (x.member_cv & cv_const)
-            text("K");
-    }
+    if (x.kind == entity_kind::function && x.nonstatic_member)
+        member_qualifiers(x);
     if (!prefix(x.enclosing))
         return false;
     if (!unqualified_name(e))
@@ -1832,6 +1840,10 @@ bool itanium_mangler::type(qualified_type t)
            mangles _Atomic(T) ([ext:clang_atomic]) */
         text("U7_Atomic");
         done = type(r.operand);
+    } else if (r.kind == type_kind::complex) {
+        /* [abi:mangling-type]: <type> ::= C <type>  # complex pair (C99) */
+        text("C");
+        done = type(r.operand);
     } else if (r.kind == type_kind::bit_int && !r.entity) {
         /* [abi:mangling-builtin]:
 
@@ -2009,6 +2021,9 @@ bool itanium_mangler::builtin_type(fundamental_type t)
     case fundamental_type::long_double:
         text("e");
         return true;
+    case fundamental_type::float128:
+        text("g");
+        return true;
     case fundamental_type::char32_t_:
         text("Di");
         return true;
@@ -2066,6 +2081,12 @@ bool itanium_mangler::qualified(qualified_type t)
  */
 bool itanium_mangler::function_type(qualified_type t)
 {
+    /* "<CV-qualifiers> ::= [r] [V] [K]": those of the function type
+       ([dcl.fct]/6) */
+    if (record(t).function_cv & cv_volatile)
+        text("V");
+    if (record(t).function_cv & cv_const)
+        text("K");
     /* "<exception-spec> ::= Do # non-throwing exception specification" */
     if (record(t).non_throwing)
         text("Do");
@@ -2074,6 +2095,11 @@ bool itanium_mangler::function_type(qualified_type t)
         return false;
     if (!bare_function_type(t))
         return false;
+    /* "<ref-qualifier> ::= R # & ref-qualifier, O # && ref-qualifier" */
+    if (record(t).function_ref == 1)
+        text("R");
+    if (record(t).function_ref == 2)
+        text("O");
     text("E");
     return true;
 }

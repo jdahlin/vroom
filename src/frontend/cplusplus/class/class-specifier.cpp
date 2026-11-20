@@ -118,8 +118,8 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
                                                           uint8_t access)
 {
     const struct type record = type_table[s.type.unqualified()];
-    if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
-        s.type.cv() || s.aligned || s.gnu_flags ||
+    if (s.typedef_ || s.static_ || s.extern_ || s.mutable_ || s.inline_ ||
+        s.constexpr_ || s.type.cv() || s.aligned || s.gnu_flags ||
         record.kind != type_kind::class_type)
         return not_supported(n, "class.union.anon");
     entity_index u = record.entity;
@@ -548,6 +548,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     owned_array<SyntaxRef> bodies;
     size_t nested_start = nested_bodies.size();
     auto spec = n.class_specifier().member_specification();
+    token_index outer_members_first = defining_members_first;
+    token_index outer_members_end = defining_members_end;
+    defining_members_first = spec.first_token();
+    defining_members_end = spec.end_token();
     for (auto member : spec.elements()) {
         if (member.is_token()) {
             switch (member.keyword()) {
@@ -578,6 +582,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         result =
             worse(result, member_declaration(c, declaration, access, bodies));
     }
+    defining_members_first = outer_members_first;
+    defining_members_end = outer_members_end;
 
     /* [class.mem]/7: complete at the closing }, where its bases and
        members get their offsets and the class its size
@@ -639,13 +645,21 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         nested_bodies.resize(nested_start);
     } else {
         size_t nested_end = nested_bodies.size();
+        bool quiet = entity_table[c].instantiation != 0;
         for (SyntaxRef body : bodies) {
-            result = worse(result, member_function_body(c, body));
+            if (quiet)
+                instantiated_member_body(c, body);
+            else
+                result = worse(result, member_function_body(c, body));
             current_declaration = outer_declaration;
         }
         for (size_t i = nested_start; i < nested_end; i++) {
-            result = worse(result, member_function_body(nested_bodies[i].c,
-                                                        nested_bodies[i].body));
+            deferred_body nested = nested_bodies[i];
+            if (quiet)
+                instantiated_member_body(nested.c, nested.body);
+            else
+                result =
+                    worse(result, member_function_body(nested.c, nested.body));
             current_declaration = outer_declaration;
         }
         nested_bodies.resize(nested_start);
@@ -1133,9 +1147,40 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     /* [ext:gnu_attributes] before it all (special_member_declarator takes
        them) */
     uint32_t lead = leading_gnu_attributes(node);
+    /* [dcl.align]/1, [dcl.attr.grammar]/4: alignas before the
+       decl-specifier-seq appertains to the member declared; the largest
+       raises its alignment, as GCC's aligned does ([dcl.align]/5: never
+       lowers it).  Not on a constructor or destructor: no rule yet. */
+    uint64_t member_alignment = 0;
+    uint32_t alignas_count = 0;
+    owned_array<SyntaxRef> alignments;
+    for (uint32_t i = lead; i < node.size(); i++) {
+        SyntaxElement a = node[i];
+        if (a.is(syntax_kind::alignment_specifier)) {
+            alignments.append(a);
+        } else if (a.is(syntax_kind::attribute_specifier_seq)) {
+            bool only = true;
+            for (auto k : a.elements())
+                only = only && k.is(syntax_kind::alignment_specifier);
+            if (!only)
+                break;
+            for (auto k : a.elements())
+                alignments.append(k);
+        } else {
+            break;
+        }
+        alignas_count++;
+    }
+    for (SyntaxRef each : alignments) {
+        uint64_t alignment = 0;
+        VTRY(r, alignment_specifier(each, alignment));
+        if (alignment > member_alignment)
+            member_alignment = alignment;
+    }
+    lead += alignas_count;
     uint32_t at = lead;
     bool constexpr_specified = false, virtual_specified = false,
-         explicit_specified = false;
+         explicit_specified = false, inline_specified = false;
     /* [class.mem]/1: member-declarator: declarator virt-specifier-seq_opt;
        a destructor's ([class.virtual]/4, /5): the declarator, its
        virt-specifiers in override_ and final_ */
@@ -1154,10 +1199,11 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         final_ = f;
         return d[0];
     };
-    if (node.size() > lead + 1 &&
+    if (!alignas_count && node.size() > lead + 1 &&
         node[lead].is(syntax_kind::decl_specifier_seq) &&
         function_specifiers_only(node[lead], constexpr_specified,
-                                 &virtual_specified, &explicit_specified) &&
+                                 &virtual_specified, &explicit_specified,
+                                 &inline_specified) &&
         declares_special_member(c, special(node[lead + 1])))
         at = lead + 1;
     if (lead == node.size() || at > lead ||
@@ -1192,7 +1238,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
             virt_final = final_;
             analysis_result r = special_member_declarator(
                 c, node, special(node[at]), access, false, constexpr_specified,
-                virtual_specified, explicit_specified);
+                virtual_specified, explicit_specified, inline_specified);
             virt_override = virt_final = false;
             return r;
         }
@@ -1209,7 +1255,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         }
         analysis_result r = special_member_declarator(
             c, node, node[at], access, true, constexpr_specified,
-            virtual_specified, explicit_specified);
+            virtual_specified, explicit_specified, inline_specified);
         if (r == analysis_result::well_formed)
             bodies.append(node);
         return r;
@@ -1230,12 +1276,18 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         sole_elaborated = first[0].index();
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
+    bool outer_mutable_allowed = mutable_allowed;
+    mutable_allowed = true;
     analysis_result r = decl_specifier_seq(first, s, false);
     virtual_allowed = outer_virtual_allowed;
+    mutable_allowed = outer_mutable_allowed;
     sole_elaborated = 0;
     declaration_access = 0;
-    for (uint32_t i = 0; i < lead && r == analysis_result::well_formed; i++)
+    for (uint32_t i = 0;
+         i < lead - alignas_count && r == analysis_result::well_formed; i++)
         VTRY_SET(r, gnu_attribute_specifier(node[i], s));
+    if (member_alignment > s.aligned)
+        s.aligned = member_alignment;
     return member_declarators(c, node, s, access, lead + 1, bodies);
 }
 
@@ -1283,8 +1335,8 @@ analysis_result semantic_analysis::member_declarators(
     }
     if (declarators.empty()) {
         /* [class.mem]/3: a member enumeration ([dcl.pre]/5) */
-        bool plain = !s.typedef_ && !s.static_ && !s.extern_ && !s.inline_ &&
-                     !s.constexpr_ && !s.type.cv();
+        bool plain = !s.typedef_ && !s.static_ && !s.extern_ && !s.mutable_ &&
+                     !s.inline_ && !s.constexpr_ && !s.type.cv();
         if (s.declares_enumeration && plain)
             return analysis_result::well_formed;
         auto seq = n[first - 1];
@@ -1381,6 +1433,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     function_parameters.clear();
     analysis_result r = declarator(declaration, d, type, m);
     in_member_declarator = false;
+    if (r == analysis_result::well_formed)
+        r = misplaced_function_qualifiers(declaration, type, true);
     if (r != analysis_result::well_formed)
         return r;
     /* [dcl.fct.default]: a member function's default arguments are a
@@ -1410,6 +1464,20 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         return not_supported(declaration, "dcl.type");
     if (s.typedef_)
         return member_typedef(c, declaration, m.id, type, s, m, access);
+    /* [dcl.stc]/8: "The mutable specifier shall appear only in the
+       declaration of a non-static data member whose type is neither
+       const-qualified nor a reference type." */
+    if (s.mutable_ &&
+        (type_table[type.unqualified()].kind == type_kind::function ||
+         (type.cv() & cv_const) ||
+         type_table[type.unqualified()].kind == type_kind::lvalue_reference ||
+         type_table[type.unqualified()].kind == type_kind::rvalue_reference))
+        return ill_formed_at_token(m.id,
+                                   "the mutable specifier shall appear only "
+                                   "in the declaration of a non-static data "
+                                   "member whose type is neither "
+                                   "const-qualified nor a reference type",
+                                   "dcl.stc");
     /* [dcl.constexpr]/1: "The constexpr specifier shall be applied only to
        the definition of a variable or variable template or the declaration
        of a function or function template": a static data member's is not
@@ -1441,7 +1509,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     /* a member's symbol attributes (a member function's weak and section,
        a static data member's, a data member's function attributes) are not
        analysed yet; on a non-static data member they are GCC's error */
-    if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section)) ||
+    if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section | gnu_mode)) ||
         (!is_function &&
          (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))))
         return not_supported(declaration, "ext.gnu");
@@ -1474,6 +1542,17 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
            brought into the class */
         return not_supported(declaration, "class.mem");
     entity_index overloads = 0;
+    /* [temp.mem]/2: member function templates of the name declared before
+       are overloaded with this function: it heads the name's chain, and
+       keeps their held name */
+    entity_index templates = 0;
+    if (prior && is_function && entity_table[prior].kind == entity_kind::none &&
+        entity_table[prior].enclosing == c &&
+        member_function_template_of(prior) && !m.conversion_function &&
+        !m.destructor) {
+        templates = prior;
+        prior = 0;
+    }
     if (prior && is_function &&
         entity_table[prior].kind == entity_kind::function &&
         entity_table[prior].special == special_member::none) {
@@ -1729,10 +1808,21 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         e = entity_table.make(entity_kind::variable, name, c);
         entity_table[e].type = type;
         entity_table[e].nonstatic_member = true;
+        entity_table[e].mutable_member = s.mutable_;
         entity_table[e].defined = true;
         entity_table[e].field = entity_table[c].member_count;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
+        /* [ext:gnu_attributes] a member of a typedef-name's type declared
+           with aligned */
+        uint32_t named =
+            typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);
+        if (named > entity_table[e].alignment)
+            entity_table[e].alignment = named;
         entity_table[e].gnu_flags = m.gnu_flags & gnu_packed;
+        /* [dcl.attr.nouniqueaddr]/2: the declaration's or the
+           declarator's */
+        entity_table[e].no_unique_address =
+            ((s.gnu_flags | m.gnu_flags) & gnu_no_unique_address) != 0;
         class_members.append(e);
         entity_table[c].member_count++;
     }
@@ -1748,6 +1838,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         entity_table[last].next_overload = e;
         entity_table[e].hidden_type = entity_table[overloads].hidden_type;
     } else {
+        entity_table[e].member_templates = templates;
         entity_table.bind(c, name, e);
     }
     last_declared = e;
@@ -1769,7 +1860,8 @@ analysis_result semantic_analysis::member_typedef(
     const specified &s, const declarator_meaning &m, uint8_t access)
 {
     if (s.static_ || s.inline_ || s.constexpr_ || s.virtual_ || s.gnu_flags ||
-        s.aligned || m.aligned || m.gnu_flags || m.section || m.asm_label)
+        s.aligned || s.typedef_aligned || m.aligned || m.gnu_flags ||
+        m.section || m.asm_label)
         return not_supported(declaration, "dcl.typedef");
     uint32_t name = tokens.identifier(id);
     if (name == entity_table[c].name)
@@ -1811,6 +1903,34 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
     return r;
 }
 
+/*
+ * [temp.inst]/4: a member function of an implicit instantiation is
+ * instantiated only if used, and its being ill-formed for these arguments
+ * (r %= x with a double r) is no error of the class's instantiation.  Uses
+ * are not tracked yet: the body is analysed quietly and one that fails is
+ * left undefined, so that no code is made for it; one that is unsupported
+ * also makes a use of the function a refusal.
+ */
+void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n)
+{
+    diagnostics_suppressed hush(diagnostics);
+    size_t unsupported_before = unsupported.size();
+    analysis_result r = member_function_body(c, n);
+    if (r == analysis_result::ill_formed)
+        entity_table[last_declared].defined = false;
+    if (r == analysis_result::unsupported && last_declared) {
+        /* what the body needs is not analysed: the function is not made,
+           and a use of it is a refusal (lowering), never code without
+           what the body did */
+        entity_table[last_declared].defined = false;
+        if (unsupported.size() > unsupported_before) {
+            body_failures.append(unsupported[unsupported_before]);
+            entity_table[last_declared].unsupported_body =
+                static_cast<uint32_t>(body_failures.size());
+        }
+    }
+}
+
 analysis_result
 semantic_analysis::member_function_definition(entity_index c,
                                               FunctionDefinition definition)
@@ -1835,12 +1955,12 @@ semantic_analysis::member_function_definition(entity_index c,
         return r;
     }
     bool constexpr_specified = false, body_virtual = false,
-         body_explicit = false;
+         body_explicit = false, body_inline = false;
     uint32_t at = 0;
     auto seq = definition.decl_specifier_seq();
     if (seq && definition.size() > leading_gnu_attributes(definition) + 2 &&
         function_specifiers_only(seq, constexpr_specified, &body_virtual,
-                                 &body_explicit) &&
+                                 &body_explicit, &body_inline) &&
         declares_special_member(c, definition.declarator()))
         at = 1;
     if (at || !seq) {
@@ -1887,6 +2007,8 @@ semantic_analysis::member_function_definition(entity_index c,
         in_member_declarator = true;
         r = declarator(definition, definition.declarator(), type, m);
         in_member_declarator = false;
+        if (r == analysis_result::well_formed)
+            r = misplaced_function_qualifiers(definition, type, true);
     }
     defining_class = saved_class;
     if (r != analysis_result::well_formed)
@@ -1984,14 +2106,40 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     qualified_type type = entity_table[e].type;
     uint32_t cv = cv_of(type_table, type);
     const struct type record = type_table[type.unqualified()];
-    if (!(cv & cv_const) || (cv & cv_volatile) ||
-        record.kind != type_kind::fundamental || !is_integral(type))
-        /* an enumeration's too, which analysis does not fold yet */
+    /* [class.static.data]/4: integral or enumeration type */
+    const bool integral_or_enumeration =
+        record.kind == type_kind::enumeration ||
+        (record.kind == type_kind::fundamental && is_integral(type));
+    /* [expr.const]/3: until the initializer is analysed (and if analysis
+       has no rules for it) whether a member that may be usable in constant
+       expressions is one, and its value, are unknown: a later member's
+       initializer that names it is not thereby not a constant expression */
+    if (s.constexpr_ ||
+        ((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration))
+        entity_table[e].usable = constness::unknown;
+    if (!(cv & cv_const) || (cv & cv_volatile) || !integral_or_enumeration)
         return not_supported(declarator, "class.static.data");
     initialized_value value;
     value.evaluation = constness::unknown;
     value.value = 0;
     VTRY(r, initializer(init, type, value));
+    /* [expr.const]/5: an initializer that calls a function (a constexpr
+       function, or a builtin clang evaluates) is the evaluator's */
+    if (value.evaluation == constness::unknown && value.node) {
+        constant_value v;
+        bool constant = false;
+        VTRY_SET(r, evaluate_constant(declarator, value.node, v, constant));
+        if (constant) {
+            expression_meaning folded;
+            folded.type = semantics[value.node].type;
+            folded.category = value_category::prvalue;
+            evaluated_meaning(folded, v);
+            value.node = expression_node(semantic_kind::constant, folded,
+                                         semantics[value.node].at);
+            value.evaluation = constness::constant;
+            value.value = folded.value;
+        }
+    }
     if (value.evaluation == constness::not_constant)
         return ill_formed(declarator,
                           "every initializer-clause of a static data "
@@ -2137,13 +2285,44 @@ bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
     return true;
 }
 
+/* [dcl.attr.grammar]/3 and GCC's aligned: [[gnu::aligned(N)]] alone, the
+   standard syntax of what __attribute__((aligned(N))) says.  A class
+   template's head names it; an instantiation asks for the layout
+   (class_definition) and is not analysed yet. */
+static bool only_gnu_aligned(token_stream &tokens, SyntaxElement c)
+{
+    if (!c.is(syntax_kind::attribute_specifier))
+        return false;
+    bool seen = false;
+    for (auto k : c.elements()) {
+        if (k.is_token())
+            continue;
+        if (!k.is(syntax_kind::attribute) || !k.size() ||
+            !k[0].is(syntax_kind::attribute_scoped_token) || k[0].size() != 3)
+            return false;
+        owned_buffer ns, name;
+        tokens.spelling(k[0][0].token(), ns.get());
+        tokens.spelling(k[0][2].token(), name.get());
+        bool gnu = (ns.size() == 3 && !memcmp(ns.data(), "gnu", 3)) ||
+                   (ns.size() == 7 && !memcmp(ns.data(), "__gnu__", 7));
+        bool aligned =
+            (name.size() == 7 && !memcmp(name.data(), "aligned", 7)) ||
+            (name.size() == 11 && !memcmp(name.data(), "__aligned__", 11));
+        if (!gnu || !aligned)
+            return false;
+        seen = true;
+    }
+    return seen;
+}
+
 /* a class-head's class-head-name (or what is in its place), after the
    class-key and alignment-specifiers; none in an unnamed class's */
 SyntaxElement semantic_analysis::class_head_name(SyntaxRef head) const
 {
     for (auto c : head.elements(1)) {
         if (c.is(syntax_kind::alignment_specifier) ||
-            (c.is_node() && gnu_or_without_effect(c)))
+            (c.is_node() && gnu_or_without_effect(c)) ||
+            only_gnu_aligned(tokens, c))
             continue;
         bool only_alignment = c.is(syntax_kind::attribute_specifier_seq);
         for (auto k : c.elements())
@@ -2186,6 +2365,9 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
     }
     expression_meaning e;
     VTRY(r, expression(n[2], e));
+    /* "an integral constant expression" is converted to a prvalue
+       ([expr.const]/8): a constexpr variable's value */
+    VTRY_SET(r, operand_value(n, e));
     if (!is_integral(e.type) || e.category != value_category::prvalue)
         return not_supported(n, "dcl.align");
     bool constant = false;

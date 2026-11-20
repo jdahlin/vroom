@@ -37,3 +37,19 @@ template <class T> constexpr int v(T x) { return x; }
 constexpr int w = v<int>(4);
 }
 static_assert(N::w == 4);
+
+// [temp.names]/3: only a > (or the first > of a >> or >>=) ends a
+// template-argument-list; a >= after an expression is the operator
+// (libc++'s <tuple>: _BoolConstant<sizeof...(_Tp) >= 1>).
+template <bool B> struct GeFlag {};
+template <class... T> struct GePack { GeFlag<sizeof...(T) >= 1> f; };
+template <class T> struct GeSize { GeFlag<sizeof(T) >= 1> f; };
+template <int N> struct GeInt { GeFlag<N >= 1> f; GeFlag<(N >> 1) >= 0> g; };
+
+// [temp.names]/3: a < after a literal is the less-than operator, so it does
+// not nest the template-argument-list (libc++'s __mu return type).
+template <bool, class T> struct lit_r2 { };
+template <class T> struct lit_r2<true, T> { typedef T type; };
+template <class T> struct lit_ph { static const int value = 1; };
+template <class T>
+typename lit_r2<0 < lit_ph<T>::value, T>::type lit_pick(T t) { return t; }

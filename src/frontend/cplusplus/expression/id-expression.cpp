@@ -97,6 +97,20 @@ static unsigned nested_component_length(parser &p, bool qualified, bool known,
     return end;
 }
 
+bool parser::same_template_id(token_index a, token_index b, token_index length)
+{
+    if (b + length > position)
+        return false;
+    for (token_index i = 0; i < length; i++) {
+        owned_buffer x, y;
+        tokens.spelling(a + i, x.get());
+        tokens.spelling(b + i, y.get());
+        if (x.size() != y.size() || memcmp(x.data(), y.data(), x.size()))
+            return false;
+    }
+    return true;
+}
+
 node_index parser::nested_name_specifier(scope_index *scope, bool *known,
                                          bool template_ids)
 {
@@ -142,10 +156,11 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
         bool found_dependent = false;
         if (*known) {
             if (qualified)
-                kind = names.lookup_qualified(*scope, name, &found,
-                                              &found_dependent);
+                kind = names.lookup_qualified_nested(*scope, name, &found,
+                                                     &found_dependent);
             else
-                kind = names.lookup_unqualified(name, &found, &found_dependent);
+                kind = names.lookup_unqualified_nested(name, &found,
+                                                       &found_dependent);
         }
         bool in_class =
             qualified && *known && names.kind_of(*scope) == scope_kind::class_;
@@ -177,6 +192,16 @@ node_index parser::nested_name_specifier(scope_index *scope, bool *known,
             *scope = found;
             if (arguments_dependent && !names.encloses_current(found))
                 qualifier_dependent = true;
+            /* [temp.expl.spec]/7: an explicit specialization has its own
+               members: those of the one these arguments name */
+            for (size_t i = specialization_regions.size(); i-- > 0;) {
+                const specialization_region &r = specialization_regions[i];
+                if (r.primary == found &&
+                    same_template_id(r.first, id_first, r.end - r.first)) {
+                    *scope = r.region;
+                    break;
+                }
+            }
         } else if ((kind == name_kind::type_name ||
                     kind == name_kind::template_name) &&
                    found && names.kind_of(found) == scope_kind::class_ &&
@@ -539,6 +564,14 @@ analysis_result semantic_analysis::id_expression(token_index t,
     entity_index e = found.entity;
     if (!e && !found.unknown)
         e = library_builtin(name);
+    /* [lex.name]/3: a name spelled __builtin_ is the implementation's; a
+       scope with names analysis did not follow (found.unknown with no
+       entity) does not declare it */
+    if (!e && !found.ambiguous && found.unknown && !found.unknown_entity &&
+        builtin_spelled(name))
+        e = library_builtin(name);
+    if (!e)
+        e = allocation_builtin(name);
     if (!e)
         return not_supported(current_declaration,
                              unknown_name_subclause(found.unknown_entity,
@@ -553,6 +586,10 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     if (entity_table[e].kind == entity_kind::none)
         return not_supported(current_declaration,
                              unknown_name_subclause(e, "basic.lookup.unqual"));
+    /* [temp.mem]/2: a name of member function templates and functions:
+       only a call on an object (member_template_call) weighs them */
+    if (entity_table[e].member_templates)
+        return not_supported(current_declaration, "temp.mem");
     /* [over.over]: the function target_expression chose for the name */
     bool chosen = t && t == overload_target_token;
     if (chosen)
@@ -720,6 +757,11 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         /* [namespace.qual]/3: "if S(X, m) is the empty set, the program is
            ill-formed"; a name not found may be one a declaration analysis
            has no rules for declares */
+        if (!e && !c && builtin_spelled(name))
+            /* [lex.name]/3: a name spelled __builtin_ is the
+               implementation's, declared at global namespace scope as
+               clang does, so ::__builtin_copysignl names it */
+            e = library_builtin(name);
         if (!e)
             return not_supported(n, "basic.lookup.qual");
         m = expression_meaning();
@@ -749,6 +791,9 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         return enumerator_value(t, e, m);
     }
     const entity &x = entity_table[e];
+    if (x.member_templates)
+        /* [temp.mem]/2 (named_entity) */
+        return not_supported(n, "temp.mem");
     /* [over.over]/1, [dcl.fct.def.delete]/2 (named_entity) */
     if (x.kind == entity_kind::function && x.next_overload &&
         t != overloaded_callee)

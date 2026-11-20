@@ -153,6 +153,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
 {
     using enum preprocessing_op_or_punc;
     entity_index member_class = 0;
+    type_index member_dependent = 0;
     for (auto c : op.elements()) {
         if (c.is_attribute())
             return not_supported(op, "dcl.attr");
@@ -165,7 +166,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                cv-qualifier-seq pointer to member of class
                nested-name-specifier of type T"." */
             nominated_scope scope;
-            VTRY(r, nested_name_specifier(c, scope));
+            VTRY(r, nested_name_specifier(c, scope, true));
             if (!scope.global && !scope.dependent &&
                 (is_namespace(scope.entity) ||
                  entity_table[scope.entity].kind == entity_kind::enumeration))
@@ -173,7 +174,13 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                                   "the nested-name-specifier of a pointer to "
                                   "member declarator shall denote a class",
                                   "dcl.mptr");
-            if (scope.global || scope.dependent ||
+            if (scope.dependent && !scope.global) {
+                /* [temp.dep.type]/9: a class that is a dependent type,
+                   known when the declaration is instantiated */
+                member_dependent = scope.dependent;
+                continue;
+            }
+            if (scope.global ||
                 entity_table[scope.entity].kind != entity_kind::class_type)
                 return not_supported(op, "dcl.mptr");
             member_class = scope.entity;
@@ -184,7 +191,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             type_kind k = type_table[type.unqualified()].kind;
             if (k == type_kind::lvalue_reference ||
                 k == type_kind::rvalue_reference) {
-                if (member_class)
+                if (member_class || member_dependent)
                     /* [dcl.mptr]/3: "A pointer to member shall not point
                        to ... a member with reference type" */
                     return ill_formed(op,
@@ -194,17 +201,25 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                 return ill_formed(
                     op, "there shall be no pointers to references", "dcl.ref");
             }
-            if (member_class) {
+            if (member_class || member_dependent) {
                 /* [dcl.mptr]/3: "or "cv void"" */
                 if (fundamental_of(type) == fundamental_type::void_)
                     return ill_formed(op,
                                       "a pointer to member shall not point "
                                       "to cv void",
                                       "dcl.mptr");
-                type = qualified_type::make(
-                    type_table.pointer_to_member(member_class, type), cv_none);
+                if (member_dependent)
+                    type = qualified_type::make(
+                        type_table.dependent_pointer_to_member(member_dependent,
+                                                               type),
+                        cv_none);
+                else
+                    type = qualified_type::make(
+                        type_table.pointer_to_member(member_class, type),
+                        cv_none);
                 continue;
             }
+            VTRY(r, misplaced_function_qualifiers(op, type, false));
             type = qualified_type::make(type_table.pointer_to(type), cv_none);
         } else if (c.is(CARET)) {
             /* [ext:clang_blocks] "a block pointer to function type"; clang
@@ -217,13 +232,15 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             type = qualified_type::make(type_table.block_pointer_to(type),
                                         cv_none);
         } else if (c.is(AMPERSAND)) {
-            VTRY(r, reference(op, false, type, m));
+            VTRY(r, misplaced_function_qualifiers(op, type, false));
+            VTRY_SET(r, reference(op, false, type, m));
         } else if (c.is(AMPERSAND_AMPERSAND)) {
             if (!tokens.files.behavior.has(language_feature::rvalue_references))
                 /* [ext.clang] an rvalue reference before C++11, an
                    extension (an error with -pedantic-errors) */
                 return not_supported(op, "ext.clang");
-            VTRY(r, reference(op, true, type, m));
+            VTRY(r, misplaced_function_qualifiers(op, type, false));
+            VTRY_SET(r, reference(op, true, type, m));
         } else if (c.cv_qualifier_seq()) {
             /* [dcl.ptr]/1: the cv-qualifiers apply to the pointer */
             for (auto q : c.elements()) {
@@ -396,13 +413,23 @@ static bool declares_by_declarator(SyntaxRef d)
         d = d.back();
     if (d.function_definition())
         return true;
-    if (!d.simple_declaration())
+    /* (a friend function template's: a member-declaration, [temp.friend]) */
+    if (!d.simple_declaration() && !d.is(syntax_kind::member_declaration))
         return false;
     for (auto c : d.elements())
         if (c.is(syntax_kind::init_declarator_list,
                  syntax_kind::noptr_declarator, syntax_kind::ptr_declarator))
             return true;
     return false;
+}
+
+/* the alias-declaration a declaration is, or a template-declaration's (an
+   alias template), else the declaration itself */
+static SyntaxRef alias_declaration_of(SyntaxRef d)
+{
+    while (d.template_declaration() && d.size() && d.back().is_node())
+        d = d.back();
+    return d;
 }
 
 /*
@@ -493,6 +520,15 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                     ids.append(c.token());
             }
         }
+    } else if (alias_declaration_of(declaration)
+                   .is(syntax_kind::alias_declaration)) {
+        /* [dcl.typedef]/2: an alias-declaration declares the identifier
+           after using; the names in its type-id are used, not declared
+           (holding them would hide a using-declaration's name from every
+           later lookup) */
+        SyntaxRef alias = alias_declaration_of(declaration);
+        if (alias.size() > 1 && alias[1].is_identifier())
+            ids.append(alias[1].token());
     } else if (!by_declarator) {
         /* the declarators are not known (a declaration not parsed, or of
            a kind analysis has no rules for: a template, a
@@ -500,6 +536,11 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
            brackets and braces, which holds more names than the declaration
            declares and so only makes more declarations unsupported */
         int depth = 0;
+        /* [dcl.init]/1: an initializer declares no name; the
+           names after = (up to the next declarator's comma, not one of a
+           template-argument-list) are used */
+        bool initializer = false;
+        int initializer_angles = 0;
         auto is_punctuator_at = [&](token_index at,
                                     preprocessing_op_or_punc op) {
             const token &x = tokens[at];
@@ -572,11 +613,37 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                     continue;
                 }
             }
-            if (tok.kind == token_kind::identifier && !depth && !qualified)
+            if (tok.kind == token_kind::identifier && !depth && !qualified &&
+                !initializer)
                 ids.append(t);
             if (tok.kind != token_kind::operator_or_punctuator)
                 continue;
             switch (preprocessing_op_or_punc_primary(tok.op_or_punc)) {
+            case preprocessing_op_or_punc::EQUAL:
+                if (!depth)
+                    initializer = true;
+                break;
+            case preprocessing_op_or_punc::LESS:
+                if (initializer && !depth &&
+                    tokens[t - 1].kind == token_kind::identifier)
+                    initializer_angles++;
+                break;
+            case preprocessing_op_or_punc::GREATER:
+                if (initializer && !depth && initializer_angles)
+                    initializer_angles--;
+                break;
+            case preprocessing_op_or_punc::GREATER_GREATER:
+                if (initializer && !depth) {
+                    if (initializer_angles > 2)
+                        initializer_angles -= 2;
+                    else
+                        initializer_angles = 0;
+                }
+                break;
+            case preprocessing_op_or_punc::COMMA:
+                if (!depth && !initializer_angles)
+                    initializer = false;
+                break;
             case preprocessing_op_or_punc::LEFT_BRACE:
             case preprocessing_op_or_punc::LEFT_BRACKET:
             case preprocessing_op_or_punc::LEFT_PARENTHESIS:
@@ -610,6 +677,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
             break;
         inner = inner[t.size() - 1].index();
         if ((inner.is(syntax_kind::simple_declaration,
+                      syntax_kind::member_declaration,
                       syntax_kind::function_definition)) &&
             parsed_completely(inner))
             declarator_ids(inner);
@@ -709,8 +777,14 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
 {
     nominated_scope scope;
     VTRY(r, nested_name_specifier(nested, scope));
-    if (at_block_scope() || defining_class || function_state.active)
+    if (at_block_scope() || function_state.active ||
+        (defining_class && !friend_declarator))
         return not_supported(nested, "dcl.meaning");
+    if (friend_declarator && !is_namespace(scope.entity))
+        return not_supported(nested, "class.friend");
+    /* [basic.lookup.qual]/3: what follows the qualified-id is looked up in
+       its namespace, not in the class a friend declaration is in */
+    defining_class = 0;
     if (is_namespace(scope.entity)) {
         m.qualified_namespace = true;
         m.namespace_qualifier = scope.entity;
@@ -770,6 +844,21 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
            declarator-id alone (a static data member's definition,
            [class.static.data]): class-name :: identifier */
         auto q = d.qualified_id();
+        if (declarator_template_id && q.size() == 2 &&
+            q.nested_name_specifier() &&
+            q[1].is(syntax_kind::simple_template_id) &&
+            q[1][0].is_identifier()) {
+            /* [temp.expl.spec]/1: a variable template's specialization
+               named by a qualified template-id */
+            VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
+            if (!m.qualified_namespace)
+                return not_supported(n, "dcl.meaning");
+            declarator_template_id = false;
+            m.template_id = q[1];
+            m.has_id = true;
+            m.id = q[1][0].token();
+            return analysis_result::well_formed;
+        }
         if (q.size() != 2 || !q.nested_name_specifier() || !q.identifier())
             return not_supported(n, "dcl.meaning");
         VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
@@ -913,8 +1002,13 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
            is a qualified-id, names used before the qualified-id being declared
            are looked up in the defining namespace scope; names following the
            qualified-id are looked up in the scope of the member's class or
-           namespace.": the parameters are analysed in that scope */
-        if (m.qualifier)
+           namespace.": the parameters are analysed in that scope (of a
+           member template defined outside its class, [temp.mem]/1: the
+           member's template-parameters' scope, whose enclosing scope is
+           the class's, [temp.local]) */
+        if (m.qualifier && entity_table[scope_before].enclosing == m.qualifier)
+            current_scope = scope_before;
+        else if (m.qualifier)
             current_scope = m.qualifier;
         else
             current_scope = m.namespace_qualifier;
@@ -1015,7 +1109,8 @@ void semantic_analysis::implicitly_non_throwing(const declarator_meaning &m,
             parameters.append(list[i]);
         type = qualified_type::make(
             type_table.function(f.operand, parameters.data(), parameters.size(),
-                                f.variadic, true),
+                                f.variadic, true, f.function_cv,
+                                f.function_ref),
             type.cv());
     }
 }

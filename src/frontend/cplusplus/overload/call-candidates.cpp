@@ -43,6 +43,11 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
                  preprocessing_op_or_punc::ARROW)) &&
         c[2].is_identifier())
         return c[2].token();
+    if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
+        (c[1].is(preprocessing_op_or_punc::DOT,
+                 preprocessing_op_or_punc::ARROW)) &&
+        c[2].operator_function_id())
+        return c[2].operator_function_id().operator_keyword().token();
     return 0;
 }
 
@@ -120,7 +125,7 @@ semantic_analysis::resolve_call(SyntaxRef n,
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
         if (!arguments[i].is(syntax_kind::braced_init_list)) {
-            VTRY(r, expression(arguments[i], e));
+            VTRY(r, passed_expression(arguments[i], e));
         }
         early.append(e);
     }
@@ -132,9 +137,13 @@ semantic_analysis::resolve_call(SyntaxRef n,
     }
     expression_meaning implied;
     if (object) {
-        /* the implied object argument, the lvalue the address is of */
+        /* the implied object argument, the object expression the address
+           is of: its category selects among ref-qualified overloads
+           ([over.match.funcs]/4-5) */
         implied.type = type_table[semantics[object].type.unqualified()].operand;
         implied.category = value_category::lvalue;
+        if (semantics[object].kind == semantic_kind::address)
+            implied.category = semantics[semantics[object].a].category;
     }
     owned_array<overload_candidate> candidates;
     for (entity_index e : set) {

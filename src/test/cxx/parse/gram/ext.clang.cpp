@@ -35,3 +35,29 @@ template <class T, unsigned long N>
 using vec __attribute__((__ext_vector_type__(N))) = T;
 template <class T, unsigned long N>
 vec<long, N> as_mask(vec<T, N> v) { return __builtin_convertvector(v == v, vec<long, N>); }
+
+// [ext:clang_builtin_functions] a builtin function's name is no type-name, so
+// a call of it that starts a statement is an expression ([stmt.ambig]/1), as
+// libc++'s <__coroutine/coroutine_handle.h> calls them.
+template <class P = void> struct handle;
+template <> struct handle<void> {
+  void resume() const { __builtin_coro_resume(raw); }
+  void destroy() const { __builtin_coro_destroy(raw); }
+  void* raw = nullptr;
+};
+
+// [ext:clang_later_edition_features] P2360R0 (C++23): an alias-declaration is
+// an init-statement; clang accepts it in C++20 with a warning.
+template <class T>
+int init_alias(T t)
+{
+    if constexpr (using U = T; sizeof(U) == 4)
+        return 1;
+    if (using V = T; sizeof(V) == 8)
+        return 2;
+    switch (using W = T; sizeof(W)) {
+    }
+    for (using X = T; X i = t; i++) {
+    }
+    return 0;
+}

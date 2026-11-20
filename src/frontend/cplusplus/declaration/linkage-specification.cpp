@@ -24,8 +24,10 @@ namespace cplusplus
 
 analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
 {
-    if (n.size() < 3 || !n[1].is_token())
+    if (n.size() < 3 || !n[1].is_token()) {
+        hold_names(n);
         return not_supported(n, "dcl.link");
+    }
     /* [dcl.link]/4: "A linkage-specification shall inhabit a namespace
        scope." */
     owned_buffer spelling;
@@ -33,11 +35,14 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
     bool c = false;
     if (spelling.size() == 3 && !memcmp(spelling.data(), "\"C\"", 3))
         c = true;
-    else if (!(spelling.size() == 5 && !memcmp(spelling.data(), "\"C++\"", 5)))
+    else if (!(spelling.size() == 5 &&
+               !memcmp(spelling.data(), "\"C++\"", 5))) {
         /* [dcl.link]/2: "Use of a string-literal other than "C" or "C++" is
            conditionally-supported, with implementation-defined
            semantics." */
+        hold_names(n);
         return not_supported(n, "dcl.link");
+    }
     owned_array<SyntaxRef> inner;
     bool braces = false;
     for (auto x : n.elements(2)) {
@@ -61,11 +66,18 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
     analysis_result result = analysis_result::well_formed;
     for (SyntaxRef d : inner) {
         current_declaration = d;
-        if (!parsed_completely(d)) {
-            result = worse(result, analysis_result::not_parsed);
-            continue;
-        }
-        result = worse(result, declaration_by_kind(d));
+        bool parsed = parsed_completely(d);
+        analysis_result r = analysis_result::not_parsed;
+        if (parsed)
+            r = declaration_by_kind(d);
+        /* only the names of the declarations that were not analysed are
+           held: a namespace-definition beside them is still known, and so
+           is what it declares (declaration() holds the whole
+           linkage-specification when it is refused as a whole) */
+        if (r != analysis_result::well_formed &&
+            !(parsed && d.is(syntax_kind::linkage_specification)))
+            hold_names(d);
+        result = worse(result, r);
     }
     c_language = saved;
     linkage_without_braces = saved_braces;

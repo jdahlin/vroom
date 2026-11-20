@@ -102,15 +102,12 @@ node_index parser::deduction_guide()
             return 0;
     }
     add_token(); /* template-name */
-    add_token(); /* ( */
-    {
-        declarative_region parameters(names, scope_kind::function_prototype);
-        parameter_declaration_clause();
-        if (failed())
-            return 0;
-    }
-    if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
-        return expected("')' to close the parameters", "temp.deduct.guide");
+    /* ( parameter-declaration-clause ) as a function declarator's
+       parameters-and-qualifiers ([dcl.fct]/1), which sema reads the guide's
+       function type from; no qualifier follows before the arrow */
+    parameters_and_qualifiers(nullptr);
+    if (failed())
+        return 0;
     if (!accept(preprocessing_op_or_punc::ARROW))
         return expected("'->' in the deduction-guide", "temp.deduct.guide");
     if (!at_identifier() || !at(preprocessing_op_or_punc::LESS, 1))

@@ -42,6 +42,10 @@ declared_names::find(scope_index in, uint32_t name, unsigned depth) const
         if (ignoring_non_types && d.kind != name_kind::type_name &&
             d.kind != name_kind::template_name)
             continue;
+        if (ignoring_non_scopes && d.kind != name_kind::type_name &&
+            d.kind != name_kind::template_name &&
+            d.kind != name_kind::namespace_name)
+            continue;
         return &d;
     }
     /* a using-directive can nominate a namespace that encloses this one:
@@ -193,9 +197,19 @@ scope_index declared_names::snapshot(scope_index region)
     copy.enclosing = s.enclosing;
     for (const declaration &d : s.declarations)
         copy.declarations.append(d);
-    for (scope_index other : s.searched_with)
-        copy.searched_with.append(other);
-    return static_cast<scope_index>(scopes.size() - 1);
+    scope_index result = static_cast<scope_index>(scopes.size() - 1);
+    /* the recursion grows scopes: no reference is kept across it */
+    for (size_t i = 0; i < scopes[region].searched_with.size(); i++) {
+        scope_index other = scopes[region].searched_with[i];
+        /* the members of an anonymous union or struct of the region
+           (add_base, decl-specifier.cpp): the first pass's rollback
+           empties that region, so the copy has a copy of it too */
+        if (scopes[other].kind == scope_kind::class_ &&
+            scopes[other].enclosing == region)
+            other = snapshot(other);
+        scopes[result].searched_with.append(other);
+    }
+    return result;
 }
 
 void declared_names::define_class(scope_index in, uint32_t name,
@@ -300,6 +314,26 @@ name_kind declared_names::lookup_elaborated(uint32_t name)
     ignoring_non_types = true;
     name_kind found = lookup_unqualified(name);
     ignoring_non_types = false;
+    return found;
+}
+
+name_kind declared_names::lookup_unqualified_nested(uint32_t name,
+                                                    scope_index *scope,
+                                                    bool *dependent)
+{
+    ignoring_non_scopes = true;
+    name_kind found = lookup_unqualified(name, scope, dependent);
+    ignoring_non_scopes = false;
+    return found;
+}
+
+name_kind declared_names::lookup_qualified_nested(scope_index in, uint32_t name,
+                                                  scope_index *scope,
+                                                  bool *dependent)
+{
+    ignoring_non_scopes = true;
+    name_kind found = lookup_qualified(in, name, scope, dependent);
+    ignoring_non_scopes = false;
     return found;
 }
 

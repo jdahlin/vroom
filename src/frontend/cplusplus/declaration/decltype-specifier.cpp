@@ -108,11 +108,6 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
         type = qualified_type::make(dependent_written_type(n), cv_none);
         return analysis_result::well_formed;
     }
-    /* in a class's member-specification: the names of members whose
-       declarations analysis has no rules for are not held (a dependent
-       operand, above, is not looked into) */
-    if (defining_class)
-        return not_supported(n, "class.mem");
     expression_meaning m;
     unevaluated++;
     analysis_result r = expression(operand, m);
@@ -125,6 +120,20 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
     if (!decltype_of(m, named, type))
         return not_supported(n, "dcl.type.decltype");
     return analysis_result::well_formed;
+}
+
+/* whether one of the arguments a pack is bound to is a type that depends
+   on a template parameter ([temp.dep.type]/10.3): an alias template used
+   in another template's declaration */
+bool semantic_analysis::pack_depends(entity_index pack) const
+{
+    for (uint32_t i = 0; i < entity_table[pack].member_count; i++) {
+        entity_index a = pack_elements[entity_table[pack].value + i];
+        if (a && entity_table[a].kind == entity_kind::typedef_name &&
+            depends_on_template_parameter(entity_table[a].type))
+            return true;
+    }
+    return false;
 }
 
 /* whether a name in [first, end) denotes a template parameter, or a
@@ -140,8 +149,13 @@ bool semantic_analysis::names_dependent_entity(token_index first,
         lookup_result found =
             lookup_unqualified(tokens.identifier(t), lookup_filter::any);
         entity_index e = found.entity;
-        if (!e)
+        if (!e) {
+            /* (lookup leaves a pack's name unknown outside a pattern) */
+            entity_index pack = find_pack(tokens.identifier(t));
+            if (pack && pack_depends(pack))
+                return true;
             continue;
+        }
         entity_kind k = entity_table[e].kind;
         if (k == entity_kind::none)
             return true;
