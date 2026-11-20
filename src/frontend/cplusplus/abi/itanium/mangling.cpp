@@ -161,7 +161,7 @@ class itanium_mangler
     bool unqualified_name_untagged(entity_index e);
     bool source_name(uint32_t identifier);
     bool operator_name(const entity &x);
-    bool ctor_dtor_name(special_member which);
+    bool ctor_dtor_name(special_member which, entity_index inherited = 0);
     void number(uint64_t n);
     bool local_name(entity_index e, entity_index function);
     bool closure_type_name(entity_index c);
@@ -1189,8 +1189,14 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
         (x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
         !in_unnamed_namespace(e) && !x.unnamed_type_linkage)
         text("L");
-    if (x.special != special_member::none)
-        return ctor_dtor_name(x.special);
+    if (x.special != special_member::none) {
+        /* [impl.clang] an inherited default constructor is named as
+           the class's own */
+        entity_index inherited = x.inherited_constructor;
+        if (!analysis.type_table[x.type.unqualified()].parameter_count)
+            inherited = 0;
+        return ctor_dtor_name(x.special, inherited);
+    }
     if (x.operator_function)
         return operator_name(x);
     if (x.conversion_function) {
@@ -1234,18 +1240,34 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
  * does ([abi:mangling-special-ctor-dtor]); there are no allocating
  * constructors yet.
  */
-bool itanium_mangler::ctor_dtor_name(special_member which)
+bool itanium_mangler::ctor_dtor_name(special_member which,
+                                     entity_index inherited)
 {
     if (which == special_member::constructor)
         text("C");
     else
         text("D");
+    /* [abi:mangling-special-ctor-dtor]: "<ctor-dtor-name> ::= CI1 <type>
+       ::= CI2 <type>": an inheriting constructor, by the base class whose
+       constructor it was inherited from */
+    if (inherited)
+        text("I");
     if (variant == 1)
         text("1");
     else if (variant == 0 && which == special_member::destructor)
         text("0");
     else
         text("2");
+    if (inherited) {
+        /* [impl.clang] one inherited through another class's inheriting
+           constructors is named by the class that declares the original;
+           the class is no substitution candidate here */
+        const entities &table = analysis.entity_table;
+        while (table[inherited].inherited_constructor)
+            inherited = table[inherited].inherited_constructor;
+        return class_enum_type(qualified_type::make(
+            table[table[inherited].enclosing].type.unqualified(), cv_none));
+    }
     return true;
 }
 

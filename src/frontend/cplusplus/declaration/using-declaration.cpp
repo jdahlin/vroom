@@ -197,6 +197,12 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
     VTRY(r, nested_name_specifier(n.nested_name_specifier(), q));
     token_index t = n.identifier().token();
     uint32_t name = tokens.identifier(t);
+    /* [class.qual]/2: the name of the class in its own scope names its
+       constructors: [namespace.udecl]/3 inheriting constructors */
+    if (defining_class && !is_namespace(q.entity) &&
+        entity_table[q.entity].kind == entity_kind::class_type &&
+        name == entity_table[q.entity].name)
+        return inheriting_using(n, t, q.entity);
     lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);
     /* [namespace.udecl]/1: "If the using-declarator names ... a set of
        declarations, the using-declarator introduces the declarator's name
@@ -296,11 +302,6 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         bool ambiguous = false;
         if (!base_step(c, q.entity, ambiguous))
             return not_supported(n, "namespace.udecl");
-        /* [namespace.udecl]/3: "If a using-declarator names a
-           constructor, its nested-name-specifier shall name a direct base
-           class of the class being defined": inheriting constructors */
-        if (name == entity_table[q.entity].name)
-            return not_supported(n, "class.inhctor.init");
         /* [namespace.udecl]/19: "A synonym created by a using-declaration
            has the usual accessibility for a member-declaration."  Access
            is the entity's here, so only a declaration that leaves it as

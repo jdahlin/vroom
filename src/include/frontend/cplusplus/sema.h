@@ -662,6 +662,14 @@ struct entity {
     /* a special member function declared implicitly ([class.default.ctor]/1,
        [class.copy.ctor]/6, [class.dtor]/4) */
     bool implicit = false;
+    /* a constructor of a class that a using-declarator names a base
+       class's constructors for ([namespace.udecl]/3): the base's
+       constructor it forwards to ([class.inhctor.init]/1); implicit too */
+    entity_index inherited_constructor = 0;
+    /* a class: a using-declarator names the constructors of one of its
+       bases ([namespace.udecl]/3), whose constructors it inherits at its
+       closing }; no aggregate ([dcl.init.aggr]/1.1) */
+    bool inherits_constructors = false;
     /* an enumeration ([dcl.enum]): its underlying type once it is
        complete (none before), whether it is scoped ([dcl.enum]/2) and
        whether its underlying type is fixed ([dcl.enum]/5) */
@@ -1439,6 +1447,14 @@ enum class unary_trait_kind {
 #define UNARY_TRAIT(kind, spelling) kind,
 #include "../../../frontend/cplusplus/ext/clang/unary-traits.inc"
 #undef UNARY_TRAIT
+};
+
+/* [class.inhctor.init]/1: the initialization of a constructor inherited
+   from class `base`'s constructor `constructor`: the base subobject by it,
+   from the parameters `parameters` of the inheriting constructor */
+struct inherited_call {
+    entity_index base = 0, constructor = 0;
+    const owned_array<entity_index> *parameters = nullptr;
 };
 
 class semantic_analysis
@@ -3373,6 +3389,7 @@ class semantic_analysis
                                               entity_index e,
                                               SyntaxElement init,
                                               const specified &s);
+    bool aggregate_value_stored(entity_index c, uint32_t value) const;
     analysis_result default_member_initializer(token_index at, entity_index e,
                                                uint32_t &statement);
     /* the subobject e (a base or a non-static data member) of *this */
@@ -3402,6 +3419,20 @@ class semantic_analysis
     void declare_implicit(entity_index c, special_member kind, bool copy,
                           bool move = false);
     analysis_result implicit_definitions(entity_index c, SyntaxRef n);
+    /* [namespace.udecl]/3: the using-declarations of constructors of class
+       c's direct bases, kept until its closing } (inherit_constructors) */
+    struct inheriting_declaration {
+        entity_index c = 0, base = 0;
+        token_index at = 0;
+    };
+    owned_array<inheriting_declaration> inheriting;
+    analysis_result inheriting_using(UsingDeclarator n, token_index at,
+                                     entity_index base);
+    analysis_result inherit_constructors(entity_index c, SyntaxRef n);
+    analysis_result inherited_base_construct(token_index at,
+                                             const struct inherited_call &call,
+                                             entity_index base,
+                                             uint32_t &statement);
     /* a function whose definition analysis makes itself (an implicit
        special member, a closure type's __invoke and conversion function):
        its parameter scope, the scope it is in, its parameters (with a
@@ -4354,7 +4385,9 @@ class semantic_analysis
                                           SyntaxElement ctor_initializer = {});
     /* [class.base.init]: a constructor's member initializations, the
        statements of a block (function_body's b) */
-    analysis_result ctor_initializer(SyntaxElement list, uint32_t &built);
+    analysis_result
+    ctor_initializer(SyntaxElement list, uint32_t &built,
+                     const struct inherited_call *inherited = nullptr);
     void collect_labels(SyntaxElement s);
     /* the statement functions give the statement's node in built (when
        well-formed) */

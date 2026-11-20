@@ -234,11 +234,30 @@ analysis_result semantic_analysis::constructor_template_declarator(
 }
 
 /*
+ * Whether the initializer of a member of class c (with constructors) is
+ * not a constructor call on the member but the value of an aggregate
+ * ([dcl.init.aggr], [dcl.init.list]/3.4: `{}` or `{...}`), which the
+ * lowering builds and stores: right only when copying the value is
+ * the same as initializing the member in place, c's copy and destructor
+ * trivial ([class.copy.ctor]/11, [class.dtor]/8).
+ */
+bool semantic_analysis::aggregate_value_stored(entity_index c,
+                                               uint32_t value) const
+{
+    const semantic_node &n = semantics[value];
+    if (n.kind != semantic_kind::initializer_list &&
+        n.kind != semantic_kind::zero)
+        return false;
+    return trivial_class(c);
+}
+
+/*
  * [class.base.init]/9.1: member e initialized from its default member
  * initializer ([class.mem]/10), analysed in the constructor ([class.mem]/6:
  * a complete-class context, `this` its object), and stored as by an
- * assignment to (*this).e.  A member of class type with constructors, or
- * an array, has no rules here yet.
+ * assignment to (*this).e.  A member of class type with constructors is
+ * constructed in place, or, when its initializer is an aggregate's value
+ * (aggregate_value_stored), stored; an array has no rules here yet.
  */
 analysis_result
 semantic_analysis::default_member_initializer(token_index at, entity_index e,
@@ -258,7 +277,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     VTRY(r, subobject(at, e, object));
     initialized_value value;
     VTRY_SET(r, initializer(init, type, value));
-    if (constructed &&
+    if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         (semantics[value.node].kind != semantic_kind::construct ||
          semantics[value.node].a))
         /* [dcl.init]/17.6.1: a prvalue of the class, or no constructor
@@ -277,7 +296,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
                 initializer_exception::may_throw;
     }
     unsupported.resize(unsupported_before);
-    if (constructed) {
+    if (constructed && !aggregate_value_stored(record.entity, value.node)) {
         /* [class.base.init]/9.1: the member's constructor, called on the
            member itself (the object of the construct node: 0 until now,
            as for a declared variable) */
@@ -1136,8 +1155,9 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
  * mem-initializers)."  /9: a member not named is default-initialized: no
  * initialization for the members analysis has.
  */
-analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
-                                                    uint32_t &built)
+analysis_result
+semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
+                                    const struct inherited_call *inherited)
 {
     entity_index c = current_class();
     token_index at = current_declaration.first_token();
@@ -1268,8 +1288,24 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
             owned_array<expression_meaning> arguments;
             if (item.size() == 4)
                 r = expression_list_meanings(item[2], arguments);
-            else if (item.size() != 3)
-                /* a braced-init-list */
+            else if (item.size() == 2 &&
+                     item[1].is(syntax_kind::braced_init_list)) {
+                /* [dcl.init.list]/3.4: an aggregate member's list: its
+                   value, stored; a constructor's list and a base's (its
+                   tail padding may hold a derived member) are not
+                   analysed */
+                if (entity_table[e].base_subobject)
+                    return not_supported(item, "class.base.init");
+                initialized_value listed;
+                r = list_initialization(item[1], type, true, listed);
+                if (r != analysis_result::well_formed)
+                    return r;
+                if (!aggregate_value_stored(record.entity, listed.node))
+                    return not_supported(item, "class.base.init");
+                initialized[slot] =
+                    subobject_store(object, type, id, listed.node);
+                continue;
+            } else if (item.size() != 3)
                 return not_supported(item, "class.base.init");
             if (r != analysis_result::well_formed)
                 return r;
@@ -1368,6 +1404,13 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
                most derived class, thus its constructors never initialize
                virtual base classes" */
             continue;
+        if (inherited && subobjects[i] == inherited->base) {
+            /* [class.inhctor.init]/1: the base the constructor was
+               inherited from, initialized by it */
+            VTRY(r, inherited_base_construct(at, *inherited, subobjects[i],
+                                             initialized[i]));
+            continue;
+        }
         if (entity_table[subobjects[i]].default_initializer) {
             /* (9.1) "if the entity is a non-static data member that has a
                default member initializer ([class.mem]) and either ... the
@@ -1817,6 +1860,223 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         declare_implicit(c, special_member::constructor, false);
     if (destruction && !entity_table[c].destructor)
         declare_implicit(c, special_member::destructor, false);
+    return inherit_constructors(c, n);
+}
+
+/*
+ * [namespace.udecl]/3: "If a using-declarator names a constructor, its
+ * nested-name-specifier shall name a direct base class of the class being
+ * defined", and /1 "it declares that the class inherits the set of
+ * constructor declarations introduced by the using-declarator".  Kept until
+ * the class is complete (inherit_constructors).  A virtual base, a base
+ * that is no direct one, and a class with virtual bases have no rules.
+ */
+analysis_result semantic_analysis::inheriting_using(UsingDeclarator n,
+                                                    token_index at,
+                                                    entity_index base)
+{
+    entity_index c = defining_class;
+    entity_index b = 0;
+    for (uint32_t i = 0; i < entity_table[c].base_count; i++) {
+        entity_index k = class_bases[entity_table[c].first_base + i];
+        if (entity_table[k].type.unqualified() ==
+            entity_table[base].type.unqualified())
+            b = k;
+    }
+    if (!b || entity_table[b].virtual_base ||
+        entity_table[c].virtual_base_count ||
+        entity_table[base].virtual_base_count)
+        return not_supported(n, "class.inhctor.init");
+    for (const inheriting_declaration &d : inheriting)
+        if (d.c == c && d.base == b)
+            /* [namespace.udecl]/9: again */
+            return analysis_result::well_formed;
+    inheriting_declaration d;
+    d.c = c;
+    d.base = b;
+    d.at = at;
+    inheriting.append(d);
+    entity_table[c].inherits_constructors = true;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [namespace.udecl]/16: "Constructors that are introduced by a
+ * using-declaration are treated as though they were constructors of the
+ * derived class when looking up the constructors of the derived class ...
+ * or forming a set of overload candidates", /15: "If a constructor ...
+ * brought from a base class into a derived class has the signature of a
+ * constructor of the derived class, it is hidden by it", and
+ * [over.match.funcs]/8 excludes the base's copy and move constructors from
+ * the one-argument case (they are not inherited here at all), the default
+ * constructor has the derived class's own.  One constructor of class c per
+ * constructor of the base: of its parameters, forwarding to it
+ * ([class.inhctor.init]/1); declared at the class's end, after the
+ * implicit special members (which an inherited constructor does not
+ * suppress, [class.default.ctor]/1).  Default arguments, ellipsis,
+ * parameters of class type that does not copy its bytes and constructor
+ * templates have no rules.
+ */
+analysis_result semantic_analysis::inherit_constructors(entity_index c,
+                                                        SyntaxRef n)
+{
+    for (size_t d = 0; d < inheriting.size(); d++) {
+        if (inheriting[d].c != c)
+            continue;
+        entity_index base_class =
+            type_table[entity_table[inheriting[d].base].type.unqualified()]
+                .entity;
+        if (entity_table[base_class].constructor_template ||
+            entity_table[base_class].constructor_templates)
+            return not_supported(n, "temp.mem");
+        /* [class.default.ctor]/1: c has an implicit default constructor
+           unless a constructor is user-declared, which hides the base's
+           X(); else the base's is c's too (clang: "a default constructor
+           is inherited") */
+        bool user_declared = entity_table[c].defaulted_default_constructor ||
+                             entity_table[c].constructor_template ||
+                             entity_table[c].constructor_templates;
+        for (entity_index k = entity_table[c].first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (!entity_table[k].implicit)
+                user_declared = true;
+        bool base_default = false;
+        for (entity_index k = entity_table[base_class].first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (!type_table[entity_table[k].type.unqualified()].parameter_count)
+                base_default = true;
+        if (user_declared && !base_default &&
+            (!entity_table[base_class].first_constructor ||
+             trivial_defaulted_default_constructor(base_class)) &&
+            !default_constructor_deleted(base_class))
+            /* the base's trivial default constructor has no entity to
+               forward to */
+            return not_supported(n, "class.inhctor.init");
+        for (entity_index k = entity_table[base_class].first_constructor; k;
+             k = entity_table[k].next_constructor) {
+            const struct type base_type =
+                type_table[entity_table[k].type.unqualified()];
+            if (is_copy_constructor(base_class, k) ||
+                (!base_type.parameter_count && !user_declared))
+                continue;
+            if (base_type.variadic || entity_table[k].first_default ||
+                entity_table[k].unknown_defaults)
+                return not_supported(n, "namespace.udecl");
+            owned_array<qualified_type> parameters;
+            for (uint32_t i = 0; i < base_type.parameter_count; i++) {
+                parameters.append(type_table.parameters(
+                    entity_table[k].type.unqualified())[i]);
+                const struct type &p = type_table[parameters[i].unqualified()];
+                if (p.kind == type_kind::class_type &&
+                    (!copies_bytes(p.entity) || destroys(p.entity)))
+                    return not_supported(n, "class.inhctor.init");
+            }
+            /* hidden by a constructor of c with the signature */
+            bool hidden = false;
+            for (entity_index q = entity_table[c].first_constructor; q;
+                 q = entity_table[q].next_constructor) {
+                const struct type &own =
+                    type_table[entity_table[q].type.unqualified()];
+                if (own.parameter_count != base_type.parameter_count)
+                    continue;
+                bool same = true;
+                for (uint32_t i = 0; i < own.parameter_count; i++)
+                    if (type_table
+                            .parameters(entity_table[q].type.unqualified())[i]
+                            .unqualified() != parameters[i].unqualified())
+                        same = false;
+                if (same) {
+                    if (entity_table[q].inherited_constructor)
+                        return not_supported(n, "namespace.udecl");
+                    hidden = true;
+                }
+            }
+            if (hidden)
+                continue;
+            qualified_type v = qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none);
+            qualified_type type = qualified_type::make(
+                type_table.function(v, parameters.data(),
+                                    base_type.parameter_count, false,
+                                    base_type.non_throwing),
+                cv_none);
+            entity_index e = entity_table.make(entity_kind::function,
+                                               entity_table[c].name, c);
+            entity &f = entity_table[e];
+            f.type = type;
+            f.nonstatic_member = true;
+            f.special = special_member::constructor;
+            f.inline_ = true;
+            f.defined = true;
+            f.implicit = true;
+            f.inherited_constructor = k;
+            f.linkage_of_name = entity_table[c].linkage_of_name;
+            f.explicit_ = entity_table[k].explicit_;
+            f.deleted = entity_table[k].deleted;
+            f.access = entity_table[k].access;
+            entity_index last = entity_table[c].first_constructor;
+            if (!last) {
+                entity_table[c].first_constructor = e;
+                continue;
+            }
+            while (entity_table[last].next_constructor)
+                last = entity_table[last].next_constructor;
+            entity_table[last].next_constructor = e;
+        }
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.inhctor.init]/1: the base subobject `base` of a constructor
+ * inherited from it, "initialized by the invocation of the inherited
+ * constructor" with the inheriting constructor's parameters: an xvalue
+ * for one of class type or of rvalue reference type, the parameter
+ * itself otherwise (the arguments are forwarded as std::forward would).
+ */
+analysis_result semantic_analysis::inherited_base_construct(
+    token_index at, const struct inherited_call &call, entity_index base,
+    uint32_t &statement)
+{
+    expression_meaning object;
+    VTRY(r, subobject(at, base, object));
+    qualified_type base_type = entity_table[base].type;
+    entity_index chosen = call.constructor;
+    qualified_type function = entity_table[chosen].type;
+    owned_array<uint32_t> nodes;
+    for (uint32_t i = 0; i < call.parameters->size(); i++) {
+        entity_index p = (*call.parameters)[i];
+        qualified_type declared = entity_table[p].type;
+        const struct type kind = type_table[declared.unqualified()];
+        expression_meaning from;
+        from.type = declared;
+        from.category = value_category::lvalue;
+        if (kind.kind == type_kind::lvalue_reference) {
+            from.type = kind.operand;
+        } else if (kind.kind == type_kind::rvalue_reference) {
+            from.type = kind.operand;
+            from.category = value_category::xvalue;
+        } else if (kind.kind == type_kind::class_type) {
+            from.category = value_category::xvalue;
+        }
+        from.evaluation = constness::not_constant;
+        from.node = expression_node(semantic_kind::entity, from, at, p);
+        initialized_value one;
+        VTRY_SET(
+            r, initialize_with(current_declaration, from,
+                               type_table.parameters(function.unqualified())[i],
+                               false, false, one));
+        nodes.append(one.node);
+    }
+    expression_meaning made;
+    made.type = qualified_type::make(base_type.unqualified(), cv_none);
+    made.category = value_category::prvalue;
+    made.evaluation = constness::unknown;
+    uint32_t built = expression_node(semantic_kind::construct, made, at,
+                                     object.node, chosen);
+    if (!nodes.empty())
+        semantics.set_list(built, &nodes[0], nodes.size());
+    statement = statement_node(semantic_kind::expression_statement, at, built);
     return analysis_result::well_formed;
 }
 
@@ -1974,7 +2234,8 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
     owned_array<entity_index> implicit;
     for (entity_index k = entity_table[c].first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (entity_table[k].implicit)
+        if (entity_table[k].implicit &&
+            !(entity_table[k].inherited_constructor && entity_table[k].deleted))
             implicit.append(k);
     if (entity_table[c].destructor &&
         entity_table[entity_table[c].destructor].implicit)
@@ -1993,7 +2254,15 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
                 cv_none));
         const struct type &ft = type_table[entity_table[f].type.unqualified()];
         entity_index source = 0;
-        if (ft.parameter_count)
+        owned_array<entity_index> forwarded;
+        if (entity_table[f].inherited_constructor) {
+            for (uint32_t i = 0; i < ft.parameter_count; i++)
+                forwarded.append(synthesized_variable(
+                    sf,
+                    type_table.parameters(
+                        entity_table[f].type.unqualified())[i],
+                    true));
+        } else if (ft.parameter_count)
             source = synthesized_variable(
                 sf,
                 type_table.parameters(entity_table[f].type.unqualified())[0],
@@ -2004,6 +2273,18 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
             /* [class.cdtor]/4: the destructor's virtual table pointer */
             members = vtable_pointer_store(c, at);
             destructions = subobject_destructions(c, at);
+        } else if (entity_table[f].inherited_constructor) {
+            inherited_call call;
+            call.constructor = entity_table[f].inherited_constructor;
+            call.parameters = &forwarded;
+            for (const inheriting_declaration &d : inheriting)
+                if (d.c == c &&
+                    type_table[entity_table[d.base].type.unqualified()]
+                            .entity ==
+                        entity_table[entity_table[f].inherited_constructor]
+                            .enclosing)
+                    call.base = d.base;
+            r = ctor_initializer(SyntaxElement(), members, &call);
         } else if (source) {
             bool move =
                 type_table[type_table

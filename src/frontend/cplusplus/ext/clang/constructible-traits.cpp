@@ -70,6 +70,12 @@ bool semantic_analysis::default_initializer_throws(entity_index e, bool &throws)
    default member initializer or an overload would have to be analysed */
 bool semantic_analysis::implicit_constructor_throws(entity_index f, bool &known)
 {
+    if (entity_table[f].inherited_constructor) {
+        /* [except.spec]/8: the inherited constructor's specification and
+           the other subobjects' default initialization: not analysed */
+        known = false;
+        return false;
+    }
     entity_index c = entity_table[f].enclosing;
     bool copy = type_table[entity_table[f].type.unqualified()].parameter_count;
     const entity x = entity_table[c];
