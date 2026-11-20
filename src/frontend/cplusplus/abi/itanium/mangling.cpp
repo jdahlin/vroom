@@ -1698,7 +1698,11 @@ bool itanium_mangler::closure_type_name(entity_index c)
        template-parameter-list: Ty for a type-parameter (the only ones
        analysed) */
     if (table[call].kind == entity_kind::template_entity) {
-        for (uint32_t i = 0; i < analysis.template_parameter_count(call); i++)
+        /* ([impl.clang] the invented ones of an auto parameter have none) */
+        uint32_t explicit_count =
+            analysis.template_parameter_count(call) -
+            analysis.invented_parameter_count(table[c].lambda);
+        for (uint32_t i = 0; i < explicit_count; i++)
             text("Ty");
         /* [impl.clang] the template-head's requires-clause: Q and its
            expression */

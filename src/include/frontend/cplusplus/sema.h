@@ -2649,7 +2649,10 @@ class semantic_analysis
     struct lambda_context {
         entity_index closure = 0, call = 0, enclosing_function = 0;
         capture_default default_capture = capture_default::none;
-        bool mutable_ = false, constexpr_ = false;
+        bool mutable_ = false, constexpr_ = false, immediate = false;
+        /* the closure's members are made: a capture the body would add
+           is not supported (a generic lambda's specialization) */
+        bool sealed = false;
         qualified_type enclosing_this;
         SyntaxRef at = 0;
         uint32_t first_capture = 0;
@@ -2666,6 +2669,22 @@ class semantic_analysis
     };
     owned_array<member_closure> member_closures;
     owned_array<capture_record> member_closure_captures;
+    /* a generic lambda's closure: what its specializations' bodies need of
+       the lambda-expression, and the captures it made */
+    struct generic_closure {
+        entity_index closure = 0, enclosing_function = 0;
+        capture_default default_capture = capture_default::none;
+        bool mutable_ = false;
+        qualified_type enclosing_this;
+        uint32_t first_capture = 0, capture_count = 0;
+    };
+    owned_array<generic_closure> generic_closures;
+    owned_array<capture_record> generic_closure_captures;
+    /* [expr.prim.lambda.capture]/7: the entities and this a generic
+       lambda's body names that its capture-default captures */
+    analysis_result
+    implicit_captures(SyntaxRef n, lambda_context &l,
+                      const owned_array<parameter_meaning> &parameters);
     /* [basic.def.odr]/4: a name in a lambda's body of a local variable
        usable in constant expressions is an odr-use, so a capture, unless
        its value is read (lvalue-to-rvalue conversion); named by an entity
@@ -4208,6 +4227,13 @@ class semantic_analysis
     mutable owned_array<uint32_t> invented_packs;
     bool abbreviated_parameters(SyntaxRef declaration,
                                 owned_array<SyntaxRef> &parameters) const;
+    bool abbreviated_clause(SyntaxElement list,
+                            owned_array<SyntaxRef> &parameters) const;
+    /* [dcl.fct]/22 and a template-parameter-list's rules for the
+       template-parameters (a template-head's or a lambda's) */
+    analysis_result validate_template_parameters(
+        SyntaxRef n, const owned_array<SyntaxRef> &parameters, bool packs,
+        bool pack_anywhere, bool type_constraints);
     /* whether a function-definition declares an abbreviated function
        template ([dcl.fct]/18) */
     bool abbreviated_function(SyntaxRef definition) const
@@ -4753,6 +4779,9 @@ class semantic_analysis
        the lambda-declarator's parameters */
     SyntaxElement lambda_constraint(SyntaxRef n,
                                     bool *trailing = nullptr) const;
+    /* the invented template-parameters of lambda-expression n
+       ([expr.prim.lambda.closure]/3) */
+    uint32_t invented_parameter_count(SyntaxRef n) const;
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
     {

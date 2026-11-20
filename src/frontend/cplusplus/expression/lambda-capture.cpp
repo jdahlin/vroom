@@ -482,6 +482,11 @@ analysis_result semantic_analysis::capture_variable(lambda_context &l,
                                                     entity_index e,
                                                     expression_meaning &m)
 {
+    /* a generic lambda's closure is complete: the names its body had
+       when the lambda-expression was analysed are captured
+       (implicit_captures) */
+    if (l.sealed && l.default_capture != capture_default::none)
+        return not_supported(current_declaration, "expr.prim.lambda.capture");
     if (l.default_capture == capture_default::none)
         return ill_formed_at_token(t,
                                    "a local entity odr-used in a declarative "
@@ -549,6 +554,146 @@ analysis_result semantic_analysis::resolve_pending_uses(lambda_context &l)
 }
 
 /*
+ * [expr.prim.lambda.capture]/7: the entities a generic lambda's body
+ * implicitly captures, which its capture-default captures.  The body is
+ * analysed once per specialization of the function call operator
+ * template, but the closure type is complete where the lambda-expression
+ * is; so the body's names decide here, as clang does for a template's:
+ * every name of a local entity of the enclosing function, outside an
+ * unevaluated operand, that is not a parameter or an init-capture, and no
+ * variable usable in constant expressions (whose reads are no odr-use),
+ * and this when the body names it or a non-static member.  /7 captures
+ * a name "in a potentially-evaluated expression where the enclosing
+ * full-expression depends on a generic lambda parameter"; whether an
+ * expression does is not known before a specialization, so a name is
+ * taken to.  A name that a declaration in the body hides is captured too,
+ * which the closure type's size shows.
+ */
+analysis_result semantic_analysis::implicit_captures(
+    SyntaxRef n, lambda_context &l,
+    const owned_array<parameter_meaning> &parameters)
+{
+    if (l.default_capture == capture_default::none)
+        return analysis_result::well_formed;
+    SyntaxElement body = n[n.size() - 1];
+    token_index first = body.first_token(), end = body.end_token();
+    owned_array<uint32_t> own;
+    for (const parameter_meaning &p : parameters)
+        if (p.id)
+            own.append(tokens.identifier(p.id));
+    for (size_t i = l.first_capture; i < lambda_captures.size(); i++)
+        if (lambda_captures[i].init_capture)
+            own.append(entity_table[lambda_captures[i].variable].name);
+    int depth = 0, unevaluated_depth = -1;
+    for (token_index t = first; t < end; t++) {
+        if (is_operator(tokens[t],
+                        preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+            if (unevaluated_depth < 0 && t > first &&
+                tokens[t - 1].kind == token_kind::keyword) {
+                standard_keyword kw = p.keyword_of(tokens[t - 1]);
+                if (kw == standard_keyword::sizeof_ ||
+                    kw == standard_keyword::alignof_ ||
+                    kw == standard_keyword::decltype_ ||
+                    kw == standard_keyword::noexcept_)
+                    unevaluated_depth = depth;
+            }
+            depth++;
+            continue;
+        }
+        if (is_operator(tokens[t],
+                        preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+            depth--;
+            if (depth == unevaluated_depth)
+                unevaluated_depth = -1;
+            continue;
+        }
+        if (unevaluated_depth >= 0)
+            continue;
+        bool names_this = tokens[t].kind == token_kind::keyword &&
+                          p.keyword_of(tokens[t]) == standard_keyword::this_;
+        capture_record record;
+        if (!names_this) {
+            if (tokens[t].kind != token_kind::identifier)
+                continue;
+            if (t > first &&
+                (is_operator(tokens[t - 1], preprocessing_op_or_punc::DOT) ||
+                 is_operator(tokens[t - 1], preprocessing_op_or_punc::ARROW) ||
+                 is_operator(tokens[t - 1],
+                             preprocessing_op_or_punc::COLON_COLON)))
+                continue;
+            uint32_t name = tokens.identifier(t);
+            bool skip = false;
+            for (uint32_t k : own)
+                skip = skip || k == name;
+            if (skip)
+                continue;
+            lookup_result found = lookup_unqualified(name, lookup_filter::any);
+            entity_index e = found.entity;
+            if (found.ambiguous || found.unknown || !e)
+                continue;
+            const entity &x = entity_table[e];
+            if (x.nonstatic_member) {
+                names_this = true;
+            } else {
+                bool binding = x.kind == entity_kind::structured_binding &&
+                               x.binding_object &&
+                               entity_table[x.binding_object].automatic;
+                if (!binding &&
+                    (x.kind != entity_kind::variable || !x.automatic))
+                    continue;
+                bool captured = false;
+                for (size_t k = l.first_capture; k < lambda_captures.size();
+                     k++)
+                    captured = captured || (lambda_captures[k].variable == e &&
+                                            !lambda_captures[k].init_capture);
+                if (captured)
+                    continue;
+                entity_index owner = enclosing_function(entity_table, e);
+                bool reachable = owner == function_state.function;
+                for (size_t k = lambdas.size(); k-- > 0 && !reachable;)
+                    if (lambdas[k].enclosing_function == owner)
+                        reachable = true;
+                if (!reachable)
+                    continue;
+                const struct type kind = type_table[x.type.unqualified()];
+                if (x.usable == constness::constant &&
+                    (kind.kind == type_kind::fundamental ||
+                     kind.kind == type_kind::enumeration ||
+                     kind.kind == type_kind::pointer))
+                    continue;
+                record.variable = e;
+                record.at = t;
+                record.by_reference =
+                    l.default_capture == capture_default::reference;
+                qualified_type captured_type = x.type;
+                if (record.by_reference)
+                    captured_type = enclosing_capture_type(e, lambdas.size(),
+                                                           l.first_capture);
+                qualified_type member_type;
+                VTRY(r, capture_type(n, captured_type, record.by_reference,
+                                     member_type));
+                record.member = capture_member_of(l.closure, member_type);
+                lambda_captures.append(record);
+                continue;
+            }
+        }
+        if (!names_this || !l.enclosing_this.unqualified())
+            continue;
+        bool captured = false;
+        for (size_t k = l.first_capture; k < lambda_captures.size(); k++)
+            captured = captured || (!lambda_captures[k].variable &&
+                                    !lambda_captures[k].init_capture);
+        if (captured)
+            continue;
+        record.at = t;
+        record.by_reference = true;
+        record.member = capture_member_of(l.closure, l.enclosing_this);
+        lambda_captures.append(record);
+    }
+    return analysis_result::well_formed;
+}
+
+/*
  * [expr.prim.lambda.closure]/12: in the compound-statement this is the
  * enclosing context's: the member capturing it (a pointer), or the address
  * of the member that is a copy of *this ([expr.prim.lambda.capture]/11:
@@ -574,7 +719,7 @@ analysis_result semantic_analysis::captured_this(token_index t,
                                        "in a member function or a default "
                                        "member initializer",
                                        "expr.prim.this");
-        if (unevaluated)
+        if (unevaluated || l.sealed)
             return not_supported(current_declaration,
                                  "expr.prim.lambda.capture");
         if (l.default_capture == capture_default::none)
