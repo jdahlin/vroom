@@ -45,6 +45,26 @@ static const gnu_builtin builtin_registry[] = {
     ROWL("__builtin_char_memchr", library_alias, 4, string, node, "SSiz",
          "memchr"),
     ROWL("__builtin_launder", launder, 0, identity, identity, nullptr, nullptr),
+    ROW("__builtin_addcb", carry, 0, none),
+    ROW("__builtin_addcs", carry, 0, none),
+    ROW("__builtin_addc", carry, 0, none),
+    ROW("__builtin_addcl", carry, 0, none),
+    ROW("__builtin_addcll", carry, 0, none),
+    ROW("__builtin_subcb", carry, 0, none),
+    ROW("__builtin_subcs", carry, 0, none),
+    ROW("__builtin_subc", carry, 0, none),
+    ROW("__builtin_subcl", carry, 0, none),
+    ROW("__builtin_subcll", carry, 0, none),
+    ROW("__builtin_complex", complex, 0, none),
+    ROW("__builtin_creal", complex_part, 0, none),
+    ROW("__builtin_crealf", complex_part, 0, none),
+    ROW("__builtin_creall", complex_part, 0, none),
+    ROW("__builtin_cimag", complex_part, 0, none),
+    ROW("__builtin_cimagf", complex_part, 0, none),
+    ROW("__builtin_cimagl", complex_part, 0, none),
+    ROW("__builtin_conj", complex_conjugate, 0, none),
+    ROW("__builtin_conjf", complex_conjugate, 0, none),
+    ROW("__builtin_conjl", complex_conjugate, 0, none),
     ROWL("__builtin_invoke", invoke, 0, none, node, nullptr, nullptr),
     ROWL("__builtin_bswapg", bswapg, 0, bswap, bswap, nullptr, nullptr),
     /* the builtins a constant expression folds: the integer operations,
@@ -207,6 +227,7 @@ bool gnu_builtin_untyped(uint16_t row)
     case builtin_form::va_list:
     case builtin_form::overflow:
     case builtin_form::atomic:
+    case builtin_form::complex:
     case builtin_form::launder:
     case builtin_form::bswapg:
     case builtin_form::invoke:

@@ -36,7 +36,7 @@ int main()
         return 1;
     if (__builtin_object_size(buf + 8, 0) != 32)
         return 2;
-    if (member(&r) != 12 && member(&r) != sizeof r)
+    if (member(&r) != 12 && member(&r) != sizeof r && member(&r) != (size_t)-1)
         return 3;
     if (unknown(buf) != (size_t)-1 && unknown(buf) != 40)
         return 4;

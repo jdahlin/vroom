@@ -2908,7 +2908,12 @@ class semantic_analysis
     /* [meta.unary.prop] is_constructible and is_nothrow_constructible
        (ext/clang/constructible-traits.cpp): the analysis of T t(declval<
        Args>()...); */
+    bool trivial_default_constructor(entity_index c) const;
+    bool trivial_copy_constructor(entity_index c) const;
+    bool trivially_constructed(qualified_type t, const qualified_type *types,
+                               uint32_t count) const;
     analysis_result clang_constructible_trait(SyntaxRef n, bool nothrow,
+                                              bool trivial,
                                               expression_meaning &m);
     analysis_result constructible_types(SyntaxRef n, qualified_type t,
                                         const qualified_type *types,
@@ -2973,6 +2978,9 @@ class semantic_analysis
                                    const owned_array<SyntaxElement> &written,
                                    const owned_array<expression_meaning> &ops,
                                    expression_meaning &m);
+    analysis_result complex_result(SyntaxRef n, entity_index called,
+                                   const owned_array<uint32_t> &nodes,
+                                   qualified_type &result);
     analysis_result launder_result(SyntaxRef n, entity_index called,
                                    const owned_array<uint32_t> &nodes,
                                    qualified_type &result);

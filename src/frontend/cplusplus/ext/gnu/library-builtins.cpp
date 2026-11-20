@@ -293,7 +293,7 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
         form == builtin_form::overflow || form == builtin_form::atomic ||
         form == builtin_form::bit_count || form == builtin_form::generic ||
         form == builtin_form::launder || form == builtin_form::bswapg ||
-        form == builtin_form::invoke) {
+        form == builtin_form::invoke || form == builtin_form::complex) {
         qualified_type result = void_type;
         /* (the type-generic ones have the signature's result type) */
         if (form == builtin_form::generic || form == builtin_form::bit_count)
@@ -322,6 +322,26 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
                 known = false;
             else
                 types_of.append(t);
+        }
+        if (known && (form == builtin_form::complex_part ||
+                      form == builtin_form::complex_conjugate)) {
+            /* the C table's d. f. D.: the real type of the complex argument */
+            qualified_type complex_type = qualified_type::make(
+                type_table.complex_of(types_of[0]), cv_none);
+            if (form == builtin_form::complex_part) {
+                types_of.append(complex_type);
+            } else {
+                types_of[0] = complex_type;
+                types_of.append(complex_type);
+            }
+            variadic = false;
+        }
+        if (known && form == builtin_form::carry && types_of.size() == 4) {
+            /* the C table writes the carry out as the variadic rest: a
+               pointer to the type */
+            types_of.append(qualified_type::make(
+                type_table.pointer_to(types_of[0]), cv_none));
+            variadic = false;
         }
         if (known && types_of.size() && form == builtin_form::library_alias) {
             /* the library function's own symbol, noexcept as clang's
@@ -640,6 +660,8 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
     case builtin_form::overflow:
         return overflow_builtin_result(n, called, spelling, length, nodes,
                                        result);
+    case builtin_form::complex:
+        return complex_result(n, called, nodes, result);
     case builtin_form::launder:
         return launder_result(n, called, nodes, result);
     case builtin_form::bswapg:
@@ -697,6 +719,42 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         }
         fundamental_type f = fundamental_of(pointee);
         bool pointer = is_pointer(pointee);
+        /* an unscoped enumeration is its underlying integer ([dcl.enum]/5:
+           clang rejects a scoped one) */
+        entity_index enumeration = enumeration_of(pointee);
+        if (enumeration) {
+            if (entity_table[enumeration].scoped)
+                return ill_formed(n,
+                                  "address argument to atomic operation must "
+                                  "be a pointer to integer, pointer or "
+                                  "supported floating point type",
+                                  "ext.clang");
+            f = entity_table[enumeration].underlying;
+        }
+        /* the generic forms take an object of any trivially copyable class
+           type that is as large as an atomic one ([intro.object]) */
+        bool generic_form = !spelled_with(spelling, length, "_n") &&
+                            !spelled_with(spelling, length, "__c11_") &&
+                            !spelled_with(spelling, length, "__sync_");
+        bool class_object =
+            type_table[pointee.unqualified()].kind == type_kind::class_type;
+        if (class_object && generic_form) {
+            bool known = false;
+            entity_index c = type_table[pointee.unqualified()].entity;
+            if (!class_trivially_copyable(c, known) || !known)
+                return not_supported_builtin(
+                    n, "ext.gnu", called,
+                    "on an object of a class that is not known to be "
+                    "trivially copyable");
+            uint64_t bytes = entity_table[c].size;
+            if (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 &&
+                bytes != 16)
+                return not_supported_builtin(
+                    n, "ext.gnu", called,
+                    "on an object of a class whose size is not 1, 2, 4, 8 or "
+                    "16 bytes");
+            f = fundamental_type::unsigned_long_int;
+        }
         if (!pointer &&
             (f == fundamental_type::none || f == fundamental_type::void_ ||
              f == fundamental_type::std_nullptr_t ||
@@ -771,6 +829,43 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
             type_table.fundamental(fundamental_type::void_), cv_none);
         break;
     }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [ext:gnu_library_builtins] _Complex T __builtin_complex (T real, T imag)
+ * (GCC manual 6.14, "Complex Numbers": "The two operands must have the same
+ * real floating-point type, and the result has the corresponding complex
+ * type"): not a constant expression's operands' conversion; each operand
+ * keeps its type.
+ */
+analysis_result
+semantic_analysis::complex_result(SyntaxRef n, entity_index called,
+                                  const owned_array<uint32_t> &nodes,
+                                  qualified_type &result)
+{
+    if (nodes.size() != 2)
+        return ill_formed(n, "__builtin_complex takes two arguments",
+                          "ext.gnu");
+    qualified_type a = semantics[nodes[0]].type;
+    qualified_type b = semantics[nodes[1]].type;
+    if (depends_on_template_parameter(a) || depends_on_template_parameter(b))
+        return not_supported(n, "temp.dep.constexpr");
+    fundamental_type f = fundamental_of(a);
+    if (a.unqualified() != b.unqualified())
+        return ill_formed(n,
+                          "the operands of __builtin_complex shall have the "
+                          "same type",
+                          "ext.gnu");
+    if (f != fundamental_type::float_ && f != fundamental_type::double_ &&
+        f != fundamental_type::long_double)
+        return ill_formed(n,
+                          "the operands of __builtin_complex shall have real "
+                          "floating-point type",
+                          "ext.gnu");
+    result = qualified_type::make(
+        type_table.complex_of(qualified_type::make(a.unqualified(), cv_none)),
+        cv_none);
     return analysis_result::well_formed;
 }
 

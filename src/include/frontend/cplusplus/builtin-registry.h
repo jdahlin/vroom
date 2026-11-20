@@ -35,6 +35,16 @@ enum class builtin_form : uint8_t {
     launder,
     /* T __builtin_bswapg(T), T an integer type of a multiple of 8 bits */
     bswapg,
+    /* __builtin_addc (x, y, carry_in, &carry_out) and the subtraction and the
+       typed forms: the C table's signature with the carry out a pointer to
+       the type */
+    carry,
+    /* _Complex T __builtin_complex (T, T) */
+    complex,
+    /* __builtin_creal, __builtin_cimag: the real or imaginary part of a
+       complex number; __builtin_conj: its conjugate */
+    complex_part,
+    complex_conjugate,
     /* __builtin_invoke (f, args...): analysed as the call it stands for */
     invoke,
     /* a builtin of the C front end whose signature has parameters this

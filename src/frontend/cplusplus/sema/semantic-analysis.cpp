@@ -54,6 +54,26 @@ analysis_result semantic_analysis::not_supported(SyntaxRef n,
     u.file = where.file;
     u.line = where.line;
     u.function = where.function;
+    /* an extension's construct is named by its source text (the first
+       tokens), so the error says what it is */
+    if (!strncmp(subclause, "ext.", 4) && n.index()) {
+        const syntax_node &s = tree[n];
+        owned_buffer text;
+        size_t tokens_named = 0;
+        for (token_index t = s.first_token;
+             t < s.end_token && tokens_named < 16 && text.size() < 100; t++) {
+            if (text.size())
+                vbuffer_string_append(text.get(), " ");
+            tokens.spelling(t, text.get());
+            tokens_named++;
+        }
+        if (text.size() && tokens_named == 16)
+            vbuffer_string_append(text.get(), " ...");
+        if (text.size()) {
+            owned_string &named = detail_texts.make(text.data(), text.size());
+            u.detail = named.c_str();
+        }
+    }
     unsupported.append(u);
     return analysis_result::unsupported;
 }

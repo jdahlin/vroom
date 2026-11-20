@@ -300,9 +300,9 @@ int64_t has_gnu_attribute(const implementation_defined_behavior &b,
    libc++ takes the fallback (bench/cxx-libcxx-builtins.py lists them) */
 static const char *const builtins_not_had[] = {
     "__array_extent",
+    "__builtin_complex",
     "__builtin_invoke_r",
     "__builtin_clear_padding",
-    "__builtin_complex",
     "__builtin_coro_noop",
     "__builtin_is_implicit_lifetime",
     "__builtin_is_virtual_base_of",
