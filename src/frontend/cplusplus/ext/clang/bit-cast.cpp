@@ -45,10 +45,7 @@ bool bit_cast_kept(const implementation_defined_behavior &behavior,
     /* the object representation of from's value */
     uint64_t bits = kept;
     if (from == fundamental_type::float_) {
-        float f = static_cast<float>(floating_value(kept));
-        uint32_t b32;
-        memcpy(&b32, &f, sizeof b32);
-        bits = b32;
+        bits = float_storage_bits(kept);
     } else if (from != fundamental_type::double_ &&
                (!fundamental_type_is_integral(from) ||
                 fundamental_type_width(behavior, from) > 64)) {
@@ -56,6 +53,12 @@ bool bit_cast_kept(const implementation_defined_behavior &behavior,
     }
     if (to == fundamental_type::float_) {
         uint32_t b32 = static_cast<uint32_t>(bits);
+        uint32_t fraction = b32 & UINT32_C(0x007fffff);
+        if ((b32 & UINT32_C(0x7f800000)) == UINT32_C(0x7f800000) && fraction) {
+            result = (uint64_t)(b32 & UINT32_C(0x80000000)) << 32 |
+                     UINT64_C(0x7ff0000000000000) | (uint64_t)fraction << 29;
+            return true;
+        }
         float f;
         memcpy(&f, &b32, sizeof f);
         result = floating_kept(f);

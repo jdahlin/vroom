@@ -49,6 +49,7 @@ const char *fundamental_type_name(fundamental_type type)
         "long double",
         "decltype(nullptr)",
         "_Float16",
+        "__bf16",
         "_BitInt",
         "unsigned _BitInt",
         "void",

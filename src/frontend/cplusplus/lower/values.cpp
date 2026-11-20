@@ -165,6 +165,15 @@ uint32_t c_lowering::constant(const semantic_node &n)
     switch (f) {
     case fundamental_type::float_:
     case fundamental_type::double_: {
+        /* A float constant normally reaches C as a double. Use an exact
+           bit cast when narrowing that double would quiet a signaling NaN. */
+        if (f == fundamental_type::float_ &&
+            floating_is_signaling_nan(n.value)) {
+            uint32_t bits = ast_builder_integer(
+                c, ast_builder_type_basic(AST_TYPE_UNSIGNED_INT),
+                float_storage_bits(n.value));
+            return cast(bits, t, AST_CAST_BIT_CAST);
+        }
         double d;
         memcpy(&d, &n.value, sizeof d);
         return ast_builder_floating(c, t, d);
@@ -399,6 +408,15 @@ uint32_t c_lowering::conversion(const semantic_node &n)
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_INTEGER);
     case conversion_kind::bit_cast:
         return cast(expression(n.a), t, AST_CAST_BIT_CAST);
+    case conversion_kind::vector_cast: {
+        int kind = AST_CAST_VECTOR_BITS;
+        if (record(n.type).kind == type_kind::vector)
+            kind = AST_CAST_UNION;
+        if (record(n.type).kind == type_kind::vector &&
+            record(node(n.a).type).kind == type_kind::vector)
+            kind = AST_CAST_NOP;
+        return cast(expression(n.a), t, kind);
+    }
     case conversion_kind::vector_convert:
         return ast_builder_convert_vector(c, t, expression(n.a));
     case conversion_kind::integral_to_pointer:

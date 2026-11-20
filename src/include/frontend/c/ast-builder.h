@@ -53,6 +53,9 @@ ast_qualified_type ast_builder_type_complex(cc *c, ast_qualified_type element);
 /* clang's ext_vector_type(count) of element (not bool) */
 ast_qualified_type
 ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count);
+/* GNU vector_size of count elements of element (an arithmetic type, not bool) */
+ast_qualified_type ast_builder_type_vector(cc *c, ast_qualified_type element,
+                                           uint64_t count);
 /* known false: an array of unknown bound */
 ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
                                           uint64_t count, bool known);
@@ -154,6 +157,14 @@ bool ast_builder_atomic_shape(const char *name, size_t length, int *written,
                               int *result);
 /* __builtin_convertvector(vector, t): each element of vector converted
    to the element type of t, a vector type of as many elements */
+/* __builtin_shufflevector(a, b, indices...): lanes of a then b, -1 any */
+uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
+                                    uint32_t b, const int32_t *indices,
+                                    uint32_t count);
+/* __builtin_elementwise_min / _max of two vectors of one integer type */
+/* ... _add_sat / _sub_sat */
+uint32_t ast_builder_vector_saturate(cc *c, bool sub, uint32_t a, uint32_t b);
+uint32_t ast_builder_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b);
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
                                     uint32_t vector);
 /* __atomic_load_n(pointer, order): a load of type t, pointer a node of

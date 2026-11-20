@@ -253,6 +253,9 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     /* "mode (mode)": the size of the type of a typedef or variable by the
        name of a machine mode (below) */
     {"mode", gnu_mode},
+    /* "vector_size (bytes)": the type of a typedef or variable is a vector
+       of its type's elements (gnu_vector_type) */
+    {"vector_size", gnu_vector_size},
     /* the attributes that change no code vcc generates: they say what a
        function or variable does (const, pure, nothrow, leaf, malloc,
        returns_nonnull, nonnull, format, format_arg, alloc_size,
@@ -269,6 +272,14 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        or pointer to such a type is intended to store character arrays that
        do not necessarily contain a terminating NUL" (a diagnostic's
        hint) */
+    /* clang's nodebug (no debug information for a function: vcc's -g
+       tables are by line), min_vector_width(N) (the widest vector the
+       function uses: an optimization hint) and GCC's target("features")
+       (<immintrin.h>'s intrinsics: the features the function's
+       instructions need, which -m options of the compilation give) */
+    {"nodebug", 0},
+    {"min_vector_width", 0},
+    {"target", 0},
     {"may_alias", 0},
     {"nonstring", 0},
     {"unused", 0},
@@ -608,6 +619,17 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             g.flags |= gnu_mode;
             continue;
         }
+        if (rule->flag == gnu_vector_size) {
+            uint64_t bytes = 0;
+            if (count != 4 || g.vector_bytes)
+                return not_supported(at, "ext.gnu");
+            VTRY(r, gnu_integer_argument(at, a[2], bytes));
+            if (!bytes)
+                return ill_formed(at, "zero vector size", "ext.gnu");
+            g.vector_bytes = bytes;
+            g.flags |= gnu_vector_size;
+            continue;
+        }
         if (rule->flag == gnu_section) {
             /* one ordinary string-literal: "section-name" */
             if (count != 4 || !a[2].is_token() ||
@@ -855,12 +877,14 @@ semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
     g.section = m.section;
     g.abi_tag = m.abi_tag;
     g.mode = m.mode;
+    g.vector_bytes = m.vector_bytes;
     g.priority = m.gnu_priority;
     g.cleanup = m.gnu_cleanup;
     analysis_result r = gnu_attribute_specifier(n, g);
     m.gnu_priority = g.priority;
     m.gnu_cleanup = g.cleanup;
     m.mode = g.mode;
+    m.vector_bytes = g.vector_bytes;
     m.aligned = g.aligned;
     m.gnu_flags = g.flags;
     m.section = g.section;
@@ -881,7 +905,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     analysis_result r = gnu_attribute_specifier(n, g);
     s.gnu_priority = g.priority;
     s.gnu_cleanup = g.cleanup;
-    if (g.mode)
+    if (g.mode || g.vector_bytes)
         /* the mode of a decl-specifier's attribute: not analysed */
         return not_supported(n, "ext.gnu");
     s.aligned = g.aligned;

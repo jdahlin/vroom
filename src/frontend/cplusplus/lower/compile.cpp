@@ -58,6 +58,7 @@ compile_behavior(const cplusplus_compile_options *o, const cc_options *co)
     } else if (co->target == PP_LINUX_X86_64) {
         b.wchar_t_is_signed = true;
         b.long_double_fraction_bits = 63;
+        b.vector_alignment_uncapped = true;
     }
     return b;
 }

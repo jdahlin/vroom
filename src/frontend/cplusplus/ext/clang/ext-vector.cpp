@@ -13,6 +13,7 @@
  */
 #include "../../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
+#include "frontend/vector-layout.h"
 
 namespace cplusplus
 {
@@ -81,6 +82,44 @@ uint64_t semantic_analysis::ext_vector_layout(const struct type &record,
     if (alignment && size > 16)
         return 16;
     return size;
+}
+
+/* [ext:gnu_vector_size] the bytes of the elements; the alignment as C's
+   (vector-layout.h) */
+uint64_t semantic_analysis::vector_layout(const struct type &record,
+                                          bool alignment) const
+{
+    uint64_t size = record.bound * size_of_type(record.operand);
+    if (alignment)
+        return vector_alignment(
+            static_cast<uint32_t>(size),
+            tokens.files.behavior.vector_alignment_uncapped);
+    return size;
+}
+
+/* vector_size(bytes) of the declared type: clang's "invalid vector element
+   type" unless the element is an integer (not bool) or floating-point type
+   and bytes a multiple of its size */
+analysis_result semantic_analysis::gnu_vector_type(SyntaxRef at, uint64_t bytes,
+                                                   qualified_type &type)
+{
+    const struct type &element = type_table[type.unqualified()];
+    bool half = element.kind == type_kind::fundamental &&
+                (element.fundamental == fundamental_type::float16 ||
+                 element.fundamental == fundamental_type::bfloat16);
+    if (!half && (element.kind != type_kind::fundamental ||
+                  element.fundamental == fundamental_type::bool_ ||
+                  !is_arithmetic(type)))
+        return ill_formed(at, "invalid vector element type", "ext.gnu");
+    uint64_t each = size_of_type(type);
+    if (bytes > UINT32_MAX || !vector_size_fits(bytes, each))
+        return ill_formed(at, "vector size is not a multiple of the element's",
+                          "ext.gnu");
+    type = qualified_type::make(
+        type_table.vector_of(qualified_type::make(type.unqualified(), cv_none),
+                             bytes / each),
+        cv_none);
+    return analysis_result::well_formed;
 }
 
 } // namespace cplusplus

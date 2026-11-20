@@ -56,6 +56,8 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
         return ast_builder_type_basic(AST_TYPE_LONG_DOUBLE);
     case fundamental_type::float16:
         return ast_builder_type_basic(AST_TYPE_FLOAT16);
+    case fundamental_type::bfloat16:
+        return ast_builder_type_basic(AST_TYPE_BFLOAT16);
     case fundamental_type::float128:
         /* as C: a type of its own on x86-64, long double elsewhere */
         if (target == PP_LINUX_X86_64)
@@ -125,7 +127,7 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::block_pointer: /* the block's address, as C's ^ */
-        made = pointer_to(type(r.operand, at));
+        made = pointer_to(pointee_type(r.operand, at));
         break;
     case type_kind::array:
         made = ast_builder_type_array(c, type(r.operand, at), r.bound,
@@ -136,6 +138,9 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
         break;
     case type_kind::complex:
         made = ast_builder_type_complex(c, type(r.operand, at));
+        break;
+    case type_kind::vector:
+        made = ast_builder_type_vector(c, type(r.operand, at), r.bound);
         break;
     case type_kind::ext_vector:
         made = ast_builder_type_ext_vector(c, type(r.operand, at), r.bound);
@@ -189,6 +194,24 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     return made;
 }
 
+/* the C struct of a class, without fields yet (made once) */
+ast_qualified_type c_lowering::class_tag(entity_index e)
+{
+    if (records[e])
+        return records[e];
+    const entity &x = analysis.entity_table[e];
+    owned_buffer name;
+    spelling(e, name);
+    if (!x.name && x.linkage_name) {
+        size_t length = 0;
+        const char *s =
+            tokens.pp.identifier_spelling(x.linkage_name - 1, &length);
+        vbuffer_append(name.get(), s, length);
+    }
+    records[e] = ast_builder_type_record(c, name.data(), name.size(), x.union_);
+    return records[e];
+}
+
 /*
  * A class as a C struct of its non-static data members (and base class
  * subobjects that are not empty), in order, at the offsets of the Itanium
@@ -204,27 +227,19 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
  */
 ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
 {
-    if (records[e])
+    if (records[e] && !deferred_class[e])
         return records[e];
     const entity &x = analysis.entity_table[e];
     if (x.kind != entity_kind::class_type) {
         fail("a class whose definition was not analysed", at);
         return ast_builder_type_basic(AST_TYPE_INT);
     }
-    owned_buffer name;
-    spelling(e, name);
-    if (!x.name && x.linkage_name) {
-        size_t length = 0;
-        const char *s =
-            tokens.pp.identifier_spelling(x.linkage_name - 1, &length);
-        vbuffer_append(name.get(), s, length);
-    }
-    ast_qualified_type made =
-        ast_builder_type_record(c, name.data(), name.size(), x.union_);
-    records[e] = made;
+    ast_qualified_type made = class_tag(e);
+    deferred_class[e] = 0;
     if (!x.size)
         /* incomplete: a pointer to it is all a program can have */
         return made;
+    classes_in_progress++;
     owned_array<ast_qualified_type> fields;
     owned_array<const char *> names;
     owned_array<size_t> lengths;
@@ -427,6 +442,38 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
            address as an implicit parameter" (x8 on AArch64), whatever its
            size */
         ast_builder_type_record_in_memory(c, made);
+    classes_in_progress--;
+    /* the classes only a pointer named, now that no struct is half made */
+    while (!classes_in_progress && deferred_classes.size()) {
+        entity_index waiting = deferred_classes[deferred_classes.size() - 1];
+        token_index named = deferred_at[deferred_at.size() - 1];
+        deferred_classes.resize(deferred_classes.size() - 1);
+        deferred_at.resize(deferred_at.size() - 1);
+        if (deferred_class[waiting])
+            class_type(waiting, named);
+    }
+    return made;
+}
+
+/* the type a pointer or reference points to: a class not made yet while
+   another class's struct is being made is declared only, so that a class
+   reached through the pointer that has the one being made as a member
+   sees it whole; it is made when the outermost class is, or where a
+   value of it is needed */
+ast_qualified_type c_lowering::pointee_type(qualified_type t, token_index at)
+{
+    const struct type &r = record(t);
+    if (!classes_in_progress || r.kind != type_kind::class_type ||
+        records[r.entity] ||
+        analysis.entity_table[r.entity].kind != entity_kind::class_type ||
+        !analysis.entity_table[r.entity].size)
+        return type(t, at);
+    ast_qualified_type made = class_tag(r.entity);
+    deferred_class[r.entity] = 1;
+    deferred_classes.append(r.entity);
+    deferred_at.append(at);
+    if (t.cv())
+        made = ast_builder_type_qualified(c, made, static_cast<int>(t.cv()));
     return made;
 }
 

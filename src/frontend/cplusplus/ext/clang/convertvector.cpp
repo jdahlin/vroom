@@ -55,9 +55,11 @@ analysis_result semantic_analysis::clang_convertvector(SyntaxRef n,
     VTRY_SET(r, operand_value(n, m));
     const struct type &from_type = type_table[m.type.unqualified()];
     const struct type &to_type = type_table[to.unqualified()];
-    if (from_type.kind != type_kind::ext_vector ||
-        to_type.kind != type_kind::ext_vector ||
-        from_type.bound != to_type.bound)
+    bool vectors = (from_type.kind == type_kind::ext_vector ||
+                    from_type.kind == type_kind::vector) &&
+                   (to_type.kind == type_kind::ext_vector ||
+                    to_type.kind == type_kind::vector);
+    if (!vectors || from_type.bound != to_type.bound)
         return ill_formed(n,
                           "first two arguments to __builtin_convertvector "
                           "must have the same number of elements",

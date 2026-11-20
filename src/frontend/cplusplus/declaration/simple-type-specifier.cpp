@@ -17,7 +17,14 @@
  *     simple-type-specifier:
  *         __float128
  *
- * the type alone.  [ext:gnu_complex] adds _Complex (or __complex__,
+ * the type alone.  [ext:clang_float16] adds two:
+ *
+ *     simple-type-specifier:
+ *         _Float16
+ *         __bf16
+ *
+ * each alone (16-bit floating-point types; no arithmetic is analysed for
+ * __bf16, and only the types of a vector for either).  [ext:gnu_complex] adds _Complex (or __complex__,
  * __complex), a modifier that goes with float, double, long double and
  * __float128 in any order:
  *
@@ -80,7 +87,8 @@ analysis_result semantic_analysis::simple_type(SyntaxRef seq,
                        "short, or int, short or long with int, long with "
                        "double, and long with long";
     unsigned keywords = k.signed_ + k.unsigned_ + k.short_ + k.long_ + k.char_ +
-                        k.int_ + k.double_ + k.alone + k.int128 + k.float128;
+                        k.int_ + k.double_ + k.alone + k.int128 + k.float128 +
+                        k.float16 + k.bfloat16;
     if (k.float128 && tokens.files.behavior.long_double_fraction_bits != 63)
         /* clang: "__float128 is not supported on this target" (x86-64's) */
         return ill_formed(seq, "__float128 is not supported on this target",
@@ -88,6 +96,19 @@ analysis_result semantic_analysis::simple_type(SyntaxRef seq,
     if (k.complex)
         return complex_type(seq, k, keywords, type);
     fundamental_type t = fundamental_type::none;
+    if (k.float16 || k.bfloat16) {
+        /* [ext:clang_float16] each alone */
+        if (k.float16 + k.bfloat16 != 1 || keywords != 1)
+            return ill_formed(seq,
+                              "_Float16 and __bf16 are not combined with "
+                              "other type specifiers",
+                              "ext.clang");
+        fundamental_type half = fundamental_type::bfloat16;
+        if (k.float16)
+            half = fundamental_type::float16;
+        type = type_table.fundamental(half);
+        return analysis_result::well_formed;
+    }
     if (k.float128) {
         /* [ext:gnu_float128] (GCC manual 6.12): the type alone */
         if (k.float128 > 1 || keywords != k.float128)

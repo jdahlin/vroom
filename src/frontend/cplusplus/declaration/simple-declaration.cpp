@@ -866,7 +866,37 @@ semantic_analysis::function_definition(FunctionDefinition definition)
         return deleted_definition(n, f);
     if (!body.plain())
         return not_supported(n, "dcl.fct.def.general");
-    return analyse_function_body(n, body.compound_statement());
+    size_t unsupported_before = unsupported.size();
+    analysis_result result =
+        analyse_function_body(n, body.compound_statement());
+    return defer_unsupported_body(n, f, unsupported_before, result);
+}
+
+/*
+ * A static or inline function of a system header whose body analysis does
+ * not support is left undefined, and a use of it is a refusal when lowered
+ * (as an instantiated member function's, instantiated_member_body): clang
+ * emits no code for one that nothing uses, and <immintrin.h> defines
+ * hundreds of them over the __builtin_ia32_ functions vcc has no rules for.
+ */
+analysis_result semantic_analysis::defer_unsupported_body(SyntaxRef n,
+                                                          entity_index f,
+                                                          size_t before,
+                                                          analysis_result r)
+{
+    if (r != analysis_result::unsupported || unsupported.size() <= before)
+        return r;
+    const entity &x = entity_table[f];
+    if (x.linkage_of_name != linkage::internal && !x.inline_)
+        return r;
+    if (!in_system_header(n.first_token()))
+        return r;
+    body_failures.append(unsupported[before]);
+    entity_table[f].unsupported_body =
+        static_cast<uint32_t>(body_failures.size());
+    entity_table[f].defined = false;
+    unsupported.resize(before);
+    return analysis_result::well_formed;
 }
 
 /*
@@ -1153,12 +1183,20 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (s.aligned > aligned)
         aligned = s.aligned;
     uint32_t gnu_flags =
-        (m.gnu_flags | s.gnu_flags) & ~(gnu_aligned | gnu_packed | gnu_mode);
+        (m.gnu_flags | s.gnu_flags) &
+        ~(gnu_aligned | gnu_packed | gnu_mode | gnu_vector_size);
     if (m.mode) {
         /* mode: the type of a typedef-name or of a variable */
         if (m.qualifier || m.qualified_namespace)
             return not_supported(declaration, "ext.gnu");
         r = gnu_mode_type(declaration, m.mode, type);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (m.vector_bytes) {
+        if (m.qualifier || m.qualified_namespace)
+            return not_supported(declaration, "ext.gnu");
+        r = gnu_vector_type(declaration, m.vector_bytes, type);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -1186,7 +1224,12 @@ analysis_result semantic_analysis::declare_with_initializer(
            typedef-name's it names; a smaller one than the type's own
            (clang lets a typedef decrease it) is not supported */
         uint64_t natural = alignment_of_type(type);
-        if (aligned && aligned < natural)
+        /* a vector typedef-name of a lesser alignment (<xmmintrin.h>'s
+           __m128_u, aligned(1)): only the unaligned loads and stores
+           through a packed struct of clang's headers name it, whose
+           members are packed whatever it says: taken as the type's own */
+        if (aligned && aligned < natural &&
+            type_table[type.unqualified()].kind != type_kind::vector)
             return not_supported(declaration, "ext.gnu");
         if (aligned > natural)
             typedef_alignment = static_cast<uint32_t>(aligned);

@@ -174,7 +174,7 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_islessgreater", generic, 11, floating),
     ROW("__builtin_isnan", generic, 0, floating),
     ROW("__builtin_isnormal", generic, 3, floating),
-    ROW("__builtin_issignaling", generic, 0, none),
+    ROW("__builtin_issignaling", generic, 0, floating_constant),
     ROW("__builtin_isunordered", generic, 12, floating),
     ROW("__builtin_signbit", generic, 4, floating),
     /* the floating constants: infinity and quiet or signalling NaNs */

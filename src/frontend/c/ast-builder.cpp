@@ -69,6 +69,13 @@ ast_builder_type_ext_vector(cc *c, ast_qualified_type element, uint64_t count)
     return AST_QUALIFIED_TYPE(cc_type_intern(c, &v), 0);
 }
 
+ast_qualified_type ast_builder_type_vector(cc *c, ast_qualified_type element,
+                                           uint64_t count)
+{
+    return cc_type_vector(c, element,
+                          (uint32_t)(count * cc_type_size(c, element)));
+}
+
 ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
                                           uint64_t count, bool known)
 {
@@ -421,11 +428,51 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
         return cc_builtin_bit_count_lower(
             c, b->id, false, cc_conversion_decay(c, args[0]), fallback, 0);
     }
+    /* the x86 vector builtins expanded into lanes, as the parsed call does:
+       the arguments converted to the signature's types first */
+    if (b->id == CC_BUILTIN_X86_SIMD) {
+        const ctype *f = AST_TYPE(c, cc_builtin_type(c, b));
+        cc_id_list typed;
+        cc_id_list_init(&typed);
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t a = args[i];
+            if (i < f->n)
+                a = cc_conversion_apply(c, a, c->params[f->aux + i]);
+            cc_id_list_append(c, &typed, a);
+        }
+        return cc_builtin_x86_simd_build(c, b, &typed, t, 0);
+    }
     cc_id_list list;
     cc_id_list_init(&list);
     for (uint32_t i = 0; i < count; i++)
         cc_id_list_append(c, &list, args[i]);
     return cc_builtin_node_new(c, b->id, t, 0, &list);
+}
+
+uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
+                                    uint32_t b, const int32_t *indices,
+                                    uint32_t count)
+{
+    uint32_t items[2 + 64];
+    uint32_t n = 0;
+    items[n++] = a;
+    items[n++] = b;
+    for (uint32_t i = 0; i < count && n < 2 + 64; i++)
+        items[n++] = ast_builder_integer(
+            c, ast_builder_type_basic(AST_TYPE_INT), indices[i]);
+    return ast_builder_node(c, AST_NODE_BUILTIN, t, 0,
+                            ast_builder_list(c, items, n), n,
+                            CC_BUILTIN_SHUFFLEVECTOR, 0);
+}
+
+uint32_t ast_builder_vector_saturate(cc *c, bool sub, uint32_t a, uint32_t b)
+{
+    return cc_vector_saturate(c, sub, a, b, 0);
+}
+
+uint32_t ast_builder_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b)
+{
+    return cc_vector_minmax(c, max, a, b, 0);
 }
 
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,

@@ -1,6 +1,6 @@
 /* [ext:clang_vector_builtins] clang's vector builtins on GCC vector types
-   (__attribute__((vector_size))): __builtin_convertvector,
-   __builtin_shufflevector, __builtin_elementwise_* and __builtin_reduce_*
+   (__attribute__((vector_size))): __builtin_elementwise_* and
+   __builtin_reduce_*
    (clang language extensions, "Vectors and Extended Vectors"; "Builtin
    Functions"); libc++'s <__algorithm/simd_utils.h> uses them. */
 typedef int v4i __attribute__((vector_size(16)));

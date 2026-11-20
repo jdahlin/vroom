@@ -707,6 +707,11 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
     r = operand_value(n, left);
     if (r == analysis_result::well_formed)
         VTRY_SET(r, operand_value(n, right));
+    /* [ext:gnu_vector_size] an operand that is a vector: lane by lane */
+    if (r == analysis_result::well_formed &&
+        (type_table[left.type.unqualified()].kind == type_kind::vector ||
+         type_table[right.type.unqualified()].kind == type_kind::vector))
+        return vector_binary(n, at, op, left, right, m);
     /* [expr.arith.conv]/1, [expr.add]/1, [expr.shift]/1: unscoped
        enumeration operands are promoted; two of one scoped enumeration
        type are compared ([expr.rel]/3, [expr.eq]/7) */

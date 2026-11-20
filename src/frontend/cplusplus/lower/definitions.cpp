@@ -97,6 +97,28 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     return true;
 }
 
+bool c_lowering::function_definition_or_drop(entity_index e)
+{
+    const entity &x = analysis.entity_table[e];
+    bool droppable = x.kind == entity_kind::function &&
+                     (x.inline_ || x.linkage_of_name == linkage::internal) &&
+                     x.definition &&
+                     analysis.token_in_system_header(node(x.definition).at);
+    if (!droppable)
+        return function_definition(e);
+    if (function_definition(e))
+        return true;
+    if (!failure.what)
+        return false;
+    dropped_function d;
+    d.entity = e;
+    d.failure = failure;
+    dropped_functions.append(d);
+    failure = lowering_failure();
+    in_function = false;
+    return true;
+}
+
 bool c_lowering::function_definition(entity_index e)
 {
     const entity &x = analysis.entity_table[e];
@@ -307,7 +329,7 @@ bool c_lowering::translation_unit()
             continue;
         done.append(d.entity);
         if (x.kind == entity_kind::function) {
-            if (!function_definition(d.entity))
+            if (!function_definition_or_drop(d.entity))
                 return false;
         } else if (x.kind == entity_kind::variable) {
             if (!variable_definition(d.entity))

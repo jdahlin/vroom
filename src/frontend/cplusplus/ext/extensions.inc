@@ -54,9 +54,15 @@ EXTENSION(gnu_int128, gnu,
           "integer type ([basic.fundamental]/2)")
 EXTENSION(gnu_float128, gnu,
           "GCC manual 6.12, Additional Floating Types: __float128, IEEE binary128")
+EXTENSION(clang_float16, clang,
+          "clang Language Extensions, Half-Precision Floating Point: _Float16 and __bf16, "
+          "types of 16 bits")
 EXTENSION(gnu_complex, gnu,
           "GCC manual 6.12, Complex Numbers: _Complex, __complex__ and __complex with float, "
           "double and long double")
+EXTENSION(gnu_vector_size, gnu,
+          "GCC manual 6.37, Using Vector Instructions through Built-in Functions: "
+          "__attribute__((vector_size(N))) on a typedef or variable, a vector of N bytes")
 EXTENSION(gnu_typeof, gnu,
           "GCC manual 6.7, Referring to a Type with typeof: typeof, __typeof and __typeof__ "
           "(expression) or (type-id), a type-specifier (glibc's <math.h> casts through it)")

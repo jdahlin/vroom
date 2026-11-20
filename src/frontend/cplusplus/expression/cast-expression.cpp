@@ -143,6 +143,35 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference)
         return reference_cast(at, to, m, kinds);
+    if ((kinds & (cast_static | cast_reinterpret)) &&
+        (target.kind == type_kind::vector ||
+         type_table[m.type.unqualified()].kind == type_kind::vector)) {
+        /* [ext:gnu_vector_size] a vector to a vector or to a scalar of the
+           same size, or a scalar to a vector: the same bits (clang: "invalid
+           conversion between vector type and ... of different size") */
+        VTRY(r, operand_value(at, m));
+        const struct type &from_type = type_table[m.type.unqualified()];
+        bool scalar_from = is_arithmetic(m.type);
+        bool scalar_to = is_arithmetic(to);
+        if (target.kind == type_kind::vector &&
+            from_type.kind != type_kind::vector && !scalar_from)
+            return not_supported(at, "ext.gnu");
+        if (from_type.kind == type_kind::vector &&
+            target.kind != type_kind::vector && !scalar_to)
+            return not_supported(at, "ext.gnu");
+        if (size_of_type(m.type) != size_of_type(to))
+            return ill_formed(at,
+                              "invalid conversion between vector type and a "
+                              "type of different size",
+                              "ext.gnu");
+        m.evaluation = constness::not_constant;
+        m.beyond_integral_constant = true;
+        m.zero_literal = false;
+        m.category = value_category::prvalue;
+        m.type = qualified_type::make(to.unqualified(), cv_none);
+        converted(m, conversion_kind::vector_cast);
+        return analysis_result::well_formed;
+    }
     if (m.type.unqualified() == to.unqualified() && binary128_or_complex(to)) {
         /* [ext:gnu_float128] a cast to the value's own type yields the
            value */
@@ -439,6 +468,66 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
 }
 
 /*
+ * Whether casting between pointer types (not similar ones) casts away
+ * constness, [expr.const.cast]/7: the types are decomposed into their
+ * levels (the pointee of the pointer, its pointee, ...) as far as both go;
+ * the cast away constness is a level where the source has a cv-qualifier
+ * the target lacks, or where they differ and a level above, below the
+ * first, lacks const in the target ([conv.qual]/3).  Levels one type has
+ * more of than the other are not compared ([impl.clang]: clang's rule).
+ * A pointer to member against what is not one, and an array below the
+ * first level, are not decomposed: *unknown is set.
+ */
+bool semantic_analysis::casts_away_constness(qualified_type from,
+                                             qualified_type to,
+                                             bool *unknown) const
+{
+    *unknown = false;
+    bool const_above = true;
+    bool first = true;
+    for (;;) {
+        qualified_type a = type_table[from.unqualified()].operand;
+        qualified_type b = type_table[to.unqualified()].operand;
+        uint32_t cva = a.cv();
+        uint32_t cvb = b.cv();
+        /* [basic.type.qualifier]/3: "An array type whose elements are
+           cv-qualified is also considered to have the same
+           cv-qualifications as its elements." */
+        while (type_table[a.unqualified()].kind == type_kind::array) {
+            a = type_table[a.unqualified()].operand;
+            cva |= a.cv();
+            *unknown = *unknown || !first;
+        }
+        while (type_table[b.unqualified()].kind == type_kind::array) {
+            b = type_table[b.unqualified()].operand;
+            cvb |= b.cv();
+            *unknown = *unknown || !first;
+        }
+        if (cva & ~cvb)
+            return true;
+        if (cva != cvb && !const_above)
+            return true;
+        if (!(cvb & cv_const))
+            const_above = false;
+        first = false;
+        const struct type ta = type_table[a.unqualified()];
+        const struct type tb = type_table[b.unqualified()];
+        bool levels = ta.kind == type_kind::pointer ||
+                      ta.kind == type_kind::pointer_to_member;
+        if (ta.kind != tb.kind || !levels) {
+            /* what the other side lacks is not compared */
+            if (ta.kind != tb.kind &&
+                (ta.kind == type_kind::pointer_to_member ||
+                 tb.kind == type_kind::pointer_to_member))
+                *unknown = true;
+            return false;
+        }
+        from = a;
+        to = b;
+    }
+}
+
+/*
  * A pointer to a pointer by the casts in kinds ([expr.cast]/4's list, in
  * order):
  *
@@ -539,10 +628,18 @@ analysis_result semantic_analysis::pointer_conversion(SyntaxRef at,
                           "the reinterpret_cast operator shall not cast away "
                           "constness",
                           "expr.reinterpret.cast");
-    if (!lesser && !by_const &&
-        (fp.kind == type_kind::pointer || tp.kind == type_kind::pointer))
+    if (!by_const) {
         /* [expr.const.cast]/7 at the levels below the first */
-        return not_supported(at, "expr.const.cast");
+        bool unknown = false;
+        bool away = casts_away_constness(m.type, to, &unknown);
+        if (away)
+            return ill_formed(at,
+                              "the reinterpret_cast operator shall not cast "
+                              "away constness",
+                              "expr.reinterpret.cast");
+        if (unknown)
+            return not_supported(at, "expr.const.cast");
+    }
     m.type = result;
     /* [expr.const]/5: "a reinterpret_cast", "a conversion from type cv
        void* to a pointer-to-object type" (which a later revision allows:
