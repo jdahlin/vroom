@@ -363,8 +363,10 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             k == standard_keyword::dynamic_cast_)
             return named_cast(n, k, m);
     }
-    if (n.size() == 3 && (n[1].is(preprocessing_op_or_punc::DOT,
-                                  preprocessing_op_or_punc::ARROW)))
+    if ((n.size() == 3 ||
+         (n.size() == 4 && n[2].is(standard_keyword::template_))) &&
+        (n[1].is(preprocessing_op_or_punc::DOT,
+                 preprocessing_op_or_punc::ARROW)))
         return member_reference(n, m);
     /* [expr.type.conv]/1: "A simple-type-specifier or typename-specifier
        followed by a parenthesized optional expression-list or by a
@@ -791,33 +793,42 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         owned_array<template_argument> specified;
         /* [class.mfct.non-static]/2: a member function template's name
            in a member function of its class (or a class derived from
-           it), called on (*this) */
-        if (n[0].is_token() && n[0].is_identifier()) {
-            lookup_result x = lookup_unqualified(
-                tokens.identifier(n[0].token()), lookup_filter::any);
-            entity_index held = 0;
-            if (x.unknown && !x.entity && !x.ambiguous &&
-                member_function_template_of(x.unknown_entity))
-                held = x.unknown_entity;
-            else if (x.entity && !x.ambiguous &&
-                     entity_table[x.entity].member_templates)
-                held = x.entity;
-            if (held) {
-                bool ambiguous = false;
-                entity_index of = entity_table[held].enclosing;
-                if (!function_state.this_entity ||
-                    (of != current_class() &&
-                     !base_step(current_class(), of, ambiguous)) ||
-                    ambiguous)
-                    return not_supported(n, "temp.mem");
-                expression_meaning object;
-                VTRY_SET(r, this_object(n[0].token(), object));
-                owned_array<expression_meaning> early;
-                for (const expression_meaning &e : expanded)
-                    early.append(e);
-                return member_template_call(n, held, object, arguments, early,
-                                            m);
-            }
+           it), called on (*this); [expr.prim.id.qual]/2: through a class's
+           name, [class.mfct.non-static]/3 */
+        entity_index held = 0;
+        entity_index named_in = 0;
+        owned_array<SyntaxElement> written;
+        SyntaxRef written_at = 0;
+        VTRY_SET(r, member_callee(n[0], held, named_in, written, written_at));
+        if (held) {
+            bool ambiguous = false;
+            entity_index from = current_class();
+            bool qualified_name = named_in != 0;
+            if (!named_in)
+                named_in = entity_table[held].enclosing;
+            /* (*this) is the object where this class is, or is derived
+               from, the class the name is of */
+            bool related = from && (named_in == from ||
+                                    base_step(from, named_in, ambiguous));
+            if (ambiguous || (!related && !qualified_name))
+                return not_supported(n, "temp.mem");
+            /* a static member's (or no member function's) context has no
+               object: only a static member function can be called */
+            expression_meaning object;
+            bool has_object = related && has_this_object();
+            if (has_object)
+                VTRY_SET(r, this_object(n.first_token(), object));
+            owned_array<expression_meaning> early;
+            for (const expression_meaning &e : expanded)
+                early.append(e);
+            const expression_meaning *implied = nullptr;
+            if (has_object)
+                implied = &object;
+            const owned_array<SyntaxElement> *as_written = nullptr;
+            if (written_at)
+                as_written = &written;
+            return member_template_call(n, held, implied, arguments, early,
+                                        as_written, written_at, m);
         }
         VTRY_SET(r, template_callee(n[0], name, ft, specified, qualified));
         if (ft) {
@@ -928,7 +939,17 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         if (r != analysis_result::well_formed)
             return r;
         expression_meaning object = member_template_object;
-        return member_template_call(n, held, object, arguments, early, m);
+        owned_array<SyntaxElement> written;
+        for (SyntaxElement w : member_template_written)
+            written.append(w);
+        SyntaxRef written_at = member_template_written_at;
+        member_template_written.clear();
+        member_template_written_at = 0;
+        const owned_array<SyntaxElement> *as_written = nullptr;
+        if (written_at)
+            as_written = &written;
+        return member_template_call(n, held, &object, arguments, early,
+                                    as_written, written_at, m);
     }
     if (r != analysis_result::well_formed)
         return r;
@@ -1052,6 +1073,122 @@ analysis_result semantic_analysis::template_callee(
     return r;
 }
 
+/*
+ * [over.call.func]/3: the callee of a call, named by a member function
+ * template of a class: an unqualified name or template-id
+ * (f, f<T>), or a class-qualified one (X::f, X::template f<T>); held is
+ * the held name of the member function templates (and the functions of
+ * their chain) it found, named_in the class of a qualified name, written
+ * the explicit template arguments of a template-id (written_at its
+ * syntax).  held is 0 for anything else.
+ */
+analysis_result semantic_analysis::member_callee(
+    SyntaxElement callee, entity_index &held, entity_index &named_in,
+    owned_array<SyntaxElement> &written, SyntaxRef &written_at)
+{
+    held = 0;
+    named_in = 0;
+    written_at = 0;
+    SyntaxElement id = callee;
+    nominated_scope scope;
+    bool qualified = false;
+    if (callee.is(syntax_kind::qualified_id)) {
+        bool keyword =
+            callee.size() == 3 && callee[1].is(standard_keyword::template_);
+        if ((callee.size() != 2 && !keyword) ||
+            !callee[0].is(syntax_kind::nested_name_specifier))
+            return analysis_result::well_formed;
+        id = callee[callee.size() - 1];
+        qualified = true;
+    }
+    token_index name = 0;
+    if (id.is_token()) {
+        if (!id.is_identifier())
+            return analysis_result::well_formed;
+        name = id.token();
+    } else if (id.is(syntax_kind::simple_template_id) && id.size() >= 3 &&
+               id[0].is_identifier()) {
+        name = id[0].token();
+    } else {
+        return analysis_result::well_formed;
+    }
+    lookup_result x;
+    /* (the uses a callee that is no member template's records are recorded
+       again by its analysis) */
+    size_t uses_before = name_uses.size();
+    if (qualified) {
+        VTRY(r, nested_name_specifier(callee[0], scope));
+        if (is_namespace(scope.entity) ||
+            entity_table[scope.entity].kind != entity_kind::class_type) {
+            name_uses.resize(uses_before);
+            return analysis_result::well_formed;
+        }
+        x = lookup_qualified(scope.entity, tokens.identifier(name),
+                             lookup_filter::any);
+        named_in = scope.entity;
+    } else {
+        x = lookup_unqualified(tokens.identifier(name), lookup_filter::any);
+    }
+    if (x.unknown && !x.entity && !x.ambiguous &&
+        member_function_template_of(x.unknown_entity))
+        held = x.unknown_entity;
+    else if (x.entity && !x.ambiguous &&
+             entity_table[x.entity].member_templates)
+        held = x.entity;
+    if (!held) {
+        named_in = 0;
+        name_uses.resize(uses_before);
+        return analysis_result::well_formed;
+    }
+    if (id.is(syntax_kind::simple_template_id)) {
+        owned_array<bool> expansion;
+        VTRY(r, written_arguments_of(id, written, expansion));
+        for (bool e : expansion)
+            if (e)
+                return not_supported(id.index(), "temp.variadic");
+        written_at = id.index();
+    }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.names]/1: the template-arguments of the simple-template-id id,
+ * one element each; [temp.variadic]/5: an item may be followed by an
+ * ellipsis (a lone argument is the template-id's own child), marked in
+ * expansion.
+ */
+analysis_result
+semantic_analysis::written_arguments_of(SyntaxElement id,
+                                        owned_array<SyntaxElement> &written,
+                                        owned_array<bool> &expansion)
+{
+    for (uint32_t i = 2; i + 1 < id.size(); i++) {
+        /* [temp.variadic]/5: an item may be followed by an ellipsis
+           (a lone argument is the template-id's own child) */
+        if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
+            if (written.empty() || expansion.back())
+                return not_supported(id.index(), "temp.variadic");
+            expansion.back() = true;
+        } else if (id[i].is(syntax_kind::template_argument_list)) {
+            if (!expansion_list(id[i], written, expansion))
+                return not_supported(id.index(), "temp.variadic");
+        } else {
+            written.append(id[i]);
+            expansion.append(false);
+        }
+    }
+    /* a type-id that ends in the ellipsis: its pattern the type-id
+       before it */
+    for (size_t w = 0; w < written.size(); w++)
+        if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
+            written[w][1].is(preprocessing_op_or_punc::ELLIPSIS)) {
+            if (expansion[w])
+                return not_supported(id.index(), "temp.variadic");
+            expansion[w] = true;
+        }
+    return analysis_result::well_formed;
+}
+
 analysis_result semantic_analysis::template_callee_parts(
     SyntaxElement callee, token_index &name, uint32_t &function_template,
     owned_array<template_argument> &specified, bool &qualified)
@@ -1081,30 +1218,7 @@ analysis_result semantic_analysis::template_callee_parts(
         if (id.size() < 3 || !id[0].is_identifier())
             return analysis_result::well_formed;
         name = id[0].token();
-        for (uint32_t i = 2; i + 1 < id.size(); i++) {
-            /* [temp.variadic]/5: an item may be followed by an ellipsis
-               (a lone argument is the template-id's own child) */
-            if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
-                if (written.empty() || expansion.back())
-                    return not_supported(id.index(), "temp.variadic");
-                expansion.back() = true;
-            } else if (id[i].is(syntax_kind::template_argument_list)) {
-                if (!expansion_list(id[i], written, expansion))
-                    return not_supported(id.index(), "temp.variadic");
-            } else {
-                written.append(id[i]);
-                expansion.append(false);
-            }
-        }
-        /* a type-id that ends in the ellipsis: its pattern the type-id
-           before it */
-        for (size_t w = 0; w < written.size(); w++)
-            if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
-                written[w][1].is(preprocessing_op_or_punc::ELLIPSIS)) {
-                if (expansion[w])
-                    return not_supported(id.index(), "temp.variadic");
-                expansion[w] = true;
-            }
+        VTRY(r, written_arguments_of(id, written, expansion));
     } else {
         return analysis_result::well_formed;
     }
@@ -1418,13 +1532,7 @@ analysis_result semantic_analysis::template_call(
         owned_array<overload_candidate> candidates;
         owned_array<uint32_t> first_arguments;
         owned_array<template_argument> all;
-        for (entity_index e : functions) {
-            overload_candidate c;
-            c.function = e;
-            c.type = entity_table[e].type;
-            candidates.append(c);
-            first_arguments.append(0);
-        }
+        function_candidates(functions, false, candidates, &first_arguments);
         const owned_array<SyntaxElement> *given_written = nullptr;
         if (written_at)
             given_written = &written;

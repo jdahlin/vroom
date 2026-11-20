@@ -26,6 +26,28 @@
 namespace cplusplus
 {
 
+/*
+ * [over.match.funcs]/2: the functions as candidates of one overload
+ * resolution; member: each takes the implied object argument first;
+ * first_arguments (parallel to candidates, as template_candidates fills it):
+ * 0, a function has no template arguments.
+ */
+void semantic_analysis::function_candidates(
+    const owned_array<entity_index> &functions, bool member,
+    owned_array<overload_candidate> &candidates,
+    owned_array<uint32_t> *first_arguments) const
+{
+    for (entity_index f : functions) {
+        overload_candidate c;
+        c.function = f;
+        c.type = entity_table[f].type;
+        c.member = member;
+        candidates.append(c);
+        if (first_arguments)
+            first_arguments->append(0);
+    }
+}
+
 /* the token of the name the postfix-expression of a call is, 0 if it is
    none of [over.call.func]/1's forms */
 token_index semantic_analysis::callee_name(SyntaxElement c) const
@@ -43,6 +65,16 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
                  preprocessing_op_or_punc::ARROW)) &&
         c[2].is_identifier())
         return c[2].token();
+    /* x.f<T> and x.template f<T> */
+    if (c.is(syntax_kind::postfix_expression) && c.size() >= 3 &&
+        (c[1].is(preprocessing_op_or_punc::DOT,
+                 preprocessing_op_or_punc::ARROW))) {
+        SyntaxElement id = c[c.size() - 1];
+        if ((c.size() == 3 ||
+             (c.size() == 4 && c[2].is(standard_keyword::template_))) &&
+            id.is(syntax_kind::simple_template_id) && id[0].is_identifier())
+            return id[0].token();
+    }
     if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
         (c[1].is(preprocessing_op_or_punc::DOT,
                  preprocessing_op_or_punc::ARROW)) &&
@@ -149,19 +181,14 @@ semantic_analysis::resolve_call(SyntaxRef n,
             implied.category = semantics[semantics[object].a].category;
     }
     owned_array<overload_candidate> candidates;
-    for (entity_index e : set) {
-        /* [over.match.funcs]/2: "the set of candidate functions can contain
-           both member and non-member functions to be resolved against the
-           same argument list"; /4: "For static member functions, the
-           implicit object parameter is considered to match any object"
-           (object_sequence); a call without an object is made of the
-           non-static ones' with no implied argument too, and the chosen one is
-           refused below ([class.mfct.non-static]/3) */
-        overload_candidate c;
-        c.function = e;
-        c.type = entity_table[e].type;
-        candidates.append(c);
-    }
+    /* [over.match.funcs]/2: "the set of candidate functions can contain
+       both member and non-member functions to be resolved against the
+       same argument list"; /4: "For static member functions, the
+       implicit object parameter is considered to match any object"
+       (object_sequence); a call without an object is made of the
+       non-static ones' with no implied argument too, and the chosen one is
+       refused below ([class.mfct.non-static]/3) */
+    function_candidates(set, false, candidates);
     size_t chosen = 0;
     const expression_meaning *implied_object = nullptr;
     if (object)

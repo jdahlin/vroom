@@ -126,14 +126,20 @@ analysis_result semantic_analysis::member_function_template(
         entity_index head = prior;
         prior = entity_table[head].member_templates;
         if (!prior) {
-            prior = entity_table.make(entity_kind::none, name, c);
-            entity_table[prior].held_by_template = true;
-            note_held(prior);
+            prior = make_held_name(name, c);
             entity_table[head].member_templates = prior;
         }
-    } else if (prior && (entity_table[prior].enclosing != c ||
-                         !member_function_template_of(prior)))
+    } else if (prior && entity_table[prior].enclosing != c) {
+        /* a name a using-declaration or a member enumeration's enumerator
+           brought into the class (class_member_declaration) */
+        return not_supported(n, "class.mem");
+    } else if (prior && !member_function_template_of(prior)) {
+        /* [temp.mem]/8: a conversion function template beside a
+           non-template conversion function (or a member of another kind):
+           the best conversion function among them ([over.match.conv]) is
+           not weighed */
         return not_supported(n, "temp.mem");
+    }
     function_template record = new_template(
         name, c, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.gnu_flags = gnu_flags;
@@ -162,9 +168,7 @@ analysis_result semantic_analysis::member_function_template(
         entity_table[t].explicit_dependent = s.explicit_dependent;
         prior = entity_table[c].constructor_templates;
         if (!prior) {
-            prior = entity_table.make(entity_kind::none, name, c);
-            entity_table[prior].held_by_template = true;
-            note_held(prior);
+            prior = make_held_name(name, c);
             entity_table[c].constructor_templates = prior;
         }
     }
@@ -180,24 +184,29 @@ analysis_result semantic_analysis::member_function_template(
 /*
  * [temp.over]/1: the specializations of the member function templates
  * named held deduced from the arguments (not the object's), appended to
- * candidates as member candidates ([over.match.funcs]/2).
+ * candidates; with_object, member candidates with the implied object
+ * argument ([over.match.funcs]/2), else candidates of a call with no
+ * object (a static member's context).  A static member function template
+ * is one too: its implicit object parameter matches any object
+ * ([over.match.funcs]/4, object_sequence).  The explicit template
+ * arguments as written, if any ([temp.arg.explicit]), and where each
+ * candidate's complete arguments start in all, as template_candidates.
  */
 analysis_result semantic_analysis::member_template_candidates(
-    SyntaxRef n, entity_index held, const expression_meaning *arguments,
-    uint32_t count, owned_array<overload_candidate> &candidates)
+    SyntaxRef n, entity_index held, bool with_object,
+    const expression_meaning *arguments, uint32_t count,
+    owned_array<overload_candidate> &candidates,
+    owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
+    const owned_array<SyntaxElement> *written, SyntaxRef written_at)
 {
     owned_array<uint32_t> group;
     function_template_overloads(held, group);
-    for (uint32_t g : group)
-        if (!entity_table[function_templates[g - 1].entity].nonstatic_member)
-            /* a static member function template: no implicit object
-               parameter to match ([over.match.funcs]/4) */
-            return not_supported(n, "temp.mem");
     size_t first = candidates.size();
     analysis_result r =
-        template_candidates(n, group, arguments, count, candidates);
+        template_candidates(n, group, arguments, count, candidates,
+                            first_arguments, all, written, written_at);
     for (size_t i = first; i < candidates.size(); i++)
-        candidates[i].member = true;
+        candidates[i].member = with_object;
     return r;
 }
 
@@ -238,13 +247,17 @@ analysis_result semantic_analysis::constructor_template_candidates(
 }
 
 /*
- * [over.call.func]/2: a call whose postfix-expression is a class member
- * access naming member function templates (held: their name), of object
- * (a glvalue of the class or of a class derived from it).  [temp.over]/1:
- * each template's specialization deduced from the arguments
- * ([temp.deduct.call]) is a candidate, with the implied object argument
- * ([over.match.funcs]/2); the best one's definition is instantiated
- * ([temp.inst]/4) and called.
+ * [over.call.func]/2, /3: a call of the member functions and function
+ * templates named held (the held name of the templates, whose chain also
+ * has the name's non-template members): through a class member access
+ * x.f(args) or x->f<T>(args), of object (a glvalue of the class or of a
+ * class derived from it), or by an unqualified or class-qualified name,
+ * with the object of *this or none.  [temp.over]/1: each template's
+ * specialization deduced from the arguments ([temp.deduct.call]) is a
+ * candidate with the non-template members ([temp.mem]/2), the implied
+ * object argument ([over.match.funcs]/2) matching any object of a static
+ * one (/4); the best one's definition is instantiated ([temp.inst]/4) and
+ * called.
  */
 void semantic_analysis::introduce_member_templates(entity_index c,
                                                    entity_index head,
@@ -266,9 +279,11 @@ void semantic_analysis::introduce_member_templates(entity_index c,
 }
 
 analysis_result semantic_analysis::member_template_call(
-    SyntaxRef n, entity_index held, const expression_meaning &object,
+    SyntaxRef n, entity_index held, const expression_meaning *object,
     const owned_array<SyntaxElement> &arguments,
-    owned_array<expression_meaning> &early, expression_meaning &m)
+    owned_array<expression_meaning> &early,
+    const owned_array<SyntaxElement> *written, SyntaxRef written_at,
+    expression_meaning &m)
 {
     if (early.empty())
         for (SyntaxElement a : arguments) {
@@ -284,54 +299,103 @@ analysis_result semantic_analysis::member_template_call(
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
             return not_supported(n, "temp.deduct.call");
     owned_array<overload_candidate> candidates;
-    /* [temp.mem]/2: the non-template member functions of the name
-       (held is the first of them, or the templates' name alone) are
-       candidates with the templates' specializations
-       ([over.match.funcs]/2: member candidates) */
+    owned_array<uint32_t> first_arguments;
+    owned_array<template_argument> all;
+    /* [temp.mem]/2: the non-template member functions of the name (held
+       is the first of them, or the templates' name alone) are candidates
+       with the templates' specializations; [temp.arg.explicit]: only a
+       template takes template arguments */
     entity_index templates = member_templates_of(held);
-    if (entity_table[held].kind == entity_kind::function) {
+    if (!written && entity_table[held].kind == entity_kind::function) {
         owned_array<entity_index> functions;
         overload_set(held, functions);
-        for (entity_index f : functions) {
-            if (!entity_table[f].nonstatic_member)
-                return not_supported(n, "temp.mem");
-            overload_candidate c;
-            c.function = f;
-            c.type = entity_table[f].type;
-            c.member = true;
-            candidates.append(c);
-        }
+        function_candidates(functions, object != nullptr, candidates,
+                            &first_arguments);
     }
-    VTRY(r, member_template_candidates(n, templates, early.data(),
-                                       static_cast<uint32_t>(early.size()),
-                                       candidates));
+    VTRY(r, member_template_candidates(
+                n, templates, object != nullptr, early.data(),
+                static_cast<uint32_t>(early.size()), candidates,
+                &first_arguments, &all, written, written_at));
     if (candidates.empty())
         return not_supported(n, "temp.deduct");
-    owned_array<expression_meaning> all;
-    all.append(object);
+    owned_array<expression_meaning> operands;
+    if (object)
+        operands.append(*object);
     for (const expression_meaning &e : early)
-        all.append(e);
+        operands.append(e);
     size_t chosen = 0;
     bool none_viable = false;
-    VTRY_SET(r, best_viable_function(n, candidates, nullptr, all, chosen,
+    VTRY_SET(r, best_viable_function(n, candidates, nullptr, operands, chosen,
                                      &none_viable));
     if (none_viable)
         return not_supported(n, "over.match.viable");
     const overload_candidate &k = candidates[chosen];
-    if (!k.template_index)
-        /* [over.match.best]/2.4: a non-template function is the better
-           of two that convert equally well */
-        return bound_member_call(n, k.function, object, arguments, early, m);
-    owned_array<template_argument> deduced;
-    r = deduce_from_call(n, k.template_index, early.data(),
-                         static_cast<uint32_t>(early.size()), deduced);
-    entity_index f = 0;
-    if (r == analysis_result::well_formed)
-        VTRY_SET(r,
-                 instantiate(n, function_templates[k.template_index - 1].entity,
-                             deduced.data(),
-                             static_cast<uint32_t>(deduced.size()), f));
-    return bound_member_call(n, f, object, arguments, early, m);
+    entity_index f = k.function;
+    if (k.template_index) {
+        /* [temp.inst]/4: the specialization chosen is referenced: its
+           definition is instantiated (a candidate's declaration only was) */
+        const struct function_template ft =
+            function_templates[k.template_index - 1];
+        VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
+                                ft.parameter_count, f));
+    }
+    if (!entity_table[f].nonstatic_member)
+        return static_member_call(n, f, object, arguments, early, m);
+    if (!object)
+        /* [class.mfct.non-static]/3: a non-static member function named
+           where no object is: ill-formed, not analysed */
+        return not_supported(n, "class.mfct.non-static");
+    return bound_member_call(n, f, *object, arguments, early, m);
+}
+
+/*
+ * [expr.call]/1 and [expr.ref]/1: a static member function f called,
+ * through an object expression "evaluated" and then discarded
+ * ([over.match.funcs]/4), or by name alone: a comma's left operand.
+ */
+analysis_result semantic_analysis::static_member_call(
+    SyntaxRef n, entity_index f, const expression_meaning *object,
+    const owned_array<SyntaxElement> &arguments,
+    owned_array<expression_meaning> &early, expression_meaning &m)
+{
+    token_index at = n.first_token();
+    entity_index object_class = 0;
+    if (object)
+        object_class = type_table[object->type.unqualified()].entity;
+    if (!accessible(f, object_class))
+        /* [class.access]/4: "access control is applied to the function
+           selected by overload resolution" */
+        return ill_formed(n,
+                          "a private or protected member's name can be used "
+                          "only by members and friends of the class in which "
+                          "it is declared",
+                          "class.access");
+    if (object && object->category == value_category::prvalue &&
+        entity_table[object_class].destructor)
+        /* the temporary's destruction ([class.temporary]/4) */
+        return not_supported(n, "class.temporary");
+    VTRY(r, deleted_use(at, f));
+    const entity x = entity_table[f];
+    expression_meaning callee;
+    callee.type = x.type;
+    callee.category = value_category::lvalue;
+    callee.evaluation = constness::constant;
+    callee.entity = f;
+    callee.node = expression_node(semantic_kind::entity, callee, at, f);
+    if (object)
+        callee.node = expression_node(semantic_kind::comma, callee, at,
+                                      object->node, callee.node);
+    return call_with(n, callee, entity_table[f].type, 0, 0, arguments, early,
+                     m);
+}
+
+/* whether an expression may name *this here: the function's own this, a
+   lambda's enclosing function's */
+bool semantic_analysis::has_this_object()
+{
+    if (lambda_context *l = current_lambda())
+        return l->enclosing_this.unqualified() != 0;
+    return function_state.this_entity != 0;
 }
 
 /* member function f called on object (of its class or a class derived

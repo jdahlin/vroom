@@ -239,7 +239,7 @@ analysis_result semantic_analysis::overloaded_operator(
                     rest.append(operand(i));
                 size_t first = candidates.size();
                 VTRY(r, member_template_candidates(
-                            n, templates, rest.data(),
+                            n, templates, true, rest.data(),
                             static_cast<uint32_t>(rest.size()), candidates));
                 for (size_t i = first; i < candidates.size(); i++) {
                     candidates[i].rewritten = rewritten;
@@ -261,13 +261,7 @@ analysis_result semantic_analysis::overloaded_operator(
            function calls ([basic.lookup.argdep]) except that all member
            functions are ignored." */
         if (member_only) {
-            for (entity_index e : members) {
-                overload_candidate c;
-                c.function = e;
-                c.type = entity_table[e].type;
-                c.member = true;
-                candidates.append(c);
-            }
+            function_candidates(members, true, candidates);
             return analysis_result::well_formed;
         }
         lookup_result found =
@@ -321,14 +315,11 @@ analysis_result semantic_analysis::overloaded_operator(
         }
         for (entity_index e : set)
             overload_set(e, others);
-        for (entity_index e : members) {
-            overload_candidate c;
-            c.function = e;
-            c.type = entity_table[e].type;
-            c.member = true;
-            c.rewritten = rewritten;
-            c.reversed = reversed;
-            candidates.append(c);
+        size_t first_member = candidates.size();
+        function_candidates(members, true, candidates);
+        for (size_t i = first_member; i < candidates.size(); i++) {
+            candidates[i].rewritten = rewritten;
+            candidates[i].reversed = reversed;
         }
         /* "However, if no operand has a class type, only those non-member
            functions in the lookup set that have a first parameter of type T1
@@ -559,6 +550,15 @@ analysis_result semantic_analysis::overloaded_operator(
             expression_node(semantic_kind::address, address, at, e.node);
         object = address.node;
         member = f;
+        if (!x.nonstatic_member) {
+            /* [over.match.funcs]/4: a static member function: the object
+               expression is evaluated and discarded */
+            callee.node = expression_node(semantic_kind::entity, callee, at, f);
+            callee.node = expression_node(semantic_kind::comma, callee, at,
+                                          e.node, callee.node);
+            object = 0;
+            member = 0;
+        }
     } else {
         /* "Otherwise, if a non-member function is selected, the expression
            is interpreted as operator @ ( x , y )" */
