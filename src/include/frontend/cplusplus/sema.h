@@ -5023,6 +5023,10 @@ class semantic_analysis
         bool identity = true;
         /* [conv.bool] from a pointer ([over.ics.rank]/4.1) */
         bool pointer_to_bool = false;
+        /* [diff.lex]/3: a string literal to char* (clang's extension since
+           C++11): a function that needs one is worse than any viable
+           function that needs none ([impl.clang]) */
+        bool string_literal_to_char_pointer = false;
         /* to cv void* ([over.ics.rank]/4.4.1) */
         bool to_void_pointer = false;
         /* [conv.prom]/4: an enumeration with a fixed underlying type to it

@@ -190,6 +190,15 @@ analysis_result semantic_analysis::best_viable_function(
        or better conversion sequence than ICS1(G) when F is a static member
        function" (compare_conversions) */
     auto better = [&](size_t f1, size_t f2) {
+        /* [impl.clang] a string literal converted to char* ([diff.lex]/3)
+           makes a function worse than any that needs no such conversion */
+        bool writing1 = false, writing2 = false;
+        for (size_t i = 0; i < width; i++) {
+            writing1 |= ics[f1 * width + i].string_literal_to_char_pointer;
+            writing2 |= ics[f2 * width + i].string_literal_to_char_pointer;
+        }
+        if (writing1 != writing2)
+            return writing2;
         bool some = false;
         for (size_t i = 0; i < width; i++) {
             int c = compare_conversions(at_best(f1, i), at_best(f2, i));
