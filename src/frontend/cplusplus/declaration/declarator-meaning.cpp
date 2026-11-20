@@ -326,6 +326,9 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
        where clang still reports it */
     if (abstract_class(type))
         return not_supported(at, "class.abstract");
+    /* [ext:clang_vla] an array of variable length arrays: not analysed */
+    if (has_variable_bound(type))
+        return not_supported(at, "dcl.array");
     if (!bound) {
         type = qualified_type::make(type_table.array_of_unknown_bound_of(type),
                                     cv_none);
@@ -350,6 +353,10 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
         return analysis_result::well_formed;
     }
     expression_meaning m;
+    /* [ext:clang_vla] whether the bound may be a run-time value; the
+       bound's own declarators (a lambda's, a cast's) may not */
+    bool run_time_allowed = variable_length_declarator;
+    scoped_value<bool> inner(variable_length_declarator, false);
     VTRY(r, expression(bound, m));
     VTRY_SET(r, operand_value(at, m));
     /* [expr.const]/10: an integral promotion of an unscoped
@@ -369,8 +376,23 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
        (C99's, clang's extension), or one clang folds */
     bool constant = false;
     VTRY_SET(r, integral_constant_expression(at, m, constant));
-    if (!constant)
-        return not_supported(at, "expr.const");
+    if (!constant) {
+        /* [ext:clang_vla] clang's and GCC's variable length array in C++:
+           "variable length arrays in C++ are a Clang extension"
+           (-Wvla-cxx-extension, off unless asked): a block-scope
+           variable's array, of one dimension with run-time bounds (the
+           element type has none), whose bound is evaluated where it is
+           declared and converted to std::size_t */
+        if (!run_time_allowed || !m.node || !depends_on_run_time_state(m.node))
+            return not_supported(at, "expr.const");
+        if (has_variable_bound(type))
+            return not_supported(at, "dcl.array");
+        VTRY_SET(r, extension_used(diagnostic_id::sema_variable_length_array,
+                                   at.first_token(), nullptr));
+        type = qualified_type::make(
+            type_table.array_of_variable_bound(type, m.node), cv_none);
+        return analysis_result::well_formed;
+    }
     const implementation_defined_behavior &b = tokens.files.behavior;
     fundamental_type f = fundamental_of(m.type);
     __int128 value = integer_value(b, f, m.value);
@@ -391,6 +413,80 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
     }
     type = qualified_type::make(type_table.array_of(type, uint64_t(value)),
                                 cv_none);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [ext:clang_vla] whether the value of the expression node n can differ
+ * from one execution to the next: it reads an object, calls a function or
+ * modifies something.  One that does not and is no constant expression is
+ * one clang folds as an extension ((unsigned long)(int *)0 + 1), not a
+ * variable length array's bound.
+ */
+bool semantic_analysis::depends_on_run_time_state(uint32_t n) const
+{
+    const semantic_node &x = semantics[n];
+    switch (x.kind) {
+    case semantic_kind::constant:
+    case semantic_kind::entity:
+        return false;
+    case semantic_kind::conversion:
+        if (x.op == static_cast<uint8_t>(conversion_kind::lvalue_to_rvalue))
+            return true;
+        return depends_on_run_time_state(x.a);
+    case semantic_kind::unary:
+    case semantic_kind::address:
+    case semantic_kind::member:
+        return depends_on_run_time_state(x.a);
+    case semantic_kind::binary:
+    case semantic_kind::logical_and:
+    case semantic_kind::logical_or:
+    case semantic_kind::comma:
+    case semantic_kind::subscript:
+        return depends_on_run_time_state(x.a) || depends_on_run_time_state(x.b);
+    case semantic_kind::conditional:
+        return depends_on_run_time_state(x.a) ||
+               depends_on_run_time_state(x.b) || depends_on_run_time_state(x.c);
+    default:
+        return true;
+    }
+}
+
+/*
+ * [ext:clang_vla] a declaration whose type has a variable length array in
+ * it: clang accepts one as an automatic variable, of one dimension, not
+ * initialized ("variable-sized object may not be initialized", also for
+ * = {} in C++), whose elements need no construction or destruction here.
+ * permitted: the declaration is a block-scope variable's (the declarator
+ * was analysed with run-time bounds allowed).
+ */
+analysis_result
+semantic_analysis::variable_length_declaration(SyntaxRef declaration,
+                                               qualified_type type,
+                                               bool permitted, bool initialized)
+{
+    if (!permitted || !variable_length_array(type))
+        return not_supported(declaration, "dcl.array");
+    if (initialized)
+        return ill_formed(declaration,
+                          "a variable length array shall not be initialized",
+                          "ext.clang");
+    qualified_type element = type_table[type.unqualified()].operand;
+    if (!size_of_type(element) || has_variable_bound(element))
+        return not_supported(declaration, "dcl.array");
+    entity_index record = element_class(element);
+    if (record) {
+        /* the elements would be constructed and destroyed in a loop at
+           run time */
+        if (!is_class_entity(record) || destroys(record) ||
+            (entity_table[record].first_constructor &&
+             !trivial_defaulted_default_constructor(record)))
+            return not_supported(declaration, "dcl.init");
+    }
+    /* [dcl.constexpr]: not a literal type's variable */
+    if (function_state.function &&
+        entity_table[function_state.function].constexpr_)
+        return not_supported(declaration, "dcl.constexpr");
     return analysis_result::well_formed;
 }
 
@@ -1105,9 +1201,10 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     for (size_t k = suffixes.size(); k-- > 0;) {
         const suffix &x = suffixes[k];
         analysis_result r;
-        if (x.function)
+        if (x.function) {
+            scoped_value<bool> parameters(variable_length_declarator, false);
             r = function(d[x.child], type);
-        else if (x.has_bound)
+        } else if (x.has_bound)
             r = array(n, d[x.child], type);
         else
             VTRY_SET(r, array(n, {}, type));

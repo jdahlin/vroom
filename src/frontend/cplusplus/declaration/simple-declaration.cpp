@@ -1148,7 +1148,21 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* the parameters of this declarator's function declarator, if it has
        one (function sets them) */
     function_parameters.clear();
-    VTRY(r, declarator(declaration, d, type, m));
+    /* [ext:clang_vla] an automatic variable's array bounds may be run-time
+       values */
+    bool variable_length = function_state.active && !s.static_ && !s.extern_ &&
+                           !s.typedef_ && !s.constexpr_ &&
+                           !s.cxx_thread_local && !s.c11_thread_local;
+    analysis_result r = analysis_result::well_formed;
+    {
+        scoped_value<bool> run_time(variable_length_declarator,
+                                    variable_length);
+        VTRY_SET(r, declarator(declaration, d, type, m));
+    }
+    if (has_variable_bound(type)) {
+        VTRY_SET(r, variable_length_declaration(declaration, type,
+                                                variable_length, initialized));
+    }
     if (!m.has_id)
         return not_supported(declaration, "dcl.meaning");
     bool has_default_arguments = false;
@@ -1564,6 +1578,10 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&
         entity_table[declared_entity].defined)
         require_destructor_definition(type);
+    /* [ext:clang_vla] a variable length array is an automatic variable's */
+    if (r == analysis_result::well_formed && kind == entity_kind::variable &&
+        variable_length_array(type) && !entity_table[declared_entity].automatic)
+        return not_supported(declaration, "dcl.array");
     /* the declaration statement's variables (statement) */
     if (r == analysis_result::well_formed && function_state.active &&
         kind == entity_kind::variable && declared_in_scope == current_scope &&

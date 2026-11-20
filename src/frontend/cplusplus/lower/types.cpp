@@ -130,6 +130,20 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
         made = pointer_to(pointee_type(r.operand, at));
         break;
     case type_kind::array:
+        if (r.variable_bound) {
+            /* [ext:clang_vla] the bound is evaluated where the array is
+               declared: its first mention */
+            type_index index = t.unqualified();
+            if (!variable_arrays[index]) {
+                uint32_t size = full_value(r.variable_bound, false);
+                if (!size)
+                    return ast_builder_type_basic(AST_TYPE_INT);
+                variable_arrays[index] =
+                    ast_builder_type_vla(c, type(r.operand, at), size);
+            }
+            made = variable_arrays[index];
+            break;
+        }
         made = ast_builder_type_array(c, type(r.operand, at), r.bound,
                                       r.bound_known);
         break;

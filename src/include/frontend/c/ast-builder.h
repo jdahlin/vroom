@@ -59,6 +59,14 @@ ast_qualified_type ast_builder_type_vector(cc *c, ast_qualified_type element,
 /* known false: an array of unknown bound */
 ast_qualified_type ast_builder_type_array(cc *c, ast_qualified_type element,
                                           uint64_t count, bool known);
+/* GNU C's variable length array of element: its bound is the expression
+   size (a node of integer type, evaluated where the array's variable is
+   declared and converted to size_t); the type is one per call, and sizes
+   are captured once per declaration */
+ast_qualified_type ast_builder_type_vla(cc *c, ast_qualified_type element,
+                                        uint32_t size);
+/* sizeof of the variable length array type t: a size_t read at run time */
+uint32_t ast_builder_sizeof_vla(cc *c, ast_qualified_type t);
 ast_qualified_type
 ast_builder_type_function(cc *c, ast_qualified_type result,
                           const ast_qualified_type *parameters, uint32_t count,

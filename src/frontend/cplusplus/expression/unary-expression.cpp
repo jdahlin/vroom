@@ -272,7 +272,7 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
     case type_kind::vector:
         return vector_layout(record, false);
     case type_kind::array:
-        if (!record.bound_known)
+        if (!record.bound_known || record.variable_bound)
             return 0;
         return record.bound * size_of_type(record.operand);
     case type_kind::class_type:
@@ -287,6 +287,46 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
     }
     default:
         return 0;
+    }
+}
+
+/* [ext:clang_vla] */
+bool semantic_analysis::variable_length_array(qualified_type t) const
+{
+    const struct type &r = type_table[t.unqualified()];
+    return r.kind == type_kind::array && r.variable_bound;
+}
+
+bool semantic_analysis::has_variable_bound(qualified_type t) const
+{
+    for (;;) {
+        const struct type &r = type_table[t.unqualified()];
+        switch (r.kind) {
+        case type_kind::array:
+            if (r.variable_bound)
+                return true;
+            t = r.operand;
+            continue;
+        case type_kind::pointer:
+        case type_kind::lvalue_reference:
+        case type_kind::rvalue_reference:
+        case type_kind::block_pointer:
+        case type_kind::pointer_to_member:
+        case type_kind::atomic:
+        case type_kind::complex:
+            t = r.operand;
+            continue;
+        case type_kind::function: {
+            const qualified_type *p = type_table.parameters(t.unqualified());
+            for (uint32_t i = 0; i < r.parameter_count; i++)
+                if (has_variable_bound(p[i]))
+                    return true;
+            t = r.operand;
+            continue;
+        }
+        default:
+            return false;
+        }
     }
 }
 
@@ -401,6 +441,29 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
     analysis_result r = sized_operand(n, alignment, operand);
     if (r != analysis_result::well_formed)
         return r;
+    /* [ext:clang_vla] sizeof a variable length array: the bytes its bound
+       made, read at run time (the bound was evaluated where the array was
+       declared) */
+    if (!alignment && !data_size) {
+        qualified_type t = operand;
+        while (type_table[t.unqualified()].kind ==
+                   type_kind::lvalue_reference ||
+               type_table[t.unqualified()].kind == type_kind::rvalue_reference)
+            t = type_table[t.unqualified()].operand;
+        if (variable_length_array(t)) {
+            m.type = qualified_type::make(
+                type_table.fundamental(fundamental_type::unsigned_long_int),
+                cv_none);
+            m.category = value_category::prvalue;
+            m.evaluation = constness::not_constant;
+            m.value = 0;
+            m.beyond_integral_constant = true;
+            m.node = expression_node(semantic_kind::variable_size, m,
+                                     n.first_token());
+            semantics[m.node].computation = t;
+            return analysis_result::well_formed;
+        }
+    }
     uint64_t size = size_of_type(operand);
     if (data_size) {
         /* [ext:clang_datasizeof] a class's data size ([abi:layout]), the

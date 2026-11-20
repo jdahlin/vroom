@@ -75,6 +75,9 @@ analysis_result semantic_analysis::gnu_typeof_type(SyntaxRef n,
         record.kind == type_kind::placeholder ||
         record.kind == type_kind::dependent)
         return not_supported(n, "ext.gnu");
+    /* [ext:clang_vla] see decltype_type */
+    if (has_variable_bound(m.type))
+        return not_supported(n, "dcl.array");
     type = m.type;
     return analysis_result::well_formed;
 }
