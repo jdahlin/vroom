@@ -41,6 +41,14 @@ static const R r1 = {.op = 1, .size = 2, .imm = -16};
 static const R r2 = {.imm = 5, .tail = 9};
 static const Q q1 = {.head = 1, .x = 2, .y = 3, .tail = 4};
 static const Q q2 = {.y = 7};
+/* a union member but the first */
+union W { int i; float f; char c[8]; };
+struct V { int tag; W w; int tail; };
+static const W w1 = {.f = 1.5f};
+static const V v1 = {.tag = 1, .w = {.c = {5, 6}}, .tail = 2};
+static const V v2 = {.w.f = 2.5f};
+static const R r3 = {.op = 2, .off = -3, .tail = 4};
+static const R r4 = {.size = 1, .lab = 77};
 static int local()
 {
     int v = 3;
@@ -72,6 +80,10 @@ int main()
     printf("%s %d %d %d %d %d\n", cs[2].name, cs[2].v[0], cs[2].v[1], cs[0].v[1], cs[0].name[0], cs[1].v[0]);
     printf("%d\n", u2.x);
     printf("%d %d %ld %d %d %d %d %d %d %d\n", r1.op, r1.size, r1.imm, r1.tail, r2.op, (int)r2.imm, r2.tail, q1.head + q1.x * 10 + q1.y * 100 + q1.tail * 1000, q2.x, q2.y);
+    printf("%f %d %d %d %f\n", w1.f, v1.tag, v1.w.c[1], v1.tail, v2.w.f);
+    printf("%d %d %d %d %d %u\n", r3.op, r3.off, (int)r3.ref, r3.tail, r4.size, r4.lab);
+    W wl = {.f = (float)local()};
+    printf("%f\n", wl.f);
     R rl = {.size = 3, .imm = local() - 1};
     printf("%d %ld\n", rl.size, rl.imm);
     printf("%d\n", local());

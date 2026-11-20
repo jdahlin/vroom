@@ -403,6 +403,21 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
         entity_index ce = record(n.type).entity;
         const entity &x = analysis.entity_table[ce];
         class_type(ce, n.at);
+        if (x.union_ && n.a) {
+            /* a union's member a designator named but the first (n.a): C's
+               field a, the list holding its value alone after zeros */
+            uint32_t union_field = c_fields[n.a];
+            for (uint32_t i = 0; i < union_field; i++)
+                values.append(0);
+            uint32_t e = expression(items[0]);
+            if (!e)
+                return 0;
+            values.append(e);
+            return make(AST_NODE_INITIALIZER, type(n.type, n.at), union_field,
+                        ast_builder_list(c, values.data(),
+                                         static_cast<uint32_t>(values.size())),
+                        static_cast<uint32_t>(values.size()), 2, 0);
+        }
         for (uint32_t i = 0, item = 0; item < n.count; i++) {
             if (i >= x.member_count)
                 return fail("an initializer for no member", n.at);

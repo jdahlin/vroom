@@ -1775,9 +1775,11 @@ analysis_result semantic_analysis::designated_list_initialization(
  * selects that member of the class and is a designator of it, the same
  * clause one level down ([class.union.anon]/1: its members are members of
  * the enclosing scope; clang designates through the anonymous member).
+ * A union holds the member its designators name; the node's a is that
+ * member's entity unless it is the first (0).
  * Left to refuse: a clause without designator after a nested one (C's
  * current object is then inside the element), the same element designated
- * in part and as a whole, a union member but its first.
+ * in part and as a whole.
  */
 analysis_result semantic_analysis::designated_elements(
     SyntaxRef list, const owned_array<SyntaxElement> &clauses,
@@ -1841,6 +1843,9 @@ analysis_result semantic_analysis::designated_elements(
     constness all = constness::constant;
     uint64_t pos = 0, extent = 0;
     bool after_nested = false;
+    /* a union's member the clauses so far initialize */
+    uint64_t active = 0;
+    bool active_set = false;
     for (size_t i = 0; i < items.size(); i++) {
         if (consumed[i])
             continue;
@@ -1851,9 +1856,10 @@ analysis_result semantic_analysis::designated_elements(
             VTRY(r, designator_elements(
                         list, designations.pool[item.chain_first], target,
                         members, bound, bound_known, first, last, through));
-            if (is_union && first != 0)
-                /* a union member but the first: its active member is not
-                   in the list's value */
+            if (is_union && active_set && first != active)
+                /* another member than the one given: clang's "initializer
+                   partially overrides prior initialization of this
+                   subobject" error, not modelled */
                 return not_supported(list, "dcl.init.aggr");
         } else {
             if (after_nested)
@@ -1887,6 +1893,9 @@ analysis_result semantic_analysis::designated_elements(
                                 list, designations.pool[items[j].chain_first],
                                 target, members, bound, bound_known, a, b,
                                 through_j));
+                    if (is_union && a != first)
+                        /* another member: refused when it is reached */
+                        continue;
                     if (a != first || b != last)
                         continue;
                     if (items[j].chain_count == 1 && !through_j)
@@ -1932,6 +1941,10 @@ analysis_result semantic_analysis::designated_elements(
         }
         for (uint64_t k = first; k <= last; k++)
             slots[k] = one.node;
+        if (item.chain_count) {
+            active = first;
+            active_set = true;
+        }
         all = combined_constness(all, one.evaluation);
         pos = last + 1;
         if (pos > extent)
@@ -1946,6 +1959,15 @@ analysis_result semantic_analysis::designated_elements(
     if (is_array && bound_known && count > target.bound)
         count = target.bound;
     owned_array<uint32_t> elements;
+    entity_index active_member = 0;
+    if (is_union && active_set && active != 0 && active < slots.size() &&
+        slots[active]) {
+        /* a union member but the first: the list holds its value alone and
+           the node names the member (the lowering's initialized field) */
+        elements.append(slots[active]);
+        active_member = members[active];
+        count = 0;
+    }
     for (uint64_t i = 0; i < count; i++) {
         if (i < slots.size() && slots[i]) {
             elements.append(slots[i]);
@@ -1970,6 +1992,7 @@ analysis_result semantic_analysis::designated_elements(
         type = qualified_type::make(type_table.array_of(target.operand, extent),
                                     type.cv());
     aggregate_value(list, type, all, elements, result);
+    semantics[result.node].a = active_member;
     return analysis_result::well_formed;
 }
 
