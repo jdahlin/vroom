@@ -828,6 +828,18 @@ uint32_t semantic_analysis::function_template_of(entity_index held,
     return 0;
 }
 
+entity_index semantic_analysis::member_templates_of(entity_index e) const
+{
+    if (!e)
+        return 0;
+    if (entity_table[e].kind == entity_kind::function)
+        return entity_table[e].member_templates;
+    if (entity_table[e].kind == entity_kind::none &&
+        member_function_template_of(e))
+        return e;
+    return 0;
+}
+
 void semantic_analysis::function_template_overloads(
     entity_index held, owned_array<uint32_t> &out) const
 {
@@ -2779,7 +2791,9 @@ analysis_result semantic_analysis::define_member_template(uint32_t member,
     entity_index held = 0;
     if (r == analysis_result::well_formed && m.has_id)
         held = entity_table.find(c, tokens.identifier(m.id));
-    if (!held || !member_function_template_of(held))
+    if (held)
+        held = member_templates_of(held);
+    if (!held)
         return member_definition_unsupported(o.declaration, recorded);
     /* the declaration the definition matches: not defined yet, the same
        template-parameters and function type ([temp.over.link]/7) */

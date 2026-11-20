@@ -507,6 +507,11 @@ struct entity {
        last.  The name is bound to the first; the others are reached
        through it (overload_set) */
     entity_index next_overload = 0;
+    /* a member function that is the first of its name's chain: the held
+       name (held_by_template) of the member function templates of the same
+       name in the class, which [temp.mem]/2 overloads with the chain; 0
+       if none */
+    entity_index member_templates = 0;
     /* a function: [dcl.fct.def.delete]/1 a deleted function */
     bool deleted = false;
     /* a function: [dcl.fct.default]/1 the number of its last parameters
@@ -2993,6 +2998,11 @@ class semantic_analysis
     {
         return function_template_of(held, true);
     }
+    /* the held name of the member function templates that the class
+       member e found by name stands for: e itself when it is that name,
+       the templates overloaded with the functions of e's chain
+       (entity::member_templates), 0 if none */
+    entity_index member_templates_of(entity_index e) const;
     analysis_result
     function_template_declarator(SyntaxRef definition, uint32_t lead,
                                  entity_index member_of, entity_index scope,

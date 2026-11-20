@@ -100,13 +100,25 @@ analysis_result semantic_analysis::member_function_template(
                                              abi_tag));
     uint32_t name = tokens.identifier(m.id);
     /* [temp.over]/1: other member function templates of the name are
-       overloads; a non-template member of the name too ([temp.mem]/2),
-       which a call would weigh against them: not analysed */
+       overloads; a non-template member of the name too ([temp.mem]/2):
+       the first of its chain keeps the templates' held name
+       (entity::member_templates), and a call weighs them together */
     entity_index prior = 0;
     if (!constructor)
         prior = entity_table.find(c, name);
-    if (prior && (entity_table[prior].enclosing != c ||
-                  !member_function_template_of(prior)))
+    if (prior && entity_table[prior].enclosing == c &&
+        entity_table[prior].kind == entity_kind::function &&
+        entity_table[prior].special == special_member::none &&
+        !entity_table[prior].conversion_function) {
+        entity_index head = prior;
+        prior = entity_table[head].member_templates;
+        if (!prior) {
+            prior = entity_table.make(entity_kind::none, name, c);
+            entity_table[prior].held_by_template = true;
+            entity_table[head].member_templates = prior;
+        }
+    } else if (prior && (entity_table[prior].enclosing != c ||
+                         !member_function_template_of(prior)))
         return not_supported(n, "temp.mem");
     function_template record = new_template(
         name, c, n, index, first, static_cast<uint32_t>(parameters.size()));
@@ -231,7 +243,25 @@ analysis_result semantic_analysis::member_template_call(
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
             return not_supported(n, "temp.deduct.call");
     owned_array<overload_candidate> candidates;
-    VTRY(r, member_template_candidates(n, held, early.data(),
+    /* [temp.mem]/2: the non-template member functions of the name
+       (held is the first of them, or the templates' name alone) are
+       candidates with the templates' specializations
+       ([over.match.funcs]/2: member candidates) */
+    entity_index templates = member_templates_of(held);
+    if (entity_table[held].kind == entity_kind::function) {
+        owned_array<entity_index> functions;
+        overload_set(held, functions);
+        for (entity_index f : functions) {
+            if (!entity_table[f].nonstatic_member)
+                return not_supported(n, "temp.mem");
+            overload_candidate c;
+            c.function = f;
+            c.type = entity_table[f].type;
+            c.member = true;
+            candidates.append(c);
+        }
+    }
+    VTRY(r, member_template_candidates(n, templates, early.data(),
                                        static_cast<uint32_t>(early.size()),
                                        candidates));
     if (candidates.empty())
@@ -247,6 +277,10 @@ analysis_result semantic_analysis::member_template_call(
     if (none_viable)
         return not_supported(n, "over.match.viable");
     const overload_candidate &k = candidates[chosen];
+    if (!k.template_index)
+        /* [over.match.best]/2.4: a non-template function is the better
+           of two that convert equally well */
+        return bound_member_call(n, k.function, object, arguments, early, m);
     owned_array<template_argument> deduced;
     r = deduce_from_call(n, k.template_index, early.data(),
                          static_cast<uint32_t>(early.size()), deduced);

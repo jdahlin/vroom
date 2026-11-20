@@ -584,6 +584,10 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     if (entity_table[e].kind == entity_kind::none)
         return not_supported(current_declaration,
                              unknown_name_subclause(e, "basic.lookup.unqual"));
+    /* [temp.mem]/2: a name of member function templates and functions:
+       only a call on an object (member_template_call) weighs them */
+    if (entity_table[e].member_templates)
+        return not_supported(current_declaration, "temp.mem");
     /* [over.over]: the function target_expression chose for the name */
     bool chosen = t && t == overload_target_token;
     if (chosen)
@@ -780,6 +784,9 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         return enumerator_value(t, e, m);
     }
     const entity &x = entity_table[e];
+    if (x.member_templates)
+        /* [temp.mem]/2 (named_entity) */
+        return not_supported(n, "temp.mem");
     /* [over.over]/1, [dcl.fct.def.delete]/2 (named_entity) */
     if (x.kind == entity_kind::function && x.next_overload &&
         t != overloaded_callee)

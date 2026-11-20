@@ -372,10 +372,12 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     entity_index e = class_member_lookup(c, tokens.identifier(name), ambiguous);
     if (ambiguous)
         return not_supported(n, "class.member.lookup");
-    if (e && entity_table[e].kind == entity_kind::none) {
+    if (e && (entity_table[e].kind == entity_kind::none ||
+              entity_table[e].member_templates)) {
         /* [temp.mem]/1: member function templates, called: the call
-           deduces their arguments (member_template_call) */
-        if (name == callee && member_function_template_of(e)) {
+           deduces their arguments (member_template_call), with the
+           functions of the name ([temp.mem]/2) */
+        if (name == callee && member_templates_of(e)) {
             member_template_name = e;
             member_template_object = m;
             return analysis_result::well_formed;

@@ -158,8 +158,13 @@ analysis_result semantic_analysis::overloaded_operator(
                 !entity_table[c].size)
                 return not_supported(n, "over.match.oper");
             lookup_result found = lookup_qualified(c, name, lookup_filter::any);
+            entity_index templates = 0;
             if (found.unknown && !found.ambiguous && !found.entity &&
-                member_function_template_of(found.unknown_entity)) {
+                member_function_template_of(found.unknown_entity))
+                templates = found.unknown_entity;
+            else if (found.entity && !found.ambiguous)
+                templates = member_templates_of(found.entity);
+            if (templates) {
                 /* [temp.mem]/1: member operator function templates, their
                    specializations deduced from the other operands
                    ([temp.over]/1) member candidates */
@@ -168,7 +173,7 @@ analysis_result semantic_analysis::overloaded_operator(
                     rest.append(operand(i));
                 size_t first = candidates.size();
                 VTRY(r, member_template_candidates(
-                            n, found.unknown_entity, rest.data(),
+                            n, templates, rest.data(),
                             static_cast<uint32_t>(rest.size()), candidates));
                 for (size_t i = first; i < candidates.size(); i++) {
                     candidates[i].rewritten = rewritten;

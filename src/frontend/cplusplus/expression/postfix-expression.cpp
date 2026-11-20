@@ -642,10 +642,16 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         if (n[0].is_token() && n[0].is_identifier()) {
             lookup_result x = lookup_unqualified(
                 tokens.identifier(n[0].token()), lookup_filter::any);
+            entity_index held = 0;
             if (x.unknown && !x.entity && !x.ambiguous &&
-                member_function_template_of(x.unknown_entity)) {
+                member_function_template_of(x.unknown_entity))
+                held = x.unknown_entity;
+            else if (x.entity && !x.ambiguous &&
+                     entity_table[x.entity].member_templates)
+                held = x.entity;
+            if (held) {
                 bool ambiguous = false;
-                entity_index of = entity_table[x.unknown_entity].enclosing;
+                entity_index of = entity_table[held].enclosing;
                 if (!function_state.this_entity ||
                     (of != current_class() &&
                      !base_step(current_class(), of, ambiguous)) ||
@@ -656,8 +662,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 owned_array<expression_meaning> early;
                 for (const expression_meaning &e : expanded)
                     early.append(e);
-                return member_template_call(n, x.unknown_entity, object,
-                                            arguments, early, m);
+                return member_template_call(n, held, object, arguments, early,
+                                            m);
             }
         }
         VTRY_SET(r, template_callee(n[0], name, ft, specified, qualified));

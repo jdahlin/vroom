@@ -1482,6 +1482,17 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
            brought into the class */
         return not_supported(declaration, "class.mem");
     entity_index overloads = 0;
+    /* [temp.mem]/2: member function templates of the name declared before
+       are overloaded with this function: it heads the name's chain, and
+       keeps their held name */
+    entity_index templates = 0;
+    if (prior && is_function && entity_table[prior].kind == entity_kind::none &&
+        entity_table[prior].enclosing == c &&
+        member_function_template_of(prior) && !m.conversion_function &&
+        !m.destructor) {
+        templates = prior;
+        prior = 0;
+    }
     if (prior && is_function &&
         entity_table[prior].kind == entity_kind::function &&
         entity_table[prior].special == special_member::none) {
@@ -1762,6 +1773,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         entity_table[last].next_overload = e;
         entity_table[e].hidden_type = entity_table[overloads].hidden_type;
     } else {
+        entity_table[e].member_templates = templates;
         entity_table.bind(c, name, e);
     }
     last_declared = e;
