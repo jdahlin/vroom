@@ -755,6 +755,11 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         /* [namespace.qual]/3: "if S(X, m) is the empty set, the program is
            ill-formed"; a name not found may be one a declaration analysis
            has no rules for declares */
+        if (!e && !c && builtin_spelled(name))
+            /* [lex.name]/3: a name spelled __builtin_ is the
+               implementation's, declared at global namespace scope as
+               clang does, so ::__builtin_copysignl names it */
+            e = library_builtin(name);
         if (!e)
             return not_supported(n, "basic.lookup.qual");
         m = expression_meaning();
