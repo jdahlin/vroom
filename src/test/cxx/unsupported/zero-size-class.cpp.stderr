@@ -1,0 +1,2 @@
+zero-size-class.cpp:5:1: error: the rules of [class.mem] are not implemented yet
+zero-size-class.cpp:5:1: note: refused by vcc's frontend/cplusplus/class/class-specifier.cpp:N (class_definition)

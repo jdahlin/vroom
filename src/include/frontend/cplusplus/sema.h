@@ -2724,7 +2724,11 @@ class semantic_analysis
     analysis_result parenthesized(SyntaxRef n, expression_meaning &m);
     /* [expr.unary] */
     analysis_result unary(SyntaxRef n, expression_meaning &m);
-    analysis_result size_of(SyntaxRef n, bool alignment, expression_meaning &m);
+    analysis_result size_of(SyntaxRef n, bool alignment, expression_meaning &m,
+                            bool data_size = false);
+    analysis_result pack_size(SyntaxRef n, expression_meaning &m);
+    analysis_result sized_operand(SyntaxRef n, bool alignment,
+                                  qualified_type operand);
     analysis_result increment(SyntaxRef n, SyntaxElement operand,
                               bool decrement, bool postfix,
                               expression_meaning &m);

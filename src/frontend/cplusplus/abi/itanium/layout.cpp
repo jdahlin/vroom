@@ -632,8 +632,7 @@ bool class_layout::zero_size_members_only(const entity &x) const
         const struct type &t = analysis.type_table[m.type.unqualified()];
         if (m.bit_field && !m.bit_width)
             continue;
-        if (t.kind != type_kind::array || !t.bound_known ||
-            analysis.size_of_type(m.type))
+        if (t.kind != type_kind::array || analysis.size_of_type(m.type))
             return false;
         any = true;
     }
@@ -646,7 +645,8 @@ const char *class_layout::finalization()
     x.alignment = alignment;
     raise_size(data_size());
     x.size = align_up(size, alignment);
-    /* (a class whose data members are all arrays of zero elements, with
+    /* (a class whose data members are all arrays of zero elements or of
+       unknown bound (flexible), with
        no base class or virtual table pointer, takes no bytes: clang's and
        GCC's size is zero, which analysis takes for an incomplete class's) */
     if (!x.size && zero_size_members_only(x))

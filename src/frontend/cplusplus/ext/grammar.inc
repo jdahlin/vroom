@@ -127,6 +127,15 @@ PRODUCTION(gnu_typeof, "simple-type-specifier", "gnu-typeof-specifier")
 PRODUCTION(gnu_typeof, "gnu-typeof-specifier", "typeof ( expression )")
 PRODUCTION(gnu_typeof, "gnu-typeof-specifier", "typeof ( type-id )")
 
+/* ---- GCC manual 6.46, Inquiring on Alignment of Types or Variables ---- */
+
+PRODUCTION(gnu_alignof_expression, "unary-expression", "alignof unary-expression")
+
+/* ---- clang Language Extensions, __datasizeof ---- */
+
+PRODUCTION(clang_datasizeof, "unary-expression", "__datasizeof unary-expression")
+PRODUCTION(clang_datasizeof, "unary-expression", "__datasizeof ( type-id )")
+
 /* ---- GCC manual 6.47, Using Assembly Language with C ---- */
 
 /* "::" counts as two ":" (an empty section).  An operand is

@@ -547,6 +547,7 @@ enum class extension_keyword : uint8_t {
     va_arg_,
     bit_cast,
     convertvector,
+    datasizeof_,
     atomic,
     bit_int,
     source_location,

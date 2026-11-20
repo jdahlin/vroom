@@ -593,7 +593,8 @@ constant_value semantic_analysis::copy_value(constant_evaluation &state,
 constness semantic_analysis::evaluate_object(constant_evaluation &state,
                                              uint32_t node, uint32_t &object)
 {
-    const semantic_node &x = semantics[node];
+    /* a copy: evaluating can analyse more code, which appends to the tree */
+    const semantic_node x = semantics[node];
     constness c;
     switch (x.kind) {
     case semantic_kind::entity: {
@@ -883,7 +884,8 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
 constness semantic_analysis::evaluate_read(constant_evaluation &state,
                                            uint32_t node, constant_value &v)
 {
-    const semantic_node &x = semantics[node];
+    /* a copy: evaluating can analyse more code, which appends to the tree */
+    const semantic_node x = semantics[node];
     if (x.type.cv() & cv_volatile)
         /* [expr.const]/5.8: "a non-volatile glvalue" */
         return undefined_value(state);
@@ -1152,7 +1154,8 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
 constness semantic_analysis::evaluate_node(constant_evaluation &state,
                                            uint32_t node, constant_value &v)
 {
-    const semantic_node &x = semantics[node];
+    /* a copy: evaluating can analyse more code, which appends to the tree */
+    const semantic_node x = semantics[node];
     constness c;
     if (x.kind == semantic_kind::bind_reference)
         return evaluate_binding(state, node, v);
@@ -1364,7 +1367,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
        ([expr.pre.incr] the same for the prefix ones).  The prefix ones are
        lvalues, read as evaluate_object's */
     case semantic_kind::increment: {
-        const semantic_node &operand = semantics[x.a];
+        const semantic_node operand = semantics[x.a];
         fundamental_type t = evaluated_type(operand.type);
         bool pointer =
             type_table[operand.type.unqualified()].kind == type_kind::pointer;
@@ -1839,7 +1842,8 @@ uint32_t semantic_analysis::switch_target(uint32_t node, uint64_t value,
 {
     if (!node)
         return 0;
-    const semantic_node &x = semantics[node];
+    /* a copy: evaluating can analyse more code, which appends to the tree */
+    const semantic_node x = semantics[node];
     uint32_t target = 0, other = 0;
     switch (x.kind) {
     case semantic_kind::block:
@@ -2108,7 +2112,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
 
 constness semantic_analysis::potential_constant(uint32_t body)
 {
-    const semantic_node &b = semantics[body];
+    const semantic_node b = semantics[body];
     if (b.kind != semantic_kind::function_body || b.b || b.c)
         return constness::unknown;
     constant_evaluation state;

@@ -46,12 +46,12 @@ old-nested-lists	vcc: the rules of [class.mem] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
 old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
 old-operators	vcc: the rules of [over.built] are not implemented yet
-old-packs	vcc: the rules of [expr.sizeof] are not implemented yet
+old-packs	vcc: the rules of [temp.variadic] are not implemented yet
 old-partial-later	vcc: the rules of [temp.class.spec] are not implemented yet
 old-pseudo-destructor-side-effects	vcc: the rules of [expr.ref] are not implemented yet
 old-range-for-arrays	vcc: the rules of [stmt.ranged] are not implemented yet
 old-requires-params	vcc: the rules of [expr.prim.req] are not implemented yet
-old-reversed-packs	vcc: the rules of [expr.sizeof] are not implemented yet
+old-reversed-packs	vcc: the rules of [temp.variadic] are not implemented yet
 old-spaceship	vcc: the rules of [over.match.oper] are not implemented yet
 old-spaceship-pack-candidate	vcc: the rules of [basic.lookup.argdep] are not implemented yet
 old-spec-after-use	vcc: in the definition of an object, the type of that object shall not be an incomplete type ([basic.def])
