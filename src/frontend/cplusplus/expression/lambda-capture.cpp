@@ -14,11 +14,21 @@
  * lambda-expression is (/15, closure_object), where a capture of an
  * enclosing lambda's entity captures it in that lambda too (/14).
  *
- * Not analysed: a pack expansion in a capture (/17), an implicit capture
- * of a variable usable in constant expressions or in an unevaluated
- * operand (whether it is an odr-use, [basic.def.odr]/4, decides whether it
- * is captured), an array or a function captured by copy, a reference to a
- * function captured.
+ * A variable usable in constant expressions is captured only by an odr-use
+ * ([basic.def.odr]/4): the names of such variables in a body are kept as
+ * entity nodes until the body is analysed (pending_uses), and a read is
+ * none.  A generic lambda's closure type is complete where the
+ * lambda-expression is, its body being analysed once per specialization
+ * of the call operator template: its implicit captures are the names the
+ * body has (implicit_captures) and a specialization that needs another is
+ * not analysed.  A capture pack ([xs...], [...ys = xs], /17) is one capture
+ * per element of the pack.
+ *
+ * Not analysed: a function captured by copy, a reference to a function
+ * captured, an entity of a function enclosing a local class whose member
+ * function the lambda is in, a lambda in a default argument of a function
+ * that is not a member, and a variable usable in constant expressions
+ * odr-used in a generic lambda's body.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"

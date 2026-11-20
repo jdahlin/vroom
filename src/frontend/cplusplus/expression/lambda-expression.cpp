@@ -773,9 +773,9 @@ semantic_analysis::lambda_body(SyntaxRef n, SyntaxElement body,
  * the template's record is a member function template's (member-template.cpp),
  * whose definition is the lambda-expression; a specialization's
  * declaration and body are the lambda-declarator and compound-statement
- * analysed again (instantiate, instantiate_definition).  Without a
- * lambda-capture only: the captures an instantiation's body makes would
- * change the closure type after its use.
+ * analysed again (instantiate, instantiate_definition).  The captures are
+ * made here (implicit_captures), none by an instantiation's body: they
+ * would change the closure type after its use.
  */
 analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
                                                   SyntaxRef declarator,
