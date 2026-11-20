@@ -671,6 +671,21 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             return constness::unknown;
         return pointed_place(state, p, object);
     }
+    /* [expr.cond]/5: a glvalue conditional designates the object of the
+       operand it selects ([ext:gnu_conditional_omitted]: d, the first
+       operand, when b is none) */
+    case semantic_kind::conditional: {
+        constant_value condition;
+        c = evaluate_node(state, x.a, condition);
+        if (c != constness::constant)
+            return c;
+        uint32_t second = x.b;
+        if (!second)
+            second = x.d;
+        if (condition.integer != 0)
+            return evaluate_object(state, second, object);
+        return evaluate_object(state, x.c, object);
+    }
     /* [expr.ref]/6.2: "If E2 is a non-static data member ... E1.E2
        designates the corresponding member subobject" */
     case semantic_kind::member: {

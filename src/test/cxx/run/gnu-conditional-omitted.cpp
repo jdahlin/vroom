@@ -28,6 +28,15 @@ static_assert((7 ?: 2) == 7, "");
 static_assert((0 ?: 2) == 2, "");
 static_assert((0 ?: 0 ?: 6) == 6, "");
 
+constexpr int fold(int a, int b) { return a ?: b; }
+static_assert(fold(4, 9) == 4, "");
+static_assert(fold(0, 9) == 9, "");
+constexpr int pick(bool c, int a, int b) { return c ? a : b; }
+static_assert(pick(true, 4, 9) == 4 && pick(false, 4, 9) == 9, "");
+constexpr int arr[] = {1, 0, 3, 0};
+template <class T> constexpr int last(T p, T q) { return p != q ? (last(p + 1, q) ?: *p) : 0; }
+static_assert(last(arr, arr + 4) == 3, "");
+
 int main() {
     int fails = 0;
     int r = 10;
