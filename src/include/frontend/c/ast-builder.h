@@ -149,6 +149,10 @@ bool ast_builder_atomic_shape(const char *name, size_t length, int *written,
                               int *result);
 /* __builtin_convertvector(vector, t): each element of vector converted
    to the element type of t, a vector type of as many elements */
+/* __builtin_shufflevector(a, b, indices...): lanes of a then b, -1 any */
+uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
+                                    uint32_t b, const int32_t *indices,
+                                    uint32_t count);
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
                                     uint32_t vector);
 /* __atomic_load_n(pointer, order): a load of type t, pointer a node of

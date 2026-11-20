@@ -1051,6 +1051,13 @@ analysis_result semantic_analysis::list_initialization_of(
         semantics[result.node].type = type;
         return too_many_clauses(list, clauses, next);
     }
+    if (target.kind == type_kind::vector) {
+        /* [ext:gnu_vector_size] the elements in order, the rest zero */
+        size_t next = 0;
+        VTRY(r, aggregate_elements(list, clauses, next, type, result));
+        semantics[result.node].type = type;
+        return too_many_clauses(list, clauses, next);
+    }
     if (target.kind == type_kind::class_type)
         return class_list_initialization(list, clauses, type, direct, result);
     if (target.kind == type_kind::lvalue_reference ||
@@ -1407,13 +1414,16 @@ analysis_result semantic_analysis::aggregate_elements(
     qualified_type type, initialized_value &result)
 {
     const struct type target = type_table[type.unqualified()];
+    /* [ext:gnu_vector_size] a vector's elements are listed as an array's */
+    bool arraylike =
+        target.kind == type_kind::array || target.kind == type_kind::vector;
     owned_array<qualified_type> types;
     owned_array<SyntaxRef> defaults;
     uint64_t count = 0;
     bool unknown_bound = false;
-    if (target.kind == type_kind::array) {
+    if (arraylike) {
         count = target.bound;
-        unknown_bound = !target.bound_known;
+        unknown_bound = target.kind == type_kind::array && !target.bound_known;
     } else {
         const entity &x = entity_table[target.entity];
         for (uint32_t i = 0; i < x.member_count; i++) {
@@ -1433,11 +1443,11 @@ analysis_result semantic_analysis::aggregate_elements(
         if (unknown_bound && next == clauses.size())
             break;
         qualified_type element = target.operand;
-        if (target.kind != type_kind::array)
+        if (!arraylike)
             element = types[i];
         initialized_value one;
         const struct type &of_element = type_table[element.unqualified()];
-        bool has_default = target.kind != type_kind::array && defaults[i];
+        bool has_default = !arraylike && defaults[i];
         if (next >= clauses.size() && !has_default &&
             of_element.kind == type_kind::class_type &&
             entity_table[of_element.entity].kind == entity_kind::class_type &&
@@ -1449,7 +1459,7 @@ analysis_result semantic_analysis::aggregate_elements(
         if (next >= clauses.size() &&
             (of_element.kind == type_kind::lvalue_reference ||
              of_element.kind == type_kind::rvalue_reference) &&
-            !(target.kind != type_kind::array && defaults[i]))
+            !(!arraylike && defaults[i]))
             /* (5.2): "If the element is not a reference, the element is
                copy-initialized from an empty initializer list"; (5.3):
                "Otherwise, the program is ill-formed" */
@@ -1461,7 +1471,7 @@ analysis_result semantic_analysis::aggregate_elements(
                               "dcl.init.aggr");
         if (next < clauses.size()) {
             VTRY(r, aggregate_element(list, clauses, next, element, one));
-        } else if (target.kind == type_kind::array) {
+        } else if (arraylike) {
             /* the rest of an array: zero, as the lowering fills it */
             break;
         } else if (defaults[i]) {
@@ -1501,7 +1511,7 @@ analysis_result semantic_analysis::aggregate_elements(
     result.value = 0;
     expression_meaning list_meaning;
     list_meaning.type = qualified_type::make(type.unqualified(), cv_none);
-    if (target.kind == type_kind::array)
+    if (arraylike)
         list_meaning.type = type;
     list_meaning.evaluation = all;
     result.node = expression_node(semantic_kind::initializer_list, list_meaning,
@@ -1557,7 +1567,7 @@ analysis_result semantic_analysis::aggregate_element_clause(
     const struct type record = type_table[element.unqualified()];
     bool braced = clause.is(syntax_kind::braced_init_list);
     bool subaggregate =
-        record.kind == type_kind::array ||
+        record.kind == type_kind::array || record.kind == type_kind::vector ||
         (record.kind == type_kind::class_type &&
          entity_table[record.entity].kind == entity_kind::class_type &&
          is_aggregate(record.entity));

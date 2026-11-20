@@ -675,6 +675,7 @@ class c_lowering
     uint32_t read_again(const reread &r);
     bool rereadable_member_pointer(uint32_t n) const;
     uint32_t binary(const semantic_node &n);
+    uint32_t vector_lane(const semantic_node &n);
     uint32_t assignment(const semantic_node &n);
     uint32_t call(const semantic_node &n);
     uint32_t bind_reference(const semantic_node &n);

@@ -1141,4 +1141,80 @@ analysis_result semantic_analysis::builtin_addressof(SyntaxRef n,
     return analysis_result::well_formed;
 }
 
+/* [ext:gnu_vector_size] clang's __builtin_shufflevector(a, b, i...): a call
+   of that name with nothing declared by it (the C front end's builtin) */
+bool semantic_analysis::builtin_shufflevector_call(SyntaxRef n)
+{
+    if (n.size() != 4 || !n[0].is_identifier() ||
+        !n[2].is(syntax_kind::initializer_list) ||
+        !tokens.files.behavior.has(extension::gnu_library_builtins))
+        return false;
+    static const char spelled[] = "__builtin_shufflevector";
+    uint32_t name = tokens.identifier(n[0].token());
+    if (name != tokens.pp.identifier(spelled, sizeof spelled - 1) + 1)
+        return false;
+    lookup_result x = lookup_unqualified(name, lookup_filter::any);
+    return !x.entity && !x.unknown && !x.ambiguous;
+}
+
+/* the lanes of the two vectors of one type, as many as there are indices
+   (constants in [-1, 2N), -1 any lane): a prvalue vector of the same
+   element type; the count a power of two within 64 bytes, as C's front end
+   takes it */
+analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
+                                                         expression_meaning &m)
+{
+    owned_array<SyntaxElement> clauses;
+    VTRY(r, list_clauses(n[2].index(), clauses));
+    if (clauses.size() < 3)
+        return ill_formed(n,
+                          "__builtin_shufflevector takes two vectors and the "
+                          "lane indices",
+                          "ext.gnu");
+    expression_meaning a, b;
+    VTRY_SET(r, expression(clauses[0], a));
+    VTRY_SET(r, expression(clauses[1], b));
+    VTRY_SET(r, operand_value(n, a));
+    VTRY_SET(r, operand_value(n, b));
+    const struct type vector = type_table[a.type.unqualified()];
+    if (vector.kind != type_kind::vector ||
+        a.type.unqualified() != b.type.unqualified())
+        return ill_formed(n,
+                          "the first two arguments to __builtin_shufflevector "
+                          "shall be vectors of the same type",
+                          "ext.gnu");
+    owned_array<uint32_t> indices;
+    for (size_t i = 2; i < clauses.size(); i++) {
+        expression_meaning e;
+        VTRY_SET(r, expression(clauses[i], e));
+        bool constant = false;
+        if (!is_integral(e.type))
+            return not_supported(n, "ext.gnu");
+        VTRY_SET(r, integral_constant_expression(n, e, constant));
+        if (!constant)
+            return not_supported(n, "ext.gnu");
+        __int128 v = integer_value(tokens.files.behavior,
+                                   fundamental_of(e.type), e.value);
+        if (v < -1 || v >= static_cast<__int128>(2 * vector.bound))
+            return ill_formed(n,
+                              "an index of __builtin_shufflevector shall be "
+                              "a constant integer in range",
+                              "ext.gnu");
+        indices.append(e.node);
+    }
+    uint64_t lanes = indices.size();
+    if ((lanes & (lanes - 1)) || lanes * size_of_type(vector.operand) > 64)
+        return not_supported(n, "ext.gnu");
+    m = expression_meaning();
+    m.type = qualified_type::make(type_table.vector_of(vector.operand, lanes),
+                                  cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::not_constant;
+    m.beyond_integral_constant = true;
+    m.node = expression_node(semantic_kind::vector_shuffle, m, n.first_token(),
+                             a.node, b.node);
+    semantics.set_list(m.node, indices.data(), indices.size());
+    return analysis_result::well_formed;
+}
+
 } // namespace cplusplus

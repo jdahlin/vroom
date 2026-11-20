@@ -2386,10 +2386,18 @@ Shared with C, not copied: the layout and validity rule
   (lanes against clang, cxx-run -O0..3).  Not yet: two different vector types
   (clang's lax conversions), `&&`, `||`, `!`, `?:` on vectors, `++`/`--`,
   constant evaluation, templates on vector types.
-- V4 element access `v[i]` (an lvalue), vector initializer lists, C-style
-  casts between vectors of the same size (the bits), `__builtin_shufflevector`,
-  `__builtin_convertvector` (shares `ext/clang/convertvector.cpp`),
-  `__builtin_elementwise_*`, `__builtin_nontemporal_load/store`.
+- V4 **Done** (2026-11-20): `v[i]` (an lvalue lane of a vector object, a prvalue
+  of an rvalue; lowered through a pointer to the first lane as C's parser does;
+  `&v[i]` is clang's error), list-initialization (the elements in order, the
+  rest zero, vectors in arrays, classes and static storage, braces elided
+  as for arrays), casts between a vector and a vector or a same-size scalar
+  (`conversion_kind::vector_cast`: the bits), `__builtin_shufflevector`
+  (`semantic_kind::vector_shuffle`, C's builtin node) and
+  `__builtin_convertvector` on GNU vectors.  Tests: `gnu-vector-subscript`,
+  `-init`, `-casts`, `-shuffle` in `src/test/cxx/run`.  Moved to V5:
+  `__builtin_elementwise_*` (C has `abs` only), `__builtin_nontemporal_*`.
+  Not yet: a vector in a constant expression, `v.xyzw` (ext_vector), vector
+  parameters of templates.
 - V5 the `__builtin_ia32_*` builtins `<immintrin.h>` calls (a table beside
   C's builtins), `__target__("sse2")` functions, then `simd-search.h`
   compiled by vcc on x86-64 as the check.

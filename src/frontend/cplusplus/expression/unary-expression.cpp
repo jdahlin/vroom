@@ -587,6 +587,12 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
                               "expr.unary.op");
         if (m.bit_field_width)
             return address_of_bit_field(n.first_token());
+        if (m.node && semantics[m.node].kind == semantic_kind::subscript &&
+            type_table[semantics[semantics[m.node].a].type.unqualified()]
+                    .kind == type_kind::vector)
+            /* [ext:gnu_vector_size] clang: "address of vector element
+               requested" */
+            return ill_formed(n, "the address of a vector element", "ext.gnu");
         address_of_glvalue(at, m);
         return analysis_result::well_formed;
     }

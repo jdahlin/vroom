@@ -598,6 +598,37 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         if (r != analysis_result::well_formed || handled)
             return r;
         expression_meaning *base = &a, *index = &i;
+        auto is_vector = [&](const expression_meaning &x) {
+            return type_table[x.type.unqualified()].kind == type_kind::vector;
+        };
+        if (is_vector(a) || is_vector(i)) {
+            /* [ext:gnu_vector_size] v[i]: lane i of the vector, an lvalue
+               where the vector is one (clang: of the vector's cv) */
+            if (!is_vector(a)) {
+                base = &i;
+                index = &a;
+            }
+            bool object = base->category == value_category::lvalue;
+            if (!object)
+                VTRY_SET(r, operand_value(n, *base));
+            VTRY_SET(r, operand_value(n, *index));
+            promote_enumeration(*index);
+            if (!is_integral(index->type))
+                return not_supported(n, "ext.gnu");
+            qualified_type lane = type_table[base->type.unqualified()].operand;
+            lane = qualified_type::make(lane.unqualified(), base->type.cv());
+            constness evaluation = constness::not_constant;
+            m = expression_meaning();
+            m.type = lane;
+            m.category = value_category::prvalue;
+            if (object)
+                m.category = value_category::lvalue;
+            m.evaluation = evaluation;
+            m.beyond_integral_constant = true;
+            m.node = expression_node(semantic_kind::subscript, m,
+                                     n.first_token(), base->node, index->node);
+            return analysis_result::well_formed;
+        }
         auto is_array = [&](const expression_meaning &x) {
             return type_table[x.type.unqualified()].kind == type_kind::array;
         };
@@ -732,6 +763,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
 {
     if (builtin_addressof_call(n))
         return builtin_addressof(n, m);
+    if (builtin_shufflevector_call(n))
+        return builtin_shufflevector(n, m);
     owned_array<SyntaxElement> arguments;
     /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
        analysed now, one per element of the packs its pattern names */

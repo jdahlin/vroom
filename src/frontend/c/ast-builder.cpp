@@ -414,6 +414,22 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     return cc_builtin_node_new(c, b->id, t, 0, &list);
 }
 
+uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
+                                    uint32_t b, const int32_t *indices,
+                                    uint32_t count)
+{
+    uint32_t items[2 + 64];
+    uint32_t n = 0;
+    items[n++] = a;
+    items[n++] = b;
+    for (uint32_t i = 0; i < count && n < 2 + 64; i++)
+        items[n++] = ast_builder_integer(
+            c, ast_builder_type_basic(AST_TYPE_INT), indices[i]);
+    return ast_builder_node(c, AST_NODE_BUILTIN, t, 0,
+                            ast_builder_list(c, items, n), n,
+                            CC_BUILTIN_SHUFFLEVECTOR, 0);
+}
+
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
                                     uint32_t vector)
 {

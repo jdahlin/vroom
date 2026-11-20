@@ -1163,6 +1163,9 @@ enum class semantic_kind : uint8_t {
     entity,
     /* op: a conversion_kind; a: the operand */
     conversion,
+    /* [ext:gnu_vector_size] __builtin_shufflevector: a, b: the two vectors;
+       the list: the constant lane indices (-1 any) */
+    vector_shuffle,
     /* op: the operator (+ - ~ !); a */
     unary,
     /* &a, *a */
@@ -1383,6 +1386,9 @@ enum class conversion_kind : uint8_t {
     /* [ext:clang_convertvector] each element of a vector converted to
        the element type of a vector type of as many elements */
     vector_convert,
+    /* [ext:gnu_vector_size] a cast between a vector and a vector or a
+       scalar of the same size: the same bits */
+    vector_cast,
 };
 
 /* [expr.cast]/4: the casts that may perform an explicit conversion */
@@ -2836,6 +2842,8 @@ class semantic_analysis
                                     uint32_t &built);
     analysis_result clang_convertvector(SyntaxRef n, expression_meaning &m);
     bool builtin_addressof_call(SyntaxRef n);
+    bool builtin_shufflevector_call(SyntaxRef n);
+    analysis_result builtin_shufflevector(SyntaxRef n, expression_meaning &m);
     /* clang's type-generic bit counts: which one the function e is (1
        popcount, 2 clz, 3 ctz; 0 none), the check of a call's arguments,
        and its value in a constant evaluation */
