@@ -2864,6 +2864,21 @@ class semantic_analysis
     analysis_result postfix(SyntaxRef n, expression_meaning &m);
     /* [expr.ref]: E1.E2 and E1->E2 */
     analysis_result member_reference(SyntaxRef n, expression_meaning &m);
+    /* [expr.ref]/1-/4: the object expression of the class member access n,
+       its glvalue (of scalar type when scalar_allowed: a pseudo-destructor's) */
+    analysis_result member_object(SyntaxRef n, bool arrow, bool scalar_allowed,
+                                  expression_meaning &m);
+    /* [expr.prim.id.dtor] (destructor-call.cpp): the unqualified-id
+       ~type-name an id-expression ends in, else nothing; the call n whose
+       postfix-expression names a destructor or a pseudo-destructor; the
+       type of ~type-name's type-name looked up in a scope (in_scope; 0 is
+       then the global namespace), else in the context, found if it names a type; scalar types */
+    SyntaxElement destructor_id(SyntaxElement id) const;
+    analysis_result destructor_call(SyntaxRef n, expression_meaning &m);
+    analysis_result destructor_type_name(SyntaxRef n, SyntaxElement name,
+                                         bool in_scope, entity_index scope,
+                                         type_index &type, bool &found);
+    bool scalar_type(type_index t) const;
     /* [expr.cast], [expr.type.conv] */
     analysis_result cast(SyntaxRef n, expression_meaning &m);
     /* the conversion of m to to by the casts in kinds (cast_kinds: the
@@ -5211,6 +5226,9 @@ class semantic_analysis
     bool deleted_body(SyntaxElement body) const;
     analysis_result deleted_definition(SyntaxRef n, entity_index f);
     analysis_result deleted_use(token_index at, entity_index f);
+    /* [new.delete.placement]/1: f is a global allocation function
+       taking (std::size_t, void *), the reserved placement form */
+    bool reserved_placement(entity_index f) const;
     analysis_result resolve_call(SyntaxRef n,
                                  const owned_array<SyntaxElement> &arguments,
                                  owned_array<expression_meaning> &early,

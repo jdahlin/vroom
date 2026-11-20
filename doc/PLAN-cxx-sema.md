@@ -1131,6 +1131,10 @@ libstdc++ and json), since sema cannot analyse a declaration kept as tokens.
   cxx-c-suites unchanged; lower.cpp 6490 -> about 6600 lines with the
   new rules, C node helpers taking most of the growth back.
 
+  Trivial assignment from a prvalue materializes the source before copying
+  the class data bytes, preserving a derived member in reused tail padding
+  (`tail-padding-assign-prvalue.cpp`).
+
 #### S4: what remains
 
 In an order where each item's tests can pass when it lands.  "Needs"

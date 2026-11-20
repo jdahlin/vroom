@@ -317,37 +317,15 @@ SyntaxElement semantic_analysis::member_template_id(SyntaxRef n) const
 }
 
 /*
- * [expr.ref]/1-/4: E1.E2 and E1->E2.  /2: "For the first option (dot) the
- * first expression shall be a glvalue.  For the second option (arrow) the
- * first expression shall be a prvalue having pointer type.  The expression
- * E1->E2 is converted to the equivalent form (*(E1)).E2"; /4: "the object
- * expression shall be of class type.  The class type shall be complete
- * unless the class member access appears in the definition of that class.
- * ... The id-expression shall name a member of the class or of one of its
- * base classes."
+ * [expr.ref]/1-/2: the object expression of E1.E2 and E1->E2, analysed as
+ * the glvalue of the object (E1->E2 is "(*(E1)).E2").  A pseudo-destructor's
+ * is of scalar type ([expr.ref]/3: scalar_allowed), another's of class type
+ * (/4).
  */
-analysis_result semantic_analysis::member_reference(SyntaxRef n,
-                                                    expression_meaning &m)
+analysis_result semantic_analysis::member_object(SyntaxRef n, bool arrow,
+                                                 bool scalar_allowed,
+                                                 expression_meaning &m)
 {
-    bool arrow = n[1].is(preprocessing_op_or_punc::ARROW);
-    token_index name = 0;
-    if (n[2].is_identifier()) {
-        name = n[2].token();
-    } else if (SyntaxElement id = member_template_id(n);
-               id.is(syntax_kind::simple_template_id)) {
-        /* [temp.names]/4: x.f<T> and x.template f<T> */
-        name = id[0].token();
-    } else if (auto function = n[2].operator_function_id()) {
-        /* [over.oper]/1: x.operator->() names the member operator
-           function: the keyword's token takes the operator's name */
-        declarator_meaning function_name;
-        VTRY(r, operator_function_id(function, function_name));
-        name = function_name.id;
-    } else {
-        /* template, a qualified-id, a destructor's name, a conversion
-           function's or a literal operator's */
-        return not_supported(n, "expr.ref");
-    }
     /* (the call's callee name, which analysing the object expression's
        calls changes) */
     token_index callee = overloaded_callee;
@@ -375,8 +353,9 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         VTRY_SET(r, operand_value(n, m));
         const struct type pointer = type_table[m.type.unqualified()];
         if (pointer.kind != type_kind::pointer ||
-            type_table[pointer.operand.unqualified()].kind !=
-                type_kind::class_type) {
+            (!scalar_allowed &&
+             type_table[pointer.operand.unqualified()].kind !=
+                 type_kind::class_type)) {
             if (fundamental_of(m.type) == fundamental_type::none &&
                 pointer.kind != type_kind::pointer)
                 return not_supported(n, "expr.ref");
@@ -392,6 +371,48 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         m.node = expression_node(semantic_kind::indirection, m, n.first_token(),
                                  m.node);
     }
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.ref]/1-/4: E1.E2 and E1->E2.  /2: "For the first option (dot) the
+ * first expression shall be a glvalue.  For the second option (arrow) the
+ * first expression shall be a prvalue having pointer type.  The expression
+ * E1->E2 is converted to the equivalent form (*(E1)).E2"; /4: "the object
+ * expression shall be of class type.  The class type shall be complete
+ * unless the class member access appears in the definition of that class.
+ * ... The id-expression shall name a member of the class or of one of its
+ * base classes."
+ */
+analysis_result semantic_analysis::member_reference(SyntaxRef n,
+                                                    expression_meaning &m)
+{
+    bool arrow = n[1].is(preprocessing_op_or_punc::ARROW);
+    token_index name = 0;
+    if (n[2].is_identifier()) {
+        name = n[2].token();
+    } else if (SyntaxElement id = member_template_id(n);
+               id.is(syntax_kind::simple_template_id)) {
+        /* [temp.names]/4: x.f<T> and x.template f<T> */
+        name = id[0].token();
+    } else if (auto function = n[2].operator_function_id()) {
+        /* [over.oper]/1: x.operator->() names the member operator
+           function: the keyword's token takes the operator's name */
+        declarator_meaning function_name;
+        VTRY(r, operator_function_id(function, function_name));
+        name = function_name.id;
+    } else if (destructor_id(n[2])) {
+        /* [expr.prim.id.dtor]/2: a destructor's name can be the callee of
+           a call only (a parenthesized one is not analysed) */
+        return not_supported(n, "expr.prim.id.dtor");
+    } else {
+        /* template, a qualified-id, a conversion function's or a literal
+           operator's */
+        return not_supported(n, "expr.ref");
+    }
+    /* (the call's callee name: member_object leaves it as it was) */
+    token_index callee = overloaded_callee;
+    VTRY(r, member_object(n, arrow, false, m));
     const struct type object = type_table[m.type.unqualified()];
     if (object.kind != type_kind::class_type) {
         if (fundamental_of(m.type) == fundamental_type::none &&

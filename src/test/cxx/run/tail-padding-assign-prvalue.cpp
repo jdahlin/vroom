@@ -20,6 +20,8 @@ int main()
     B b;
     b.tail = 7;
     static_cast<A &>(b) = make(40);
+    if (b.x != 40 || b.c != 'a' || b.tail != 7)
+        return 1;
     static_cast<A &>(b) = A(2, 'b');
     return b.x + b.tail + (b.c == 'b') - 10;
 }

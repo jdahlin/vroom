@@ -159,20 +159,16 @@ uint32_t c_lowering::expression(uint32_t index)
                     AST_NODE_FLAG_LVALUE);
     }
     case semantic_kind::member: {
-        /* [expr.ref]/6.2: the member subobject */
-        uint32_t object = expression(n.a);
-        if (!object)
+        /* [expr.ref]/6.2: the member subobject; of a glvalue, the object
+           it designates (an assignment's result is one) */
+        uint32_t base = 0;
+        if (is_glvalue(node(n.a)))
+            base = object(n.a);
+        else
+            base = expression(n.a);
+        if (!base)
             return 0;
-        const entity &x = analysis.entity_table[n.b];
-        if (!is_reference(x.type) || is_reference(n.type))
-            /* a reference member being initialized ([class.base.init]) is
-               the pointer itself */
-            return ast_builder_member(c, object, c_fields[n.b],
-                                      type(n.type, n.at));
-        /* [expr.ref]/6.1: a reference member is the object it refers to */
-        uint32_t pointer =
-            ast_builder_member(c, object, c_fields[n.b], type(x.type, n.at));
-        return dereference(pointer, type(n.type, n.at));
+        return member_access(n, base);
     }
     case semantic_kind::member_pointer:
         return member_pointer(index);

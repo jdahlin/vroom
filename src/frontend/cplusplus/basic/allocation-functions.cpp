@@ -308,4 +308,24 @@ semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
     return analysis_result::well_formed;
 }
 
+/*
+ * [new.delete.placement]/1: whether f is the reserved non-allocating form
+ * ::operator new(std::size_t, void *) (or the array form's), declared in
+ * the global namespace; clang's isReservedGlobalPlacementOperator.
+ */
+bool semantic_analysis::reserved_placement(entity_index f) const
+{
+    const entity &x = entity_table[f];
+    if (x.enclosing || x.kind != entity_kind::function)
+        return false;
+    const struct type &function = type_table[x.type.unqualified()];
+    if (function.parameter_count != 2)
+        return false;
+    qualified_type second = type_table.parameters(x.type.unqualified())[1];
+    const struct type &pointer = type_table[second.unqualified()];
+    return pointer.kind == type_kind::pointer && !second.cv() &&
+           fundamental_of(pointer.operand) == fundamental_type::void_ &&
+           !pointer.operand.cv();
+}
+
 } // namespace cplusplus

@@ -765,6 +765,13 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         return builtin_addressof(n, m);
     if (builtin_shufflevector_call(n))
         return builtin_shufflevector(n, m);
+    /* [expr.prim.id.dtor]/2: a destructor's name is a call's callee alone */
+    if ((n.size() == 3 || n.size() == 4) &&
+        n[0].is(syntax_kind::postfix_expression) && n[0].size() == 3 &&
+        n[0][1].is(preprocessing_op_or_punc::DOT,
+                   preprocessing_op_or_punc::ARROW) &&
+        destructor_id(n[0][2]))
+        return destructor_call(n, m);
     owned_array<SyntaxElement> arguments;
     /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
        analysed now, one per element of the packs its pattern names */
