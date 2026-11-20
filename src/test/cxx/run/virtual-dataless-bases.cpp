@@ -1,4 +1,4 @@
-/* [abi:empty]: a dynamic class is never empty (its virtual table pointer
+/* [abi:definitions]: a dynamic class is never empty (its virtual table pointer
    is its data), so a base with virtual functions or virtual bases and no
    data members is a subobject with bytes: dispatch through it, a derived
    class adding nothing, virtual destructors, and a diamond of virtual

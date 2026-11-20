@@ -1544,7 +1544,7 @@ class semantic_analysis
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
     bool trivial_class(entity_index c) const;
-    /* [abi:empty], [class.prop]/5 (std::is_empty): no non-static data
+    /* [abi:definitions], [class.prop]/5 (std::is_empty): no non-static data
        member but zero-width bit-fields, no virtual function or base, every
        base empty (ext/clang/class-traits.cpp) */
     bool empty_class(entity_index c) const;

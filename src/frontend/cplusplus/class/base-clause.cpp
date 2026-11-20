@@ -366,7 +366,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
             entity_table[e].field = UINT32_MAX;
         } else if (empty_class(base)) {
             /* [class.derived]/4 (Note): "A base class subobject may be of
-               zero size": an empty class's ([abi:empty]; a dynamic class
+               zero size": an empty class's ([abi:definitions]; a dynamic class
                has its virtual table pointer) */
             entity_table[e].field = UINT32_MAX;
         } else {
