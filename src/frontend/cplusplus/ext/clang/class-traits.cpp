@@ -277,6 +277,29 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
             answer = class_destructible(c, throws) && !destroys(c);
         }
         return true;
+    /* [meta.unary.prop] is_destructible: "the expression declval<U&>().~U()
+       is well-formed when treated as an unevaluated operand" for U the
+       type without its array extents or reference ("T is a reference
+       type: true; void, a function, an array of unknown bound: false");
+       is_nothrow_destructible: and the destructor does not throw */
+    case unary_trait_kind::is_destructible:
+    case unary_trait_kind::is_nothrow_destructible:
+        if (kind == type_kind::function ||
+            fundamental_of(t) == fundamental_type::void_ || unbounded)
+            return true;
+        if (!is_class) {
+            answer = true;
+            return true;
+        }
+        {
+            bool throws = false;
+            answer = class_destructible(c, throws);
+            if (static_cast<unary_trait_kind>(which) ==
+                    unary_trait_kind::is_nothrow_destructible &&
+                throws)
+                answer = false;
+        }
+        return true;
     default:
         return false;
     }

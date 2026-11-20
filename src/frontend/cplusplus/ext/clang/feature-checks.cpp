@@ -310,8 +310,6 @@ static const char *const builtins_not_had[] = {
     "__builtin_lt_synthesizes_from_spaceship",
     "__builtin_operator_delete",
     "__builtin_operator_new",
-    "__is_destructible",
-    "__is_nothrow_destructible",
     "__is_trivially_equality_comparable",
     "__is_trivially_relocatable",
 };

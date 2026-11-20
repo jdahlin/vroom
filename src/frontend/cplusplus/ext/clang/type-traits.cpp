@@ -411,6 +411,8 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     case unary_trait_kind::is_trivially_destructible:
     case unary_trait_kind::has_trivial_destructor:
     case unary_trait_kind::has_virtual_destructor:
+    case unary_trait_kind::is_destructible:
+    case unary_trait_kind::is_nothrow_destructible:
         if (!class_property_trait(which, t, answer))
             return false;
         break;
