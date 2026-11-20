@@ -499,31 +499,43 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
    translation unit's declarations (each may use more) */
 void semantic_analysis::instantiate_pending()
 {
-    for (size_t i = 0; i < postponed_bodies.size(); i++) {
-        const postponed_body b = postponed_bodies[i];
-        if (!b.c)
-            continue;
-        instantiation_context context;
-        enter_instantiation(context, b.scope, b.declaration);
-        instantiated_member_body(b.c, b.body);
-        leave_instantiation(context);
-    }
-    postponed_bodies.clear();
-    for (size_t i = 0; i < pending_definitions.size(); i++) {
-        uint32_t index = pending_definitions[i];
-        if (!instantiations[index].pending)
-            continue;
-        entity_index t = instantiations[index].template_entity;
-        const function_template ft =
-            function_templates[entity_table[t].instantiation - 1];
-        /* a template never defined: the specialization is not either
-           ([temp.inst]/5 needs a definition only to exist) */
-        if (!ft.definition) {
-            instantiations[index].pending = false;
-            continue;
+    size_t next_definition = 0;
+    bool progress;
+    do {
+        progress = false;
+        for (size_t i = 0; i < postponed_bodies.size(); i++) {
+            const postponed_body b = postponed_bodies[i];
+            if (!b.c || (b.function &&
+                         !entity_table[b.function].member_definition_needed &&
+                         explicitly_instantiated(b.function) !=
+                             instantiation_kind::definition))
+                continue;
+            postponed_bodies[i].c = 0;
+            if (b.function)
+                entity_table[b.function].member_body_deferred = false;
+            instantiation_context context;
+            enter_instantiation(context, b.scope, b.declaration);
+            instantiated_member_body(b.c, b.body);
+            leave_instantiation(context);
+            progress = true;
         }
-        instantiate_definition(ft.declaration, index);
-    }
+        for (; next_definition < pending_definitions.size();
+             next_definition++) {
+            uint32_t index = pending_definitions[next_definition];
+            if (!instantiations[index].pending)
+                continue;
+            entity_index t = instantiations[index].template_entity;
+            const function_template ft =
+                function_templates[entity_table[t].instantiation - 1];
+            if (!ft.definition) {
+                instantiations[index].pending = false;
+                continue;
+            }
+            instantiate_definition(ft.declaration, index);
+            progress = true;
+        }
+    } while (progress);
+    postponed_bodies.clear();
     pending_definitions.clear();
 }
 

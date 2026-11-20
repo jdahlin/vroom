@@ -2302,7 +2302,11 @@ lines:
   emitted data. A declaration imported through two using-declaration paths
   enters the overload set once ([namespace.udecl]/1, /9), so Skia's
   `SkBlendModeBlender.cpp` gets past the `std::abs(float)` calls in
-  `SkPoint.h`. Its first remaining errors are in `SkRefCnt.h`.
+  `SkPoint.h`. For specializations such as `sk_sp<SkImage>` with an
+  incomplete class argument, non-virtual member definitions with known
+  return types now wait until used ([temp.inst]/3, /11).
+  `SkBlendModeBlender.cpp` gets past `SkRefCnt.h` and first fails on template
+  argument deduction in libc++'s `atomic_flag.h`.
 - Diagnostics in vcc's system; tuning starts from `cxxsema -stats`.
 
 ### S9. The rest of C++20

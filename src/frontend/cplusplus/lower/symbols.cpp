@@ -81,6 +81,10 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         return fail("a function whose body is not supported",
                     u.node.first_token());
     }
+    if (x.member_body_deferred && !declaring_symbols &&
+        analysis.explicitly_instantiated(e) != instantiation_kind::declaration)
+        return fail("a template member whose definition was not instantiated",
+                    at);
     if (!declaring_symbols)
         for (const dropped_function &d : dropped_functions)
             if (d.entity == e) {

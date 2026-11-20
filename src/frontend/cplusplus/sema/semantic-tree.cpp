@@ -105,11 +105,38 @@ uint32_t semantic_tree::list(const uint32_t *items, size_t count)
     return first;
 }
 
+void semantic_analysis::require_destructor_definition(qualified_type type)
+{
+    while (type_table[type.unqualified()].kind == type_kind::array)
+        type = type_table[type.unqualified()].operand;
+    const auto &object = type_table[type.unqualified()];
+    if (object.kind != type_kind::class_type)
+        return;
+    entity_index destructor = entity_table[object.entity].destructor;
+    if (destructor)
+        entity_table[destructor].member_definition_needed = true;
+}
+
 uint32_t semantic_analysis::expression_node(semantic_kind kind,
                                             const expression_meaning &m,
                                             token_index at, uint32_t a,
                                             uint32_t b, uint8_t op)
 {
+    if (!unevaluated) {
+        entity_index function = 0;
+        if ((kind == semantic_kind::entity ||
+             kind == semantic_kind::member_pointer) &&
+            a && entity_table[a].kind == entity_kind::function)
+            function = a;
+        else if (kind == semantic_kind::construct ||
+                 kind == semantic_kind::destroy ||
+                 kind == semantic_kind::bound_member_function)
+            function = b;
+        if (function)
+            entity_table[function].member_definition_needed = true;
+        if (m.category == value_category::prvalue)
+            require_destructor_definition(m.type);
+    }
     semantic_node n;
     n.kind = kind;
     n.op = op;
@@ -138,6 +165,8 @@ uint32_t semantic_analysis::statement_node(semantic_kind kind, token_index at,
                                            uint32_t a, uint32_t b, uint32_t c,
                                            uint32_t d)
 {
+    if (kind == semantic_kind::declaration_statement)
+        require_destructor_definition(entity_table[a].type);
     semantic_node n;
     n.kind = kind;
     n.at = at;

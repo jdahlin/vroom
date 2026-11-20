@@ -413,6 +413,8 @@ struct entity {
        left undefined, and a use of it is refused (body_failures' index
        plus one) */
     uint32_t unsupported_body = 0;
+    /* [temp.inst]/4: a definition deferred until the function is used. */
+    bool member_definition_needed = false, member_body_deferred = false;
     /* the preprocessor's identifier number, 0 for an unnamed entity */
     uint32_t name = 0;
     /* the entity whose scope the name is declared in (a namespace, a
@@ -3343,6 +3345,7 @@ class semantic_analysis
        non-static member function's this, or kind none), the arguments
        list[first .. first + count) */
     void analyse_postponed_body(entity_index f);
+    void require_destructor_definition(qualified_type type);
     constness evaluate_invocation(constant_evaluation &state, entity_index f,
                                   const constant_value &self, uint32_t first,
                                   uint32_t count, bool &returned,
@@ -4726,14 +4729,15 @@ class semantic_analysis
         SyntaxRef body;
     };
     owned_array<deferred_body> nested_bodies;
-    /* [temp.inst]/4: the member function bodies of a class template's
-       specialization instantiated while another class is being defined,
-       analysed by instantiate_pending in the instantiation's scope */
+    /* [temp.inst]/4: class template member bodies that wait until another
+       class is complete or until the member is needed. A nonzero function
+       identifies the member whose use triggers instantiation. */
     struct postponed_body {
         entity_index c;
         SyntaxRef body;
         entity_index scope;
         SyntaxRef declaration;
+        entity_index function = 0;
     };
     owned_array<postponed_body> postponed_bodies;
     bool postpone_member_bodies = false;
