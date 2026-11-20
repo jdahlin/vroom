@@ -76,6 +76,9 @@ class c_lowering
         c_fields.resize(analysis.entity_table.size());
         for (uint32_t &f : c_fields)
             f = 0;
+        deferred_class.resize(analysis.entity_table.size());
+        for (uint8_t &f : deferred_class)
+            f = 0;
         tail_reused.resize(analysis.entity_table.size());
         for (uint8_t &f : tail_reused)
             f = 0;
@@ -138,6 +141,16 @@ class c_lowering
     owned_array<uint32_t> c_fields;
     /* a base subobject whose field is the char array of its data size */
     owned_array<uint8_t> tail_reused;
+    /* a class named through a pointer or reference while another class's
+       struct is being made: its tag exists, its fields wait until the
+       outermost class is complete (else a member of it that is the class
+       being made would be an incomplete struct); the classes waiting,
+       with where each was named */
+    owned_array<uint8_t> deferred_class;
+    owned_array<entity_index> deferred_classes;
+    owned_array<token_index> deferred_at;
+    /* the nesting depth of the classes being made */
+    uint32_t classes_in_progress = 0;
     /* the labels of the function being lowered: identifier, C label */
     struct label_record {
         uint32_t identifier = 0, label = 0;
@@ -405,6 +418,8 @@ class c_lowering
     ast_qualified_type type(qualified_type t, token_index at);
     ast_qualified_type fundamental(fundamental_type f, token_index at);
     ast_qualified_type class_type(entity_index e, token_index at);
+    ast_qualified_type class_tag(entity_index e);
+    ast_qualified_type pointee_type(qualified_type t, token_index at);
     ast_qualified_type entity_type(entity_index e, token_index at);
     bool is_reference(qualified_type t) const;
     bool without_linkage(qualified_type t) const;
