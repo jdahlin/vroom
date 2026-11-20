@@ -1,0 +1,2 @@
+anonymous-struct-mem-initializer-template.cpp:10:11: error: the rules of [class.base.init] are not implemented yet
+anonymous-struct-mem-initializer-template.cpp:10:11: note: refused by vcc's frontend/cplusplus/class/constructor.cpp:N (ctor_initializer)

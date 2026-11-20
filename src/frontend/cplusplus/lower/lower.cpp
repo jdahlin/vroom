@@ -300,6 +300,8 @@ class c_lowering
                           ast_qualified_type element, uint64_t bound,
                           bool reverse, entity_index e, token_index at);
 
+    /* declaring every function's symbol, which uses none */
+    bool declaring_symbols = false;
     uint32_t fail(const char *what, token_index at)
     {
         if (!failure.what) {
@@ -1092,6 +1094,19 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
 uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
 {
     const entity &x = analysis.entity_table[e];
+    if (x.unsupported_body && !declaring_symbols) {
+        /* [temp.inst]/4: the definition of a member function used: its body
+           has a construct the analysis has no rules for */
+        const unsupported_construct &u =
+            analysis.body_failures[x.unsupported_body - 1];
+        failure.subclause = u.subclause;
+        failure.file = u.file;
+        failure.line = u.line;
+        failure.function = u.function;
+        failure.front_end = true;
+        return fail("a function whose body is not supported",
+                    u.node.first_token());
+    }
     uint32_t *slot = &symbols[e];
     if (x.special != special_member::none && variant == 1)
         slot = &complete_symbols[e];
@@ -6321,7 +6336,10 @@ bool c_lowering::translation_unit()
             if (!mangled)
                 continue;
         }
-        if (!symbol(d.entity, 0))
+        declaring_symbols = true;
+        bool made = symbol(d.entity, 0);
+        declaring_symbols = false;
+        if (!made)
             return false;
     }
     owned_array<entity_index> done;

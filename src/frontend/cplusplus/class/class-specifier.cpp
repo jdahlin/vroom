@@ -1843,13 +1843,27 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
  * instantiated only if used, and its being ill-formed for these arguments
  * (r %= x with a double r) is no error of the class's instantiation.  Uses
  * are not tracked yet: the body is analysed quietly and one that fails is
- * left undefined, so that no code is made for it.
+ * left undefined, so that no code is made for it; one that is unsupported
+ * also makes a use of the function a refusal.
  */
 void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n)
 {
     diagnostics_suppressed hush(diagnostics);
-    if (member_function_body(c, n) == analysis_result::ill_formed)
+    size_t unsupported_before = unsupported.size();
+    analysis_result r = member_function_body(c, n);
+    if (r == analysis_result::ill_formed)
         entity_table[last_declared].defined = false;
+    if (r == analysis_result::unsupported && last_declared) {
+        /* what the body needs is not analysed: the function is not made,
+           and a use of it is a refusal (lowering), never code without
+           what the body did */
+        entity_table[last_declared].defined = false;
+        if (unsupported.size() > unsupported_before) {
+            body_failures.append(unsupported[unsupported_before]);
+            entity_table[last_declared].unsupported_body =
+                static_cast<uint32_t>(body_failures.size());
+        }
+    }
 }
 
 analysis_result

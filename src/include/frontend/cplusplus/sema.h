@@ -345,6 +345,10 @@ struct entity {
     linkage linkage_of_name = linkage::none;
     /* [basic.def]/2: a declaration of it was a definition */
     bool defined = false;
+    /* an instantiated member function whose body analysis does not support:
+       left undefined, and a use of it is refused (body_failures' index
+       plus one) */
+    uint32_t unsupported_body = 0;
     /* the preprocessor's identifier number, 0 for an unnamed entity */
     uint32_t name = 0;
     /* the entity whose scope the name is declared in (a namespace, a
@@ -1378,6 +1382,7 @@ class semantic_analysis
     entities entity_table;
     owned_array<analysed_declaration> declarations;
     owned_array<unsupported_construct> unsupported;
+    owned_array<unsupported_construct> body_failures;
     owned_array<declared_name> declared;
     owned_array<analysed_expression> expressions;
     /* the semantic tree of every definition analysed */
