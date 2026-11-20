@@ -101,10 +101,10 @@ void semantic_analysis::bind_template_argument(entity_index scope,
         return;
     }
     if (a.kind == template_argument::kind_t::template_name) {
-        /* [temp.arg.template]: the class template's name */
+        /* [temp.arg.template]: the class or alias template's name */
         for (const function_template &t : function_templates)
-            if (t.entity == static_cast<entity_index>(a.value) && t.is_class &&
-                !t.primary) {
+            if (t.entity == static_cast<entity_index>(a.value) &&
+                (t.is_class || t.is_alias) && !t.primary) {
                 entity_table.bind(scope, name, t.name);
                 return;
             }
@@ -541,6 +541,68 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
 }
 
 /*
+ * [temp.arg.template]/3: the argument's template-parameter-list matches
+ * the parameter's when each parameter of the one has the same form
+ * (kind, and a non-type parameter's type) as the other's; a pack of the
+ * parameter's list matches zero or more of the argument's parameters of
+ * its form; a pack of the argument's accepts any number of the
+ * parameter's; and one the parameter's list leaves over has a default
+ * template-argument or is a pack (P0522R0, as clang's default).  A
+ * template template-parameter among them matches only when its own list
+ * is the same (anything else is unsupported, by the caller).
+ */
+bool semantic_analysis::template_parameters_match(
+    const function_template &wanted, const function_template &given)
+{
+    if (given.parameter_count == wanted.parameter_count &&
+        same_template_parameters(given.first_parameter, wanted.first_parameter,
+                                 wanted.parameter_count))
+        return true;
+    auto same_form = [&](uint32_t i, uint32_t j) {
+        const entity &x =
+            entity_table[template_parameter_entities[wanted.first_parameter +
+                                                     i]];
+        const entity &y =
+            entity_table[template_parameter_entities[given.first_parameter +
+                                                     j]];
+        if (x.kind != y.kind)
+            return false;
+        if (x.kind == entity_kind::none)
+            return x.type == y.type;
+        if (x.kind == entity_kind::template_entity) {
+            const function_template p = function_templates[x.instantiation - 1];
+            const function_template q = function_templates[y.instantiation - 1];
+            return p.parameter_count == q.parameter_count &&
+                   same_template_parameters(
+                       p.first_parameter, q.first_parameter, p.parameter_count);
+        }
+        return true;
+    };
+    uint32_t j = 0;
+    for (uint32_t i = 0; i < wanted.parameter_count; i++) {
+        if (template_parameter_is_pack(wanted.first_parameter + i)) {
+            while (j < given.parameter_count && same_form(i, j))
+                j++;
+            continue;
+        }
+        if (j >= given.parameter_count || !same_form(i, j))
+            return false;
+        if (!template_parameter_is_pack(given.first_parameter + j))
+            j++;
+    }
+    for (; j < given.parameter_count; j++) {
+        if (template_parameter_is_pack(given.first_parameter + j))
+            continue;
+        template_parameter_parts form;
+        if (!template_parameter_form(
+                template_parameter_nodes[given.first_parameter + j], form) ||
+            !form.has_default)
+            return false;
+    }
+    return true;
+}
+
+/*
  * [temp.arg.template]/1: "A template-argument for a template
  * template-parameter shall be the name of a class template or an alias
  * template, expressed as id-expression."  A class template here (as a
@@ -598,14 +660,14 @@ analysis_result semantic_analysis::template_template_argument(
     /* (an injected-class-name names its class template here,
        [temp.local]/1) */
     uint32_t a = class_template_of(named);
+    if (!a)
+        a = alias_template_of(named);
     if (!a || function_templates[a - 1].primary)
         return not_supported(at, "temp.arg.template");
     const function_template given = function_templates[a - 1];
     const function_template wanted =
         function_templates[entity_table[parameter].instantiation - 1];
-    if (given.parameter_count != wanted.parameter_count ||
-        !same_template_parameters(given.first_parameter, wanted.first_parameter,
-                                  wanted.parameter_count))
+    if (!template_parameters_match(wanted, given))
         return not_supported(at, "temp.arg.template");
     out.kind = template_argument::kind_t::template_name;
     if (given.is_parameter) {

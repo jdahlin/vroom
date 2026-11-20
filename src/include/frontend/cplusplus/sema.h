@@ -4000,6 +4000,10 @@ class semantic_analysis
        (template<class T> struct S;) */
     analysis_result class_template_declaration(SyntaxRef n,
                                                SyntaxRef elaborated);
+    /* [temp.arg.template]/3: whether an argument template's parameters
+       match a template template-parameter's */
+    bool template_parameters_match(const function_template &wanted,
+                                   const function_template &given);
     /* whether the template's parameters (template_parameter_entities from
        first) are another's (from other_first) of the same kinds and
        types, count of each */
