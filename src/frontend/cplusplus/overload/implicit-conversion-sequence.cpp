@@ -272,6 +272,58 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
  * defined to be the unique conversion sequence designated the ambiguous
  * conversion sequence."
  */
+/*
+ * [over.match.copy]/1.2: "When the type of the initializer expression is a
+ * class type "cv S", the non-explicit conversion functions of S and its
+ * base classes are considered.  When initializing a temporary object to be
+ * bound to the first parameter of a constructor ... Those that are not
+ * hidden within S and yield a type whose cv-unqualified version is the same
+ * type as T or is a derived class thereof are candidate functions."
+ * Whether S has one that may be (a class or function template of
+ * conversion functions it does not follow is one); the explicit ones
+ * count when asked: the first parameter of a copy or move constructor in
+ * a direct-initialization takes them too ([over.match.copy]/1.2's last
+ * sentence), which the sequence of an argument is not told apart from.
+ */
+bool semantic_analysis::conversion_functions_yield_class(
+    entity_index s, entity_index t, bool explicit_counts) const
+{
+    if (entity_table[s].kind != entity_kind::class_type ||
+        base_has_conversion_functions(s))
+        return true;
+    for (entity_index f = own_conversion_functions(s); f;
+         f = entity_table[f].next_overload) {
+        if (!entity_table[f].conversion_function)
+            return true;
+        if (entity_table[f].explicit_ && !explicit_counts)
+            continue;
+        const struct type &r =
+            type_table[conversion_function_result(f).type.unqualified()];
+        if (r.kind != type_kind::class_type)
+            continue;
+        bool ambiguous = false;
+        if (entity_table[r.entity].kind != entity_kind::class_type ||
+            r.entity == t || base_step(r.entity, t, ambiguous) || ambiguous)
+            return true;
+    }
+    return false;
+}
+
+/* whether the class has a conversion function that is no explicit one
+   (or conversion functions this does not follow): one a copy-initialization
+   may use ([class.conv.fct]/2) */
+bool semantic_analysis::has_implicit_conversion_functions(entity_index c) const
+{
+    if (entity_table[c].kind != entity_kind::class_type ||
+        base_has_conversion_functions(c))
+        return true;
+    for (entity_index f = own_conversion_functions(c); f;
+         f = entity_table[f].next_overload)
+        if (!entity_table[f].conversion_function || !entity_table[f].explicit_)
+            return true;
+    return false;
+}
+
 semantic_analysis::conversion_sequence
 semantic_analysis::class_sequence(const expression_meaning &a,
                                   qualified_type to, bool user_defined)
@@ -305,8 +357,13 @@ semantic_analysis::class_sequence(const expression_meaning &a,
     /* [over.match.copy]/1.2: the conversion functions of the argument's
        class are candidates too: not analysed */
     if (y.kind == type_kind::class_type && user_defined &&
-        has_conversion_functions(y.entity))
-        return of_form(sequence::form::unknown);
+        conversion_functions_yield_class(y.entity, c1, true)) {
+        /* (a class unrelated to c1: only a user-defined conversion
+           converts it) */
+        sequence unknown = of_form(sequence::form::unknown);
+        unknown.user_defined_if_viable = true;
+        return unknown;
+    }
     if (!user_defined)
         return of_form(sequence::form::bad);
     /* [temp.mem]/1: a constructor template of c1 only declared is a
@@ -452,8 +509,14 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                functions: see above) */
             /* [dcl.init.ref]/5.1.2, /5.3.2 ([over.match.ref]): a
                conversion function of T2's: not analysed */
-            if (c2 && user_defined && has_conversion_functions(c2))
-                return of_form(sequence::form::unknown);
+            if (c2 && user_defined) {
+                /* (those that yield T1 or a class derived from it) */
+                bool functions = has_conversion_functions(c2);
+                if (c1)
+                    functions = conversion_functions_yield_class(c2, c1, true);
+                if (functions)
+                    return of_form(sequence::form::unknown);
+            }
             if (!c1 || !binds_rvalues || !user_defined)
                 return of_form(sequence::form::bad);
             s = class_sequence(
@@ -600,11 +663,23 @@ semantic_analysis::object_sequence(const expression_meaning &object,
     s.target =
         qualified_type::make(object.type.unqualified(), object_cv(x.member_cv));
     entity_index c = type_table[object.type.unqualified()].entity;
-    if (c != x.enclosing) {
+    /* [over.match.funcs]/4: "For non-conversion functions introduced by a
+       using-declaration into a derived class, the function is considered
+       to be a member of the derived class for the purpose of defining the
+       type of the implicit object parameter": the class the name is found
+       in */
+    entity_index owner = x.enclosing;
+    if (c != owner && x.name && !x.conversion_function &&
+        is_class_entity(owner) && is_class_entity(c)) {
+        lookup_result found = lookup_qualified(c, x.name, lookup_filter::any);
+        if (found.found_in != owner && is_class_entity(found.found_in))
+            owner = found.found_in;
+    }
+    if (c != owner) {
         s.identity = false;
         s.rank = 2;
         s.base_from = c;
-        s.base_to = x.enclosing;
+        s.base_to = owner;
     }
     return s;
 }

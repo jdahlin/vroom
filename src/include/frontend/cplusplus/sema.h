@@ -3262,6 +3262,13 @@ class semantic_analysis
        the templates overloaded with the functions of e's chain
        (entity::member_templates), 0 if none */
     entity_index member_templates_of(entity_index e) const;
+    /* [namespace.udecl]/15: the member function templates of the held
+       name `from` (a base class's), which a using-declaration brought into
+       the class c, join the templates of the name of the class's own
+       function head (its held name is made if it has none): copies of
+       their records */
+    void introduce_member_templates(entity_index c, entity_index head,
+                                    entity_index from);
     analysis_result
     function_template_declarator(SyntaxRef definition, uint32_t lead,
                                  entity_index member_of, entity_index scope,
@@ -4621,6 +4628,11 @@ class semantic_analysis
         /* the implicit object parameter of a static member function, which
            "is considered to match any object" ([over.match.funcs]/4) */
         bool any_object = false;
+        /* an unknown sequence that is, if the candidate is viable, a
+           user-defined conversion sequence (never a standard one): the
+           class converted from is unrelated to the parameter's and has
+           conversion functions analysis does not follow */
+        bool user_defined_if_viable = false;
         /* [over.best.ics]/10: an ambiguous conversion sequence */
         bool ambiguous = false;
         /* the type converted to: the parameter's, or the type a
@@ -4726,6 +4738,11 @@ class semantic_analysis
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
     bool has_conversion_functions(entity_index c) const;
+    /* whether the class s has a non-explicit conversion function that may
+       yield the class t or one derived from it ([over.match.copy]/1.2) */
+    bool has_implicit_conversion_functions(entity_index c) const;
+    bool conversion_functions_yield_class(entity_index s, entity_index t,
+                                          bool explicit_counts = false) const;
     /* ... a base class of c does */
     bool base_has_conversion_functions(entity_index c) const;
     bool converts_to_non_class(entity_index c, bool explicit_counts) const;

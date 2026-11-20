@@ -1274,11 +1274,13 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
             if (r != analysis_result::well_formed)
                 return r;
             /* [dcl.init]/17.6.1: a member initialized from a prvalue of
-               its class is that object, no constructor called: not
-               analysed */
-            if (!entity_table[e].base_subobject && arguments.size() == 1 &&
-                arguments[0].category == value_category::prvalue &&
-                arguments[0].type.unqualified() == type.unqualified())
+               its class is that object, no constructor called: only one
+               whose class copies its bytes is analysed (below) */
+            bool elided = !entity_table[e].base_subobject &&
+                          arguments.size() == 1 &&
+                          arguments[0].category == value_category::prvalue &&
+                          arguments[0].type.unqualified() == type.unqualified();
+            if (elided && !trivial_class(record.entity))
                 return not_supported(item, "class.copy.elision");
             initialized_value value;
             constructing_base = entity_table[e].base_subobject;
@@ -1291,13 +1293,20 @@ analysis_result semantic_analysis::ctor_initializer(SyntaxElement list,
                    class that copies its bytes (construct gave the
                    argument's value): stored as for a member with no
                    constructors; a base class subobject's bytes are
-                   not, its padding may hold a derived member */
-                if (entity_table[e].base_subobject)
+                   not, its padding may hold a derived member (a base with
+                   no tail padding, whose data size is its size, is) */
+                if (entity_table[e].base_subobject &&
+                    entity_table[record.entity].data_size !=
+                        entity_table[record.entity].size)
                     return not_supported(item, "class.copy.ctor");
                 initialized[slot] =
                     subobject_store(object, type, id, value.node);
                 continue;
             }
+            if (elided)
+                /* (the copy or move constructor of the class is called:
+                   [class.copy.elision]/1 calls none) */
+                return not_supported(item, "class.copy.elision");
             initialized[slot] = statement_node(
                 semantic_kind::expression_statement, id, value.node);
             if (entity_table[e].virtual_base)

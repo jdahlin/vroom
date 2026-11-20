@@ -34,11 +34,34 @@ namespace cplusplus
 void semantic_analysis::overload_set(entity_index e,
                                      owned_array<entity_index> &out) const
 {
+    size_t first = out.size();
     for (; e; e = entity_table[e].next_overload) {
         bool seen = false;
         for (entity_index other : out)
             if (other == e)
                 seen = true;
+        /* [namespace.udecl]/15 (C++20 /14): "When a using-declarator brings
+           declarations from a base class into a derived class, member
+           functions ... in the derived class override and/or hide member
+           functions ... with the same name, parameter-type-list,
+           cv-qualification, and ref-qualifier (if any) in a base class
+           (rather than conflicting)": the chain of a derived class's name
+           ends with the base's functions its using-declaration introduced,
+           after the class's own, and one of them with the signature of a
+           function before it in the chain is hidden */
+        const entity &x = entity_table[e];
+        if (x.kind == entity_kind::function &&
+            entity_table[x.enclosing].kind == entity_kind::class_type)
+            for (size_t i = first; i < out.size() && !seen; i++) {
+                const entity &y = entity_table[out[i]];
+                if (y.enclosing != x.enclosing &&
+                    y.kind == entity_kind::function &&
+                    y.member_cv == x.member_cv &&
+                    y.conversion_function == x.conversion_function &&
+                    same_parameters(type_table, y.type.unqualified(),
+                                    x.type.unqualified()))
+                    seen = true;
+            }
         if (!seen)
             out.append(e);
     }
@@ -146,10 +169,17 @@ analysis_result semantic_analysis::best_viable_function(
     /* an unknown sequence at its best */
     sequence best_case;
     best_case.kind = sequence::form::standard;
+    /* the best a user-defined one can be ([over.ics.rank]/2: worse than any
+       standard conversion sequence) */
+    sequence best_user_defined;
+    best_user_defined.kind = sequence::form::user_defined;
     auto at_best = [&](size_t candidate, size_t i) -> const sequence & {
         const sequence &s = ics[candidate * width + i];
-        if (s.kind == sequence::form::unknown)
+        if (s.kind == sequence::form::unknown) {
+            if (s.user_defined_if_viable)
+                return best_user_defined;
             return best_case;
+        }
         return s;
     };
     /* [over.match.best]/2: "a viable function F1 is defined to be a better

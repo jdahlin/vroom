@@ -246,6 +246,25 @@ analysis_result semantic_analysis::constructor_template_candidates(
  * ([over.match.funcs]/2); the best one's definition is instantiated
  * ([temp.inst]/4) and called.
  */
+void semantic_analysis::introduce_member_templates(entity_index c,
+                                                   entity_index head,
+                                                   entity_index from)
+{
+    entity_index held = entity_table[head].member_templates;
+    if (!held) {
+        held = entity_table.make(entity_kind::none, entity_table[head].name, c);
+        entity_table[held].held_by_template = true;
+        entity_table[head].member_templates = held;
+    }
+    for (size_t i = 0, k = function_templates.size(); i < k; i++)
+        if (function_templates[i].name == from &&
+            !function_templates[i].unusable) {
+            function_template copy = function_templates[i];
+            copy.name = held;
+            function_templates.append(copy);
+        }
+}
+
 analysis_result semantic_analysis::member_template_call(
     SyntaxRef n, entity_index held, const expression_meaning &object,
     const owned_array<SyntaxElement> &arguments,
