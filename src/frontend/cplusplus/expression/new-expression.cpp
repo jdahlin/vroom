@@ -483,6 +483,15 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     entity_index function = set[chosen];
     expression_meaning call;
     VTRY_SET(r, call_function(n, at, function, arguments, call));
+    bool reserved = reserved_placement(function) && !array;
+    if (reserved) {
+        /* [new.delete.placement]/1-/3: the reserved non-allocating form
+           "Returns: ptr" and "Intentionally performs no other action",
+           and "The provisions of [basic.stc.dynamic] do not apply" (no
+           null result): clang makes no call, the pointer is the
+           allocation */
+        call.node = semantics.items(semantics[call.node].first)[1];
+    }
     /* the pointer to the object, which its initialization is of */
     m = expression_meaning();
     m.type = qualified_type::make(type_table.pointer_to(type), cv_none);
@@ -597,10 +606,10 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
        not be called, and the value of the new-expression shall be null."
        Only the implicitly declared global functions are known never to
        return null ([basic.stc.dynamic.allocation]/4) */
-    if (value.node && !entity_table[function].implicit)
+    if (value.node && !entity_table[function].implicit && !reserved)
         semantics[m.node].c = 1;
     if (elements) {
-        if (!entity_table[function].implicit)
+        if (!entity_table[function].implicit && !reserved)
             semantics[m.node].c = 1;
         semantics[m.node].d = element_count.node;
         semantics[m.node].value = cookie;
