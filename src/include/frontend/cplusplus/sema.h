@@ -427,6 +427,8 @@ struct entity {
     /* [dcl.inline]: an inline function or variable; [namespace.def]/7: an
        inline namespace */
     bool inline_ = false;
+    /* A constructor with an unsatisfied associated constraint. */
+    bool constraint_unsatisfied = false;
     /* a scope: a declaration analysis did not follow may have brought
        names into it that are not held one by one (a using-directive whose
        namespace is not known, a using-enum-declaration): a name not found
@@ -4016,7 +4018,7 @@ class semantic_analysis
     bool function_specifiers_only(SyntaxRef seq, bool &constexpr_specified,
                                   bool *virtual_specified = nullptr,
                                   bool *explicit_specified = nullptr,
-                                  bool *inline_specified = nullptr) const;
+                                  bool *inline_specified = nullptr);
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
     analysis_result special_member_body(FunctionDefinition definition,

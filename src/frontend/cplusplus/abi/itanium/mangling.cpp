@@ -264,7 +264,23 @@ bool itanium_mangler::encoding(entity_index e)
         return false;
     if (x.kind == entity_kind::variable)
         return true;
-    return bare_function_type(x.type);
+    if (!bare_function_type(x.type))
+        return false;
+    if (x.special == special_member::constructor && x.first_declaration &&
+        x.enclosing && analysis.entity_table[x.enclosing].instantiation) {
+        SyntaxRef declaration =
+            analysis.entity_table.declaration(x.first_declaration).node;
+        for (SyntaxElement part : declaration.elements()) {
+            if (!part.is(syntax_kind::requires_clause) || part.size() != 2)
+                continue;
+            entity_index pattern = analysis.specialized_template(x.enclosing);
+            if (!pattern)
+                return false;
+            text("Q");
+            return constraint_expression(pattern, part[1]);
+        }
+    }
+    return true;
 }
 
 /*
@@ -369,6 +385,11 @@ bool itanium_mangler::specialization_encoding(entity_index e)
 bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
 {
     if (c.is_token()) {
+        if (entity_index parameter =
+                analysis.constraint_parameter(t, c.token())) {
+            template_param(analysis.entity_table[parameter].value);
+            return true;
+        }
         /* a decimal integer-literal of type int: Li <value> E */
         owned_buffer spelling;
         analysis.token_spelling(c.token(), spelling.get());

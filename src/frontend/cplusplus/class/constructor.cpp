@@ -186,8 +186,7 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
         if (x.is(syntax_kind::explicit_specifier)) {
             if (!conditions)
                 continue;
-            if (!instantiating && !class_instantiating && !substituting &&
-                names_dependent_entity(x.first_token(), x.end_token())) {
+            if (names_dependent_entity(x.first_token(), x.end_token())) {
                 s.explicit_dependent = true;
                 continue;
             }
@@ -455,7 +454,7 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
                                                  bool &constexpr_specified,
                                                  bool *virtual_specified,
                                                  bool *explicit_specified,
-                                                 bool *inline_specified) const
+                                                 bool *inline_specified)
 {
     constexpr_specified = false;
     bool virtual_seen = false, explicit_seen = false, inline_seen = false;
@@ -471,6 +470,21 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
            applies them */
         if (c.is(syntax_kind::gnu_attribute_specifier))
             continue;
+        if (c.is(syntax_kind::explicit_specifier)) {
+            if (!explicit_specified || explicit_seen ||
+                names_dependent_entity(c.first_token(), c.end_token()))
+                return false;
+            bool constant = false, value = false;
+            size_t unsupported_before = unsupported.size();
+            analysis_result r =
+                bool_constant_expression(c, c[2], constant, value);
+            unsupported.resize(unsupported_before);
+            if (r != analysis_result::well_formed || !constant)
+                return false;
+            explicit_seen = true;
+            *explicit_specified = value;
+            continue;
+        }
         if (!c.is_token())
             return false;
         switch (c.keyword()) {
@@ -1034,7 +1048,8 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
            default initialization in the context of copy-initialization),
            the candidate functions are all the converting constructors
            ([class.conv.ctor]) of that class" */
-        if (copy && entity_table[k].explicit_)
+        if ((copy && entity_table[k].explicit_) ||
+            entity_table[k].constraint_unsatisfied)
             continue;
         overload_candidate one;
         one.function = k;

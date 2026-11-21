@@ -270,8 +270,7 @@ analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
     entity_index outer = current_scope;
     open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
-    if (!instantiating && !class_instantiating && !substituting &&
-        names_dependent_entity(n.first_token(), n.end_token()))
+    if (names_dependent_entity(n.first_token(), n.end_token()))
     /* [temp.dep.constexpr]: value-dependent in the template's own
            declaration; each specialization's declaration is analysed with
            the arguments, and the template's own type says potentially

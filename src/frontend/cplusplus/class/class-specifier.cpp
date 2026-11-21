@@ -1301,21 +1301,38 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
             return r;
         }
         auto body = node.function_definition().function_body();
-        if (node.size() != at + 2 || !body || body.function_try_block())
+        bool constrained = node.size() == at + 3 &&
+                           node[at + 1].is(syntax_kind::requires_clause) &&
+                           node[at + 1].size() == 2;
+        if ((!constrained && node.size() != at + 2) || !body ||
+            body.function_try_block())
             return not_supported(node, "dcl.fct.def.general");
+        bool satisfied = true;
+        if (constrained) {
+            if (!entity_table[c].instantiation || body.defaulted() ||
+                body.deleted())
+                return not_supported(node, "temp.constr");
+            VTRY(r, constraint_satisfied(node[at + 1][1], current_scope,
+                                         lookup_horizon, satisfied));
+        }
         if (body.defaulted() || body.deleted()) {
             /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
             return defaulted_or_deleted_special_member(
-                c, node, node[at], node[at + 1], access, constexpr_specified,
-                virtual_specified, explicit_specified);
+                c, node, special(node[at]), node[at + 1], access,
+                constexpr_specified, virtual_specified || override_ || final_,
+                explicit_specified);
         }
         analysis_result r = special_member_declarator(
-            c, node, node[at], access, true, constexpr_specified,
-            virtual_specified, explicit_specified, inline_specified);
-        if (r == analysis_result::well_formed)
-            bodies.append(node);
+            c, node, special(node[at]), access, true, constexpr_specified,
+            virtual_specified || override_ || final_, explicit_specified,
+            inline_specified);
+        if (r == analysis_result::well_formed) {
+            entity_table[last_declared].constraint_unsatisfied = !satisfied;
+            if (satisfied)
+                bodies.append(node);
+        }
         return r;
     }
     /* [ext:gnu_attributes] before the decl-specifier-seq: what follows
@@ -2109,7 +2126,7 @@ semantic_analysis::member_function_definition(entity_index c,
         }
         if (!last_declared)
             return not_supported(definition, "class.ctor");
-        return special_member_body(definition, tail[at + 1].function_body());
+        return special_member_body(definition, definition.function_body());
     }
     /* [basic.scope.class]: the declarator's names are looked up in the
        class, as when its declaration was analysed (a class template's
