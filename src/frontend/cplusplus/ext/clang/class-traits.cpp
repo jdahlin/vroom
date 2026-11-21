@@ -86,21 +86,20 @@ bool semantic_analysis::virtual_destructor(entity_index c) const
 }
 
 /* whether class c, or a subobject's class, has what the analysis does not
-   follow to its end in [class.prop]'s triviality: a constructor template or
-   a deleted constructor or destructor (which clang counts as it does not
+   follow to its end in [class.prop]'s triviality: a deleted copy or move
+   constructor or destructor (which clang counts as it does not
    the standard: "cwg1496: no"), a defaulted move */
 bool semantic_analysis::triviality_unknown(entity_index c) const
 {
     const entity &x = entity_table[c];
-    if (x.constructor_template || x.implicit_copy_deleted ||
-        x.defaulted_move_constructor || x.defaulted_move_assignment ||
-        x.defaulted_copy_assignment)
+    if (x.implicit_copy_deleted || x.defaulted_move_constructor ||
+        x.defaulted_move_assignment)
         return true;
     if (x.destructor && entity_table[x.destructor].deleted)
         return true;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (entity_table[k].deleted)
+        if (entity_table[k].deleted && is_copy_constructor(c, k))
             return true;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);

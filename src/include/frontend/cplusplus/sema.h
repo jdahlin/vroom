@@ -5382,6 +5382,7 @@ class semantic_analysis
     };
     owned_array<deferred_class_instantiation> deferred_class_instantiations;
     uint32_t require_complete_class = 0;
+    bool member_return_type = false;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
        not */
