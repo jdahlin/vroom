@@ -2345,6 +2345,9 @@ lines:
 - Deleted move constructors are declared and diagnosed when selected by
   overload resolution ([dcl.fct.def.delete]/2). `SkBlendModeBlender.cpp`
   now first stops at deallocation lookup inside `SkRefCntBase`.
+- Allocation and deallocation lookup uses the analysed members and bases of
+  a laid-out class ([class.mem]/6). `SkBlendModeBlender.cpp` now first stops
+  at a defaulted special member in `SkBlender.h`.
 - Diagnostics in vcc's system; tuning starts from `cxxsema -stats`.
 
 ### S9. The rest of C++20

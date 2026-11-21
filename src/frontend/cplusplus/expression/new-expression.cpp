@@ -230,9 +230,11 @@ analysis_result semantic_analysis::allocation_functions(
     implicit_allocation_functions();
     uint32_t name = allocation_function_name(kind);
     in_class = false;
-    if (c && !class_complete &&
+    if (c && !class_complete && !entity_table[c].size &&
         allocation_names_spelled() != allocation_declarations_analysed)
-        /* the class may declare one analysis did not follow */
+        /* Before its layout, the class may declare one analysis has not
+           followed. A class with a size has had its members and bases
+           analysed, including in a complete-class context. */
         return not_supported(n, "class.free");
     if (c) {
         lookup_result found = lookup_qualified(c, name, lookup_filter::any);
