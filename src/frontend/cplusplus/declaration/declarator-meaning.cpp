@@ -505,6 +505,15 @@ token_index semantic_analysis::declarator_id(SyntaxElement d) const
         return d.token();
     if (d.is_token())
         return 0;
+    if (d.is(syntax_kind::simple_template_id)) {
+        if (d.size() && d[0].is_identifier())
+            return d[0].token();
+        return 0;
+    }
+    if (d.is(syntax_kind::operator_function_id,
+             syntax_kind::literal_operator_id,
+             syntax_kind::conversion_function_id))
+        return d.first_token();
     if (!d.is(syntax_kind::init_declarator, syntax_kind::declarator,
               syntax_kind::ptr_declarator, syntax_kind::noptr_declarator))
         return 0;
@@ -529,13 +538,14 @@ static bool declares_by_declarator(SyntaxRef d)
     while ((d.template_declaration() || d.explicit_specialization()) &&
            d.back().is_node())
         d = d.back();
-    if (d.function_definition())
+    if (d.function_definition() || d.is(syntax_kind::deduction_guide))
         return true;
     /* (a friend function template's: a member-declaration, [temp.friend]) */
     if (!d.simple_declaration() && !d.is(syntax_kind::member_declaration))
         return false;
     for (auto c : d.elements())
         if (c.is(syntax_kind::init_declarator_list,
+                 syntax_kind::init_declarator, syntax_kind::declarator,
                  syntax_kind::noptr_declarator, syntax_kind::ptr_declarator))
             return true;
     return false;
@@ -622,11 +632,27 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
             if (!part.is(syntax_kind::decl_specifier_seq))
                 continue;
             for (SyntaxElement spec : part.elements()) {
+                if (spec.is(syntax_kind::elaborated_type_specifier) &&
+                    spec.size()) {
+                    SyntaxElement name = spec[spec.size() - 1];
+                    if (name.is_identifier()) {
+                        ids.append(name.token());
+                        class_template = true;
+                    } else if (name.is(syntax_kind::simple_template_id) &&
+                               name.size() && name[0].is_identifier()) {
+                        ids.append(name[0].token());
+                        class_template = true;
+                    }
+                    continue;
+                }
                 if (!spec.is(syntax_kind::class_specifier) || !spec.size())
                     continue;
                 SyntaxElement name = class_head_name(spec[0]);
-                if (name.is(syntax_kind::simple_template_id) && name.size() &&
-                    name[0].is_identifier()) {
+                if (name.is_identifier()) {
+                    ids.append(name.token());
+                    class_template = true;
+                } else if (name.is(syntax_kind::simple_template_id) &&
+                           name.size() && name[0].is_identifier()) {
                     ids.append(name[0].token());
                     class_template = true;
                 }

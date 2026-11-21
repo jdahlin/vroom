@@ -761,12 +761,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
        name's templates are overloaded, [temp.over]) */
     /* (an operator function template is followed: operator expressions
        find it, over.match.oper) */
-    bool operators_were_held = operators_held;
-    hold_names(n);
-    operators_held = operators_were_held;
     entity_index held = entity_table.find(outer, name);
-    if (!held && m.operator_function) {
-        /* (hold_names holds identifiers: an operator's name is held here) */
+    if (!held) {
         held = make_held_name(name, outer);
         entity_table.bind(outer, name, held);
     }
