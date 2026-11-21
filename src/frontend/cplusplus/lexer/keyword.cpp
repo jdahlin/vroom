@@ -54,15 +54,48 @@ struct keyword_description {
     const char *spelling;
     const char *clang_name;
     uint32_t flags;
+    uint16_t length;
 };
 
 constexpr keyword_description keywords[] = {
-#define KEYWORD(spelling, clang_name, flags) {spelling, clang_name, flags},
+#define KEYWORD(spelling, clang_name, flags)                                   \
+    {spelling, clang_name, flags, sizeof(spelling) - 1},
 #include "keyword.inc"
 #undef KEYWORD
 };
 
 constexpr int keyword_count = sizeof keywords / sizeof *keywords;
+
+/* Build the table from keyword.inc so its indices remain the keyword IDs. */
+constexpr uint32_t keyword_hash(const char *spelling, size_t length)
+{
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < length; i++)
+        h = (h ^ static_cast<unsigned char>(spelling[i])) * 16777619u;
+    return h;
+}
+
+constexpr size_t keyword_slot_count = 1024;
+struct keyword_index {
+    uint16_t slots[keyword_slot_count];
+};
+
+constexpr keyword_index make_keyword_index()
+{
+    keyword_index index{};
+    for (int i = 0; i < keyword_count; i++) {
+        const keyword_description &keyword = keywords[i];
+        size_t slot = keyword_hash(keyword.spelling, keyword.length) &
+                      (keyword_slot_count - 1);
+        while (index.slots[slot])
+            slot = (slot + 1) & (keyword_slot_count - 1);
+        index.slots[slot] = static_cast<uint16_t>(i + 1);
+    }
+    return index;
+}
+
+static_assert(keyword_count < keyword_slot_count);
+constexpr keyword_index keyword_slots = make_keyword_index();
 
 /* clang's KeywordStatus, in its order: the strongest condition wins */
 enum class keyword_status { unknown, disabled, future, extension, enabled };
@@ -137,36 +170,27 @@ keyword_status keyword_status_of(const implementation_defined_behavior &b,
 VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
                          const char *spelling, size_t length)
 {
-    int lo = 0, hi = keyword_count;
-    while (lo < hi) {
-        int mid = (lo + hi) / 2;
-        const char *k = keywords[mid].spelling;
-        size_t n = strlen(k);
-        size_t common = n;
-        if (length < common)
-            common = length;
-        int c = memcmp(k, spelling, common);
-        if (!c && n < length)
-            c = -1;
-        else if (!c && n > length)
-            c = 1;
-        if (!c) {
+    size_t slot = keyword_hash(spelling, length) & (keyword_slot_count - 1);
+    for (;;) {
+        uint16_t entry = keyword_slots.slots[slot];
+        if (!entry)
+            return -1;
+        int index = entry - 1;
+        const keyword_description &keyword = keywords[index];
+        if (keyword.length == length &&
+            !memcmp(keyword.spelling, spelling, length)) {
             /* [ext:clang_no_operator_names]: -fno-operator-names
                makes and, or, ... identifiers */
-            if ((keywords[mid].flags & KEYWORD_OPERATOR) &&
-                !behavior.operator_names)
+            if ((keyword.flags & KEYWORD_OPERATOR) && !behavior.operator_names)
                 return -1;
-            keyword_status s = keyword_status_of(behavior, keywords[mid].flags);
-            if (s == keyword_status::enabled || s == keyword_status::extension)
-                return mid;
+            keyword_status status = keyword_status_of(behavior, keyword.flags);
+            if (status == keyword_status::enabled ||
+                status == keyword_status::extension)
+                return index;
             return -1;
         }
-        if (c < 0)
-            lo = mid + 1;
-        else
-            hi = mid;
+        slot = (slot + 1) & (keyword_slot_count - 1);
     }
-    return -1;
 }
 
 VPRIV const char *keyword_clang_name(int keyword)
