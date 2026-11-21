@@ -1201,8 +1201,13 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             i++;
             continue;
         }
-        if (c.is_attribute())
+        if (c.is_attribute()) {
+            if (attributes_without_effect(c)) {
+                i++;
+                continue;
+            }
             return not_supported(n, "dcl.attr");
+        }
         if (c.parameters_and_qualifiers()) {
             /* [ext:gnu_attributes] after the parameters */
             for (auto a : c.elements())
