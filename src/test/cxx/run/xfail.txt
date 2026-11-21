@@ -16,7 +16,6 @@ old-enums-switch	vcc: the C++ front end does not handle a declaration the parser
 old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
 old-local-unnamed-template-arg	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 old-long-double	vcc: C++ code generation does not handle a constant whose value analysis does not know yet
-old-member-pointers	vcc: the rules of [temp.res] are not implemented yet
 old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
 old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
@@ -36,7 +35,6 @@ temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implem
 temp-mem-address-deduced-target	vcc: the rules of [over] are not implemented yet
 temp-mem-constructor-declared	vcc: the rules of [temp.inst] are not implemented yet
 temp-mem-conversion-template-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
-temp-mem-decltype-return-mangling	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 temp-mem-friend-of-member-template	vcc: the rules of [dcl.meaning] are not implemented yet
 temp-mem-member-class-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
 temp-mem-member-deduction-guide	vcc: the rules of [temp.mem] are not implemented yet

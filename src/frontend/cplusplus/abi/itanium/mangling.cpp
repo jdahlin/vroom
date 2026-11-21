@@ -539,13 +539,43 @@ bool itanium_mangler::dependent_expression(SyntaxElement c)
     if (c.is_token()) {
         uint32_t position =
             analysis.function_parameter_position(encoding_template, c.token());
-        if (!position)
+        if (position) {
+            text("fp");
+            if (position > 1)
+                number(position - 2);
+            text("_");
+            return true;
+        }
+        owned_buffer sp;
+        analysis.token_spelling(c.token(), sp.get());
+        if (!sp.size() || sp.size() > 9 ||
+            (sp.data()[0] == '0' && sp.size() > 1))
             return false;
-        text("fp");
-        if (position > 1)
-            number(position - 2);
-        text("_");
+        for (size_t i = 0; i < sp.size(); i++)
+            if (sp.data()[i] < '0' || sp.data()[i] > '9')
+                return false;
+        text("Li");
+        vbuffer_append(out, sp.data(), sp.size());
+        text("E");
         return true;
+    }
+    if (c.size() == 3 && (c.kind() == syntax_kind::additive_expression ||
+                          c.kind() == syntax_kind::multiplicative_expression)) {
+        const char *op = nullptr;
+        if (punctuator(c[1], preprocessing_op_or_punc::PLUS))
+            op = "pl";
+        else if (punctuator(c[1], preprocessing_op_or_punc::MINUS))
+            op = "mi";
+        else if (punctuator(c[1], preprocessing_op_or_punc::STAR))
+            op = "ml";
+        else if (punctuator(c[1], preprocessing_op_or_punc::SLASH))
+            op = "dv";
+        else if (punctuator(c[1], preprocessing_op_or_punc::PERCENT))
+            op = "rm";
+        if (!op)
+            return false;
+        text(op);
+        return dependent_expression(c[0]) && dependent_expression(c[2]);
     }
     if (c.kind() != syntax_kind::postfix_expression || c.size() < 3)
         return false;
@@ -1959,10 +1989,30 @@ bool itanium_mangler::type(qualified_type t)
                <pointer-to-member-type> ::= M <class type> <member type>
         */
         text("M");
-        done =
-            type(qualified_type::make(
-                analysis.entity_table[r.entity].type.unqualified(), cv_none)) &&
-            type(r.operand);
+        type_index cls = analysis.entity_table[r.entity].type.unqualified();
+        bool class_ok = false;
+        if (cls) {
+            class_ok = type(qualified_type::make(cls, cv_none));
+        } else if (encoding_template) {
+            bool subst = false;
+            uint64_t param_pos = analysis.entity_table[r.entity].value;
+            for (size_t i = 0; i < candidates.size(); i++) {
+                if (candidates[i].type.unqualified() &&
+                    !candidates[i].type.cv() &&
+                    record(candidates[i].type).kind ==
+                        type_kind::template_parameter &&
+                    analysis.entity_table[record(candidates[i].type).entity]
+                            .value == param_pos) {
+                    type(candidates[i].type);
+                    subst = true;
+                    break;
+                }
+            }
+            if (!subst)
+                template_param(param_pos);
+            class_ok = true;
+        }
+        done = class_ok && type(r.operand);
     } else if (r.kind == type_kind::block_pointer) {
         /* [abi:mangling-type]'s vendor extended type qualifier, as clang
            mangles a block pointer ([ext:clang_blocks]) */
