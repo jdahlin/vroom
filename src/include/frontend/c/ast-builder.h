@@ -100,6 +100,10 @@ uint64_t ast_builder_type_record_offset(cc *c, ast_qualified_type record,
 /* ... in bits (a bit-field's first bit) */
 uint64_t ast_builder_type_record_bit_offset(cc *c, ast_qualified_type record,
                                             uint32_t field);
+void ast_builder_type_record_set_offset(cc *c, ast_qualified_type record,
+                                        uint32_t field, uint64_t bit_offset);
+void ast_builder_type_record_set_size(cc *c, ast_qualified_type record,
+                                      uint64_t size, uint32_t align);
 
 /* ---- symbols ---- */
 /* kind AST_SYMBOL_*, storage AST_STORAGE_*, flags AST_SYMBOL_FLAG_*; depth
@@ -190,6 +194,8 @@ uint32_t ast_builder_member(cc *c, uint32_t object, uint32_t field,
    zero-extended for an unsigned one (unsigned __int128 included) */
 uint32_t ast_builder_integer(cc *c, ast_qualified_type t, int64_t value);
 uint32_t ast_builder_floating(cc *c, ast_qualified_type t, double value);
+uint32_t ast_builder_floating_literal(cc *c, ast_qualified_type t,
+                                      const char *spelling, size_t length);
 /* a string literal of count elements of size bytes each, terminator
    included (bytes has them all); kind LEX_TOKEN_STRING .. */
 uint32_t ast_builder_string(cc *c, ast_qualified_type element,

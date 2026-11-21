@@ -539,13 +539,43 @@ bool itanium_mangler::dependent_expression(SyntaxElement c)
     if (c.is_token()) {
         uint32_t position =
             analysis.function_parameter_position(encoding_template, c.token());
-        if (!position)
+        if (position) {
+            text("fp");
+            if (position > 1)
+                number(position - 2);
+            text("_");
+            return true;
+        }
+        owned_buffer sp;
+        analysis.token_spelling(c.token(), sp.get());
+        if (!sp.size() || sp.size() > 9 ||
+            (sp.data()[0] == '0' && sp.size() > 1))
             return false;
-        text("fp");
-        if (position > 1)
-            number(position - 2);
-        text("_");
+        for (size_t i = 0; i < sp.size(); i++)
+            if (sp.data()[i] < '0' || sp.data()[i] > '9')
+                return false;
+        text("Li");
+        vbuffer_append(out, sp.data(), sp.size());
+        text("E");
         return true;
+    }
+    if (c.size() == 3 && (c.kind() == syntax_kind::additive_expression ||
+                          c.kind() == syntax_kind::multiplicative_expression)) {
+        const char *op = nullptr;
+        if (punctuator(c[1], preprocessing_op_or_punc::PLUS))
+            op = "pl";
+        else if (punctuator(c[1], preprocessing_op_or_punc::MINUS))
+            op = "mi";
+        else if (punctuator(c[1], preprocessing_op_or_punc::STAR))
+            op = "ml";
+        else if (punctuator(c[1], preprocessing_op_or_punc::SLASH))
+            op = "dv";
+        else if (punctuator(c[1], preprocessing_op_or_punc::PERCENT))
+            op = "rm";
+        if (!op)
+            return false;
+        text(op);
+        return dependent_expression(c[0]) && dependent_expression(c[2]);
     }
     if (c.kind() != syntax_kind::postfix_expression || c.size() < 3)
         return false;
@@ -835,7 +865,9 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         x.kind != entity_kind::enumeration &&
         x.kind != entity_kind::template_specialization)
         return false;
-    if (!x.name && !x.linkage_name && !x.lambda)
+    if (!x.name && !x.linkage_name && !x.lambda &&
+        !(x.kind == entity_kind::class_type && enclosing_function(table, c) &&
+          analysis.number_closures))
         return false;
     /* [abi:mangling-compression]: a template's name seen before, with its
        prefix, is a <substitution> before the arguments */
@@ -1294,8 +1326,35 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
         return closure_type_name(e);
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
-                    x.kind == entity_kind::enumeration))
-        return source_name(x.linkage_name);
+                    x.kind == entity_kind::enumeration)) {
+        if (x.linkage_name)
+            return source_name(x.linkage_name);
+        /* [impl.clang]: an unnamed local class/union without a typedef name is
+           mangled as $_<n> in its enclosing function */
+        if (x.kind == entity_kind::class_type && enclosing_function(table, e) &&
+            analysis.number_closures) {
+            entity_index context = enclosing_function(table, e);
+            size_t n = 0;
+            bool seen = false;
+            for (entity_index k : analysis.unnumbered_closures) {
+                if (k == e) {
+                    seen = true;
+                    break;
+                }
+                if (enclosing_function(table, k) == context)
+                    n++;
+            }
+            if (!seen)
+                analysis.unnumbered_closures.append(e);
+            char buf[32];
+            size_t len =
+                static_cast<size_t>(snprintf(buf, sizeof(buf), "$_%zu", n));
+            number(len);
+            vbuffer_append(out, buf, len);
+            return true;
+        }
+        return false;
+    }
     return source_name(x.name);
 }
 
@@ -1959,10 +2018,30 @@ bool itanium_mangler::type(qualified_type t)
                <pointer-to-member-type> ::= M <class type> <member type>
         */
         text("M");
-        done =
-            type(qualified_type::make(
-                analysis.entity_table[r.entity].type.unqualified(), cv_none)) &&
-            type(r.operand);
+        type_index cls = analysis.entity_table[r.entity].type.unqualified();
+        bool class_ok = false;
+        if (cls) {
+            class_ok = type(qualified_type::make(cls, cv_none));
+        } else if (encoding_template) {
+            bool subst = false;
+            uint64_t param_pos = analysis.entity_table[r.entity].value;
+            for (size_t i = 0; i < candidates.size(); i++) {
+                if (candidates[i].type.unqualified() &&
+                    !candidates[i].type.cv() &&
+                    record(candidates[i].type).kind ==
+                        type_kind::template_parameter &&
+                    analysis.entity_table[record(candidates[i].type).entity]
+                            .value == param_pos) {
+                    type(candidates[i].type);
+                    subst = true;
+                    break;
+                }
+            }
+            if (!subst)
+                template_param(param_pos);
+            class_ok = true;
+        }
+        done = class_ok && type(r.operand);
     } else if (r.kind == type_kind::block_pointer) {
         /* [abi:mangling-type]'s vendor extended type qualifier, as clang
            mangles a block pointer ([ext:clang_blocks]) */

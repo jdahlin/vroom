@@ -182,6 +182,21 @@ uint32_t c_lowering::constant(const semantic_node &n)
         f = analysis.entity_table[r.entity].underlying;
     else if (r.kind != type_kind::fundamental)
         return fail("a constant of this type", n.at);
+    if (f == fundamental_type::long_double) {
+        if (n.evaluation == constness::constant)
+            return ast_builder_floating(c, t, static_cast<double>(n.value));
+        owned_buffer sp;
+        analysis.token_spelling(n.at, sp.get());
+        if (sp.size()) {
+            size_t len = sp.size();
+            while (len > 0 &&
+                   (sp.data()[len - 1] == 'l' || sp.data()[len - 1] == 'L' ||
+                    sp.data()[len - 1] == 'f' || sp.data()[len - 1] == 'F'))
+                len--;
+            return ast_builder_floating_literal(c, t, sp.data(), len);
+        }
+        return fail("a floating constant of this type", n.at);
+    }
     if (n.evaluation != constness::constant)
         return fail("a constant whose value analysis does not know", n.at);
     switch (f) {

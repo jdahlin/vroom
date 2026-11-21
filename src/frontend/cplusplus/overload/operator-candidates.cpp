@@ -251,14 +251,16 @@ analysis_result semantic_analysis::overloaded_operator(
             break;
         }
     }
-    if (converts && !logical)
-        return not_supported(n, "over.built");
     /* [over.match.oper], Table 15: a=b, a[b] and (by [over.call.object]) a(b)
        have member candidates alone: a of class type */
     bool member_only = op == preprocessing_op_or_punc::EQUAL ||
                        op == preprocessing_op_or_punc::LEFT_BRACKET ||
                        op == preprocessing_op_or_punc::LEFT_PARENTHESIS ||
                        op == preprocessing_op_or_punc::ARROW;
+    if (converts && !logical &&
+        (operands.size() != 2 || member_only ||
+         op == preprocessing_op_or_punc::SPACESHIP))
+        return not_supported(n, "over.built");
     if (member_only && type_table[operands[0].type.unqualified()].kind !=
                            type_kind::class_type)
         return analysis_result::well_formed;
@@ -470,8 +472,52 @@ analysis_result semantic_analysis::overloaded_operator(
         r = collect(spaceship, true, false);
     if (r == analysis_result::well_formed && three_way)
         VTRY_SET(r, collect(spaceship, true, true));
-    if (candidates.empty())
+    if (candidates.empty()) {
+        if (converts && !logical && !member_only && operands.size() == 2) {
+            /* [over.built]: no user-defined operator was found; convert class
+               operands via their unique non-class conversion target and apply
+               the built-in binary operator */
+            auto convert_operand =
+                [&](expression_meaning &op_val) -> analysis_result {
+                const struct type &ot = type_table[op_val.type.unqualified()];
+                if (ot.kind != type_kind::class_type)
+                    return analysis_result::well_formed;
+                owned_array<entity_index> fns;
+                if (!visible_conversion_functions(ot.entity, fns))
+                    return not_supported(n, "over.built");
+                qualified_type target;
+                for (entity_index f : fns) {
+                    if (entity_table[f].explicit_)
+                        continue;
+                    qualified_type rt = conversion_function_result(f).type;
+                    const struct type &rtr = type_table[rt.unqualified()];
+                    if (rtr.kind == type_kind::class_type)
+                        continue;
+                    qualified_type unq =
+                        qualified_type::make(rt.unqualified(), cv_none);
+                    if (!target.unqualified())
+                        target = unq;
+                    else if (target != unq)
+                        return not_supported(n, "over.built");
+                }
+                if (!target.unqualified())
+                    return not_supported(n, "over.built");
+                bool converted = false;
+                VTRY(cr, conversion_function_call(n, op_val, target, false,
+                                                  converted));
+                if (!converted)
+                    return not_supported(n, "over.built");
+                return analysis_result::well_formed;
+            };
+            expression_meaning lhs = operands[0];
+            expression_meaning rhs = operands[1];
+            VTRY(lr, convert_operand(lhs));
+            VTRY(rr, convert_operand(rhs));
+            VTRY(br, builtin_binary(n, at, op, lhs, rhs, m));
+            handled = true;
+        }
         return analysis_result::well_formed;
+    }
     if (converts)
         return not_supported(n, "over.built");
     if (op == preprocessing_op_or_punc::EQUAL) {

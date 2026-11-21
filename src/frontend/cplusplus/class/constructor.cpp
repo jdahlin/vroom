@@ -1714,6 +1714,14 @@ uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
                                             qualified_type type, token_index at,
                                             uint32_t value)
 {
+    /* [dcl.attr.nouniqueaddr]: an empty subobject may share its address with
+       another member; do not write its padding byte */
+    const struct type &r = type_table[type.unqualified()];
+    if (r.kind == type_kind::class_type &&
+        entity_table[r.entity].member_count == 0 &&
+        entity_table[r.entity].base_count == 0 &&
+        !entity_table[r.entity].dynamic)
+        return statement_node(semantic_kind::expression_statement, at, value);
     expression_meaning stored = object;
     stored.type = qualified_type::make(type.unqualified(), cv_none);
     stored.evaluation = constness::not_constant;

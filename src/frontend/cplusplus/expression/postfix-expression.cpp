@@ -786,6 +786,40 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                    preprocessing_op_or_punc::ARROW) &&
         destructor_id(n[0][2]))
         return destructor_call(n, m);
+    /* [class.copy.assign]/12: B::operator=(x) on an empty base class with an
+       implicit trivial copy/move assignment operator writes no bytes */
+    if (n.size() == 4 && n[0].is(syntax_kind::qualified_id) &&
+        n[0].size() == 2 && n[0][0].is(syntax_kind::nested_name_specifier) &&
+        n[0][1].operator_function_id() && n[0][1].size() == 2 &&
+        n[0][1][1].is(preprocessing_op_or_punc::EQUAL) && current_class()) {
+        nominated_scope qscope;
+        if (nested_name_specifier(n[0][0], qscope, false) ==
+                analysis_result::well_formed &&
+            !qscope.global && !qscope.dependent && qscope.entity &&
+            entity_table[qscope.entity].kind == entity_kind::class_type &&
+            entity_table[qscope.entity].member_count == 0 &&
+            entity_table[qscope.entity].base_count == 0 &&
+            !entity_table[qscope.entity].dynamic &&
+            !entity_table.find(
+                qscope.entity,
+                operator_name(preprocessing_op_or_punc::EQUAL))) {
+            expression_meaning arg;
+            VTRY(ar, expression(n[2], arg));
+            expression_meaning ptr;
+            VTRY(tr, this_pointer(n.first_token(), ptr));
+            expression_meaning self;
+            self.type = entity_table[current_class()].type;
+            self.category = value_category::lvalue;
+            self.evaluation = constness::not_constant;
+            self.node = expression_node(semantic_kind::indirection, self,
+                                        n.first_token(), ptr.node);
+            VTRY(br, to_base(n.first_token(), qscope.entity, self));
+            m = self;
+            m.node = expression_node(semantic_kind::comma, m, n.first_token(),
+                                     arg.node, self.node);
+            return analysis_result::well_formed;
+        }
+    }
     owned_array<SyntaxElement> arguments;
     /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
        analysed now, one per element of the packs its pattern names */

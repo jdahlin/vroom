@@ -188,6 +188,21 @@ uint64_t ast_builder_type_record_bit_offset(cc *c, ast_qualified_type record,
     return c->tags[AST_TYPE(c, record)->aux].f[field].off;
 }
 
+void ast_builder_type_record_set_offset(cc *c, ast_qualified_type record,
+                                        uint32_t field, uint64_t bit_offset)
+{
+    c->tags[AST_TYPE(c, record)->aux].f[field].off = bit_offset;
+}
+
+void ast_builder_type_record_set_size(cc *c, ast_qualified_type record,
+                                      uint64_t size, uint32_t align)
+{
+    c->tags[AST_TYPE(c, record)->aux].size = size;
+    c->tags[AST_TYPE(c, record)->aux].align = align;
+    AST_TYPE(c, record)->size = size;
+    AST_TYPE(c, record)->align = align;
+}
+
 /* ---- symbols ---- */
 
 /* an interned identifier of a name that need not outlive the call */
@@ -541,6 +556,16 @@ uint32_t ast_builder_integer(cc *c, ast_qualified_type t, int64_t value)
 uint32_t ast_builder_floating(cc *c, ast_qualified_type t, double value)
 {
     return cc_node_float_new(c, value, t, 0);
+}
+
+uint32_t ast_builder_floating_literal(cc *c, ast_qualified_type t,
+                                      const char *spelling, size_t length)
+{
+    u128 q = vsoftfloat_parse_with_precision(spelling, length,
+                                             cc_float_precision_bits(c, t));
+    if (cc_type_is_float128(c, t))
+        return cc_node_float128_new(c, q, t, 0);
+    return cc_node_float_new(c, vsoftfloat_to_double(q), t, 0);
 }
 
 uint32_t ast_builder_string(cc *c, ast_qualified_type element,

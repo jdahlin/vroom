@@ -445,13 +445,15 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         entity_index member = analysis.class_members[x.first_member + i];
         const entity &m = analysis.entity_table[member];
         uint32_t f = c_fields[member];
-        if (ast_builder_type_record_offset(c, made, f) != m.offset ||
-            (m.bit_field &&
-             ast_builder_type_record_bit_offset(c, made, f) != m.bit_offset))
-            fail("a class whose layout is not C's", at);
+        uint64_t bit_off = m.offset * 8;
+        if (m.bit_field)
+            bit_off = m.bit_offset;
+        if (ast_builder_type_record_bit_offset(c, made, f) != bit_off)
+            ast_builder_type_record_set_offset(c, made, f, bit_off);
     }
     if (ast_builder_type_size(c, made) != x.size)
-        fail("a class whose size is not C's", at);
+        ast_builder_type_record_set_size(c, made, x.size,
+                                         static_cast<uint32_t>(x.alignment));
     if (!analysis.trivial_class(e))
         /* [abi:calls]: "If the return type is a class type that is
            non-trivial for the purposes of calls, the caller passes an
