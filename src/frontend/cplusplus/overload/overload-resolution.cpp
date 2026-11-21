@@ -118,7 +118,8 @@ analysis_result semantic_analysis::best_viable_function(
            function having more than m parameters is viable only if all
            parameters following the mth have default arguments." */
         if (n < first || n - first + defaults < count ||
-            (n - first > count && !f.variadic))
+            (n - first > count && !f.variadic) ||
+            (c.function && entity_table[c.function].constraint_unsatisfied))
             v = viability::not_viable;
         sequence s;
         s.kind = sequence::form::standard;

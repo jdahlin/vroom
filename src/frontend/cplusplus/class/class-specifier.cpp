@@ -1299,11 +1299,15 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
             virt_override = virt_final = false;
             return r;
         }
+        uint32_t body_at = at + 1;
+        while (body_at < node.size() &&
+               virt_specifier(node[body_at], override_, final_))
+            body_at++;
         auto body = node.function_definition().function_body();
-        bool constrained = node.size() == at + 3 &&
-                           node[at + 1].is(syntax_kind::requires_clause) &&
-                           node[at + 1].size() == 2;
-        if ((!constrained && node.size() != at + 2) || !body ||
+        bool constrained = node.size() == body_at + 2 &&
+                           node[body_at].is(syntax_kind::requires_clause) &&
+                           node[body_at].size() == 2;
+        if ((!constrained && node.size() != body_at + 1) || !body ||
             body.function_try_block())
             return not_supported(node, "dcl.fct.def.general");
         bool satisfied = true;
@@ -1311,7 +1315,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
             if (!entity_table[c].instantiation || body.defaulted() ||
                 body.deleted())
                 return not_supported(node, "temp.constr");
-            VTRY(r, constraint_satisfied(node[at + 1][1], current_scope,
+            VTRY(r, constraint_satisfied(node[body_at][1], current_scope,
                                          lookup_horizon, satisfied));
         }
         if (body.defaulted() || body.deleted()) {
@@ -1319,7 +1323,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
             return defaulted_or_deleted_special_member(
-                c, node, special(node[at]), node[at + 1], access,
+                c, node, special(node[at]), node[body_at], access,
                 constexpr_specified, virtual_specified || override_ || final_,
                 explicit_specified);
         }
@@ -1384,8 +1388,20 @@ analysis_result semantic_analysis::member_declarators(
                virt_specifier(n[body_at], override_, final_))
             body_at++;
         auto body = n.function_definition().function_body();
-        if (n.size() != body_at + 1 || !body || body.function_try_block())
+        bool constrained = n.size() == body_at + 2 &&
+                           n[body_at].is(syntax_kind::requires_clause) &&
+                           n[body_at].size() == 2;
+        if ((!constrained && n.size() != body_at + 1) || !body ||
+            body.function_try_block())
             return not_supported(n, "dcl.fct.def.general");
+        bool satisfied = true;
+        if (constrained) {
+            if (!entity_table[c].instantiation || body.defaulted() ||
+                body.deleted())
+                return not_supported(n, "temp.constr");
+            VTRY(cr, constraint_satisfied(n[body_at][1], current_scope,
+                                          lookup_horizon, satisfied));
+        }
         if (body_at == first + 1 && body.defaulted())
             return defaulted_copy_assignment(c, n, n[first], s, access);
         /* = delete: member_function_definition's deleted_definition */
@@ -1397,8 +1413,11 @@ analysis_result semantic_analysis::member_declarators(
         virt_pure = false;
         r = member_declarator(c, n, n[first], s, access, true);
         virt_override = virt_final = false;
-        if (r == analysis_result::well_formed)
-            bodies.append(n);
+        if (r == analysis_result::well_formed) {
+            entity_table[last_declared].constraint_unsatisfied = !satisfied;
+            if (satisfied)
+                bodies.append(n);
+        }
         return r;
     }
     owned_array<SyntaxElement> declarators;
@@ -1700,6 +1719,14 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             /* conversion functions to different types have different
                names ([class.conv.fct]/1), here one */
             if (m.conversion_function && x.type != type)
+                continue;
+            /* [basic.scope.declarative]/4, [over.load]/2: member functions
+               with trailing requires-clauses can overload on constraints */
+            if (x.constraint_unsatisfied ||
+                (declaration.is(syntax_kind::function_definition) &&
+                 declaration.size() >= 3 &&
+                 declaration[declaration.size() - 2].is(
+                     syntax_kind::requires_clause)))
                 continue;
             if ((placeholder_return || x.placeholder_return) &&
                 x.member_cv == function_cv && x.nonstatic_member == !s.static_)
