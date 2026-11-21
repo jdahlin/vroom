@@ -2327,10 +2327,15 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     qualified_type type = entity_table[e].type;
     uint32_t cv = cv_of(type_table, type);
     const struct type record = type_table[type.unqualified()];
-    /* [class.static.data]/4: integral or enumeration type */
+    /* [class.static.data]/4: integral or enumeration type;
+       [dcl.constexpr]/1: a static constexpr data member of floating-point
+       type is implicitly inline and may have an in-class initializer */
     const bool integral_or_enumeration =
         record.kind == type_kind::enumeration ||
         (record.kind == type_kind::fundamental && is_integral(type));
+    const bool constexpr_floating = s.constexpr_ &&
+                                    record.kind == type_kind::fundamental &&
+                                    is_floating(type);
     /* [expr.const]/3: until the initializer is analysed (and if analysis
        has no rules for it) whether a member that may be usable in constant
        expressions is one, and its value, are unknown: a later member's
@@ -2338,7 +2343,8 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     if (s.constexpr_ ||
         ((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration))
         entity_table[e].usable = constness::unknown;
-    if (!(cv & cv_const) || (cv & cv_volatile) || !integral_or_enumeration)
+    if (!(cv & cv_const) || (cv & cv_volatile) ||
+        (!integral_or_enumeration && !constexpr_floating))
         return not_supported(declarator, "class.static.data");
     initialized_value value;
     value.evaluation = constness::unknown;
