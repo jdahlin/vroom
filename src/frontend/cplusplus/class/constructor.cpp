@@ -1377,13 +1377,32 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     return not_supported(item, "class.base.init");
                 e = entity_table.find(c, name);
             }
+            entity_index found_name = e;
+            if (e && entity_table[e].kind == entity_kind::typedef_name)
+                e = 0;
             if (!e) {
                 /* [class.base.init]/3: "A mem-initializer-list can initialize
                a base class using any class-or-decltype that denotes that
                base class type" */
                 entity_index base = qualified_class;
-                if (!base)
-                    base = lookup(name);
+                if (!base) {
+                    if (!found_name) {
+                        /* [class.base.init]/2: skip the parameter scope. */
+                        entity_index saved_scope = current_scope;
+                        current_scope = c;
+                        found_name = lookup(name);
+                        current_scope = saved_scope;
+                    }
+                    base = found_name;
+                }
+                if (base &&
+                    entity_table[base].kind == entity_kind::typedef_name) {
+                    const struct type &alias =
+                        type_table[entity_table[base].type.unqualified()];
+                    base = 0;
+                    if (alias.kind == type_kind::class_type)
+                        base = alias.entity;
+                }
                 for (uint32_t i = 0; base && i < entity_table[c].base_count;
                      i++) {
                     entity_index b =
@@ -1411,7 +1430,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 !entity_table[e].nonstatic_member) {
                 if (e && entity_table[e].kind == entity_kind::none)
                     return not_supported(item, "over");
-                if (!e && (qualified_class || lookup(name)))
+                if (!e && (qualified_class || found_name))
                     /* a name of an enclosing scope */
                     return not_supported(item, "class.base.init");
                 return ill_formed_at_token(
@@ -1464,17 +1483,32 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     r = expression_list_meanings(item[2], arguments);
                 else if (item.size() == 2 &&
                          item[1].is(syntax_kind::braced_init_list)) {
-                    /* [dcl.init.list]/3.4: an aggregate member's list: its
-                   value, stored; a constructor's list and a base's (its
-                   tail padding may hold a derived member) are not
-                   analysed */
-                    if (entity_table[e].base_subobject)
+                    bool base = entity_table[e].base_subobject;
+                    if (base && is_aggregate(record.entity))
                         return not_supported(item, "class.base.init");
                     initialized_value listed;
+                    bool saved_constructing_base = constructing_base;
+                    constructing_base = base;
                     r = list_initialization(item[1], type, true, listed);
+                    constructing_base = saved_constructing_base;
                     if (r != analysis_result::well_formed)
                         return r;
-                    if (!aggregate_value_stored(record.entity, listed.node))
+                    if (semantics[listed.node].kind ==
+                            semantic_kind::construct &&
+                        !semantics[listed.node].a) {
+                        semantics[listed.node].a = object.node;
+                        initialized[slot] =
+                            statement_node(semantic_kind::expression_statement,
+                                           id, listed.node);
+                        if (entity_table[e].virtual_base)
+                            initialized[slot] =
+                                complete_object(initialized[slot]);
+                        continue;
+                    }
+                    /* [dcl.init.list]/3.4: store the value of an aggregate
+                       member. A base's tail padding can hold derived members. */
+                    if (base ||
+                        !aggregate_value_stored(record.entity, listed.node))
                         return not_supported(item, "class.base.init");
                     initialized[slot] =
                         subobject_store(object, type, id, listed.node);
