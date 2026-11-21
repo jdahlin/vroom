@@ -2192,6 +2192,7 @@ analysis_result semantic_analysis::member_redeclaration(
                                    "declaration shall refer to a previously "
                                    "declared member of the class",
                                    "dcl.meaning");
+    VTRY(r, constexpr_redeclaration(id, e, s.constexpr_));
     /* [basic.def.odr]/1 */
     if (entity_table[e].defined)
         return ill_formed_at_token(id,

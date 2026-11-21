@@ -726,17 +726,9 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                        "more than one definition of any "
                                        "variable or function",
                                        "basic.def.odr");
-        /* [dcl.constexpr]/1: "If any declaration of a function or function
-           template has a constexpr or consteval specifier, then all its
-           declarations shall contain the same specifier." */
-        if (kind == entity_kind::function && e.kind == entity_kind::function &&
-            e.constexpr_ != s.constexpr_)
-            return ill_formed_at_token(id,
-                                       "if any declaration of a function has "
-                                       "a constexpr specifier, then all its "
-                                       "declarations shall contain the same "
-                                       "specifier",
-                                       "dcl.constexpr");
+        if (kind == entity_kind::function && e.kind == entity_kind::function) {
+            VTRY(r, constexpr_redeclaration(id, prior, s.constexpr_));
+        }
         /* [dcl.stc]/6: "The linkages implied by successive declarations for
            a given entity shall agree." */
         if (implied == linkage::internal && !in_unnamed &&
@@ -845,6 +837,19 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
     return analysis_result::well_formed;
 }
 
+/* [dcl.constexpr]/1: every redeclaration must repeat constexpr. */
+analysis_result semantic_analysis::constexpr_redeclaration(token_index id,
+                                                           entity_index prior,
+                                                           bool specified)
+{
+    if (entity_table[prior].constexpr_ != specified)
+        return ill_formed_at_token(id,
+                                   "all declarations of a constexpr function "
+                                   "shall contain the constexpr specifier",
+                                   "dcl.constexpr");
+    return analysis_result::well_formed;
+}
+
 /*
  * [basic.link]/6: "The name of a function declared in block scope and the name
  * of a variable declared by a block scope extern declaration have linkage. ...
@@ -888,7 +893,7 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
                                    "with external or internal linkage that "
                                    "has an initializer is ill-formed",
                                    "dcl.init");
-    if (s.constexpr_ || function_cv)
+    if ((s.constexpr_ && kind != entity_kind::function) || function_cv)
         return not_supported(declaration, "basic.link");
     if (kind == entity_kind::variable) {
         const struct type &record = type_table[type.unqualified()];
@@ -921,6 +926,9 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
                 r = not_supported(declaration, "over");
                 return false;
             }
+            r = constexpr_redeclaration(id, e, s.constexpr_);
+            if (r != analysis_result::well_formed)
+                return false;
             /* [over.load]/2 */
             if (!(x.type == type)) {
                 r = ill_formed_at_token(id,
@@ -1024,6 +1032,10 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
         target = entity_table.make(kind, name, space);
         entity &made = entity_table[target];
         made.type = type;
+        if (kind == entity_kind::function && s.constexpr_) {
+            made.constexpr_ = true;
+            made.inline_ = true;
+        }
         made.linkage_of_name = linkage::external;
         /* [basic.link]/4: within an unnamed namespace, internal */
         if (within_unnamed_namespace(space))

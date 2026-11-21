@@ -3998,6 +3998,8 @@ class semantic_analysis
     entity_index current_class() const;
     /* [dcl.meaning]/1: a member function of qualifier defined outside its
        class */
+    analysis_result constexpr_redeclaration(token_index id, entity_index prior,
+                                            bool specified);
     analysis_result member_redeclaration(SyntaxRef declaration, token_index id,
                                          entity_index qualifier,
                                          qualified_type type,
