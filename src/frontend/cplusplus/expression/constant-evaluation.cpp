@@ -1339,7 +1339,6 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         /* the operand is promoted to t, or a bool for ! */
         fundamental_type operand = evaluated_type(semantics[x.a].type);
         if (wide_integer(operand)) {
-            /* unary + and !; - and ~ at 128 bits are not evaluated */
             auto op = static_cast<preprocessing_op_or_punc>(x.op);
             if (v.kind != constant_value_kind::integer)
                 return constness::unknown;
@@ -1349,6 +1348,17 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             }
             if (op == preprocessing_op_or_punc::PLUS)
                 return constness::constant;
+            if (op == preprocessing_op_or_punc::TILDE) {
+                v.integer = ~v.integer;
+                return constness::constant;
+            }
+            if (op == preprocessing_op_or_punc::MINUS) {
+                if (t == fundamental_type::int128 &&
+                    v.integer == (static_cast<unsigned __int128>(1) << 127))
+                    return constness::not_constant;
+                v.integer = 0 - v.integer;
+                return constness::constant;
+            }
             return constness::unknown;
         }
         uint64_t value = 0;

@@ -1246,6 +1246,8 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
     VTRY(r, template_head_parameters(n, parameters, true));
     uint32_t skip = attributes_without_effect_before(declaration);
     auto item = declaration[skip + 1];
+    if (item.is(syntax_kind::member_declarator_list) && item.size() == 1)
+        item = item[0];
     if (item.size() != 2 || item[1].is(syntax_kind::requires_clause))
         return not_supported(n, "temp.pre");
     /* (the name is not known before the declarator: the template-parameters

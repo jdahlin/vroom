@@ -1602,7 +1602,8 @@ analysis_result semantic_analysis::template_call(
         VTRY(r, passed_expression(a, e));
         /* (a function's name whose other declarations analysis did not
            follow may be such a set too) */
-        if (e.entity && entity_table[e.entity].kind == entity_kind::function) {
+        if (e.entity && entity_table[e.entity].kind == entity_kind::function &&
+            entity_table[e.entity].next_overload) {
             name_uses.resize(uses_before);
             return not_supported(n, "temp.deduct.call");
         }

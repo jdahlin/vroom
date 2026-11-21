@@ -312,7 +312,8 @@ bool itanium_mangler::specialization_encoding(entity_index e)
            nested-name's CV-qualifiers its own, as nested_name's) */
         const entity &x = table[e];
         bool member = table[scope].kind == entity_kind::class_type &&
-                      x.kind == entity_kind::function;
+                      (x.kind == entity_kind::function ||
+                       x.kind == entity_kind::variable);
         if (table[scope].kind != entity_kind::namespace_entity && !member)
             return false;
         /* (a member of a local class: its function scope first, as

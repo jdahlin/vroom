@@ -47,9 +47,7 @@ semantic_analysis::concept_definition(SyntaxRef n, ConceptDefinition definition)
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     entity_table[record.entity].defined = true;
-    if (definition[3].is_token())
-        return not_supported(n, "temp.concept");
-    record.definition = definition[3].index();
+    record.definition = definition;
     record.is_concept = true;
     hold_template_name(record, name, outer);
     return analysis_result::well_formed;
@@ -304,7 +302,7 @@ analysis_result semantic_analysis::concept_satisfied(
             scope, template_parameter_entities[c.first_parameter + i],
             arguments[i]);
     analysis_result r = constraint_satisfied(
-        c.definition, scope, c.declaration.first_token(), satisfied);
+        c.definition[3], scope, c.declaration.first_token(), satisfied);
     /* (what is not decided is not kept: asked again it names its reason) */
     if (r != analysis_result::well_formed)
         return r;

@@ -178,7 +178,11 @@ semantic_analysis::template_parameter_kind(entity_index t, uint32_t i,
 bool semantic_analysis::names_template_parameter_pack(qualified_type t) const
 {
     const struct type &r = type_table[t.unqualified()];
-    if (r.kind != type_kind::template_parameter || t.cv())
+    if (r.kind == type_kind::lvalue_reference ||
+        r.kind == type_kind::rvalue_reference || r.kind == type_kind::pointer ||
+        r.kind == type_kind::array)
+        return names_template_parameter_pack(r.operand);
+    if (r.kind != type_kind::template_parameter)
         return false;
     for (size_t i = 0; i < template_parameter_entities.size(); i++)
         if (template_parameter_entities[i] == r.entity)

@@ -505,6 +505,12 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         return not_supported(n, "class.member.lookup");
     if (e && (entity_table[e].kind == entity_kind::none ||
               entity_table[e].member_templates)) {
+        if (uint32_t vt = variable_template_of(e)) {
+            SyntaxElement id = member_template_id(n);
+            if (id.is(syntax_kind::simple_template_id,
+                      syntax_kind::template_id))
+                return variable_template_id_of(id.index(), vt, m);
+        }
         /* [temp.mem]/1: member function templates, called: the call
            deduces their arguments (member_template_call), with the
            functions of the name ([temp.mem]/2) */
