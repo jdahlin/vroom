@@ -539,8 +539,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
     entity_table[c].base_count = 0;
     analysis_result result = analysis_result::well_formed;
-    if (has_bases)
+    if (has_bases) {
+        require_complete_class++;
         result = base_clause(c, head_children[next], key);
+        require_complete_class--;
+    }
     entity_table[c].requested_alignment = trailing_class_alignment;
     entity_table[c].gnu_flags |= trailing_class_flags;
     trailing_class_alignment = 0;
@@ -622,6 +625,30 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         entity_table[c].kind = entity_kind::none;
         entity_table[c].size = 0;
         return result;
+    }
+    /* [temp.inst]/2: complete class template specializations that named c
+       while c was being defined, now that c's layout is complete */
+    {
+        owned_array<deferred_class_instantiation> remaining;
+        owned_array<deferred_class_instantiation> ready;
+        for (const deferred_class_instantiation &d :
+             deferred_class_instantiations) {
+            if (d.owner == c)
+                ready.append(d);
+            else
+                remaining.append(d);
+        }
+        deferred_class_instantiations =
+            static_cast<owned_array<deferred_class_instantiation> &&>(
+                remaining);
+        for (const deferred_class_instantiation &d : ready) {
+            if (!entity_table[d.specialization].defined &&
+                !instantiations[d.index].defining) {
+                entity_index done = d.specialization;
+                result =
+                    worse(result, define_class_outside(d.at, d.index, done));
+            }
+        }
     }
     /* [class.mem]/6: "A complete-class context of a class is a function
        body ... within the member-specification of the class": the bodies

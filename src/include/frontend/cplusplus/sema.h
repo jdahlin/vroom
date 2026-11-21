@@ -5339,6 +5339,17 @@ class semantic_analysis
     owned_array<SyntaxElement> overloaded_written;
     owned_array<bool> overloaded_written_expansion;
     SyntaxRef overloaded_written_at = 0;
+    /* [temp.inst]/2: class template specializations naming the class
+       currently being defined (defining_class) in its member-specification
+       are left incomplete until defining_class finishes its layout */
+    struct deferred_class_instantiation {
+        entity_index owner = 0;
+        SyntaxRef at = 0;
+        uint32_t index = 0;
+        entity_index specialization = 0;
+    };
+    owned_array<deferred_class_instantiation> deferred_class_instantiations;
+    uint32_t require_complete_class = 0;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
        not */
