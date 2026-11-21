@@ -1914,6 +1914,15 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             size = pointer_size();
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].kind != entity_kind::class_type) {
+            uint32_t inst = entity_table[record.entity].instantiation;
+            if (inst && instantiations[inst - 1].has_failure) {
+                unsupported.append(instantiations[inst - 1].failure);
+                return analysis_result::unsupported;
+            }
+            return not_supported(declaration, "class.mem");
+        }
         if (record.kind == type_kind::class_type && !size)
             /* [class.mem]/15: "The type of a non-static data member shall
                not be an incomplete type" */
