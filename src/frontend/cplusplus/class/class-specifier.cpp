@@ -539,8 +539,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     entity_table[c].first_base = static_cast<uint32_t>(class_bases.size());
     entity_table[c].base_count = 0;
     analysis_result result = analysis_result::well_formed;
-    if (has_bases)
+    if (has_bases) {
+        require_complete_class++;
         result = base_clause(c, head_children[next], key);
+        require_complete_class--;
+    }
     entity_table[c].requested_alignment = trailing_class_alignment;
     entity_table[c].gnu_flags |= trailing_class_flags;
     trailing_class_alignment = 0;
@@ -622,6 +625,30 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         entity_table[c].kind = entity_kind::none;
         entity_table[c].size = 0;
         return result;
+    }
+    /* [temp.inst]/2: complete class template specializations that named c
+       while c was being defined, now that c's layout is complete */
+    {
+        owned_array<deferred_class_instantiation> remaining;
+        owned_array<deferred_class_instantiation> ready;
+        for (const deferred_class_instantiation &d :
+             deferred_class_instantiations) {
+            if (d.owner == c)
+                ready.append(d);
+            else
+                remaining.append(d);
+        }
+        deferred_class_instantiations =
+            static_cast<owned_array<deferred_class_instantiation> &&>(
+                remaining);
+        for (const deferred_class_instantiation &d : ready) {
+            if (!entity_table[d.specialization].defined &&
+                !instantiations[d.index].defining) {
+                entity_index done = d.specialization;
+                result =
+                    worse(result, define_class_outside(d.at, d.index, done));
+            }
+        }
     }
     /* [class.mem]/6: "A complete-class context of a class is a function
        body ... within the member-specification of the class": the bodies
@@ -2327,10 +2354,15 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     qualified_type type = entity_table[e].type;
     uint32_t cv = cv_of(type_table, type);
     const struct type record = type_table[type.unqualified()];
-    /* [class.static.data]/4: integral or enumeration type */
+    /* [class.static.data]/4: integral or enumeration type;
+       [dcl.constexpr]/1: a static constexpr data member of floating-point
+       type is implicitly inline and may have an in-class initializer */
     const bool integral_or_enumeration =
         record.kind == type_kind::enumeration ||
         (record.kind == type_kind::fundamental && is_integral(type));
+    const bool constexpr_floating = s.constexpr_ &&
+                                    record.kind == type_kind::fundamental &&
+                                    is_floating(type);
     /* [expr.const]/3: until the initializer is analysed (and if analysis
        has no rules for it) whether a member that may be usable in constant
        expressions is one, and its value, are unknown: a later member's
@@ -2338,7 +2370,8 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     if (s.constexpr_ ||
         ((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration))
         entity_table[e].usable = constness::unknown;
-    if (!(cv & cv_const) || (cv & cv_volatile) || !integral_or_enumeration)
+    if (!(cv & cv_const) || (cv & cv_volatile) ||
+        (!integral_or_enumeration && !constexpr_floating))
         return not_supported(declarator, "class.static.data");
     initialized_value value;
     value.evaluation = constness::unknown;

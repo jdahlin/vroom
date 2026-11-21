@@ -3843,7 +3843,7 @@ class semantic_analysis
     /* the glvalue m of a class derived from base converted to its base
        class subobject ([expr.ref]/6.2 through [class.derived]/1) */
     analysis_result to_base(token_index at, entity_index base,
-                            expression_meaning &m);
+                            expression_meaning &m, bool check_access = true);
     /* the base-clause of class c ([class.derived]) */
     analysis_result base_clause(entity_index c, BaseClause n,
                                 standard_keyword key);
@@ -5330,13 +5330,26 @@ class semantic_analysis
         owned_array<template_argument> *all = nullptr,
         const owned_array<SyntaxElement> *written = nullptr,
         SyntaxRef written_at = 0,
-        const owned_array<template_argument> *specified = nullptr);
+        const owned_array<template_argument> *specified = nullptr,
+        const owned_array<bool> *written_expansion = nullptr);
     /* a call's template-id naming several function templates: its
        template-arguments as written, checked against each template by
        template_candidates ([temp.over]/1), from template_callee_parts to
        template_call */
     owned_array<SyntaxElement> overloaded_written;
+    owned_array<bool> overloaded_written_expansion;
     SyntaxRef overloaded_written_at = 0;
+    /* [temp.inst]/2: class template specializations naming the class
+       currently being defined (defining_class) in its member-specification
+       are left incomplete until defining_class finishes its layout */
+    struct deferred_class_instantiation {
+        entity_index owner = 0;
+        SyntaxRef at = 0;
+        uint32_t index = 0;
+        entity_index specialization = 0;
+    };
+    owned_array<deferred_class_instantiation> deferred_class_instantiations;
+    uint32_t require_complete_class = 0;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
        not */
