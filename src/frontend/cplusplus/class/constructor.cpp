@@ -274,8 +274,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     qualified_type type = entity_table[e].type;
     const struct type &record = type_table[type.unqualified()];
     SyntaxRef init = entity_table[e].default_initializer;
-    if (record.kind == type_kind::array ||
-        record.kind == type_kind::lvalue_reference ||
+    if (record.kind == type_kind::lvalue_reference ||
         record.kind == type_kind::rvalue_reference)
         return not_supported(init, "class.base.init");
     /* before the analysis, which may move the tables */
