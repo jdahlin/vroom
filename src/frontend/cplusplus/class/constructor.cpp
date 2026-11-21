@@ -428,9 +428,13 @@ bool semantic_analysis::copies_bytes(entity_index c) const
     if ((x.defaulted_move_constructor || x.defaulted_move_assignment) &&
         !x.defaulted_copy_constructor)
         return false;
+    /* a user-declared copy or move constructor; an implicit one is an entity
+       for overload resolution (declared beside a constructor template,
+       [class.copy.ctor]/6) or because a subobject's is not trivial, which the
+       subobjects below say: it makes the class no less trivially copyable */
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (is_copy_constructor(c, k))
+        if (!entity_table[k].implicit && is_copy_constructor(c, k))
             return false;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
