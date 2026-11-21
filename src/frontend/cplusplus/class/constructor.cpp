@@ -1338,17 +1338,24 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                                        "mem-initializer is ill-formed",
                                        "class.base.init");
         }
-        if (entity_table[entity_table[e].enclosing].anonymous_object)
-            /* [class.base.init]/2: a member of an anonymous union
-               ([class.union.anon]), initialized in its unnamed object */
-            return not_supported(item, "class.base.init");
+        /* [class.base.init]/2: a member of an anonymous union
+           ([class.union.anon]) is initialized in its unnamed object */
+        entity_index target = e;
+        while (
+            entity_index anon =
+                entity_table[entity_table[target].enclosing].anonymous_object)
+            target = anon;
         size_t slot = 0;
-        while (subobjects[slot] != e)
+        while (slot < subobjects.size() && subobjects[slot] != target)
             slot++;
+        if (slot == subobjects.size())
+            return not_supported(item, "class.base.init");
         /* [class.base.init]/4: "if a mem-initializer-id designates the
            same member or base class more than once, the program is
-           ill-formed" (clang's "multiple initializations") */
-        if (initialized[slot])
+           ill-formed" (clang's "multiple initializations"); an anonymous
+           struct's distinct members share one unnamed object */
+        if (initialized[slot] &&
+            (target == e || entity_table[entity_table[e].enclosing].union_))
             return ill_formed_at_token(id,
                                        "a mem-initializer-list shall not "
                                        "designate the same member more than "
@@ -1960,6 +1967,18 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         if (!user_copy && !y.defaulted_copy_constructor)
             copy_deleted = true;
     }
+    /* [class.copy.ctor]/10.1: a union with a variant member that has a
+       non-trivial copy/move constructor has its implicit copy/move
+       constructor defined as deleted */
+    if (entity_table[c].union_) {
+        for (entity_index k : classes) {
+            if (!trivial_special_members(k)) {
+                copy_deleted = true;
+                move_deleted = true;
+                break;
+            }
+        }
+    }
     entity_table[c].implicit_copy_deleted = copy_deleted;
     if (copy && !user_copy && !copy_deleted)
         declare_implicit(c, special_member::constructor, true);
@@ -2262,8 +2281,24 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
     const entity &x = entity_table[c];
     if (x.implicit_default_deleted)
         return true;
-    if (x.union_)
-        return false;
+    if (x.union_) {
+        /* [class.default.ctor]/2.2: a union with no default member
+           initializers and a variant member with a non-trivial default
+           constructor has a deleted defaulted default constructor */
+        bool has_default_init = false;
+        bool has_nontrivial = false;
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            const entity &m = entity_table[class_members[x.first_member + i]];
+            if (m.kind != entity_kind::variable || !m.nonstatic_member)
+                continue;
+            if (m.default_initializer)
+                has_default_init = true;
+            if (entity_index mc = element_class(m.type))
+                if (!trivial_special_members(mc))
+                    has_nontrivial = true;
+        }
+        return !has_default_init && has_nontrivial;
+    }
     /* a user-declared constructor and no X() = default: no implicit
        default constructor ([class.default.ctor]/1) */
     if (!x.defaulted_default_constructor)
