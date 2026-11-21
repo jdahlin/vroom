@@ -671,6 +671,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             entity_table[f.entity].inline_ = true;
         entity_table.add_declaration(f.entity, n);
         last_function_template = earlier;
+        if (!s.friend_)
+            function_templates[earlier - 1].hidden_friend = false;
         if (defines) {
             function_template &record = function_templates[earlier - 1];
             record.declaration = n;
@@ -687,6 +689,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.gnu_flags = gnu_flags;
+    record.hidden_friend = s.friend_ && defines;
     record.abi_tag = abi_tag;
     record.default_arguments = defaults;
     entity_index t = record.entity;

@@ -962,8 +962,20 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             owned_array<entity_index> set;
             if (x.entity)
                 set.append(x.entity);
-            if (!argument_dependent_lookup(name, types, set))
+            owned_array<entity_index> held;
+            if (!argument_dependent_lookup(name, types, set, 0, &held))
                 return not_supported(n, "basic.lookup.argdep");
+            if (!held.empty()) {
+                if (held.size() != 1 || !set.empty())
+                    return not_supported(n, "basic.lookup.argdep");
+                uint32_t found_template = function_template_of(held[0]);
+                if (!found_template)
+                    return not_supported(n, "basic.lookup.argdep");
+                owned_array<template_argument> specified;
+                VTRY_SET(r, template_call(n, t, found_template, specified,
+                                          false, arguments, early, f));
+                return call_with(n, f, f.type, 0, 0, arguments, early, m);
+            }
             /* the functions of the sets found: [over.call.func]/3's
                candidate functions */
             for (entity_index e : set)
@@ -1589,6 +1601,23 @@ analysis_result semantic_analysis::template_call(
     owned_array<uint32_t> group;
     function_template_overloads(function_templates[function_template - 1].name,
                                 group);
+    owned_array<entity_index> associated_classes, associated_spaces;
+    if (!qualified &&
+        !associated_namespaces(types, associated_classes, associated_spaces))
+        return not_supported(n, "basic.lookup.argdep");
+    owned_array<uint32_t> visible;
+    for (uint32_t candidate : group) {
+        const struct function_template &entry =
+            function_templates[candidate - 1];
+        bool found = !entry.hidden_friend;
+        if (!qualified && entry.hidden_friend)
+            for (entity_index cls : associated_classes)
+                if (cls == entry.friend_class)
+                    found = true;
+        if (found)
+            visible.append(candidate);
+    }
+    group = static_cast<owned_array<uint32_t> &&>(visible);
     /* the name's non-template functions, candidates unless the name is a
        template-id's ([temp.arg.explicit]: only templates take template
        arguments) */
@@ -1602,6 +1631,11 @@ analysis_result semantic_analysis::template_call(
             !template_id)
             functions.append(x.function);
     entity_index specialization = 0;
+    if (group.empty() && functions.empty())
+        return ill_formed_at_token(name, "use of an undeclared identifier",
+                                   "basic.lookup.unqual");
+    if (!group.empty())
+        function_template = group[0];
     if (group.size() > 1 || !functions.empty()) {
         /* [temp.over]/1: template_candidates */
         owned_array<overload_candidate> candidates;

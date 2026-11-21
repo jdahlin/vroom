@@ -418,17 +418,17 @@ semantic_analysis::qualified_friend_function(entity_index c, SyntaxRef n,
  * the innermost enclosing namespace of c ([namespace.memdef]/3) as by a
  * template-declaration there, and all its specializations are friends.  (The
  * name is then visible to ordinary lookup there, which [namespace.memdef]/3
- * hides until a declaration in the namespace: code that names it before is
- * accepted where it is ill-formed.)  A friend template defined in the class
- * ([temp.friend]/2), a friend class template and a qualified name are not
- * analysed.
+ * hides until a declaration in the namespace. A definition in the class
+ * ([temp.friend]/2) is instantiated in that class's lexical scope. Friend
+ * class templates and qualified names are not analysed.
  */
 analysis_result semantic_analysis::friend_function_template(
     entity_index c, TemplateDeclaration n, SyntaxRef inner)
 {
     uint32_t lead = leading_gnu_attributes(inner);
-    if (inner.is(syntax_kind::function_definition) ||
-        !inner.is(syntax_kind::member_declaration) || inner.size() != lead + 3)
+    if (!inner.is(syntax_kind::member_declaration,
+                  syntax_kind::function_definition) ||
+        inner.size() != lead + 3)
         return not_supported(n, "temp.friend");
     entity_index saved_scope = current_scope, saved_class = defining_class;
     bool saved_friend = friend_allowed;
@@ -442,6 +442,8 @@ analysis_result semantic_analysis::friend_function_template(
     friend_allowed = saved_friend;
     if (r != analysis_result::well_formed)
         return r;
+    if (inner.is(syntax_kind::function_definition))
+        function_templates[last_function_template - 1].friend_class = c;
     friend_record f;
     f.granting = c;
     f.template_entity = function_templates[last_function_template - 1].entity;

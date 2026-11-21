@@ -182,8 +182,10 @@ semantic_analysis::record_instantiation(const function_template &ft,
     record.argument_count = count;
     for (uint32_t i = 0; i < count; i++)
         template_arguments.append(arguments[i]);
-    record.scope = entity_table.make(entity_kind::block_scope, 0,
-                                     entity_table[ft.entity].enclosing);
+    entity_index scope = entity_table[ft.entity].enclosing;
+    if (ft.friend_class)
+        scope = ft.friend_class;
+    record.scope = entity_table.make(entity_kind::block_scope, 0, scope);
     for (uint32_t i = 0; i < count; i++)
         bind_template_argument(
             record.scope, template_parameter_entities[ft.first_parameter + i],
