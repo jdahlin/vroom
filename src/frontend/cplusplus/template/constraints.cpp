@@ -215,7 +215,9 @@ analysis_result semantic_analysis::requirement_satisfied(SyntaxElement r,
 analysis_result semantic_analysis::requires_expression(RequiresExpression n,
                                                        expression_meaning &m)
 {
-    if (!substituting || n.size() < 2 || n.size() > 3)
+    if (n.size() < 2 || n.size() > 3 ||
+        (!substituting &&
+         names_dependent_entity(n.first_token(), n.end_token())))
         return not_supported(n, "expr.prim.req");
     SyntaxElement list;
     if (n.size() == 3) {
@@ -236,6 +238,7 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
     entity_index outer = current_scope;
     bool satisfied = true;
     analysis_result result = analysis_result::well_formed;
+    substituting++;
     if (list) {
         /* [expr.prim.req]/5: the local parameters, their types
            substituted first */
@@ -270,6 +273,7 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
          i++)
         result = requirement_satisfied(requirements[i], satisfied);
     unevaluated--;
+    substituting--;
     current_scope = outer;
     if (result != analysis_result::well_formed)
         return result;

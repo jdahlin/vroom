@@ -92,6 +92,9 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
     uint32_t count = n.size();
     if (n.is(syntax_kind::type_requirement))
         count--;
+    if (n.is(syntax_kind::type_requirement) && count == 2 &&
+        n[1].is(syntax_kind::simple_template_id))
+        return template_type(n[1], 0, false, type, &cv);
     if (count < 3 || count > 4 || !n[1].is(syntax_kind::nested_name_specifier))
         return not_supported(n, "temp.res");
     SyntaxElement last = n[count - 1];
@@ -106,8 +109,17 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
         nominated_scope scope;
         VTRY(r, nested_name_specifier(n[1], scope, true));
         if (scope.dependent) {
-            type = dependent_written_type(n);
-            return analysis_result::well_formed;
+            if (n.is(syntax_kind::type_requirement)) {
+                const struct type &qr = type_table[scope.dependent];
+                if (qr.kind == type_kind::class_type) {
+                    scope.entity = qr.entity;
+                    scope.dependent = 0;
+                }
+            }
+            if (scope.dependent) {
+                type = dependent_written_type(n);
+                return analysis_result::well_formed;
+            }
         }
         if (!scope.entity)
             return not_supported(n, "temp.res");

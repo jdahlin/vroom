@@ -20,6 +20,16 @@ struct B {
     using difference_type = char;
     using value_type = int;
 };
+template <class T> using with_ref = T&;
+template <class T>
+concept can_ref = requires { typename with_ref<T>; };
+template <class T> struct Probe {
+    static constexpr bool has_d = requires { typename T::difference_type; };
+};
+static_assert(can_ref<int>);
+static_assert(!can_ref<void>);
+static_assert(Probe<A>::has_d);
+static_assert(!Probe<int>::has_d);
 int main()
 {
     return I<A>::v * 10 + I<int>::v + I<B>::v + has_both<B> * 100 +
