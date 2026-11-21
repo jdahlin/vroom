@@ -1338,22 +1338,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 return not_supported(item, "temp.variadic");
         }
         for (uint32_t exp_k = 0; exp_k < times; exp_k++) {
-            struct expand_guard {
-                bool &flag;
-                uint32_t &elem;
-                bool saved_flag;
-                uint32_t saved_elem;
-                ~expand_guard()
-                {
-                    flag = saved_flag;
-                    elem = saved_elem;
-                }
-            } guard = {expanding, expansion_element, expanding,
-                       expansion_element};
-            if (item_expands[idx]) {
-                expanding = true;
-                expansion_element = exp_k;
-            }
+            expansion_scope scope(*this, item_expands[idx], exp_k);
             token_index id = 0;
             uint32_t name = 0;
             entity_index e = 0;

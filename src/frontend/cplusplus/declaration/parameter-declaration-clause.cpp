@@ -532,15 +532,12 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
             if (!clause_expansion &&
                 tokens[ellipsis + 1].kind == token_kind::identifier)
                 pack_name = tokens.identifier(ellipsis + 1);
-            bool saved = expanding;
-            uint32_t saved_element = expansion_element;
             for (uint32_t e = 0; e < elements; e++) {
-                expanding = true;
-                expansion_element = e;
-                r = parameter_declaration(declarations[k], t, unnamed, id,
-                                          default_argument);
-                expanding = saved;
-                expansion_element = saved_element;
+                {
+                    expansion_scope scope(*this, true, e);
+                    r = parameter_declaration(declarations[k], t, unnamed, id,
+                                              default_argument);
+                }
                 if (r != analysis_result::well_formed)
                     return r;
                 if ((!clause_expansion && declared_pack != ellipsis) ||

@@ -1376,19 +1376,12 @@ analysis_result semantic_analysis::template_callee_parts(
             if (position == UINT32_MAX)
                 return not_supported(id.index(), "temp.arg.explicit");
             template_argument x;
-            bool saved = expanding;
-            uint32_t saved_element = expansion_element;
-            if (expansion[w]) {
-                expanding = true;
-                expansion_element = k;
-                type_id_expansion = true;
+            analysis_result r = analysis_result::well_formed;
+            {
+                expansion_scope scope(*this, expansion[w], k, true);
+                r = template_argument_for(id.index(), function_template,
+                                          position, a, specified.data(), x);
             }
-            analysis_result r =
-                template_argument_for(id.index(), function_template, position,
-                                      a, specified.data(), x);
-            type_id_expansion = false;
-            expanding = saved;
-            expansion_element = saved_element;
             if (r != analysis_result::well_formed)
                 return r;
             specified.append(x);
@@ -1519,18 +1512,11 @@ analysis_result semantic_analysis::template_candidates(
                         break;
                     }
                     template_argument x;
-                    bool saved = expanding;
-                    uint32_t saved_element = expansion_element;
-                    if (is_exp) {
-                        expanding = true;
-                        expansion_element = k;
-                        type_id_expansion = true;
+                    {
+                        expansion_scope scope(*this, is_exp, k, true);
+                        r = template_argument_for(written_at, g, position, a,
+                                                  d.data(), x);
                     }
-                    r = template_argument_for(written_at, g, position, a,
-                                              d.data(), x);
-                    type_id_expansion = false;
-                    expanding = saved;
-                    expansion_element = saved_element;
                     if (r != analysis_result::well_formed)
                         break;
                     d.append(x);

@@ -2558,18 +2558,12 @@ analysis_result semantic_analysis::template_id_arguments(
                 if (position >= count)
                     return not_supported(id, "temp.arg");
                 template_argument v;
-                bool saved = expanding;
-                uint32_t saved_element = expansion_element;
-                if (expansion[w]) {
-                    expanding = true;
-                    expansion_element = k;
-                    type_id_expansion = true;
+                analysis_result r = analysis_result::well_formed;
+                {
+                    expansion_scope scope(*this, expansion[w], k, true);
+                    r = template_argument_for(id, ct, position, a,
+                                              arguments.data(), v);
                 }
-                analysis_result r = template_argument_for(id, ct, position, a,
-                                                          arguments.data(), v);
-                type_id_expansion = false;
-                expanding = saved;
-                expansion_element = saved_element;
                 if (r != analysis_result::well_formed)
                     return r;
                 if (position == pack)

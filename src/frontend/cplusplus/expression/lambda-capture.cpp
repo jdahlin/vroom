@@ -423,20 +423,16 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
         entity_table[v].type = type;
         qualified_type outer_deduced = declaration_deduced;
         entity_index outer_variable = deducing_variable;
-        bool outer_expanding = expanding;
-        uint32_t outer_element = expansion_element;
         declaration_deduced = qualified_type();
         deducing_variable = v;
-        if (pack) {
-            expanding = true;
-            expansion_element = k;
-        }
         initialized_value value;
-        analysis_result r = deduced_initializer(n[i + 1], v, type, value);
+        analysis_result r = analysis_result::well_formed;
+        {
+            expansion_scope scope(*this, pack, k);
+            r = deduced_initializer(n[i + 1], v, type, value);
+        }
         declaration_deduced = outer_deduced;
         deducing_variable = outer_variable;
-        expanding = outer_expanding;
-        expansion_element = outer_element;
         if (r != analysis_result::well_formed)
             return r;
         qualified_type member = type;
