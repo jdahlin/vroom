@@ -105,19 +105,22 @@ class itanium_mangler
     /* [abi:mangling-compression]: the substitution candidates seen so far,
        in order; a type is one candidate however it is spelled, since the
        type table has one record per type.  A namespace as a <prefix> is a
-       candidate too: its entity, with no type */
+       candidate too: its entity, with no type. A member function type
+       also carries the class that owns the member. */
     struct candidate {
         qualified_type type;
         entity_index scope = 0;
+        entity_index member_class = 0;
     };
     owned_array<candidate> candidates;
     /* the function template whose specialization's encoding is being
        mangled: what its function parameters' names are */
     entity_index encoding_template = 0;
-    void add_candidate(qualified_type t)
+    void add_candidate(qualified_type t, entity_index member_class = 0)
     {
         candidate c;
         c.type = t;
+        c.member_class = member_class;
         candidates.append(c);
     }
 
@@ -159,8 +162,8 @@ class itanium_mangler
     }
     bool name(entity_index e);
     bool unscoped_name(entity_index e);
-    bool unqualified_name(entity_index e);
-    bool unqualified_name_untagged(entity_index e);
+    bool unqualified_name(entity_index e, bool as_type = false);
+    bool unqualified_name_untagged(entity_index e, bool as_type);
     bool source_name(uint32_t identifier);
     bool operator_name(const entity &x);
     bool ctor_dtor_name(special_member which, entity_index inherited = 0);
@@ -168,7 +171,10 @@ class itanium_mangler
     bool local_name(entity_index e, entity_index function);
     bool closure_type_name(entity_index c);
     bool closure_numbered(entity_index c) const;
-    entity_index local_function(entity_index e) const;
+    entity_index local_function(entity_index e,
+                                entity_index *local_class = nullptr) const;
+    uint64_t local_class_ordinal(entity_index c, entity_index function) const;
+    void local_class_discriminator(entity_index c, entity_index function);
     bool function_scope(entity_index function);
     bool nested_name(entity_index e);
     void member_qualifiers(const entity &x);
@@ -178,12 +184,12 @@ class itanium_mangler
     bool dependent_member_prefix(type_index q);
     void discriminator(uint64_t n);
     bool bare_function_type(qualified_type t);
-    bool type(qualified_type t);
+    bool type(qualified_type t, entity_index member_class = 0);
     bool builtin_type(fundamental_type t);
     bool qualified(qualified_type t);
     bool function_type(qualified_type t);
     bool array_type(qualified_type t);
-    bool substitution(qualified_type t);
+    bool substitution(qualified_type t, entity_index member_class = 0);
     bool same_candidate(qualified_type a, qualified_type b) const;
     bool substitution(entity_index scope);
     void substitution_at(size_t i);
@@ -309,6 +315,8 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     entity_index pattern_of = analysis.specialized_template(e);
     entity_index scope = table[e].enclosing;
     bool nested = scope && !is_std(scope);
+    entity_index local_class = 0;
+    entity_index local = 0;
     if (nested) {
         /* (a member function template's specialization, [temp.mem]: the
            nested-name's CV-qualifiers its own, as nested_name's) */
@@ -320,7 +328,7 @@ bool itanium_mangler::specialization_encoding(entity_index e)
             return false;
         /* (a member of a local class: its function scope first, as
            name()'s) */
-        entity_index local = local_function(e);
+        local = local_function(e, &local_class);
         if (member && local && !function_scope(local))
             return false;
         text("N");
@@ -351,6 +359,8 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     }
     if (nested)
         text("E");
+    if (local)
+        local_class_discriminator(local_class, local);
     /* a variable template's specialization: <data name> */
     if (table[e].kind == entity_kind::variable)
         return true;
@@ -518,104 +528,116 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
 }
 
 /*
- * [abi:expressions] of a decltype-specifier's type-dependent operand in a
- * function template's declarator (encoding_template), as far as it is
- * written with its function parameters, class member accesses and calls:
+ * [abi:expressions]:
  *
  *     <expression> ::= cl <expression>+ E
- *                  ::= <unresolved-name>
  *                  ::= dt <expression> <unresolved-name>
  *                  ::= pt <expression> <unresolved-name>
  *                  ::= <function-param>
+ *                  ::= <expr-primary>
+ *
+ * Binary arithmetic uses <binary operator-name> followed by both operands.
+ * The literal form here is a decimal int.
+ *
+ * For a named callee or member, the supported <unresolved-name> is a
+ * <simple-id> consisting of a <source-name>.
  *
  * [abi:mangle.function-param]:
  *
  *     <function-param> ::= fp <top-level CV-qualifiers> _
  *                      ::= fp <top-level CV-qualifiers> <parameter-2 non-negative number> _
  *
- * the member's <unresolved-name> its <source-name>.  Anything else: not
- * mangled yet.
+ * The function parameter forms below omit the CV-qualifiers.
  */
-bool itanium_mangler::dependent_expression(SyntaxElement c)
+bool itanium_mangler::dependent_expression(SyntaxElement expression)
 {
-    if (c.is_token()) {
-        uint32_t position =
-            analysis.function_parameter_position(encoding_template, c.token());
-        if (position) {
-            text("fp");
-            if (position > 1)
-                number(position - 2);
-            text("_");
-            return true;
-        }
-        owned_buffer sp;
-        analysis.token_spelling(c.token(), sp.get());
-        if (!sp.size() || sp.size() > 9 ||
-            (sp.data()[0] == '0' && sp.size() > 1))
-            return false;
-        for (size_t i = 0; i < sp.size(); i++)
-            if (sp.data()[i] < '0' || sp.data()[i] > '9')
-                return false;
-        text("Li");
-        vbuffer_append(out, sp.data(), sp.size());
-        text("E");
-        return true;
-    }
-    if (c.size() == 3 && (c.kind() == syntax_kind::additive_expression ||
-                          c.kind() == syntax_kind::multiplicative_expression)) {
+    if (expression.size() == 3 &&
+        (expression.kind() == syntax_kind::additive_expression ||
+         expression.kind() == syntax_kind::multiplicative_expression)) {
         const char *op = nullptr;
-        if (punctuator(c[1], preprocessing_op_or_punc::PLUS))
+        if (punctuator(expression[1], preprocessing_op_or_punc::PLUS))
             op = "pl";
-        else if (punctuator(c[1], preprocessing_op_or_punc::MINUS))
+        else if (punctuator(expression[1], preprocessing_op_or_punc::MINUS))
             op = "mi";
-        else if (punctuator(c[1], preprocessing_op_or_punc::STAR))
+        else if (punctuator(expression[1], preprocessing_op_or_punc::STAR))
             op = "ml";
-        else if (punctuator(c[1], preprocessing_op_or_punc::SLASH))
+        else if (punctuator(expression[1], preprocessing_op_or_punc::SLASH))
             op = "dv";
-        else if (punctuator(c[1], preprocessing_op_or_punc::PERCENT))
+        else if (punctuator(expression[1], preprocessing_op_or_punc::PERCENT))
             op = "rm";
         if (!op)
             return false;
         text(op);
-        return dependent_expression(c[0]) && dependent_expression(c[2]);
+        return dependent_expression(expression[0]) &&
+               dependent_expression(expression[2]);
     }
-    if (c.kind() != syntax_kind::postfix_expression || c.size() < 3)
-        return false;
-    bool arrow = punctuator(c[1], preprocessing_op_or_punc::ARROW);
-    if (c.size() == 3 &&
-        (arrow || punctuator(c[1], preprocessing_op_or_punc::DOT)) &&
-        c[2].is_token()) {
-        if (arrow)
-            text("pt");
-        else
-            text("dt");
-        return dependent_expression(c[0]) &&
-               source_name(analysis.token_identifier(c[2].token()));
-    }
-    if (!punctuator(c[1], preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
-        !punctuator(c[c.size() - 1],
-                    preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
-        c.size() > 4)
-        return false;
-    text("cl");
-    /* a callee named by an identifier that is no function parameter: its
-       <unresolved-name>, the <source-name> (the overload set is resolved
-       per instantiation, [temp.dep]/2) */
-    SyntaxElement callee = c[0];
-    if (callee.is_token() &&
-        !analysis.function_parameter_position(encoding_template,
-                                              callee.token()) &&
-        analysis.token_identifier(callee.token())) {
-        if (!source_name(analysis.token_identifier(callee.token())))
-            return false;
-    } else if (!dependent_expression(callee))
-        return false;
-    if (c.size() == 4) {
-        auto a = c[2];
-        for (auto x : a.items(syntax_kind::initializer_list))
-            if (!dependent_expression(x))
+    if (expression.is(syntax_kind::primary_expression) &&
+        expression.size() == 3 &&
+        expression[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        return dependent_expression(expression[1]);
+
+    if (expression.is(syntax_kind::postfix_expression) &&
+        expression.size() >= 3) {
+        auto base = expression[0];
+        auto op = expression[1];
+        if (expression.size() <= 4 &&
+            op.is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+            expression[expression.size() - 1].is(
+                preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+            text("cl");
+            uint32_t unresolved_name = 0;
+            if (base.is_token() && !analysis.function_parameter_position(
+                                       encoding_template, base.token()))
+                unresolved_name = analysis.token_identifier(base.token());
+            if (unresolved_name) {
+                if (!source_name(unresolved_name))
+                    return false;
+            } else if (!dependent_expression(base))
                 return false;
+            if (expression.size() == 4)
+                for (auto argument :
+                     expression[2].items(syntax_kind::initializer_list))
+                    if (!dependent_expression(argument))
+                        return false;
+            text("E");
+            return true;
+        }
+
+        bool dot = op.is(preprocessing_op_or_punc::DOT);
+        if (expression.size() == 3 && expression[2].is_token() &&
+            (dot || op.is(preprocessing_op_or_punc::ARROW))) {
+            if (dot)
+                text("dt");
+            else
+                text("pt");
+            return dependent_expression(base) &&
+                   source_name(
+                       analysis.token_identifier(expression[2].token()));
+        }
     }
+
+    if (!expression.is_token())
+        return false;
+    uint32_t parameter = analysis.function_parameter_position(
+        encoding_template, expression.token());
+    if (parameter) {
+        text("fp");
+        if (parameter > 1)
+            number(parameter - 2);
+        text("_");
+        return true;
+    }
+
+    owned_buffer spelling;
+    analysis.token_spelling(expression.token(), spelling.get());
+    if (!spelling.size() || spelling.size() > 9 ||
+        (spelling.data()[0] == '0' && spelling.size() > 1))
+        return false;
+    for (size_t i = 0; i < spelling.size(); i++)
+        if (spelling.data()[i] < '0' || spelling.data()[i] > '9')
+            return false;
+    text("Li");
+    vbuffer_append(out, spelling.data(), spelling.size());
     text("E");
     return true;
 }
@@ -639,7 +661,8 @@ bool itanium_mangler::name(entity_index e)
     /* (a closure type with a <data-member-prefix> is a <nested-name>) */
     if ((scope == 0 || is_std(scope)) && !table[e].closure_variable)
         return unscoped_name(e);
-    entity_index local = local_function(e);
+    entity_index local_class = 0;
+    entity_index local = local_function(e, &local_class);
     if (local && table[scope].kind == entity_kind::class_type) {
         /* a member of a local class: Z <function encoding> E
            <nested-name> */
@@ -647,19 +670,17 @@ bool itanium_mangler::name(entity_index e)
             return false;
         /* [abi:mangling-scope] a default argument's scope:
            d [<number>] _ */
-        entity_index top = e;
-        if (table[top].kind != entity_kind::class_type)
-            top = table[top].enclosing;
-        while (table[top].kind == entity_kind::class_type &&
-               table[table[top].enclosing].kind == entity_kind::class_type)
-            top = table[top].enclosing;
-        if (uint32_t parameter = table[top].default_argument_parameter) {
+        if (uint32_t parameter =
+                table[local_class].default_argument_parameter) {
             text("d");
             if (parameter > 1)
                 number(parameter - 2);
             text("_");
         }
-        return nested_name(e);
+        if (!nested_name(e))
+            return false;
+        local_class_discriminator(local_class, local);
+        return true;
     }
     if (table[scope].kind == entity_kind::class_type ||
         table[scope].kind == entity_kind::namespace_entity)
@@ -670,9 +691,17 @@ bool itanium_mangler::name(entity_index e)
     return local_name(e, function);
 }
 
-/* "<nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] ..." of a
-   non-static member function x: "<ref-qualifier> ::= R # & ref-qualifier,
-   O # && ref-qualifier" */
+/*
+ * [abi:mangle.qualified-type]:
+ *
+ *     <CV-qualifiers> ::= [r] [V] [K]
+ *     <ref-qualifier> ::= R  # &
+ *                     ::= O  # &&
+ *
+ * A non-static member function's <nested-name> places these before the
+ * prefix ([abi:mangle.name]). The member qualifiers here are volatile,
+ * const, and the optional ref-qualifier.
+ */
 void itanium_mangler::member_qualifiers(const entity &x)
 {
     if (x.member_cv & cv_volatile)
@@ -824,36 +853,30 @@ bool itanium_mangler::dependent_member_name(entity_index e)
 
 bool itanium_mangler::dependent_member_prefix(type_index q)
 {
-    const struct type &r = record(qualified_type::make(q, cv_none));
-    if (r.kind == type_kind::template_parameter)
-        return type(qualified_type::make(q, cv_none));
-    if (r.kind == type_kind::dependent &&
-        analysis.entity_table[r.entity].kind ==
-            entity_kind::template_specialization) {
-        /* a class template's specialization at namespace scope as the
-           prefix, its template-prefix and template-args
-           (only_int<T>::type: N8only_intIT_E4typeE, as clang 23), itself
-           a candidate */
-        qualified_type t = qualified_type::make(q, cv_none);
-        if (substitution(t))
-            return true;
-        entity_index enc = analysis.entity_table[r.entity].enclosing;
-        if ((enc != 0 && !is_std(enc)) || !class_enum_type(t))
-            return false;
-        add_candidate(t);
-        return true;
-    }
-    if (r.kind != type_kind::dependent ||
-        analysis.entity_table[r.entity].kind != entity_kind::dependent_member)
-        return false;
     qualified_type t = qualified_type::make(q, cv_none);
+    const struct type &r = record(t);
+    if (r.kind == type_kind::template_parameter)
+        return type(t);
+    if (r.kind != type_kind::dependent)
+        return false;
+
+    const entity &prefix = analysis.entity_table[r.entity];
+    if (prefix.kind != entity_kind::template_specialization &&
+        prefix.kind != entity_kind::dependent_member)
+        return false;
     if (substitution(t))
         return true;
-    const entity &x = analysis.entity_table[r.entity];
-    if (!dependent_member_prefix(static_cast<type_index>(x.value)))
-        return false;
-    if (!source_name(x.name))
-        return false;
+
+    if (prefix.kind == entity_kind::template_specialization) {
+        if ((prefix.enclosing && !is_std(prefix.enclosing)) ||
+            !class_enum_type(t))
+            return false;
+    } else {
+        if (!dependent_member_prefix(static_cast<type_index>(prefix.value)))
+            return false;
+        if (!source_name(prefix.name))
+            return false;
+    }
     add_candidate(t);
     return true;
 }
@@ -867,14 +890,13 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         x.kind != entity_kind::enumeration &&
         x.kind != entity_kind::template_specialization)
         return false;
-    if (!x.name && !x.linkage_name && !x.lambda &&
-        !(x.kind == entity_kind::class_type && enclosing_function(table, c) &&
-          analysis.number_closures))
+    entity_index local_class = 0;
+    entity_index local = local_function(c, &local_class);
+    if (!x.name && !x.linkage_name && !x.lambda && c != local_class)
         return false;
     /* [abi:mangling-compression]: a template's name seen before, with its
        prefix, is a <substitution> before the arguments */
-    if (x.instantiation && x.enclosing && !is_std(x.enclosing) &&
-        !local_function(c)) {
+    if (x.instantiation && x.enclosing && !is_std(x.enclosing) && !local) {
         /* [abi:mangle.name]:
 
                <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <template-prefix> <template-args> E
@@ -942,12 +964,16 @@ bool itanium_mangler::class_enum_type(qualified_type t)
     }
     if (x.enclosing == 0 || is_std(x.enclosing))
         return unscoped_name(c) && class_template_args(c);
-    if (entity_index local = local_function(c)) {
+    if (local) {
         /* [abi:mangling-scope]: a local class, or one nested in it */
         if (!function_scope(local))
             return false;
-        if (table[x.enclosing].kind != entity_kind::class_type)
-            return unqualified_name(c);
+        if (c == local_class) {
+            if (!unqualified_name(c, true))
+                return false;
+            local_class_discriminator(local_class, local);
+            return true;
+        }
     } else if (table[x.enclosing].kind != entity_kind::class_type &&
                table[x.enclosing].kind != entity_kind::namespace_entity)
         return false;
@@ -961,6 +987,8 @@ bool itanium_mangler::class_enum_type(qualified_type t)
     if (!class_template_args(c))
         return false;
     text("E");
+    if (local)
+        local_class_discriminator(local_class, local);
     return true;
 }
 
@@ -1281,9 +1309,9 @@ bool itanium_mangler::unscoped_name(entity_index e)
  */
 /* [abi:mangle.abi-tag] "<abi-tag> ::= B <source-name>" after the
    name, from GNU's __attribute__((abi_tag("tag"))) (one tag) */
-bool itanium_mangler::unqualified_name(entity_index e)
+bool itanium_mangler::unqualified_name(entity_index e, bool as_type)
 {
-    if (!unqualified_name_untagged(e))
+    if (!unqualified_name_untagged(e, as_type))
         return false;
     token_index tag = analysis.entity_table[e].abi_tag;
     if (tag) {
@@ -1300,7 +1328,7 @@ bool itanium_mangler::unqualified_name(entity_index e)
     return true;
 }
 
-bool itanium_mangler::unqualified_name_untagged(entity_index e)
+bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
 {
     const entities &table = analysis.entity_table;
     const entity &x = table[e];
@@ -1373,6 +1401,17 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
     }
     if (x.kind == entity_kind::class_type && x.lambda)
         return closure_type_name(e);
+    if (x.kind == entity_kind::class_type && !x.name && !x.linkage_name &&
+        !(as_type && analysis.number_closures)) {
+        if (entity_index function = enclosing_function(table, e)) {
+            /* [abi:mangling.named]: <unnamed-type-name> ::= Ut [ <nonnegative number> ] _ */
+            text("Ut");
+            if (uint64_t ordinal = local_class_ordinal(e, function))
+                number(ordinal - 1);
+            text("_");
+            return true;
+        }
+    }
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration)) {
@@ -1476,62 +1515,55 @@ bool itanium_mangler::source_name(uint32_t identifier)
 /*
  * [abi:mangling-operator]:
  *
- *     <operator-name> ::= nw        # new
- *                     ::= na        # new[]
- *                     ::= dl        # delete
- *                     ::= da        # delete[]
- *                     ::= ps        # + (unary)
- *                     ::= ng        # - (unary)
- *                     ::= ad        # & (unary)
- *                     ::= de        # * (unary)
- *                     ::= co        # ~
- *                     ::= pl        # +
- *                     ::= mi        # -
- *                     ::= ml        # *
- *                     ::= dv        # /
- *                     ::= rm        # %
- *                     ::= an        # &
- *                     ::= or        # |
- *                     ::= eo        # ^
- *                     ::= pL        # +=
- *                     ::= mI        # -=
- *                     ::= mL        # *=
- *                     ::= dV        # /=
- *                     ::= rM        # %=
- *                     ::= aN        # &=
- *                     ::= oR        # |=
- *                     ::= eO        # ^=
- *                     ::= ls        # <<
- *                     ::= lS        # <<=
- *                     ::= eq        # ==
- *                     ::= ne        # !=
- *                     ::= lt        # <
- *                     ::= le        # <=
- *                     ::= nt        # !
- *                     ::= aa        # &&
- *                     ::= oo        # ||
- *                     ::= pp        # ++ (postfix in <expression> context)
- *                     ::= mm        # --
- *                     ::= aS        # =
- *                     ::= cl        # ()
- *                     ::= ix        # []
- *                     ::= cm        # ,
- *                     ::= pm        # ->*
- *                     ::= pt        # ->
- *                     ::= ss        # <=>
+ *     <operator-name> ::= nw  # new
+ *                     ::= na  # new[]
+ *                     ::= dl  # delete
+ *                     ::= da  # delete[]
+ *                     ::= ps  # + (unary)
+ *                     ::= ng  # - (unary)
+ *                     ::= ad  # & (unary)
+ *                     ::= de  # * (unary)
+ *                     ::= co  # ~
+ *                     ::= pl  # +
+ *                     ::= mi  # -
+ *                     ::= ml  # *
+ *                     ::= dv  # /
+ *                     ::= rm  # %
+ *                     ::= an  # &
+ *                     ::= or  # |
+ *                     ::= eo  # ^
+ *                     ::= aS  # =
+ *                     ::= pL  # +=
+ *                     ::= mI  # -=
+ *                     ::= mL  # *=
+ *                     ::= dV  # /=
+ *                     ::= rM  # %=
+ *                     ::= aN  # &=
+ *                     ::= oR  # |=
+ *                     ::= eO  # ^=
+ *                     ::= ls  # <<
+ *                     ::= lS  # <<=
+ *                     ::= eq  # ==
+ *                     ::= ne  # !=
+ *                     ::= lt  # <
+ *                     ::= le  # <=
+ *                     ::= ss  # <=>
+ *                     ::= nt  # !
+ *                     ::= aa  # &&
+ *                     ::= oo  # ||
+ *                     ::= pp  # ++
+ *                     ::= mm  # --
+ *                     ::= cm  # ,
+ *                     ::= pm  # ->*
+ *                     ::= pt  # ->
+ *                     ::= cl  # ()
+ *                     ::= ix  # []
  *
- * and rs (>>), rS (>>=), gt (>) and ge (>=), whose lines the grammar
- * index lost.  The unary forms of + - & * are the operator functions of one operand,
- * the implicit object parameter counted ([over.unary]/1).
+ * The switch also includes rs (>>), rS (>>=), gt (>), and ge (>=).
+ * The operand count includes the implicit object ([over.unary]/1).
  */
 bool itanium_mangler::operator_name(const entity &x)
 {
-    const types &table = analysis.type_table;
-    uint32_t operands = table[x.type.unqualified()].parameter_count;
-    if (x.nonstatic_member)
-        operands++;
-    bool unary = operands == 1;
-    const char *code = nullptr;
     switch (x.allocation) {
     case allocation_function::new_:
         text("nw");
@@ -1548,131 +1580,151 @@ bool itanium_mangler::operator_name(const entity &x)
     default:
         break;
     }
-    switch (x.implemented) {
-    case preprocessing_op_or_punc::PLUS:
-        code = "pl";
-        if (unary)
+
+    using enum preprocessing_op_or_punc;
+    const struct type &function = analysis.type_table[x.type.unqualified()];
+    bool unary = function.parameter_count + unsigned(x.nonstatic_member) == 1;
+    const char *code = nullptr;
+    if (unary) {
+        switch (x.implemented) {
+        case PLUS:
             code = "ps";
-        break;
-    case preprocessing_op_or_punc::MINUS:
-        code = "mi";
-        if (unary)
+            break;
+        case MINUS:
             code = "ng";
-        break;
-    case preprocessing_op_or_punc::AMPERSAND:
-        code = "an";
-        if (unary)
+            break;
+        case AMPERSAND:
             code = "ad";
-        break;
-    case preprocessing_op_or_punc::STAR:
-        code = "ml";
-        if (unary)
+            break;
+        case STAR:
             code = "de";
-        break;
-    case preprocessing_op_or_punc::TILDE:
+            break;
+        default:
+            break;
+        }
+        if (code) {
+            text(code);
+            return true;
+        }
+    }
+
+    switch (x.implemented) {
+    case TILDE:
         code = "co";
         break;
-    case preprocessing_op_or_punc::SLASH:
+    case PLUS:
+        code = "pl";
+        break;
+    case MINUS:
+        code = "mi";
+        break;
+    case STAR:
+        code = "ml";
+        break;
+    case SLASH:
         code = "dv";
         break;
-    case preprocessing_op_or_punc::PERCENT:
+    case PERCENT:
         code = "rm";
         break;
-    case preprocessing_op_or_punc::BAR:
+    case AMPERSAND:
+        code = "an";
+        break;
+    case BAR:
         code = "or";
         break;
-    case preprocessing_op_or_punc::CARET:
+    case CARET:
         code = "eo";
         break;
-    case preprocessing_op_or_punc::PLUS_EQUAL:
-        code = "pL";
-        break;
-    case preprocessing_op_or_punc::MINUS_EQUAL:
-        code = "mI";
-        break;
-    case preprocessing_op_or_punc::STAR_EQUAL:
-        code = "mL";
-        break;
-    case preprocessing_op_or_punc::SLASH_EQUAL:
-        code = "dV";
-        break;
-    case preprocessing_op_or_punc::PERCENT_EQUAL:
-        code = "rM";
-        break;
-    case preprocessing_op_or_punc::AMPERSAND_EQUAL:
-        code = "aN";
-        break;
-    case preprocessing_op_or_punc::BAR_EQUAL:
-        code = "oR";
-        break;
-    case preprocessing_op_or_punc::CARET_EQUAL:
-        code = "eO";
-        break;
-    case preprocessing_op_or_punc::LESS_LESS:
-        code = "ls";
-        break;
-    case preprocessing_op_or_punc::GREATER_GREATER:
-        code = "rs";
-        break;
-    case preprocessing_op_or_punc::LESS_LESS_EQUAL:
-        code = "lS";
-        break;
-    case preprocessing_op_or_punc::GREATER_GREATER_EQUAL:
-        code = "rS";
-        break;
-    case preprocessing_op_or_punc::EQUAL_EQUAL:
-        code = "eq";
-        break;
-    case preprocessing_op_or_punc::EXCLAMATION_EQUAL:
-        code = "ne";
-        break;
-    case preprocessing_op_or_punc::LESS:
-        code = "lt";
-        break;
-    case preprocessing_op_or_punc::GREATER:
-        code = "gt";
-        break;
-    case preprocessing_op_or_punc::LESS_EQUAL:
-        code = "le";
-        break;
-    case preprocessing_op_or_punc::GREATER_EQUAL:
-        code = "ge";
-        break;
-    case preprocessing_op_or_punc::EXCLAMATION:
-        code = "nt";
-        break;
-    case preprocessing_op_or_punc::AMPERSAND_AMPERSAND:
-        code = "aa";
-        break;
-    case preprocessing_op_or_punc::BAR_BAR:
-        code = "oo";
-        break;
-    case preprocessing_op_or_punc::PLUS_PLUS:
-        code = "pp";
-        break;
-    case preprocessing_op_or_punc::MINUS_MINUS:
-        code = "mm";
-        break;
-    case preprocessing_op_or_punc::EQUAL:
+    case EQUAL:
         code = "aS";
         break;
-    case preprocessing_op_or_punc::LEFT_PARENTHESIS:
-        code = "cl";
+    case PLUS_EQUAL:
+        code = "pL";
         break;
-    case preprocessing_op_or_punc::LEFT_BRACKET:
-        code = "ix";
+    case MINUS_EQUAL:
+        code = "mI";
         break;
-    case preprocessing_op_or_punc::COMMA:
+    case STAR_EQUAL:
+        code = "mL";
+        break;
+    case SLASH_EQUAL:
+        code = "dV";
+        break;
+    case PERCENT_EQUAL:
+        code = "rM";
+        break;
+    case AMPERSAND_EQUAL:
+        code = "aN";
+        break;
+    case BAR_EQUAL:
+        code = "oR";
+        break;
+    case CARET_EQUAL:
+        code = "eO";
+        break;
+    case LESS_LESS:
+        code = "ls";
+        break;
+    case GREATER_GREATER:
+        code = "rs";
+        break;
+    case LESS_LESS_EQUAL:
+        code = "lS";
+        break;
+    case GREATER_GREATER_EQUAL:
+        code = "rS";
+        break;
+    case EQUAL_EQUAL:
+        code = "eq";
+        break;
+    case EXCLAMATION_EQUAL:
+        code = "ne";
+        break;
+    case LESS:
+        code = "lt";
+        break;
+    case GREATER:
+        code = "gt";
+        break;
+    case LESS_EQUAL:
+        code = "le";
+        break;
+    case GREATER_EQUAL:
+        code = "ge";
+        break;
+    case SPACESHIP:
+        code = "ss";
+        break;
+    case EXCLAMATION:
+        code = "nt";
+        break;
+    case AMPERSAND_AMPERSAND:
+        code = "aa";
+        break;
+    case BAR_BAR:
+        code = "oo";
+        break;
+    case PLUS_PLUS:
+        code = "pp";
+        break;
+    case MINUS_MINUS:
+        code = "mm";
+        break;
+    case COMMA:
         code = "cm";
         break;
-    case preprocessing_op_or_punc::ARROW_STAR:
+    case ARROW_STAR:
         code = "pm";
         break;
-    case preprocessing_op_or_punc::ARROW:
+    case ARROW:
         code = "pt";
         break;
-    case preprocessing_op_or_punc::SPACESHIP:
-        code = "ss";
+    case LEFT_PARENTHESIS:
+        code = "cl";
+        break;
+    case LEFT_BRACKET:
+        code = "ix";
         break;
     default:
         return false;
@@ -1694,14 +1746,9 @@ void itanium_mangler::number(uint64_t n)
     vbuffer_format_append(out, "%llu", static_cast<unsigned long long>(n));
 }
 
-/*
- * The function a class of block scope (a local class, [class.local]) is
- * declared in, for e that is such a class, a class nested in one, or a
- * member of either; 0 otherwise.  A local class whose name another class
- * of the function also has would need a discriminator, which is not
- * written: no function then.
- */
-entity_index itanium_mangler::local_function(entity_index e) const
+/* Find the outermost class in the function's scope. */
+entity_index itanium_mangler::local_function(entity_index e,
+                                             entity_index *local_class) const
 {
     const entities &table = analysis.entity_table;
     entity_index c = e;
@@ -1710,34 +1757,58 @@ entity_index itanium_mangler::local_function(entity_index e) const
     while (c && table[c].kind == entity_kind::class_type &&
            table[table[c].enclosing].kind == entity_kind::class_type)
         c = table[c].enclosing;
-    if (!c || table[c].kind != entity_kind::class_type || !table[c].enclosing ||
-        table[table[c].enclosing].kind == entity_kind::namespace_entity)
+    if (!c || table[c].kind != entity_kind::class_type)
         return 0;
     entity_index function = enclosing_function(table, c);
-    if (!function)
-        return 0;
-    /* (a closure type's name is numbered: closure_type_name) */
-    if (table[c].lambda)
-        return function;
-    for (entity_index other = 1; other < table.size(); other++)
-        if (other != c && table[other].kind == entity_kind::class_type &&
-            table[other].name == table[c].name && !table[other].lambda &&
-            enclosing_function(table, other) == function)
-            return UINT32_MAX;
+    if (function && local_class)
+        *local_class = c;
     return function;
+}
+
+/* [abi:mangling-scope]: count earlier classes with the same name in the
+   function. Unnamed classes have their own sequence, separate from lambdas. */
+uint64_t itanium_mangler::local_class_ordinal(entity_index c,
+                                              entity_index function) const
+{
+    const entities &table = analysis.entity_table;
+    uint32_t name = table[c].name;
+    if (!name)
+        name = table[c].linkage_name;
+    uint64_t ordinal = 0;
+    for (entity_index other = 1; other < c; other++) {
+        const entity &x = table[other];
+        uint32_t other_name = x.name;
+        if (!other_name)
+            other_name = x.linkage_name;
+        if (x.kind == entity_kind::class_type && !x.lambda &&
+            other_name == name && enclosing_function(table, other) == function)
+            ordinal++;
+    }
+    return ordinal;
+}
+
+void itanium_mangler::local_class_discriminator(entity_index c,
+                                                entity_index function)
+{
+    const entity &x = analysis.entity_table[c];
+    if (x.lambda || (!x.name && !x.linkage_name))
+        return;
+    if (uint64_t ordinal = local_class_ordinal(c, function))
+        discriminator(ordinal - 1);
 }
 
 /* [abi:mangling-scope]: Z <function encoding> E, the scope of a
    <local-name>; main's encoding is its name alone (local_name) */
 bool itanium_mangler::function_scope(entity_index function)
 {
-    if (function == UINT32_MAX)
-        return false;
     const entity &f = analysis.entity_table[function];
-    text("Z");
     size_t length = 0;
     const char *identifier = spelling(f.name, &length);
-    if (f.enclosing == 0 && length == 4 && !memcmp(identifier, "main", 4)) {
+    bool is_main =
+        !f.enclosing && length == 4 && !memcmp(identifier, "main", 4);
+
+    text("Z");
+    if (is_main) {
         if (!unqualified_name(function))
             return false;
     } else if (!encoding(function))
@@ -1765,9 +1836,6 @@ bool itanium_mangler::local_name(entity_index e, entity_index function)
     const entity &x = table[e];
     if (x.kind != entity_kind::variable || x.automatic)
         return false;
-    /* [impl.gnu] [impl.clang] the encoding of a function whose own symbol
-       is not mangled (main) is its name alone, without its type:
-       _ZZ4mainE1r */
     if (!function_scope(function))
         return false;
     if (!unqualified_name(e))
@@ -1993,18 +2061,22 @@ bool itanium_mangler::bare_function_type(qualified_type t)
  *            ::= <function-type>
  *            ::= <class-enum-type>
  *            ::= <array-type>
+ *            ::= <pointer-to-member-type>
+ *            ::= <template-param>
+ *            ::= <template-template-param> <template-args>
+ *            ::= <decltype>
  *            ::= P <type>
  *            ::= R <type>
  *            ::= O <type>
+ *            ::= C <type>
  *            ::= <substitution>
  *
- * P is a pointer, R an lvalue reference, O an rvalue reference.  Every
- * type but a builtin one is a substitution candidate
- * ([abi:mangling-compression]): one seen before is a <substitution>, and
- * one that is not is added after its parts, so the parts have the earlier
- * numbers.
+ * P, R and O encode pointers and the two kinds of reference. C encodes
+ * a complex pair, and Dp wraps a pack expansion. Substitutable types are
+ * entered after their components, in the order they are encoded
+ * ([abi:mangling-compression]).
  */
-bool itanium_mangler::type(qualified_type t)
+bool itanium_mangler::type(qualified_type t, entity_index member_class)
 {
     const struct type &r = record(t);
     if (r.kind == type_kind::fundamental && !t.cv() &&
@@ -2046,7 +2118,7 @@ bool itanium_mangler::type(qualified_type t)
         text(codes[constraint != 0][(r.entity & 3) == 2]);
         return !constraint || name(constraint);
     }
-    if (substitution(t))
+    if (substitution(t, member_class))
         return true;
     bool done = false;
     if (t.cv() && r.kind != type_kind::array)
@@ -2090,7 +2162,10 @@ bool itanium_mangler::type(qualified_type t)
                 template_param(param_pos);
             class_ok = true;
         }
-        done = class_ok && type(r.operand);
+        entity_index owner = 0;
+        if (record(r.operand).kind == type_kind::function)
+            owner = r.entity;
+        done = class_ok && type(r.operand, owner);
     } else if (r.kind == type_kind::block_pointer) {
         /* [abi:mangling-type]'s vendor extended type qualifier, as clang
            mangles a block pointer ([ext:clang_blocks]) */
@@ -2105,13 +2180,20 @@ bool itanium_mangler::type(qualified_type t)
         /* [abi:mangling-type]: <type> ::= C <type>  # complex pair (C99) */
         text("C");
         done = type(r.operand);
-    } else if (r.kind == type_kind::bit_int && !r.entity) {
+    } else if (r.kind == type_kind::bit_int) {
         /* [abi:mangling-builtin]:
 
                <builtin-type> ::= DB <number> _
-        */
+                              ::= DB <instantiation-dependent expression> _
+
+           A dependent width here is a non-type template parameter.
+           Clang substitutes repeated _BitInt types, so keep them in
+           the substitution table for interoperation. */
         text("DB");
-        number(r.bound);
+        if (r.entity)
+            template_param(analysis.entity_table[r.entity].value);
+        else
+            number(r.bound);
         text("_");
         done = true;
     } else if ((r.kind == type_kind::ext_vector ||
@@ -2160,15 +2242,29 @@ bool itanium_mangler::type(qualified_type t)
     } else if (r.kind == type_kind::dependent &&
                analysis.entity_table[r.entity].kind ==
                    entity_kind::dependent_written) {
-        /* [abi:mangle.decltype]: decltype of a type-dependent expression,
+        /* [abi:mangle.decltype]:
 
-               <decltype> ::= DT <expression> E
+               <decltype> ::= Dt <expression> E
+                          ::= DT <expression> E
 
-           the decltype-specifier's operand */
+           Dt selects the declared type of an unparenthesized identifier
+           or member access. DT selects the expression form, including
+           a parenthesized identifier or member access. */
         SyntaxRef n = SyntaxRef(node_index(
             static_cast<uint32_t>(analysis.entity_table[r.entity].value)));
-        text("DT");
-        done = n.size() == 4 && encoding_template && dependent_expression(n[2]);
+        if (n.size() != 4 || !encoding_template)
+            return false;
+        SyntaxElement operand = n[2];
+        bool member_access =
+            operand.is(syntax_kind::postfix_expression) &&
+            operand.size() == 3 &&
+            (punctuator(operand[1], preprocessing_op_or_punc::DOT) ||
+             punctuator(operand[1], preprocessing_op_or_punc::ARROW));
+        if (operand.is_token() || member_access)
+            text("Dt");
+        else
+            text("DT");
+        done = dependent_expression(operand);
         text("E");
     } else if (r.kind == type_kind::class_type ||
                r.kind == type_kind::enumeration ||
@@ -2184,7 +2280,7 @@ bool itanium_mangler::type(qualified_type t)
     }
     if (!done)
         return false;
-    add_candidate(t);
+    add_candidate(t, member_class);
     return true;
 }
 
@@ -2342,31 +2438,28 @@ bool itanium_mangler::qualified(qualified_type t)
  *
  *     <function-type> ::= [<CV-qualifiers>] [<exception-spec>] [Dx] F [Y] <bare-function-type> [<ref-qualifier>] E
  *
- * A function type that is not a function's name (a parameter's pointer to
- * function, say) encodes its return type first; the section treats the
- * delimited and the bare type as one for substitution.  S1's functions
- * have no qualifiers, exception specification or C language linkage (Y).
+ * A function type starts the signature with its return type. Its CV and
+ * reference qualifiers belong to the same substitution candidate.
+ * The supported exception specification is Do (non-throwing).
  */
 bool itanium_mangler::function_type(qualified_type t)
 {
-    /* "<CV-qualifiers> ::= [r] [V] [K]": those of the function type
-       ([dcl.fct]/6) */
-    if (record(t).function_cv & cv_volatile)
+    const struct type &function = record(t);
+    if (function.function_cv & cv_volatile)
         text("V");
-    if (record(t).function_cv & cv_const)
+    if (function.function_cv & cv_const)
         text("K");
-    /* "<exception-spec> ::= Do # non-throwing exception specification" */
-    if (record(t).non_throwing)
+    if (function.non_throwing)
         text("Do");
+
     text("F");
-    if (!type(record(t).operand))
+    if (!type(function.operand))
         return false;
     if (!bare_function_type(t))
         return false;
-    /* "<ref-qualifier> ::= R # & ref-qualifier, O # && ref-qualifier" */
-    if (record(t).function_ref == 1)
+    if (function.function_ref == 1)
         text("R");
-    if (record(t).function_ref == 2)
+    else if (function.function_ref == 2)
         text("O");
     text("E");
     return true;
@@ -2376,30 +2469,24 @@ bool itanium_mangler::function_type(qualified_type t)
  * [abi:mangle.array-type]:
  *
  *     <array-type> ::= A [<array bound number>] _ <element type>
+ *                  ::= A <instantiation-dependent array bound expression> _ <element type>
  *
- * The bound is left out for an array of unknown bound.  cv-qualifiers on
- * an array type are its elements' ([basic.type.qualifier]/3: "An array
- * type whose elements are cv-qualified is also considered to have the same
- * cv-qualifications as its elements"), and mangled there.
+ * Omit an unknown bound. A dependent bound here is a template parameter.
+ * Array CV-qualifiers go on the element type ([basic.type.qualifier]/3).
  */
 bool itanium_mangler::array_type(qualified_type t)
 {
-    const struct type &r = record(t);
+    const struct type &array = record(t);
     text("A");
-    /* [abi:mangle.array-type] with the bound a template parameter's
-       <template-param>:
-           <array-type> ::= A <instantiation-dependent array bound expression> _ <element type>
-     */
-    if (r.entity)
-        template_param(analysis.entity_table[r.entity].value);
-    else if (r.bound_known)
-        number(r.bound);
+    if (array.entity)
+        template_param(analysis.entity_table[array.entity].value);
+    else if (array.bound_known)
+        number(array.bound);
     text("_");
-    qualified_type element = r.operand;
-    if (t.cv())
-        element =
-            qualified_type::make(element.unqualified(), element.cv() | t.cv());
-    return type(element);
+
+    qualified_type element = array.operand;
+    return type(
+        qualified_type::make(element.unqualified(), element.cv() | t.cv()));
 }
 
 /*
@@ -2409,11 +2496,15 @@ bool itanium_mangler::array_type(qualified_type t)
  *                    ::= S_
  *
  * The first candidate is S_, the (n+2)-th S <n in base 36> _.
+ * A member function type is a distinct candidate for each owning class,
+ * even when its <function-type> text matches another function type.
  */
-bool itanium_mangler::substitution(qualified_type t)
+bool itanium_mangler::substitution(qualified_type t, entity_index member_class)
 {
     for (size_t i = 0; i < candidates.size(); i++)
-        if (!candidates[i].scope && same_candidate(candidates[i].type, t)) {
+        if (!candidates[i].scope &&
+            candidates[i].member_class == member_class &&
+            same_candidate(candidates[i].type, t)) {
             substitution_at(i);
             return true;
         }
@@ -2527,3 +2618,366 @@ bool itanium_construction_vtable_name(const semantic_analysis &analysis,
 }
 
 } // namespace cplusplus
+
+/*
+ * Itanium C++ ABI §5.1 grammar reference
+ * https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling
+ *
+ * This reference includes unsupported alternatives such as transaction-safe
+ * entry points and dependent exception specifications. The production
+ * comments beside the emitters identify the alternatives handled there.
+ * The ABI text also specifies when to select each alternative.
+ *
+ * := introduces a production, and | introduces another alternative.
+ * Brackets make a term optional. A star allows zero or more repetitions,
+ * and a plus requires at least one. Spaces separate terms in the grammar
+ * and contribute no bytes to the encoded name.
+ *
+ * 5.1.2 General Structure
+ *   <mangled-name> := _Z <encoding>
+ *     | _Z <encoding> . <vendor-specific suffix>
+ *   <encoding> := <function name> <bare-function-type>
+ *     | <data name>
+ *     | <special-name>
+ *
+ *  Names
+ *   <name> := <nested-name>
+ *     | <unscoped-name>
+ *     | <unscoped-template-name> <template-args>
+ *     | <local-name>
+ *   <unscoped-name> := <unqualified-name>
+ *     | St <unqualified-name>
+ *   <unscoped-template-name> := <unscoped-name>
+ *     | <substitution>
+ *   <nested-name> := N [<CV-qualifiers>] [<ref-qualifier>] <prefix> <unqualified-name> E
+ *     | N [<CV-qualifiers>] [<ref-qualifier>] <template-prefix> <template-args> E
+ *   <prefix> := <unqualified-name>
+ *     | <prefix> <unqualified-name>
+ *     | <template-prefix> <template-args>
+ *     | <closure-prefix>
+ *     | <template-param>
+ *     | <decltype>
+ *     | <substitution>
+ *   <template-prefix> := <template unqualified-name>
+ *     | <prefix> <template unqualified-name>
+ *     | <template-param>
+ *     | <substitution>
+ *   <unqualified-name> := <operator-name> [<abi-tags>]
+ *     | <ctor-dtor-name>
+ *     | <source-name>
+ *     | <unnamed-type-name>
+ *     | DC <source-name>+ E
+ *   <source-name> := <positive length number> <identifier>
+ *   <identifier> := <unqualified source code identifier>
+ *
+ *  ABI tags
+ *   <abi-tags> := <abi-tag> [<abi-tags>]
+ *   <abi-tag> := B <source-name>
+ *
+ *  Numbers
+ *   <number> := [n] <non-negative decimal integer>
+ *
+ *  Sequence numbers
+ *   <seq-id> := <0-9A-Z>+
+ *
+ * 5.1.3 Operator Encodings
+ *   <operator-name> := nw
+ *     | na
+ *     | dl
+ *     | da
+ *     | aw
+ *     | ps
+ *     | ng
+ *     | ad
+ *     | de
+ *     | co
+ *     | pl
+ *     | mi
+ *     | ml
+ *     | dv
+ *     | rm
+ *     | an
+ *     | or
+ *     | eo
+ *     | aS
+ *     | pL
+ *     | mI
+ *     | mL
+ *     | dV
+ *     | rM
+ *     | aN
+ *     | oR
+ *     | eO
+ *     | ls
+ *     | lS
+ *     | eq
+ *     | ne
+ *     | lt
+ *     | le
+ *     | ss
+ *     | nt
+ *     | aa
+ *     | oo
+ *     | pp
+ *     | mm
+ *     | cm
+ *     | pm
+ *     | pt
+ *     | cl
+ *     | ix
+ *     | qu
+ *     | cv <type>
+ *     | li <source-name>
+ *     | v <digit> <source-name>
+ *
+ * 5.1.4.1 Virtual Tables and RTTI
+ *   <special-name> := TV <type>
+ *     | TT <type>
+ *     | TI <type>
+ *     | TS <type>
+ *
+ * 5.1.4.2 Virtual Override Thunks
+ *   <special-name> := T <call-offset> <base encoding>
+ *   <call-offset> := h <nv-offset> _
+ *     | v <v-offset> _
+ *   <nv-offset> := <offset number>
+ *   <v-offset> := <offset number> _ <virtual offset number>
+ *   <special-name> := Tc <call-offset> <call-offset> <base encoding>
+ *
+ * 5.1.4.3 Constructors and Destructors
+ *   <ctor-dtor-name> := C1
+ *     | C2
+ *     | C3
+ *     | CI1 <base class type>
+ *     | CI2 <base class type>
+ *     | D0
+ *     | D1
+ *     | D2
+ *
+ * 5.1.4.4 Guard Variables
+ *   <special-name> := GV <object name>
+ *
+ * 5.1.4.5 Lifetime-Extended Temporaries
+ *   <special-name> := GR <object name> _
+ *     | GR <object name> <seq-id> _
+ *
+ * 5.1.4.6 Transaction-Safe Function
+ *   <special-name> := GTt <encoding>
+ *
+ * 5.1.5 Type encodings
+ *   <type> := <builtin-type>
+ *     | <qualified-type>
+ *     | <function-type>
+ *     | <class-enum-type>
+ *     | <array-type>
+ *     | <pointer-to-member-type>
+ *     | <template-param>
+ *     | <template-template-param> <template-args>
+ *     | <decltype>
+ *     | P <type>
+ *     | R <type>
+ *     | O <type>
+ *     | C <type>
+ *     | G <type>
+ *     | <substitution>
+ *
+ * 5.1.5.1 Qualified types
+ *   <qualified-type> := <qualifiers> <type>
+ *   <qualifiers> := <extended-qualifier>* <CV-qualifiers>
+ *   <extended-qualifier> := U <source-name> [<template-args>]
+ *   <CV-qualifiers> := [r] [V] [K]
+ *   <ref-qualifier> := R
+ *     | O
+ *
+ * 5.1.5.2 Builtin types
+ *   <builtin-type> := v
+ *     | w
+ *     | b
+ *     | c
+ *     | a
+ *     | h
+ *     | s
+ *     | t
+ *     | i
+ *     | j
+ *     | l
+ *     | m
+ *     | x
+ *     | y
+ *     | n
+ *     | o
+ *     | f
+ *     | d
+ *     | e
+ *     | g
+ *     | z
+ *     | Dd
+ *     | De
+ *     | Df
+ *     | Dh
+ *     | DF <number> _
+ *     | DF <number> x
+ *     | DF16b
+ *     | DB <number> _
+ *     | DB <instantiation-dependent expression> _
+ *     | DU <number> _
+ *     | DU <instantiation-dependent expression> _
+ *     | Di
+ *     | Ds
+ *     | Du
+ *     | Da
+ *     | Dc
+ *     | Dn
+ *     | [DS] DA
+ *     | [DS] DR
+ *     | u <source-name> [<template-args>]
+ *
+ * 5.1.5.3 Function types
+ *   <function-type> := [<CV-qualifiers>] [<exception-spec>] [Dx] F [Y] <bare-function-type> [<ref-qualifier>] E
+ *   <bare-function-type> := <signature type>+
+ *   <exception-spec> := Do
+ *     | DO <expression> E
+ *     | Dw <type>+ E
+ *   <type> := Dp <type>
+ *
+ * 5.1.5.4 C++11 decltype
+ *   <decltype> := Dt <expression> E
+ *     | DT <expression> E
+ *
+ * 5.1.5.5 Class, union, and enum types
+ *   <class-enum-type> := <name>
+ *     | Ts <name>
+ *     | Tu <name>
+ *     | Te <name>
+ *   <unnamed-type-name> := Ut [ <nonnegative number> ] _
+ *
+ * 5.1.5.6 Array types
+ *   <array-type> := A [<array bound number>] _ <element type>
+ *     | A <instantiation-dependent array bound expression> _ <element type>
+ *
+ * 5.1.5.7 Pointer-to-member types
+ *   <pointer-to-member-type> := M <class type> <member type>
+ *
+ * 5.1.5.8 Template parameters
+ *   <template-param> := T_
+ *     | T <parameter-2 non-negative number> _
+ *   <template-template-param> := <template-param>
+ *     | <substitution>
+ *
+ * 5.1.5.9 Function parameter references
+ *   <function-param> := fp <top-level CV-qualifiers> _
+ *     | fp <top-level CV-qualifiers> <parameter-2 non-negative number> _
+ *     | fL <L-1 non-negative number> p <top-level CV-qualifiers> _
+ *     | fL <L-1 non-negative number> p <top-level CV-qualifiers>
+ *     | fpT
+ *
+ * 5.1.5.10 Template Arguments
+ *   <template-args> := I <template-arg>+ E
+ *   <template-arg> := <type>
+ *     | X <expression> E
+ *     | <expr-primary>
+ *     | J <template-arg>* E
+ *
+ * 5.1.6 Expressions
+ *   <expression> := <unary operator-name> <expression>
+ *     | <binary operator-name> <expression> <expression>
+ *     | <ternary operator-name> <expression> <expression> <expression>
+ *     | pp_ <expression>
+ *     | mm_ <expression>
+ *     | cl <expression>+ E
+ *     | cp <base-unresolved-name> <expression>* E
+ *     | cv <type> <expression>
+ *     | cv <type> _ <expression>* E
+ *     | tl <type> <braced-expression>* E
+ *     | il <braced-expression>* E
+ *     | [gs] nw <expression>* _ <type> E
+ *     | [gs] nw <expression>* _ <type> <initializer>
+ *     | [gs] na <expression>* _ <type> E
+ *     | [gs] na <expression>* _ <type> <initializer>
+ *     | [gs] dl <expression>
+ *     | [gs] da <expression>
+ *     | dc <type> <expression>
+ *     | sc <type> <expression>
+ *     | cc <type> <expression>
+ *     | rc <type> <expression>
+ *     | ti <type>
+ *     | te <expression>
+ *     | st <type>
+ *     | sz <expression>
+ *     | at <type>
+ *     | az <expression>
+ *     | nx <expression>
+ *     | <template-param>
+ *     | <function-param>
+ *     | dt <expression> <unresolved-name>
+ *     | pt <expression> <unresolved-name>
+ *     | ds <expression> <expression>
+ *     | sZ <template-param>
+ *     | sZ <function-param>
+ *     | sP <template-arg>* E
+ *     | sp <expression>
+ *     | fl <binary operator-name> <expression>
+ *     | fr <binary operator-name> <expression>
+ *     | fL <binary operator-name> <expression> <expression>
+ *     | fR <binary operator-name> <expression> <expression>
+ *     | tw <expression>
+ *     | tr
+ *     | u <source-name> <template-arg>* E
+ *     | <unresolved-name>
+ *     | <expr-primary>
+ *   <unresolved-name> := [gs] <base-unresolved-name>
+ *     | sr <unresolved-type> <base-unresolved-name>
+ *     | srN <unresolved-type> <unresolved-qualifier-level>+ E <base-unresolved-name>
+ *     | [gs] sr <unresolved-qualifier-level>+ E <base-unresolved-name>
+ *   <unresolved-type> := <template-param> [ <template-args> ]
+ *     | <decltype>
+ *     | <substitution>
+ *   <unresolved-qualifier-level> := <simple-id>
+ *   <simple-id> := <source-name> [ <template-args> ]
+ *   <base-unresolved-name> := <simple-id>
+ *     | on <operator-name>
+ *     | on <operator-name> <template-args>
+ *     | dn <destructor-name>
+ *   <destructor-name> := <unresolved-type>
+ *     | <simple-id>
+ *   <expr-primary> := L <type> <value number> E
+ *     | L <type> <value float> E
+ *     | L <string type> E
+ *     | L <nullptr type> E
+ *     | L <pointer type> 0 E
+ *     | L <type> <real-part float> _ <imag-part float> E
+ *     | L _Z <encoding> E
+ *   <braced-expression> := <expression>
+ *     | di <field source-name> <braced-expression>
+ *     | dx <index expression> <braced-expression>
+ *     | dX <range begin expression> <range end expression> <braced-expression>
+ *   <initializer> := pi <expression>* E
+ *
+ * 5.1.6.1 Literals
+ *   <float> := <0-9a-f>+
+ *
+ * 5.1.7 Scope Encoding
+ *   <local-name> := Z <function encoding> E <entity name> [<discriminator>]
+ *     | Z <function encoding> E s [<discriminator>]
+ *   <discriminator> := _ <non-negative number>
+ *   <unnamed-type-name> := Ut [<nonnegative number> ] _
+ *
+ * 5.1.8 Closure Types (Lambdas)
+ *   <unnamed-type-name> := <closure-type-name>
+ *   <closure-type-name> := Ul <lambda-sig> E [ <nonnegative number> ] _
+ *   <lambda-sig> := <parameter type>+
+ *   <local-name> := Z <function encoding> Ed [ <parameter number> ] _ <entity name>
+ *   <closure-prefix> := [ <prefix> ] <variable or member unqualified-name> M
+ *     | <variable template template-prefix> <template-args> M
+ *
+ * 5.1.10 Compression
+ *   <substitution> := S <seq-id> _
+ *     | S_
+ *     | St
+ *     | Sa
+ *     | Sb
+ *     | Ss
+ *     | Si
+ *     | So
+ *     | Sd
+ */
