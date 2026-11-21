@@ -232,19 +232,23 @@ semantic_analysis::resolve_call(SyntaxRef n,
         name_uses[use].entity = c;
     /* the expression the name is, as analysed: its type and entity are
        the function's chosen */
+    semantic_node &selected = callee();
+    bool bound = selected.kind == semantic_kind::bound_member_function;
+    analysed_expression *claims = expressions.data();
     for (size_t i = expressions.size(); i-- > 0;) {
-        if (expressions[i].meaning.node != f.node)
+        expression_meaning &meaning = claims[i].meaning;
+        if (meaning.node != f.node)
             continue;
-        expressions[i].meaning.type = x.type;
-        if (callee().kind != semantic_kind::bound_member_function)
-            expressions[i].meaning.entity = c;
+        meaning.type = x.type;
+        if (!bound)
+            meaning.entity = c;
         break;
     }
-    callee().type = x.type;
-    if (callee().kind == semantic_kind::bound_member_function) {
-        callee().b = c;
+    selected.type = x.type;
+    if (bound) {
+        selected.b = c;
     } else {
-        callee().a = c;
+        selected.a = c;
         f.entity = c;
     }
     f.type = x.type;
