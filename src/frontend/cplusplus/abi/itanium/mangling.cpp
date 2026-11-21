@@ -1248,7 +1248,8 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
         declared = table[analysis.specialized_template(e)].linkage_of_name;
     if (declared == linkage::internal && namespace_scope &&
         (x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
-        !in_unnamed_namespace(e) && !x.unnamed_type_linkage)
+        !in_unnamed_namespace(e) && !x.unnamed_type_linkage &&
+        !x.operator_function)
         text("L");
     if (x.special != special_member::none) {
         /* [impl.clang] an inherited default constructor is named as

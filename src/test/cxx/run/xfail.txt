@@ -9,7 +9,6 @@ old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
 old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
 old-class-scalar-operand	vcc: the rules of [dcl.fct] are not implemented yet
 old-constexpr-case-array-nsdmi	vcc: the rules of [class.base.init] are not implemented yet
-old-conversion-template	vcc: the rules of [temp.mem] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
 old-defaulted-assignment	vcc: the rules of [class.mem] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
@@ -29,7 +28,6 @@ old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
 old-nested-lists	vcc: the rules of [class.mem] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
 old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
-old-operators	vcc: the rules of [over.built] are not implemented yet
 old-packs	vcc: the rules of [temp.variadic] are not implemented yet
 old-partial-later	vcc: the rules of [temp.class.spec] are not implemented yet
 old-range-for-arrays	vcc: the rules of [stmt.ranged] are not implemented yet
@@ -50,8 +48,6 @@ temp-mem-address-deduced-target	vcc: the rules of [over] are not implemented yet
 temp-mem-concept-equivalent-head	vcc: the rules of [temp.concept] are not implemented yet
 temp-mem-constructor-declared	vcc: the rules of [temp.inst] are not implemented yet
 temp-mem-constructor-defined-in-class	vcc: symbols differ from clang's (see cxx-run)
-temp-mem-conversion-template-base	vcc: the rules of [over.match.conv] are not implemented yet
-temp-mem-conversion-template-declared	vcc: the rules of [over.match.conv] are not implemented yet
 temp-mem-conversion-template-explicit-call	vcc: the rules of [expr.ref] are not implemented yet
 temp-mem-conversion-template-ordering	vcc: the rules of [temp.mem] are not implemented yet
 temp-mem-conversion-template-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
