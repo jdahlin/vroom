@@ -445,6 +445,49 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         /* [expr.prim.id.dtor]/2: a destructor's name can be the callee of
            a call only (a parenthesized one is not analysed) */
         return not_supported(n, "expr.prim.id.dtor");
+    } else if (n[2].is(syntax_kind::conversion_function_id)) {
+        /* [class.conv.fct]/1, [temp.mem]/5: explicit call to a conversion
+           function or conversion function template (a.operator T()) */
+        qualified_type target;
+        VTRY(r, conversion_type(n[2], target));
+        VTRY_SET(r, member_object(n, arrow, false, m));
+        const struct type object = type_table[m.type.unqualified()];
+        if (object.kind != type_kind::class_type)
+            return ill_formed(n,
+                              "the object expression of a class member access "
+                              "shall be of class type",
+                              "expr.ref");
+        entity_index c = object.entity;
+        if (entity_table[c].kind != entity_kind::class_type)
+            return not_supported(n, "class.pre");
+        if (!entity_table[c].size)
+            return ill_formed(n,
+                              "the class type shall be complete unless the "
+                              "class member access appears in the definition "
+                              "of that class",
+                              "expr.ref");
+        bool ambiguous = false, unknown = false;
+        entity_index f =
+            conversion_function_for(m, target, true, ambiguous, unknown);
+        if (unknown || ambiguous || !f ||
+            type_table[entity_table[f].type.unqualified()].operand != target)
+            return not_supported(n, "expr.ref");
+        if (entity_table[f].instantiation && !unevaluated) {
+            uint32_t idx = entity_table[f].instantiation - 1;
+            instantiation_record &rec = instantiations[idx];
+            const entity tmpl = entity_table[rec.template_entity];
+            const function_template ft =
+                function_templates[tmpl.instantiation - 1];
+            if (!rec.defined && !rec.defining && !rec.pending) {
+                if (!tmpl.constexpr_ || !ft.definition) {
+                    rec.pending = true;
+                    pending_definitions.append(idx);
+                } else {
+                    VTRY_SET(r, instantiate_definition(n, idx));
+                }
+            }
+        }
+        return member_access(n[2].first_token(), f, m);
     } else {
         /* template, a qualified-id, a conversion function's or a literal
            operator's */
