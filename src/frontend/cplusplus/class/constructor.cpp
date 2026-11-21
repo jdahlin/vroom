@@ -925,7 +925,15 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
     /* [class.member.lookup]: an operator= found in a base class is not a
        declaration of c; one copy and one move assignment operator may be
        defaulted ([class.copy.assign]/2, /3) */
-    bool declared_here = found.entity && found.found_in == c;
+    bool declared_here = false;
+    if (found.entity && found.found_in == c) {
+        for (entity_index f = found.entity; f && entity_table[f].enclosing == c;
+             f = entity_table[f].next_overload) {
+            if ((!move && copy_assignment_operator(f, c)) ||
+                (move && move_assignment_operator(f, c)))
+                declared_here = true;
+        }
+    }
     if (found.unknown || found.ambiguous || declared_here ||
         (move && x.defaulted_move_assignment) ||
         (!move && x.defaulted_copy_assignment))
