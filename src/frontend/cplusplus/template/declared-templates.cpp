@@ -1509,10 +1509,19 @@ analysis_result semantic_analysis::alias_template_specialization(
                 const template_argument &x = pack_arguments[a.value + k];
                 if (x.count != UINT32_MAX)
                     continue;
+                entity_index parameter =
+                    template_parameter_entities[ft.first_parameter + i];
+                bool same_non_type =
+                    entity_table[x.template_entity].kind == entity_kind::none &&
+                    entity_table[parameter].kind == entity_kind::none &&
+                    (entity_table[x.template_entity].type ==
+                         entity_table[parameter].type ||
+                     contains_placeholder(entity_table[parameter].type));
                 if (a.count != 1 ||
                     !template_parameter_is_pack(ft.first_parameter + i) ||
-                    entity_table[x.template_entity].kind !=
-                        entity_kind::typedef_name) {
+                    (entity_table[x.template_entity].kind !=
+                         entity_kind::typedef_name &&
+                     !same_non_type)) {
                     type = dependent_specialization(ft.entity, arguments);
                     return analysis_result::well_formed;
                 }
