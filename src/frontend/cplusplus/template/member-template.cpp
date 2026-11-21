@@ -192,7 +192,12 @@ analysis_result semantic_analysis::member_function_template(
     entity_table[t].constexpr_ = s.constexpr_;
     entity_table[t].immediate = s.consteval_;
     entity_table[t].operator_function = m.operator_function;
+    entity_table[t].conversion_function = conversion;
     entity_table[t].implemented = m.implemented;
+    if (conversion) {
+        entity_table[t].explicit_ = s.explicit_;
+        entity_table[t].explicit_dependent = s.explicit_dependent;
+    }
     if (constructor) {
         /* [class.ctor]/2: a constructor has no name to find; the class
            keeps its templates' (construct, class_sequence) */

@@ -5402,8 +5402,13 @@ class semantic_analysis
        class c and of its bases that no conversion function to the same type
        in a nearer class hides, appended to out; false when one is a
        template, which analysis does not follow */
-    bool visible_conversion_functions(entity_index c,
-                                      owned_array<entity_index> &out) const;
+    bool visible_conversion_functions(
+        entity_index c, owned_array<entity_index> &out,
+        owned_array<entity_index> *templates = nullptr) const;
+    bool
+    deduce_conversion_templates(const owned_array<entity_index> &conv_templates,
+                                qualified_type to,
+                                owned_array<entity_index> &candidates);
     /* the value a call of the conversion function f gives: its type and
        value category ([expr.call]/14) */
     expression_meaning conversion_function_result(entity_index f) const;

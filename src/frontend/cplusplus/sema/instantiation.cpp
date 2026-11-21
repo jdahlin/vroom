@@ -75,6 +75,9 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
            optional, [class.ctor]/1) */
         bool specifiers = d_syntax[d_skip].is(syntax_kind::decl_specifier_seq);
         bool constructor = t.special == special_member::constructor;
+        SyntaxRef conversion;
+        if (!is_namespace(t.enclosing))
+            conversion = conversion_function_id_of(ft.declarator);
         analysis_result r = analysis_result::well_formed;
         bool lambda = ft.declarator.is(syntax_kind::lambda_expression);
         /* [temp.deduct.guide]/1: a deduction guide's function type, its
@@ -89,11 +92,16 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             r = constructor_specifiers(d_syntax[d_skip], s);
         else if (specifiers) {
             bool saved_friend = friend_allowed;
+            bool outer_explicit = explicit_allowed;
             friend_allowed = ft.friend_class != 0;
+            explicit_allowed = outer_explicit || conversion;
             r = decl_specifier_seq(d_syntax[d_skip], s, false);
+            explicit_allowed = outer_explicit;
             friend_allowed = saved_friend;
         }
         qualified_type type = s.type;
+        if (r == analysis_result::well_formed && conversion)
+            r = conversion_type(conversion, type);
         if (guide)
             type = lambda_type;
         if (lambda) {
@@ -257,6 +265,18 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
                                    (static_cast<bool>(
                                        trailing_constraint(ft.declaration)))]
                               .function_body());
+    } else if (entity_table[instantiations[index].specialization]
+                   .conversion_function) {
+        auto d_syntax = ft.definition;
+        uint32_t d_skip = leading_gnu_attributes(ft.definition);
+        bool specifiers = d_syntax[d_skip].is(syntax_kind::decl_specifier_seq);
+        function_parameters.clear();
+        last_declared = instantiations[index].specialization;
+        auto body =
+            d_syntax[d_skip + specifiers + 1 +
+                     (static_cast<bool>(trailing_constraint(ft.declaration)))]
+                .function_body();
+        r = analyse_function_body(ft.definition, body.compound_statement());
     } else if (ft.definition.is(syntax_kind::lambda_expression)) {
         /* a generic lambda's ([expr.prim.lambda.closure]/3) */
         qualified_type type;
@@ -600,6 +620,7 @@ analysis_result semantic_analysis::declare_specialization(
     entity_table[e].constexpr_ = t.constexpr_;
     entity_table[e].immediate = t.immediate;
     entity_table[e].operator_function = t.operator_function;
+    entity_table[e].conversion_function = t.conversion_function;
     entity_table[e].implemented = t.implemented;
     entity_table[e].instantiation = index + 1;
     /* a member function template's specialization: a member function of
