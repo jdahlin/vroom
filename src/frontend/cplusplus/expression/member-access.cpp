@@ -320,6 +320,9 @@ SyntaxElement semantic_analysis::member_template_id(SyntaxRef n) const
     if (id.is(syntax_kind::simple_template_id) && id.size() >= 3 &&
         id[0].is_identifier())
         return id;
+    if (id.is(syntax_kind::template_id) && id.size() >= 3 &&
+        id[0].operator_function_id())
+        return id;
     return SyntaxElement{};
 }
 
@@ -422,10 +425,16 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         } else {
             return not_supported(n, "expr.ref");
         }
-    } else if (SyntaxElement id = member_template_id(n);
-               id.is(syntax_kind::simple_template_id)) {
-        /* [temp.names]/4: x.f<T> and x.template f<T> */
-        name = id[0].token();
+    } else if (SyntaxElement id = member_template_id(n); id.is(
+                   syntax_kind::simple_template_id, syntax_kind::template_id)) {
+        /* [temp.names]/4: x.f<T>, x.template f<T>, x.operator()<T> */
+        if (id[0].is_identifier()) {
+            name = id[0].token();
+        } else if (auto function = id[0].operator_function_id()) {
+            declarator_meaning function_name;
+            VTRY(r, operator_function_id(function, function_name));
+            name = function_name.id;
+        }
     } else if (auto function = n[2].operator_function_id()) {
         /* [over.oper]/1: x.operator->() names the member operator
            function: the keyword's token takes the operator's name */
@@ -487,7 +496,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
             member_template_written.clear();
             member_template_written_at = 0;
             SyntaxElement id = member_template_id(n);
-            if (id.is(syntax_kind::simple_template_id)) {
+            if (id.is(syntax_kind::simple_template_id,
+                      syntax_kind::template_id)) {
                 owned_array<bool> expansion;
                 VTRY(w, written_arguments_of(id, member_template_written,
                                              expansion));
@@ -500,7 +510,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         }
         return not_supported(n, "over");
     }
-    if (member_template_id(n).is(syntax_kind::simple_template_id))
+    if (member_template_id(n).is(syntax_kind::simple_template_id,
+                                 syntax_kind::template_id))
         /* a template-id of no member function template analysis knows */
         return not_supported(n, "temp.names");
     if (!e)

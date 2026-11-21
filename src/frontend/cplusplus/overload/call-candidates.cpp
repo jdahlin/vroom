@@ -83,6 +83,10 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
              (c.size() == 4 && c[2].is(standard_keyword::template_))) &&
             id.is(syntax_kind::simple_template_id) && id[0].is_identifier())
             return id[0].token();
+        if ((c.size() == 3 ||
+             (c.size() == 4 && c[2].is(standard_keyword::template_))) &&
+            id.is(syntax_kind::template_id) && id[0].operator_function_id())
+            return id[0].operator_function_id().operator_keyword().token();
     }
     if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
         (c[1].is(preprocessing_op_or_punc::DOT,

@@ -57,7 +57,6 @@ old-value-init	vcc: the rules of [dcl.init] are not implemented yet
 no-unique-address-layout	vcc: C++ code generation does not handle a class whose layout is not C's yet
 temp-names-concept-id	vcc: the rules of [temp.func.order] are not implemented yet
 temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implemented yet
-temp-names-operator-template-id	vcc: the rules of [expr.ref] are not implemented yet
 # [temp.mem] forms not done yet (the temp-mem- tests; PLAN: one PR per group)
 temp-mem-address-deduced-target	vcc: the rules of [over] are not implemented yet
 temp-mem-concept-equivalent-head	vcc: the rules of [temp.concept] are not implemented yet
