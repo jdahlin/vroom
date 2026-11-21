@@ -225,7 +225,7 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
         answer = !array && is_class && abstract_class(t);
         return true;
     case unary_trait_kind::is_final:
-        answer = false;
+        answer = !array && is_class && entity_table[c].final_;
         return true;
     case unary_trait_kind::is_standard_layout: {
         /* [class.prop]/7: a scalar type is a standard-layout type

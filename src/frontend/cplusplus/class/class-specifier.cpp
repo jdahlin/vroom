@@ -263,9 +263,19 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         /* attributes */
         return not_supported(n, "class.pre");
     }
+    bool is_final = false;
+    uint32_t next = 2;
+    if (!unnamed && head_count > next && head_children[next].is_identifier()) {
+        owned_buffer spelling;
+        tokens.spelling(head_children[next].token(), spelling.get());
+        if (spelling.size() == 5 && !memcmp(spelling.data(), "final", 5)) {
+            is_final = true;
+            next++;
+        }
+    }
     bool has_bases =
-        head_count == 3 && !unnamed && head_children[2].base_clause();
-    if (head_count > 2 && !has_bases)
+        head_count == next + 1 && !unnamed && head_children[next].base_clause();
+    if (head_count > next && !has_bases)
         /* a class-virt-specifier, a base-clause of an unnamed class */
         return not_supported(n, "class.derived");
     standard_keyword key = head_children[0].keyword();
@@ -502,6 +512,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     if (gnu.abi_tag)
         entity_table[c].abi_tag = gnu.abi_tag;
     entity_table[c].defined = true;
+    entity_table[c].final_ = is_final;
     entity_table[c].union_ = key == standard_keyword::union_;
     entity_table[c].class_key = head_children[0].token();
     entity_table[c].first_member = static_cast<uint32_t>(class_members.size());
@@ -529,7 +540,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     entity_table[c].base_count = 0;
     analysis_result result = analysis_result::well_formed;
     if (has_bases)
-        result = base_clause(c, head_children[2], key);
+        result = base_clause(c, head_children[next], key);
     entity_table[c].requested_alignment = trailing_class_alignment;
     entity_table[c].gnu_flags |= trailing_class_flags;
     trailing_class_alignment = 0;

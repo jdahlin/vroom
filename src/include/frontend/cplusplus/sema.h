@@ -424,6 +424,8 @@ struct entity {
        the consteval specifier is called an immediate function" (also
        constexpr_ and inline_) */
     bool immediate = false;
+    /* a class: [class.pre]/1 marked final (cannot be a direct base class) */
+    bool final_ = false;
     /* [dcl.inline]: an inline function or variable; [namespace.def]/7: an
        inline namespace */
     bool inline_ = false;
