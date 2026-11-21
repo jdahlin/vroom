@@ -1153,11 +1153,6 @@ analysis_result semantic_analysis::variable_partial_specialization(
     if (parameters.empty() || function_templates[vt - 1].name != named ||
         entity_table[primary.entity].enclosing != outer)
         return not_supported(n, "temp.class.spec");
-    /* [temp.class.spec]/1: one declared after an instantiation it would
-       be used for: not analysed */
-    for (const instantiation_record &i : instantiations)
-        if (i.template_entity == primary.entity && i.specialization)
-            return not_supported(n, "temp.class.spec");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
@@ -1176,6 +1171,10 @@ analysis_result semantic_analysis::variable_partial_specialization(
     /* [temp.class.spec]/9: more specialized than the primary */
     if (!dependent || identity)
         return not_supported(n, "temp.class.spec");
+    /* [temp.class.spec]/1: prior instantiations for other arguments are
+       unaffected. If this partial specialization would be selected for a
+       prior use, no diagnostic is required. Keep the result cached at that
+       use and consider this declaration on subsequent instantiations. */
     function_template record;
     record.entity = primary.entity;
     record.declaration = n;
