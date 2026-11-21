@@ -187,6 +187,7 @@ class itanium_mangler
     void substitution_at(size_t i);
     void seq_id(size_t n);
     bool is_std(entity_index scope) const;
+    bool in_inline_namespace(entity_index e) const;
     bool in_unnamed_namespace(entity_index e) const;
 };
 
@@ -737,6 +738,14 @@ bool itanium_mangler::is_std(entity_index scope) const
     return analysis.std_namespace(scope);
 }
 
+bool itanium_mangler::in_inline_namespace(entity_index e) const
+{
+    entity_index s = analysis.entity_table[e].enclosing;
+    return s &&
+           analysis.entity_table[s].kind == entity_kind::namespace_entity &&
+           analysis.entity_table[s].inline_;
+}
+
 /* whether e is declared, directly or not, within an unnamed namespace */
 bool itanium_mangler::in_unnamed_namespace(entity_index e) const
 {
@@ -867,7 +876,7 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         candidates.append(y);
         return template_args(c);
     }
-    if (x.instantiation && is_std(x.enclosing)) {
+    if (x.instantiation && is_std(x.enclosing) && !in_inline_namespace(c)) {
         /* [abi:mangling-compression]:
          *
          *     <substitution> ::= Sa
