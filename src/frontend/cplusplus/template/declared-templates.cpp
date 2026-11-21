@@ -976,13 +976,32 @@ void semantic_analysis::function_template_overloads(
     entity_index held, owned_array<uint32_t> &out) const
 {
     out.clear();
-    for (size_t i = 0; i < function_templates.size(); i++)
-        if (function_templates[i].name == held && held &&
-            !function_templates[i].unusable &&
-            !function_templates[i].is_class &&
-            !function_templates[i].is_alias &&
-            !function_templates[i].is_variable)
+    if (!held)
+        return;
+    /* [namespace.def]/7: members of an inline namespace are treated as if they
+       were members of the enclosing namespace for lookup and overload sets */
+    auto non_inline_ns = [&](entity_index s) {
+        while (s && entity_table[s].kind == entity_kind::namespace_entity &&
+               entity_table[s].inline_)
+            s = entity_table[s].enclosing;
+        return s;
+    };
+    bool in_ns = is_namespace(entity_table[held].enclosing);
+    entity_index base_ns = 0;
+    uint32_t held_id = entity_table[held].name;
+    if (in_ns)
+        base_ns = non_inline_ns(entity_table[held].enclosing);
+    for (size_t i = 0; i < function_templates.size(); i++) {
+        if (function_templates[i].unusable || function_templates[i].is_class ||
+            function_templates[i].is_alias || function_templates[i].is_variable)
+            continue;
+        entity_index fn = function_templates[i].name;
+        if (fn == held ||
+            (in_ns && fn && entity_table[fn].name == held_id &&
+             is_namespace(entity_table[fn].enclosing) &&
+             non_inline_ns(entity_table[fn].enclosing) == base_ns))
             out.append(static_cast<uint32_t>(i + 1));
+    }
 }
 
 uint32_t semantic_analysis::class_template_of(entity_index e) const

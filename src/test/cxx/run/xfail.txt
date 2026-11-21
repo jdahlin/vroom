@@ -24,7 +24,6 @@ old-ilist-ctor-not-viable	vcc: the rules of [class.mem] are not implemented yet
 old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
 old-initializer-list-local	vcc: the rules of [dcl.init.list] are not implemented yet
 old-initializer-lists	vcc: the rules of [class.mem] are not implemented yet
-old-inline-ns-overloads	vcc: the rules of [temp.deduct.call] are not implemented yet
 old-local-unnamed-template-arg	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 old-long-double	vcc: C++ code generation does not handle a constant whose value analysis does not know yet
 old-member-pointers	vcc: the rules of [temp.res] are not implemented yet
