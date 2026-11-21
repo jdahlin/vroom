@@ -543,6 +543,16 @@ uint32_t ast_builder_floating(cc *c, ast_qualified_type t, double value)
     return cc_node_float_new(c, value, t, 0);
 }
 
+uint32_t ast_builder_floating_literal(cc *c, ast_qualified_type t,
+                                      const char *spelling, size_t length)
+{
+    u128 q = vsoftfloat_parse_with_precision(spelling, length,
+                                             cc_float_precision_bits(c, t));
+    if (cc_type_is_float128(c, t))
+        return cc_node_float128_new(c, q, t, 0);
+    return cc_node_float_new(c, vsoftfloat_to_double(q), t, 0);
+}
+
 uint32_t ast_builder_string(cc *c, ast_qualified_type element,
                             const void *bytes, uint32_t count, uint8_t size,
                             uint8_t kind)

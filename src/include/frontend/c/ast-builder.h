@@ -190,6 +190,8 @@ uint32_t ast_builder_member(cc *c, uint32_t object, uint32_t field,
    zero-extended for an unsigned one (unsigned __int128 included) */
 uint32_t ast_builder_integer(cc *c, ast_qualified_type t, int64_t value);
 uint32_t ast_builder_floating(cc *c, ast_qualified_type t, double value);
+uint32_t ast_builder_floating_literal(cc *c, ast_qualified_type t,
+                                      const char *spelling, size_t length);
 /* a string literal of count elements of size bytes each, terminator
    included (bytes has them all); kind LEX_TOKEN_STRING .. */
 uint32_t ast_builder_string(cc *c, ast_qualified_type element,
