@@ -128,7 +128,8 @@ node_index parser::postfix_expression()
         } else if (at_identifier() ||
                    at(preprocessing_op_or_punc::COLON_COLON)) {
             unsigned length = 0;
-            if (classify_name(0, &length, false) == name_class::type) {
+            if (classify_name(0, &length, false) == name_class::type &&
+                !at(preprocessing_op_or_punc::COLON_COLON, length)) {
                 if (at(preprocessing_op_or_punc::LESS, length))
                     return beyond_this_step(); /* a template-id: P7 */
                 simple_type_specifier_with_name();

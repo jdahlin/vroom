@@ -91,6 +91,8 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
             *length = i - ahead;
             if (p.at(preprocessing_op_or_punc::TILDE, i) && class_name)
                 return name_class::constructor;
+            if (qualified && p.at(standard_keyword::operator_, i))
+                return name_class::not_a_type;
             if (qualified)
                 return name_class::unknown;
             return name_class::none;
