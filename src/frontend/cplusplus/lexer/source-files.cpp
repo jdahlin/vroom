@@ -164,7 +164,7 @@ struct lexing_in {
 
 source_files::source_files(const implementation_defined_behavior &b,
                            diagnostic_consumer &d)
-    : behavior(b), diagnostics(d), conversion(b, d, {})
+    : behavior(b), diagnostics(d), conversion(b, d, lexer_options())
 {
     conversion.file.from_memory("", "", 0);
     conversion.lex.files = this;

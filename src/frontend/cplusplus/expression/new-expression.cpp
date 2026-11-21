@@ -531,27 +531,26 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     } else if (init.is(syntax_kind::braced_init_list)) {
         r = list_initialization(init, type, true, value);
     } else if (init.is(syntax_kind::new_initializer)) {
-        if (init.size() == 2) {
+        bool has_list =
+            init.size() == 3 && init[1].is(syntax_kind::initializer_list);
+        owned_array<expression_meaning> list;
+        if (has_list)
+            VTRY_SET(r, expression_list_meanings(init[1], list));
+        if (init.size() == 2 || (has_list && list.empty())) {
             /* [dcl.init]/11: "An object whose initializer is an empty set
                of parentheses, i.e., (), shall be value-initialized."; /8:
                (8.3) "Otherwise, the object is zero-initialized." */
-            bool user_provided = false;
-            if (c)
-                for (entity_index q = entity_table[c].first_constructor; q;
-                     q = entity_table[q].next_constructor)
-                    if (!entity_table[q].implicit &&
-                        !type_table[entity_table[q].type.unqualified()]
-                             .parameter_count)
-                        user_provided = true;
-            if (c && user_provided) {
-                /* (8.1): "if T is a (possibly cv-qualified) class type with
-                   ... a default constructor that is user-provided ..., then
-                   the object is default-initialized" */
-                r = construct(n, type, none, object.node, value);
+            if (c && entity_table[c].first_constructor) {
+                VTRY_SET(r, construct(n, type, none, object.node, value));
+                semantic_node &initialization = semantics[value.node];
+                if (initialization.kind != semantic_kind::construct)
+                    return not_supported(n, "dcl.init");
+                /* [dcl.init]/8.2: value-initialization zeroes the object
+                   before calling a non-user-provided default constructor. */
+                if (entity_table[initialization.b].implicit ||
+                    entity_table[c].defaulted_default_constructor)
+                    initialization.op = 1;
             } else if (c) {
-                /* (8.2): zero-initialized, then default-initialized when
-                   the default constructor is non-trivial; a default
-                   constructor with default arguments */
                 return not_supported(n, "dcl.init");
             } else {
                 expression_meaning zero;
@@ -560,24 +559,22 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                 zero.evaluation = constness::constant;
                 value.node = expression_node(semantic_kind::zero, zero, at);
             }
-        } else if (init.size() == 3 &&
-                   init[1].is(syntax_kind::initializer_list)) {
-            /* [dcl.init]/17.6.2: the constructor called with the
-               expression-list as its arguments */
-            if (has_pack_expansion(init[1]))
-                return not_supported(n, "temp.variadic");
-            if (!c)
+        } else if (has_list) {
+            /* [dcl.init]/17.6.2: the constructor called with the expanded
+               expression-list as its arguments. */
+            if (c && entity_table[c].first_constructor)
+                r = construct(n, type, list, object.node, value);
+            else if (list.size() == 1)
+                r = initialize_with(n, list[0], type, true, false, value);
+            else if (c)
+                return not_supported(n, "dcl.init");
+            else
                 return ill_formed(n,
                                   "if the entity being initialized does not "
-                                  "have class type, the expression-list in "
-                                  "a parenthesized initializer shall be a "
-                                  "single expression",
+                                  "have class type, the expression-list in a "
+                                  "parenthesized initializer shall be a single "
+                                  "expression",
                                   "dcl.init");
-            if (!entity_table[c].first_constructor)
-                return not_supported(n, "dcl.init");
-            owned_array<expression_meaning> list;
-            VTRY_SET(r, expression_list_meanings(init[1], list));
-            r = construct(n, type, list, object.node, value);
         } else if (init.size() == 3) {
             r = initialize_from(n, init[1], type, true, false, value);
         } else {

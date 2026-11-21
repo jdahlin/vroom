@@ -268,7 +268,7 @@ class syntax_tree
   private:
     owned_array<syntax_node> nodes;
     owned_array<syntax_child> child_lists;
-    size_t kind_counts[static_cast<size_t>(syntax_kind::count)] = {};
+    size_t kind_counts[static_cast<size_t>(syntax_kind::count)];
 };
 
 /* ---- the names the grammar depends on ----------------------------------- */

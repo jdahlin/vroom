@@ -582,9 +582,9 @@ analysis_result semantic_analysis::overloaded_operator(
                               "over.match.oper");
         }
     }
-    const struct type &t1 = type_table[ordered[0].type.unqualified()];
+    entity_index object_class =
+        type_table[ordered[0].type.unqualified()].entity;
     if (c.member) {
-        entity_index object_class = t1.entity;
         if (!accessible(f, object_class))
             /* [class.access]/4: "access control is applied to the function
                selected by overload resolution" */
@@ -608,7 +608,7 @@ analysis_result semantic_analysis::overloaded_operator(
            is interpreted as x . operator @ ( y )" */
         expression_meaning &e = ordered[0];
         if (e.category == value_category::prvalue &&
-            entity_table[t1.entity].destructor)
+            entity_table[object_class].destructor)
             /* the temporary's destruction ([class.temporary]/4) */
             return not_supported(n, "class.temporary");
         expression_meaning address;
@@ -618,6 +618,16 @@ analysis_result semantic_analysis::overloaded_operator(
         address.evaluation = constness::not_constant;
         address.node =
             expression_node(semantic_kind::address, address, at, e.node);
+        if (x.nonstatic_member && x.enclosing != object_class) {
+            /* [over.match.funcs]/4: the implicit object argument
+               designates the selected function's base class subobject. */
+            qualified_type base = qualified_type::make(
+                entity_table[x.enclosing].type.unqualified(), e.type.cv());
+            qualified_type pointer =
+                qualified_type::make(type_table.pointer_to(base), cv_none);
+            VTRY_SET(r, pointer_to_base(at, object_class, x.enclosing, pointer,
+                                        address));
+        }
         object = address.node;
         member = f;
         if (!x.nonstatic_member) {

@@ -166,7 +166,7 @@ static bool is_single(fundamental_type f)
 /* the classes of fpclassify, in clang's order of its five arguments */
 enum fp_class { fp_nan, fp_infinite, fp_normal, fp_subnormal, fp_zero };
 
-static fp_class classify(double d, bool single)
+static fp_class classify_floating_value(double d, bool single)
 {
     if (__builtin_isnan(d))
         return fp_nan;
@@ -215,7 +215,7 @@ constness semantic_analysis::evaluate_floating_classification(
             return constness::unknown;
     }
     double a = x[0].floating, c2 = x[1].floating;
-    fp_class k = classify(a, single);
+    fp_class k = classify_floating_value(a, single);
     bool unordered = __builtin_isnan(a) || __builtin_isnan(c2);
     long result = 0;
     switch (static_cast<builtin_float_op>(b.which)) {

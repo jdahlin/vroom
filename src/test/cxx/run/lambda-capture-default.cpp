@@ -20,6 +20,8 @@ int main()
     check(mixed() == 114 && c == 4);
     check(mixed2() == 112 && a == 112);
     check(mut() == 113 && mut() == 114 && a == 112);
+    auto captured_ref = [&]() -> const int & { return a; };
+    check(&captured_ref() == &a);
     /* static storage duration is not captured */
     static int s = 7;
     auto nocapture = [] { return s + global; };

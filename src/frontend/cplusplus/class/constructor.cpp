@@ -900,19 +900,40 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
     return analysis_result::well_formed;
 }
 
-/* the expressions of an expression-list (an initializer_list node, or one
-   expression), analysed; a braced-init-list or a pack expansion among them
-   is not analysed yet */
+/* The expressions of an expression-list, with each pack expansion
+   analysed once per element ([temp.variadic]/5). */
 analysis_result semantic_analysis::expression_list_meanings(
     SyntaxElement list, owned_array<expression_meaning> &out)
 {
-    for (SyntaxElement a : list.items(syntax_kind::initializer_list)) {
-        if (a.is(syntax_kind::braced_init_list) ||
-            a.is(preprocessing_op_or_punc::ELLIPSIS))
-            return not_supported(node_of(a), "over.match.list");
-        expression_meaning e;
-        VTRY(r, expression(a, e));
-        out.append(e);
+    auto items = list.items(syntax_kind::initializer_list);
+    auto end = items.end();
+    for (auto i = items.begin(); i != end;) {
+        SyntaxElement a = *i;
+        ++i;
+        if (a.is(syntax_kind::braced_init_list))
+            return not_supported(a, "over.match.list");
+        if (a.is(preprocessing_op_or_punc::ELLIPSIS))
+            return not_supported(list, "temp.variadic");
+        bool expands = i != end && (*i).is(preprocessing_op_or_punc::ELLIPSIS);
+        if (!expands) {
+            expression_meaning e;
+            VTRY(r, expression(a, e));
+            out.append(e);
+            continue;
+        }
+        ++i;
+        token_index first = first_token(a);
+        token_index last = first + 1;
+        if (!a.is_token())
+            last = a.end_token();
+        uint32_t count = 0;
+        if (!expansion_count(first, last, count))
+            return not_supported(list, "temp.variadic");
+        for (uint32_t k = 0; k < count; k++) {
+            expression_meaning e;
+            VTRY(r, expansion_element_expression(a, k, e));
+            out.append(e);
+        }
     }
     return analysis_result::well_formed;
 }

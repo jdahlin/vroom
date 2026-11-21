@@ -109,8 +109,7 @@ node_index parser::assignment_expression()
 analysis_result semantic_analysis::assignment(SyntaxRef n,
                                               expression_meaning &m)
 {
-    if (n.size() != 3 || !n[1].is_token() ||
-        n[2].is(syntax_kind::braced_init_list))
+    if (n.size() != 3 || !n[1].is_token())
         return not_supported(n, "expr.ass");
     preprocessing_op_or_punc op =
         preprocessing_op_or_punc_primary(tokens[n[1].token()].op_or_punc);
@@ -119,11 +118,27 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
        atomic store or read-modify-write, C's code generator) */
     atomic_object_operand = true;
     analysis_result r = expression(n[0], left);
+    if (r != analysis_result::well_formed)
+        return r;
+    if (n[2].is(syntax_kind::braced_init_list)) {
+        /* [expr.ass]/8: for an aggregate with only trivial assignment,
+           the list initializes the object passed to that operator. */
+        const struct type target = type_table[left.type.unqualified()];
+        if (op != preprocessing_op_or_punc::EQUAL ||
+            target.kind != type_kind::class_type ||
+            !is_aggregate(target.entity) || !assigned_bitwise(target.entity))
+            return not_supported(n, "expr.ass");
+        right.type = qualified_type::make(left.type.unqualified(), cv_none);
+        initialized_value value;
+        VTRY_SET(r, list_initialization(n[2], right.type, false, value));
+        right.category = value_category::prvalue;
+        right.node = value.node;
+        return class_assignment(n, op, left, right, m);
+    }
     /* [over.over]/1: "the left side of an assignment" */
-    if (r == analysis_result::well_formed &&
-        op == preprocessing_op_or_punc::EQUAL)
+    if (op == preprocessing_op_or_punc::EQUAL)
         r = target_expression(n[2], left.type, right);
-    else if (r == analysis_result::well_formed)
+    else
         VTRY_SET(r, expression(n[2], right));
     if (r != analysis_result::well_formed)
         return r;

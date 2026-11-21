@@ -82,6 +82,7 @@ bool syntax_kind_is_expression(syntax_kind kind)
 
 syntax_tree::syntax_tree()
 {
+    memset(kind_counts, 0, sizeof(kind_counts));
     /* node 0 is no node */
     nodes.append({syntax_kind::count, 0, 0, 0, 0});
 }

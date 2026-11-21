@@ -273,6 +273,14 @@ entity_index semantic_analysis::implicitly_movable(SyntaxElement operand)
     entity_index e = lookup(tokens.identifier(named.token()));
     if (!e || !entity_table[e].automatic)
         return 0;
+    /* [class.copy.elision]/3: the variable must be declared in the
+       innermost function or lambda. A captured local belongs to the
+       enclosing function. */
+    entity_index owner = entity_table[e].enclosing;
+    while (owner && entity_table[owner].kind != entity_kind::function)
+        owner = entity_table[owner].enclosing;
+    if (owner != function_state.function)
+        return 0;
     qualified_type t = entity_table[e].type;
     const struct type &k = type_table[t.unqualified()];
     if (k.kind == type_kind::lvalue_reference)

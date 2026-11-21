@@ -312,6 +312,7 @@ vccrt: $(OUT)/vpp $(if $(filter environment command line,$(origin AR)),,$(OUT)/v
 # can schedule independent compilation jobs across the recursive invocation.
 SELF ?= $(if $(filter Darwin,$(HOST_OS)),../build/self,$(OUT)-self)
 SELF_CC ?= $(abspath $(OUT))/vpp
+SELF_LANG ?= c
 SELF_TARGET = $(if $(filter Darwin,$(HOST_OS)),arm64-apple-darwin,$(HOST_ARCH)-linux-gnu)
 SELF_FLAGS ?= --target=$(SELF_TARGET) -I$(abspath headers)
 ifeq ($(HOST_OS),Linux)
@@ -322,7 +323,7 @@ endif
 SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
 
 self: $(OUT)/vpp
-	$(MAKE) vcc OUT=$(SELF) VCC_LANG=c VCC_PGO= VCC_LTO= VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
+	$(MAKE) vcc OUT=$(SELF) VCC_LANG=$(SELF_LANG) VCC_PGO= VCC_LTO= VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
 
 self-check: self
 	$(MAKE) self SELF=$(SELF)3 SELF_CC=$(abspath $(SELF))/vpp

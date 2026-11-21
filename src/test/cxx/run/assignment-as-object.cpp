@@ -75,7 +75,7 @@ int main()
     // a member call on an assignment's result
     if ((a = b).sum() != 7 || a.x != 3)
         return 2;
-    (a = P{5, 6}).bump();
+    (a = {5, 6}).bump();
     if (a.x != 6 || a.y != 6)
         return 3;
     // reference binding

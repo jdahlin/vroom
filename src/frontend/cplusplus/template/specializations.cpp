@@ -210,7 +210,7 @@ SyntaxRef semantic_analysis::variable_specialization_id(SyntaxRef d) const
     if (!template_id_name(id, x, named) || x.ambiguous ||
         !variable_template_of(named))
         return 0;
-    return id;
+    return id.index();
 }
 
 /* [temp.expl.spec]/1, [dcl.meaning]/1: the same with a qualified

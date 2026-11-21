@@ -1122,7 +1122,7 @@ class preprocessor
 
     /* ---- [cpp.predefined] */
     uint32_t counter = 0;
-    char date[16] = "", time_of_day[16] = "";
+    char date[16], time_of_day[16];
     void write_predefined_macros(vbuffer *out) const;
     int32_t define_dynamic(const char *name, dynamic_macro dynamic,
                            bool function_like);

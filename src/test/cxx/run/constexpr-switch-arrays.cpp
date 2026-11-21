@@ -66,6 +66,10 @@ constexpr int column_sum(int j)
     return partial[0] + partial[1] + partial[2];
 }
 
+struct row { int cells[2]; };
+constexpr row empty_rows[2] = {};
+static_assert(empty_rows[1].cells[1] == 0, "");
+
 static_assert(pick(5) == 9, "");
 static_assert(tally(6) == 2 * (1 + 10 + 10 + 100 + 1000), "");
 static_assert(classify('1') == 1 && classify('2') == 4 && classify('x') == -1,

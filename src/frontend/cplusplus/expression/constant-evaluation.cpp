@@ -482,11 +482,12 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         c_entity = evaluated_class(t);
         if (!c_entity)
             return constness::unknown;
-        count = entity_table[c_entity].member_count;
-        /* value-initialization of a class ([dcl.init]/8) calls a default
-           constructor, and a member's default member initializer
-           ([class.mem]/10) is not in the tree: neither is modelled */
-        if (zero && count)
+        const entity &c = entity_table[c_entity];
+        count = c.member_count;
+        /* [dcl.init]/8: a class with a trivial default constructor is
+           zero-initialized member by member. Base subobjects and
+           non-trivial default constructors need separate handling. */
+        if (zero && (c.base_count || c.first_constructor))
             return constness::unknown;
     }
     if (init && !zero) {

@@ -2508,3 +2508,32 @@ Shared with C, not copied: the layout and validity rule
   assembler's VEX encoding, mask registers), `_Float16` arithmetic.
 - `ext_vector_type` (clang_ext_vector_type) shares V2-V4 (element
   swizzles `.xyzw` are its own).
+
+
+### C++ self-host status after #469
+
+The x86-64 Linux build includes the C++ front end in the self-built
+compiler. Call deduction counts an explicit type pack as one parameter
+([temp.arg.explicit]/7, /9), leaving the parameters after that pack
+deducible in calls such as `syntax_call<Sums...>(f, v)`. The bootstrap
+also exercises aggregate braced assignment ([expr.ass]/8), constructor
+argument packs in a new-expression ([temp.variadic]/5), and zero
+initialization before an implicit default constructor ([dcl.init]/8).
+
+The rebuilt compiler exposed two incorrect code paths in the front end.
+A conversion function's definition must start with an empty parameter
+list ([class.conv.fct]/1). A call to an inherited operator must address
+the selected base subobject ([over.match.funcs]/4), including a later
+closure base of the syntax visitor.
+
+On x86-64 Linux, build a C++ seed with vcc and then compare the two
+rebuilds it produces at the default `-O3`:
+
+```sh
+make -C src -j 6 self SELF_LANG=c++ SELF=../build/linux/cxx-seed
+make -C src -j 6 self-check SELF_LANG=c++ SELF=../build/linux/cxx-check \
+    SELF_CC="$PWD/build/linux/cxx-seed/vpp"
+```
+
+The two rebuilds produced 66 byte-identical objects. The C++ run suite
+passed 2428 checks at `-O0` through `-O3`, with 98 expected failures.

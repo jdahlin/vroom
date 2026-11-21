@@ -259,13 +259,8 @@ void preprocessor::directive_include(const preprocessing_token &name,
     if (kind == directive_kind::import) /* [ext.clang]: included once */
         once_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
     file->system_header = system;
-    inclusions.append({file,
-                       directory,
-                       (uint32_t)conditionals.size(),
-                       name.location,
-                       system,
-                       false,
-                       {}});
+    inclusions.append({file, directory, (uint32_t)conditionals.size(),
+                       name.location, system, false, preprocessing_token()});
     inclusion &entered = inclusions.back();
     if (identified)
         entered.guard_state = 1;
