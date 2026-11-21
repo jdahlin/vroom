@@ -963,11 +963,13 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
     lookup_result x = lookup_qualified(scope.entity, tokens.identifier(t),
                                        lookup_filter::any);
     entity_index held = 0;
-    if (x.unknown && !x.entity && !x.ambiguous &&
-        member_function_template_of(x.unknown_entity))
-        held = x.unknown_entity;
-    else if (x.entity && !x.ambiguous &&
-             entity_table[x.entity].member_templates)
+    if (x.unknown && !x.entity && !x.ambiguous) {
+        if (uint32_t vt = variable_template_of(x.unknown_entity))
+            return variable_template_id_of(id.index(), vt, m);
+        if (member_function_template_of(x.unknown_entity))
+            held = x.unknown_entity;
+    } else if (x.entity && !x.ambiguous &&
+               entity_table[x.entity].member_templates)
         held = member_templates_of(x.entity);
     owned_array<uint32_t> group;
     if (held)

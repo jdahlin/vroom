@@ -1058,7 +1058,8 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
             items.append(c);
             continue;
         }
-        if (c.is(syntax_kind::init_declarator_list)) {
+        if (c.is(syntax_kind::init_declarator_list,
+                 syntax_kind::member_declarator_list)) {
             for (uint32_t k = 0; k < c.size(); k++) {
                 SyntaxElement item = c[k];
                 if (!item.is_token() || item.is_identifier())
@@ -1125,7 +1126,7 @@ analysis_result semantic_analysis::init_declarator(SyntaxRef declaration,
     SyntaxElement d = item;
     SyntaxElement init;
     bool initialized = false;
-    if (item.is(syntax_kind::init_declarator)) {
+    if (item.is(syntax_kind::init_declarator, syntax_kind::member_declarator)) {
         if (item.size() != 2 || item[1].is(syntax_kind::requires_clause))
             return not_supported(item.index(), "dcl.decl");
         d = item[0];

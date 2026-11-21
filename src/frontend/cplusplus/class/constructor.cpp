@@ -137,6 +137,21 @@ analysis_result semantic_analysis::member_template_declaration(
           inner[at].is(syntax_kind::decl_specifier_seq) &&
           declares_special_member(c, inner[at + 1])))
         return member_function_template(c, n, inner, access);
+    /* [temp.mem]/1: a static data member variable template defined in-class */
+    if (inner.is(syntax_kind::member_declaration) && at + 1 < inner.size() &&
+        inner[at].is(syntax_kind::decl_specifier_seq)) {
+        SyntaxElement item = inner[at + 1];
+        if (item.is(syntax_kind::member_declarator_list) && item.size() == 1)
+            item = item[0];
+        if (item.is(syntax_kind::member_declarator) && item.size() == 2 &&
+            item[1].is(syntax_kind::brace_or_equal_initializer)) {
+            entity_index saved = current_scope;
+            current_scope = c;
+            analysis_result r = variable_template_definition(n, inner);
+            current_scope = saved;
+            return r;
+        }
+    }
     /* [temp.mem]/1: a member function template only declared (defined
        outside the class) */
     if (inner.is(syntax_kind::member_declaration) && at + 1 < inner.size() &&
