@@ -144,7 +144,11 @@ analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
            the specialization named */
         type_index named = 0;
         uint32_t cv = 0;
-        VTRY(r, template_type(type[1], 0, false, named, &cv));
+        declaring_specializations++;
+        analysis_result r = template_type(type[1], 0, false, named, &cv);
+        declaring_specializations--;
+        if (r != analysis_result::well_formed)
+            return r;
         const struct type &record = type_table[named];
         if (record.kind != type_kind::class_type ||
             entity_table[record.entity].kind != entity_kind::class_type ||
@@ -426,6 +430,23 @@ analysis_result semantic_analysis::friend_function_template(
     entity_index c, TemplateDeclaration n, SyntaxRef inner)
 {
     uint32_t lead = leading_gnu_attributes(inner);
+    if (inner.is(syntax_kind::member_declaration) && inner.size() == lead + 2 &&
+        inner[lead].is(syntax_kind::decl_specifier_seq) &&
+        inner[lead + 1].is(preprocessing_op_or_punc::SEMICOLON)) {
+        /* [temp.friend]/1: template<...> friend class S; */
+        bool has_friend = false, has_elaborated = false;
+        for (SyntaxElement spec : inner[lead].elements()) {
+            if (spec.is(standard_keyword::friend_))
+                has_friend = true;
+            else if (spec.is(syntax_kind::elaborated_type_specifier))
+                has_elaborated = true;
+            else if (!spec.is(syntax_kind::gnu_attribute_specifier) &&
+                     !attributes_without_effect(spec))
+                return not_supported(n, "temp.friend");
+        }
+        if (has_friend && has_elaborated)
+            return analysis_result::well_formed;
+    }
     if (!inner.is(syntax_kind::member_declaration,
                   syntax_kind::function_definition) ||
         inner.size() != lead + 3)
