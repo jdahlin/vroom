@@ -4,7 +4,6 @@ old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented ye
 old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
 old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
 old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
-old-class-scalar-operand	vcc: the rules of [dcl.fct] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
 old-empty-base-assign	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
