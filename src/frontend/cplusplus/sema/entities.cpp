@@ -44,6 +44,21 @@ entity_index entities::find(entity_index scope, uint32_t name) const
     return 0;
 }
 
+/* [dcl.link]/7: the first namespace-scope declaration of this C name. */
+entity_index entities::find_c_linkage(uint32_t name, entity_kind kind) const
+{
+    const entity *entries = records.data();
+    size_t count = records.size();
+    for (entity_index i = 1; i < count; i++) {
+        const entity &e = entries[i];
+        if (e.name == name && e.kind == kind && e.c_language_linkage &&
+            (!e.enclosing ||
+             entries[e.enclosing].kind == entity_kind::namespace_entity))
+            return i;
+    }
+    return 0;
+}
+
 bool entities::bound_by_using(entity_index scope, uint32_t name) const
 {
     size_t mask = slots.size() - 1;

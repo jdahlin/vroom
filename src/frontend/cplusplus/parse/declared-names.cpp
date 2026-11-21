@@ -35,8 +35,9 @@ declared_names::find(scope_index in, uint32_t name, unsigned depth) const
     const scope &s = scopes[in];
     /* the latest declaration first: a later one of another kind is the one
        in effect ([basic.scope.hiding] is not modelled further) */
+    const declaration *declarations = s.declarations.data();
     for (size_t i = s.declarations.size(); i-- > 0;) {
-        const declaration &d = s.declarations[i];
+        const declaration &d = declarations[i];
         if (d.name != name)
             continue;
         if (ignoring_non_types && d.kind != name_kind::type_name &&

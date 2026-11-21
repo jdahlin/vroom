@@ -112,13 +112,21 @@ semantic_analysis::resolve_call(SyntaxRef n,
     /* f's node, fetched at each use: analysing the arguments and
        choosing the function add nodes, which may move semantics' */
     auto callee = [&]() -> semantic_node & { return semantics[f.node]; };
-    size_t use = name_uses.size();
-    for (size_t i = name_uses.size(); i-- > 0 && use == name_uses.size();)
-        if (name_uses[i].at == callee().at)
+    token_index callee_at = callee().at;
+    size_t use_count = name_uses.size();
+    size_t use = use_count;
+    const name_use *uses = name_uses.data();
+    for (size_t i = use_count; i-- > 0;)
+        if (uses[i].at == callee_at) {
             use = i;
-    for (entity_index e : set)
-        if (use < name_uses.size() && name_uses[use].entity == e)
-            name_uses[use].entity = 0;
+            break;
+        }
+    if (use < use_count)
+        for (entity_index e : set)
+            if (uses[use].entity == e) {
+                name_uses[use].entity = 0;
+                break;
+            }
     /* [over.ics.list]/10: "Otherwise, if the parameter type is not a class:
        if the initializer list has one element that is not itself an
        initializer list, the implicit conversion sequence is the one
@@ -219,24 +227,28 @@ semantic_analysis::resolve_call(SyntaxRef n,
     /* [dcl.fct.def.delete]/2: "If a function is overloaded, it is
        referenced only if the function is selected by overload
        resolution." */
-    VTRY_SET(r, deleted_use(callee().at, c));
+    VTRY_SET(r, deleted_use(callee_at, c));
     if (use < name_uses.size() && !name_uses[use].entity)
         name_uses[use].entity = c;
     /* the expression the name is, as analysed: its type and entity are
        the function's chosen */
+    semantic_node &selected = callee();
+    bool bound = selected.kind == semantic_kind::bound_member_function;
+    analysed_expression *claims = expressions.data();
     for (size_t i = expressions.size(); i-- > 0;) {
-        if (expressions[i].meaning.node != f.node)
+        expression_meaning &meaning = claims[i].meaning;
+        if (meaning.node != f.node)
             continue;
-        expressions[i].meaning.type = x.type;
-        if (callee().kind != semantic_kind::bound_member_function)
-            expressions[i].meaning.entity = c;
+        meaning.type = x.type;
+        if (!bound)
+            meaning.entity = c;
         break;
     }
-    callee().type = x.type;
-    if (callee().kind == semantic_kind::bound_member_function) {
-        callee().b = c;
+    selected.type = x.type;
+    if (bound) {
+        selected.b = c;
     } else {
-        callee().a = c;
+        selected.a = c;
         f.entity = c;
     }
     f.type = x.type;

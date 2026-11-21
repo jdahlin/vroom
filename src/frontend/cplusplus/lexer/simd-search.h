@@ -179,12 +179,6 @@ constexpr uint32_t lex_vector_bytes = 16;
 #define LEX_MASK(m) (uint32_t)_mm_movemask_epi8(m)
 #endif
 
-/* x < n, unsigned, as a byte mask: min(x, n - 1) == x */
-inline lex_vector lex_x86_below(lex_vector x, unsigned char n)
-{
-    return LEX_EQ(LEX_MIN(x, LEX_SET1(n - 1)), x);
-}
-
 /* the bytes a search stops at, as a bit mask (identifier and blank: the
    bytes it does not stop at, inverted by the caller) */
 inline uint32_t lex_x86_stops(lex_stop kind, lex_vector v)
@@ -207,10 +201,13 @@ inline uint32_t lex_x86_stops(lex_stop kind, lex_vector v)
                    LEX_EQ(v, zero)));
     case lex_stop::identifier: {
         lex_vector lower = LEX_OR(v, LEX_SET1(0x20));
+        lex_vector letter = LEX_SUB(lower, LEX_SET1('a'));
+        lex_vector digit = LEX_SUB(v, LEX_SET1('0'));
+        /* Unsigned offsets in range are unchanged by clamping. */
+        lex_vector letters = LEX_EQ(LEX_MIN(letter, LEX_SET1(25)), letter);
+        lex_vector digits = LEX_EQ(LEX_MIN(digit, LEX_SET1(9)), digit);
         lex_vector in =
-            LEX_OR(LEX_OR(lex_x86_below(LEX_SUB(lower, LEX_SET1('a')), 26),
-                          lex_x86_below(LEX_SUB(v, LEX_SET1('0')), 10)),
-                   LEX_EQ(v, LEX_SET1('_')));
+            LEX_OR(LEX_OR(letters, digits), LEX_EQ(v, LEX_SET1('_')));
         return ~LEX_MASK(in);
     }
     case lex_stop::blank:

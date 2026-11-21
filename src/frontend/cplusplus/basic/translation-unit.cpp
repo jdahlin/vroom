@@ -336,11 +336,8 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
            to the same variable." */
         if (!prior && c_language && is_namespace(scope) &&
             (kind == entity_kind::function || kind == entity_kind::variable))
-            for (entity_index e = 1; e < entity_table.size(); e++) {
+            if (entity_index e = entity_table.find_c_linkage(name, kind)) {
                 const entity &x = entity_table[e];
-                if (!x.c_language_linkage || x.kind != kind || x.name != name ||
-                    !is_namespace(x.enclosing))
-                    continue;
                 /* [impl.clang] the library function a builtin declares
                    implicitly is noexcept, and a declaration of the
                    library's name without noexcept is of it */
@@ -350,7 +347,6 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                     return not_supported(declaration, "dcl.link");
                 prior = e;
                 entity_table.bind(scope, name, e);
-                break;
             }
     }
     /* [dcl.typedef]/3: "In a given non-class scope, a typedef specifier
