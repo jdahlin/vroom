@@ -1349,6 +1349,7 @@ analysis_result semantic_analysis::builtin_addressof(SyntaxRef n,
                                                      expression_meaning &m)
 {
     SyntaxElement operand = n[2];
+    atomic_object_operand = true;
     VTRY(r, expression(operand, m));
     if (m.category != value_category::lvalue)
         return ill_formed(n,
