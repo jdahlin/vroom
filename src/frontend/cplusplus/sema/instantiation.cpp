@@ -630,14 +630,13 @@ analysis_result semantic_analysis::declare_variable_specialization(
     /* (a copy: making the entity can move the table) */
     const entity t = entity_table[instantiations[index].template_entity];
     bool explicit_ = instantiations[index].explicit_specialization;
-    if ((s.constexpr_ != t.constexpr_ && !explicit_) || s.static_ ||
-        s.extern_ || s.typedef_)
+    if ((s.constexpr_ != t.constexpr_ && !explicit_) || s.extern_ || s.typedef_)
         return not_supported(declaration, "temp.inst");
     entity_index e =
         entity_table.make(entity_kind::variable, t.name, t.enclosing);
     entity_table[e].type = type;
     entity_table[e].linkage_of_name = t.linkage_of_name;
-    if (type_without_external_linkage(type))
+    if (s.static_ || type_without_external_linkage(type))
         entity_table[e].linkage_of_name = linkage::internal;
     /* ([temp.expl.spec]/12: an explicit specialization's as declared) */
     entity_table[e].inline_ = !explicit_ || s.inline_;
