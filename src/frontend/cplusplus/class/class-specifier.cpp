@@ -2542,6 +2542,7 @@ SyntaxElement semantic_analysis::class_head_name(SyntaxRef head) const
 {
     for (auto c : head.elements(1)) {
         if (c.is(syntax_kind::alignment_specifier) ||
+            class_head_attributes_without_effect(c) ||
             (c.is_node() && gnu_or_without_effect(c)) ||
             only_gnu_aligned(tokens, c))
             continue;

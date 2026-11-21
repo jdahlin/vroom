@@ -487,9 +487,11 @@ bool attribute_without_effect(const char *ns, size_t ns_length,
         "nodebug",         "unused",     "deprecated",
         "returns_nonnull", "alloc_size", "alloc_align",
         "nonnull",         "pure",       "const"};
-    /* availability: platform versions, for diagnostics only */
+    /* availability: platform versions, for diagnostics only;
+       trivial_abi: calling-convention hint for pass-by-value */
     static const char *const clang[] = {"preferred_name", "no_specializations",
-                                        "lifetimebound", "availability"};
+                                        "lifetimebound", "availability",
+                                        "trivial_abi"};
     /* the thread-safety attributes (libc++'s _LIBCPP_CAPABILITY, ...):
        checked only under -Wthread-safety, which vcc does not do */
     static const char *const thread_safety[] = {"capability",
