@@ -1352,6 +1352,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     virtual_allowed = true;
     bool outer_mutable_allowed = mutable_allowed;
     mutable_allowed = true;
+    placeholder_allowed = true;
     analysis_result r = decl_specifier_seq(first, s, false);
     virtual_allowed = outer_virtual_allowed;
     mutable_allowed = outer_mutable_allowed;
@@ -1585,6 +1586,25 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     uint32_t name = tokens.identifier(m.id);
     bool is_function =
         type_table[type.unqualified()].kind == type_kind::function;
+    bool placeholder_return = is_function && contains_placeholder(type);
+    if (placeholder_return) {
+        /* [dcl.spec.auto]/10: "A virtual function shall not have a
+           declared return type that uses a placeholder type." */
+        if (s.virtual_ || virt_override || virt_final || virt_pure)
+            return ill_formed_at_token(m.id,
+                                       "a virtual function shall not have a "
+                                       "declared return type that uses a "
+                                       "placeholder type",
+                                       "dcl.spec.auto");
+        if (!definition ||
+            !tokens.files.behavior.has(
+                language_feature::return_type_deduction) ||
+            m.conversion_function || m.destructor || m.literal_operator ||
+            (m.operator_function && m.allocation != allocation_function::none))
+            return not_supported(declaration, "dcl.spec.auto");
+    }
+    if (!is_function && contains_placeholder(type))
+        return not_supported(declaration, "dcl.spec.auto");
     /* [dcl.fct.spec]/2: "The virtual specifier shall be used only in the
        initial declaration of a non-static class member function" */
     if (s.virtual_ && !is_function)
@@ -1681,6 +1701,9 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                names ([class.conv.fct]/1), here one */
             if (m.conversion_function && x.type != type)
                 continue;
+            if ((placeholder_return || x.placeholder_return) &&
+                x.member_cv == function_cv && x.nonstatic_member == !s.static_)
+                return not_supported(declaration, "dcl.spec.auto");
             if (x.member_cv == function_cv &&
                 x.nonstatic_member == !s.static_ && x.type == type)
                 /* [class.mem]/5 */
@@ -1736,6 +1759,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "class.static.mfct");
         e = entity_table.make(entity_kind::function, name, c);
         entity_table[e].type = type;
+        entity_table[e].placeholder_return = placeholder_return;
         entity_table[e].nonstatic_member = !s.static_;
         entity_table[e].member_cv = function_cv;
         /* [class.mfct]/1: "A member function may be defined in its class
@@ -2135,6 +2159,7 @@ semantic_analysis::member_function_definition(entity_index c,
     specified s;
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
+    placeholder_allowed = true;
     analysis_result r = decl_specifier_seq(seq, s, false);
     virtual_allowed = outer_virtual_allowed;
     qualified_type type = s.type;
