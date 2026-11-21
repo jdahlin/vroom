@@ -69,7 +69,6 @@ temp-mem-conversion-template-ordering	vcc: the rules of [temp.mem] are not imple
 temp-mem-conversion-template-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
 temp-mem-decltype-return-mangling	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 temp-mem-friend-of-member-template	vcc: the rules of [dcl.meaning] are not implemented yet
-temp-mem-generic-lambda	vcc: the rules of [expr.prim.lambda.closure] are not implemented yet
 temp-mem-member-alias-template	vcc: the rules of [temp.deduct.call] are not implemented yet
 temp-mem-member-class-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
 temp-mem-member-deduction-guide	vcc: the rules of [temp.mem] are not implemented yet
