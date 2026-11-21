@@ -574,10 +574,8 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     bool from_three_way =
         c.rewritten && x.implemented == preprocessing_op_or_punc::SPACESHIP;
-    if (from_three_way &&
-        (!any_class || op == preprocessing_op_or_punc::SPACESHIP))
-        /* an enumeration's built-in candidates against a rewritten one;
-           0 <=> (y <=> x), whose built-in <=> is not analysed */
+    if (from_three_way && !any_class)
+        /* an enumeration's built-in candidates against a rewritten one */
         return not_supported(n, "over.match.oper");
     if (c.rewritten && !from_three_way) {
         /* /9: "If a rewritten operator== candidate is selected by overload

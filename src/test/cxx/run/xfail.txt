@@ -20,10 +20,8 @@ old-member-pointers	vcc: the rules of [temp.res] are not implemented yet
 old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
 old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
-old-packs	vcc: the rules of [temp.variadic] are not implemented yet
 old-partial-later	vcc: the rules of [temp.class.spec] are not implemented yet
 old-requires-params	vcc: the rules of [expr.prim.req] are not implemented yet
-old-reversed-packs	vcc: the rules of [temp.variadic] are not implemented yet
 old-spec-after-use	vcc: in the definition of an object, the type of that object shall not be an incomplete type ([basic.def])
 old-statement-expression	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-static-local-object	symbols: missing [] extra ['_ZGVZL1gvE1u', '_ZN1UC2Ev'] binding []
