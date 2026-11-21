@@ -124,8 +124,7 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
         return not_supported(n, "class.union.anon");
     entity_index u = record.entity;
     const entity &x = entity_table[u];
-    if (x.first_constructor || x.destructor || x.base_count ||
-        !size_of_type(s.type))
+    if (!trivial_special_members(u) || x.base_count || !size_of_type(s.type))
         return not_supported(n, "class.union.anon");
     entity_index e = entity_table.make(entity_kind::variable, 0, c);
     entity_table[e].type = s.type;

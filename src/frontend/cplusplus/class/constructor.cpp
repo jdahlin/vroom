@@ -355,10 +355,18 @@ bool semantic_analysis::trivial_class(entity_index c) const
 bool semantic_analysis::trivial_special_members(entity_index c) const
 {
     const entity &x = entity_table[c];
-    if (x.first_constructor && !trivial_defaulted_default_constructor(c))
-        return false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (!entity_table[k].implicit &&
+            (type_table[entity_table[k].type.unqualified()].parameter_count ==
+                 0 ||
+             is_copy_constructor(c, k)))
+            return false;
     if (x.dynamic || x.destructor || x.user_copy_assignments)
         return false;
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (entity_table[class_members[x.first_member + i]].default_initializer)
+            return false;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes)
