@@ -1373,6 +1373,7 @@ int semantic_analysis::vector_builtin_kind(uint32_t name)
     static const char sub_sat[] = "__builtin_elementwise_sub_sat";
     static const char store[] = "__builtin_nontemporal_store";
     static const char load[] = "__builtin_nontemporal_load";
+    static const char abs_[] = "__builtin_elementwise_abs";
     if (name == tokens.pp.identifier(shuffle, sizeof shuffle - 1) + 1)
         return 1;
     if (name == tokens.pp.identifier(minimum, sizeof minimum - 1) + 1)
@@ -1387,6 +1388,8 @@ int semantic_analysis::vector_builtin_kind(uint32_t name)
         return 6;
     if (name == tokens.pp.identifier(load, sizeof load - 1) + 1)
         return 7;
+    if (name == tokens.pp.identifier(abs_, sizeof abs_ - 1) + 1)
+        return 8;
     return 0;
 }
 
@@ -1428,11 +1431,13 @@ semantic_analysis::nontemporal_access(SyntaxRef n,
 bool semantic_analysis::builtin_shufflevector_call(SyntaxRef n)
 {
     if (n.size() != 4 || !n[0].is_identifier() ||
-        !n[2].is(syntax_kind::initializer_list) ||
         !tokens.files.behavior.has(extension::gnu_library_builtins))
         return false;
     uint32_t name = tokens.identifier(n[0].token());
-    if (vector_builtin_kind(name) == 0)
+    int kind = vector_builtin_kind(name);
+    if (kind == 0)
+        return false;
+    if (kind < 7 && !n[2].is(syntax_kind::initializer_list))
         return false;
     lookup_result x = lookup_unqualified(name, lookup_filter::any);
     return !x.entity && !x.unknown && !x.ambiguous;
@@ -1446,8 +1451,43 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
                                                          expression_meaning &m)
 {
     owned_array<SyntaxElement> clauses;
-    VTRY(r, list_clauses(n[2].index(), clauses));
+    analysis_result r = analysis_result::well_formed;
+    if (n[2].is(syntax_kind::initializer_list)) {
+        VTRY_SET(r, list_clauses(n[2].index(), clauses));
+    } else {
+        clauses.append(n[2]);
+    }
     int kind = vector_builtin_kind(tokens.identifier(n[0].token()));
+    if (kind == 8) {
+        if (clauses.size() != 1)
+            return ill_formed(n, "wrong number of arguments to the builtin",
+                              "ext.clang");
+        expression_meaning a;
+        VTRY_SET(r, expression(clauses[0], a));
+        VTRY_SET(r, operand_value(n, a));
+        const struct type t = type_table[a.type.unqualified()];
+        qualified_type et = a.type;
+        if (t.kind == type_kind::vector)
+            et = t.operand;
+        fundamental_type f = fundamental_of(et);
+        if (!is_floating(et) &&
+            !(is_integral(et) && f != fundamental_type::bool_ &&
+              fundamental_type_is_signed(tokens.files.behavior, f)))
+            return ill_formed(n,
+                              "argument to '__builtin_elementwise_abs' must be "
+                              "a scalar or vector of signed integer or "
+                              "floating-point type",
+                              "ext.clang");
+        m = expression_meaning();
+        m.type = qualified_type::make(a.type.unqualified(), cv_none);
+        m.category = value_category::prvalue;
+        m.evaluation = constness::not_constant;
+        m.beyond_integral_constant = true;
+        m.node =
+            expression_node(semantic_kind::vector_shuffle, m, n.first_token(),
+                            a.node, a.node, static_cast<uint8_t>(kind));
+        return analysis_result::well_formed;
+    }
     if (kind >= 6)
         return nontemporal_access(n, clauses, kind == 6, m);
     if (kind != 1 && clauses.size() != 2)
