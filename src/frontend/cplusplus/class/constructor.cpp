@@ -745,8 +745,6 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
     }
     if (!form.defaulted())
         return not_supported(n, "dcl.fct.def.general");
-    if (access)
-        return not_supported(n, "dcl.fct.def.default");
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
     declarator_meaning m;
@@ -775,6 +773,8 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         (m.destructor || f.parameter_count || x.virtual_base_count))
         return not_supported(n, "dcl.fct.def.default");
     if (m.destructor) {
+        if (access)
+            return not_supported(n, "dcl.fct.def.default");
         /* [class.dtor]/4: as the implicitly-declared destructor */
         if (x.destructor || f.parameter_count || explicit_specified)
             return not_supported(n, "dcl.fct.def.default");
@@ -788,11 +788,20 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         virt_override = virt_final = virt_pure = false;
         return virtual_member(c, e, n, m.id, true);
     }
+    if (access && f.parameter_count)
+        return not_supported(n, "dcl.fct.def.default");
     if (!f.parameter_count) {
         if (x.defaulted_default_constructor)
             return not_supported(n, "class.mem");
         x.defaulted_default_constructor = true;
         x.explicit_default_constructor = explicit_specified;
+        if (access) {
+            declare_implicit(c, special_member::constructor, false);
+            entity_index constructor = entity_table[c].first_constructor;
+            while (entity_table[constructor].next_constructor)
+                constructor = entity_table[constructor].next_constructor;
+            entity_table[constructor].access = access;
+        }
         return analysis_result::well_formed;
     }
     const qualified_type *parameters =
@@ -1800,7 +1809,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         /* X() = default beside other constructors may be no entity
            (trivial_defaulted_default_constructor) */
         bool default_ok = (!sub.first_constructor ||
-                           sub.defaulted_default_constructor) &&
+                           trivial_defaulted_default_constructor(k)) &&
                           !sub.implicit_default_deleted,
              copy_ok = copies_bytes(k), copy_usable = false,
              move_usable = false, move_seen = false;
@@ -1808,9 +1817,26 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
              q = entity_table[q].next_constructor) {
             /* [class.access]/1: c a friend of k may call it, where an
                aggregate initialization may not (not analysed) */
-            if (entity_table[q].access && grants(k, c))
+            bool is_default =
+                !type_table[entity_table[q].type.unqualified()].parameter_count;
+            if (entity_table[q].access && grants(k, c) && !is_default)
                 return not_supported(n, "class.friend");
-            bool usable = !entity_table[q].access && !entity_table[q].deleted;
+            bool allowed = !entity_table[q].access || grants(k, c);
+            if (is_default && entity_table[q].access == 1) {
+                bool ambiguous = false;
+                bool has_member = false;
+                for (uint32_t i = 0; i < x.member_count; i++) {
+                    const entity &member =
+                        entity_table[class_members[x.first_member + i]];
+                    if (member.nonstatic_member && !member.base_subobject &&
+                        !member.default_initializer &&
+                        element_class(member.type) == k)
+                        has_member = true;
+                }
+                if (!has_member && base_step(c, k, ambiguous) && !ambiguous)
+                    allowed = true;
+            }
+            bool usable = allowed && !entity_table[q].deleted;
             bool is_move = false;
             if (is_copy_constructor(k, q))
                 is_move =
@@ -1841,7 +1867,8 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         if (!copies_bytes(k) && !(move_seen && move_usable) &&
             !(!move_seen && copy_usable))
             move_deleted = true;
-        if (construction && !default_ok && !x.first_constructor &&
+        if (construction && !default_ok &&
+            (!x.first_constructor || x.defaulted_default_constructor) &&
             default_constructed(c, k)) {
             /* C++03 has no deleted functions: the implicit default
                constructor's definition is ill-formed, reported at the
@@ -1882,7 +1909,13 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     /* [dcl.fct.def.default]: X() = default beside other constructors: the
        default constructor, trivial or not, that a default-initialization
        chooses */
-    if (x.defaulted_default_constructor && user_constructors && construction)
+    bool has_default = false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (!type_table[entity_table[k].type.unqualified()].parameter_count)
+            has_default = true;
+    if (x.defaulted_default_constructor && user_constructors && construction &&
+        !has_default)
         declare_implicit(c, special_member::constructor, false);
     bool user_copy = false;
     /* entity_table[c], not x: declare_implicit may have moved it */
@@ -1933,6 +1966,15 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             entity_table[c].implicit_default_deleted = true;
         else
             declare_implicit(c, special_member::constructor, false);
+    }
+    if (entity_table[c].defaulted_default_constructor &&
+        default_constructor_deleted(c)) {
+        entity_table[c].implicit_default_deleted = true;
+        for (entity_index k = entity_table[c].first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (entity_table[k].implicit &&
+                !type_table[entity_table[k].type.unqualified()].parameter_count)
+                entity_table[k].deleted = true;
     }
     if (destruction && !entity_table[c].destructor)
         declare_implicit(c, special_member::destructor, false);
@@ -2327,8 +2369,7 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
     owned_array<entity_index> implicit;
     for (entity_index k = entity_table[c].first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (entity_table[k].implicit &&
-            !(entity_table[k].inherited_constructor && entity_table[k].deleted))
+        if (entity_table[k].implicit && !entity_table[k].deleted)
             implicit.append(k);
     if (entity_table[c].destructor &&
         entity_table[entity_table[c].destructor].implicit)
