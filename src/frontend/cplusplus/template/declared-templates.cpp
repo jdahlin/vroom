@@ -1671,6 +1671,19 @@ bool semantic_analysis::depends_on_template_parameter(qualified_type t) const
     return depends(type_table, t);
 }
 
+/* whether template argument a is simply the template parameter pe (or its
+   unexpanded pack pe...) */
+bool semantic_analysis::argument_is_parameter(const template_argument &a,
+                                              entity_index pe) const
+{
+    return a.template_entity == pe ||
+           (a.kind == template_argument::kind_t::type && !a.template_entity &&
+            a.type == entity_table[pe].type) ||
+           (a.kind == template_argument::kind_t::pack && a.count == 1 &&
+            pack_arguments[a.value].count == UINT32_MAX &&
+            pack_arguments[a.value].template_entity == pe);
+}
+
 /*
  * [temp.class.spec]/9: "The specialization shall be more specialized than
  * the primary template": whether partial specialization n's arguments are
@@ -1686,17 +1699,10 @@ bool semantic_analysis::primary_arguments(
 {
     if (arguments.size() != count)
         return false;
-    for (uint32_t i = 0; i < count; i++) {
-        entity_index pe = template_parameter_entities[first + i];
-        const template_argument &a = arguments[i];
-        if (!(a.template_entity == pe ||
-              (a.kind == template_argument::kind_t::type &&
-               a.type == entity_table[pe].type) ||
-              (a.kind == template_argument::kind_t::pack && a.count == 1 &&
-               pack_arguments[a.value].count == UINT32_MAX &&
-               pack_arguments[a.value].template_entity == pe)))
+    for (uint32_t i = 0; i < count; i++)
+        if (!argument_is_parameter(arguments[i],
+                                   template_parameter_entities[first + i]))
             return false;
-    }
     return !template_head_constrained(n) || template_head_constrained(primary);
 }
 
@@ -2878,7 +2884,7 @@ analysis_result semantic_analysis::member_definition_of_template(
 {
     entity_index outer = current_scope;
     owned_array<SyntaxRef> parameters;
-    VTRY(r, template_head_parameters(n, parameters));
+    VTRY(r, template_head_parameters(n, parameters, true, true, true, true));
     /* [temp.static]/1: a static data member's definition is a
        simple-declaration */
     bool variable = definition.is(syntax_kind::simple_declaration);
@@ -2903,7 +2909,6 @@ analysis_result semantic_analysis::member_definition_of_template(
     uint32_t ct = class_template_of(named);
     if (!ct || function_templates[ct - 1].name != named ||
         function_templates[ct - 1].primary ||
-        !function_templates[ct - 1].definition ||
         entity_table[function_templates[ct - 1].entity].enclosing != outer)
         return not_supported(n, "temp.mem.func");
     uint32_t index = 0, first = 0;
@@ -2913,12 +2918,24 @@ analysis_result semantic_analysis::member_definition_of_template(
     /* the template-id's arguments in terms of the parameters; what they
        record for claims is the template's */
     owned_array<template_argument> arguments;
-    VTRY_SET(r, template_id_arguments_in(id, ct, scope, arguments));
+    partial_arguments++;
+    declaring_specializations++;
+    r = template_id_arguments_in(id, ct, scope, arguments);
+    declaring_specializations--;
+    partial_arguments--;
+    if (r != analysis_result::well_formed)
+        return r;
     uint32_t pattern = 0;
     owned_array<template_argument> deduced;
-    VTRY_SET(r, matching_specialization(id, ct, arguments.data(),
-                                        static_cast<uint32_t>(arguments.size()),
-                                        pattern, deduced));
+    partial_arguments++;
+    declaring_specializations++;
+    r = matching_specialization(id, ct, arguments.data(),
+                                static_cast<uint32_t>(arguments.size()),
+                                pattern, deduced);
+    declaring_specializations--;
+    partial_arguments--;
+    if (r != analysis_result::well_formed)
+        return r;
     token_index after_declarator_id = 0;
     if (variable) {
         after_declarator_id = definition[1][0].end_token();
@@ -2937,22 +2954,19 @@ analysis_result semantic_analysis::member_definition_of_template(
     }
     /* each argument the parameter of the same position, with the
        class's parameter's name */
-    if (!of.parameter_count || mine_count != parameters.size() ||
+    if (!of.definition || !of.parameter_count ||
+        mine_count != parameters.size() ||
         of.parameter_count != parameters.size() ||
         !same_template_parameters(first, of.first_parameter,
                                   of.parameter_count))
         return not_supported(n, "temp.mem.func");
     for (uint32_t i = 0; i < mine_count; i++) {
         entity_index pe = template_parameter_entities[first + i];
-        const template_argument &a = mine[i];
-        bool same = a.template_entity == pe ||
-                    (a.kind == template_argument::kind_t::type &&
-                     !a.template_entity && a.type == entity_table[pe].type);
         uint32_t mine_name = entity_table[pe].name;
         uint32_t class_name =
             entity_table[template_parameter_entities[of.first_parameter + i]]
                 .name;
-        if (!same)
+        if (!argument_is_parameter(mine[i], pe))
             return not_supported(n, "temp.mem.func");
         if (mine_name == class_name)
             continue;

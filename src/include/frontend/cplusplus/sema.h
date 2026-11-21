@@ -4547,6 +4547,8 @@ class semantic_analysis
                       bool &satisfied);
     bool same_constraints(SyntaxRef a, SyntaxRef b);
     bool template_head_constrained(SyntaxRef n);
+    bool argument_is_parameter(const template_argument &a,
+                               entity_index pe) const;
     bool primary_arguments(SyntaxRef n, SyntaxRef primary,
                            const owned_array<template_argument> &arguments,
                            uint32_t first, size_t count);

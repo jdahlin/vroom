@@ -81,6 +81,12 @@ void semantic_analysis::bind_template_argument(entity_index scope,
                 entity_table[e].value = x.value;
             } else if (x.kind == template_argument::kind_t::type) {
                 e = entity_table.make(entity_kind::typedef_name, name, scope);
+            } else if (x.kind == template_argument::kind_t::pack &&
+                       x.count == UINT32_MAX && x.template_entity) {
+                /* a partial specialization's own pack parameter bound to
+                   itself during substitute_specialization */
+                entity_table.bind(scope, name, x.template_entity);
+                return;
             } else {
                 /* (a value-dependent element: not made) */
                 continue;
