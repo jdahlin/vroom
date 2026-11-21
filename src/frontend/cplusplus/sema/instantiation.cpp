@@ -118,6 +118,8 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             instantiating = index + 1;
             r = declare_specialization(ft.declarator, m.id, type, s, e);
             instantiating = 0;
+            if (r == analysis_result::well_formed && constructor)
+                entity_table[e].explicit_ = s.explicit_;
             if (r == analysis_result::well_formed && ft.friend_class &&
                 ft.definition) {
                 entity_table[e].inline_ = true;

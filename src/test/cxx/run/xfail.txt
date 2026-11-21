@@ -63,7 +63,6 @@ temp-mem-address-deduced-target	vcc: the rules of [over] are not implemented yet
 temp-mem-concept-equivalent-head	vcc: the rules of [temp.concept] are not implemented yet
 temp-mem-constructor-declared	vcc: the rules of [temp.inst] are not implemented yet
 temp-mem-constructor-defined-in-class	vcc: symbols differ from clang's (see cxx-run)
-temp-mem-constructor-explicit-dependent	vcc: the rules of [dcl.fct.spec] are not implemented yet
 temp-mem-conversion-template-base	vcc: the rules of [over.match.conv] are not implemented yet
 temp-mem-conversion-template-declared	vcc: the rules of [over.match.conv] are not implemented yet
 temp-mem-conversion-template-explicit-call	vcc: the rules of [expr.ref] are not implemented yet

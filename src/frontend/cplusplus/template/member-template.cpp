@@ -259,13 +259,9 @@ analysis_result semantic_analysis::constructor_template_candidates(
     if (copy) {
         size_t kept = 0;
         for (uint32_t g : group)
-            if (entity_table[function_templates[g - 1].entity]
+            if (!entity_table[function_templates[g - 1].entity].explicit_ ||
+                entity_table[function_templates[g - 1].entity]
                     .explicit_dependent)
-                /* [dcl.fct.spec]/2: whether this specialization is explicit
-                   is known after deduction: not filtered here yet */
-                return not_supported(n, "dcl.fct.spec");
-        for (uint32_t g : group)
-            if (!entity_table[function_templates[g - 1].entity].explicit_)
                 group[kept++] = g;
         group.resize(kept);
     }
@@ -275,8 +271,28 @@ analysis_result semantic_analysis::constructor_template_candidates(
     owned_array<uint32_t> firsts;
     if (!first_arguments)
         first_arguments = &firsts;
-    return template_candidates(n, group, arguments, count, candidates,
-                               first_arguments, all);
+    size_t before = candidates.size();
+    size_t first_before = first_arguments->size();
+    VTRY(r, template_candidates(n, group, arguments, count, candidates,
+                                first_arguments, all));
+    if (copy) {
+        /* [dcl.fct.spec]/2: filter out specializations whose dependent
+           explicit(bool) condition evaluated to true */
+        size_t kept = before;
+        for (size_t i = before; i < candidates.size(); i++) {
+            if (entity_table[candidates[i].function].explicit_)
+                continue;
+            if (kept != i) {
+                candidates[kept] = candidates[i];
+                (*first_arguments)[first_before + (kept - before)] =
+                    (*first_arguments)[first_before + (i - before)];
+            }
+            kept++;
+        }
+        candidates.resize(kept);
+        first_arguments->resize(first_before + (kept - before));
+    }
+    return analysis_result::well_formed;
 }
 
 /*
