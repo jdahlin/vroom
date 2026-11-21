@@ -2258,8 +2258,7 @@ class semantic_analysis
        name has no external linkage; with arguments, a class template
        specialization of the weakest linkage of its template arguments
        (clang's, of a function specialization's) */
-    bool type_without_external_linkage(qualified_type t, bool visible = false,
-                                       bool arguments = false) const;
+
     /* [basic.link]/4.3: whether t is (an array of) an unnamed class
        without a typedef name for linkage purposes */
     bool unnamed_class_object(qualified_type t) const;
@@ -4625,8 +4624,9 @@ class semantic_analysis
     /* [temp.param]/4: a non-type parameter's dependent type
        (typename enable_if<B, int>::type) with the arguments before it */
     entity_index dependent_value_entity(SyntaxElement written);
-    entity_index dependent_variable_specialization(SyntaxRef id,
-                                                   entity_index e);
+    entity_index dependent_variable_specialization(SyntaxRef id, entity_index e,
+                                                   bool negated,
+                                                   entity_index scope = 0);
     owned_array<entity_index> dependent_values;
     analysis_result substituted_parameter_type(uint32_t template_index,
                                                uint32_t position,
@@ -5136,6 +5136,8 @@ class semantic_analysis
        classes or closure types other translation units name too: its
        symbol has its template's linkage (basic/translation-unit.cpp) */
     bool specialization_visible(entity_index e) const;
+    bool type_without_external_linkage(qualified_type t, bool visible = false,
+                                       bool arguments = false) const;
     uint32_t specialization_argument_count(entity_index e) const
     {
         return instantiations[entity_table[e].instantiation - 1].argument_count;

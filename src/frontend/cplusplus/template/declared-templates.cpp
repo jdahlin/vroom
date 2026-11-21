@@ -1153,11 +1153,6 @@ analysis_result semantic_analysis::variable_partial_specialization(
     if (parameters.empty() || function_templates[vt - 1].name != named ||
         entity_table[primary.entity].enclosing != outer)
         return not_supported(n, "temp.class.spec");
-    /* [temp.class.spec]/1: one declared after an instantiation it would
-       be used for: not analysed */
-    for (const instantiation_record &i : instantiations)
-        if (i.template_entity == primary.entity && i.specialization)
-            return not_supported(n, "temp.class.spec");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
@@ -1176,6 +1171,10 @@ analysis_result semantic_analysis::variable_partial_specialization(
     /* [temp.class.spec]/9: more specialized than the primary */
     if (!dependent || identity)
         return not_supported(n, "temp.class.spec");
+    /* [temp.class.spec]/1: prior instantiations for other arguments are
+       unaffected. If this partial specialization would be selected for a
+       prior use, no diagnostic is required. Keep the result cached at that
+       use and consider this declaration on subsequent instantiations. */
     function_template record;
     record.entity = primary.entity;
     record.declaration = n;
@@ -1591,6 +1590,19 @@ analysis_result semantic_analysis::alias_template_specialization(
     current_scope = saved_scope;
     lookup_horizon = saved_horizon;
     expanding = saved_expanding;
+    /* [impl.clang] a closure type created by substituting an alias template
+       belongs to the function that substituted it */
+    if (r == analysis_result::well_formed &&
+        type_table[t.unqualified()].kind == type_kind::class_type) {
+        entity_index c = type_table[t.unqualified()].entity;
+        if (entity_table[c].lambda) {
+            entity_index fn = saved_scope;
+            while (fn && entity_table[fn].kind != entity_kind::function)
+                fn = entity_table[fn].enclosing;
+            if (fn)
+                entity_table[c].enclosing = saved_scope;
+        }
+    }
     /* an argument that makes the type ill-formed: clang reports it at the
        alias template, with a note at the use; while a candidate is
        substituted, [temp.alias]/3's deduction failure */

@@ -144,8 +144,10 @@ class itanium_mangler
         return c.is(op);
     }
     bool class_template_args(entity_index c);
-    bool template_args(entity_index c, entity_index function = 0);
+    bool template_args(entity_index c, entity_index function = 0,
+                       bool pack_brackets = true);
     bool dependent_value(entity_index d);
+    bool dependent_value_expr(entity_index d);
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
     bool template_template_arg(entity_index t, uint32_t parameter);
     void template_param(uint64_t position)
@@ -835,8 +837,8 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
         qualified_type t = qualified_type::make(q, cv_none);
         if (substitution(t))
             return true;
-        if (analysis.entity_table[r.entity].enclosing != 0 ||
-            !class_enum_type(t))
+        entity_index enc = analysis.entity_table[r.entity].enclosing;
+        if ((enc != 0 && !is_std(enc)) || !class_enum_type(t))
             return false;
         add_candidate(t);
         return true;
@@ -996,7 +998,8 @@ bool itanium_mangler::class_template_args(entity_index c)
  * its parameter's type, then the value, n before a negative one's
  * magnitude; a bool's 0 or 1.
  */
-bool itanium_mangler::template_args(entity_index c, entity_index function)
+bool itanium_mangler::template_args(entity_index c, entity_index function,
+                                    bool pack_brackets)
 {
     text("I");
     uint32_t count = analysis.specialization_argument_count(c);
@@ -1039,7 +1042,8 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
 
                <template-arg> ::= J <template-arg>* E
         */
-        text("J");
+        if (pack_brackets)
+            text("J");
         for (uint32_t k = 1; k < pack; k++) {
             /* a template's own pack expanded (res<A...> in its own
                declaration): [abi:mangle.function-type]'s pack expansion of the
@@ -1065,7 +1069,8 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
             if (!template_arg(c, i, k))
                 return false;
         }
-        text("E");
+        if (pack_brackets)
+            text("E");
     }
     text("E");
     return true;
@@ -1121,30 +1126,74 @@ bool itanium_mangler::template_template_arg(entity_index t, uint32_t parameter)
  * Q<args>::name as written, Q unqualified; clang makes the qualifier
  * level no candidate, its template-args' types are as anywhere.
  */
-bool itanium_mangler::dependent_value(entity_index d)
+bool itanium_mangler::dependent_value_expr(entity_index d)
 {
     const entity &x = analysis.entity_table[d];
     if (!x.value)
         return false;
-    entity_index q = record(x.type).entity;
-    const entity &spec = analysis.entity_table[q];
-    if (x.value == 4) {
-        /* a variable template's specialization, v<args>: [abi:expressions]'
-           unresolved-name, <source-name> <template-args> */
-        text("X");
-        if (!source_name(spec.name) || !template_args(q))
+    if (x.value == 8 || x.value == 9 || x.value == 10) {
+        if (x.value == 8)
+            text("aa");
+        else if (x.value == 9)
+            text("oo");
+        else
+            text("gt");
+        return dependent_value_expr(x.enclosing) &&
+               dependent_value_expr(x.name);
+    }
+    if (x.value == 11) {
+        text("st");
+        return type(x.type);
+    }
+    if (x.value == 12) {
+        text("Li");
+        number(x.name);
+        text("E");
+        return true;
+    }
+    if (x.value == 13) {
+        text("clsr");
+        if (!type(x.type) || !source_name(x.name))
             return false;
         text("E");
         return true;
     }
-    text("X");
+    if (x.value == 14) {
+        text("nt");
+        return dependent_value_expr(x.enclosing);
+    }
+    entity_index q = record(x.type).entity;
+    const entity &spec = analysis.entity_table[q];
+    if (x.value == 4 || x.value == 6) {
+        /* a variable template's specialization, [!] [ns::] v<args>:
+           [abi:expressions]' unresolved-name */
+        if (x.value & 2)
+            text("nt");
+        if (x.enclosing) {
+            text("sr");
+            if (!source_name(analysis.entity_table[x.enclosing].name))
+                return false;
+            text("E");
+        }
+        return source_name(spec.name) && template_args(q, 0, false);
+    }
     if (x.value & 2)
         text("nt");
     text("sr");
+    if (x.enclosing && !source_name(analysis.entity_table[x.enclosing].name))
+        return false;
     if (!source_name(spec.name) || !template_args(q))
         return false;
     text("E");
-    if (!source_name(x.name))
+    return source_name(x.name);
+}
+
+bool itanium_mangler::dependent_value(entity_index d)
+{
+    if (!analysis.entity_table[d].value)
+        return false;
+    text("X");
+    if (!dependent_value_expr(d))
         return false;
     text("E");
     return true;

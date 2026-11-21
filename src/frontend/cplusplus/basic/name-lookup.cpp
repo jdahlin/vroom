@@ -867,6 +867,21 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                     "basic.lookup.qual");
             e = named.entity;
         }
+        if (entity_table[e].kind == entity_kind::class_type &&
+            !entity_table[e].size && entity_table[e].instantiation &&
+            e != defining_class && !entity_table[e].defined) {
+            uint32_t k = entity_table[e].instantiation - 1;
+            entity_index t_ent = instantiations[k].template_entity;
+            uint32_t ct = entity_table[t_ent].instantiation;
+            if (ct && !instantiations[k].defining) {
+                entity_index done = e;
+                VTRY(ir,
+                     instantiate_class(
+                         n, ct,
+                         &template_arguments[instantiations[k].first_argument],
+                         instantiations[k].argument_count, done));
+            }
+        }
         const entity &x = entity_table[e];
         if (x.kind == entity_kind::class_type) {
             /* [basic.lookup.qual]/1 with [class.qual]: the class's members

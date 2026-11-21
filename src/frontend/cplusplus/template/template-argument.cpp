@@ -142,7 +142,102 @@ void semantic_analysis::bind_template_argument(entity_index scope,
    written (clang mangles the qualifier as written) */
 entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
 {
+    while (written.is(syntax_kind::primary_expression) && written.size() == 3 &&
+           written[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+           written[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+        written = written[1];
     entity_index e = entity_table.make(entity_kind::dependent_value, 0, 0);
+    if (written.size() == 3 &&
+        (written.is(syntax_kind::logical_and_expression) ||
+         written.is(syntax_kind::logical_or_expression) ||
+         (written.is(syntax_kind::relational_expression) &&
+          written[1].is(preprocessing_op_or_punc::GREATER)))) {
+        entity_index lhs = dependent_value_entity(written[0]);
+        entity_index rhs = dependent_value_entity(written[2]);
+        if (!entity_table[lhs].value || !entity_table[rhs].value)
+            return e;
+        uint64_t value = 10;
+        if (written.is(syntax_kind::logical_and_expression))
+            value = 8;
+        else if (written.is(syntax_kind::logical_or_expression))
+            value = 9;
+        for (entity_index d : dependent_values)
+            if (entity_table[d].value == value &&
+                entity_table[d].enclosing == lhs && entity_table[d].name == rhs)
+                return d;
+        entity_table[e].enclosing = lhs;
+        entity_table[e].name = rhs;
+        entity_table[e].value = value;
+        dependent_values.append(e);
+        return e;
+    }
+    if (written.is(syntax_kind::unary_expression) && written.size() == 4 &&
+        written[0].is(standard_keyword::sizeof_) &&
+        written[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        written[3].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        size_t unsupported_before = unsupported.size();
+        qualified_type t;
+        analysis_result r = type_id(written[2], t);
+        unsupported.resize(unsupported_before);
+        if (r != analysis_result::well_formed)
+            return e;
+        for (entity_index d : dependent_values)
+            if (entity_table[d].value == 11 && entity_table[d].type == t)
+                return d;
+        entity_table[e].type = t;
+        entity_table[e].value = 11;
+        dependent_values.append(e);
+        return e;
+    }
+    if (written.is_token()) {
+        owned_buffer sp;
+        token_spelling(written.token(), sp.get());
+        uint64_t n = 0;
+        bool ok = sp.size() > 0 && sp.size() <= 9;
+        for (size_t i = 0; i < sp.size() && ok; i++) {
+            if (sp.data()[i] < '0' || sp.data()[i] > '9')
+                ok = false;
+            else
+                n = n * 10 + static_cast<uint64_t>(sp.data()[i] - '0');
+        }
+        if (ok) {
+            uint32_t v = static_cast<uint32_t>(n);
+            for (entity_index d : dependent_values)
+                if (entity_table[d].value == 12 && entity_table[d].name == v)
+                    return d;
+            entity_table[e].name = v;
+            entity_table[e].value = 12;
+            dependent_values.append(e);
+            return e;
+        }
+    }
+    if (written.is(syntax_kind::postfix_expression) && written.size() == 3 &&
+        written[0].is(syntax_kind::qualified_id) &&
+        written[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        written[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        SyntaxElement qid = written[0];
+        if (qid.size() == 2 && qid[0].is(syntax_kind::nested_name_specifier) &&
+            qid[0].size() == 2 && qid[0][0].is_identifier() &&
+            qid[1].is_identifier()) {
+            lookup_result lx = lookup_unqualified(
+                tokens.identifier(qid[0][0].token()), lookup_filter::any);
+            if (lx.entity &&
+                entity_table[lx.entity].kind == entity_kind::typedef_name) {
+                qualified_type t = entity_table[lx.entity].type;
+                uint32_t name = tokens.identifier(qid[1].token());
+                for (entity_index d : dependent_values)
+                    if (entity_table[d].value == 13 &&
+                        entity_table[d].type == t &&
+                        entity_table[d].name == name)
+                        return d;
+                entity_table[e].type = t;
+                entity_table[e].name = name;
+                entity_table[e].value = 13;
+                dependent_values.append(e);
+                return e;
+            }
+        }
+    }
     bool negated = false;
     if (written.is(syntax_kind::unary_expression) && written.size() == 2 &&
         written[0].is(preprocessing_op_or_punc::EXCLAMATION)) {
@@ -158,22 +253,49 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
             entity_table[x.entity].kind == entity_kind::dependent_value)
             return x.entity;
     }
-    if (!negated && written.is(syntax_kind::simple_template_id))
-        return dependent_variable_specialization(written, e);
+    if (written.is(syntax_kind::simple_template_id))
+        return dependent_variable_specialization(written, e, negated);
     if (!written.is(syntax_kind::qualified_id) || written.size() != 2)
         return e;
     SyntaxElement qualifier = written[0];
     SyntaxElement member = written[1];
+    if (!qualifier.is(syntax_kind::nested_name_specifier))
+        return e;
+    /* ns::v<args> */
+    if (qualifier.size() == 2 && qualifier[0].is_identifier() &&
+        member.is(syntax_kind::simple_template_id)) {
+        lookup_result ns = lookup_unqualified(
+            tokens.identifier(qualifier[0].token()), lookup_filter::any);
+        if (ns.entity &&
+            entity_table[ns.entity].kind == entity_kind::namespace_entity)
+            return dependent_variable_specialization(member, e, negated,
+                                                     ns.entity);
+        return e;
+    }
+    entity_index ns_scope = 0;
+    SyntaxElement spec_node;
+    if (qualifier.size() == 2 &&
+        qualifier[0].is(syntax_kind::simple_template_id)) {
+        spec_node = qualifier[0];
+    } else if (qualifier.size() == 4 && qualifier[0].is_identifier() &&
+               qualifier[2].is(syntax_kind::simple_template_id)) {
+        lookup_result ns = lookup_unqualified(
+            tokens.identifier(qualifier[0].token()), lookup_filter::any);
+        if (!ns.entity ||
+            entity_table[ns.entity].kind != entity_kind::namespace_entity)
+            return e;
+        ns_scope = ns.entity;
+        spec_node = qualifier[2];
+    } else {
+        return e;
+    }
     if (!member.is_token() ||
-        tokens[member.token()].kind != token_kind::identifier ||
-        !qualifier.is(syntax_kind::nested_name_specifier) ||
-        qualifier.size() != 2 ||
-        !qualifier[0].is(syntax_kind::simple_template_id))
+        tokens[member.token()].kind != token_kind::identifier)
         return e;
     /* (its own unsupported records: the argument stays value-dependent) */
     size_t unsupported_before = unsupported.size();
     type_index q = 0;
-    analysis_result r = template_type(qualifier[0], 0, false, q);
+    analysis_result r = template_type(spec_node, ns_scope, ns_scope != 0, q);
     unsupported.resize(unsupported_before);
     if (r != analysis_result::well_formed ||
         type_table[q].kind != type_kind::dependent ||
@@ -187,11 +309,13 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
         value = 3;
     for (entity_index d : dependent_values)
         if (entity_table[d].type == type && entity_table[d].name == name &&
-            entity_table[d].value == value)
+            entity_table[d].value == value &&
+            entity_table[d].enclosing == ns_scope)
             return d;
     entity_table[e].type = type;
     entity_table[e].name = name;
     entity_table[e].value = value;
+    entity_table[e].enclosing = ns_scope;
     dependent_values.append(e);
     return e;
 }
@@ -202,14 +326,18 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
    variable template (one per arguments), which [abi:mangle.template-arg]
    spells X <source-name> <template-args> E (value 4); e if it is not
    one */
-entity_index
-semantic_analysis::dependent_variable_specialization(SyntaxRef id,
-                                                     entity_index e)
+entity_index semantic_analysis::dependent_variable_specialization(
+    SyntaxRef id, entity_index e, bool negated, entity_index scope)
 {
     if (id.size() < 3 || !id[0].is_identifier())
         return e;
-    lookup_result x = lookup_unqualified(tokens.identifier(id[0].token()),
-                                         lookup_filter::any);
+    lookup_result x;
+    if (scope)
+        x = lookup_qualified(scope, tokens.identifier(id[0].token()),
+                             lookup_filter::any);
+    else
+        x = lookup_unqualified(tokens.identifier(id[0].token()),
+                               lookup_filter::any);
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
@@ -261,11 +389,16 @@ semantic_analysis::dependent_variable_specialization(SyntaxRef id,
         instantiations.append(record);
     }
     qualified_type type = entity_table[s].type;
+    uint64_t value = 4;
+    if (negated)
+        value = 6;
     for (entity_index d : dependent_values)
-        if (entity_table[d].type == type && entity_table[d].value == 4)
+        if (entity_table[d].type == type && entity_table[d].value == value &&
+            entity_table[d].enclosing == scope)
             return d;
     entity_table[e].type = type;
-    entity_table[e].value = 4;
+    entity_table[e].value = value;
+    entity_table[e].enclosing = scope;
     dependent_values.append(e);
     return e;
 }
@@ -322,6 +455,13 @@ analysis_result semantic_analysis::template_argument_for(
     if (entity_table[p].kind == entity_kind::template_entity)
         return template_template_argument(at, p, written, out);
     if (entity_table[p].kind == entity_kind::typedef_name) {
+        if (written.is(syntax_kind::qualified_id)) {
+            type_index qt = 0;
+            uint32_t cv = cv_none;
+            VTRY(qr, qualified_type_name(written, qt, cv));
+            out.type = qualified_type::make(qt, cv);
+            return analysis_result::well_formed;
+        }
         if (!written.is(syntax_kind::type_id))
             return not_supported(at, "temp.arg");
         return type_id(written, out.type);
