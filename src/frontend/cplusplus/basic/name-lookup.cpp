@@ -800,8 +800,15 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                 qualified = true;
                 continue;
             }
-            if (st.kind != type_kind::class_type)
+            if (st.kind != type_kind::class_type) {
+                if (st.kind != type_kind::dependent &&
+                    st.kind != type_kind::enumeration)
+                    return ill_formed(n,
+                                      "a nested-name-specifier shall name a "
+                                      "class, enumeration, or namespace",
+                                      "basic.lookup.qual");
                 return not_supported(n, "temp.res");
+            }
             const entity &x = entity_table[st.entity];
             if (!x.size && st.entity != defining_class && !x.defined)
                 return not_supported(n, "basic.lookup.qual");

@@ -320,7 +320,9 @@ analysis_result semantic_analysis::overloaded_operator(
             }
             if (found.entity) {
                 if (entity_table[found.entity].kind != entity_kind::function ||
-                    !entity_table[found.entity].nonstatic_member)
+                    (!entity_table[found.entity].nonstatic_member &&
+                     op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
+                     op != preprocessing_op_or_punc::LEFT_BRACKET))
                     return not_supported(n, "over.match.oper");
                 overload_set(found.entity, members);
             }
