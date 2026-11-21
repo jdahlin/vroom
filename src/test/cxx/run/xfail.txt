@@ -37,8 +37,6 @@ old-partial-later	vcc: the rules of [temp.class.spec] are not implemented yet
 old-range-for-arrays	vcc: the rules of [stmt.ranged] are not implemented yet
 old-requires-params	vcc: the rules of [expr.prim.req] are not implemented yet
 old-reversed-packs	vcc: the rules of [temp.variadic] are not implemented yet
-old-spaceship	vcc: the rules of [over.match.oper] are not implemented yet
-old-spaceship-pack-candidate	vcc: the rules of [basic.lookup.argdep] are not implemented yet
 old-spec-after-use	vcc: in the definition of an object, the type of that object shall not be an incomplete type ([basic.def])
 old-statement-expression	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-static-local-object	symbols: missing [] extra ['_ZGVZL1gvE1u', '_ZN1UC2Ev'] binding []

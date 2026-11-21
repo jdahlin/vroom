@@ -57,6 +57,8 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
             return c.token();
         return 0;
     }
+    if (c.is(syntax_kind::operator_function_id))
+        return c.first_token();
     if (c.is(syntax_kind::qualified_id) && c.size() >= 2) {
         SyntaxElement rhs = c.back();
         if (rhs.is_token() && rhs.is_identifier())
