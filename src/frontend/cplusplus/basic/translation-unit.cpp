@@ -493,6 +493,24 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                        "basic.def");
         }
         if (record.kind == type_kind::class_type) {
+            if (definition && !entity_table[record.entity].size &&
+                entity_table[record.entity].instantiation &&
+                !entity_table[record.entity].defined) {
+                /* [temp.inst]/2: a class template specialization named before
+                   its template was defined (e.g. through a typedef) is
+                   implicitly instantiated when an object of it is defined */
+                uint32_t k = entity_table[record.entity].instantiation - 1;
+                entity_index t = instantiations[k].template_entity;
+                uint32_t ct = entity_table[t].instantiation;
+                if (ct && !instantiations[k].defining) {
+                    entity_index done = record.entity;
+                    VTRY(ir, instantiate_class(
+                                 declaration, ct,
+                                 &template_arguments[instantiations[k]
+                                                         .first_argument],
+                                 instantiations[k].argument_count, done));
+                }
+            }
             const entity &c = entity_table[record.entity];
             if (c.kind != entity_kind::class_type)
                 /* a class whose definition was not analysed */
