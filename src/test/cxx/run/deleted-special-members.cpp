@@ -39,10 +39,28 @@ struct after_user_assigned : user_assigned {
 };
 static_assert(sizeof(after_user_assigned) == 8, "");
 
+int check_no_move();
+
 int main()
 {
     handle h = {3};
     if (pick<int>::value + pick<nat>::value != 3 || by_pointer(0))
         return 1;
-    return h.v == 3 ? 0 : 2;
+    return h.v == 3 && check_no_move() == 26 ? 0 : 2;
+}
+
+/* [dcl.fct.def.delete] a deleted move constructor is considered only
+   when selected. A copy from an lvalue and a prvalue return are valid. */
+struct no_move {
+    int value;
+    no_move(int n) : value(n) {}
+    no_move(const no_move &other) : value(other.value) {}
+    no_move(no_move &&) = delete;
+};
+no_move make_no_move() { return no_move(17); }
+int check_no_move() {
+    no_move a(9);
+    no_move b(a);
+    no_move c = make_no_move();
+    return b.value + c.value;
 }
