@@ -336,9 +336,7 @@ bool semantic_analysis::visible_conversion_functions(
             for (size_t k = own_end; k < out.size() && !hidden; k++)
                 hidden = out[k] == f;
             if (!hidden)
-                if (templates && entity_table[f].member_templates)
-                    templates->append(entity_table[f].member_templates);
-            out.append(f);
+                out.append(f);
         }
     }
     return true;
