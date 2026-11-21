@@ -58,8 +58,10 @@ analysis_result semantic_analysis::passed_expression(SyntaxElement e,
                                                      expression_meaning &m)
 {
     binary128_value_passes = true;
+    atomic_object_operand = true;
     analysis_result r = expression(e, m);
     binary128_value_passes = false;
+    atomic_object_operand = false;
     return r;
 }
 
@@ -67,8 +69,10 @@ analysis_result semantic_analysis::passed_target_expression(
     SyntaxElement e, qualified_type target, expression_meaning &m)
 {
     binary128_value_passes = true;
+    atomic_object_operand = true;
     analysis_result r = target_expression(e, target, m);
     binary128_value_passes = false;
+    atomic_object_operand = false;
     return r;
 }
 
