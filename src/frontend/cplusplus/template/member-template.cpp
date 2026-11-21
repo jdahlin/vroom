@@ -345,7 +345,8 @@ analysis_result semantic_analysis::member_template_call(
             early.append(e);
         }
     for (const expression_meaning &e : early)
-        if (e.entity && entity_table[e.entity].kind == entity_kind::function)
+        if (e.entity && entity_table[e.entity].kind == entity_kind::function &&
+            entity_table[e.entity].next_overload)
             return not_supported(n, "temp.deduct.call");
     owned_array<overload_candidate> candidates;
     owned_array<uint32_t> first_arguments;
