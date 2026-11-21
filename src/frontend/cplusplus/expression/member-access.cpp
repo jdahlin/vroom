@@ -315,6 +315,8 @@ SyntaxElement semantic_analysis::member_template_id(SyntaxRef n) const
         id = n[2];
     else if (n.size() == 4 && n[2].is(standard_keyword::template_))
         id = n[3];
+    if (id.is(syntax_kind::qualified_id) && id.size() >= 2)
+        id = id.back();
     if (id.is(syntax_kind::simple_template_id) && id.size() >= 3 &&
         id[0].is_identifier())
         return id;
@@ -394,8 +396,32 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
 {
     bool arrow = n[1].is(preprocessing_op_or_punc::ARROW);
     token_index name = 0;
+    entity_index qual_class = 0;
     if (n[2].is_identifier()) {
         name = n[2].token();
+    } else if (n[2].is(syntax_kind::qualified_id) && n[2].size() >= 2 &&
+               n[2][0].is(syntax_kind::nested_name_specifier)) {
+        /* [expr.ref]/4: E1.B::m or E1->B::m */
+        nominated_scope qscope;
+        VTRY(qr, nested_name_specifier(n[2][0], qscope, false));
+        if (qscope.global || qscope.dependent || !qscope.entity ||
+            entity_table[qscope.entity].kind != entity_kind::class_type ||
+            !entity_table[qscope.entity].size)
+            return not_supported(n, "expr.ref");
+        qual_class = qscope.entity;
+        SyntaxElement rhs = n[2].back();
+        if (rhs.is_identifier()) {
+            name = rhs.token();
+        } else if (rhs.is(syntax_kind::simple_template_id) && rhs.size() >= 3 &&
+                   rhs[0].is_identifier()) {
+            name = rhs[0].token();
+        } else if (auto function = rhs.operator_function_id()) {
+            declarator_meaning function_name;
+            VTRY(r, operator_function_id(function, function_name));
+            name = function_name.id;
+        } else {
+            return not_supported(n, "expr.ref");
+        }
     } else if (SyntaxElement id = member_template_id(n);
                id.is(syntax_kind::simple_template_id)) {
         /* [temp.names]/4: x.f<T> and x.template f<T> */
@@ -438,8 +464,16 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
                           "member access appears in the definition of that "
                           "class",
                           "expr.ref");
+    entity_index lookup_class = c;
+    if (qual_class) {
+        if (qual_class != c) {
+            VTRY(br, to_base(name, qual_class, m));
+        }
+        lookup_class = qual_class;
+    }
     bool ambiguous = false;
-    entity_index e = class_member_lookup(c, tokens.identifier(name), ambiguous);
+    entity_index e =
+        class_member_lookup(lookup_class, tokens.identifier(name), ambiguous);
     if (ambiguous)
         return not_supported(n, "class.member.lookup");
     if (e && (entity_table[e].kind == entity_kind::none ||

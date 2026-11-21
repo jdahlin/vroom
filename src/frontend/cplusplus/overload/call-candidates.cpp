@@ -57,17 +57,23 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
             return c.token();
         return 0;
     }
-    if (c.is(syntax_kind::qualified_id) && c.size() == 2) {
-        if (c[1].is_token() && c[1].is_identifier())
-            return c[1].token();
-        if (c[1].is(syntax_kind::operator_function_id))
-            return c[1].first_token();
+    if (c.is(syntax_kind::qualified_id) && c.size() >= 2) {
+        SyntaxElement rhs = c.back();
+        if (rhs.is_token() && rhs.is_identifier())
+            return rhs.token();
+        if (rhs.is(syntax_kind::simple_template_id) && rhs[0].is_identifier())
+            return rhs[0].token();
+        if (rhs.is(syntax_kind::operator_function_id))
+            return rhs.first_token();
     }
     if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
         (c[1].is(preprocessing_op_or_punc::DOT,
-                 preprocessing_op_or_punc::ARROW)) &&
-        c[2].is_identifier())
-        return c[2].token();
+                 preprocessing_op_or_punc::ARROW))) {
+        if (c[2].is_identifier())
+            return c[2].token();
+        if (c[2].is(syntax_kind::qualified_id))
+            return callee_name(c[2]);
+    }
     /* x.f<T> and x.template f<T> */
     if (c.is(syntax_kind::postfix_expression) && c.size() >= 3 &&
         (c[1].is(preprocessing_op_or_punc::DOT,

@@ -74,8 +74,6 @@ temp-mem-generic-lambda	vcc: the rules of [expr.prim.lambda.closure] are not imp
 temp-mem-member-alias-template	vcc: the rules of [temp.deduct.call] are not implemented yet
 temp-mem-member-class-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
 temp-mem-member-deduction-guide	vcc: the rules of [temp.mem] are not implemented yet
-temp-mem-no-override	vcc: the rules of [expr.ref] are not implemented yet
-temp-mem-qualified-member-access	vcc: the rules of [expr.ref] are not implemented yet
 temp-mem-sibling-explicit-specialization	vcc: the rules of [temp.expl.spec] are not implemented yet
 temp-mem-specialization-member-class	vcc: the rules of [temp.expl.spec] are not implemented yet
 temp-mem-specialization-member-of-class	vcc: the rules of [dcl.meaning] are not implemented yet
