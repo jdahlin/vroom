@@ -2348,6 +2348,9 @@ lines:
 - Allocation and deallocation lookup uses the analysed members and bases of
   a laid-out class ([class.mem]/6). `SkBlendModeBlender.cpp` now first stops
   at a defaulted special member in `SkBlender.h`.
+- Private and protected defaulted default constructors retain access for
+  calls, friends and derived classes. `SkBlendModeBlender.cpp` now reaches
+  a friend function template in libc++ `unreachable_sentinel.h`.
 - Diagnostics in vcc's system; tuning starts from `cxxsema -stats`.
 
 ### S9. The rest of C++20

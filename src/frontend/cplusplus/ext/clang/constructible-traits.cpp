@@ -406,8 +406,16 @@ bool semantic_analysis::trivial_default_constructor(entity_index c) const
     const entity &x = entity_table[c];
     if (x.dynamic)
         return false;
-    if (x.first_constructor && !trivial_defaulted_default_constructor(c))
-        return false;
+    if (x.first_constructor && !trivial_defaulted_default_constructor(c)) {
+        bool implicit_default = false;
+        for (entity_index k = x.first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (entity_table[k].implicit &&
+                !type_table[entity_table[k].type.unqualified()].parameter_count)
+                implicit_default = true;
+        if (!implicit_default)
+            return false;
+    }
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
         if (m.kind == entity_kind::variable && m.nonstatic_member &&
