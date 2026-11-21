@@ -1616,6 +1616,17 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     uint32_t name = tokens.identifier(m.id);
     bool is_function =
         type_table[type.unqualified()].kind == type_kind::function;
+    if (is_function && !s.typedef_ &&
+        type_table[s.type.unqualified()].kind == type_kind::function &&
+        type == s.type && entity_table[c].instantiation)
+        /* [temp.spec]/8: "If a function declaration acquired its function type
+           through a dependent type without using the syntactic form of a
+           function declarator, the program is ill-formed" */
+        return ill_formed_at_token(m.id,
+                                   "a function declaration shall not acquire "
+                                   "its function type through a dependent type "
+                                   "without a function declarator",
+                                   "temp.spec");
     bool placeholder_return = is_function && contains_placeholder(type);
     if (placeholder_return) {
         /* [dcl.spec.auto]/10: "A virtual function shall not have a

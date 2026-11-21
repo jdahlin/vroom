@@ -303,7 +303,21 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             owned_array<template_argument> rest;
             for (uint32_t i = fixed; i < ar.parameter_count; i++) {
                 template_argument element;
-                element.type = ap[i];
+                const struct type &at = type_table[ap[i].unqualified()];
+                if (exact && ar.parameter_count == fixed + 1 &&
+                    at.kind == type_kind::pack_expansion &&
+                    type_table[at.operand.unqualified()].kind ==
+                        type_kind::template_parameter &&
+                    !at.operand.cv()) {
+                    entity_index ae =
+                        type_table[at.operand.unqualified()].entity;
+                    element.kind = template_argument::kind_t::pack;
+                    element.count = UINT32_MAX;
+                    element.value = entity_table[ae].value;
+                    element.template_entity = ae;
+                } else {
+                    element.type = ap[i];
+                }
                 rest.append(element);
             }
             template_argument pack =

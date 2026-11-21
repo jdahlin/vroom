@@ -359,22 +359,6 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
     }
     if (instantiation_depth >= 64)
         return not_supported(at, "temp.inst");
-    /* [temp.spec]/8: "If a function declaration acquired its function type
-       through a dependent type without using the syntactic form of a
-       function declarator, the program is ill-formed": a member `T f;`
-       is a data member's syntax; which declarations name a parameter is
-       not kept, so a function type argument is not instantiated */
-    for (uint32_t i = 0; i < count; i++) {
-        if (type_table[arguments[i].type.unqualified()].kind ==
-            type_kind::function)
-            return not_supported(at, "temp.spec");
-        if (arguments[i].kind == template_argument::kind_t::pack)
-            for (uint32_t k = 0; k < arguments[i].count; k++)
-                if (type_table[pack_arguments[arguments[i].value + k]
-                                   .type.unqualified()]
-                        .kind == type_kind::function)
-                    return not_supported(at, "temp.spec");
-    }
     instantiation_record record;
     record.template_entity = ft.entity;
     /* [temp.class.spec.match]: the definition instantiated, the
