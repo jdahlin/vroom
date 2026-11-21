@@ -2358,6 +2358,9 @@ lines:
 - A refused, parsed class-template specialization holds its class-head name
   without hiding names in its arguments or base clause. `SkBlendModeBlender.cpp`
   now stops at a base-class lookup in `SkSpan.h`.
+- A namespace-qualified template-id names a base and its constructor
+  initializer ([class.derived]/2, [class.base.init]/3). `SkBlendModeBlender.cpp`
+  now stops at a constrained constructor in `SkSpan.h`.
 - Diagnostics in vcc's system; tuning starts from `cxxsema -stats`.
 
 ### S9. The rest of C++20
