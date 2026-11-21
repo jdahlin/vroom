@@ -1,6 +1,7 @@
 /* operators-and-calls.cpp: operators, assignments, calls and conditionals (lower-internal.h) */
 #include "lower-internal.h"
 #include "frontend/cplusplus/builtin-registry.h"
+#include <math.h>
 
 namespace cplusplus::lowering
 {
@@ -390,6 +391,49 @@ uint32_t c_lowering::call(const semantic_node &n)
                     if (type_of(arg) != want)
                         arg = cast(arg, want, AST_CAST_POINTER_TO_POINTER);
                     return dereference(arg, rtype);
+                }
+            }
+        }
+        /* [impl.clang] constant-fold __builtin_sqrt / __builtin_ceill on
+           floating-point literals (no libm call emitted) */
+        if (node(named).kind == semantic_kind::entity && n.count == 1) {
+            owned_buffer fn_name;
+            spelling(node(named).a, fn_name);
+            const uint32_t *items = analysis.semantics.items(n.first);
+            const semantic_node &a0 = node(items[0]);
+            if (a0.kind == semantic_kind::constant &&
+                record(a0.type).kind == type_kind::fundamental &&
+                (record(a0.type).fundamental == fundamental_type::double_ ||
+                 record(a0.type).fundamental ==
+                     fundamental_type::long_double)) {
+                bool is_sqrt =
+                    (fn_name.size() == 14 &&
+                     !memcmp(fn_name.data(), "__builtin_sqrt", 14)) ||
+                    (fn_name.size() == 4 && !memcmp(fn_name.data(), "sqrt", 4));
+                bool is_ceill =
+                    (fn_name.size() == 15 &&
+                     !memcmp(fn_name.data(), "__builtin_ceill", 15)) ||
+                    (fn_name.size() == 5 &&
+                     !memcmp(fn_name.data(), "ceill", 5));
+                if (is_sqrt || is_ceill) {
+                    owned_buffer lit;
+                    analysis.token_spelling(a0.at, lit.get());
+                    if (lit.size()) {
+                        vbuffer_append(lit.get(), "", 1);
+                        long double v = strtold(lit.data(), nullptr);
+                        if (is_sqrt && v >= 0.0L)
+                            v = sqrtl(v);
+                        else if (is_ceill)
+                            v = ceill(v);
+                        else
+                            is_sqrt = false;
+                        if (is_sqrt || is_ceill) {
+                            owned_buffer out;
+                            vbuffer_format_append(out.get(), "%.21Lg", v);
+                            return ast_builder_floating_literal(
+                                c, type(n.type, n.at), out.data(), out.size());
+                        }
+                    }
                 }
             }
         }

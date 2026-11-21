@@ -3,7 +3,6 @@ old-adl-friend-after-conversion	vcc: the rules of [temp.mem] are not implemented
 old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented yet
 old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
 old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
-old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
