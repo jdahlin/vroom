@@ -485,10 +485,20 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
           !entity_table[type_table[m.type.unqualified()].entity].destructor))
         return not_supported(at, "class.temporary");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
-       to a bit-field"; a const one is bound to a temporary (not
-       analysed) */
-    if (m.bit_field_width && m.category != value_category::prvalue)
-        return not_supported(at, "class.bit");
+       to a bit-field"; a const lvalue or rvalue reference is bound to a
+       temporary holding its value ([conv.lval]) */
+    if (m.bit_field_width && m.category != value_category::prvalue) {
+        if (r.kind == type_kind::lvalue_reference &&
+            (!(r.operand.cv() & cv_const) || (r.operand.cv() & cv_volatile)))
+            return ill_formed(at,
+                              "a non-const lvalue reference shall not be "
+                              "bound to a bit-field",
+                              "dcl.init.ref");
+        m.category = value_category::prvalue;
+        m.bit_field_width = 0;
+        m.node = expression_node(semantic_kind::conversion, m, at.first_token(),
+                                 m.node);
+    }
     qualified_type t1 = r.operand, t2 = m.type;
     const struct type x = type_table[t1.unqualified()];
     const struct type y = type_table[t2.unqualified()];
