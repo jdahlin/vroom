@@ -865,7 +865,9 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         x.kind != entity_kind::enumeration &&
         x.kind != entity_kind::template_specialization)
         return false;
-    if (!x.name && !x.linkage_name && !x.lambda)
+    if (!x.name && !x.linkage_name && !x.lambda &&
+        !(x.kind == entity_kind::class_type && enclosing_function(table, c) &&
+          analysis.number_closures))
         return false;
     /* [abi:mangling-compression]: a template's name seen before, with its
        prefix, is a <substitution> before the arguments */
@@ -1324,8 +1326,35 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
         return closure_type_name(e);
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
-                    x.kind == entity_kind::enumeration))
-        return source_name(x.linkage_name);
+                    x.kind == entity_kind::enumeration)) {
+        if (x.linkage_name)
+            return source_name(x.linkage_name);
+        /* [impl.clang]: an unnamed local class/union without a typedef name is
+           mangled as $_<n> in its enclosing function */
+        if (x.kind == entity_kind::class_type && enclosing_function(table, e) &&
+            analysis.number_closures) {
+            entity_index context = enclosing_function(table, e);
+            size_t n = 0;
+            bool seen = false;
+            for (entity_index k : analysis.unnumbered_closures) {
+                if (k == e) {
+                    seen = true;
+                    break;
+                }
+                if (enclosing_function(table, k) == context)
+                    n++;
+            }
+            if (!seen)
+                analysis.unnumbered_closures.append(e);
+            char buf[32];
+            size_t len =
+                static_cast<size_t>(snprintf(buf, sizeof(buf), "$_%zu", n));
+            number(len);
+            vbuffer_append(out, buf, len);
+            return true;
+        }
+        return false;
+    }
     return source_name(x.name);
 }
 

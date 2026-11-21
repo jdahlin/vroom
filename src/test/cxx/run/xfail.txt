@@ -14,7 +14,6 @@ old-empty-pack-constexpr	vcc: the rules of [dcl.decl] are not implemented yet
 old-enable-if-overloads	vcc: the rules of [temp.variadic] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
-old-local-unnamed-template-arg	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 old-long-double	vcc: C++ code generation does not handle a constant whose value analysis does not know yet
 old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
