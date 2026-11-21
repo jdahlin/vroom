@@ -845,6 +845,7 @@ class entities
        ([basic.link]/7), an unscoped enumerator in its enumeration
        ([dcl.enum]/11) */
     entity_index find(entity_index scope, uint32_t name) const;
+    entity_index find_c_linkage(uint32_t name, entity_kind kind) const;
     void bind(entity_index scope, uint32_t name, entity_index e,
               bool by_using_declaration = false);
     /* whether the name is bound in the scope by a using-declaration
