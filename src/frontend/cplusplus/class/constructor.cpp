@@ -1052,10 +1052,17 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
     if (!arguments.empty() && x.implicit_copy_deleted && !moved &&
         !x.defaulted_move_constructor && copy_argument_candidate(c, arguments))
         return not_supported(at, "class.copy.ctor");
-    if (arguments.empty() && trivial_defaulted_default_constructor(c))
-        /* value-initialization through a trivial X() = default
-           ([dcl.init]/8.2: zero-initialized): not analysed */
-        return not_supported(at, "dcl.init");
+    if (arguments.empty() && trivial_defaulted_default_constructor(c)) {
+        /* [dcl.init]/8.2: value-initialization of a class with a trivial
+           defaulted default constructor zero-initializes the object */
+        expression_meaning zero;
+        zero.type = qualified_type::make(type.unqualified(), cv_none);
+        zero.category = value_category::prvalue;
+        result.node =
+            expression_node(semantic_kind::zero, zero, at.first_token());
+        result.evaluation = constness::constant;
+        return analysis_result::well_formed;
+    }
     /* [temp.mem]/1: a constructor template only declared is a candidate
        too (member_template_declaration) */
     if (x.constructor_template)
