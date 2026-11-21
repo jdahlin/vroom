@@ -117,9 +117,14 @@ analysis_result semantic_analysis::member_template_declaration(
             return r;
         }
     }
+    /* [temp.mem]/2: a local class shall not have member templates; a nested
+       class of a namespace-scope class may */
+    entity_index top = entity_table[c].enclosing;
+    while (top && entity_table[top].kind == entity_kind::class_type)
+        top = entity_table[top].enclosing;
     if ((!inner.is(syntax_kind::function_definition,
                    syntax_kind::member_declaration)) ||
-        !is_namespace(entity_table[c].enclosing))
+        !is_namespace(top))
         return not_supported(n, "temp.mem");
     /* [ext:gnu_attributes] before it all; [class.ctor]/1: "Each
        decl-specifier in the decl-specifier-seq of a constructor
