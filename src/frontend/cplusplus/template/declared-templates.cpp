@@ -300,7 +300,7 @@ analysis_result semantic_analysis::template_head_parameters(
         entity_table[current_scope].kind == entity_kind::class_type &&
         n[1].is(syntax_kind::member_declaration);
     if (!member_alias && !member_class &&
-        (!is_namespace(current_scope) || defining_class))
+        (!is_namespace(current_scope) || (defining_class && !friend_allowed)))
         return not_supported(n, "temp.mem");
     /* template-head: template < template-parameter-list >; a
        requires-clause is [temp.constr] */
@@ -519,8 +519,11 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         return not_supported(n, "temp.fct");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
-    VTRY(declared, template_parameter_scope(n, parameters, outer, 0, index,
-                                            scope, first));
+    entity_index lookup_outer = outer;
+    if (defining_class)
+        lookup_outer = defining_class;
+    VTRY(declared, template_parameter_scope(n, parameters, lookup_outer, 0,
+                                            index, scope, first));
     specified s;
     declarator_meaning m;
     qualified_type type;
