@@ -2,7 +2,6 @@
 old-adl-friend-after-conversion	vcc: the rules of [temp.mem] are not implemented yet
 old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented yet
 old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
-old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
@@ -34,7 +33,6 @@ temp-mem-variable-template-constexpr	vcc: the rules of [class.mem] are not imple
 temp-mem-variable-template-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
 lambda-capture-alias-template	symbols: a closure type of an alias template belongs to the function that substitutes it
 lambda-capture-generic-conversion	vcc: the rules of [expr.prim.lambda.closure] are not implemented yet
-lambda-capture-lambda-template-argument	symbols: a member function of a specialization with a closure type argument is weak in clang
 gnu-builtin-clear-padding	vcc: the rules of [ext.clang] are not implemented yet
 gnu-builtin-complex	vcc: the rules of [ext.gnu] are not implemented yet
 gnu-builtin-coroutine	vcc: the rules of [basic.lookup.unqual] are not implemented yet

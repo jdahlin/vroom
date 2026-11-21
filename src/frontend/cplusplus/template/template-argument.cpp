@@ -455,6 +455,13 @@ analysis_result semantic_analysis::template_argument_for(
     if (entity_table[p].kind == entity_kind::template_entity)
         return template_template_argument(at, p, written, out);
     if (entity_table[p].kind == entity_kind::typedef_name) {
+        if (written.is(syntax_kind::qualified_id)) {
+            type_index qt = 0;
+            uint32_t cv = cv_none;
+            VTRY(qr, qualified_type_name(written, qt, cv));
+            out.type = qualified_type::make(qt, cv);
+            return analysis_result::well_formed;
+        }
         if (!written.is(syntax_kind::type_id))
             return not_supported(at, "temp.arg");
         return type_id(written, out.type);
