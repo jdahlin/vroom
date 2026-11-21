@@ -1345,22 +1345,17 @@ analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
             return function_template_id_value(n, ft, m);
     if (!vt || x.ambiguous)
         return not_supported(n, "temp.names");
+    return variable_template_id_of(n, vt, m);
+}
+
+analysis_result
+semantic_analysis::variable_template_id_of(SyntaxRef n, uint32_t vt,
+                                           expression_meaning &m)
+{
     owned_array<template_argument> arguments;
     VTRY(r, template_id_arguments(n, vt, arguments));
-    for (const template_argument &a : arguments) {
-        if (depends(type_table, a.type) || a.template_entity)
-            return not_supported(n, "temp.dep");
-        /* a pack's elements: each known ([temp.variadic]/1) */
-        if (a.kind == template_argument::kind_t::pack) {
-            if (a.count == UINT32_MAX)
-                return not_supported(n, "temp.dep");
-            for (uint32_t k = 0; k < a.count; k++)
-                if (depends(type_table, pack_arguments[a.value + k].type) ||
-                    pack_arguments[a.value + k].template_entity ||
-                    pack_arguments[a.value + k].count == UINT32_MAX)
-                    return not_supported(n, "temp.dep");
-        }
-    }
+    if (dependent_arguments(arguments))
+        return not_supported(n, "temp.dep");
     entity_index e = 0;
     VTRY_SET(r,
              instantiate_variable(n, vt, arguments.data(),
@@ -1700,12 +1695,16 @@ bool semantic_analysis::dependent_arguments(
     for (const template_argument &a : arguments) {
         if (depends_on_template_parameter(a.type) || a.template_entity)
             return true;
-        if (a.kind == template_argument::kind_t::pack)
+        if (a.kind == template_argument::kind_t::pack) {
+            if (a.count == UINT32_MAX)
+                return true;
             for (uint32_t k = 0; k < a.count; k++)
                 if (depends_on_template_parameter(
                         pack_arguments[a.value + k].type) ||
-                    pack_arguments[a.value + k].template_entity)
+                    pack_arguments[a.value + k].template_entity ||
+                    pack_arguments[a.value + k].count == UINT32_MAX)
                     return true;
+        }
     }
     return false;
 }
@@ -2383,18 +2382,8 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
     owned_array<template_argument> arguments;
     VTRY(filled, template_id_arguments(id, ct, arguments));
     /* [temp.dep.type]/9: "the template name is a template parameter" */
-    bool dependent = function_templates[ct - 1].is_parameter;
-    for (const template_argument &a : arguments) {
-        if (depends(type_table, a.type) || a.template_entity)
-            dependent = true;
-        /* a pack of dependent arguments (deduced from by
-           deduce_pack_argument, [temp.deduct.type]/9) */
-        if (a.kind == template_argument::kind_t::pack)
-            for (uint32_t k = 0; k < a.count; k++)
-                if (depends(type_table, pack_arguments[a.value + k].type) ||
-                    pack_arguments[a.value + k].template_entity)
-                    dependent = true;
-    }
+    bool dependent = function_templates[ct - 1].is_parameter ||
+                     dependent_arguments(arguments);
     if (dependent) {
         /* [temp.dep.type]/9: "A type is dependent if it is ... a
            simple-template-id in which either the template name is a
