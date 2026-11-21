@@ -2342,6 +2342,9 @@ lines:
 - Atomic lvalues retain their type for reference binding and overload resolution,
   and `__builtin_addressof` takes their address. `SkBlendModeBlender.cpp`
   now first stops at a defaulted special member in `SkRefCnt.h`.
+- Deleted move constructors are declared and diagnosed when selected by
+  overload resolution ([dcl.fct.def.delete]/2). `SkBlendModeBlender.cpp`
+  now first stops at deallocation lookup inside `SkRefCntBase`.
 - Diagnostics in vcc's system; tuning starts from `cxxsema -stats`.
 
 ### S9. The rest of C++20

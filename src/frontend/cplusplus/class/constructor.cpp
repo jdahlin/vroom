@@ -728,20 +728,17 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
            program */
         if (f.special == special_member::destructor)
             return deleted_definition(n, last_declared);
-        /* X(X&) = delete or X(X&&) = delete: which one a return of a local
-           chooses depends on [class.copy.elision]/3's implicit move, not
-           analysed */
+        /* An X(X&) constructor changes implicit-move fallback on returns,
+           which return-statement analysis does not yet model. */
         const struct type &ft = type_table[f.type.unqualified()];
         if (ft.parameter_count) {
             const struct type &first =
                 type_table[type_table.parameters(f.type.unqualified())[0]
                                .unqualified()];
-            if ((first.kind == type_kind::lvalue_reference ||
-                 first.kind == type_kind::rvalue_reference) &&
+            if (first.kind == type_kind::lvalue_reference &&
                 first.operand.unqualified() ==
                     entity_table[c].type.unqualified() &&
-                !(first.kind == type_kind::lvalue_reference &&
-                  first.operand.cv() == cv_const))
+                first.operand.cv() != cv_const)
                 return not_supported(n, "class.copy.elision");
         }
         return deleted_definition(n, last_declared);
