@@ -1471,7 +1471,11 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             /* a copy: subobject and the initializer add types, which may move
            type_table's */
             const struct type record = type_table[type.unqualified()];
-            if (record.kind == type_kind::array)
+            /* [class.base.init]/7: an array member can be initialized
+               by a braced-init-list, using the ordinary array rules. */
+            if (record.kind == type_kind::array &&
+                !(item.size() == 2 &&
+                  item[1].is(syntax_kind::braced_init_list)))
                 return not_supported(item, "class.base.init");
             expression_meaning object;
             VTRY(r, subobject(id, e, object));
