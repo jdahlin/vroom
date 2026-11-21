@@ -85,7 +85,8 @@ analysis_result semantic_analysis::best_viable_function(
     SyntaxRef at, const owned_array<overload_candidate> &candidates,
     const expression_meaning *object,
     const owned_array<expression_meaning> &arguments, size_t &chosen,
-    bool *none_viable, bool user_defined)
+    bool *none_viable, bool user_defined,
+    const owned_array<SyntaxElement> *written_arguments)
 {
     size_t n = arguments.size();
     /* each candidate's conversion sequences: the implicit object
@@ -95,8 +96,6 @@ analysis_result semantic_analysis::best_viable_function(
     owned_array<viability> state;
     for (const overload_candidate &c : candidates) {
         const struct type &f = type_table[c.type.unqualified()];
-        const qualified_type *parameters =
-            type_table.parameters(c.type.unqualified());
         size_t count = f.parameter_count;
         /* a member candidate's first argument is for its implicit object
            parameter ([over.match.oper]/3): its parameters are for the
@@ -148,11 +147,43 @@ analysis_result semantic_analysis::best_viable_function(
                    there shall exist for each argument an implicit
                    conversion sequence ([over.best.ics]) that converts that
                    argument to the corresponding parameter of F." */
-                if (argument.overload_name)
-                    a = overload_set_sequence(argument, parameters[i - first]);
-                else
-                    a = implicit_conversion_sequence(
-                        argument, parameters[i - first], user_defined);
+                qualified_type target =
+                    type_table.parameters(c.type.unqualified())[i - first];
+                if (written_arguments &&
+                    (*written_arguments)[k].is(syntax_kind::braced_init_list)) {
+                    if (type_table[target.unqualified()].kind ==
+                        type_kind::class_type) {
+                        /* [over.ics.list]: probe class list initialization.
+                           The selected parameter is copy-list-initialized
+                           in call_with. */
+                        substitution_mark mark = mark_substitution();
+                        initialized_value value;
+                        substituting++;
+                        analysis_result r = list_initialization(
+                            (*written_arguments)[k], target, true, value);
+                        substituting--;
+                        bool rolled_back = undo_substitution(mark);
+                        if (r == analysis_result::well_formed) {
+                            a.kind = sequence::form::user_defined;
+                            a.target = target;
+                            if (semantics[value.node].kind ==
+                                semantic_kind::construct)
+                                a.function = semantics[value.node].b;
+                        } else if (r != analysis_result::ill_formed ||
+                                   !rolled_back) {
+                            a.kind = sequence::form::unknown;
+                            a.user_defined_if_viable = true;
+                        }
+                    } else if (argument.node) {
+                        a = implicit_conversion_sequence(argument, target,
+                                                         user_defined);
+                    }
+                } else if (argument.overload_name) {
+                    a = overload_set_sequence(argument, target);
+                } else {
+                    a = implicit_conversion_sequence(argument, target,
+                                                     user_defined);
+                }
             } else {
                 /* [over.ics.ellipsis]/1: "An ellipsis conversion sequence
                    occurs when an argument in a function call is matched

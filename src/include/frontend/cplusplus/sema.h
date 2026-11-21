@@ -5469,7 +5469,8 @@ class semantic_analysis
         SyntaxRef at, const owned_array<overload_candidate> &candidates,
         const expression_meaning *object,
         const owned_array<expression_meaning> &arguments, size_t &chosen,
-        bool *none_viable = nullptr, bool user_defined = true);
+        bool *none_viable = nullptr, bool user_defined = true,
+        const owned_array<SyntaxElement> *written_arguments = nullptr);
     /* the functions of the overload set whose first is e
        (entity::next_overload), each once, added to out */
     void overload_set(entity_index e, owned_array<entity_index> &out) const;
