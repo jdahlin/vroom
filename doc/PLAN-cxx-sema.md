@@ -2339,6 +2339,9 @@ lines:
   base specialization ([temp.deduct.call]/4.3). Skia's libc++ atomic load
   calls get past deduction in `atomic_flag.h` and first fail on a deleted
   overload in `__atomic/support/c11.h`.
+- Atomic lvalues retain their type for reference binding and overload resolution,
+  and `__builtin_addressof` takes their address. `SkBlendModeBlender.cpp`
+  now first stops at a defaulted special member in `SkRefCnt.h`.
 - Diagnostics in vcc's system; tuning starts from `cxxsema -stats`.
 
 ### S9. The rest of C++20
