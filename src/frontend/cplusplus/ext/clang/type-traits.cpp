@@ -710,18 +710,12 @@ analysis_result semantic_analysis::builtin_template_types(
             }
         }
         for (uint32_t k = 0; k < times; k++) {
-            bool saved = expanding;
-            uint32_t saved_element = expansion_element;
-            if (expansion[w]) {
-                expanding = true;
-                expansion_element = k;
-                type_id_expansion = true;
-            }
             qualified_type t;
-            analysis_result r = type_id(a, t);
-            type_id_expansion = false;
-            expanding = saved;
-            expansion_element = saved_element;
+            analysis_result r = analysis_result::well_formed;
+            {
+                expansion_scope scope(*this, expansion[w], k, true);
+                r = type_id(a, t);
+            }
             if (r != analysis_result::well_formed)
                 return r;
             if (depends_on_template_parameter(t))

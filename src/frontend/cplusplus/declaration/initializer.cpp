@@ -1937,18 +1937,14 @@ analysis_result semantic_analysis::aggregate_element(
         at = clause.index();
     /* [temp.variadic]/7: the clause of a pack expansion is its pattern for
        one element */
-    bool saved_expanding = expanding;
-    uint32_t saved_element = expansion_element;
-    if (clause_packs && next < clause_packs->size() &&
-        (*clause_packs)[next] != no_expansion) {
-        expanding = true;
-        expansion_element = (*clause_packs)[next];
-    }
-    analysis_result r =
-        aggregate_element_clause(list, clauses, next, element, one, clause, at);
-    expanding = saved_expanding;
-    expansion_element = saved_element;
-    return r;
+    bool has_pack = clause_packs && next < clause_packs->size() &&
+                    (*clause_packs)[next] != no_expansion;
+    uint32_t pack_idx = 0;
+    if (has_pack)
+        pack_idx = (*clause_packs)[next];
+    expansion_scope scope(*this, has_pack, pack_idx);
+    return aggregate_element_clause(list, clauses, next, element, one, clause,
+                                    at);
 }
 
 analysis_result semantic_analysis::aggregate_element_clause(

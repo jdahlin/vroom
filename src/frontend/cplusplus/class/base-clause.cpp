@@ -298,15 +298,12 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
             name = name[name.size() - 1];
         token_index id = 0;
         entity_index base = 0;
-        bool saved_expanding = expanding;
-        uint32_t saved_element = expansion_element;
-        if (elements[si] != UINT32_MAX) {
-            expanding = true;
-            expansion_element = elements[si];
+        analysis_result named = analysis_result::well_formed;
+        {
+            expansion_scope scope(*this, elements[si] != UINT32_MAX,
+                                  elements[si]);
+            named = base_class_name(name, n, base, id);
         }
-        analysis_result named = base_class_name(name, n, base, id);
-        expanding = saved_expanding;
-        expansion_element = saved_element;
         if (named != analysis_result::well_formed)
             return named;
         named_bases.append(base);

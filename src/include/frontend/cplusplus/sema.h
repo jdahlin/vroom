@@ -4871,6 +4871,31 @@ class semantic_analysis
     owned_array<entity_index> pack_elements;
     bool expanding = false;
     uint32_t expansion_element = 0;
+    struct expansion_scope {
+        semantic_analysis &self;
+        bool saved_expanding;
+        uint32_t saved_element;
+        bool saved_type_id;
+        expansion_scope(semantic_analysis &s, bool active, uint32_t element,
+                        bool in_type_id = false)
+            : self(s), saved_expanding(s.expanding),
+              saved_element(s.expansion_element),
+              saved_type_id(s.type_id_expansion)
+        {
+            if (active) {
+                s.expanding = true;
+                s.expansion_element = element;
+                if (in_type_id)
+                    s.type_id_expansion = true;
+            }
+        }
+        ~expansion_scope()
+        {
+            self.expanding = saved_expanding;
+            self.expansion_element = saved_element;
+            self.type_id_expansion = saved_type_id;
+        }
+    };
     /* [dcl.init.aggr]/4.2: for the clauses of the list being aggregate
        initialized, the element of the pack each one expands (a clause that
        is no pack expansion's pattern: no_expansion), or null */

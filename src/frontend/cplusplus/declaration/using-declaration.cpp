@@ -198,17 +198,12 @@ analysis_result semantic_analysis::using_declarator_pack(UsingDeclarator n,
     if (!expansion_count(n.first_token(), n.end_token(), count))
         return not_supported(n, "temp.variadic");
     analysis_result result = analysis_result::well_formed;
-    bool saved_expanding = expanding;
-    uint32_t saved_element = expansion_element;
-    expanding = true;
     for (uint32_t e = 0; e < count; e++) {
-        expansion_element = e;
+        expansion_scope scope(*this, true, e);
         result = worse(result, using_declarator(n, if_exists));
         if (result != analysis_result::well_formed)
             break;
     }
-    expanding = saved_expanding;
-    expansion_element = saved_element;
     return result;
 }
 

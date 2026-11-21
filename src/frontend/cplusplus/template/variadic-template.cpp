@@ -332,14 +332,8 @@ bool semantic_analysis::has_pack_expansion(SyntaxElement list) const
 analysis_result semantic_analysis::expansion_element_expression(
     SyntaxElement pattern, uint32_t i, expression_meaning &m)
 {
-    bool saved = expanding;
-    uint32_t saved_element = expansion_element;
-    expanding = true;
-    expansion_element = i;
-    analysis_result r = expression(pattern, m);
-    expanding = saved;
-    expansion_element = saved_element;
-    return r;
+    expansion_scope scope(*this, true, i);
+    return expression(pattern, m);
 }
 
 /* the tokens of a syntax child */
