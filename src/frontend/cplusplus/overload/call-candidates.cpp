@@ -57,9 +57,12 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
             return c.token();
         return 0;
     }
-    if (c.is(syntax_kind::qualified_id) && c.size() == 2 && c[1].is_token() &&
-        c[1].is_identifier())
-        return c[1].token();
+    if (c.is(syntax_kind::qualified_id) && c.size() == 2) {
+        if (c[1].is_token() && c[1].is_identifier())
+            return c[1].token();
+        if (c[1].is(syntax_kind::operator_function_id))
+            return c[1].first_token();
+    }
     if (c.is(syntax_kind::postfix_expression) && c.size() == 3 &&
         (c[1].is(preprocessing_op_or_punc::DOT,
                  preprocessing_op_or_punc::ARROW)) &&
