@@ -13,14 +13,12 @@ old-empty-member-copy	vcc: the rules of [class.ctor] are not implemented yet
 old-empty-pack-constexpr	vcc: the rules of [dcl.decl] are not implemented yet
 old-enable-if-overloads	vcc: the rules of [temp.variadic] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
-old-ilist-ctor-not-viable	vcc: the rules of [class.mem] are not implemented yet
 old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
 old-initializer-lists	vcc: the rules of [class.mem] are not implemented yet
 old-local-unnamed-template-arg	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 old-long-double	vcc: C++ code generation does not handle a constant whose value analysis does not know yet
 old-member-pointers	vcc: the rules of [temp.res] are not implemented yet
 old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
-old-nested-lists	vcc: the rules of [class.mem] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
 old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
 old-packs	vcc: the rules of [temp.variadic] are not implemented yet

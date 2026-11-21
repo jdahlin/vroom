@@ -1525,10 +1525,16 @@ analysis_result semantic_analysis::constructor_list_initialization(
     qualified_type type, bool direct, initialized_value &result)
 {
     entity_index c = type_table[type.unqualified()].entity;
+    /* [over.match.list]/1.1: first phase: initializer-list constructors */
+    owned_array<entity_index> ilist_ctors;
+    owned_array<qualified_type> ilist_types;
     for (entity_index k = entity_table[c].first_constructor; k;
          k = entity_table[k].next_constructor) {
         const struct type &f = type_table[entity_table[k].type.unqualified()];
         if (!f.parameter_count)
+            continue;
+        if (f.parameter_count > 1 &&
+            entity_table[k].default_arguments < f.parameter_count - 1)
             continue;
         qualified_type first =
             type_table.parameters(entity_table[k].type.unqualified())[0];
@@ -1539,10 +1545,34 @@ analysis_result semantic_analysis::constructor_list_initialization(
         const struct type &p0 = type_table[first.unqualified()];
         if (p0.kind == type_kind::class_type && p0.entity != c &&
             named(p0.entity, "initializer_list") &&
-            std_namespace(entity_table[p0.entity].enclosing))
-            /* [over.match.list]/1.1: initializer-list constructors, the
-               first phase, are not analysed */
-            return not_supported(list, "over.match.list");
+            std_namespace(entity_table[p0.entity].enclosing)) {
+            ilist_ctors.append(k);
+            ilist_types.append(
+                qualified_type::make(first.unqualified(), cv_none));
+        }
+    }
+    if (ilist_ctors.size() == 1) {
+        qualified_type ilist_type = ilist_types[0];
+        initialized_value ilist_val;
+        substitution_mark mark = mark_substitution();
+        substituting++;
+        analysis_result ir = class_list_initialization(
+            list, clauses, ilist_type, false, ilist_val);
+        substituting--;
+        if (ir == analysis_result::well_formed) {
+            expression_meaning arg;
+            arg.type = ilist_type;
+            arg.category = value_category::prvalue;
+            arg.evaluation = ilist_val.evaluation;
+            arg.node = ilist_val.node;
+            owned_array<expression_meaning> one;
+            one.append(arg);
+            return construct(list, type, one, 0, result, !direct);
+        }
+        if (ir != analysis_result::ill_formed || !undo_substitution(mark))
+            return ir;
+    } else if (ilist_ctors.size() > 1) {
+        return not_supported(list, "over.match.list");
     }
     owned_array<expression_meaning> arguments;
     for (SyntaxElement clause : clauses) {
@@ -1948,10 +1978,13 @@ analysis_result semantic_analysis::aggregate_element_clause(
             next++;
             return initialize_with(at, e, element, false, true, one);
         }
+        if (!subaggregate) {
+            next++;
+            return initialize_with(at, e, element, false, true, one);
+        }
         /* a conversion from another class (a constructor or conversion
-           function), or into a class that is no aggregate */
-        if (!subaggregate ||
-            type_table[e.type.unqualified()].kind == type_kind::class_type)
+           function) into a subaggregate */
+        if (type_table[e.type.unqualified()].kind == type_kind::class_type)
             return not_supported(list, "dcl.init.aggr");
     }
     if (!subaggregate) {
