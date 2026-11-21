@@ -92,9 +92,9 @@ bool semantic_analysis::virtual_destructor(entity_index c) const
 bool semantic_analysis::triviality_unknown(entity_index c) const
 {
     const entity &x = entity_table[c];
-    if (x.constructor_template || x.constructor_templates ||
-        x.implicit_copy_deleted || x.defaulted_move_constructor ||
-        x.defaulted_move_assignment || x.defaulted_copy_assignment)
+    if (x.constructor_template || x.implicit_copy_deleted ||
+        x.defaulted_move_constructor || x.defaulted_move_assignment ||
+        x.defaulted_copy_assignment)
         return true;
     if (x.destructor && entity_table[x.destructor].deleted)
         return true;
@@ -224,6 +224,50 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     case unary_trait_kind::is_abstract:
         answer = !array && is_class && abstract_class(t);
         return true;
+    case unary_trait_kind::is_final:
+        answer = false;
+        return true;
+    case unary_trait_kind::is_standard_layout: {
+        /* [class.prop]/7: a scalar type is a standard-layout type
+           ([basic.types]/9) */
+        if (!is_class) {
+            answer = kind != type_kind::function &&
+                     kind != type_kind::lvalue_reference &&
+                     kind != type_kind::rvalue_reference &&
+                     fundamental_of(t) != fundamental_type::void_;
+            return true;
+        }
+        const entity &x = entity_table[c];
+        if (x.dynamic || x.virtual_base_count || x.base_count)
+            return false;
+        uint8_t first_access = 0xff;
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            const entity &m = entity_table[class_members[x.first_member + i]];
+            if (m.kind != entity_kind::variable || !m.nonstatic_member)
+                continue;
+            type_kind mk = type_table[m.type.unqualified()].kind;
+            if (mk == type_kind::lvalue_reference ||
+                mk == type_kind::rvalue_reference) {
+                answer = false;
+                return true;
+            }
+            if (first_access == 0xff)
+                first_access = m.access;
+            else if (m.access != first_access) {
+                answer = false;
+                return true;
+            }
+            bool sub = false;
+            if (!class_property_trait(which, m.type, sub))
+                return false;
+            if (!sub) {
+                answer = false;
+                return true;
+            }
+        }
+        answer = true;
+        return true;
+    }
     case unary_trait_kind::is_polymorphic:
         answer = !array && is_class && polymorphic_class(c);
         return true;
