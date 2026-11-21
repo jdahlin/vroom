@@ -2516,7 +2516,7 @@ The x86-64 Linux build includes the C++ front end in the self-built
 compiler. Call deduction counts an explicit type pack as one parameter
 ([temp.arg.explicit]/7, /9), leaving the parameters after that pack
 deducible in calls such as `syntax_call<Sums...>(f, v)`. The bootstrap
-also exercises aggregate braced assignment ([expr.ass]/10), constructor
+also exercises aggregate braced assignment ([expr.ass]/8), constructor
 argument packs in a new-expression ([temp.variadic]/5), and zero
 initialization before an implicit default constructor ([dcl.init]/8).
 
