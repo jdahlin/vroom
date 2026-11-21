@@ -436,20 +436,28 @@ static void copy_deduction(const owned_array<T> &from,
 
 /* [temp.deduct.call]/4.3: "If P is a class and P has the form
    simple-template-id, then the transformed A can be a derived class D of
-   the deduced A.  ..."  /5: "If there is more than one possible deduced
-   A, the type deduction fails." */
+   the deduced A." The same alternative applies to pointers to these
+   classes. /5: "If there is more than one possible deduced A, the type
+   deduction fails." */
 int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
                                         owned_array<template_argument> &deduced,
                                         owned_array<bool> &set)
 {
+    const struct type &parameter = type_table[p.unqualified()];
+    const struct type &argument = type_table[a.unqualified()];
+    if (parameter.kind == type_kind::pointer &&
+        argument.kind == type_kind::pointer) {
+        p = parameter.operand;
+        a = argument.operand;
+    }
     const struct type &pr = type_table[p.unqualified()];
     const struct type &ar = type_table[a.unqualified()];
     if (pr.kind != type_kind::dependent ||
         !entity_table[pr.entity].instantiation)
         return -1;
     /* (an arithmetic, enumeration, pointer or pointer-to-member A is no
-       class, nor derived from one: /4.3's derived class D is a class, and
-       a pointer to D matches a pointer P, which this P is not) */
+       class, nor derived from one. The one pointer level allowed by /4.3
+       has already been removed. */
     if (ar.kind == type_kind::fundamental ||
         ar.kind == type_kind::enumeration || ar.kind == type_kind::pointer ||
         ar.kind == type_kind::pointer_to_member)
@@ -464,6 +472,7 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
         return -1;
     int found = 0;
     owned_array<template_argument> result;
+    owned_array<bool> result_set;
     for (uint32_t i = 0; i < x.base_count; i++) {
         qualified_type b = qualified_type::make(
             entity_table[class_bases[x.first_base + i]].type.unqualified(),
@@ -487,18 +496,16 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
             continue;
         if (found) {
             for (uint32_t k = 0; k < values.size(); k++)
-                if (!(values[k] == result[k]))
+                if (given[k] != result_set[k] ||
+                    (given[k] && !(values[k] == result[k])))
                     return 0;
             continue;
         }
         found = 1;
-        for (uint32_t k = 0; k < values.size(); k++) {
-            result.append(values[k]);
-            set[k] = given[k];
-        }
+        copy_deduction(values, given, result, result_set);
     }
-    for (uint32_t k = 0; found && k < result.size(); k++)
-        deduced[k] = result[k];
+    if (found)
+        copy_deduction(result, result_set, deduced, set);
     return found;
 }
 

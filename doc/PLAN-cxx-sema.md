@@ -2335,6 +2335,10 @@ lines:
   return types now wait until used ([temp.inst]/3, /11).
   `SkBlendModeBlender.cpp` gets past `SkRefCnt.h` and first fails on template
   argument deduction in libc++'s `atomic_flag.h`.
+- Pointer arguments can deduce template parameters from a derived class's
+  base specialization ([temp.deduct.call]/4.3). Skia's libc++ atomic load
+  calls get past deduction in `atomic_flag.h` and first fail on a deleted
+  overload in `__atomic/support/c11.h`.
 - Diagnostics in vcc's system; tuning starts from `cxxsema -stats`.
 
 ### S9. The rest of C++20
