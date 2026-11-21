@@ -50,13 +50,98 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     if (!inner.is(syntax_kind::function_definition,
                   syntax_kind::simple_declaration))
         return not_supported(n, "temp.expl.spec");
+    /* [ext:gnu_attributes] before the declaration (e.g. SK_API /
+       visibility("default")) */
+    uint32_t lead = leading_gnu_attributes(inner);
+    for (uint32_t i = 0; i < lead; i++)
+        if (!inner[i].is(syntax_kind::gnu_attribute_specifier) ||
+            !gnu_attributes_without_effect(inner[i]))
+            return not_supported(n, "temp.expl.spec");
     bool defines = inner.is(syntax_kind::function_definition);
     /* [dcl.fct.def.delete], = default: not yet */
     if (defines && !inner.function_definition().function_body().plain())
         return not_supported(n, "temp.expl.spec");
+    /* [temp.expl.spec]/1.3: explicit specialization of a non-template member
+       function of a class template specialization (template<> R C<T>::f(...)) */
+    {
+        SyntaxTail tail(inner, lead);
+        if (tail.size() == 3 && tail[0].is(syntax_kind::decl_specifier_seq) &&
+            !tail[1].is_token() &&
+            tail[1].is(syntax_kind::noptr_declarator,
+                       syntax_kind::ptr_declarator) &&
+            ((defines && inner.function_definition().plain()) ||
+             (!defines && tail[2].is(preprocessing_op_or_punc::SEMICOLON))) &&
+            is_namespace(current_scope) && !defining_class &&
+            !function_state.active) {
+            size_t expressions_before = expressions.size();
+            size_t uses_before = name_uses.size();
+            entity_index outer = current_scope;
+            uint32_t saved_cv = function_cv;
+            owned_array<parameter_meaning> saved_parameters =
+                static_cast<owned_array<parameter_meaning> &&>(
+                    function_parameters);
+            specified ms;
+            declarator_meaning m;
+            qualified_type type;
+            analysis_result mr = decl_specifier_seq(tail[0], ms, false);
+            uint32_t cv = 0;
+            if (mr == analysis_result::well_formed) {
+                type = ms.type;
+                function_cv = 0;
+                function_parameters.clear();
+                declarator_template_id = true;
+                mr = declarator(inner, tail[1], type, m);
+                declarator_template_id = false;
+                cv = function_cv;
+            }
+            bool defaults = false;
+            for (const parameter_meaning &p : function_parameters)
+                if (p.default_argument)
+                    defaults = true;
+            current_scope = outer;
+            function_cv = saved_cv;
+            function_parameters =
+                static_cast<owned_array<parameter_meaning> &&>(
+                    saved_parameters);
+            expressions.resize(expressions_before);
+            name_uses.resize(uses_before);
+            if (mr == analysis_result::well_formed && m.has_id && m.qualifier &&
+                !m.template_id && !m.operator_function && !m.literal_operator &&
+                !defaults &&
+                entity_table[m.qualifier].kind == entity_kind::class_type &&
+                type_table[type.unqualified()].kind == type_kind::function &&
+                !ms.typedef_ && !ms.static_ && !ms.extern_ && !ms.aligned &&
+                !m.aligned && !ms.section && !m.section && !m.asm_label) {
+                entity_index e =
+                    entity_table.find(m.qualifier, tokens.identifier(m.id));
+                entity_index match = 0;
+                for (entity_index o = e;
+                     o && entity_table[o].kind == entity_kind::function;
+                     o = entity_table[o].next_overload) {
+                    if (entity_table[o].type == type &&
+                        entity_table[o].member_cv == cv) {
+                        match = o;
+                        break;
+                    }
+                }
+                if (match) {
+                    entity_table[match].member_body_deferred = false;
+                    if (!defines) {
+                        VTRY(cr, constexpr_redeclaration(m.id, match,
+                                                         ms.constexpr_));
+                        if (ms.inline_)
+                            entity_table[match].inline_ = true;
+                        entity_table.add_declaration(match, inner);
+                        return analysis_result::well_formed;
+                    }
+                    return function_definition(inner);
+                }
+            }
+        }
+    }
     specified s;
     uint32_t index = 0;
-    VTRY(r, named_specialization(n, inner, 0, true, false, s, index));
+    VTRY(r, named_specialization(n, inner, lead, true, false, s, index));
     /* [temp.expl.spec]/14 (Note): the template's exception specification
        is instantiated for the comparison: not here */
     if (dependent_exception_specification(

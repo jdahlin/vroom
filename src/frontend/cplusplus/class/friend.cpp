@@ -454,7 +454,7 @@ analysis_result semantic_analysis::friend_function_template(
     entity_index saved_scope = current_scope, saved_class = defining_class;
     bool saved_friend = friend_allowed;
     current_scope = enclosing_namespace(c);
-    defining_class = 0;
+    defining_class = c;
     friend_allowed = true;
     last_function_template = 0;
     analysis_result r = function_template_definition(n, inner);

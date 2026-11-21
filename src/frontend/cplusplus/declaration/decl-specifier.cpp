@@ -1347,6 +1347,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             named = class_type;
             named_at = c.first_token();
             if (!c.is(syntax_kind::simple_type_specifier,
+                      syntax_kind::simple_template_id,
                       syntax_kind::typename_specifier,
                       syntax_kind::decltype_specifier,
                       syntax_kind::gnu_typeof_specifier,

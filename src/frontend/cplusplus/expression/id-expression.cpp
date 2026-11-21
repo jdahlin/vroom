@@ -822,12 +822,23 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         (n.size() == 2 ||
          (n.size() == 3 && n[1].is(standard_keyword::template_))))
         return qualified_template_id(n, m);
-    if (n.size() != 2 || !n.nested_name_specifier() || !n.identifier())
+    if (n.size() != 2 || !n.nested_name_specifier())
         return not_supported(n, "expr.prim.id.qual");
     nominated_scope scope;
     VTRY(r, nested_name_specifier(n.nested_name_specifier(), scope));
-    token_index t = n.identifier().token();
-    uint32_t name = tokens.identifier(t);
+    token_index t = 0;
+    uint32_t name = 0;
+    if (n.identifier()) {
+        t = n.identifier().token();
+        name = tokens.identifier(t);
+    } else if (auto function = n[1].operator_function_id()) {
+        declarator_meaning function_name;
+        VTRY(or_, operator_function_id(function, function_name));
+        t = function_name.id;
+        name = tokens.identifier(t);
+    } else {
+        return not_supported(n, "expr.prim.id.qual");
+    }
     entity_index c = scope.entity;
     if (!is_namespace(c) && entity_table[c].kind == entity_kind::enumeration) {
         /* an unscoped enumeration's enumerators are bound in it as well as
