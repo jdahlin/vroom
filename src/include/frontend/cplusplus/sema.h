@@ -5330,12 +5330,14 @@ class semantic_analysis
         owned_array<template_argument> *all = nullptr,
         const owned_array<SyntaxElement> *written = nullptr,
         SyntaxRef written_at = 0,
-        const owned_array<template_argument> *specified = nullptr);
+        const owned_array<template_argument> *specified = nullptr,
+        const owned_array<bool> *written_expansion = nullptr);
     /* a call's template-id naming several function templates: its
        template-arguments as written, checked against each template by
        template_candidates ([temp.over]/1), from template_callee_parts to
        template_call */
     owned_array<SyntaxElement> overloaded_written;
+    owned_array<bool> overloaded_written_expansion;
     SyntaxRef overloaded_written_at = 0;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says

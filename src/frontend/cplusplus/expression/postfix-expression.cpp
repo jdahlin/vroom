@@ -1338,13 +1338,12 @@ analysis_result semantic_analysis::template_callee_parts(
         function_template_overloads(
             function_templates[function_template - 1].name, group);
         if (group.size() > 1) {
-            /* (their expansion is not analysed) */
-            for (bool x : expansion)
-                if (x)
-                    return not_supported(id.index(), "temp.variadic");
             overloaded_written.clear();
+            overloaded_written_expansion.clear();
             for (SyntaxElement a : written)
                 overloaded_written.append(a);
+            for (bool x : expansion)
+                overloaded_written_expansion.append(x);
             overloaded_written_at = id.index();
             return analysis_result::well_formed;
         }
@@ -1463,7 +1462,8 @@ analysis_result semantic_analysis::template_candidates(
     owned_array<overload_candidate> &candidates,
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
     const owned_array<SyntaxElement> *written, SyntaxRef written_at,
-    const owned_array<template_argument> *specified)
+    const owned_array<template_argument> *specified,
+    const owned_array<bool> *written_expansion)
 {
     for (uint32_t g : group) {
         /* the explicit template arguments ([temp.arg.explicit]), if given */
@@ -1484,27 +1484,58 @@ analysis_result semantic_analysis::template_candidates(
            or one of another kind, is no candidate ([temp.deduct]/2) */
         if (written) {
             for (size_t i = 0; !failed && i < written->size(); i++) {
-                uint32_t position =
-                    explicit_argument_position(g, static_cast<uint32_t>(i));
-                if (position == UINT32_MAX) {
-                    failed = true;
-                    break;
+                SyntaxElement a = (*written)[i];
+                bool is_exp = written_expansion && (*written_expansion)[i];
+                uint32_t times = 1;
+                if (is_exp) {
+                    token_index first = first_token(a);
+                    token_index end = first + 1;
+                    if (!a.is_token())
+                        end = a.end_token();
+                    if (end > first + 1 &&
+                        SyntaxElement::from_token(end - 1).is(
+                            preprocessing_op_or_punc::ELLIPSIS))
+                        end--;
+                    if (!expansion_count(first, end, times)) {
+                        r = not_supported(written_at, "temp.variadic");
+                        break;
+                    }
                 }
-                entity_index p = template_parameter_entities
-                    [function_templates[g - 1].first_parameter + position];
-                bool type_parameter =
-                    entity_table[p].kind == entity_kind::typedef_name;
-                if (entity_table[p].kind != entity_kind::template_entity &&
-                    type_parameter != (*written)[i].is(syntax_kind::type_id)) {
-                    failed = true;
-                    break;
+                for (uint32_t k = 0; !failed && k < times; k++) {
+                    uint32_t position = explicit_argument_position(
+                        g, static_cast<uint32_t>(d.size()));
+                    if (position == UINT32_MAX) {
+                        failed = true;
+                        break;
+                    }
+                    entity_index p = template_parameter_entities
+                        [function_templates[g - 1].first_parameter + position];
+                    bool type_parameter =
+                        entity_table[p].kind == entity_kind::typedef_name;
+                    if (entity_table[p].kind != entity_kind::template_entity &&
+                        type_parameter != a.is(syntax_kind::type_id)) {
+                        failed = true;
+                        break;
+                    }
+                    template_argument x;
+                    bool saved = expanding;
+                    uint32_t saved_element = expansion_element;
+                    if (is_exp) {
+                        expanding = true;
+                        expansion_element = k;
+                        type_id_expansion = true;
+                    }
+                    r = template_argument_for(written_at, g, position, a,
+                                              d.data(), x);
+                    type_id_expansion = false;
+                    expanding = saved;
+                    expansion_element = saved_element;
+                    if (r != analysis_result::well_formed)
+                        break;
+                    d.append(x);
                 }
-                template_argument x;
-                r = template_argument_for(written_at, g, position,
-                                          (*written)[i], d.data(), x);
                 if (r != analysis_result::well_formed)
                     break;
-                d.append(x);
             }
         }
         if (r == analysis_result::well_formed && !failed)
@@ -1545,10 +1576,14 @@ analysis_result semantic_analysis::template_call(
     owned_array<expression_meaning> &early, expression_meaning &f)
 {
     owned_array<SyntaxElement> written;
+    owned_array<bool> written_expansion;
     SyntaxRef written_at = overloaded_written_at;
     for (SyntaxElement a : overloaded_written)
         written.append(a);
+    for (bool x : overloaded_written_expansion)
+        written_expansion.append(x);
     overloaded_written.clear();
+    overloaded_written_expansion.clear();
     overloaded_written_at = 0;
     owned_array<qualified_type> types;
     /* (arguments analysed already: a pack expansion's, call) */
@@ -1658,12 +1693,15 @@ analysis_result semantic_analysis::template_call(
         owned_array<template_argument> all;
         function_candidates(functions, false, candidates, &first_arguments);
         const owned_array<SyntaxElement> *given_written = nullptr;
-        if (written_at)
+        const owned_array<bool> *given_expansion = nullptr;
+        if (written_at) {
             given_written = &written;
-        VTRY(added, template_candidates(n, group, meanings,
-                                        static_cast<uint32_t>(early.size()),
-                                        candidates, &first_arguments, &all,
-                                        given_written, written_at));
+            given_expansion = &written_expansion;
+        }
+        VTRY(added, template_candidates(
+                        n, group, meanings, static_cast<uint32_t>(early.size()),
+                        candidates, &first_arguments, &all, given_written,
+                        written_at, nullptr, given_expansion));
         if (candidates.empty())
             /* (deduction failed for each: no viable function, which
                clang reports with each template's reason) */
