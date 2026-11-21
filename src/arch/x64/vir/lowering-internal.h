@@ -105,6 +105,8 @@ VPRIV bool x64_vir_fold_edits_check(x64_vir_context *L, uint32_t b,
 VPRIV bool x64_vir_memory_next_fold(x64_vir_context *L, uint32_t b, uint32_t v);
 VPRIV bool x64_vir_value_fits_unsigned(const vir_function *f, uint32_t v,
                                        unsigned width);
+VPRIV bool x64_vir_memory_address_fold(x64_vir_context *L, uint32_t b,
+                                       uint32_t v, int base, int index);
 VPRIV bool x64_vir_memory_cast_fold(x64_vir_context *L, uint32_t b, uint32_t v);
 VPRIV unsigned x64_vir_word_read_match(x64_vir_context *L, uint32_t b,
                                        uint32_t v, uint32_t *end);

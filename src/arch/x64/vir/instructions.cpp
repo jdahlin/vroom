@@ -275,7 +275,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             return;
         }
     }
-    if (i->op == VIR_OP_PTRADD && x64_vir_memory_next_fold(L, b, v)) {
+    if (i->op == VIR_OP_PTRADD && x64_vir_memory_address_fold(L, b, v, a, c)) {
         L->memory_value = v;
         L->memory_base = a;
         L->memory_offset = 0;
