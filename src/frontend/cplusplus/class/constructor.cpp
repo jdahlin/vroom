@@ -2063,8 +2063,7 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
         entity_index base_class =
             type_table[entity_table[inheriting[d].base].type.unqualified()]
                 .entity;
-        if (entity_table[base_class].constructor_template ||
-            entity_table[base_class].constructor_templates)
+        if (entity_table[base_class].constructor_template)
             return not_supported(n, "temp.mem");
         /* [class.default.ctor]/1: c has an implicit default constructor
            unless a constructor is user-declared, which hides the base's
@@ -2077,6 +2076,21 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
              k = entity_table[k].next_constructor)
             if (!entity_table[k].implicit)
                 user_declared = true;
+        if (entity_table[base_class].constructor_templates) {
+            entity_index from = entity_table[base_class].constructor_templates;
+            entity_index to = entity_table[c].constructor_templates;
+            if (!to) {
+                to = make_held_name(entity_table[c].name, c);
+                entity_table[c].constructor_templates = to;
+            }
+            for (size_t i = 0, m = function_templates.size(); i < m; i++)
+                if (function_templates[i].name == from &&
+                    !function_templates[i].unusable) {
+                    function_template copy = function_templates[i];
+                    copy.name = to;
+                    function_templates.append(copy);
+                }
+        }
         /* [class.default.ctor]/1: the inherited constructors are no
            user-declared ones, so c has its implicit default constructor;
            a trivial one is no entity until a constructor beside it makes
