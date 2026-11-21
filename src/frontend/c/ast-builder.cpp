@@ -6,7 +6,17 @@
 
 cc *ast_builder_open(pp *p, const cc_options *o)
 {
-    return cc_translation_unit_open(p, o);
+    cc *c = cc_translation_unit_open(p, o);
+
+    /* The builder is never inside a C scope, but what it builds is function
+       bodies (a symbol it makes itself says its depth: ast_builder_symbol),
+       and the builtins it calls (x86's pmovmskb128, ...) make their scratch
+       variables with cc_symbol_new, at the scope's depth: at 0 such a variable
+       is a file-scope one, a static in .bss that every thread shared.  A
+       local one is at depth 1. */
+    if (c)
+        c->depth = 1;
+    return c;
 }
 
 struct ast *ast_builder_ast(cc *c)
