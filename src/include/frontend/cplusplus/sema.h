@@ -4257,6 +4257,8 @@ class semantic_analysis
        template */
     struct function_template {
         entity_index entity = 0, name = 0;
+        entity_index friend_class = 0;
+        bool hidden_friend = false;
         SyntaxRef declaration = 0, definition = 0;
         /* a function template's function-definition or (declared, not
            yet defined: definition 0) simple-declaration, whose first two

@@ -87,8 +87,12 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             r = lambda_specialization(ft.declarator, false, lambda_type, 0);
         else if (constructor && specifiers)
             r = constructor_specifiers(d_syntax[d_skip], s);
-        else if (specifiers)
+        else if (specifiers) {
+            bool saved_friend = friend_allowed;
+            friend_allowed = ft.friend_class != 0;
             r = decl_specifier_seq(d_syntax[d_skip], s, false);
+            friend_allowed = saved_friend;
+        }
         qualified_type type = s.type;
         if (guide)
             type = lambda_type;
@@ -114,6 +118,11 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             instantiating = index + 1;
             r = declare_specialization(ft.declarator, m.id, type, s, e);
             instantiating = 0;
+            if (r == analysis_result::well_formed && ft.friend_class &&
+                ft.definition) {
+                entity_table[e].inline_ = true;
+                friend_definitions.append({ft.definition, e, ft.friend_class});
+            }
         }
         /* [dcl.fct.def.delete]/2: a specialization of a deleted template
            is deleted from its declaration on, a call of it ill-formed;
@@ -252,7 +261,10 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         r = lambda_specialization(ft.definition, true, type,
                                   instantiations[index].specialization);
     } else {
+        bool saved_friend = friend_allowed;
+        friend_allowed = ft.friend_class != 0;
         r = function_definition(ft.definition);
+        friend_allowed = saved_friend;
     }
     member_template_declarator(0);
     instantiations[index].defining = false;

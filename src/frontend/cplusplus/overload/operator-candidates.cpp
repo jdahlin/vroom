@@ -362,11 +362,23 @@ analysis_result semantic_analysis::overloaded_operator(
             return not_supported(n, "basic.lookup.argdep");
         if (!held_names.empty()) {
             owned_array<uint32_t> group;
+            owned_array<entity_index> associated_classes, associated_spaces;
+            if (!associated_namespaces(types, associated_classes,
+                                       associated_spaces))
+                return not_supported(n, "basic.lookup.argdep");
             for (entity_index held : held_names) {
                 owned_array<uint32_t> one;
                 function_template_overloads(held, one);
-                for (uint32_t t : one)
-                    group.append(t);
+                for (uint32_t t : one) {
+                    const function_template &entry = function_templates[t - 1];
+                    bool visible = !entry.hidden_friend;
+                    if (entry.hidden_friend)
+                        for (entity_index cls : associated_classes)
+                            if (cls == entry.friend_class)
+                                visible = true;
+                    if (visible)
+                        group.append(t);
+                }
                 for (const template_name_function &x : template_name_functions)
                     if (x.name == held)
                         set.append(x.function);
