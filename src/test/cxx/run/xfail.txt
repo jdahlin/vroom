@@ -6,7 +6,6 @@ old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
 old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
-old-empty-base-assign	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-empty-pack-constexpr	vcc: the rules of [dcl.decl] are not implemented yet
 old-enable-if-overloads	vcc: the rules of [temp.variadic] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
