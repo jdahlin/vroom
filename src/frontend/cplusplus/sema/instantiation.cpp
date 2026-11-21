@@ -207,6 +207,27 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
     return instantiate_definition(at, index);
 }
 
+/* [temp.inst]/4: queue or instantiate the definition of a function template
+   specialization when it is odr-used outside an unevaluated operand. */
+analysis_result
+semantic_analysis::need_specialization_definition(SyntaxRef at, entity_index f)
+{
+    if (!entity_table[f].instantiation || unevaluated)
+        return analysis_result::well_formed;
+    uint32_t idx = entity_table[f].instantiation - 1;
+    instantiation_record &rec = instantiations[idx];
+    const entity tmpl = entity_table[rec.template_entity];
+    const function_template ft = function_templates[tmpl.instantiation - 1];
+    if (rec.defined || rec.defining || rec.pending)
+        return analysis_result::well_formed;
+    if (!tmpl.constexpr_ || !ft.definition) {
+        rec.pending = true;
+        pending_definitions.append(idx);
+        return analysis_result::well_formed;
+    }
+    return instantiate_definition(at, idx);
+}
+
 /*
  * The definition of a specialization: the template's function-definition
  * analysed again in the specialization's scope, declare() finding the

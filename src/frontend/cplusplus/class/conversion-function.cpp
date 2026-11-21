@@ -551,20 +551,7 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
                           "class.access");
     token_index t = at.first_token();
     VTRY(r, deleted_use(t, f));
-    if (entity_table[f].instantiation && !unevaluated) {
-        uint32_t idx = entity_table[f].instantiation - 1;
-        instantiation_record &rec = instantiations[idx];
-        const entity tmpl = entity_table[rec.template_entity];
-        const function_template ft = function_templates[tmpl.instantiation - 1];
-        if (!rec.defined && !rec.defining && !rec.pending) {
-            if (!tmpl.constexpr_ || !ft.definition) {
-                rec.pending = true;
-                pending_definitions.append(idx);
-            } else {
-                VTRY_SET(r, instantiate_definition(at, idx));
-            }
-        }
-    }
+    VTRY_SET(r, need_specialization_definition(at, f));
     /* (a captureless lambda's closure object has no members: its
        temporary is the call's object argument, as for its call operator) */
     if ((aggregate_prvalue(m) && !entity_table[c].lambda) ||

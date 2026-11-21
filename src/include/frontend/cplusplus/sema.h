@@ -4377,6 +4377,8 @@ class semantic_analysis
     owned_array<uint32_t> pending_definitions;
     /* the definition of instantiations[index]'s specialization */
     analysis_result instantiate_definition(SyntaxRef at, uint32_t index);
+    analysis_result need_specialization_definition(SyntaxRef at,
+                                                   entity_index f);
     /* the definitions pending_definitions waits for */
     void instantiate_pending();
     /* in an instantiation, the template's first token: a namespace's
