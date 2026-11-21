@@ -119,8 +119,10 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
     const entity &x = entity_table[e];
     if (x.nonstatic_member && x.enclosing != object_class) {
         /* [class.derived]/1: a member of a base class, of the base class
-           subobject */
-        VTRY(r, to_base(at, x.enclosing, m));
+           subobject (accessible() above already checked access to the member
+           through object_class, including public using-declarations of private
+           base members, [class.access.base]/5) */
+        VTRY(r, to_base(at, x.enclosing, m, false));
     }
     if (x.kind == entity_kind::variable && x.nonstatic_member) {
         /* [expr.ref]/6.2: "If E2 is a non-static data member and the type

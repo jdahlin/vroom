@@ -653,7 +653,8 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
  * analysed).
  */
 analysis_result semantic_analysis::to_base(token_index at, entity_index base,
-                                           expression_meaning &m)
+                                           expression_meaning &m,
+                                           bool check_access)
 {
     if (aggregate_prvalue(m) && type_table[m.type.unqualified()].entity != base)
         return not_supported(current_declaration, "class.temporary");
@@ -677,7 +678,7 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
             continue;
         }
         step = nonvirtual_step(c, base);
-        if (entity_table[step].access && current_class() != c &&
+        if (check_access && entity_table[step].access && current_class() != c &&
             !in_friend_of(c)) {
             if (current_class())
                 return not_supported(current_declaration, "class.access.base");

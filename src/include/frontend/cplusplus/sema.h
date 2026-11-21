@@ -3843,7 +3843,7 @@ class semantic_analysis
     /* the glvalue m of a class derived from base converted to its base
        class subobject ([expr.ref]/6.2 through [class.derived]/1) */
     analysis_result to_base(token_index at, entity_index base,
-                            expression_meaning &m);
+                            expression_meaning &m, bool check_access = true);
     /* the base-clause of class c ([class.derived]) */
     analysis_result base_clause(entity_index c, BaseClause n,
                                 standard_keyword key);
