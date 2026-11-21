@@ -145,6 +145,8 @@ static const virbuild_pass virbuild_passes[] = {
     /* (loop-constants, virbuild_loop_constants_pin, runs inside vectorize, per loop: a row of its own needs vectorize.c) */
     {"vectorize", virbuild_pass_vectorize, O | P, 0, O | P,
      U | VIRBUILD_PASS_FLAG_VECTOR_GATE, NULL}, /* vectorize.c */
+    {"address-clone", virbuild_addresses_clone, O | P, 0, O | P, 0,
+     NULL}, /* address-clone.c */
     /* required: VIR's block parameters take no critical edges (left out, the verifier rejects 10 741
 	   functions of the suites and 31 vcc tests miscompile, as -O2 does not verify) */
     {"split", virbuild_pass_split, O | P, 0, O | P,
