@@ -361,6 +361,38 @@ uint32_t c_lowering::call(const semantic_node &n)
                 AST_QUALIFIED_TYPE_UNQUALIFIED(
                     type(record(function_type).operand, n.at)),
                 0);
+        /* [impl.clang] std::move, std::forward, std::as_const of a single
+           argument: fold to the argument itself (no function call emitted) */
+        if (node(named).kind == semantic_kind::entity && n.count == 1 &&
+            n.category != value_category::prvalue) {
+            const entity &fn = analysis.entity_table[node(named).a];
+            entity_index enc = fn.enclosing;
+            if (enc &&
+                analysis.entity_table[enc].kind ==
+                    entity_kind::namespace_entity &&
+                analysis.entity_table[enc].enclosing == 0 && fn.name) {
+                owned_buffer ns_name, fn_name;
+                spelling(enc, ns_name);
+                spelling(node(named).a, fn_name);
+                if (ns_name.size() == 3 && !memcmp(ns_name.data(), "std", 3) &&
+                    ((fn_name.size() == 4 &&
+                      !memcmp(fn_name.data(), "move", 4)) ||
+                     (fn_name.size() == 7 &&
+                      !memcmp(fn_name.data(), "forward", 7)) ||
+                     (fn_name.size() == 8 &&
+                      !memcmp(fn_name.data(), "as_const", 8)))) {
+                    const uint32_t *items = analysis.semantics.items(n.first);
+                    uint32_t arg = expression(items[0]);
+                    if (!arg)
+                        return 0;
+                    ast_qualified_type rtype = type(n.type, n.at);
+                    ast_qualified_type want = pointer_to(rtype);
+                    if (type_of(arg) != want)
+                        arg = cast(arg, want, AST_CAST_POINTER_TO_POINTER);
+                    return dereference(arg, rtype);
+                }
+            }
+        }
         if (node(named).kind == semantic_kind::entity &&
             (analysis.entity_table[node(named).a].gnu_flags &
              gnu_compiler_builtin))

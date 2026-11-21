@@ -16,7 +16,6 @@ old-requires-params	vcc: the rules of [expr.prim.req] are not implemented yet
 old-spec-after-use	vcc: in the definition of an object, the type of that object shall not be an incomplete type ([basic.def])
 old-statement-expression	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-static-local-object	symbols: missing [] extra ['_ZGVZL1gvE1u', '_ZN1UC2Ev'] binding []
-old-std-forward-fold	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 old-ttp-patterns-vdtor	vcc: the rules of [class.base.init] are not implemented yet
 temp-names-concept-id	vcc: the rules of [temp.func.order] are not implemented yet
 temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implemented yet
