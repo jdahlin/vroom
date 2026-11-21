@@ -315,8 +315,13 @@ SyntaxElement semantic_analysis::member_template_id(SyntaxRef n) const
         id = n[2];
     else if (n.size() == 4 && n[2].is(standard_keyword::template_))
         id = n[3];
+    if (id.is(syntax_kind::qualified_id) && id.size() >= 2)
+        id = id.back();
     if (id.is(syntax_kind::simple_template_id) && id.size() >= 3 &&
         id[0].is_identifier())
+        return id;
+    if (id.is(syntax_kind::template_id) && id.size() >= 3 &&
+        id[0].operator_function_id())
         return id;
     return SyntaxElement{};
 }
@@ -394,12 +399,44 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
 {
     bool arrow = n[1].is(preprocessing_op_or_punc::ARROW);
     token_index name = 0;
+    entity_index qual_class = 0;
+    bool conversion_id = false;
+    qualified_type conversion_target;
     if (n[2].is_identifier()) {
         name = n[2].token();
-    } else if (SyntaxElement id = member_template_id(n);
-               id.is(syntax_kind::simple_template_id)) {
-        /* [temp.names]/4: x.f<T> and x.template f<T> */
-        name = id[0].token();
+    } else if (n[2].is(syntax_kind::qualified_id) && n[2].size() >= 2 &&
+               n[2][0].is(syntax_kind::nested_name_specifier)) {
+        /* [expr.ref]/4: E1.B::m or E1->B::m */
+        nominated_scope qscope;
+        VTRY(qr, nested_name_specifier(n[2][0], qscope, false));
+        if (qscope.global || qscope.dependent || !qscope.entity ||
+            entity_table[qscope.entity].kind != entity_kind::class_type ||
+            !entity_table[qscope.entity].size)
+            return not_supported(n, "expr.ref");
+        qual_class = qscope.entity;
+        SyntaxElement rhs = n[2].back();
+        if (rhs.is_identifier()) {
+            name = rhs.token();
+        } else if (rhs.is(syntax_kind::simple_template_id) && rhs.size() >= 3 &&
+                   rhs[0].is_identifier()) {
+            name = rhs[0].token();
+        } else if (auto function = rhs.operator_function_id()) {
+            declarator_meaning function_name;
+            VTRY(r, operator_function_id(function, function_name));
+            name = function_name.id;
+        } else {
+            return not_supported(n, "expr.ref");
+        }
+    } else if (SyntaxElement id = member_template_id(n); id.is(
+                   syntax_kind::simple_template_id, syntax_kind::template_id)) {
+        /* [temp.names]/4: x.f<T>, x.template f<T>, x.operator()<T> */
+        if (id[0].is_identifier()) {
+            name = id[0].token();
+        } else if (auto function = id[0].operator_function_id()) {
+            declarator_meaning function_name;
+            VTRY(r, operator_function_id(function, function_name));
+            name = function_name.id;
+        }
     } else if (auto function = n[2].operator_function_id()) {
         /* [over.oper]/1: x.operator->() names the member operator
            function: the keyword's token takes the operator's name */
@@ -410,6 +447,11 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         /* [expr.prim.id.dtor]/2: a destructor's name can be the callee of
            a call only (a parenthesized one is not analysed) */
         return not_supported(n, "expr.prim.id.dtor");
+    } else if (n[2].is(syntax_kind::conversion_function_id)) {
+        /* [class.conv.fct]/1, [temp.mem]/5: explicit call to a conversion
+           function or conversion function template (a.operator T()) */
+        VTRY(r, conversion_type(n[2], conversion_target));
+        conversion_id = true;
     } else {
         /* template, a qualified-id, a conversion function's or a literal
            operator's */
@@ -438,8 +480,27 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
                           "member access appears in the definition of that "
                           "class",
                           "expr.ref");
+    if (conversion_id) {
+        bool ambiguous = false, unknown = false;
+        entity_index f = conversion_function_for(m, conversion_target, true,
+                                                 ambiguous, unknown);
+        if (unknown || ambiguous || !f ||
+            type_table[entity_table[f].type.unqualified()].operand !=
+                conversion_target)
+            return not_supported(n, "expr.ref");
+        VTRY_SET(r, need_specialization_definition(n, f));
+        return member_access(n[2].first_token(), f, m);
+    }
+    entity_index lookup_class = c;
+    if (qual_class) {
+        if (qual_class != c) {
+            VTRY(br, to_base(name, qual_class, m));
+        }
+        lookup_class = qual_class;
+    }
     bool ambiguous = false;
-    entity_index e = class_member_lookup(c, tokens.identifier(name), ambiguous);
+    entity_index e =
+        class_member_lookup(lookup_class, tokens.identifier(name), ambiguous);
     if (ambiguous)
         return not_supported(n, "class.member.lookup");
     if (e && (entity_table[e].kind == entity_kind::none ||
@@ -453,7 +514,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
             member_template_written.clear();
             member_template_written_at = 0;
             SyntaxElement id = member_template_id(n);
-            if (id.is(syntax_kind::simple_template_id)) {
+            if (id.is(syntax_kind::simple_template_id,
+                      syntax_kind::template_id)) {
                 owned_array<bool> expansion;
                 VTRY(w, written_arguments_of(id, member_template_written,
                                              expansion));
@@ -466,7 +528,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         }
         return not_supported(n, "over");
     }
-    if (member_template_id(n).is(syntax_kind::simple_template_id))
+    if (member_template_id(n).is(syntax_kind::simple_template_id,
+                                 syntax_kind::template_id))
         /* a template-id of no member function template analysis knows */
         return not_supported(n, "temp.names");
     if (!e)

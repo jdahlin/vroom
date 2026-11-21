@@ -651,7 +651,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             base = &i;
             index = &a;
         }
-        if (is_array(*base) && base->category != value_category::lvalue)
+        if (is_array(*base) && base->category == value_category::prvalue)
             return not_supported(n, "expr.sub");
         r = operand_value(n, *base);
         if (r == analysis_result::well_formed)
@@ -1703,10 +1703,15 @@ analysis_result semantic_analysis::template_call(
                         n, group, meanings, static_cast<uint32_t>(early.size()),
                         candidates, &first_arguments, &all, given_written,
                         written_at, nullptr, given_expansion));
-        if (candidates.empty())
+        if (candidates.empty()) {
+            /* [temp.deduct]/8: no viable candidate in an immediate context
+               is a substitution failure */
+            if (substituting)
+                return analysis_result::ill_formed;
             /* (deduction failed for each: no viable function, which
                clang reports with each template's reason) */
             return not_supported(n, "temp.over");
+        }
         size_t chosen = 0;
         VTRY(r, best_viable_function(n, candidates, nullptr, early, chosen));
         if (!candidates[chosen].template_index) {

@@ -670,9 +670,10 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
     if (x.kind == entity_kind::function && x.next_overload &&
         t != overloaded_callee && !chosen)
         return not_supported(current_declaration, "over.over");
-    /* [dcl.fct.def.delete]/2 (of an overload set: the function chosen,
-       resolve_call) */
-    if (x.kind == entity_kind::function && (!x.next_overload || chosen)) {
+    /* [dcl.fct.def.delete]/2 (of an overload set or unqualified call subject
+       to ADL: the function chosen, resolve_call / call_function) */
+    if (x.kind == entity_kind::function &&
+        ((!x.next_overload && t != overloaded_callee) || chosen)) {
         VTRY(r, deleted_use(t, e));
     }
     if (x.nonstatic_member)

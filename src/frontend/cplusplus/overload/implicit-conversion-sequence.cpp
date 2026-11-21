@@ -366,8 +366,10 @@ bool semantic_analysis::conversion_function_to_class(
     found = of_form(sequence::form::bad);
     entity_index c1 = type_table[to.unqualified()].entity;
     owned_array<entity_index> candidates;
+    owned_array<entity_index> conv_templates;
     if (!visible_conversion_functions(type_table[a.type.unqualified()].entity,
-                                      candidates)) {
+                                      candidates, &conv_templates) ||
+        !deduce_conversion_templates(conv_templates, to, candidates)) {
         unknown = true;
         return false;
     }

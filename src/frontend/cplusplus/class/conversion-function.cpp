@@ -295,15 +295,22 @@ semantic_analysis::conversion_function_result(entity_index f) const
  * conversion ambiguous, which the conversion refuses.
  */
 bool semantic_analysis::visible_conversion_functions(
-    entity_index c, owned_array<entity_index> &out) const
+    entity_index c, owned_array<entity_index> &out,
+    owned_array<entity_index> *templates) const
 {
     size_t first = out.size();
     for (entity_index f = own_conversion_functions(c); f;
          f = entity_table[f].next_overload) {
         /* [temp.mem]/1: a conversion function template, held under the
-           name, needs [temp.deduct.conv]: not analysed */
-        if (!entity_table[f].conversion_function)
-            return false;
+           name, needs [temp.deduct.conv] */
+        if (!entity_table[f].conversion_function) {
+            if (!templates || !member_function_template_of(f))
+                return false;
+            templates->append(f);
+            continue;
+        }
+        if (templates && entity_table[f].member_templates)
+            templates->append(entity_table[f].member_templates);
         out.append(f);
     }
     size_t own_end = out.size();
@@ -315,7 +322,7 @@ bool semantic_analysis::visible_conversion_functions(
         if (entity_table[b].kind != entity_kind::class_type)
             return false;
         owned_array<entity_index> inherited;
-        if (!visible_conversion_functions(b, inherited))
+        if (!visible_conversion_functions(b, inherited, templates))
             return false;
         for (entity_index f : inherited) {
             /* the declared type: operator int and operator int& convert to
@@ -351,6 +358,53 @@ bool semantic_analysis::visible_conversion_functions(
  * conversion sequence from the return type of F2".  A base's function takes
  * the object by a derived-to-base conversion (object_sequence, [over.ics.rank]/4.4).
  */
+bool semantic_analysis::deduce_conversion_templates(
+    const owned_array<entity_index> &conv_templates, qualified_type to,
+    owned_array<entity_index> &candidates)
+{
+    /* [temp.deduct.conv]/1: deduce template arguments for conversion function
+       templates from the destination type 'to' */
+    qualified_type dest = qualified_type::make(to.unqualified(), cv_none);
+    for (entity_index held : conv_templates) {
+        owned_array<uint32_t> group;
+        function_template_overloads(held, group);
+        for (uint32_t g : group) {
+            const function_template ft = function_templates[g - 1];
+            qualified_type ret =
+                type_table[entity_table[ft.entity].type.unqualified()].operand;
+            owned_array<template_argument> values;
+            owned_array<bool> set;
+            for (uint32_t i = 0; i < ft.parameter_count; i++) {
+                values.append(template_argument());
+                set.append(false);
+            }
+            if (!deduce_type(ret, dest, values, set, true))
+                continue;
+            bool all_set = true;
+            for (bool s : set)
+                if (!s)
+                    all_set = false;
+            if (!all_set)
+                continue;
+            entity_index spec = 0;
+            substitution_mark mark = mark_substitution();
+            substituting++;
+            unevaluated++;
+            analysis_result r =
+                instantiate(current_declaration, ft.entity, values.data(),
+                            ft.parameter_count, spec);
+            unevaluated--;
+            substituting--;
+            if (r == analysis_result::ill_formed && undo_substitution(mark))
+                continue;
+            if (r != analysis_result::well_formed || !spec)
+                return false;
+            candidates.append(spec);
+        }
+    }
+    return true;
+}
+
 entity_index
 semantic_analysis::conversion_function_for(const expression_meaning &m,
                                            qualified_type to, bool direct,
@@ -363,7 +417,9 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
         return 0;
     }
     owned_array<entity_index> candidates;
-    if (!visible_conversion_functions(c, candidates)) {
+    owned_array<entity_index> conv_templates;
+    if (!visible_conversion_functions(c, candidates, &conv_templates) ||
+        !deduce_conversion_templates(conv_templates, to, candidates)) {
         unknown = true;
         return 0;
     }
@@ -399,12 +455,57 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
         }
         int o = compare_conversions(object, best_object);
         int s = compare_conversions(second, best_second);
-        if (o < 0 || (o == 0 && s < 0)) {
+        int cmp = 0;
+        if (o != 0)
+            cmp = o;
+        else if (s != 0)
+            cmp = s;
+        else if (!x.instantiation && entity_table[best].instantiation)
+            /* [over.match.best]/2.4: non-template beats template */
+            cmp = -1;
+        else if (x.instantiation && !entity_table[best].instantiation)
+            cmp = 1;
+        else if (x.instantiation && entity_table[best].instantiation) {
+            /* [over.match.best]/2.5, [temp.func.order]: partial ordering of
+               conversion function templates by their return types */
+            entity_index t1 =
+                instantiations[x.instantiation - 1].template_entity;
+            entity_index t2 =
+                instantiations[entity_table[best].instantiation - 1]
+                    .template_entity;
+            if (t1 != t2) {
+                const function_template ft1 =
+                    function_templates[entity_table[t1].instantiation - 1];
+                const function_template ft2 =
+                    function_templates[entity_table[t2].instantiation - 1];
+                qualified_type r1 =
+                    type_table[entity_table[t1].type.unqualified()].operand;
+                qualified_type r2 =
+                    type_table[entity_table[t2].type.unqualified()].operand;
+                owned_array<template_argument> v1, v2;
+                owned_array<bool> s1, s2;
+                for (uint32_t i = 0; i < ft1.parameter_count; i++) {
+                    v1.append(template_argument());
+                    s1.append(false);
+                }
+                for (uint32_t i = 0; i < ft2.parameter_count; i++) {
+                    v2.append(template_argument());
+                    s2.append(false);
+                }
+                bool two_from_one = deduce_type(r2, r1, v2, s2, true);
+                bool one_from_two = deduce_type(r1, r2, v1, s1, true);
+                if (two_from_one && !one_from_two)
+                    cmp = -1;
+                else if (one_from_two && !two_from_one)
+                    cmp = 1;
+            }
+        }
+        if (cmp < 0) {
             best = f;
             best_object = object;
             best_second = second;
             ambiguous = false;
-        } else if (!(o > 0 || (o == 0 && s > 0))) {
+        } else if (cmp == 0) {
             ambiguous = true;
         }
     }
@@ -450,6 +551,7 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
                           "class.access");
     token_index t = at.first_token();
     VTRY(r, deleted_use(t, f));
+    VTRY_SET(r, need_specialization_definition(at, f));
     /* (a captureless lambda's closure object has no members: its
        temporary is the call's object argument, as for its call operator) */
     if ((aggregate_prvalue(m) && !entity_table[c].lambda) ||

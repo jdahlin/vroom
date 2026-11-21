@@ -253,6 +253,11 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
         return clang_convertvector(e, m);
     case syntax_kind::clang_source_location_expression:
         return clang_source_location(e, m);
+    case syntax_kind::operator_function_id: {
+        declarator_meaning function_name;
+        VTRY(r, operator_function_id(e.operator_function_id(), function_name));
+        return id_expression(function_name.id, m);
+    }
     default:
         return not_supported(e);
     }

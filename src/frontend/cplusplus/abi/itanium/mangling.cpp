@@ -353,10 +353,11 @@ bool itanium_mangler::specialization_encoding(entity_index e)
         return true;
     qualified_type pattern = table[pattern_of].type;
     encoding_template = pattern_of;
-    /* (a constructor template's has none: [abi:mangle.function-type]'s
-       exception for constructors) */
+    /* (a constructor or conversion function template's has none:
+       [abi:mangle.function-type]'s exception for constructors and conversion
+       operators) */
     if (table[e].special == special_member::none &&
-        !type(record(pattern).operand))
+        !table[e].conversion_function && !type(record(pattern).operand))
         return false;
     if (!bare_function_type(pattern))
         return false;
@@ -1247,7 +1248,8 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
         declared = table[analysis.specialized_template(e)].linkage_of_name;
     if (declared == linkage::internal && namespace_scope &&
         (x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
-        !in_unnamed_namespace(e) && !x.unnamed_type_linkage)
+        !in_unnamed_namespace(e) && !x.unnamed_type_linkage &&
+        !x.operator_function)
         text("L");
     if (x.special != special_member::none) {
         /* [impl.clang] an inherited default constructor is named as
@@ -1262,6 +1264,17 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e)
     if (x.conversion_function) {
         /* [abi:mangling-operator]: "<operator-name> ::= cv <type> # (cast)" */
         text("cv");
+        if (x.instantiation) {
+            entity_index tmpl = analysis.specialized_template(e);
+            entity_index saved = encoding_template;
+            encoding_template = tmpl;
+            bool ok = type(
+                analysis
+                    .type_table[analysis.entity_table[tmpl].type.unqualified()]
+                    .operand);
+            encoding_template = saved;
+            return ok;
+        }
         return type(analysis.type_table[x.type.unqualified()].operand);
     }
     if (x.kind == entity_kind::function && x.name) {

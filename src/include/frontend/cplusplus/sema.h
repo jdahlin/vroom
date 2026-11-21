@@ -3918,6 +3918,9 @@ class semantic_analysis
     void declare_implicit(entity_index c, special_member kind, bool copy,
                           bool move = false);
     analysis_result implicit_definitions(entity_index c, SyntaxRef n);
+    analysis_result define_defaulted_special_member(entity_index c,
+                                                    entity_index f,
+                                                    SyntaxRef n);
     /* [class.copy.assign]: the implicitly-declared copy and move assignment
        operators that are not trivial (class/implicit-assignment.cpp) */
     enum class assignment_use : uint8_t { usable, deleted, unknown };
@@ -4374,6 +4377,8 @@ class semantic_analysis
     owned_array<uint32_t> pending_definitions;
     /* the definition of instantiations[index]'s specialization */
     analysis_result instantiate_definition(SyntaxRef at, uint32_t index);
+    analysis_result need_specialization_definition(SyntaxRef at,
+                                                   entity_index f);
     /* the definitions pending_definitions waits for */
     void instantiate_pending();
     /* in an instantiation, the template's first token: a namespace's
@@ -5399,8 +5404,13 @@ class semantic_analysis
        class c and of its bases that no conversion function to the same type
        in a nearer class hides, appended to out; false when one is a
        template, which analysis does not follow */
-    bool visible_conversion_functions(entity_index c,
-                                      owned_array<entity_index> &out) const;
+    bool visible_conversion_functions(
+        entity_index c, owned_array<entity_index> &out,
+        owned_array<entity_index> *templates = nullptr) const;
+    bool
+    deduce_conversion_templates(const owned_array<entity_index> &conv_templates,
+                                qualified_type to,
+                                owned_array<entity_index> &candidates);
     /* the value a call of the conversion function f gives: its type and
        value category ([expr.call]/14) */
     expression_meaning conversion_function_result(entity_index f) const;

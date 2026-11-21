@@ -369,9 +369,12 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         declarator_meaning function_name;
         VTRY(r, operator_function_id(function, function_name));
         t = function_name.id;
+    } else if (auto literal = n[1].literal_operator_id()) {
+        declarator_meaning function_name;
+        VTRY(r, literal_operator_id(literal, function_name));
+        t = function_name.id;
     } else {
-        /* a destructor's name, a conversion function's, a literal
-           operator's */
+        /* a destructor's name, a conversion function's */
         return not_supported(n, "namespace.udecl");
     }
     nominated_scope q;

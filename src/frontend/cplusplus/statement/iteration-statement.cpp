@@ -377,17 +377,80 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
         current_scope = outer;
         return r;
     };
-    if (initializer.is(syntax_kind::braced_init_list))
-        /* auto && deduced from a braced-init-list: std::initializer_list
-           ([dcl.type.auto.deduct]/4) */
-        return failed(not_supported(n, "stmt.ranged"));
-    /* auto &&range = for-range-initializer ; "if the for-range-initializer
-       is an expression, it is regarded as if it were surrounded by
-       parentheses" */
     expression_meaning m;
-    analysis_result r = expression(initializer, m);
-    if (r != analysis_result::well_formed)
-        return failed(r);
+    analysis_result r = analysis_result::well_formed;
+    if (initializer.is(syntax_kind::braced_init_list)) {
+        /* [stmt.ranged]/1, [dcl.type.auto.deduct]/4: a braced-init-list
+           range deduces an array of the common element type */
+        owned_array<SyntaxElement> clauses;
+        for (SyntaxElement e : initializer.elements()) {
+            if (e.is(syntax_kind::initializer_list)) {
+                for (SyntaxElement item : e.elements()) {
+                    if (!item.is(preprocessing_op_or_punc::COMMA))
+                        clauses.append(item);
+                }
+            }
+        }
+        if (clauses.empty())
+            return failed(not_supported(n, "stmt.ranged"));
+        qualified_type elem;
+        for (size_t i = 0; i < clauses.size(); i++) {
+            expression_meaning item;
+            r = expression(clauses[i], item);
+            if (r != analysis_result::well_formed)
+                return failed(r);
+            qualified_type t = item.type;
+            const struct type &tr = type_table[t.unqualified()];
+            if (tr.kind == type_kind::array)
+                t = qualified_type::make(type_table.pointer_to(tr.operand),
+                                         cv_none);
+            else if (tr.kind == type_kind::function)
+                t = qualified_type::make(type_table.pointer_to(t), cv_none);
+            else
+                t = qualified_type::make(t.unqualified(), cv_none);
+            if (i == 0)
+                elem = t;
+            else if (t != elem)
+                return failed(not_supported(n, "stmt.ranged"));
+        }
+        entity_index std_ns =
+            entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
+        entity_index ilist_tmpl = 0;
+        if (std_ns)
+            ilist_tmpl = entity_table.find(
+                std_ns, tokens.pp.identifier("initializer_list", 16) + 1);
+        uint32_t ct = 0;
+        if (ilist_tmpl)
+            ct = class_template_of(ilist_tmpl);
+        if (!ct)
+            return failed(not_supported(n, "stmt.ranged"));
+        template_argument targ;
+        targ.kind = template_argument::kind_t::type;
+        targ.type = elem;
+        entity_index ilist_class = 0;
+        require_complete_class++;
+        r = instantiate_class(initializer.index(), ct, &targ, 1, ilist_class);
+        require_complete_class--;
+        if (r != analysis_result::well_formed || !ilist_class)
+            return failed(r);
+        qualified_type ilist_type = entity_table[ilist_class].type;
+        initialized_value ilist_val;
+        r = class_list_initialization(initializer.index(), clauses, ilist_type,
+                                      false, ilist_val);
+        if (r != analysis_result::well_formed)
+            return failed(r);
+        m.type = ilist_type;
+        m.category = value_category::prvalue;
+        m.evaluation = ilist_val.evaluation;
+        m.node = ilist_val.node;
+    } else {
+        /* auto &&range = for-range-initializer ; "if the for-range-initializer
+           is an expression, it is regarded as if it were surrounded by
+           parentheses" */
+        r = expression(initializer, m);
+        if (r != analysis_result::well_formed)
+            return failed(r);
+    }
     qualified_type forwarding = reference_to(placeholder_type(false), true);
     uint32_t declared = 0;
     expression_meaning range;

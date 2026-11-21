@@ -320,7 +320,9 @@ analysis_result semantic_analysis::overloaded_operator(
             }
             if (found.entity) {
                 if (entity_table[found.entity].kind != entity_kind::function ||
-                    !entity_table[found.entity].nonstatic_member)
+                    (!entity_table[found.entity].nonstatic_member &&
+                     op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
+                     op != preprocessing_op_or_punc::LEFT_BRACKET))
                     return not_supported(n, "over.match.oper");
                 overload_set(found.entity, members);
             }
@@ -673,9 +675,6 @@ analysis_result semantic_analysis::overloaded_operator(
            x) if the selected candidate is a synthesized candidate with
            reversed order of parameters, or (x <=> y) @ 0 otherwise, using
            the selected rewritten operator<=> candidate." */
-        if (fundamental_of(m.type) == fundamental_type::none)
-            /* a comparison category type of <compare> */
-            return not_supported(n, "over.match.oper");
         expression_meaning zero =
             integer_constant(fundamental_type::int_, 0, at);
         zero.zero_literal = true;
@@ -684,6 +683,21 @@ analysis_result semantic_analysis::overloaded_operator(
         if (c.reversed) {
             left = &zero;
             right = &three;
+        }
+        if (fundamental_of(three.type) == fundamental_type::none) {
+            owned_array<expression_meaning> cmp_ops;
+            owned_array<SyntaxElement> cmp_syn;
+            cmp_ops.append(*left);
+            cmp_ops.append(*right);
+            cmp_syn.append(SyntaxElement{});
+            cmp_syn.append(SyntaxElement{});
+            bool cmp_handled = false;
+            VTRY_SET(r, overloaded_operator(n, at, op, false, cmp_syn, cmp_ops,
+                                            cmp_handled, m));
+            if (!cmp_handled)
+                return not_supported(n, "over.match.oper");
+            handled = true;
+            return analysis_result::well_formed;
         }
         r = operand_value(n, *left);
         if (r == analysis_result::well_formed)

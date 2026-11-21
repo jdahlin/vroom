@@ -274,8 +274,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     qualified_type type = entity_table[e].type;
     const struct type &record = type_table[type.unqualified()];
     SyntaxRef init = entity_table[e].default_initializer;
-    if (record.kind == type_kind::array ||
-        record.kind == type_kind::lvalue_reference ||
+    if (record.kind == type_kind::lvalue_reference ||
         record.kind == type_kind::rvalue_reference)
         return not_supported(init, "class.base.init");
     /* before the analysis, which may move the tables */
@@ -1052,10 +1051,17 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
     if (!arguments.empty() && x.implicit_copy_deleted && !moved &&
         !x.defaulted_move_constructor && copy_argument_candidate(c, arguments))
         return not_supported(at, "class.copy.ctor");
-    if (arguments.empty() && trivial_defaulted_default_constructor(c))
-        /* value-initialization through a trivial X() = default
-           ([dcl.init]/8.2: zero-initialized): not analysed */
-        return not_supported(at, "dcl.init");
+    if (arguments.empty() && trivial_defaulted_default_constructor(c)) {
+        /* [dcl.init]/8.2: value-initialization of a class with a trivial
+           defaulted default constructor zero-initializes the object */
+        expression_meaning zero;
+        zero.type = qualified_type::make(type.unqualified(), cv_none);
+        zero.category = value_category::prvalue;
+        result.node =
+            expression_node(semantic_kind::zero, zero, at.first_token());
+        result.evaluation = constness::constant;
+        return analysis_result::well_formed;
+    }
     /* [temp.mem]/1: a constructor template only declared is a candidate
        too (member_template_declaration) */
     if (x.constructor_template)
@@ -1253,18 +1259,59 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
     entity_index c = current_class();
     token_index at = current_declaration.first_token();
     owned_array<SyntaxElement> items;
+    owned_array<bool> item_expands;
     for (uint32_t i = 0; list && i < list.size(); i++) {
         SyntaxElement item = list[i];
         if (item.is(syntax_kind::mem_initializer_list)) {
             for (SyntaxElement one : item.elements()) {
-                if (one.is(syntax_kind::mem_initializer))
+                if (one.is(syntax_kind::mem_initializer)) {
                     items.append(one);
-                else if (!one.is(preprocessing_op_or_punc::COMMA))
+                    item_expands.append(false);
+                } else if (one.is(preprocessing_op_or_punc::ELLIPSIS) &&
+                           !item_expands.empty()) {
+                    item_expands[item_expands.size() - 1] = true;
+                } else if (!one.is(preprocessing_op_or_punc::COMMA)) {
                     return not_supported(list.index(), "class.base.init");
+                }
             }
         } else if (item.is(syntax_kind::mem_initializer)) {
             items.append(item);
+            item_expands.append(false);
+        } else if (item.is(preprocessing_op_or_punc::ELLIPSIS) &&
+                   !item_expands.empty()) {
+            item_expands[item_expands.size() - 1] = true;
         }
+    }
+    /* [class.base.init]/6: a delegating constructor (the sole mem-initializer
+       names the constructor's own class) */
+    if (items.size() == 1 && !item_expands[0] && items[0].size() >= 2 &&
+        items[0][0].is_identifier() &&
+        tokens.identifier(items[0][0].token()) == entity_table[c].name) {
+        SyntaxElement item = items[0];
+        token_index id = item[0].token();
+        owned_array<expression_meaning> arguments;
+        if (item.size() == 4) {
+            VTRY(r, expression_list_meanings(item[2], arguments));
+        } else if (item.size() != 3) {
+            return not_supported(item, "class.base.init");
+        }
+        initialized_value value;
+        VTRY(r, construct(item, entity_table[c].type, arguments, 0, value));
+        if (semantics[value.node].kind != semantic_kind::construct ||
+            semantics[value.node].a)
+            return not_supported(item, "class.base.init");
+        expression_meaning ptr;
+        VTRY_SET(r, this_pointer(id, ptr));
+        expression_meaning self;
+        self.type = entity_table[c].type;
+        self.category = value_category::lvalue;
+        self.evaluation = constness::not_constant;
+        self.node =
+            expression_node(semantic_kind::indirection, self, id, ptr.node);
+        semantics[value.node].a = self.node;
+        built =
+            statement_node(semantic_kind::expression_statement, id, value.node);
+        return analysis_result::well_formed;
     }
     /* [class.base.init]/13: "(13.2) Then, direct base classes are
        initialized in declaration order as they appear in the
@@ -1281,225 +1328,256 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
     initialized.resize(subobjects.size());
     for (uint32_t &i : initialized)
         i = 0;
-    for (SyntaxElement item : items) {
+    for (size_t idx = 0; idx < items.size(); idx++) {
+        SyntaxElement item = items[idx];
         if (!item.size())
             return not_supported(item, "class.base.init");
-        token_index id = 0;
-        uint32_t name = 0;
-        entity_index e = 0;
-        /* a class-or-decltype with a nested-name-specifier: the class it
-           names ([basic.lookup.qual]) */
-        entity_index qualified_class = 0;
-        if (item[0].is(syntax_kind::simple_template_id,
-                       syntax_kind::class_or_decltype)) {
-            /* [class.base.init]/3: a base class named by its type. */
-            VTRY(r, base_class_name(item[0], item, qualified_class, id));
-            if (qualified_class == c)
-                return not_supported(item, "class.base.init");
-            name = tokens.identifier(id);
-        } else {
-            if (!item[0].is_identifier())
-                return not_supported(item, "class.base.init");
-            id = item[0].token();
-            name = tokens.identifier(id);
-            if (name == entity_table[c].name)
-                /* [class.base.init]/6: a delegating constructor */
-                return not_supported(item, "class.base.init");
-            e = entity_table.find(c, name);
+        uint32_t times = 1;
+        if (item_expands[idx]) {
+            if (!expansion_count(item.first_token(), item.end_token(), times))
+                return not_supported(item, "temp.variadic");
         }
-        if (!e) {
-            /* [class.base.init]/3: "A mem-initializer-list can initialize
+        for (uint32_t exp_k = 0; exp_k < times; exp_k++) {
+            struct expand_guard {
+                bool &flag;
+                uint32_t &elem;
+                bool saved_flag;
+                uint32_t saved_elem;
+                ~expand_guard()
+                {
+                    flag = saved_flag;
+                    elem = saved_elem;
+                }
+            } guard = {expanding, expansion_element, expanding,
+                       expansion_element};
+            if (item_expands[idx]) {
+                expanding = true;
+                expansion_element = exp_k;
+            }
+            token_index id = 0;
+            uint32_t name = 0;
+            entity_index e = 0;
+            /* a class-or-decltype with a nested-name-specifier: the class it
+           names ([basic.lookup.qual]) */
+            entity_index qualified_class = 0;
+            if (item[0].is(syntax_kind::simple_template_id,
+                           syntax_kind::class_or_decltype)) {
+                /* [class.base.init]/3: a base class named by its type. */
+                VTRY(r, base_class_name(item[0], item, qualified_class, id));
+                if (qualified_class == c)
+                    return not_supported(item, "class.base.init");
+                name = tokens.identifier(id);
+            } else {
+                if (!item[0].is_identifier())
+                    return not_supported(item, "class.base.init");
+                id = item[0].token();
+                name = tokens.identifier(id);
+                if (name == entity_table[c].name)
+                    /* [class.base.init]/6: a delegating constructor */
+                    return not_supported(item, "class.base.init");
+                e = entity_table.find(c, name);
+            }
+            if (!e) {
+                /* [class.base.init]/3: "A mem-initializer-list can initialize
                a base class using any class-or-decltype that denotes that
                base class type" */
-            entity_index base = qualified_class;
-            if (!base)
-                base = lookup(name);
-            for (uint32_t i = 0; base && i < entity_table[c].base_count; i++) {
-                entity_index b = class_bases[entity_table[c].first_base + i];
-                if (entity_table[b].type.unqualified() ==
-                    entity_table[base].type.unqualified())
-                    e = b;
+                entity_index base = qualified_class;
+                if (!base)
+                    base = lookup(name);
+                for (uint32_t i = 0; base && i < entity_table[c].base_count;
+                     i++) {
+                    entity_index b =
+                        class_bases[entity_table[c].first_base + i];
+                    if (entity_table[b].type.unqualified() ==
+                        entity_table[base].type.unqualified())
+                        e = b;
+                }
+                /* [class.base.init]/2: "a direct or virtual base" */
+                if (!e && base &&
+                    entity_table[base].kind == entity_kind::class_type)
+                    e = virtual_base_of(c, base);
+                if (!e && base &&
+                    entity_table[base].kind == entity_kind::class_type) {
+                    bool ambiguous = false;
+                    if (base_step(c, base, ambiguous))
+                        return ill_formed_at_token(
+                            id,
+                            "a mem-initializer-id shall name a direct or "
+                            "virtual base of the constructor's class",
+                            "class.base.init");
+                }
             }
-            /* [class.base.init]/2: "a direct or virtual base" */
-            if (!e && base &&
-                entity_table[base].kind == entity_kind::class_type)
-                e = virtual_base_of(c, base);
-            if (!e && base &&
-                entity_table[base].kind == entity_kind::class_type) {
-                bool ambiguous = false;
-                if (base_step(c, base, ambiguous))
-                    return ill_formed_at_token(
-                        id,
-                        "a mem-initializer-id shall name a direct or "
-                        "virtual base of the constructor's class",
-                        "class.base.init");
+            if (!e || entity_table[e].kind != entity_kind::variable ||
+                !entity_table[e].nonstatic_member) {
+                if (e && entity_table[e].kind == entity_kind::none)
+                    return not_supported(item, "over");
+                if (!e && (qualified_class || lookup(name)))
+                    /* a name of an enclosing scope */
+                    return not_supported(item, "class.base.init");
+                return ill_formed_at_token(
+                    id,
+                    "unless the mem-initializer-id names "
+                    "the constructor's class, a "
+                    "non-static data member of the "
+                    "constructor's class, or a direct or "
+                    "virtual base of that class, the "
+                    "mem-initializer is ill-formed",
+                    "class.base.init");
             }
-        }
-        if (!e || entity_table[e].kind != entity_kind::variable ||
-            !entity_table[e].nonstatic_member) {
-            if (e && entity_table[e].kind == entity_kind::none)
-                return not_supported(item, "over");
-            if (!e && (qualified_class || lookup(name)))
-                /* a name of an enclosing scope */
-                return not_supported(item, "class.base.init");
-            return ill_formed_at_token(id,
-                                       "unless the mem-initializer-id names "
-                                       "the constructor's class, a "
-                                       "non-static data member of the "
-                                       "constructor's class, or a direct or "
-                                       "virtual base of that class, the "
-                                       "mem-initializer is ill-formed",
-                                       "class.base.init");
-        }
-        /* [class.base.init]/2: a member of an anonymous union
+            /* [class.base.init]/2: a member of an anonymous union
            ([class.union.anon]) is initialized in its unnamed object */
-        entity_index target = e;
-        while (
-            entity_index anon =
-                entity_table[entity_table[target].enclosing].anonymous_object)
-            target = anon;
-        size_t slot = 0;
-        while (slot < subobjects.size() && subobjects[slot] != target)
-            slot++;
-        if (slot == subobjects.size())
-            return not_supported(item, "class.base.init");
-        /* [class.base.init]/4: "if a mem-initializer-id designates the
+            entity_index target = e;
+            while (entity_index anon =
+                       entity_table[entity_table[target].enclosing]
+                           .anonymous_object)
+                target = anon;
+            size_t slot = 0;
+            while (slot < subobjects.size() && subobjects[slot] != target)
+                slot++;
+            if (slot == subobjects.size())
+                return not_supported(item, "class.base.init");
+            /* [class.base.init]/4: "if a mem-initializer-id designates the
            same member or base class more than once, the program is
            ill-formed" (clang's "multiple initializations"); an anonymous
            struct's distinct members share one unnamed object */
-        if (initialized[slot] &&
-            (target == e || entity_table[entity_table[e].enclosing].union_))
-            return ill_formed_at_token(id,
-                                       "a mem-initializer-list shall not "
-                                       "designate the same member more than "
-                                       "once",
-                                       "class.base.init");
-        qualified_type type = entity_table[e].type;
-        /* a copy: subobject and the initializer add types, which may move
+            if (initialized[slot] &&
+                (target == e || entity_table[entity_table[e].enclosing].union_))
+                return ill_formed_at_token(
+                    id,
+                    "a mem-initializer-list shall not "
+                    "designate the same member more than "
+                    "once",
+                    "class.base.init");
+            qualified_type type = entity_table[e].type;
+            /* a copy: subobject and the initializer add types, which may move
            type_table's */
-        const struct type record = type_table[type.unqualified()];
-        if (record.kind == type_kind::array)
-            return not_supported(item, "class.base.init");
-        expression_meaning object;
-        VTRY(r, subobject(id, e, object));
-        if (record.kind == type_kind::class_type &&
-            entity_table[record.entity].first_constructor) {
-            /* [class.base.init]/7: direct-initialization: a constructor */
-            owned_array<expression_meaning> arguments;
-            if (item.size() == 4)
-                r = expression_list_meanings(item[2], arguments);
-            else if (item.size() == 2 &&
-                     item[1].is(syntax_kind::braced_init_list)) {
-                /* [dcl.init.list]/3.4: an aggregate member's list: its
+            const struct type record = type_table[type.unqualified()];
+            if (record.kind == type_kind::array)
+                return not_supported(item, "class.base.init");
+            expression_meaning object;
+            VTRY(r, subobject(id, e, object));
+            if (record.kind == type_kind::class_type &&
+                entity_table[record.entity].first_constructor) {
+                /* [class.base.init]/7: direct-initialization: a constructor */
+                owned_array<expression_meaning> arguments;
+                if (item.size() == 4)
+                    r = expression_list_meanings(item[2], arguments);
+                else if (item.size() == 2 &&
+                         item[1].is(syntax_kind::braced_init_list)) {
+                    /* [dcl.init.list]/3.4: an aggregate member's list: its
                    value, stored; a constructor's list and a base's (its
                    tail padding may hold a derived member) are not
                    analysed */
-                if (entity_table[e].base_subobject)
+                    if (entity_table[e].base_subobject)
+                        return not_supported(item, "class.base.init");
+                    initialized_value listed;
+                    r = list_initialization(item[1], type, true, listed);
+                    if (r != analysis_result::well_formed)
+                        return r;
+                    if (!aggregate_value_stored(record.entity, listed.node))
+                        return not_supported(item, "class.base.init");
+                    initialized[slot] =
+                        subobject_store(object, type, id, listed.node);
+                    continue;
+                } else if (item.size() != 3)
                     return not_supported(item, "class.base.init");
-                initialized_value listed;
-                r = list_initialization(item[1], type, true, listed);
                 if (r != analysis_result::well_formed)
                     return r;
-                if (!aggregate_value_stored(record.entity, listed.node))
-                    return not_supported(item, "class.base.init");
-                initialized[slot] =
-                    subobject_store(object, type, id, listed.node);
-                continue;
-            } else if (item.size() != 3)
-                return not_supported(item, "class.base.init");
-            if (r != analysis_result::well_formed)
-                return r;
-            /* [dcl.init]/17.6.1: a member initialized from a prvalue of
+                /* [dcl.init]/17.6.1: a member initialized from a prvalue of
                its class is that object, no constructor called: only one
                whose class copies its bytes is analysed (below) */
-            bool elided = !entity_table[e].base_subobject &&
-                          arguments.size() == 1 &&
-                          arguments[0].category == value_category::prvalue &&
-                          arguments[0].type.unqualified() == type.unqualified();
-            if (elided && !trivial_class(record.entity))
-                return not_supported(item, "class.copy.elision");
-            initialized_value value;
-            constructing_base = entity_table[e].base_subobject;
-            r = construct(item, type, arguments, object.node, value);
-            constructing_base = false;
-            if (r != analysis_result::well_formed)
-                return r;
-            if (semantics[value.node].kind != semantic_kind::construct) {
-                /* [class.copy.ctor]/14: the implicit copy constructor of a
+                bool elided =
+                    !entity_table[e].base_subobject && arguments.size() == 1 &&
+                    arguments[0].category == value_category::prvalue &&
+                    arguments[0].type.unqualified() == type.unqualified();
+                if (elided && !trivial_class(record.entity))
+                    return not_supported(item, "class.copy.elision");
+                initialized_value value;
+                constructing_base = entity_table[e].base_subobject;
+                r = construct(item, type, arguments, object.node, value);
+                constructing_base = false;
+                if (r != analysis_result::well_formed)
+                    return r;
+                if (semantics[value.node].kind != semantic_kind::construct) {
+                    /* [class.copy.ctor]/14: the implicit copy constructor of a
                    class that copies its bytes (construct gave the
                    argument's value): stored as for a member with no
                    constructors; a base class subobject's bytes are
                    not, its padding may hold a derived member (a base with
                    no tail padding, whose data size is its size, is) */
-                if (entity_table[e].base_subobject &&
-                    entity_table[record.entity].data_size !=
-                        entity_table[record.entity].size)
-                    return not_supported(item, "class.copy.ctor");
-                initialized[slot] =
-                    subobject_store(object, type, id, value.node);
+                    if (entity_table[e].base_subobject &&
+                        entity_table[record.entity].data_size !=
+                            entity_table[record.entity].size)
+                        return not_supported(item, "class.copy.ctor");
+                    initialized[slot] =
+                        subobject_store(object, type, id, value.node);
+                    continue;
+                }
+                if (elided)
+                    /* (the copy or move constructor of the class is called:
+                   [class.copy.elision]/1 calls none) */
+                    return not_supported(item, "class.copy.elision");
+                initialized[slot] = statement_node(
+                    semantic_kind::expression_statement, id, value.node);
+                if (entity_table[e].virtual_base)
+                    initialized[slot] = complete_object(initialized[slot]);
                 continue;
             }
-            if (elided)
-                /* (the copy or move constructor of the class is called:
-                   [class.copy.elision]/1 calls none) */
-                return not_supported(item, "class.copy.elision");
-            initialized[slot] = statement_node(
-                semantic_kind::expression_statement, id, value.node);
-            if (entity_table[e].virtual_base)
-                initialized[slot] = complete_object(initialized[slot]);
-            continue;
-        }
-        initialized_value value;
-        if (item.size() == 2 && item[1].is(syntax_kind::braced_init_list)) {
-            r = list_initialization(item[1], type, true, value);
-            if (r == analysis_result::well_formed &&
-                (record.kind == type_kind::lvalue_reference ||
-                 record.kind == type_kind::rvalue_reference) &&
-                semantics[value.node].kind == semantic_kind::bind_reference &&
-                semantics[value.node].category == value_category::prvalue)
-                /* the reference is bound to the temporary the list
+            initialized_value value;
+            if (item.size() == 2 && item[1].is(syntax_kind::braced_init_list)) {
+                r = list_initialization(item[1], type, true, value);
+                if (r == analysis_result::well_formed &&
+                    (record.kind == type_kind::lvalue_reference ||
+                     record.kind == type_kind::rvalue_reference) &&
+                    semantics[value.node].kind ==
+                        semantic_kind::bind_reference &&
+                    semantics[value.node].category == value_category::prvalue)
+                    /* the reference is bound to the temporary the list
                    initialized (reference_list_initialization) */
-                return ill_formed(item,
-                                  "a temporary expression bound to a "
-                                  "reference member in a mem-initializer is "
-                                  "ill-formed",
-                                  "class.base.init");
-        } else if (item.size() == 3) {
-            /* ( ): value-initialization ([dcl.init]/11): zero for the
+                    return ill_formed(
+                        item,
+                        "a temporary expression bound to a "
+                        "reference member in a mem-initializer is "
+                        "ill-formed",
+                        "class.base.init");
+            } else if (item.size() == 3) {
+                /* ( ): value-initialization ([dcl.init]/11): zero for the
                members analysis has */
-            expression_meaning zero;
-            zero.type = qualified_type::make(type.unqualified(), cv_none);
-            zero.evaluation = constness::constant;
-            value.node =
-                expression_node(semantic_kind::zero, zero, first_token(item));
-        } else if (item.size() == 4) {
-            SyntaxElement init = item[2];
-            if (init.is(syntax_kind::initializer_list)) {
-                if (has_pack_expansion(init))
-                    return not_supported(item, "temp.variadic");
-                if (record.kind != type_kind::class_type)
-                    return ill_formed(item,
-                                      "if the entity being initialized does "
-                                      "not have class type, the "
-                                      "expression-list in a parenthesized "
-                                      "initializer shall be a single "
-                                      "expression",
-                                      "dcl.init");
-                return not_supported(item, "dcl.init");
-            }
-            if (entity_table[e].base_subobject)
-                /* a base copied from an expression: [conv.ptr]/3's
+                expression_meaning zero;
+                zero.type = qualified_type::make(type.unqualified(), cv_none);
+                zero.evaluation = constness::constant;
+                value.node = expression_node(semantic_kind::zero, zero,
+                                             first_token(item));
+            } else if (item.size() == 4) {
+                SyntaxElement init = item[2];
+                if (init.is(syntax_kind::initializer_list)) {
+                    if (has_pack_expansion(init))
+                        return not_supported(item, "temp.variadic");
+                    if (record.kind != type_kind::class_type)
+                        return ill_formed(
+                            item,
+                            "if the entity being initialized does "
+                            "not have class type, the "
+                            "expression-list in a parenthesized "
+                            "initializer shall be a single "
+                            "expression",
+                            "dcl.init");
+                    return not_supported(item, "dcl.init");
+                }
+                if (entity_table[e].base_subobject)
+                    /* a base copied from an expression: [conv.ptr]/3's
                    conversion of the source */
+                    return not_supported(item, "class.base.init");
+                r = initialize_from(item, init, type, true, false, value);
+            } else {
                 return not_supported(item, "class.base.init");
-            r = initialize_from(item, init, type, true, false, value);
-        } else {
-            return not_supported(item, "class.base.init");
-        }
-        if (r != analysis_result::well_formed)
-            return r;
-        /* the member's initialization: its bytes, stored as by an
+            }
+            if (r != analysis_result::well_formed)
+                return r;
+            /* the member's initialization: its bytes, stored as by an
            assignment to (*this).member */
-        initialized[slot] = subobject_store(object, type, id, value.node);
+            initialized[slot] = subobject_store(object, type, id, value.node);
+        }
     }
     /* [class.base.init]/9: "In a non-delegating constructor, if a given
        potentially constructed subobject is not designated by a
@@ -2443,6 +2521,69 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
  * function-body".  The bodies of class c's implicitly-declared special
  * members, at the end of its definition n.
  */
+analysis_result
+semantic_analysis::define_defaulted_special_member(entity_index c,
+                                                   entity_index f, SyntaxRef n)
+{
+    current_declaration = n;
+    token_index at = n.first_token();
+    synthesized_function sf;
+    begin_synthesized(
+        sf, f,
+        qualified_type::make(type_table.fundamental(fundamental_type::void_),
+                             cv_none),
+        qualified_type::make(type_table.pointer_to(qualified_type::make(
+                                 entity_table[c].type.unqualified(), cv_none)),
+                             cv_none));
+    const struct type &ft = type_table[entity_table[f].type.unqualified()];
+    entity_index source = 0;
+    owned_array<entity_index> forwarded;
+    if (entity_table[f].inherited_constructor) {
+        for (uint32_t i = 0; i < ft.parameter_count; i++)
+            forwarded.append(synthesized_variable(
+                sf,
+                type_table.parameters(entity_table[f].type.unqualified())[i],
+                true));
+    } else if (ft.parameter_count)
+        source = synthesized_variable(
+            sf, type_table.parameters(entity_table[f].type.unqualified())[0],
+            true);
+    analysis_result r = analysis_result::well_formed;
+    uint32_t members = 0, destructions = 0;
+    if (entity_table[f].special == special_member::destructor) {
+        /* [class.cdtor]/4: the destructor's virtual table pointer */
+        members = vtable_pointer_store(c, at);
+        destructions = subobject_destructions(c, at);
+    } else if (entity_table[f].inherited_constructor) {
+        inherited_call call;
+        call.constructor = entity_table[f].inherited_constructor;
+        call.parameters = &forwarded;
+        for (const inheriting_declaration &d : inheriting)
+            if (d.c == c &&
+                type_table[entity_table[d.base].type.unqualified()].entity ==
+                    entity_table[entity_table[f].inherited_constructor]
+                        .enclosing)
+                call.base = d.base;
+        r = ctor_initializer(SyntaxElement(), members, &call);
+    } else if (source) {
+        bool move =
+            type_table[type_table
+                           .parameters(entity_table[f].type.unqualified())[0]
+                           .unqualified()]
+                .kind == type_kind::rvalue_reference;
+        r = implicit_copy(c, n, source, members, move);
+    } else
+        r = ctor_initializer(SyntaxElement(), members);
+    finish_synthesized(sf, n, at, statement_node(semantic_kind::block, at),
+                       members, destructions);
+    if (r == analysis_result::ill_formed)
+        /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
+           special member that would be ill-formed is defined as
+           deleted (an error only where it is used): not analysed */
+        return not_supported(n, "class.default.ctor");
+    return r;
+}
+
 analysis_result semantic_analysis::implicit_definitions(entity_index c,
                                                         SyntaxRef n)
 {
@@ -2454,70 +2595,8 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
     if (entity_table[c].destructor &&
         entity_table[entity_table[c].destructor].implicit)
         implicit.append(entity_table[c].destructor);
-    current_declaration = n;
-    token_index at = n.first_token();
     for (entity_index f : implicit) {
-        synthesized_function sf;
-        begin_synthesized(
-            sf, f,
-            qualified_type::make(
-                type_table.fundamental(fundamental_type::void_), cv_none),
-            qualified_type::make(
-                type_table.pointer_to(qualified_type::make(
-                    entity_table[c].type.unqualified(), cv_none)),
-                cv_none));
-        const struct type &ft = type_table[entity_table[f].type.unqualified()];
-        entity_index source = 0;
-        owned_array<entity_index> forwarded;
-        if (entity_table[f].inherited_constructor) {
-            for (uint32_t i = 0; i < ft.parameter_count; i++)
-                forwarded.append(synthesized_variable(
-                    sf,
-                    type_table.parameters(
-                        entity_table[f].type.unqualified())[i],
-                    true));
-        } else if (ft.parameter_count)
-            source = synthesized_variable(
-                sf,
-                type_table.parameters(entity_table[f].type.unqualified())[0],
-                true);
-        analysis_result r = analysis_result::well_formed;
-        uint32_t members = 0, destructions = 0;
-        if (entity_table[f].special == special_member::destructor) {
-            /* [class.cdtor]/4: the destructor's virtual table pointer */
-            members = vtable_pointer_store(c, at);
-            destructions = subobject_destructions(c, at);
-        } else if (entity_table[f].inherited_constructor) {
-            inherited_call call;
-            call.constructor = entity_table[f].inherited_constructor;
-            call.parameters = &forwarded;
-            for (const inheriting_declaration &d : inheriting)
-                if (d.c == c &&
-                    type_table[entity_table[d.base].type.unqualified()]
-                            .entity ==
-                        entity_table[entity_table[f].inherited_constructor]
-                            .enclosing)
-                    call.base = d.base;
-            r = ctor_initializer(SyntaxElement(), members, &call);
-        } else if (source) {
-            bool move =
-                type_table[type_table
-                               .parameters(
-                                   entity_table[f].type.unqualified())[0]
-                               .unqualified()]
-                    .kind == type_kind::rvalue_reference;
-            r = implicit_copy(c, n, source, members, move);
-        } else
-            r = ctor_initializer(SyntaxElement(), members);
-        finish_synthesized(sf, n, at, statement_node(semantic_kind::block, at),
-                           members, destructions);
-        if (r == analysis_result::ill_formed)
-            /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
-               special member that would be ill-formed is defined as
-               deleted (an error only where it is used): not analysed */
-            return not_supported(n, "class.default.ctor");
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, define_defaulted_special_member(c, f, n));
     }
     return implicit_assignment_definitions(c, n);
 }
@@ -2671,6 +2750,15 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
                                        FunctionBody body)
 {
     SyntaxElement init = body.ctor_initializer();
+    if (body.defaulted()) {
+        /* [dcl.fct.def.default]/1: out-of-class = default for a constructor
+           or destructor (e.g. X::X() = default; X::~X() = default;) */
+        entity_index f = last_declared;
+        entity_index c = entity_table[f].enclosing;
+        if (entity_table[f].special == special_member::constructor ||
+            entity_table[f].special == special_member::destructor)
+            return define_defaulted_special_member(c, f, definition);
+    }
     if (!body.compound_statement())
         return not_supported(definition, "dcl.fct.def.general");
     if (init &&

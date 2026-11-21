@@ -121,8 +121,7 @@ analysis_result semantic_analysis::member_function_template(
         prior = entity_table.find(c, name);
     if (prior && entity_table[prior].enclosing == c &&
         entity_table[prior].kind == entity_kind::function &&
-        entity_table[prior].special == special_member::none &&
-        !entity_table[prior].conversion_function) {
+        entity_table[prior].special == special_member::none) {
         entity_index head = prior;
         prior = entity_table[head].member_templates;
         if (!prior) {
@@ -192,7 +191,12 @@ analysis_result semantic_analysis::member_function_template(
     entity_table[t].constexpr_ = s.constexpr_;
     entity_table[t].immediate = s.consteval_;
     entity_table[t].operator_function = m.operator_function;
+    entity_table[t].conversion_function = conversion;
     entity_table[t].implemented = m.implemented;
+    if (conversion) {
+        entity_table[t].explicit_ = s.explicit_;
+        entity_table[t].explicit_dependent = s.explicit_dependent;
+    }
     if (constructor) {
         /* [class.ctor]/2: a constructor has no name to find; the class
            keeps its templates' (construct, class_sequence) */
@@ -259,13 +263,9 @@ analysis_result semantic_analysis::constructor_template_candidates(
     if (copy) {
         size_t kept = 0;
         for (uint32_t g : group)
-            if (entity_table[function_templates[g - 1].entity]
+            if (!entity_table[function_templates[g - 1].entity].explicit_ ||
+                entity_table[function_templates[g - 1].entity]
                     .explicit_dependent)
-                /* [dcl.fct.spec]/2: whether this specialization is explicit
-                   is known after deduction: not filtered here yet */
-                return not_supported(n, "dcl.fct.spec");
-        for (uint32_t g : group)
-            if (!entity_table[function_templates[g - 1].entity].explicit_)
                 group[kept++] = g;
         group.resize(kept);
     }
@@ -275,8 +275,28 @@ analysis_result semantic_analysis::constructor_template_candidates(
     owned_array<uint32_t> firsts;
     if (!first_arguments)
         first_arguments = &firsts;
-    return template_candidates(n, group, arguments, count, candidates,
-                               first_arguments, all);
+    size_t before = candidates.size();
+    size_t first_before = first_arguments->size();
+    VTRY(r, template_candidates(n, group, arguments, count, candidates,
+                                first_arguments, all));
+    if (copy) {
+        /* [dcl.fct.spec]/2: filter out specializations whose dependent
+           explicit(bool) condition evaluated to true */
+        size_t kept = before;
+        for (size_t i = before; i < candidates.size(); i++) {
+            if (entity_table[candidates[i].function].explicit_)
+                continue;
+            if (kept != i) {
+                candidates[kept] = candidates[i];
+                (*first_arguments)[first_before + (kept - before)] =
+                    (*first_arguments)[first_before + (i - before)];
+            }
+            kept++;
+        }
+        candidates.resize(kept);
+        first_arguments->resize(first_before + (kept - before));
+    }
+    return analysis_result::well_formed;
 }
 
 /*
@@ -329,7 +349,8 @@ analysis_result semantic_analysis::member_template_call(
             early.append(e);
         }
     for (const expression_meaning &e : early)
-        if (e.entity && entity_table[e.entity].kind == entity_kind::function)
+        if (e.entity && entity_table[e.entity].kind == entity_kind::function &&
+            entity_table[e.entity].next_overload)
             return not_supported(n, "temp.deduct.call");
     owned_array<overload_candidate> candidates;
     owned_array<uint32_t> first_arguments;

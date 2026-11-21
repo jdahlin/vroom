@@ -485,10 +485,20 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
           !entity_table[type_table[m.type.unqualified()].entity].destructor))
         return not_supported(at, "class.temporary");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
-       to a bit-field"; a const one is bound to a temporary (not
-       analysed) */
-    if (m.bit_field_width && m.category != value_category::prvalue)
-        return not_supported(at, "class.bit");
+       to a bit-field"; a const lvalue or rvalue reference is bound to a
+       temporary holding its value ([conv.lval]) */
+    if (m.bit_field_width && m.category != value_category::prvalue) {
+        if (r.kind == type_kind::lvalue_reference &&
+            (!(r.operand.cv() & cv_const) || (r.operand.cv() & cv_volatile)))
+            return ill_formed(at,
+                              "a non-const lvalue reference shall not be "
+                              "bound to a bit-field",
+                              "dcl.init.ref");
+        m.category = value_category::prvalue;
+        m.bit_field_width = 0;
+        m.node = expression_node(semantic_kind::conversion, m, at.first_token(),
+                                 m.node);
+    }
     qualified_type t1 = r.operand, t2 = m.type;
     const struct type x = type_table[t1.unqualified()];
     const struct type y = type_table[t2.unqualified()];
@@ -1337,10 +1347,93 @@ analysis_result semantic_analysis::class_list_initialization(
         return not_supported(list, "class.pre");
     /* [dcl.init.list]/3.6: "Otherwise, if T is a specialization of
        std::initializer_list<E>, the object is constructed as described
-       below": not analysed */
+       below" */
     if (named(c, "initializer_list") &&
-        std_namespace(entity_table[c].enclosing))
-        return not_supported(list, "dcl.init.list");
+        std_namespace(entity_table[c].enclosing)) {
+        if (!entity_table[c].instantiation)
+            return not_supported(list, "dcl.init.list");
+        const instantiation_record &inst =
+            instantiations[entity_table[c].instantiation - 1];
+        if (inst.argument_count < 1 ||
+            template_arguments[inst.first_argument].kind !=
+                template_argument::kind_t::type)
+            return not_supported(list, "dcl.init.list");
+        qualified_type elem = template_arguments[inst.first_argument].type;
+        owned_array<entity_index> fields;
+        for (uint32_t i = 0; i < entity_table[c].member_count; i++) {
+            entity_index m = class_members[entity_table[c].first_member + i];
+            if (entity_table[m].kind == entity_kind::variable &&
+                entity_table[m].nonstatic_member)
+                fields.append(m);
+        }
+        if (fields.size() != 2)
+            return not_supported(list, "dcl.init.list");
+        qualified_type f0 = entity_table[fields[0]].type;
+        qualified_type f1 = entity_table[fields[1]].type;
+        if (type_table[f0.unqualified()].kind != type_kind::pointer)
+            return not_supported(list, "dcl.init.list");
+        bool second_is_int = is_integral(f1);
+        if (!second_is_int &&
+            type_table[f1.unqualified()].kind != type_kind::pointer)
+            return not_supported(list, "dcl.init.list");
+        token_index at = list.first_token();
+        uint32_t first_node = 0;
+        uint32_t second_node = 0;
+        if (clauses.empty()) {
+            expression_meaning nullp;
+            nullp.type = f0;
+            nullp.category = value_category::prvalue;
+            nullp.evaluation = constness::constant;
+            nullp.value = 0;
+            first_node = expression_node(semantic_kind::constant, nullp, at);
+            expression_meaning zero;
+            zero.type = f1;
+            zero.category = value_category::prvalue;
+            zero.evaluation = constness::constant;
+            zero.value = 0;
+            second_node = expression_node(semantic_kind::constant, zero, at);
+        } else {
+            qualified_type elem_const =
+                qualified_type::make(elem.unqualified(), elem.cv() | cv_const);
+            qualified_type arr_type = qualified_type::make(
+                type_table.array_of(elem_const, clauses.size()), cv_none);
+            initialized_value arr_init;
+            VTRY(r, list_initialization(list, arr_type, false, arr_init));
+            expression_meaning arr_obj;
+            arr_obj.type = arr_type;
+            arr_obj.category = value_category::lvalue;
+            arr_obj.evaluation = constness::not_constant;
+            uint32_t cl = expression_node(semantic_kind::compound_literal,
+                                          arr_obj, at, arr_init.node);
+            expression_meaning decayed;
+            decayed.type = f0;
+            decayed.category = value_category::prvalue;
+            decayed.evaluation = constness::not_constant;
+            first_node =
+                expression_node(semantic_kind::conversion, decayed, at, cl);
+            if (second_is_int) {
+                expression_meaning sz;
+                sz.type = f1;
+                sz.category = value_category::prvalue;
+                sz.evaluation = constness::constant;
+                sz.value = static_cast<int64_t>(clauses.size());
+                second_node = expression_node(semantic_kind::constant, sz, at);
+            } else {
+                return not_supported(list, "dcl.init.list");
+            }
+        }
+        owned_array<uint32_t> items;
+        items.append(first_node);
+        items.append(second_node);
+        expression_meaning out;
+        out.type = type;
+        out.category = value_category::prvalue;
+        out.evaluation = constness::not_constant;
+        result.node = expression_node(semantic_kind::initializer_list, out, at);
+        semantics.set_list(result.node, items.data(), items.size());
+        result.evaluation = constness::not_constant;
+        return analysis_result::well_formed;
+    }
     if (!entity_table[c].size)
         /* [dcl.init.list]/3: list-initialization of an incomplete class:
            clang's "incomplete type" error */
@@ -1432,10 +1525,16 @@ analysis_result semantic_analysis::constructor_list_initialization(
     qualified_type type, bool direct, initialized_value &result)
 {
     entity_index c = type_table[type.unqualified()].entity;
+    /* [over.match.list]/1.1: first phase: initializer-list constructors */
+    owned_array<entity_index> ilist_ctors;
+    owned_array<qualified_type> ilist_types;
     for (entity_index k = entity_table[c].first_constructor; k;
          k = entity_table[k].next_constructor) {
         const struct type &f = type_table[entity_table[k].type.unqualified()];
         if (!f.parameter_count)
+            continue;
+        if (f.parameter_count > 1 &&
+            entity_table[k].default_arguments < f.parameter_count - 1)
             continue;
         qualified_type first =
             type_table.parameters(entity_table[k].type.unqualified())[0];
@@ -1446,10 +1545,34 @@ analysis_result semantic_analysis::constructor_list_initialization(
         const struct type &p0 = type_table[first.unqualified()];
         if (p0.kind == type_kind::class_type && p0.entity != c &&
             named(p0.entity, "initializer_list") &&
-            std_namespace(entity_table[p0.entity].enclosing))
-            /* [over.match.list]/1.1: initializer-list constructors, the
-               first phase, are not analysed */
-            return not_supported(list, "over.match.list");
+            std_namespace(entity_table[p0.entity].enclosing)) {
+            ilist_ctors.append(k);
+            ilist_types.append(
+                qualified_type::make(first.unqualified(), cv_none));
+        }
+    }
+    if (ilist_ctors.size() == 1) {
+        qualified_type ilist_type = ilist_types[0];
+        initialized_value ilist_val;
+        substitution_mark mark = mark_substitution();
+        substituting++;
+        analysis_result ir = class_list_initialization(
+            list, clauses, ilist_type, false, ilist_val);
+        substituting--;
+        if (ir == analysis_result::well_formed) {
+            expression_meaning arg;
+            arg.type = ilist_type;
+            arg.category = value_category::prvalue;
+            arg.evaluation = ilist_val.evaluation;
+            arg.node = ilist_val.node;
+            owned_array<expression_meaning> one;
+            one.append(arg);
+            return construct(list, type, one, 0, result, !direct);
+        }
+        if (ir != analysis_result::ill_formed || !undo_substitution(mark))
+            return ir;
+    } else if (ilist_ctors.size() > 1) {
+        return not_supported(list, "over.match.list");
     }
     owned_array<expression_meaning> arguments;
     for (SyntaxElement clause : clauses) {
@@ -1855,10 +1978,13 @@ analysis_result semantic_analysis::aggregate_element_clause(
             next++;
             return initialize_with(at, e, element, false, true, one);
         }
+        if (!subaggregate) {
+            next++;
+            return initialize_with(at, e, element, false, true, one);
+        }
         /* a conversion from another class (a constructor or conversion
-           function), or into a class that is no aggregate */
-        if (!subaggregate ||
-            type_table[e.type.unqualified()].kind == type_kind::class_type)
+           function) into a subaggregate */
+        if (type_table[e.type.unqualified()].kind == type_kind::class_type)
             return not_supported(list, "dcl.init.aggr");
     }
     if (!subaggregate) {
