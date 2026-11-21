@@ -787,12 +787,11 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         return not_supported(n, "dcl.fct.def.default");
     entity &x = entity_table[c];
     /* [dcl.fct.def.default]/3: constexpr only if constexpr-compatible.  The
-       default constructor of a class without virtual bases is
-       ([class.default.ctor]/4 with [dcl.constexpr]/4 as of C++20, which
-       no longer asks for every member to be initialized); the other
-       functions are not analysed */
-    if (constexpr_specified &&
-        (m.destructor || f.parameter_count || x.virtual_base_count))
+       default, copy and move constructors of a class without virtual bases
+       are ([class.default.ctor]/4, [class.copy.ctor]/13 with
+       [dcl.constexpr]/4 as of C++20, which no longer asks for every member
+       to be initialized); the other functions are not analysed */
+    if (constexpr_specified && (m.destructor || x.virtual_base_count))
         return not_supported(n, "dcl.fct.def.default");
     if (m.destructor) {
         if (access)
@@ -876,8 +875,9 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
                                                              uint8_t access)
 {
     if (access || !s.has_type || s.typedef_ || s.static_ || s.extern_ ||
-        s.constexpr_ || s.virtual_ || s.friend_ || s.explicit_ ||
-        s.declares_class || s.aligned)
+        s.virtual_ || s.friend_ || s.explicit_ || s.declares_class || s.aligned)
+        return not_supported(n, "dcl.fct.def.default");
+    if (s.constexpr_ && entity_table[c].virtual_base_count)
         return not_supported(n, "dcl.fct.def.default");
     qualified_type type = s.type;
     declarator_meaning m;
