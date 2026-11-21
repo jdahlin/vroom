@@ -261,6 +261,7 @@ VPRIV bool x64_framefree_record(codegen_context *e, const record *i);
 VPRIV bool x64_copy_forward_at(codegen_context *e, uint32_t k);
 VPRIV bool x64_last_u32(const codegen_context *e, int r);
 VPRIV void x64_dead(codegen_context *e);
+VPRIV void x64_zero_idioms(codegen_context *e);
 VPRIV void
 x64_dead_budget(codegen_context *e,
                 uint32_t budget); /* internal bounded-fallback contracts */

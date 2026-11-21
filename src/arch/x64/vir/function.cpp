@@ -252,6 +252,12 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
                         V->allocation.slot[v], V->allocation.spill_defined[v]);
     }
     free(entries.p);
+    if (L.map && allocated) {
+        vbuffer pb = {0};
+        vir_alloc_print(&pb, NULL, f, &V->loops, &V->allocation);
+        fprintf(stderr, "%.*s", (int)pb.n, pb.p ? (char *)pb.p : "");
+        free(pb.p);
+    }
     L.general_temporary = r10 ? R11 : R10;
     if (!allocated) {
         *why = VIRBUILD_FAILURE(x64_allocation_failed);
