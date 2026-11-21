@@ -651,7 +651,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             base = &i;
             index = &a;
         }
-        if (is_array(*base) && base->category != value_category::lvalue)
+        if (is_array(*base) && base->category == value_category::prvalue)
             return not_supported(n, "expr.sub");
         r = operand_value(n, *base);
         if (r == analysis_result::well_formed)
