@@ -281,6 +281,25 @@ VPRIV bool x64_vir_address_memory_fold(x64_vir_context *L, uint32_t b,
            x64_vir_big_endian_address_match(L, b, v, &end);
 }
 
+/* v is a non-negative value of at most `width` bytes: a zero-extended load of no more bytes, or
+ * an `and` with a mask that small.  The low `width` bytes of its register are then the value
+ * whatever the upper bits of that register are. */
+VPRIV bool x64_vir_value_fits_unsigned(const vir_function *f, uint32_t v,
+                                       unsigned width)
+{
+    const vir_insn *i = &f->insns[v];
+    int64_t mask;
+
+    if (i->op == VIR_OP_LOAD)
+        return !(i->flags & (VIR_INSN_FLAG_MS | VIR_INSN_FLAG_VOL)) &&
+               (1u << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) <= width &&
+               (i->type == VIR_TYPE_I32 || i->type == VIR_TYPE_I64);
+    if (i->op == VIR_OP_AND && (x64_vir_value_immediate(f, i->b, &mask) ||
+                                x64_vir_value_immediate(f, i->a, &mask)))
+        return mask >= 0 && mask < (INT64_C(1) << (width * 8));
+    return false;
+}
+
 /* An IR i32 does not itself guarantee zero upper bits: parameters, calls,
  * signed narrow loads and identity truncations can retain arbitrary bits. */
 VPRIV bool x64_vir_value_upper_half_is_clear(const vir_function *f, uint32_t v)
