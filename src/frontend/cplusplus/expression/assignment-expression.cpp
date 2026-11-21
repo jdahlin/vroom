@@ -121,7 +121,7 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
     if (r != analysis_result::well_formed)
         return r;
     if (n[2].is(syntax_kind::braced_init_list)) {
-        /* [expr.ass]/10: for an aggregate with only trivial assignment,
+        /* [expr.ass]/8: for an aggregate with only trivial assignment,
            the list initializes the object passed to that operator. */
         const struct type target = type_table[left.type.unqualified()];
         if (op != preprocessing_op_or_punc::EQUAL ||
