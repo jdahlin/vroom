@@ -1347,10 +1347,93 @@ analysis_result semantic_analysis::class_list_initialization(
         return not_supported(list, "class.pre");
     /* [dcl.init.list]/3.6: "Otherwise, if T is a specialization of
        std::initializer_list<E>, the object is constructed as described
-       below": not analysed */
+       below" */
     if (named(c, "initializer_list") &&
-        std_namespace(entity_table[c].enclosing))
-        return not_supported(list, "dcl.init.list");
+        std_namespace(entity_table[c].enclosing)) {
+        if (!entity_table[c].instantiation)
+            return not_supported(list, "dcl.init.list");
+        const instantiation_record &inst =
+            instantiations[entity_table[c].instantiation - 1];
+        if (inst.argument_count < 1 ||
+            template_arguments[inst.first_argument].kind !=
+                template_argument::kind_t::type)
+            return not_supported(list, "dcl.init.list");
+        qualified_type elem = template_arguments[inst.first_argument].type;
+        owned_array<entity_index> fields;
+        for (uint32_t i = 0; i < entity_table[c].member_count; i++) {
+            entity_index m = class_members[entity_table[c].first_member + i];
+            if (entity_table[m].kind == entity_kind::variable &&
+                entity_table[m].nonstatic_member)
+                fields.append(m);
+        }
+        if (fields.size() != 2)
+            return not_supported(list, "dcl.init.list");
+        qualified_type f0 = entity_table[fields[0]].type;
+        qualified_type f1 = entity_table[fields[1]].type;
+        if (type_table[f0.unqualified()].kind != type_kind::pointer)
+            return not_supported(list, "dcl.init.list");
+        bool second_is_int = is_integral(f1);
+        if (!second_is_int &&
+            type_table[f1.unqualified()].kind != type_kind::pointer)
+            return not_supported(list, "dcl.init.list");
+        token_index at = list.first_token();
+        uint32_t first_node = 0;
+        uint32_t second_node = 0;
+        if (clauses.empty()) {
+            expression_meaning nullp;
+            nullp.type = f0;
+            nullp.category = value_category::prvalue;
+            nullp.evaluation = constness::constant;
+            nullp.value = 0;
+            first_node = expression_node(semantic_kind::constant, nullp, at);
+            expression_meaning zero;
+            zero.type = f1;
+            zero.category = value_category::prvalue;
+            zero.evaluation = constness::constant;
+            zero.value = 0;
+            second_node = expression_node(semantic_kind::constant, zero, at);
+        } else {
+            qualified_type elem_const =
+                qualified_type::make(elem.unqualified(), elem.cv() | cv_const);
+            qualified_type arr_type = qualified_type::make(
+                type_table.array_of(elem_const, clauses.size()), cv_none);
+            initialized_value arr_init;
+            VTRY(r, list_initialization(list, arr_type, false, arr_init));
+            expression_meaning arr_obj;
+            arr_obj.type = arr_type;
+            arr_obj.category = value_category::lvalue;
+            arr_obj.evaluation = constness::not_constant;
+            uint32_t cl = expression_node(semantic_kind::compound_literal,
+                                          arr_obj, at, arr_init.node);
+            expression_meaning decayed;
+            decayed.type = f0;
+            decayed.category = value_category::prvalue;
+            decayed.evaluation = constness::not_constant;
+            first_node =
+                expression_node(semantic_kind::conversion, decayed, at, cl);
+            if (second_is_int) {
+                expression_meaning sz;
+                sz.type = f1;
+                sz.category = value_category::prvalue;
+                sz.evaluation = constness::constant;
+                sz.value = static_cast<int64_t>(clauses.size());
+                second_node = expression_node(semantic_kind::constant, sz, at);
+            } else {
+                return not_supported(list, "dcl.init.list");
+            }
+        }
+        owned_array<uint32_t> items;
+        items.append(first_node);
+        items.append(second_node);
+        expression_meaning out;
+        out.type = type;
+        out.category = value_category::prvalue;
+        out.evaluation = constness::not_constant;
+        result.node = expression_node(semantic_kind::initializer_list, out, at);
+        semantics.set_list(result.node, items.data(), items.size());
+        result.evaluation = constness::not_constant;
+        return analysis_result::well_formed;
+    }
     if (!entity_table[c].size)
         /* [dcl.init.list]/3: list-initialization of an incomplete class:
            clang's "incomplete type" error */
