@@ -1252,8 +1252,8 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
     if (r != analysis_result::well_formed)
         return r;
     if (!m.has_id || m.qualifier || m.qualified_namespace || !s.has_type ||
-        s.typedef_ || s.static_ || s.extern_ || s.declares_enumeration ||
-        s.gnu_flags || s.aligned || m.operator_function || m.literal_operator ||
+        s.typedef_ || s.extern_ || s.declares_enumeration || s.gnu_flags ||
+        s.aligned || m.operator_function || m.literal_operator ||
         type_table[type.unqualified()].kind == type_kind::function ||
         type_table[type.unqualified()].kind == type_kind::none)
         return not_supported(n, "temp.pre");

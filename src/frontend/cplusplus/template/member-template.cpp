@@ -468,7 +468,9 @@ analysis_result semantic_analysis::bound_member_call(
         entity_table[x.enclosing].destructor)
         /* the temporary's destruction ([class.temporary]/4) */
         return not_supported(n, "class.temporary");
-    if (aggregate_prvalue(e))
+    if (aggregate_prvalue(e) &&
+        (!at_block_scope() || entity_table[x.enclosing].destructor ||
+         x.enclosing != object_class))
         return not_supported(n, "class.temporary");
     VTRY(r, deleted_use(at, f));
     expression_meaning callee;

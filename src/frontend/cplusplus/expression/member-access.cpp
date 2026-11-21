@@ -103,7 +103,10 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         VTRY(r, member_access(at, through, m));
         object_class = type_table[m.type.unqualified()].entity;
     }
-    if (aggregate_prvalue(m))
+    if (aggregate_prvalue(m) &&
+        (!at_block_scope() || entity_table[object_class].destructor ||
+         (entity_table[e].nonstatic_member &&
+          entity_table[e].enclosing != object_class)))
         return not_supported(current_declaration, "class.temporary");
     if (!accessible(e, object_class))
         /* [class.access]/1.1: "private; that is, its name can be used only

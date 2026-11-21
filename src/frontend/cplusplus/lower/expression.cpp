@@ -164,6 +164,9 @@ uint32_t c_lowering::expression(uint32_t index)
         uint32_t base = 0;
         if (is_glvalue(node(n.a)))
             base = object(n.a);
+        else if (node(n.a).kind == semantic_kind::initializer_list ||
+                 node(n.a).kind == semantic_kind::zero)
+            base = temporary_object(n.a);
         else
             base = expression(n.a);
         if (!base)

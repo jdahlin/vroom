@@ -267,8 +267,8 @@ bool itanium_mangler::encoding(entity_index e)
         return true;
     if (!bare_function_type(x.type))
         return false;
-    if (x.special == special_member::constructor && x.first_declaration &&
-        x.enclosing && analysis.entity_table[x.enclosing].instantiation) {
+    if (x.kind == entity_kind::function && x.first_declaration && x.enclosing &&
+        analysis.entity_table[x.enclosing].instantiation) {
         SyntaxRef declaration =
             analysis.entity_table.declaration(x.first_declaration).node;
         for (SyntaxElement part : declaration.elements()) {

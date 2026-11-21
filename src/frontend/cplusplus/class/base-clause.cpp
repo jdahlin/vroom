@@ -355,6 +355,11 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
                                        "class type that is not an "
                                        "incompletely defined class",
                                        "class.derived");
+        if (bx.final_)
+            return ill_formed_at_token(id,
+                                       "a class marked final shall not be "
+                                       "specified as a direct base class",
+                                       "class.derived");
         for (uint32_t k = 0; k < entity_table[c].base_count; k++)
             if (entity_table[class_bases[entity_table[c].first_base + k]]
                     .type.unqualified() == bx.type.unqualified())
