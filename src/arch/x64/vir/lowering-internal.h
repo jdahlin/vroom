@@ -42,6 +42,8 @@ typedef struct x64_vir_context {
     uint32_t compare_memory_value;
     uint8_t compare_memory_size;
     bool compare_memory_side;
+    bool
+        compare_memory_unsigned; /* a narrow zero-extended compare: the unsigned condition */
     uint32_t test_value;
     uint8_t test_size;
     int64_t test_immediate;
@@ -101,6 +103,8 @@ VPRIV void x64_vir_switch_lower(x64_vir_context *L, uint32_t block,
 VPRIV bool x64_vir_fold_edits_check(x64_vir_context *L, uint32_t b,
                                     uint32_t pos, int keep);
 VPRIV bool x64_vir_memory_next_fold(x64_vir_context *L, uint32_t b, uint32_t v);
+VPRIV bool x64_vir_value_fits_unsigned(const vir_function *f, uint32_t v,
+                                       unsigned width);
 VPRIV bool x64_vir_memory_cast_fold(x64_vir_context *L, uint32_t b, uint32_t v);
 VPRIV unsigned x64_vir_word_read_match(x64_vir_context *L, uint32_t b,
                                        uint32_t v, uint32_t *end);

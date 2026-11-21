@@ -134,6 +134,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         unsigned width = 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
         int64_t k = 0;
         bool side = next->b == v, ok = false;
+        bool narrow_unsigned = false;
         if (next->op == VIR_OP_ICMP && (next->a == v || side)) {
             uint32_t other = side ? next->a : next->b;
             bool imm = x64_vir_value_immediate(L->function, other, &k);
@@ -147,10 +148,20 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                                              !!(i->flags & VIR_INSN_FLAG_MS))) -
                              1;
                 ok = k >= lo && k <= hi;
+            } else if (!(i->flags & VIR_INSN_FLAG_MS) && width < 4 &&
+                       (imm ? !side && k >= 0 && k < (INT64_C(1) << (width * 8))
+                            : x64_vir_value_fits_unsigned(L->function, other,
+                                                          width))) {
+                /* a zero-extended byte or word against another such value or an
+				 * immediate in its range: the compare of the narrow bytes, with the
+				 * unsigned condition (the signed one on non-negative values is the same) */
+                ok = true;
+                narrow_unsigned = true;
             }
         }
         if (ok) {
             L->compare_memory_value = v + 1;
+            L->compare_memory_unsigned = narrow_unsigned;
             L->compare_memory_size = width;
             L->compare_memory_side = side;
             x64_vir_load_address(L, i->a, a);
@@ -568,8 +579,10 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                                      X64_CONDITION_G, X64_CONDITION_GE,
                                      X64_CONDITION_B, X64_CONDITION_BE,
                                      X64_CONDITION_A, X64_CONDITION_AE};
+        bool narrow_unsigned = false;
         if (L->compare_memory_value == v) {
             int other = L->compare_memory_side ? a : c;
+            narrow_unsigned = L->compare_memory_unsigned;
             record *r = x64_record_emit_three_registers(
                 e, X64_OP_CMPM, L->compare_memory_size, X64_REGISTER_NONE,
                 L->memory_base, other);
@@ -598,9 +611,12 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         L->compare_condition = v;
         L->compare_block = b;
         L->setcc_record = e->x64_context->record_count;
+        unsigned condition = i->flags & 15;
+        if (narrow_unsigned && condition >= 2 && condition <= 5)
+            condition += 4; /* slt, sle, sgt, sge -> ult, ule, ugt, uge */
         x64_record_emit_three_registers(e, X64_OP_SETCC, 4, d,
                                         X64_REGISTER_NONE, X64_REGISTER_NONE)
-            ->condition = cc[i->flags & 15];
+            ->condition = cc[condition];
         return;
     }
     case VIR_OP_FCMP: {
