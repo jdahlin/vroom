@@ -162,8 +162,14 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         vbuffer_append(written.get(), name.data(), name.size());
         owned_buffer identifier;
         spelling(e, identifier);
+        /* [basic.stc.thread]: a static local that is thread_local (or C's
+           _Thread_local, __thread) has one object per thread, as one of
+           namespace scope below */
+        uint32_t local_flags = 0;
+        if (kind == AST_SYMBOL_VARIABLE && x.c11_thread_local)
+            local_flags |= AST_SYMBOL_FLAG_THREAD;
         s = ast_builder_symbol(c, kind, identifier.data(), identifier.size(), t,
-                               AST_STORAGE_STATIC, 0, 1);
+                               AST_STORAGE_STATIC, local_flags, 1);
         ast_builder_symbol_assembler_name(c, s, written.data(), written.size());
         *slot = s;
         gnu_attributes(e, s);
