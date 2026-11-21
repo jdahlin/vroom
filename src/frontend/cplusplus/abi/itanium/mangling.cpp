@@ -144,7 +144,8 @@ class itanium_mangler
         return c.is(op);
     }
     bool class_template_args(entity_index c);
-    bool template_args(entity_index c, entity_index function = 0);
+    bool template_args(entity_index c, entity_index function = 0,
+                       bool pack_brackets = true);
     bool dependent_value(entity_index d);
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
     bool template_template_arg(entity_index t, uint32_t parameter);
@@ -996,7 +997,8 @@ bool itanium_mangler::class_template_args(entity_index c)
  * its parameter's type, then the value, n before a negative one's
  * magnitude; a bool's 0 or 1.
  */
-bool itanium_mangler::template_args(entity_index c, entity_index function)
+bool itanium_mangler::template_args(entity_index c, entity_index function,
+                                    bool pack_brackets)
 {
     text("I");
     uint32_t count = analysis.specialization_argument_count(c);
@@ -1039,7 +1041,8 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
 
                <template-arg> ::= J <template-arg>* E
         */
-        text("J");
+        if (pack_brackets)
+            text("J");
         for (uint32_t k = 1; k < pack; k++) {
             /* a template's own pack expanded (res<A...> in its own
                declaration): [abi:mangle.function-type]'s pack expansion of the
@@ -1065,7 +1068,8 @@ bool itanium_mangler::template_args(entity_index c, entity_index function)
             if (!template_arg(c, i, k))
                 return false;
         }
-        text("E");
+        if (pack_brackets)
+            text("E");
     }
     text("E");
     return true;
@@ -1128,11 +1132,13 @@ bool itanium_mangler::dependent_value(entity_index d)
         return false;
     entity_index q = record(x.type).entity;
     const entity &spec = analysis.entity_table[q];
-    if (x.value == 4) {
-        /* a variable template's specialization, v<args>: [abi:expressions]'
+    if (x.value == 4 || x.value == 6) {
+        /* a variable template's specialization, [!] v<args>: [abi:expressions]'
            unresolved-name, <source-name> <template-args> */
         text("X");
-        if (!source_name(spec.name) || !template_args(q))
+        if (x.value & 2)
+            text("nt");
+        if (!source_name(spec.name) || !template_args(q, 0, false))
             return false;
         text("E");
         return true;

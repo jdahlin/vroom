@@ -4625,8 +4625,8 @@ class semantic_analysis
     /* [temp.param]/4: a non-type parameter's dependent type
        (typename enable_if<B, int>::type) with the arguments before it */
     entity_index dependent_value_entity(SyntaxElement written);
-    entity_index dependent_variable_specialization(SyntaxRef id,
-                                                   entity_index e);
+    entity_index dependent_variable_specialization(SyntaxRef id, entity_index e,
+                                                   bool negated);
     owned_array<entity_index> dependent_values;
     analysis_result substituted_parameter_type(uint32_t template_index,
                                                uint32_t position,

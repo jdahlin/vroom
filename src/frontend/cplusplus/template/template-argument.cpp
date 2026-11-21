@@ -158,8 +158,8 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
             entity_table[x.entity].kind == entity_kind::dependent_value)
             return x.entity;
     }
-    if (!negated && written.is(syntax_kind::simple_template_id))
-        return dependent_variable_specialization(written, e);
+    if (written.is(syntax_kind::simple_template_id))
+        return dependent_variable_specialization(written, e, negated);
     if (!written.is(syntax_kind::qualified_id) || written.size() != 2)
         return e;
     SyntaxElement qualifier = written[0];
@@ -202,9 +202,8 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
    variable template (one per arguments), which [abi:mangle.template-arg]
    spells X <source-name> <template-args> E (value 4); e if it is not
    one */
-entity_index
-semantic_analysis::dependent_variable_specialization(SyntaxRef id,
-                                                     entity_index e)
+entity_index semantic_analysis::dependent_variable_specialization(
+    SyntaxRef id, entity_index e, bool negated)
 {
     if (id.size() < 3 || !id[0].is_identifier())
         return e;
@@ -261,11 +260,14 @@ semantic_analysis::dependent_variable_specialization(SyntaxRef id,
         instantiations.append(record);
     }
     qualified_type type = entity_table[s].type;
+    uint64_t value = 4;
+    if (negated)
+        value = 6;
     for (entity_index d : dependent_values)
-        if (entity_table[d].type == type && entity_table[d].value == 4)
+        if (entity_table[d].type == type && entity_table[d].value == value)
             return d;
     entity_table[e].type = type;
-    entity_table[e].value = 4;
+    entity_table[e].value = value;
     dependent_values.append(e);
     return e;
 }
