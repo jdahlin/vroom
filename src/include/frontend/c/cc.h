@@ -420,7 +420,9 @@ enum { CC_DISABLED_BUILTIN_WORDS = 6 }; /* generated libbuiltins.inc indices */
     X(vectorize, "vectorize",                                                  \
       3) /* the loop vectorizer (codegen/vir/vectorize.cpp) */                 \
     X(hoist_loop_constants, "hoist-loop-constants",                            \
-      3) /* a loop's constants are made once in front of it */
+      3) /* a loop's constants are made once in front of it */                 \
+    X(address_clone, "address-clone",                                          \
+      2) /* x86-64: a constant offset several accesses use is added at each */
 
 typedef struct cc_optimizations {
 #define X(field, name, level) bool field;

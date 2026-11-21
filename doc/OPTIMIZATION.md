@@ -90,16 +90,19 @@ What a function gets, in order (the rows of `codegen/vir/pass-table.c`):
    result is a value become one compare chain (arm64: `ccmp`).
 7. **If-conversion** (`if-conversion.c`): diamonds and triangles with small
    arms become selects (`csel`, `cmov`).
-8. **Edge splitting**, conversion to VIR and its canonical form (`split`,
+8. **Address cloning** (`address-clone.cpp`, x86-64): a pointer plus a
+   constant that several loads and stores use is added again in front of each,
+   so that every one folds it as its displacement instead of sharing an `lea`.
+9. **Edge splitting**, conversion to VIR and its canonical form (`split`,
    `slot-uses`, `to-vir`, `canon`).
-9. **Register allocation** (`vir/alloc.c`, `SPEC-vir.md` 15): greedy, in block
+10. **Register allocation** (`vir/alloc.c`, `SPEC-vir.md` 15): greedy, in block
    order, on SSA, with parallel moves on edges; callee-saved registers chosen
    per function.
-10. **Lowering** (`arch/a64/vir/`, `arch/x64/vir/`): block layout with loop
+11. **Lowering** (`arch/a64/vir/`, `arch/x64/vir/`): block layout with loop
     rotation (the test at the bottom of a loop) and duplication of a loop's
     entry test; on arm64, shrink-wrapping (the prologue only on the paths
     that need a frame; not with `-fasynchronous-unwind-tables` on ELF).
-11. **Records**: the same clean-up passes as `-O1`.
+12. **Records**: the same clean-up passes as `-O1`.
 
 ### -O3: the vectorizer
 
@@ -133,6 +136,7 @@ it to a lower level.
 | `-fshrink-wrap` | `-O2` | arm64: the prologue moves to the paths that need a frame |
 | `-fvectorize` (`-ftree-vectorize`) | `-O3` | the loop vectorizer |
 | `-fhoist-loop-constants` | `-O3` | an innermost loop's constants made once in front of it |
+| `-faddress-clone` | `-O2` | x86-64: a pointer plus a constant that several accesses use is added again at each (`-fno-address-clone` keeps one shared `lea`) |
 
 The direct emitter's own optimizations have no options of their own, apart
 from the ones clang has: `-fno-jump-tables`, `-fno-optimize-sibling-calls`,
