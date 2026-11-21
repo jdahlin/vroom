@@ -44,7 +44,6 @@ temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implem
 temp-mem-address-deduced-target	vcc: the rules of [over] are not implemented yet
 temp-mem-concept-equivalent-head	vcc: the rules of [temp.concept] are not implemented yet
 temp-mem-constructor-declared	vcc: the rules of [temp.inst] are not implemented yet
-temp-mem-constructor-defined-in-class	vcc: symbols differ from clang's (see cxx-run)
 temp-mem-conversion-template-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
 temp-mem-decltype-return-mangling	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 temp-mem-friend-of-member-template	vcc: the rules of [dcl.meaning] are not implemented yet

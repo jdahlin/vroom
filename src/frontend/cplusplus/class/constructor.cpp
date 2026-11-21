@@ -1282,6 +1282,37 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             item_expands[item_expands.size() - 1] = true;
         }
     }
+    /* [class.base.init]/6: a delegating constructor (the sole mem-initializer
+       names the constructor's own class) */
+    if (items.size() == 1 && !item_expands[0] && items[0].size() >= 2 &&
+        items[0][0].is_identifier() &&
+        tokens.identifier(items[0][0].token()) == entity_table[c].name) {
+        SyntaxElement item = items[0];
+        token_index id = item[0].token();
+        owned_array<expression_meaning> arguments;
+        if (item.size() == 4) {
+            VTRY(r, expression_list_meanings(item[2], arguments));
+        } else if (item.size() != 3) {
+            return not_supported(item, "class.base.init");
+        }
+        initialized_value value;
+        VTRY(r, construct(item, entity_table[c].type, arguments, 0, value));
+        if (semantics[value.node].kind != semantic_kind::construct ||
+            semantics[value.node].a)
+            return not_supported(item, "class.base.init");
+        expression_meaning ptr;
+        VTRY_SET(r, this_pointer(id, ptr));
+        expression_meaning self;
+        self.type = entity_table[c].type;
+        self.category = value_category::lvalue;
+        self.evaluation = constness::not_constant;
+        self.node =
+            expression_node(semantic_kind::indirection, self, id, ptr.node);
+        semantics[value.node].a = self.node;
+        built =
+            statement_node(semantic_kind::expression_statement, id, value.node);
+        return analysis_result::well_formed;
+    }
     /* [class.base.init]/13: "(13.2) Then, direct base classes are
        initialized in declaration order as they appear in the
        base-specifier-list ... (13.3) Then, non-static data members are
