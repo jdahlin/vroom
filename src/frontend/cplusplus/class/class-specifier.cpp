@@ -124,8 +124,7 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
         return not_supported(n, "class.union.anon");
     entity_index u = record.entity;
     const entity &x = entity_table[u];
-    if (x.first_constructor || x.destructor || x.base_count ||
-        !size_of_type(s.type))
+    if (!trivial_special_members(u) || x.base_count || !size_of_type(s.type))
         return not_supported(n, "class.union.anon");
     entity_index e = entity_table.make(entity_kind::variable, 0, c);
     entity_table[e].type = s.type;
@@ -1301,21 +1300,38 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
             return r;
         }
         auto body = node.function_definition().function_body();
-        if (node.size() != at + 2 || !body || body.function_try_block())
+        bool constrained = node.size() == at + 3 &&
+                           node[at + 1].is(syntax_kind::requires_clause) &&
+                           node[at + 1].size() == 2;
+        if ((!constrained && node.size() != at + 2) || !body ||
+            body.function_try_block())
             return not_supported(node, "dcl.fct.def.general");
+        bool satisfied = true;
+        if (constrained) {
+            if (!entity_table[c].instantiation || body.defaulted() ||
+                body.deleted())
+                return not_supported(node, "temp.constr");
+            VTRY(r, constraint_satisfied(node[at + 1][1], current_scope,
+                                         lookup_horizon, satisfied));
+        }
         if (body.defaulted() || body.deleted()) {
             /* = default, = delete: no user-provided function
                ([dcl.fct.def.default]/5), which the layout ([abi:pod]) and
                triviality need to know before the class is complete */
             return defaulted_or_deleted_special_member(
-                c, node, node[at], node[at + 1], access, constexpr_specified,
-                virtual_specified, explicit_specified);
+                c, node, special(node[at]), node[at + 1], access,
+                constexpr_specified, virtual_specified || override_ || final_,
+                explicit_specified);
         }
         analysis_result r = special_member_declarator(
-            c, node, node[at], access, true, constexpr_specified,
-            virtual_specified, explicit_specified, inline_specified);
-        if (r == analysis_result::well_formed)
-            bodies.append(node);
+            c, node, special(node[at]), access, true, constexpr_specified,
+            virtual_specified || override_ || final_, explicit_specified,
+            inline_specified);
+        if (r == analysis_result::well_formed) {
+            entity_table[last_declared].constraint_unsatisfied = !satisfied;
+            if (satisfied)
+                bodies.append(node);
+        }
         return r;
     }
     /* [ext:gnu_attributes] before the decl-specifier-seq: what follows
@@ -1336,6 +1352,7 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     virtual_allowed = true;
     bool outer_mutable_allowed = mutable_allowed;
     mutable_allowed = true;
+    placeholder_allowed = true;
     analysis_result r = decl_specifier_seq(first, s, false);
     virtual_allowed = outer_virtual_allowed;
     mutable_allowed = outer_mutable_allowed;
@@ -1569,6 +1586,25 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     uint32_t name = tokens.identifier(m.id);
     bool is_function =
         type_table[type.unqualified()].kind == type_kind::function;
+    bool placeholder_return = is_function && contains_placeholder(type);
+    if (placeholder_return) {
+        /* [dcl.spec.auto]/10: "A virtual function shall not have a
+           declared return type that uses a placeholder type." */
+        if (s.virtual_ || virt_override || virt_final || virt_pure)
+            return ill_formed_at_token(m.id,
+                                       "a virtual function shall not have a "
+                                       "declared return type that uses a "
+                                       "placeholder type",
+                                       "dcl.spec.auto");
+        if (!definition ||
+            !tokens.files.behavior.has(
+                language_feature::return_type_deduction) ||
+            m.conversion_function || m.destructor || m.literal_operator ||
+            (m.operator_function && m.allocation != allocation_function::none))
+            return not_supported(declaration, "dcl.spec.auto");
+    }
+    if (!is_function && contains_placeholder(type))
+        return not_supported(declaration, "dcl.spec.auto");
     /* [dcl.fct.spec]/2: "The virtual specifier shall be used only in the
        initial declaration of a non-static class member function" */
     if (s.virtual_ && !is_function)
@@ -1665,6 +1701,9 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                names ([class.conv.fct]/1), here one */
             if (m.conversion_function && x.type != type)
                 continue;
+            if ((placeholder_return || x.placeholder_return) &&
+                x.member_cv == function_cv && x.nonstatic_member == !s.static_)
+                return not_supported(declaration, "dcl.spec.auto");
             if (x.member_cv == function_cv &&
                 x.nonstatic_member == !s.static_ && x.type == type)
                 /* [class.mem]/5 */
@@ -1720,6 +1759,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "class.static.mfct");
         e = entity_table.make(entity_kind::function, name, c);
         entity_table[e].type = type;
+        entity_table[e].placeholder_return = placeholder_return;
         entity_table[e].nonstatic_member = !s.static_;
         entity_table[e].member_cv = function_cv;
         /* [class.mfct]/1: "A member function may be defined in its class
@@ -1874,6 +1914,15 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             size = pointer_size();
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].kind != entity_kind::class_type) {
+            uint32_t inst = entity_table[record.entity].instantiation;
+            if (inst && instantiations[inst - 1].has_failure) {
+                unsupported.append(instantiations[inst - 1].failure);
+                return analysis_result::unsupported;
+            }
+            return not_supported(declaration, "class.mem");
+        }
         if (record.kind == type_kind::class_type && !size)
             /* [class.mem]/15: "The type of a non-static data member shall
                not be an incomplete type" */
@@ -2109,7 +2158,7 @@ semantic_analysis::member_function_definition(entity_index c,
         }
         if (!last_declared)
             return not_supported(definition, "class.ctor");
-        return special_member_body(definition, tail[at + 1].function_body());
+        return special_member_body(definition, definition.function_body());
     }
     /* [basic.scope.class]: the declarator's names are looked up in the
        class, as when its declaration was analysed (a class template's
@@ -2119,6 +2168,7 @@ semantic_analysis::member_function_definition(entity_index c,
     specified s;
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
+    placeholder_allowed = true;
     analysis_result r = decl_specifier_seq(seq, s, false);
     virtual_allowed = outer_virtual_allowed;
     qualified_type type = s.type;

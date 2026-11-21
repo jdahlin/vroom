@@ -255,16 +255,8 @@ CC_PRIVATE bool cc_builtin_has_effects(cc *c, uint32_t n, bool load)
     }
 }
 
-CC_PRIVATE uint32_t cc_builtin_elementwise_abs_build(cc *c, const cc_builtin *b,
-                                                     uint32_t loc)
+CC_PRIVATE uint32_t cc_vector_abs(cc *c, uint32_t arg, uint32_t loc)
 {
-    cc_id_list args;
-    cc_builtin_arguments_parse(c, &args);
-    if (args.n != 1) {
-        cc_builtin_arity_check(c, loc, 1, &args);
-        return cc_node_error_new(c, loc);
-    }
-    uint32_t arg = cc_conversion_decay(c, args.v[0]);
     ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(arg)->ty),
                        et = cc_type_is_vector(c, t) ? AST_TYPE(c, t)->base : t;
     int k = AST_TYPE_KIND(c, et);
@@ -272,9 +264,9 @@ CC_PRIVATE uint32_t cc_builtin_elementwise_abs_build(cc *c, const cc_builtin *b,
          (!cc_type_is_integer(c, et) || !cc_type_is_signed(c, et))) ||
         k == AST_TYPE_ENUM || k == AST_TYPE_BOOL) {
         cc_report_error(c, loc,
-                        "argument to '%s' must be a scalar or vector of signed "
-                        "integer or floating-point type",
-                        b->name);
+                        "argument to '__builtin_elementwise_abs' must be a "
+                        "scalar or vector of signed integer or floating-point "
+                        "type");
         return cc_node_error_new(c, loc);
     }
     /* Retain constant-expression support for scalar integer/floating args. */
@@ -327,6 +319,19 @@ CC_PRIVATE uint32_t cc_builtin_elementwise_abs_build(cc *c, const cc_builtin *b,
             result);
     }
     return cc_lowering_sequence(c, pre, result);
+}
+
+CC_PRIVATE uint32_t cc_builtin_elementwise_abs_build(cc *c, const cc_builtin *b,
+                                                     uint32_t loc)
+{
+    cc_id_list args;
+    cc_builtin_arguments_parse(c, &args);
+    if (args.n != 1) {
+        cc_builtin_arity_check(c, loc, 1, &args);
+        return cc_node_error_new(c, loc);
+    }
+    (void)b;
+    return cc_vector_abs(c, cc_conversion_decay(c, args.v[0]), loc);
 }
 
 /* __builtin_elementwise_min and _max of two vectors of one integer type:

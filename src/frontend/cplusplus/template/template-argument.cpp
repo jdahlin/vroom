@@ -81,6 +81,12 @@ void semantic_analysis::bind_template_argument(entity_index scope,
                 entity_table[e].value = x.value;
             } else if (x.kind == template_argument::kind_t::type) {
                 e = entity_table.make(entity_kind::typedef_name, name, scope);
+            } else if (x.kind == template_argument::kind_t::pack &&
+                       x.count == UINT32_MAX && x.template_entity) {
+                /* a partial specialization's own pack parameter bound to
+                   itself during substitute_specialization */
+                entity_table.bind(scope, name, x.template_entity);
+                return;
             } else {
                 /* (a value-dependent element: not made) */
                 continue;
@@ -323,6 +329,8 @@ analysis_result semantic_analysis::template_argument_for(
     if (written.is(syntax_kind::type_id))
         return not_supported(at, "temp.arg");
     qualified_type to = entity_table[p].type;
+    bool placeholder_to =
+        type_table[to.unqualified()].kind == type_kind::placeholder && !to.cv();
     /* [temp.param]/4: a parameter whose type is an earlier type parameter
        of the template (template <class T, T v>): that argument's type, the
        cv-qualifiers ignored (/6) */
@@ -339,7 +347,7 @@ analysis_result semantic_analysis::template_argument_for(
         if (!depends_on_template_parameter(to) &&
             !structural_parameter_type(to))
             return not_supported(at, "temp.arg.nontype");
-    } else if (depends_on_template_parameter(to)) {
+    } else if (!placeholder_to && depends_on_template_parameter(to)) {
         /* another dependent type: the parameter's type with the arguments
            before it, which may fail to be one ([temp.deduct]/8) */
         if (!before)
@@ -378,6 +386,9 @@ analysis_result semantic_analysis::template_argument_for(
         if (named && entity_table[named].kind == entity_kind::none &&
             entity_table[named].instantiation &&
             !entity_table[named].held_by_template) {
+            if (placeholder_to)
+                to = qualified_type::make(
+                    entity_table[named].type.unqualified(), cv_none);
             if (!(entity_table[named].type == to))
                 return not_supported(at, "temp.arg.nontype");
             out.kind = template_argument::kind_t::value;
@@ -400,12 +411,30 @@ analysis_result semantic_analysis::template_argument_for(
            parameter's name (bind_template_argument): its argument */
         if (named && entity_table[named].kind == entity_kind::none &&
             !entity_table[named].instantiation && entity_table[named].defined &&
-            entity_table[named].type == to) {
+            (placeholder_to || entity_table[named].type == to)) {
+            if (placeholder_to)
+                to = qualified_type::make(
+                    entity_table[named].type.unqualified(), cv_none);
             out.kind = template_argument::kind_t::value;
             out.type = to;
             out.value = entity_table[named].value;
             return analysis_result::well_formed;
         }
+    }
+    if (placeholder_to) {
+        /* [temp.arg.nontype]/1: deduce the placeholder parameter type
+           from the template argument expression */
+        expression_meaning m;
+        VTRY(r, expression(written, m));
+        qualified_type deduced = m.type;
+        const struct type &mr = type_table[deduced.unqualified()];
+        if (mr.kind == type_kind::function || mr.kind == type_kind::array)
+            deduced = decayed(deduced);
+        else
+            deduced = qualified_type::make(deduced.unqualified(), cv_none);
+        if (!structural_parameter_type(deduced))
+            return not_supported(at, "temp.arg.nontype");
+        to = deduced;
     }
     /* [temp.dep.constexpr]/2: another expression naming a template
        parameter (is_integral<T>::value): value-dependent, not analysed

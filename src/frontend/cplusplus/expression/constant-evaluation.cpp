@@ -1223,9 +1223,10 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             v = value_of(f, x.value);
             return constness::constant;
         }
-        /* (a null pointer is made by the conversion below) */
+        /* (a null pointer or void conversion is made by the conversion below) */
         type_kind k = type_table[x.type.unqualified()].kind;
-        if (k != type_kind::class_type && k != type_kind::pointer)
+        if (k != type_kind::class_type && k != type_kind::pointer &&
+            fundamental_of(x.type) != fundamental_type::void_)
             return constness::unknown;
     }
     if (x.category != value_category::prvalue &&

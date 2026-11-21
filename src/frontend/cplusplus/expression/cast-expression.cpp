@@ -788,13 +788,17 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
     } else {
         if (m.category == value_category::prvalue)
             return not_supported(at, "expr.cast");
-        if (lvalue_reference && m.category != value_category::lvalue)
+        bool xvalue_ok = m.category == value_category::xvalue &&
+                         (!lvalue_reference || (referenced.cv() == cv_const &&
+                                                (kinds & cast_static)));
+        if (lvalue_reference && m.category != value_category::lvalue &&
+            !xvalue_ok)
             return not_supported(at, "expr.cast");
         if (same && m.type.cv() == referenced.cv() && m.category == category &&
             (kinds & (cast_static | cast_const)))
             /* the glvalue itself */
             return analysis_result::well_formed;
-        if (m.category != value_category::lvalue)
+        if (m.category != value_category::lvalue && !xvalue_ok)
             return not_supported(at, "expr.cast");
         const struct type &from = type_table[m.type.unqualified()];
         const struct type &into = type_table[referenced.unqualified()];

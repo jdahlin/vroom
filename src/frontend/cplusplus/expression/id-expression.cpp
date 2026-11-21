@@ -926,10 +926,28 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
         return not_supported(n, "temp.names");
     nominated_scope scope;
     VTRY(r, nested_name_specifier(n[0], scope));
-    if (is_namespace(scope.entity) ||
-        entity_table[scope.entity].kind != entity_kind::class_type)
-        return not_supported(n, "expr.prim.id.qual");
     token_index t = id[0].token();
+    if (is_namespace(scope.entity)) {
+        lookup_result x = lookup_qualified(scope.entity, tokens.identifier(t),
+                                           lookup_filter::any);
+        if (x.ambiguous)
+            return ill_formed_at_token(t,
+                                       "the use of a name is ill-formed if it "
+                                       "does not allow a unique declaration to "
+                                       "be chosen from those found in the "
+                                       "namespaces",
+                                       "namespace.qual");
+        entity_index named = x.entity;
+        if (!named)
+            named = x.unknown_entity;
+        if (uint32_t ct = concept_of(named))
+            return concept_id(id, ct, m);
+        if (uint32_t vt = variable_template_of(named))
+            return variable_template_id_of(id, vt, m);
+        return not_supported(n, "expr.prim.id.qual");
+    }
+    if (entity_table[scope.entity].kind != entity_kind::class_type)
+        return not_supported(n, "expr.prim.id.qual");
     lookup_result x = lookup_qualified(scope.entity, tokens.identifier(t),
                                        lookup_filter::any);
     entity_index held = 0;

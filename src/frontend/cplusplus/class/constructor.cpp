@@ -186,8 +186,7 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
         if (x.is(syntax_kind::explicit_specifier)) {
             if (!conditions)
                 continue;
-            if (!instantiating && !class_instantiating && !substituting &&
-                names_dependent_entity(x.first_token(), x.end_token())) {
+            if (names_dependent_entity(x.first_token(), x.end_token())) {
                 s.explicit_dependent = true;
                 continue;
             }
@@ -356,10 +355,18 @@ bool semantic_analysis::trivial_class(entity_index c) const
 bool semantic_analysis::trivial_special_members(entity_index c) const
 {
     const entity &x = entity_table[c];
-    if (x.first_constructor && !trivial_defaulted_default_constructor(c))
-        return false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (!entity_table[k].implicit &&
+            (type_table[entity_table[k].type.unqualified()].parameter_count ==
+                 0 ||
+             is_copy_constructor(c, k)))
+            return false;
     if (x.dynamic || x.destructor || x.user_copy_assignments)
         return false;
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (entity_table[class_members[x.first_member + i]].default_initializer)
+            return false;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes)
@@ -455,7 +462,7 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
                                                  bool &constexpr_specified,
                                                  bool *virtual_specified,
                                                  bool *explicit_specified,
-                                                 bool *inline_specified) const
+                                                 bool *inline_specified)
 {
     constexpr_specified = false;
     bool virtual_seen = false, explicit_seen = false, inline_seen = false;
@@ -471,6 +478,21 @@ bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
            applies them */
         if (c.is(syntax_kind::gnu_attribute_specifier))
             continue;
+        if (c.is(syntax_kind::explicit_specifier)) {
+            if (!explicit_specified || explicit_seen ||
+                names_dependent_entity(c.first_token(), c.end_token()))
+                return false;
+            bool constant = false, value = false;
+            size_t unsupported_before = unsupported.size();
+            analysis_result r =
+                bool_constant_expression(c, c[2], constant, value);
+            unsupported.resize(unsupported_before);
+            if (r != analysis_result::well_formed || !constant)
+                return false;
+            explicit_seen = true;
+            *explicit_specified = value;
+            continue;
+        }
         if (!c.is_token())
             return false;
         switch (c.keyword()) {
@@ -765,12 +787,11 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         return not_supported(n, "dcl.fct.def.default");
     entity &x = entity_table[c];
     /* [dcl.fct.def.default]/3: constexpr only if constexpr-compatible.  The
-       default constructor of a class without virtual bases is
-       ([class.default.ctor]/4 with [dcl.constexpr]/4 as of C++20, which
-       no longer asks for every member to be initialized); the other
-       functions are not analysed */
-    if (constexpr_specified &&
-        (m.destructor || f.parameter_count || x.virtual_base_count))
+       default, copy and move constructors of a class without virtual bases
+       are ([class.default.ctor]/4, [class.copy.ctor]/13 with
+       [dcl.constexpr]/4 as of C++20, which no longer asks for every member
+       to be initialized); the other functions are not analysed */
+    if (constexpr_specified && (m.destructor || x.virtual_base_count))
         return not_supported(n, "dcl.fct.def.default");
     if (m.destructor) {
         if (access)
@@ -854,8 +875,9 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
                                                              uint8_t access)
 {
     if (access || !s.has_type || s.typedef_ || s.static_ || s.extern_ ||
-        s.constexpr_ || s.virtual_ || s.friend_ || s.explicit_ ||
-        s.declares_class || s.aligned)
+        s.virtual_ || s.friend_ || s.explicit_ || s.declares_class || s.aligned)
+        return not_supported(n, "dcl.fct.def.default");
+    if (s.constexpr_ && entity_table[c].virtual_base_count)
         return not_supported(n, "dcl.fct.def.default");
     qualified_type type = s.type;
     declarator_meaning m;
@@ -1034,7 +1056,8 @@ semantic_analysis::construct(SyntaxRef at, qualified_type type,
            default initialization in the context of copy-initialization),
            the candidate functions are all the converting constructors
            ([class.conv.ctor]) of that class" */
-        if (copy && entity_table[k].explicit_)
+        if ((copy && entity_table[k].explicit_) ||
+            entity_table[k].constraint_unsatisfied)
             continue;
         overload_candidate one;
         one.function = k;
@@ -2040,8 +2063,7 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
         entity_index base_class =
             type_table[entity_table[inheriting[d].base].type.unqualified()]
                 .entity;
-        if (entity_table[base_class].constructor_template ||
-            entity_table[base_class].constructor_templates)
+        if (entity_table[base_class].constructor_template)
             return not_supported(n, "temp.mem");
         /* [class.default.ctor]/1: c has an implicit default constructor
            unless a constructor is user-declared, which hides the base's
@@ -2054,6 +2076,21 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
              k = entity_table[k].next_constructor)
             if (!entity_table[k].implicit)
                 user_declared = true;
+        if (entity_table[base_class].constructor_templates) {
+            entity_index from = entity_table[base_class].constructor_templates;
+            entity_index to = entity_table[c].constructor_templates;
+            if (!to) {
+                to = make_held_name(entity_table[c].name, c);
+                entity_table[c].constructor_templates = to;
+            }
+            for (size_t i = 0, m = function_templates.size(); i < m; i++)
+                if (function_templates[i].name == from &&
+                    !function_templates[i].unusable) {
+                    function_template copy = function_templates[i];
+                    copy.name = to;
+                    function_templates.append(copy);
+                }
+        }
         /* [class.default.ctor]/1: the inherited constructors are no
            user-declared ones, so c has its implicit default constructor;
            a trivial one is no entity until a constructor beside it makes

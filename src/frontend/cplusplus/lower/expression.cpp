@@ -187,8 +187,13 @@ uint32_t c_lowering::expression(uint32_t index)
     case semantic_kind::compound_literal:
         return compound_literal(n.a);
     case semantic_kind::vector_shuffle: {
-        uint32_t a = expression(n.a), b = expression(n.b);
-        if (!a || !b)
+        uint32_t a = expression(n.a);
+        if (!a)
+            return 0;
+        if (n.op == 8)
+            return ast_builder_vector_abs(c, a);
+        uint32_t b = expression(n.b);
+        if (!b)
             return 0;
         if (n.op >= 4)
             return ast_builder_vector_saturate(c, n.op == 5, a, b);

@@ -365,8 +365,34 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
        declarations of the same name in the same declarative region also apply
        to using-declarations"): a function beside functions is an overload, the
        rest conflicts or hides */
-    if (prior && !qualified && entity_table.bound_by_using(scope, name))
+    if (prior && !qualified && entity_table.bound_by_using(scope, name)) {
+        if (c_language && is_namespace(scope) &&
+            kind == entity_kind::function &&
+            entity_table[prior].kind == entity_kind::none &&
+            entity_table[prior].held_by_template &&
+            function_template_of(prior)) {
+            if (entity_index e = entity_table.find_c_linkage(name, kind)) {
+                const entity &x = entity_table[e];
+                bool library = x.gnu_flags & gnu_library_function;
+                if (x.type == type ||
+                    (library && differ_in_exceptions(x.type, type))) {
+                    bool present = false;
+                    for (const template_name_function &f :
+                         template_name_functions)
+                        if (f.name == prior && f.function == e) {
+                            present = true;
+                            break;
+                        }
+                    if (!present)
+                        template_name_functions.append({prior, e});
+                    entity_table.add_declaration(e, declaration);
+                    declared_entity = e;
+                    return analysis_result::well_formed;
+                }
+            }
+        }
         return not_supported(declaration, "namespace.udecl");
+    }
     /* [basic.scope.hiding]/2: "If a class name or enumeration name and a
        variable, data member, function, or enumerator are declared in the same
        declarative region (in any order) with the same name ..., the class or

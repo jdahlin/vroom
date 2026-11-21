@@ -144,6 +144,7 @@ CC_PRIVATE uint32_t cc_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b,
 CC_PRIVATE uint32_t cc_builtin_elementwise_minmax_build(cc *c,
                                                         const cc_builtin *b,
                                                         uint32_t loc);
+CC_PRIVATE uint32_t cc_vector_abs(cc *c, uint32_t arg, uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_elementwise_abs_build(cc *c, const cc_builtin *b,
                                                      uint32_t loc);
 CC_PRIVATE bool cc_builtin_has_effects(cc *c, uint32_t n, bool load);

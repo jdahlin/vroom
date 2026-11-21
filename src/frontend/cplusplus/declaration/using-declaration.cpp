@@ -380,9 +380,15 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
     /* [class.qual]/2: the name of the class in its own scope names its
        constructors: [namespace.udecl]/3 inheriting constructors */
     if (defining_class && !is_namespace(q.entity) &&
-        entity_table[q.entity].kind == entity_kind::class_type &&
-        name == entity_table[q.entity].name)
-        return inheriting_using(n, t, q.entity);
+        entity_table[q.entity].kind == entity_kind::class_type) {
+        if (name == entity_table[q.entity].name)
+            return inheriting_using(n, t, q.entity);
+        entity_index alias = entity_table.find(defining_class, name);
+        if (alias && entity_table[alias].kind == entity_kind::typedef_name &&
+            entity_table[alias].type.unqualified() ==
+                entity_table[q.entity].type.unqualified())
+            return inheriting_using(n, t, q.entity);
+    }
     lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);
     /* [namespace.udecl]/1: "If the using-declarator names ... a set of
        declarations, the using-declarator introduces the declarator's name
@@ -581,8 +587,27 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         return analysis_result::well_formed;
     }
     entity_kind prior_kind = entity_table[prior].kind;
-    if (prior_kind == entity_kind::none)
+    if (prior_kind == entity_kind::none) {
+        if (kind == entity_kind::function &&
+            entity_table[prior].held_by_template && is_namespace(scope) &&
+            function_template_of(prior)) {
+            owned_array<entity_index> functions;
+            overload_set(e, functions);
+            for (entity_index f : functions) {
+                bool present = false;
+                for (const template_name_function &x : template_name_functions)
+                    if (x.name == prior && x.function == f) {
+                        present = true;
+                        break;
+                    }
+                if (!present)
+                    template_name_functions.append({prior, f});
+            }
+            used(t, e);
+            return analysis_result::well_formed;
+        }
         return not_supported(n, "basic.scope.declarative");
+    }
     if (prior == e) {
         /* [namespace.udecl]/9: "A using-declaration is a declaration and can
            therefore be used repeatedly where (and only where) multiple

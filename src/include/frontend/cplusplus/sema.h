@@ -427,6 +427,8 @@ struct entity {
     /* [dcl.inline]: an inline function or variable; [namespace.def]/7: an
        inline namespace */
     bool inline_ = false;
+    /* A constructor with an unsatisfied associated constraint. */
+    bool constraint_unsatisfied = false;
     /* a scope: a declaration analysis did not follow may have brought
        names into it that are not held one by one (a using-directive whose
        namespace is not known, a using-enum-declaration): a name not found
@@ -4016,7 +4018,7 @@ class semantic_analysis
     bool function_specifiers_only(SyntaxRef seq, bool &constexpr_specified,
                                   bool *virtual_specified = nullptr,
                                   bool *explicit_specified = nullptr,
-                                  bool *inline_specified = nullptr) const;
+                                  bool *inline_specified = nullptr);
     /* the function-body of a constructor or destructor definition
        (last_declared): ctor-initializer_opt compound-statement */
     analysis_result special_member_body(FunctionDefinition definition,
@@ -4473,6 +4475,8 @@ class semantic_analysis
     /* [temp.inst]/7: a simple-template-id naming a variable template's
        specialization, as an id-expression */
     analysis_result variable_template_id(SyntaxRef n, expression_meaning &m);
+    analysis_result variable_template_id_of(SyntaxRef n, uint32_t vt,
+                                            expression_meaning &m);
     analysis_result function_template_id_value(SyntaxRef n, uint32_t ft,
                                                expression_meaning &m);
     /* ... the specialization, instantiated (or found) */
@@ -4545,6 +4549,8 @@ class semantic_analysis
                       bool &satisfied);
     bool same_constraints(SyntaxRef a, SyntaxRef b);
     bool template_head_constrained(SyntaxRef n);
+    bool argument_is_parameter(const template_argument &a,
+                               entity_index pe) const;
     bool primary_arguments(SyntaxRef n, SyntaxRef primary,
                            const owned_array<template_argument> &arguments,
                            uint32_t first, size_t count);

@@ -1589,10 +1589,12 @@ analysis_result semantic_analysis::template_call(
     }
     /* [basic.lookup.argdep]/1: for an unqualified name only */
     owned_array<entity_index> others;
-    if (!qualified && (!argument_dependent_lookup(
-                           tokens.identifier(name), types, others,
-                           function_templates[function_template - 1].name) ||
-                       !others.empty()))
+    owned_array<entity_index> adl_templates;
+    if (!qualified &&
+        (!argument_dependent_lookup(
+             tokens.identifier(name), types, others,
+             function_templates[function_template - 1].name, &adl_templates) ||
+         !others.empty()))
         return not_supported(n, "basic.lookup.argdep");
     owned_array<template_argument> &deduced = specified;
     const expression_meaning *meanings = nullptr;
@@ -1601,6 +1603,19 @@ analysis_result semantic_analysis::template_call(
     owned_array<uint32_t> group;
     function_template_overloads(function_templates[function_template - 1].name,
                                 group);
+    for (entity_index held : adl_templates) {
+        owned_array<uint32_t> extra;
+        function_template_overloads(held, extra);
+        for (uint32_t g : extra) {
+            bool present = false;
+            for (uint32_t existing : group)
+                if (function_templates[existing - 1].entity ==
+                    function_templates[g - 1].entity)
+                    present = true;
+            if (!present)
+                group.append(g);
+        }
+    }
     owned_array<entity_index> associated_classes, associated_spaces;
     if (!qualified &&
         !associated_namespaces(types, associated_classes, associated_spaces))

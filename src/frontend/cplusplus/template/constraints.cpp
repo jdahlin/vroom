@@ -80,10 +80,8 @@ analysis_result semantic_analysis::concept_id(SyntaxRef n, uint32_t ct,
         return not_supported(n, "temp.constr.normal");
     if (r != analysis_result::well_formed)
         return r;
-    for (const template_argument &a : arguments)
-        if (a.kind == template_argument::kind_t::pack ||
-            depends_on_template_parameter(a.type) || a.template_entity)
-            return not_supported(n, "temp.constr");
+    if (dependent_arguments(arguments))
+        return not_supported(n, "temp.constr");
     bool satisfied = false;
     VTRY_SET(r, concept_satisfied(n, ct, arguments, satisfied));
     m = integer_constant(fundamental_type::bool_, satisfied, n.first_token());
@@ -109,7 +107,10 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
     if (named)
         ct = concept_of(named);
     if (!ct ||
-        (parts == 1 && function_templates[ct - 1].parameter_count != 1) ||
+        (parts == 1 && function_templates[ct - 1].parameter_count != 1 &&
+         !(function_templates[ct - 1].parameter_count == 2 &&
+           template_parameter_is_pack(
+               function_templates[ct - 1].first_parameter + 1))) ||
         template_parameter_is_pack(function_templates[ct - 1].first_parameter))
         return not_supported(q, "temp.param");
     owned_array<template_argument> arguments;
@@ -117,7 +118,9 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
     first.kind = template_argument::kind_t::type;
     first.type = u;
     arguments.append(first);
-    if (parts != 1) {
+    if (parts == 1 && function_templates[ct - 1].parameter_count == 2) {
+        arguments.append(make_pack(nullptr, 0));
+    } else if (parts != 1) {
         substitution_mark mark = mark_substitution();
         analysis_result r = template_id_arguments(q, ct, arguments);
         if (r == analysis_result::ill_formed && undo_substitution(mark))
@@ -125,10 +128,8 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
         if (r != analysis_result::well_formed)
             return r;
     }
-    for (const template_argument &a : arguments)
-        if (a.kind == template_argument::kind_t::pack ||
-            depends_on_template_parameter(a.type) || a.template_entity)
-            return not_supported(q, "temp.constr");
+    if (dependent_arguments(arguments))
+        return not_supported(q, "temp.constr");
     return concept_satisfied(q, ct, arguments, satisfied);
 }
 
@@ -214,7 +215,9 @@ analysis_result semantic_analysis::requirement_satisfied(SyntaxElement r,
 analysis_result semantic_analysis::requires_expression(RequiresExpression n,
                                                        expression_meaning &m)
 {
-    if (!substituting || n.size() < 2 || n.size() > 3)
+    if (n.size() < 2 || n.size() > 3 ||
+        (!substituting &&
+         names_dependent_entity(n.first_token(), n.end_token())))
         return not_supported(n, "expr.prim.req");
     SyntaxElement list;
     if (n.size() == 3) {
@@ -235,6 +238,7 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
     entity_index outer = current_scope;
     bool satisfied = true;
     analysis_result result = analysis_result::well_formed;
+    substituting++;
     if (list) {
         /* [expr.prim.req]/5: the local parameters, their types
            substituted first */
@@ -269,6 +273,7 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
          i++)
         result = requirement_satisfied(requirements[i], satisfied);
     unevaluated--;
+    substituting--;
     current_scope = outer;
     if (result != analysis_result::well_formed)
         return result;

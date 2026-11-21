@@ -175,6 +175,7 @@ uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
 /* ... _add_sat / _sub_sat */
 uint32_t ast_builder_vector_saturate(cc *c, bool sub, uint32_t a, uint32_t b);
 uint32_t ast_builder_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b);
+uint32_t ast_builder_vector_abs(cc *c, uint32_t a);
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
                                     uint32_t vector);
 /* __atomic_load_n(pointer, order): a load of type t, pointer a node of

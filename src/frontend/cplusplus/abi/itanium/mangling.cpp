@@ -187,6 +187,7 @@ class itanium_mangler
     void substitution_at(size_t i);
     void seq_id(size_t n);
     bool is_std(entity_index scope) const;
+    bool in_inline_namespace(entity_index e) const;
     bool in_unnamed_namespace(entity_index e) const;
 };
 
@@ -264,7 +265,23 @@ bool itanium_mangler::encoding(entity_index e)
         return false;
     if (x.kind == entity_kind::variable)
         return true;
-    return bare_function_type(x.type);
+    if (!bare_function_type(x.type))
+        return false;
+    if (x.special == special_member::constructor && x.first_declaration &&
+        x.enclosing && analysis.entity_table[x.enclosing].instantiation) {
+        SyntaxRef declaration =
+            analysis.entity_table.declaration(x.first_declaration).node;
+        for (SyntaxElement part : declaration.elements()) {
+            if (!part.is(syntax_kind::requires_clause) || part.size() != 2)
+                continue;
+            entity_index pattern = analysis.specialized_template(x.enclosing);
+            if (!pattern)
+                return false;
+            text("Q");
+            return constraint_expression(pattern, part[1]);
+        }
+    }
+    return true;
 }
 
 /*
@@ -369,6 +386,11 @@ bool itanium_mangler::specialization_encoding(entity_index e)
 bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
 {
     if (c.is_token()) {
+        if (entity_index parameter =
+                analysis.constraint_parameter(t, c.token())) {
+            template_param(analysis.entity_table[parameter].value);
+            return true;
+        }
         /* a decimal integer-literal of type int: Li <value> E */
         owned_buffer spelling;
         analysis.token_spelling(c.token(), spelling.get());
@@ -716,6 +738,14 @@ bool itanium_mangler::is_std(entity_index scope) const
     return analysis.std_namespace(scope);
 }
 
+bool itanium_mangler::in_inline_namespace(entity_index e) const
+{
+    entity_index s = analysis.entity_table[e].enclosing;
+    return s &&
+           analysis.entity_table[s].kind == entity_kind::namespace_entity &&
+           analysis.entity_table[s].inline_;
+}
+
 /* whether e is declared, directly or not, within an unnamed namespace */
 bool itanium_mangler::in_unnamed_namespace(entity_index e) const
 {
@@ -846,7 +876,7 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         candidates.append(y);
         return template_args(c);
     }
-    if (x.instantiation && is_std(x.enclosing)) {
+    if (x.instantiation && is_std(x.enclosing) && !in_inline_namespace(c)) {
         /* [abi:mangling-compression]:
          *
          *     <substitution> ::= Sa
