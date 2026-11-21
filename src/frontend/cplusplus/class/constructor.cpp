@@ -2443,6 +2443,69 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
  * function-body".  The bodies of class c's implicitly-declared special
  * members, at the end of its definition n.
  */
+analysis_result
+semantic_analysis::define_defaulted_special_member(entity_index c,
+                                                   entity_index f, SyntaxRef n)
+{
+    current_declaration = n;
+    token_index at = n.first_token();
+    synthesized_function sf;
+    begin_synthesized(
+        sf, f,
+        qualified_type::make(type_table.fundamental(fundamental_type::void_),
+                             cv_none),
+        qualified_type::make(type_table.pointer_to(qualified_type::make(
+                                 entity_table[c].type.unqualified(), cv_none)),
+                             cv_none));
+    const struct type &ft = type_table[entity_table[f].type.unqualified()];
+    entity_index source = 0;
+    owned_array<entity_index> forwarded;
+    if (entity_table[f].inherited_constructor) {
+        for (uint32_t i = 0; i < ft.parameter_count; i++)
+            forwarded.append(synthesized_variable(
+                sf,
+                type_table.parameters(entity_table[f].type.unqualified())[i],
+                true));
+    } else if (ft.parameter_count)
+        source = synthesized_variable(
+            sf, type_table.parameters(entity_table[f].type.unqualified())[0],
+            true);
+    analysis_result r = analysis_result::well_formed;
+    uint32_t members = 0, destructions = 0;
+    if (entity_table[f].special == special_member::destructor) {
+        /* [class.cdtor]/4: the destructor's virtual table pointer */
+        members = vtable_pointer_store(c, at);
+        destructions = subobject_destructions(c, at);
+    } else if (entity_table[f].inherited_constructor) {
+        inherited_call call;
+        call.constructor = entity_table[f].inherited_constructor;
+        call.parameters = &forwarded;
+        for (const inheriting_declaration &d : inheriting)
+            if (d.c == c &&
+                type_table[entity_table[d.base].type.unqualified()].entity ==
+                    entity_table[entity_table[f].inherited_constructor]
+                        .enclosing)
+                call.base = d.base;
+        r = ctor_initializer(SyntaxElement(), members, &call);
+    } else if (source) {
+        bool move =
+            type_table[type_table
+                           .parameters(entity_table[f].type.unqualified())[0]
+                           .unqualified()]
+                .kind == type_kind::rvalue_reference;
+        r = implicit_copy(c, n, source, members, move);
+    } else
+        r = ctor_initializer(SyntaxElement(), members);
+    finish_synthesized(sf, n, at, statement_node(semantic_kind::block, at),
+                       members, destructions);
+    if (r == analysis_result::ill_formed)
+        /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
+           special member that would be ill-formed is defined as
+           deleted (an error only where it is used): not analysed */
+        return not_supported(n, "class.default.ctor");
+    return r;
+}
+
 analysis_result semantic_analysis::implicit_definitions(entity_index c,
                                                         SyntaxRef n)
 {
@@ -2454,70 +2517,8 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
     if (entity_table[c].destructor &&
         entity_table[entity_table[c].destructor].implicit)
         implicit.append(entity_table[c].destructor);
-    current_declaration = n;
-    token_index at = n.first_token();
     for (entity_index f : implicit) {
-        synthesized_function sf;
-        begin_synthesized(
-            sf, f,
-            qualified_type::make(
-                type_table.fundamental(fundamental_type::void_), cv_none),
-            qualified_type::make(
-                type_table.pointer_to(qualified_type::make(
-                    entity_table[c].type.unqualified(), cv_none)),
-                cv_none));
-        const struct type &ft = type_table[entity_table[f].type.unqualified()];
-        entity_index source = 0;
-        owned_array<entity_index> forwarded;
-        if (entity_table[f].inherited_constructor) {
-            for (uint32_t i = 0; i < ft.parameter_count; i++)
-                forwarded.append(synthesized_variable(
-                    sf,
-                    type_table.parameters(
-                        entity_table[f].type.unqualified())[i],
-                    true));
-        } else if (ft.parameter_count)
-            source = synthesized_variable(
-                sf,
-                type_table.parameters(entity_table[f].type.unqualified())[0],
-                true);
-        analysis_result r = analysis_result::well_formed;
-        uint32_t members = 0, destructions = 0;
-        if (entity_table[f].special == special_member::destructor) {
-            /* [class.cdtor]/4: the destructor's virtual table pointer */
-            members = vtable_pointer_store(c, at);
-            destructions = subobject_destructions(c, at);
-        } else if (entity_table[f].inherited_constructor) {
-            inherited_call call;
-            call.constructor = entity_table[f].inherited_constructor;
-            call.parameters = &forwarded;
-            for (const inheriting_declaration &d : inheriting)
-                if (d.c == c &&
-                    type_table[entity_table[d.base].type.unqualified()]
-                            .entity ==
-                        entity_table[entity_table[f].inherited_constructor]
-                            .enclosing)
-                    call.base = d.base;
-            r = ctor_initializer(SyntaxElement(), members, &call);
-        } else if (source) {
-            bool move =
-                type_table[type_table
-                               .parameters(
-                                   entity_table[f].type.unqualified())[0]
-                               .unqualified()]
-                    .kind == type_kind::rvalue_reference;
-            r = implicit_copy(c, n, source, members, move);
-        } else
-            r = ctor_initializer(SyntaxElement(), members);
-        finish_synthesized(sf, n, at, statement_node(semantic_kind::block, at),
-                           members, destructions);
-        if (r == analysis_result::ill_formed)
-            /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
-               special member that would be ill-formed is defined as
-               deleted (an error only where it is used): not analysed */
-            return not_supported(n, "class.default.ctor");
-        if (r != analysis_result::well_formed)
-            return r;
+        VTRY(r, define_defaulted_special_member(c, f, n));
     }
     return implicit_assignment_definitions(c, n);
 }
@@ -2671,6 +2672,15 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
                                        FunctionBody body)
 {
     SyntaxElement init = body.ctor_initializer();
+    if (body.defaulted()) {
+        /* [dcl.fct.def.default]/1: out-of-class = default for a constructor
+           or destructor (e.g. X::X() = default; X::~X() = default;) */
+        entity_index f = last_declared;
+        entity_index c = entity_table[f].enclosing;
+        if (entity_table[f].special == special_member::constructor ||
+            entity_table[f].special == special_member::destructor)
+            return define_defaulted_special_member(c, f, definition);
+    }
     if (!body.compound_statement())
         return not_supported(definition, "dcl.fct.def.general");
     if (init &&

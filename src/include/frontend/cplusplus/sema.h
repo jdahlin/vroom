@@ -3918,6 +3918,9 @@ class semantic_analysis
     void declare_implicit(entity_index c, special_member kind, bool copy,
                           bool move = false);
     analysis_result implicit_definitions(entity_index c, SyntaxRef n);
+    analysis_result define_defaulted_special_member(entity_index c,
+                                                    entity_index f,
+                                                    SyntaxRef n);
     /* [class.copy.assign]: the implicitly-declared copy and move assignment
        operators that are not trivial (class/implicit-assignment.cpp) */
     enum class assignment_use : uint8_t { usable, deleted, unknown };
