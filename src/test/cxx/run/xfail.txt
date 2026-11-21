@@ -1,5 +1,4 @@
 # expected failures of bench/cxx-run.py: NAME<TAB>vcc first error
-old-adl-calls	vcc: a program that refers to a deleted function, other than to declare it, is ill-formed ([dcl.fct.def.delete])
 old-adl-friend-after-conversion	vcc: the rules of [temp.mem] are not implemented yet
 old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented yet
 old-anonymous-members	vcc: the rules of [class.ctor] are not implemented yet
