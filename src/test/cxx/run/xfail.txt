@@ -2,7 +2,6 @@
 old-adl-calls	vcc: a program that refers to a deleted function, other than to declare it, is ill-formed ([dcl.fct.def.delete])
 old-adl-friend-after-conversion	vcc: the rules of [temp.mem] are not implemented yet
 old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented yet
-old-alias-pack-partial	vcc: the rules of [temp.variadic] are not implemented yet
 old-anonymous-members	vcc: the rules of [class.ctor] are not implemented yet
 old-arrow-convert	vcc: the rules of [temp.mem] are not implemented yet
 old-auto-members	vcc: the rules of [dcl.spec.auto] are not implemented yet
