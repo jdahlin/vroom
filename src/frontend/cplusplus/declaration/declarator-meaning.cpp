@@ -610,6 +610,29 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
     if (!by_declarator && declaration.is(syntax_kind::template_declaration) &&
         parsed_completely(declaration))
         by_declarator = declares_by_declarator(declaration);
+    /* A parsed class template specialization declares its class-head name;
+       its template arguments and base clause name existing entities. */
+    bool class_template = false;
+    SyntaxRef inner = declaration;
+    while ((inner.template_declaration() || inner.explicit_specialization()) &&
+           inner.size() && inner.back().is_node())
+        inner = inner.back();
+    if (inner != declaration && parsed_completely(inner)) {
+        for (SyntaxElement part : inner.elements()) {
+            if (!part.is(syntax_kind::decl_specifier_seq))
+                continue;
+            for (SyntaxElement spec : part.elements()) {
+                if (!spec.is(syntax_kind::class_specifier) || !spec.size())
+                    continue;
+                SyntaxElement name = class_head_name(spec[0]);
+                if (name.is(syntax_kind::simple_template_id) && name.size() &&
+                    name[0].is_identifier()) {
+                    ids.append(name[0].token());
+                    class_template = true;
+                }
+            }
+        }
+    }
     if (declaration.is(syntax_kind::using_directive)) {
         /* [namespace.udir]: what it makes visible is not known */
         entity_table[current_scope].unknown_names = true;
@@ -647,7 +670,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         SyntaxRef alias = alias_declaration_of(declaration);
         if (alias.size() > 1 && alias[1].is_identifier())
             ids.append(alias[1].token());
-    } else if (!by_declarator) {
+    } else if (!by_declarator && !class_template) {
         /* the declarators are not known (a declaration not parsed, or of
            a kind analysis has no rules for: a template, a
            using-declaration, ...): every identifier outside parentheses,
