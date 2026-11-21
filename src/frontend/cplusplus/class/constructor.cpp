@@ -1254,15 +1254,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         /* a class-or-decltype with a nested-name-specifier: the class it
            names ([basic.lookup.qual]) */
         entity_index qualified_class = 0;
-        if (item[0].is(syntax_kind::simple_template_id)) {
-            /* [class.base.init]/3, [temp.names]/1: a base class that is a
-               class template's specialization */
+        if (item[0].is(syntax_kind::simple_template_id,
+                       syntax_kind::class_or_decltype)) {
+            /* [class.base.init]/3: a base class named by its type. */
             VTRY(r, base_class_name(item[0], item, qualified_class, id));
-            if (qualified_class == c)
-                return not_supported(item, "class.base.init");
-            name = tokens.identifier(id);
-        } else if (item[0].is(syntax_kind::class_or_decltype)) {
-            VTRY(r, named_class(item[0], item, qualified_class, id));
             if (qualified_class == c)
                 return not_supported(item, "class.base.init");
             name = tokens.identifier(id);

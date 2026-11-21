@@ -184,6 +184,18 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
         base = type_table[t].entity;
         return analysis_result::well_formed;
     }
+    if (name.is(syntax_kind::class_or_decltype) && name.size() == 2 &&
+        name[0].is(syntax_kind::nested_name_specifier) &&
+        name[1].is(syntax_kind::simple_template_id)) {
+        type_index t = 0;
+        uint32_t cv = 0;
+        VTRY(r, qualified_type_name(name, t, cv));
+        id = name[1].first_token();
+        if (type_table[t].kind != type_kind::class_type)
+            return not_supported(n, "class.derived");
+        base = type_table[t].entity;
+        return analysis_result::well_formed;
+    }
     if (!name.is_token() && !name.is(syntax_kind::class_or_decltype))
         return not_supported(n, "class.derived");
     size_t before = unsupported.size();
