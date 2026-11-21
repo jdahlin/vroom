@@ -6,7 +6,6 @@ old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
 old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
-old-empty-pack-constexpr	vcc: the rules of [dcl.decl] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
 old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
@@ -18,8 +17,6 @@ old-spec-after-use	vcc: in the definition of an object, the type of that object 
 old-statement-expression	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-static-local-object	symbols: missing [] extra ['_ZGVZL1gvE1u', '_ZN1UC2Ev'] binding []
 old-std-forward-fold	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
-old-tn-dependent-values	vcc: the rules of [expr.prim.id.qual] are not implemented yet
-old-tn-member-templates	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 old-ttp-patterns-vdtor	vcc: the rules of [class.base.init] are not implemented yet
 temp-names-concept-id	vcc: the rules of [temp.func.order] are not implemented yet
 temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implemented yet

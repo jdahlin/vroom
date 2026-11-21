@@ -4626,7 +4626,8 @@ class semantic_analysis
        (typename enable_if<B, int>::type) with the arguments before it */
     entity_index dependent_value_entity(SyntaxElement written);
     entity_index dependent_variable_specialization(SyntaxRef id, entity_index e,
-                                                   bool negated);
+                                                   bool negated,
+                                                   entity_index scope = 0);
     owned_array<entity_index> dependent_values;
     analysis_result substituted_parameter_type(uint32_t template_index,
                                                uint32_t position,
