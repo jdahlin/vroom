@@ -159,6 +159,50 @@ VPRIV bool x64_vir_fold_edits_check(x64_vir_context *L, uint32_t b,
     return true;
 }
 
+/* The edits before instruction pos leave registers base and index alone: reloads and
+ * rematerializations into other registers (a store's constant or spilled value) cannot change
+ * an address that the consumer at pos reads from them. */
+static bool x64_vir_edits_spare(x64_vir_context *L, uint32_t b, uint32_t pos,
+                                int base, int index)
+{
+    uint32_t lo =
+                 L->allocation->block_offsets[L->function->block_count + 1 + b],
+             hi =
+                 L->allocation->block_offsets[L->function->block_count + 2 + b],
+             end = hi;
+    while (lo < hi) {
+        uint32_t m = lo + (hi - lo) / 2;
+        if (L->allocation->edit[m].pos < pos)
+            lo = m + 1;
+        else
+            hi = m;
+    }
+    for (uint32_t k = lo; k < end && L->allocation->edit[k].pos == pos; k++) {
+        const vir_edit *edit = &L->allocation->edit[k];
+        int dst = x64_vir_register_number(edit->dst);
+
+        if ((edit->kind != VIR_EDIT_REMATERIALIZE &&
+             edit->kind != VIR_EDIT_RELOAD) ||
+            dst == base || dst == index)
+            return false;
+    }
+    return true;
+}
+
+/* A pointer addition with one use, the next instruction's load or store address: it becomes
+ * that instruction's memory operand, base register and index as the lowering has them */
+VPRIV bool x64_vir_memory_address_fold(x64_vir_context *L, uint32_t b,
+                                       uint32_t v, int base, int index)
+{
+    return v + 1 < L->function->blocks[b].first +
+                       L->function->blocks[b].insn_count &&
+           L->uses[v] == 1 && L->allocation->slot[v] == VIR_BLOCK_NONE &&
+           L->function->insns[v + 1].a == v &&
+           (L->function->insns[v + 1].op == VIR_OP_LOAD ||
+            L->function->insns[v + 1].op == VIR_OP_STORE) &&
+           x64_vir_edits_spare(L, b, v + 1, base, index);
+}
+
 VPRIV bool x64_vir_memory_next_fold(x64_vir_context *L, uint32_t b, uint32_t v)
 {
     return v + 1 < L->function->blocks[b].first +
