@@ -96,6 +96,21 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
     if (n.size() != 4)
         return not_supported(n, "dcl.type.decltype");
     SyntaxElement operand = n[2];
+    if (operand.is_token() && operand.is_identifier()) {
+        lookup_result found = lookup_unqualified(
+            tokens.identifier(operand.token()), lookup_filter::any);
+        entity_index named = found.entity;
+        if (!named && !found.ambiguous)
+            named = found.unknown_entity;
+        if (named && entity_table[named].kind == entity_kind::none &&
+            !entity_table[named].held_by_template &&
+            entity_table[named].type.unqualified() &&
+            !contains_placeholder(entity_table[named].type) &&
+            !depends_on_template_parameter(entity_table[named].type)) {
+            type = entity_table[named].type;
+            return analysis_result::well_formed;
+        }
+    }
     /* an operand that names a template parameter (or a type that depends
        on one) is type-dependent ([temp.dep.expr]): not analysed */
     if (names_dependent_entity(n.first_token(), n.end_token())) {
@@ -171,6 +186,9 @@ bool semantic_analysis::names_dependent_entity(token_index first,
         lookup_result found =
             lookup_unqualified(tokens.identifier(t), lookup_filter::any);
         entity_index e = found.entity;
+        if (!e && !found.ambiguous && found.unknown_entity &&
+            !entity_table[found.unknown_entity].held_by_template)
+            e = found.unknown_entity;
         if (!e) {
             /* (lookup leaves a pack's name unknown outside a pattern) */
             entity_index pack = find_pack(tokens.identifier(t));

@@ -864,6 +864,7 @@ analysis_result semantic_analysis::declare_template_parameters(
             entity_index saved = current_scope;
             current_scope = scope;
             specified sp;
+            placeholder_allowed = true;
             analysis_result r = decl_specifier_seq(node[0], sp, false);
             qualified_type type = sp.type;
             if (r == analysis_result::well_formed && form.has_declarator) {
@@ -887,7 +888,9 @@ analysis_result semantic_analysis::declare_template_parameters(
                (template_argument_for) */
             bool own_parameter_type =
                 own_type_parameter_position(type, scope, first) != UINT32_MAX;
-            if ((!own_parameter_type && !depends(type_table, type) &&
+            bool placeholder = contains_placeholder(type);
+            if ((!own_parameter_type && !placeholder &&
+                 !depends(type_table, type) &&
                  !structural_parameter_type(type)) ||
                 sp.typedef_ || sp.static_ || sp.extern_ || sp.constexpr_ ||
                 sp.inline_ || sp.gnu_flags)
