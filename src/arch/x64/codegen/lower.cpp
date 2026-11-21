@@ -833,6 +833,8 @@ VPRIV void x64_finish(codegen_context *e, uint32_t s)
     if (e->unit->options->opt >= 1 && !e->unit->cleanups_disabled)
         x64_dead(e);
     x64_two_address_convert(e);
+    if (e->unit->options->opt >= 1 && !e->unit->cleanups_disabled)
+        x64_zero_idioms(e);
     b->n = (b->n + 7) & ~(size_t)7;
     start = b->n;
     codegen_symbol_header_append(e, b, s, true, "\t.text\n", 16);
