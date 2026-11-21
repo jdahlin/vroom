@@ -122,10 +122,7 @@ bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
     /* a virtual function or a user-provided destructor: not trivial */
     if (entity_table[c].dynamic || destroys(c))
         return false;
-    if (copies_bytes(c) && assigned_bitwise(c))
-        return true;
-    known = false;
-    return false;
+    return copies_bytes(c) && assigned_bitwise(c);
 }
 
 /* [class.derived]/2: whether class d has class b among its direct or

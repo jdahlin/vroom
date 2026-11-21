@@ -23,7 +23,6 @@ old-empty-base-assign	vcc: the C++ front end does not handle a declaration the p
 old-empty-member-copy	vcc: the rules of [class.ctor] are not implemented yet
 old-empty-pack-constexpr	vcc: the rules of [dcl.decl] are not implemented yet
 old-enable-if-overloads	vcc: the rules of [temp.variadic] are not implemented yet
-old-enumerator-prvalue	vcc: the rules of [ext.clang] are not implemented yet
 old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
 old-ilist-ctor-not-viable	vcc: the rules of [class.mem] are not implemented yet
 old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
