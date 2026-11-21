@@ -1591,6 +1591,19 @@ analysis_result semantic_analysis::alias_template_specialization(
     current_scope = saved_scope;
     lookup_horizon = saved_horizon;
     expanding = saved_expanding;
+    /* [impl.clang] a closure type created by substituting an alias template
+       belongs to the function that substituted it */
+    if (r == analysis_result::well_formed &&
+        type_table[t.unqualified()].kind == type_kind::class_type) {
+        entity_index c = type_table[t.unqualified()].entity;
+        if (entity_table[c].lambda) {
+            entity_index fn = saved_scope;
+            while (fn && entity_table[fn].kind != entity_kind::function)
+                fn = entity_table[fn].enclosing;
+            if (fn)
+                entity_table[c].enclosing = saved_scope;
+        }
+    }
     /* an argument that makes the type ill-formed: clang reports it at the
        alias template, with a note at the use; while a candidate is
        substituted, [temp.alias]/3's deduction failure */
