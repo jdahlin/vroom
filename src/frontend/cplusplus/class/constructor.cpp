@@ -2927,6 +2927,31 @@ analysis_result semantic_analysis::class_direct_initialization(
     qualified_type type = entity_table[c].type;
     if (!entity_table[c].size)
         return not_supported(n, "expr.type.conv");
+    if (arguments.size() == 1 &&
+        tokens.files.behavior.edition >= standard_edition::cplusplus_17 &&
+        type_table[arguments[0].type.unqualified()].kind ==
+            type_kind::class_type &&
+        type_table[arguments[0].type.unqualified()].entity != c) {
+        conversion_sequence found;
+        bool cannot_tell = false;
+        if (conversion_function_to_class(arguments[0], type, found,
+                                         cannot_tell)) {
+            conversion_sequence s = class_sequence(arguments[0], type, true);
+            if (s.kind == conversion_sequence::form::user_defined &&
+                !s.ambiguous && s.function == found.function) {
+                expression_meaning conv = arguments[0];
+                bool converted = false;
+                VTRY(cr,
+                     conversion_function_call(n, conv, type, true, converted));
+                if (converted &&
+                    conv.type.unqualified() == type.unqualified() &&
+                    conv.category == value_category::prvalue) {
+                    m = conv;
+                    return analysis_result::well_formed;
+                }
+            }
+        }
+    }
     initialized_value value;
     analysis_result r = analysis_result::well_formed;
     if (!entity_table[c].first_constructor && arguments.empty()) {
