@@ -60,8 +60,8 @@ node_index parser::gnu_offsetof_expression()
 
 /* [ext:gnu_offsetof] a prvalue of type std::size_t, a constant: the
    offset in bytes of the designated subobject from the start of an
-   object of the type.  A member found in a base class or through an
-   anonymous union is not handled yet; a template's own operand is
+   object of the type.  A member found in a base class is not handled
+   yet; a template's own operand is
    dependent, analysed when it is instantiated */
 analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
                                                 expression_meaning &m)
@@ -113,6 +113,18 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
             e.anonymous_object)
             return not_supported(n, "ext.gnu");
         offset += e.offset;
+        /* [class.union.anon]/1: a member of an anonymous union is one of the
+           class whose member its unnamed object is, at that object's offset
+           (and so on, outwards); a member of a base class is not handled yet */
+        entity_index member_of = e.enclosing;
+        while (entity_table[member_of].anonymous_object) {
+            const entity &object =
+                entity_table[entity_table[member_of].anonymous_object];
+            offset += object.offset;
+            member_of = object.enclosing;
+        }
+        if (member_of != record.entity)
+            return not_supported(n, "ext.gnu");
         t = e.type;
     }
     m = integer_constant(fundamental_type::unsigned_long_int, offset,
