@@ -209,6 +209,10 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
     qualified_type pointee = f.operand, target_pointee = t.operand;
     const struct type fp = type_table[pointee.unqualified()];
     const struct type tp = type_table[target_pointee.unqualified()];
+    /* The supported function pointer conversion was handled above.
+       [conv.fctptr]/1 has no conversion in the reverse direction. */
+    if (fp.kind == type_kind::function && tp.kind == type_kind::function)
+        return of_form(sequence::form::bad);
     bool cv_kept = !(pointee.cv() & ~target_pointee.cv());
     /* [conv.ptr]/2: "A prvalue of type "pointer to cv T", where T is an
        object type, can be converted to a prvalue of type "pointer to cv

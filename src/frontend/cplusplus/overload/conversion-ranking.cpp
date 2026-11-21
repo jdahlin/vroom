@@ -105,6 +105,12 @@ int semantic_analysis::compare_standard_conversions(
     qualified_type tb = qualified_type::make(b.target.unqualified(), cv_none);
     if (a.identity != b.identity && ta == tb)
         return prefer(a.identity, b.identity);
+    /* [conv.fctptr]/1: using a noexcept pointer unchanged is also a
+       proper subsequence of converting it to a potentially-throwing one. */
+    if (a.identity && !b.identity && function_pointer_convertible(ta, tb))
+        return -1;
+    if (b.identity && !a.identity && function_pointer_convertible(tb, ta))
+        return 1;
     /* /3.2.2: "the rank of S1 is better than the rank of S2" */
     if (a.rank != b.rank)
         return prefer(a.rank < b.rank, b.rank < a.rank);

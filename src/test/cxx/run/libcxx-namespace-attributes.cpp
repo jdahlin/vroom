@@ -10,4 +10,7 @@ using ::not_declared_anywhere __attribute__((__using_if_exists__));
 int twice() { return va_like * 2; }
 } // namespace __1
 } // namespace lib
-int main() { return lib::twice() + lib::va_like - 21; }
+namespace lib __attribute__((visibility("default"))) {
+int three() { return 3; }
+}
+int main() { return lib::twice() + lib::va_like + lib::three() - 24; }

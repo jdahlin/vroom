@@ -445,8 +445,7 @@ bool semantic_analysis::copies_bytes(entity_index c) const
  * rules for on a constructor or destructor: constexpr ([class.ctor]/1,
  * [class.dtor]/1) and, in a class (virtual_specified), virtual
  * ([class.dtor]/1, [dcl.fct.spec]/2; on a constructor it is ill-formed,
- * left to special_member_declarator).  A constexpr destructor is C++20's
- * and is not analysed.
+ * left to special_member_declarator).
  */
 bool semantic_analysis::function_specifiers_only(SyntaxRef seq,
                                                  bool &constexpr_specified,
@@ -570,9 +569,10 @@ analysis_result semantic_analysis::special_member_declarator(
     const qualified_type *parameters =
         type_table.parameters(type.unqualified());
     special_member kind = special_member::constructor;
-    if (m.destructor && constexpr_specified)
-        /* C++20's constexpr destructors ([dcl.constexpr]/3) */
-        return not_supported(declaration, "dcl.constexpr");
+    if (m.destructor && constexpr_specified &&
+        !tokens.files.behavior.has(language_feature::constexpr_destructors))
+        return ill_formed(declaration, "a constexpr destructor requires C++20",
+                          "dcl.constexpr");
     if (explicit_specified && m.destructor)
         /* [dcl.fct.spec]/3: "An explicit-specifier shall be used only in
            the declaration of a constructor or conversion function within
@@ -2557,6 +2557,27 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
                           "a ctor-initializer shall appear only in the "
                           "definition of a constructor",
                           "class.base.init");
+    const entity &f = entity_table[last_declared];
+    if (f.constexpr_ && f.special == special_member::destructor &&
+        !tokens.files.behavior.has(
+            language_feature::constexpr_without_constant_result)) {
+        /* [dcl.constexpr]/5: a constexpr destructor requires constexpr
+           destructors for its class subobjects. A trivial destructor
+           has no entity. */
+        owned_array<entity_index> subobjects;
+        subobject_classes(f.enclosing, subobjects);
+        for (entity_index sub : subobjects) {
+            entity_index dtor = entity_table[sub].destructor;
+            if (!dtor || entity_table[dtor].constexpr_)
+                continue;
+            if (entity_table[dtor].implicit)
+                return not_supported(definition, "dcl.constexpr");
+            return ill_formed(definition,
+                              "a constexpr destructor requires constexpr "
+                              "subobject destructors",
+                              "dcl.constexpr");
+        }
+    }
     return analyse_function_body(definition, body.compound_statement(), init);
 }
 
@@ -2614,11 +2635,7 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
                                    "declaration shall refer to a previously "
                                    "declared member of the class",
                                    "dcl.meaning");
-    /* [dcl.constexpr]/1: "If any declaration of a function or function
-       template has a constexpr specifier, then all its declarations shall
-       contain the constexpr specifier." */
-    if (entity_table[e].constexpr_ != constexpr_specified)
-        return not_supported(n, "dcl.constexpr");
+    VTRY_SET(r, constexpr_redeclaration(m.id, e, constexpr_specified));
     /* [basic.def.odr]/1 */
     if (entity_table[e].defined)
         return ill_formed_at_token(m.id,

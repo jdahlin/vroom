@@ -158,7 +158,11 @@ analysis_result semantic_analysis::select_for_target(
             how = set_selection::unknown;
             return analysis_result::well_formed;
         }
-        if (x.type.unqualified() == ft.unqualified()) {
+        /* [over.over]/2: compare after the one-way [conv.fctptr]
+           conversion, including when the target is a function reference. */
+        bool compatible = type_table[x.type.unqualified()].non_throwing &&
+                          differ_in_exceptions(x.type, ft);
+        if (x.type.unqualified() == ft.unqualified() || compatible) {
             if (function) {
                 how = set_selection::unknown;
                 return analysis_result::well_formed;
@@ -166,8 +170,7 @@ analysis_result semantic_analysis::select_for_target(
             function = f;
         } else if (same_parameters(type_table, x.type.unqualified(),
                                    ft.unqualified())) {
-            /* the function pointer conversion ([conv.fctptr]) or a return
-               type that differs */
+            /* A return type or exception specification that differs. */
             close = true;
         }
     }
@@ -252,6 +255,8 @@ semantic_analysis::overload_set_sequence(const expression_meaning &a,
         return s;
     s.kind = conversion_sequence::form::standard;
     s.target = parameter;
+    if (function && differ_in_exceptions(entity_table[function].type, ft))
+        s.identity = false;
     if (p.kind != type_kind::pointer) {
         s.reference = true;
         s.function_lvalue = true;
