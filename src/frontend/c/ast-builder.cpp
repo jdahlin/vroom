@@ -188,6 +188,21 @@ uint64_t ast_builder_type_record_bit_offset(cc *c, ast_qualified_type record,
     return c->tags[AST_TYPE(c, record)->aux].f[field].off;
 }
 
+void ast_builder_type_record_set_offset(cc *c, ast_qualified_type record,
+                                        uint32_t field, uint64_t bit_offset)
+{
+    c->tags[AST_TYPE(c, record)->aux].f[field].off = bit_offset;
+}
+
+void ast_builder_type_record_set_size(cc *c, ast_qualified_type record,
+                                      uint64_t size, uint32_t align)
+{
+    c->tags[AST_TYPE(c, record)->aux].size = size;
+    c->tags[AST_TYPE(c, record)->aux].align = align;
+    AST_TYPE(c, record)->size = size;
+    AST_TYPE(c, record)->align = align;
+}
+
 /* ---- symbols ---- */
 
 /* an interned identifier of a name that need not outlive the call */

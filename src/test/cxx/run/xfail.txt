@@ -1,7 +1,6 @@
 # expected failures of bench/cxx-run.py: NAME<TAB>vcc first error
 old-adl-friend-after-conversion	vcc: the rules of [temp.mem] are not implemented yet
 old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented yet
-old-anonymous-members	vcc: the rules of [class.ctor] are not implemented yet
 old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
 old-builtin-common-type	vcc: the rules of [temp.arg] are not implemented yet
 old-builtins-table	vcc: the rules of [basic.types] are not implemented yet
@@ -26,7 +25,6 @@ old-std-forward-fold	vcc: C++ code generation does not handle an entity whose sy
 old-tn-dependent-values	vcc: the rules of [expr.prim.id.qual] are not implemented yet
 old-tn-member-templates	vcc: C++ code generation does not handle an entity whose symbol is not mangled yet
 old-ttp-patterns-vdtor	vcc: the rules of [class.base.init] are not implemented yet
-no-unique-address-layout	vcc: C++ code generation does not handle a class whose layout is not C's yet
 temp-names-concept-id	vcc: the rules of [temp.func.order] are not implemented yet
 temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implemented yet
 # [temp.mem] forms not done yet (the temp-mem- tests; PLAN: one PR per group)

@@ -100,6 +100,10 @@ uint64_t ast_builder_type_record_offset(cc *c, ast_qualified_type record,
 /* ... in bits (a bit-field's first bit) */
 uint64_t ast_builder_type_record_bit_offset(cc *c, ast_qualified_type record,
                                             uint32_t field);
+void ast_builder_type_record_set_offset(cc *c, ast_qualified_type record,
+                                        uint32_t field, uint64_t bit_offset);
+void ast_builder_type_record_set_size(cc *c, ast_qualified_type record,
+                                      uint64_t size, uint32_t align);
 
 /* ---- symbols ---- */
 /* kind AST_SYMBOL_*, storage AST_STORAGE_*, flags AST_SYMBOL_FLAG_*; depth
