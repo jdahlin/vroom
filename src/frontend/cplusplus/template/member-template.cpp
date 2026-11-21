@@ -121,8 +121,7 @@ analysis_result semantic_analysis::member_function_template(
         prior = entity_table.find(c, name);
     if (prior && entity_table[prior].enclosing == c &&
         entity_table[prior].kind == entity_kind::function &&
-        entity_table[prior].special == special_member::none &&
-        !entity_table[prior].conversion_function) {
+        entity_table[prior].special == special_member::none) {
         entity_index head = prior;
         prior = entity_table[head].member_templates;
         if (!prior) {
