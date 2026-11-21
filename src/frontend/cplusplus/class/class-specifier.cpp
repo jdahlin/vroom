@@ -124,7 +124,8 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
         return not_supported(n, "class.union.anon");
     entity_index u = record.entity;
     const entity &x = entity_table[u];
-    if (!trivial_special_members(u) || x.base_count || !size_of_type(s.type))
+    if ((!x.union_ && !trivial_special_members(u)) || x.base_count ||
+        !size_of_type(s.type))
         return not_supported(n, "class.union.anon");
     entity_index e = entity_table.make(entity_kind::variable, 0, c);
     entity_table[e].type = s.type;
@@ -2031,11 +2032,6 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             alignment = static_cast<uint32_t>(pointer_size());
         if (!alignment)
             return not_supported(declaration, "class.mem");
-        if (entity_table[c].union_ && element_class(type) &&
-            !trivial_special_members(element_class(type)))
-            /* a member whose special member functions make the union's
-               deleted ([class.union]/4 Note 3) */
-            return not_supported(declaration, "class.union");
         /* its offset is the layout's, at the closing }
            ([abi:class-types]), with [ext:gnu_attributes]' aligned and
            packed */

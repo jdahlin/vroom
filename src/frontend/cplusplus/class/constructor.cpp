@@ -117,9 +117,14 @@ analysis_result semantic_analysis::member_template_declaration(
             return r;
         }
     }
+    /* [temp.mem]/2: a local class shall not have member templates; a nested
+       class of a namespace-scope class may */
+    entity_index top = entity_table[c].enclosing;
+    while (top && entity_table[top].kind == entity_kind::class_type)
+        top = entity_table[top].enclosing;
     if ((!inner.is(syntax_kind::function_definition,
                    syntax_kind::member_declaration)) ||
-        !is_namespace(entity_table[c].enclosing))
+        !is_namespace(top))
         return not_supported(n, "temp.mem");
     /* [ext:gnu_attributes] before it all; [class.ctor]/1: "Each
        decl-specifier in the decl-specifier-seq of a constructor
@@ -920,7 +925,15 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
     /* [class.member.lookup]: an operator= found in a base class is not a
        declaration of c; one copy and one move assignment operator may be
        defaulted ([class.copy.assign]/2, /3) */
-    bool declared_here = found.entity && found.found_in == c;
+    bool declared_here = false;
+    if (found.entity && found.found_in == c) {
+        for (entity_index f = found.entity; f && entity_table[f].enclosing == c;
+             f = entity_table[f].next_overload) {
+            if ((!move && copy_assignment_operator(f, c)) ||
+                (move && move_assignment_operator(f, c)))
+                declared_here = true;
+        }
+    }
     if (found.unknown || found.ambiguous || declared_here ||
         (move && x.defaulted_move_assignment) ||
         (!move && x.defaulted_copy_assignment))
@@ -1338,17 +1351,24 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                                        "mem-initializer is ill-formed",
                                        "class.base.init");
         }
-        if (entity_table[entity_table[e].enclosing].anonymous_object)
-            /* [class.base.init]/2: a member of an anonymous union
-               ([class.union.anon]), initialized in its unnamed object */
-            return not_supported(item, "class.base.init");
+        /* [class.base.init]/2: a member of an anonymous union
+           ([class.union.anon]) is initialized in its unnamed object */
+        entity_index target = e;
+        while (
+            entity_index anon =
+                entity_table[entity_table[target].enclosing].anonymous_object)
+            target = anon;
         size_t slot = 0;
-        while (subobjects[slot] != e)
+        while (slot < subobjects.size() && subobjects[slot] != target)
             slot++;
+        if (slot == subobjects.size())
+            return not_supported(item, "class.base.init");
         /* [class.base.init]/4: "if a mem-initializer-id designates the
            same member or base class more than once, the program is
-           ill-formed" (clang's "multiple initializations") */
-        if (initialized[slot])
+           ill-formed" (clang's "multiple initializations"); an anonymous
+           struct's distinct members share one unnamed object */
+        if (initialized[slot] &&
+            (target == e || entity_table[entity_table[e].enclosing].union_))
             return ill_formed_at_token(id,
                                        "a mem-initializer-list shall not "
                                        "designate the same member more than "
@@ -1960,6 +1980,18 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         if (!user_copy && !y.defaulted_copy_constructor)
             copy_deleted = true;
     }
+    /* [class.copy.ctor]/10.1: a union with a variant member that has a
+       non-trivial copy/move constructor has its implicit copy/move
+       constructor defined as deleted */
+    if (entity_table[c].union_) {
+        for (entity_index k : classes) {
+            if (!trivial_special_members(k)) {
+                copy_deleted = true;
+                move_deleted = true;
+                break;
+            }
+        }
+    }
     entity_table[c].implicit_copy_deleted = copy_deleted;
     if (copy && !user_copy && !copy_deleted)
         declare_implicit(c, special_member::constructor, true);
@@ -2262,8 +2294,24 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
     const entity &x = entity_table[c];
     if (x.implicit_default_deleted)
         return true;
-    if (x.union_)
-        return false;
+    if (x.union_) {
+        /* [class.default.ctor]/2.2: a union with no default member
+           initializers and a variant member with a non-trivial default
+           constructor has a deleted defaulted default constructor */
+        bool has_default_init = false;
+        bool has_nontrivial = false;
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            const entity &m = entity_table[class_members[x.first_member + i]];
+            if (m.kind != entity_kind::variable || !m.nonstatic_member)
+                continue;
+            if (m.default_initializer)
+                has_default_init = true;
+            if (entity_index mc = element_class(m.type))
+                if (!trivial_special_members(mc))
+                    has_nontrivial = true;
+        }
+        return !has_default_init && has_nontrivial;
+    }
     /* a user-declared constructor and no X() = default: no implicit
        default constructor ([class.default.ctor]/1) */
     if (!x.defaulted_default_constructor)
