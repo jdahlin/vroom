@@ -28,6 +28,24 @@ namespace cplusplus
 namespace
 {
 
+name_kind lookup_qualified_or_specialization(const parser &p, scope_index scope,
+                                             uint32_t name, scope_index *found,
+                                             bool *dependent)
+{
+    name_kind kind = p.names.lookup_qualified(scope, name, found, dependent);
+    if (kind != name_kind::not_declared)
+        return kind;
+    for (size_t s = p.specialization_regions.size(); s-- > 0;) {
+        const auto &r = p.specialization_regions[s];
+        if (r.primary != scope)
+            continue;
+        kind = p.names.lookup_qualified(r.region, name, found, dependent);
+        if (kind != name_kind::not_declared)
+            return kind;
+    }
+    return name_kind::not_declared;
+}
+
 /*
  * The name at tokens[ahead ...]: ::_opt (name ::)* name, where a name is an
  * identifier or a simple-template-id (template_opt after a '::'), looked
@@ -119,8 +137,8 @@ name_class classify(parser &p, unsigned ahead, unsigned *length,
                 kind = p.names.lookup_qualified_nested(scope, name, &found,
                                                        &found_dependent);
             else if (qualified)
-                kind = p.names.lookup_qualified(scope, name, &found,
-                                                &found_dependent);
+                kind = lookup_qualified_or_specialization(
+                    p, scope, name, &found, &found_dependent);
             else if (nested)
                 kind = p.names.lookup_unqualified_nested(name, &found,
                                                          &found_dependent);
@@ -803,7 +821,8 @@ node_index parser::simple_type_specifier_with_name()
     if (!qualifier)
         kind = names.lookup_unqualified(name, &region, &dependent);
     else if (known)
-        kind = names.lookup_qualified(scope, name, &region, &dependent);
+        kind = lookup_qualified_or_specialization(*this, scope, name, &region,
+                                                  &dependent);
     if (kind == name_kind::template_name && !at(preprocessing_op_or_punc::LESS))
         tree.template_names_as_types.append(name_first);
     if (at(preprocessing_op_or_punc::LESS) && qualifier &&

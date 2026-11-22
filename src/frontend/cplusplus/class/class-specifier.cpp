@@ -251,15 +251,18 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            (instantiate_class): the template's name */
         head_name = name_syntax[0].token();
     } else if (auto qualified = name_syntax.qualified_class_head_name()) {
-        if (!qualified.nested_name_specifier() || !qualified.identifier())
-            /* a simple-template-id: an explicit or partial
-               specialization's class-head ([temp.spec]/4: "A
-               specialization is a class, variable, function, or class
-               member that is either instantiated ... from a templated entity
-               or is an explicit specialization") */
+        if (!qualified.nested_name_specifier())
             return not_supported(n, "temp.spec");
-        head_qualifier = qualified.nested_name_specifier().index();
-        head_name = qualified.identifier().token();
+        if (qualified.identifier()) {
+            head_qualifier = qualified.nested_name_specifier().index();
+            head_name = qualified.identifier().token();
+        } else if (class_instantiating && name_syntax.size() == 2 &&
+                   name_syntax[1].is(syntax_kind::simple_template_id)) {
+            head_qualifier = qualified.nested_name_specifier().index();
+            head_name = name_syntax[1][0].token();
+        } else {
+            return not_supported(n, "temp.spec");
+        }
     } else if (!unnamed) {
         /* attributes */
         return not_supported(n, "class.pre");
