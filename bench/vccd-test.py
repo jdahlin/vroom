@@ -325,14 +325,17 @@ def memory_restart_between_builds():
 
 @test()
 def other_build_refused():
-    """a request from another build of the shim gets the mismatch status, not service"""
+    """a request from another build of the shim is not served: an idle server restarts itself (status RETRY, the
+    binary on disk may be the new build) and then serves the real shim"""
     v = Vccd()
     try:
         d = f'{v.dir}/w'; src = tu(d)
         argv = [SHIM] + TARGET + ['-c', src]
         good = b''.join(s.encode() + b'\0' for s in [d] + argv)
         st = raw_request(v.sock, d, argv, header=hdr(MAGIC, len(argv), 0, len(good), build=12345), payload=good)
-        check(st == 0x7fff0001, f'status {st} for a foreign build id (want VCCD_STATUS_MISMATCH)')
+        check(st == 0x7fff0002, f'status {st} for a foreign build id (want VCCD_STATUS_RETRY)')
+        time.sleep(0.5)
+        check('restarting' in open(v.logf).read(), 'the idle server did not restart')
         st, err = v.cc(d, src)
         check(st == 0, f'the real shim (same build) is served: {st} {err[-300:]}')
     finally: v.stop()
