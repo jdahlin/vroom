@@ -86,6 +86,8 @@ EXTENSION(gnu_offsetof, gnu,
 EXTENSION(gnu_va_arg, gnu,
           "GCC manual 6.55 (Variable Arguments): __builtin_va_arg (va_list, type), "
           "<cstdarg>'s va_arg ([cstdarg.syn])")
+EXTENSION(gnu_statement_expressions, gnu,
+          "GCC manual 6.1, Statements and Declarations in Expressions: ({ ... })")
 
 /* clang */
 EXTENSION(clang_feature_checks, clang,

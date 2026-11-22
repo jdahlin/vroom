@@ -40,7 +40,9 @@ node_index parser::primary_expression()
     }
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
         if (at(preprocessing_op_or_punc::LEFT_BRACE, 1)) {
-            /* [ext.gnu] a statement expression, ({ ... }) */
+            /* [ext:gnu_statement_expressions]:
+                 primary-expression:
+                     ( compound-statement ) */
             size_t mark = begin_node();
             token_index first = position;
             flag_set greater(greater_is_operator, true);

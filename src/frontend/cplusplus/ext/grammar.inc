@@ -216,6 +216,10 @@ PRODUCTION(gnu_offsetof, "gnu-offsetof-member-designator", "gnu-offsetof-member-
 PRODUCTION(gnu_va_arg, "primary-expression", "gnu-va-arg-expression")
 PRODUCTION(gnu_va_arg, "gnu-va-arg-expression", "__builtin_va_arg ( assignment-expression , type-id )")
 
+/* ---- GCC manual 6.1, Statements and Declarations in Expressions ---- */
+
+PRODUCTION(gnu_statement_expressions, "primary-expression", "( compound-statement )")
+
 /* ---- clang Language Extensions, __builtin_bit_cast ---- */
 
 PRODUCTION(clang_bit_cast, "primary-expression", "clang-bit-cast-expression")
