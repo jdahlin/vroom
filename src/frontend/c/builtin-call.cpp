@@ -569,9 +569,9 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
         }
         case CC_BUILTIN_ADDC:
         case CC_BUILTIN_SUBC:
-            if (args.n != 4 || !cc_type_is_pointer(c, AST_NODE(args.v[3])->ty))
-                cc_report_error(
-                    c, loc, "carry-out argument to builtin must be a pointer");
+            if (args.n == 4)
+                args.v[3] =
+                    cc_builtin_pointer_argument(c, args.v[3], rt, 3, loc);
             break;
         case CC_BUILTIN_ISNAN:
         case CC_BUILTIN_ISINF:

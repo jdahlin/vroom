@@ -21,18 +21,22 @@ enum {
     BODY_T_ARGUMENT /* __T: the first argument's type, unqualified; __N: its precision in bits (an int constant) */
 };
 
+/* params, one letter per parameter:
+ *   T  the argument converted to __T
+ *   F  a floating argument
+ *   U  an unsigned integer argument (__T is its type)
+ *   P  a pointer to __T, converted as an argument to a parameter of that type
+ * stores: the body writes through a pointer, so only constants are substituted.
+ * a64_native: the arm64 code generators lower it themselves, in one adds/adcs;
+ * the body is not used there. */
 typedef struct cc_body_binding {
     const char *spelling;
-    const char *
-        params; /* one letter each: T the argument converted to __T, F a floating argument, U an unsigned integer argument (__T is its type), P a pointer (not converted) */
+    const char *params;
     const char *names; /* the parameters' names in the body, space separated */
-    const char
-        *text; /* the body: one expression, a statement expression for more */
-    uint8_t type; /* BODY_T_* */
-    bool
-        stores; /* the body writes through a pointer: only constants are substituted */
-    bool
-        a64_native; /* the arm64 code generators lower it themselves, in one adds/adcs: not substituted there */
+    const char *text;  /* one expression; a statement expression for more */
+    uint8_t type;      /* BODY_T_* */
+    bool stores;
+    bool a64_native;
 } cc_body_binding;
 
 /* x + y + carry-in; the carry out is that of either addition (clang's two uadd.with.overflow) */
@@ -181,6 +185,31 @@ static uint32_t cc_body_parse(cc *c, const char *text, uint32_t loc)
     return n;
 }
 
+static const char *cc_body_ordinal(uint32_t i)
+{
+    static const char *const names[BODY_PARAMS_MAX] = {"1st", "2nd", "3rd",
+                                                       "4th", "5th", "6th"};
+
+    return names[i];
+}
+
+/* argument `index` of a builtin whose parameter there is `pointee *`: the
+   conversion and diagnostics of an argument to a parameter of that type
+   (clang: incompatible pointer types are an error, a discarded qualifier a
+   warning).  Also the carry-out of addc/subc where a code generator lowers
+   them itself. */
+CC_PRIVATE uint32_t cc_builtin_pointer_argument(cc *c, uint32_t a,
+                                                ast_qualified_type pointee,
+                                                uint32_t index, uint32_t loc)
+{
+    a = cc_conversion_decay(c, a);
+    c->cv_fn = 0;
+    c->cv_arg = index;
+    c->cv_callee = loc;
+    return cc_conversion_apply_as(c, a, cc_type_pointer(c, pointee),
+                                  CC_CONVERSION_CONTEXT_ARGUMENT, loc);
+}
+
 static bool cc_body_is_constant(cc *c, uint32_t n)
 {
     const node *x = AST_NODE(n);
@@ -232,19 +261,22 @@ CC_PRIVATE uint32_t cc_builtin_body_apply(cc *c, const cc_body_binding *k,
                 AST_TYPE_KIND(c, AST_NODE(a)->ty) == AST_TYPE_ENUM) {
                 cc_report_error(
                     c, AST_NODE(a)->loc,
-                    "1st argument must be a scalar unsigned integer type");
+                    "%s argument must be a scalar unsigned integer type",
+                    cc_body_ordinal(i));
                 return cc_node_error_new(c, loc);
             }
             break;
         case 'P':
-            if (!cc_type_is_pointer(c, AST_NODE(a)->ty)) {
-                cc_report_error(
-                    c, loc, "carry-out argument to builtin must be a pointer");
+            a = cc_builtin_pointer_argument(c, a, t, i, loc);
+            if (AST_NODE_IS_ERROR(a))
                 return cc_node_error_new(c, loc);
-            }
             break;
         default:
-            a = cc_conversion_apply(c, a, t);
+            c->cv_fn = 0;
+            c->cv_arg = i;
+            c->cv_callee = loc;
+            a = cc_conversion_apply_as(c, a, t, CC_CONVERSION_CONTEXT_ARGUMENT,
+                                       loc);
             break;
         }
         /* once, in order: a constant as it is, a name that cannot change
