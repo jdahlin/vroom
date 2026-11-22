@@ -51,7 +51,7 @@ relative to it); `TODO.md` stays at the top.
   lowering target.  Update the status of a step in `PLAN-vir.md`.
 - `src/codegen/vir/`: the VIR builder, one pass per file (`preir.h` the pre-IR and what the files share, `ssa-construction.cpp`, `lower-*.cpp`, `slot-promotion.cpp`, the simplifier in `rules.cpp`, `value-numbering.cpp`, `load-forwarding.cpp` and `simplify.cpp`, `if-conversion.cpp`, `condition-merge.cpp`, `to-vir.cpp`, `pipeline.cpp`).  `vectorize.cpp` is the loop vectorizer, on
   the builder's pre-IR, at `-O3` (`-fvectorize`; `-fvir-vectorize-report` reports each
-  innermost loop to stderr, `-fno-hoist-loop-constants` keeps loop constants unhoisted, `virbuild_loop_constants_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
+  innermost loop to stderr, `-fno-hoist-loop-constants` keeps loop constants unhoisted, `virbuild_loop_constants_pin`).  `carry-placement.cpp` puts an unsigned carry or borrow test behind its addition or subtraction, whose flags the lowerings then read (`-fno-carry-flags`).  VIR's vectors: `SPEC-vir.md` 7.5.
 - `src/arch/a64/vir/` (internal header `lowering-internal.h`; files by topic: `calling-convention.cpp`, `moves.cpp`, `compares.cpp`, `memory.cpp`, `calls.cpp`, `switch.cpp`, `address-folds.cpp`, `returns-and-jumps.cpp`, `vectors.cpp`, `instructions.cpp`, `function.cpp`) and `src/arch/x64/vir/` (the same cut): VIR's arm64 and x86-64 lowerings.  `-fno-rotate-loops` keeps VIR's block order (no loop
   rotation); arm64: `-fno-shrink-wrap` the prologue at the function's entry (no shrink-wrapping); `-fvir-probe=MASK` puts a nop after each allocator edit of the kinds in MASK, so that
   instructions retired count how often that kind runs.

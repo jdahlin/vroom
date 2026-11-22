@@ -684,4 +684,49 @@ const char *
 vir_function_name(const vir_unit *u,
                   const vir_function *f); /* the name of f's symbol, or "?" */
 
+/* The compare `a CODE b` (icmp's code, operands a and b) asks for the carry of p = add x, y or
+ * the borrow of p = sub x, y: true exactly when it carried or borrowed (VIR_CARRY_SET), or exactly
+ * when it did not (VIR_CARRY_CLEAR).  The carry of an addition is `p <u x`, `p <u y` and their
+ * mirrors; the borrow of a subtraction is `x <u y`.  Used by the builder's carry placement and by
+ * the lowerings that read such a compare from the flags of p. */
+enum { VIR_CARRY_NONE, VIR_CARRY_SET, VIR_CARRY_CLEAR };
+
+static inline int vir_carry_compare_kind(uint32_t op, uint32_t p, uint32_t x,
+                                         uint32_t y, int code, uint32_t a,
+                                         uint32_t b)
+{
+    bool straight, mirrored;
+
+    if (op == VIR_OP_ADD) {
+        straight = a == p && (b == x || b == y); /* p ? operand */
+        mirrored = b == p && (a == x || a == y); /* operand ? p */
+    } else if (op == VIR_OP_SUB) {
+        straight = a == x && b == y;
+        mirrored = a == y && b == x;
+    } else {
+        return VIR_CARRY_NONE;
+    }
+    switch (code) {
+    case 6: /* a <u b */
+        if (straight)
+            return VIR_CARRY_SET;
+        break;
+    case 9: /* a >=u b */
+        if (straight)
+            return VIR_CARRY_CLEAR;
+        break;
+    case 8: /* a >u b */
+        if (mirrored)
+            return VIR_CARRY_SET;
+        break;
+    case 7: /* a <=u b */
+        if (mirrored)
+            return VIR_CARRY_CLEAR;
+        break;
+    default:
+        break;
+    }
+    return VIR_CARRY_NONE;
+}
+
 #endif

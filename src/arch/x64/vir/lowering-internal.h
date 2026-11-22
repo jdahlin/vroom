@@ -18,6 +18,10 @@ typedef struct x64_vir_context {
     int64_t result_pointer_slot;
     uint32_t *label, *edge_labels, ret, compare_condition, compare_block,
         setcc_record;
+    /* the icmp that asks for the carry or borrow of the add or sub in front of it, emitted as
+       the record carry_record with its flags (x64_vir_carry_follows); 0 none */
+    uint32_t carry_value, carry_record;
+    bool carry_is_set; /* ... true when it carried (else when it did not) */
     uint8_t *uses;
     const vir_loops *loops;
     uint32_t *order, *position, *rotations, *chase, block_current;

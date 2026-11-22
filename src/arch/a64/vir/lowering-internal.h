@@ -58,6 +58,9 @@ typedef struct a64_vir_context {
         chain_high; /* [cclo, cchi]: compares joined by and/or into one condition (cmp, ccmp ...); cchi 0 none */
     int chain_condition; /* ... the condition the flags hold so far */
     uint32_t
+        carry_value; /* the icmp whose answer the flags of the add or sub in front of it hold (a64_vir_carry_follows); VIR_BLOCK_NONE none */
+    int carry_condition; /* ... the condition under which it is true */
+    uint32_t
         pointer_value; /* a ptradd the next load or store addresses through (0 none) */
     int pointer_base;       /* ... its base register */
     int64_t pointer_offset; /* ... and offset */

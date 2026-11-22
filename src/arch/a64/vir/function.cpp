@@ -33,6 +33,7 @@ static void vl_target_block_begin(void *ctx, uint32_t b)
 
     L->flag_condition = -1, L->zero_test_register = -1, L->test_bit = -1;
     L->chain_high = 0;
+    L->carry_value = VIR_BLOCK_NONE;
     L->folded_low = L->folded_high = 0;
     L->pointer_value = 0, L->index_value = 0,
     L->chain_consumer = VIR_BLOCK_NONE;

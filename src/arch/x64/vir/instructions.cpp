@@ -17,6 +17,48 @@ static void x64_vir_load_address(x64_vir_context *L, uint32_t value, int reg)
     L->memory_shift = 0;
 }
 
+/* The instruction behind the add or sub v is the compare that asks for its carry or borrow
+ * (the builder's carry placement puts it there): v is emitted as add or sub, not lea, and the
+ * compare reads CF, set by a carry and by a borrow alike. */
+static bool x64_vir_carry_follows(x64_vir_context *L, uint32_t b, uint32_t v)
+{
+    const vir_function *f = L->function;
+    const vir_insn *i = &f->insns[v], *k;
+    int kind;
+
+    if (!L->context->unit->options->optimize.carry_flags ||
+        v + 1 >= f->blocks[b].first + f->blocks[b].insn_count ||
+        (i->type != VIR_TYPE_I32 && i->type != VIR_TYPE_I64))
+        return false;
+    k = &f->insns[v + 1];
+    if (k->op != VIR_OP_ICMP || L->compare_memory_value == v + 1)
+        return false;
+    kind =
+        vir_carry_compare_kind(i->op, v, i->a, i->b, k->flags & 15, k->a, k->b);
+    if (kind == VIR_CARRY_NONE)
+        return false;
+    L->carry_value = v + 1;
+    L->carry_is_set = kind == VIR_CARRY_SET;
+    return true;
+}
+
+/* the carry compare v finds the flags of its add or sub: nothing emitted since wrote them */
+static bool x64_vir_carry_flags_hold(x64_vir_context *L, uint32_t v)
+{
+    codegen_context *e = L->context;
+
+    if (L->carry_value != v)
+        return false;
+    L->carry_value = 0;
+    for (uint32_t k = L->carry_record + 1; k < e->x64_context->record_count;
+         k++)
+        if (x64_record_effects(e, &e->x64_context->records[k]).flags &
+            (RECORD_EFFECT_WRITES_FLAGS | RECORD_EFFECT_BARRIER |
+             RECORD_EFFECT_CALL))
+            return false;
+    return true;
+}
+
 VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                               const uint8_t *p, uint32_t n, uint8_t res)
 {
@@ -330,6 +372,10 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                     ? (i->type == VIR_TYPE_F32X4 ? "mulps" : "mulpd")
                     : (i->type == VIR_TYPE_F32X4 ? "divps" : "divpd");
             x64_vir_simd_emit(L, op, d, a, c);
+        } else if ((i->op == VIR_OP_ADD || i->op == VIR_OP_SUB) &&
+                   x64_vir_carry_follows(L, b, v)) {
+            L->carry_record = e->x64_context->record_count;
+            x64_record_emit_three_registers(e, alu[i->op], sz, d, a, c);
         } else if (i->op == VIR_OP_ADD || i->op == VIR_OP_PTRADD)
             x64_record_emit_three_registers(e, X64_OP_LEASCALE, sz, d, a, c)
                 ->shift = 0;
@@ -580,6 +626,19 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                                      X64_CONDITION_B, X64_CONDITION_BE,
                                      X64_CONDITION_A, X64_CONDITION_AE};
         bool narrow_unsigned = false;
+        if (x64_vir_carry_flags_hold(L, v)) {
+            uint8_t carry = X64_CONDITION_AE;
+
+            if (L->carry_is_set)
+                carry = X64_CONDITION_B;
+            L->compare_condition = v;
+            L->compare_block = b;
+            L->setcc_record = e->x64_context->record_count;
+            x64_record_emit_three_registers(
+                e, X64_OP_SETCC, 4, d, X64_REGISTER_NONE, X64_REGISTER_NONE)
+                ->condition = carry;
+            return;
+        }
         if (L->compare_memory_value == v) {
             int other = L->compare_memory_side ? a : c;
             narrow_unsigned = L->compare_memory_unsigned;

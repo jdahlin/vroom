@@ -147,6 +147,8 @@ static const virbuild_pass virbuild_passes[] = {
      U | VIRBUILD_PASS_FLAG_VECTOR_GATE, NULL}, /* vectorize.c */
     {"address-clone", virbuild_addresses_clone, O | P, 0, O | P, 0,
      NULL}, /* address-clone.c */
+    {"carry-placement", virbuild_carries_place, O | P, 0, O | P, 0,
+     NULL}, /* carry-placement.c */
     /* required: VIR's block parameters take no critical edges (left out, the verifier rejects 10 741
 	   functions of the suites and 31 vcc tests miscompile, as -O2 does not verify) */
     {"split", virbuild_pass_split, O | P, 0, O | P,
