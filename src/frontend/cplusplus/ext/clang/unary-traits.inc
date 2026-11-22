@@ -48,3 +48,8 @@ UNARY_TRAIT(has_trivial_copy, "__has_trivial_copy")
 UNARY_TRAIT(has_trivial_assign, "__has_trivial_assign")
 UNARY_TRAIT(has_unique_object_representations,
             "__has_unique_object_representations")
+UNARY_TRAIT(is_trivially_relocatable, "__is_trivially_relocatable")
+UNARY_TRAIT(is_cpp_trivially_relocatable,
+            "__builtin_is_cpp_trivially_relocatable")
+UNARY_TRAIT(is_trivially_equality_comparable,
+            "__is_trivially_equality_comparable")
