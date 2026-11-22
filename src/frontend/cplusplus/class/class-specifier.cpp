@@ -1396,7 +1396,23 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
     bool outer_mutable_allowed = mutable_allowed;
     mutable_allowed = true;
     placeholder_allowed = true;
+    /* [temp.inst]/2: a member function declaration can name an
+       incomplete specialization as its return type. */
+    bool saved_member_return = member_return_type;
+    member_return_type = false;
+    if (node.is(syntax_kind::member_declaration) && count == 3) {
+        SyntaxElement d = node[lead + 1];
+        if (d.is(syntax_kind::member_declarator_list) && d.size() == 1)
+            d = d[0];
+        if (d.is(syntax_kind::member_declarator) && d.size() == 1)
+            d = d[0];
+        if (d.is(syntax_kind::noptr_declarator))
+            for (SyntaxElement part : d.elements())
+                if (part.is(syntax_kind::parameters_and_qualifiers))
+                    member_return_type = true;
+    }
     analysis_result r = decl_specifier_seq(first, s, false);
+    member_return_type = saved_member_return;
     virtual_allowed = outer_virtual_allowed;
     mutable_allowed = outer_mutable_allowed;
     sole_elaborated = 0;

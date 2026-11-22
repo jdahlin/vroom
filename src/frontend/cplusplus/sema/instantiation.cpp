@@ -361,23 +361,24 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
 {
     c = 0;
     const function_template ft = function_templates[class_template - 1];
-    /* [temp.inst]/2: a class template specialization naming the class
-       currently being defined in its member-specification (e.g. a member
-       function returning std::optional<Self>) does not require a complete
-       type until the class's layout finishes */
-    bool incomplete_defining_arg = false;
-    if (defining_class && !require_complete_class &&
-        !entity_table[defining_class].size) {
+    /* [temp.inst]/2: naming a specialization in a declaration can
+       leave it incomplete. For example, a function may return
+       optional<ForwardDeclared> before ForwardDeclared is defined. */
+    bool incomplete_argument = false;
+    bool defining_argument = false;
+    if (!require_complete_class) {
         for (uint32_t i = 0; i < count; i++) {
             if (arguments[i].kind != template_argument::kind_t::type)
                 continue;
-            const struct type &arg_t =
+            const struct type &arg =
                 type_table[arguments[i].type.unqualified()];
-            if (arg_t.kind == type_kind::class_type &&
-                arg_t.entity == defining_class) {
-                incomplete_defining_arg = true;
-                break;
-            }
+            if (arg.kind != type_kind::class_type ||
+                entity_table[arg.entity].kind != entity_kind::class_type ||
+                entity_table[arg.entity].size)
+                continue;
+            bool self = defining_class && arg.entity == defining_class;
+            incomplete_argument |= self || member_return_type;
+            defining_argument |= self;
         }
     }
     if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
@@ -415,8 +416,7 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
         SyntaxRef defined_by = ft.definition;
         if (pattern)
             defined_by = function_templates[pattern - 1].definition;
-        if (defined_by && !declaring_specializations &&
-            !incomplete_defining_arg)
+        if (defined_by && !declaring_specializations && !incomplete_argument)
             return define_class_outside(at, k, c);
         return analysis_result::well_formed;
     }
@@ -443,7 +443,7 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
     SyntaxRef defined_by = ft.definition;
     if (pattern)
         defined_by = function_templates[pattern - 1].definition;
-    if (!defined_by || declaring_specializations || incomplete_defining_arg) {
+    if (!defined_by || declaring_specializations || incomplete_argument) {
         /* [temp.class]/1's template, or [temp.expl.spec]/1's explicit
            specialization, declared, not yet defined: the specialization
            is an incomplete class ([basic.types]/5), which a later use
@@ -461,7 +461,7 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
             type_table.of_entity(type_kind::class_type, c), cv_none);
         entity_table[c].instantiation = index + 1;
         instantiations[index].specialization = c;
-        if (incomplete_defining_arg && defined_by && !declaring_specializations)
+        if (defining_argument && defined_by && !declaring_specializations)
             deferred_class_instantiations.append(
                 deferred_class_instantiation{defining_class, at, index, c});
         return analysis_result::well_formed;

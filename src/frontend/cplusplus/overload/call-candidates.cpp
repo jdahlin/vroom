@@ -142,36 +142,8 @@ semantic_analysis::resolve_call(SyntaxRef n,
                 name_uses[use].entity = 0;
                 break;
             }
-    /* [over.ics.list]/10: "Otherwise, if the parameter type is not a class:
-       if the initializer list has one element that is not itself an
-       initializer list, the implicit conversion sequence is the one
-       required to convert the element to the parameter type": the
-       element stands for the list (the call list-initializes the
-       parameter); other lists, and lists for a parameter of class,
-       reference or array type, are not analysed */
-    owned_array<SyntaxElement> lists;
-    for (size_t i = 0; i < arguments.size(); i++) {
-        if (!arguments[i].is(syntax_kind::braced_init_list))
-            continue;
-        owned_array<SyntaxElement> clauses;
-        VTRY(r, list_clauses(arguments[i], clauses));
-        if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list))
-            return not_supported(n, "over.ics.list");
-        for (entity_index e : set) {
-            const struct type &ft =
-                type_table[entity_table[e].type.unqualified()];
-            if (i >= ft.parameter_count)
-                continue;
-            qualified_type p =
-                type_table.parameters(entity_table[e].type.unqualified())[i];
-            type_kind k = type_table[p.unqualified()].kind;
-            if (k != type_kind::pointer && k != type_kind::enumeration &&
-                (k != type_kind::fundamental ||
-                 fundamental_of(p) == fundamental_type::void_))
-                return not_supported(n, "over.ics.list");
-        }
-        lists.append(clauses[0]);
-    }
+    /* [over.ics.list]/10: scalar parameters convert through the sole list
+       element; class parameters retain their braced initializer. */
     for (size_t i = 0; i < early.size(); i++)
         if (!early[i].node && !early[i].overload_name &&
             !arguments[i].is(syntax_kind::braced_init_list))
@@ -187,11 +159,32 @@ semantic_analysis::resolve_call(SyntaxRef n,
         }
         early.append(e);
     }
-    size_t list = 0;
     for (size_t i = 0; i < arguments.size(); i++) {
         if (!arguments[i].is(syntax_kind::braced_init_list))
             continue;
-        VTRY(r, expression(lists[list++], early[i]));
+        bool has_scalar_parameter = false;
+        for (entity_index e : set) {
+            const struct type &ft =
+                type_table[entity_table[e].type.unqualified()];
+            if (i >= ft.parameter_count)
+                continue;
+            qualified_type parameter =
+                type_table.parameters(entity_table[e].type.unqualified())[i];
+            type_kind k = type_table[parameter.unqualified()].kind;
+            has_scalar_parameter |=
+                k == type_kind::pointer || k == type_kind::enumeration ||
+                (k == type_kind::fundamental &&
+                 fundamental_of(parameter) != fundamental_type::void_);
+        }
+        if (!has_scalar_parameter)
+            continue;
+        owned_array<SyntaxElement> clauses;
+        VTRY(listed, list_clauses(arguments[i], clauses));
+        if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list))
+            continue;
+        expression_meaning element;
+        VTRY(r, expression(clauses[0], element));
+        early[i] = element;
     }
     expression_meaning implied;
     if (object) {
@@ -216,7 +209,8 @@ semantic_analysis::resolve_call(SyntaxRef n,
     const expression_meaning *implied_object = nullptr;
     if (object)
         implied_object = &implied;
-    VTRY(r, best_viable_function(n, candidates, implied_object, early, chosen));
+    VTRY(r, best_viable_function(n, candidates, implied_object, early, chosen,
+                                 nullptr, true, &arguments));
     entity_index c = set[chosen];
     if (entity_table[c].nonstatic_member != (object != 0))
         /* a static member function chosen for a call with an object

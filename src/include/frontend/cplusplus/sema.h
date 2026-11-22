@@ -5382,6 +5382,7 @@ class semantic_analysis
     };
     owned_array<deferred_class_instantiation> deferred_class_instantiations;
     uint32_t require_complete_class = 0;
+    bool member_return_type = false;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
        not */
@@ -5469,7 +5470,8 @@ class semantic_analysis
         SyntaxRef at, const owned_array<overload_candidate> &candidates,
         const expression_meaning *object,
         const owned_array<expression_meaning> &arguments, size_t &chosen,
-        bool *none_viable = nullptr, bool user_defined = true);
+        bool *none_viable = nullptr, bool user_defined = true,
+        const owned_array<SyntaxElement> *written_arguments = nullptr);
     /* the functions of the overload set whose first is e
        (entity::next_overload), each once, added to out */
     void overload_set(entity_index e, owned_array<entity_index> &out) const;
