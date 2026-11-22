@@ -13,6 +13,7 @@
  */
 #include "../../cplusplus-internal.h"
 #include "frontend/c/ast-builder.h"
+#include "frontend/builtin-fold.h"
 #include "frontend/cplusplus/builtin-registry.h"
 
 namespace cplusplus
@@ -195,6 +196,11 @@ const gnu_builtin *gnu_builtin_find(const char *spelling, size_t length,
 const gnu_builtin &gnu_builtin_at(uint16_t row)
 {
     return builtin_registry[row - 1];
+}
+
+bool gnu_builtin_folds(const gnu_builtin &b)
+{
+    return vfold_in_language(vfold_find(b.name, strlen(b.name)), 1);
 }
 
 bool gnu_builtin_untyped(uint16_t row)
