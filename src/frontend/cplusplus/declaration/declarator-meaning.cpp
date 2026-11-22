@@ -950,8 +950,6 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
     if (at_block_scope() || function_state.active ||
         (defining_class && !friend_declarator))
         return not_supported(nested, "dcl.meaning");
-    if (friend_declarator && !is_namespace(scope.entity))
-        return not_supported(nested, "class.friend");
     /* [basic.lookup.qual]/3: what follows the qualified-id is looked up in
        its namespace, not in the class a friend declaration is in */
     defining_class = 0;
