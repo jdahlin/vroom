@@ -360,3 +360,33 @@ bench/vcc-builtins.py --target aarch64-linux-gnu --header arm_neon.h --header ar
   add and subtract samples. B4 includes the x86-64 add-carry sample.
   B5 includes the SME streaming-length queries. Per-spelling execution
   coverage and the remaining B3–B6 work are pending.
+
+### Consistency check (vcc only)
+
+`bench/vcc-builtins.py --check-consistency --vpp build/linux/src/vpp`
+(`bench/vcc-builtins-consistency.py`, no clang at check time, about 1.5 s,
+wired into `ci/premerge.sh` as `builtin-consistency`) takes every spelling
+of vcc's C table (699 with a typed call; the stub catalog is left out) and
+runs vpp for aarch64-linux-gnu and x86_64-linux-gnu, in C and in C++:
+`__has_builtin` and `__has_constexpr_builtin`, a typed call under
+`-fsyntax-only`, the same call under `-c` at -O0, -O1 and -O2, and a call on
+literals as a constant expression (a file-scope array bound in C,
+`constexpr` in C++). Calls are built from the table's signature (hand-written
+ones for the `.` rows: atomics, overflow, elementwise, classification);
+excluded as special forms: `__builtin_counted_by_ref`, `__builtin_os_log_format*`,
+`__builtin_matrix_*` (each needs a type or layout no typed call can state),
+and the `fprintf`/`fscanf` family whose `FILE *` is not decoded. Known
+violations are in `src/test/builtins/consistency-failures.txt` (`--check`:
+no new line, no line that passes now; `--bless` rewrites it).
+
+| invariant | known lines |
+| --- | --- |
+| claimed-not-callable (`__has_builtin` 1, call rejected) | 3 |
+| c-only-callable (callable in C, rejected in C++) | 6 |
+| not-compiled (callable, `-c` fails at -O0/-O1/-O2) | 249 |
+| crash (vpp dies on the call) | 0 |
+| constexpr-claimed-not-folded (`__has_constexpr_builtin` 1, no fold) | 140 |
+| constexpr-folds-unclaimed (folds, claim 0) | 65 |
+| fold-c-only / fold-cxx-only (folds in one language only) | 18 / 75 |
+
+Each step that fixes a violation removes its lines in the same commit.

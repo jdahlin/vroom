@@ -1,0 +1,560 @@
+# Known violations of bench/vcc-builtins-consistency.py: INVARIANT NAME LANGUAGE/TARGET[/LEVEL] [# what vpp said].
+# --check fails on a violation not listed here and on a listed one that no longer happens: fix it, then
+# `bench/vcc-builtins-consistency.py --bless` in the same commit.  Never add a line to hide a regression.
+# The text after # is informational and not compared.
+c-only-callable __builtin_ia32_lfence c++/arm64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+c-only-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+c-only-callable __builtin_ia32_mfence c++/arm64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+c-only-callable __builtin_ia32_mfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+c-only-callable __builtin_ia32_sfence c++/arm64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+c-only-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+claimed-not-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+claimed-not-callable __builtin_ia32_mfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+claimed-not-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+constexpr-claimed-not-folded __builtin_abs c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_abs c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_add_overflow c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_add_overflow c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_classify_type c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_classify_type c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_dynamic_object_size c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_dynamic_object_size c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_dynamic_object_size c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_dynamic_object_size c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fmax c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fmax c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fmax c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fmax c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fmaxf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fmaxf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fmaxf c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fmaxf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fmaxl c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fmaxl c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fmaxl c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fmaxl c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fmin c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fmin c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fmin c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fmin c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fminf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fminf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fminf c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fminf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fminl c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fminl c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_fminl c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fminl c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fpclassify c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_fpclassify c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_huge_val c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_huge_val c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_huge_val c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_huge_val c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_huge_valf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_huge_valf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_huge_valf c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_huge_valf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_huge_vall c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_huge_vall c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_ia32_addcarryx_u64 c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_ia32_crc32di c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_ia32_crc32di c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_ia32_crc32hi c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_ia32_crc32hi c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_ia32_crc32qi c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_ia32_crc32qi c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_ia32_crc32si c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_ia32_crc32si c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_inf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_inf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_inf c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_inf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_inff c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_inff c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_inff c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_inff c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_infl c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_infl c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_is_constant_evaluated c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_is_constant_evaluated c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_isfinite c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isfinite c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isgreater c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isgreater c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isgreaterequal c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isgreaterequal c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isinf c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isinf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isinf_sign c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isinf_sign c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isless c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isless c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_islessequal c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_islessequal c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_islessgreater c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_islessgreater c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isnan c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isnan c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isnormal c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isnormal c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isunordered c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_isunordered c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_labs c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_labs c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_llabs c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_llabs c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_memcmp c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_memcmp c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_mul_overflow c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_mul_overflow c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nan c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nan c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nanf c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nanf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nanl c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nanl c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nans c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nans c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nansf c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nansf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nansl c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nansl c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_object_size c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_object_size c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_object_size c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_object_size c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_signbit c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_signbit c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_signbitf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_signbitf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_signbitf c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_signbitf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_signbitl c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_signbitl c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_signbitl c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_signbitl c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_stdc_count_ones c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_stdc_count_ones c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_stdc_trailing_zeros c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_stdc_trailing_zeros c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_strcmp c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_strcmp c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_strncmp c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_sub_overflow c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_sub_overflow c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_wcslen c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_wcslen c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_wcslen c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_wcslen c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_wmemcmp c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_wmemcmp c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
+constexpr-claimed-not-folded __builtin_wmemcmp c/arm64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_wmemcmp c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-folds-unclaimed __builtin_arm_cls c/arm64
+constexpr-folds-unclaimed __builtin_arm_cls c/x86_64
+constexpr-folds-unclaimed __builtin_arm_cls64 c/arm64
+constexpr-folds-unclaimed __builtin_arm_cls64 c/x86_64
+constexpr-folds-unclaimed __builtin_arm_clz c/arm64
+constexpr-folds-unclaimed __builtin_arm_clz c/x86_64
+constexpr-folds-unclaimed __builtin_arm_clz64 c/arm64
+constexpr-folds-unclaimed __builtin_arm_clz64 c/x86_64
+constexpr-folds-unclaimed __builtin_arm_rbit c/arm64
+constexpr-folds-unclaimed __builtin_arm_rbit c/x86_64
+constexpr-folds-unclaimed __builtin_arm_rbit64 c/arm64
+constexpr-folds-unclaimed __builtin_arm_rbit64 c/x86_64
+constexpr-folds-unclaimed __builtin_bitreverse16 c/arm64
+constexpr-folds-unclaimed __builtin_bitreverse32 c/arm64
+constexpr-folds-unclaimed __builtin_bitreverse64 c/arm64
+constexpr-folds-unclaimed __builtin_cabs c++/arm64
+constexpr-folds-unclaimed __builtin_cabs c++/x86_64
+constexpr-folds-unclaimed __builtin_cabsf c++/arm64
+constexpr-folds-unclaimed __builtin_cabsf c++/x86_64
+constexpr-folds-unclaimed __builtin_cabsl c++/arm64
+constexpr-folds-unclaimed __builtin_cabsl c++/x86_64
+constexpr-folds-unclaimed __builtin_carg c++/arm64
+constexpr-folds-unclaimed __builtin_carg c++/x86_64
+constexpr-folds-unclaimed __builtin_cargf c++/arm64
+constexpr-folds-unclaimed __builtin_cargf c++/x86_64
+constexpr-folds-unclaimed __builtin_cargl c++/arm64
+constexpr-folds-unclaimed __builtin_cargl c++/x86_64
+constexpr-folds-unclaimed __builtin_clrsb c++/arm64
+constexpr-folds-unclaimed __builtin_clrsb c++/x86_64
+constexpr-folds-unclaimed __builtin_clrsb c/arm64
+constexpr-folds-unclaimed __builtin_clrsb c/x86_64
+constexpr-folds-unclaimed __builtin_clrsbl c++/arm64
+constexpr-folds-unclaimed __builtin_clrsbl c++/x86_64
+constexpr-folds-unclaimed __builtin_clrsbl c/arm64
+constexpr-folds-unclaimed __builtin_clrsbl c/x86_64
+constexpr-folds-unclaimed __builtin_clrsbll c++/arm64
+constexpr-folds-unclaimed __builtin_clrsbll c++/x86_64
+constexpr-folds-unclaimed __builtin_clrsbll c/arm64
+constexpr-folds-unclaimed __builtin_clrsbll c/x86_64
+constexpr-folds-unclaimed __builtin_ia32_addcarryx_u64 c++/arm64
+constexpr-folds-unclaimed __builtin_issignaling c++/arm64
+constexpr-folds-unclaimed __builtin_issignaling c++/x86_64
+constexpr-folds-unclaimed __builtin_neon_vaddh_f16 c++/arm64
+constexpr-folds-unclaimed __builtin_neon_vaddh_f16 c++/x86_64
+constexpr-folds-unclaimed __builtin_neon_vaddh_f16 c/arm64
+constexpr-folds-unclaimed __builtin_neon_vsubh_f16 c++/arm64
+constexpr-folds-unclaimed __builtin_neon_vsubh_f16 c++/x86_64
+constexpr-folds-unclaimed __builtin_neon_vsubh_f16 c/arm64
+constexpr-folds-unclaimed __builtin_parityl c++/arm64
+constexpr-folds-unclaimed __builtin_parityl c++/x86_64
+constexpr-folds-unclaimed __builtin_parityl c/arm64
+constexpr-folds-unclaimed __builtin_parityl c/x86_64
+constexpr-folds-unclaimed __builtin_parityll c++/arm64
+constexpr-folds-unclaimed __builtin_parityll c++/x86_64
+constexpr-folds-unclaimed __builtin_parityll c/arm64
+constexpr-folds-unclaimed __builtin_parityll c/x86_64
+constexpr-folds-unclaimed __builtin_stdc_rotate_left c++/arm64
+constexpr-folds-unclaimed __builtin_stdc_rotate_left c++/x86_64
+constexpr-folds-unclaimed __builtin_stdc_rotate_left c/arm64
+constexpr-folds-unclaimed __builtin_stdc_rotate_left c/x86_64
+constexpr-folds-unclaimed __builtin_stdc_rotate_right c++/arm64
+constexpr-folds-unclaimed __builtin_stdc_rotate_right c++/x86_64
+constexpr-folds-unclaimed __builtin_stdc_rotate_right c/arm64
+constexpr-folds-unclaimed __builtin_stdc_rotate_right c/x86_64
+constexpr-folds-unclaimed __builtin_strncmp c++/arm64
+fold-c-only __builtin_arm_cls c++/arm64
+fold-c-only __builtin_arm_cls c++/x86_64
+fold-c-only __builtin_arm_cls64 c++/arm64
+fold-c-only __builtin_arm_cls64 c++/x86_64
+fold-c-only __builtin_arm_clz c++/arm64
+fold-c-only __builtin_arm_clz c++/x86_64
+fold-c-only __builtin_arm_clz64 c++/arm64
+fold-c-only __builtin_arm_clz64 c++/x86_64
+fold-c-only __builtin_arm_rbit c++/arm64
+fold-c-only __builtin_arm_rbit c++/x86_64
+fold-c-only __builtin_arm_rbit64 c++/arm64
+fold-c-only __builtin_arm_rbit64 c++/x86_64
+fold-c-only __builtin_classify_type c++/arm64
+fold-c-only __builtin_classify_type c++/x86_64
+fold-c-only __builtin_stdc_count_ones c++/arm64
+fold-c-only __builtin_stdc_count_ones c++/x86_64
+fold-c-only __builtin_stdc_trailing_zeros c++/arm64
+fold-c-only __builtin_stdc_trailing_zeros c++/x86_64
+fold-cxx-only __builtin_abs c/arm64
+fold-cxx-only __builtin_abs c/x86_64
+fold-cxx-only __builtin_add_overflow c/arm64
+fold-cxx-only __builtin_add_overflow c/x86_64
+fold-cxx-only __builtin_cabs c/arm64
+fold-cxx-only __builtin_cabs c/x86_64
+fold-cxx-only __builtin_cabsf c/arm64
+fold-cxx-only __builtin_cabsf c/x86_64
+fold-cxx-only __builtin_cabsl c/arm64
+fold-cxx-only __builtin_cabsl c/x86_64
+fold-cxx-only __builtin_carg c/arm64
+fold-cxx-only __builtin_carg c/x86_64
+fold-cxx-only __builtin_cargf c/arm64
+fold-cxx-only __builtin_cargf c/x86_64
+fold-cxx-only __builtin_cargl c/arm64
+fold-cxx-only __builtin_cargl c/x86_64
+fold-cxx-only __builtin_fpclassify c/arm64
+fold-cxx-only __builtin_fpclassify c/x86_64
+fold-cxx-only __builtin_huge_vall c/arm64
+fold-cxx-only __builtin_huge_vall c/x86_64
+fold-cxx-only __builtin_ia32_addcarryx_u64 c/x86_64
+fold-cxx-only __builtin_infl c/arm64
+fold-cxx-only __builtin_infl c/x86_64
+fold-cxx-only __builtin_isfinite c/arm64
+fold-cxx-only __builtin_isfinite c/x86_64
+fold-cxx-only __builtin_isgreater c/arm64
+fold-cxx-only __builtin_isgreater c/x86_64
+fold-cxx-only __builtin_isgreaterequal c/arm64
+fold-cxx-only __builtin_isgreaterequal c/x86_64
+fold-cxx-only __builtin_isinf c/arm64
+fold-cxx-only __builtin_isinf c/x86_64
+fold-cxx-only __builtin_isinf_sign c/arm64
+fold-cxx-only __builtin_isinf_sign c/x86_64
+fold-cxx-only __builtin_isless c/arm64
+fold-cxx-only __builtin_isless c/x86_64
+fold-cxx-only __builtin_islessequal c/arm64
+fold-cxx-only __builtin_islessequal c/x86_64
+fold-cxx-only __builtin_islessgreater c/arm64
+fold-cxx-only __builtin_islessgreater c/x86_64
+fold-cxx-only __builtin_isnan c/arm64
+fold-cxx-only __builtin_isnan c/x86_64
+fold-cxx-only __builtin_isnormal c/arm64
+fold-cxx-only __builtin_isnormal c/x86_64
+fold-cxx-only __builtin_issignaling c/arm64
+fold-cxx-only __builtin_issignaling c/x86_64
+fold-cxx-only __builtin_isunordered c/arm64
+fold-cxx-only __builtin_isunordered c/x86_64
+fold-cxx-only __builtin_labs c/arm64
+fold-cxx-only __builtin_labs c/x86_64
+fold-cxx-only __builtin_llabs c/arm64
+fold-cxx-only __builtin_llabs c/x86_64
+fold-cxx-only __builtin_memcmp c/arm64
+fold-cxx-only __builtin_memcmp c/x86_64
+fold-cxx-only __builtin_mul_overflow c/arm64
+fold-cxx-only __builtin_mul_overflow c/x86_64
+fold-cxx-only __builtin_nan c/arm64
+fold-cxx-only __builtin_nan c/x86_64
+fold-cxx-only __builtin_nanf c/arm64
+fold-cxx-only __builtin_nanf c/x86_64
+fold-cxx-only __builtin_nanl c/arm64
+fold-cxx-only __builtin_nanl c/x86_64
+fold-cxx-only __builtin_nans c/arm64
+fold-cxx-only __builtin_nans c/x86_64
+fold-cxx-only __builtin_nansf c/arm64
+fold-cxx-only __builtin_nansf c/x86_64
+fold-cxx-only __builtin_nansl c/arm64
+fold-cxx-only __builtin_nansl c/x86_64
+fold-cxx-only __builtin_signbit c/arm64
+fold-cxx-only __builtin_signbit c/x86_64
+fold-cxx-only __builtin_strcmp c/arm64
+fold-cxx-only __builtin_strcmp c/x86_64
+fold-cxx-only __builtin_strncmp c/arm64
+fold-cxx-only __builtin_strncmp c/x86_64
+fold-cxx-only __builtin_sub_overflow c/arm64
+fold-cxx-only __builtin_sub_overflow c/x86_64
+not-compiled __builtin___vsnprintf_chk c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsnprintf_chk c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsnprintf_chk c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsnprintf_chk c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsnprintf_chk c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsnprintf_chk c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsprintf_chk c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsprintf_chk c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsprintf_chk c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsprintf_chk c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsprintf_chk c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin___vsprintf_chk c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+not-compiled __builtin_addc c++/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addc c++/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addc c++/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addc c/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addc c/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addc c/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcb c++/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcb c++/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcb c++/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcb c/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcb c/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcb c/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcl c++/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcl c++/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcl c++/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcl c/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcl c/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcl c/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcll c++/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcll c++/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcll c++/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcll c/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcll c/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcll c/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcs c++/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcs c++/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcs c++/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcs c/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcs c/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_addcs c/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_clrex c++/x86_64/O0 # x86-64: builtin 139 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_clrex c++/x86_64/O1 # x86-64: builtin 139 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_clrex c++/x86_64/O2 # x86-64: builtin 139 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_clrex c/x86_64/O0 # x86-64: builtin 139 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_clrex c/x86_64/O1 # x86-64: builtin 139 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_clrex c/x86_64/O2 # x86-64: builtin 139 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dmb c++/x86_64/O0 # x86-64: builtin 141 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dmb c++/x86_64/O1 # x86-64: builtin 141 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dmb c++/x86_64/O2 # x86-64: builtin 141 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dmb c/x86_64/O0 # x86-64: builtin 141 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dmb c/x86_64/O1 # x86-64: builtin 141 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dmb c/x86_64/O2 # x86-64: builtin 141 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dsb c++/x86_64/O0 # x86-64: builtin 142 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dsb c++/x86_64/O1 # x86-64: builtin 142 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dsb c++/x86_64/O2 # x86-64: builtin 142 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dsb c/x86_64/O0 # x86-64: builtin 142 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dsb c/x86_64/O1 # x86-64: builtin 142 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_dsb c/x86_64/O2 # x86-64: builtin 142 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_isb c++/x86_64/O0 # x86-64: builtin 140 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_isb c++/x86_64/O1 # x86-64: builtin 140 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_isb c++/x86_64/O2 # x86-64: builtin 140 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_isb c/x86_64/O0 # x86-64: builtin 140 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_isb c/x86_64/O1 # x86-64: builtin 140 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_isb c/x86_64/O2 # x86-64: builtin 140 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_nop c++/x86_64/O0 # x86-64: builtin 133 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_nop c++/x86_64/O1 # x86-64: builtin 133 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_nop c++/x86_64/O2 # x86-64: builtin 133 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_nop c/x86_64/O0 # x86-64: builtin 133 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_nop c/x86_64/O1 # x86-64: builtin 133 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_nop c/x86_64/O2 # x86-64: builtin 133 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_rsr64 c++/x86_64/O0 # x86-64: builtin 85 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_rsr64 c++/x86_64/O1 # x86-64: builtin 85 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_rsr64 c++/x86_64/O2 # x86-64: builtin 85 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_rsr64 c/x86_64/O0 # x86-64: builtin 85 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_rsr64 c/x86_64/O1 # x86-64: builtin 85 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_rsr64 c/x86_64/O2 # x86-64: builtin 85 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sev c++/x86_64/O0 # x86-64: builtin 137 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sev c++/x86_64/O1 # x86-64: builtin 137 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sev c++/x86_64/O2 # x86-64: builtin 137 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sev c/x86_64/O0 # x86-64: builtin 137 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sev c/x86_64/O1 # x86-64: builtin 137 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sev c/x86_64/O2 # x86-64: builtin 137 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sevl c++/x86_64/O0 # x86-64: builtin 138 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sevl c++/x86_64/O1 # x86-64: builtin 138 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sevl c++/x86_64/O2 # x86-64: builtin 138 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sevl c/x86_64/O0 # x86-64: builtin 138 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sevl c/x86_64/O1 # x86-64: builtin 138 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_sevl c/x86_64/O2 # x86-64: builtin 138 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_trap c++/x86_64/O0 # x86-64: builtin 143 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_trap c++/x86_64/O1 # x86-64: builtin 143 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_trap c++/x86_64/O2 # x86-64: builtin 143 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_trap c/x86_64/O0 # x86-64: builtin 143 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_trap c/x86_64/O1 # x86-64: builtin 143 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_trap c/x86_64/O2 # x86-64: builtin 143 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfe c++/x86_64/O0 # x86-64: builtin 135 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfe c++/x86_64/O1 # x86-64: builtin 135 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfe c++/x86_64/O2 # x86-64: builtin 135 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfe c/x86_64/O0 # x86-64: builtin 135 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfe c/x86_64/O1 # x86-64: builtin 135 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfe c/x86_64/O2 # x86-64: builtin 135 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfi c++/x86_64/O0 # x86-64: builtin 136 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfi c++/x86_64/O1 # x86-64: builtin 136 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfi c++/x86_64/O2 # x86-64: builtin 136 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfi c/x86_64/O0 # x86-64: builtin 136 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfi c/x86_64/O1 # x86-64: builtin 136 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_wfi c/x86_64/O2 # x86-64: builtin 136 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_yield c++/x86_64/O0 # x86-64: builtin 134 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_yield c++/x86_64/O1 # x86-64: builtin 134 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_yield c++/x86_64/O2 # x86-64: builtin 134 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_yield c/x86_64/O0 # x86-64: builtin 134 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_yield c/x86_64/O1 # x86-64: builtin 134 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_arm_yield c/x86_64/O2 # x86-64: builtin 134 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_debugtrap c++/x86_64/O0 # x86-64: builtin 45 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_debugtrap c++/x86_64/O1 # x86-64: builtin 45 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_debugtrap c++/x86_64/O2 # x86-64: builtin 45 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_debugtrap c/x86_64/O0 # x86-64: builtin 45 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_debugtrap c/x86_64/O1 # x86-64: builtin 45 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_debugtrap c/x86_64/O2 # x86-64: builtin 45 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_flt_rounds c++/x86_64/O0 # x86-64: builtin 86 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_flt_rounds c++/x86_64/O1 # x86-64: builtin 86 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_flt_rounds c++/x86_64/O2 # x86-64: builtin 86 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_flt_rounds c/x86_64/O0 # x86-64: builtin 86 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_flt_rounds c/x86_64/O1 # x86-64: builtin 86 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_flt_rounds c/x86_64/O2 # x86-64: builtin 86 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_ia32_addcarryx_u64 c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
+not-compiled __builtin_ia32_addcarryx_u64 c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
+not-compiled __builtin_ia32_addcarryx_u64 c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
+not-compiled __builtin_ia32_addcarryx_u64 c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
+not-compiled __builtin_ia32_addcarryx_u64 c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
+not-compiled __builtin_ia32_addcarryx_u64 c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
+not-compiled __builtin_isfpclass c++/x86_64/O0 # x86-64: builtin 149 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_isfpclass c++/x86_64/O1 # x86-64: builtin 149 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_isfpclass c++/x86_64/O2 # x86-64: builtin 149 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_issubnormal c++/x86_64/O0 # x86-64: builtin 150 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_issubnormal c++/x86_64/O1 # x86-64: builtin 150 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_issubnormal c++/x86_64/O2 # x86-64: builtin 150 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_iszero c++/x86_64/O0 # x86-64: builtin 151 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_iszero c++/x86_64/O1 # x86-64: builtin 151 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_iszero c++/x86_64/O2 # x86-64: builtin 151 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_ms_va_copy c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_copy c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_copy c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_copy c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_copy c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_copy c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_end c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_end c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_end c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_end c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_end c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_end c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
+not-compiled __builtin_ms_va_start c++/arm64/O0 # the C++ front end does not handle a declaration the parser kept as tokens yet
+not-compiled __builtin_ms_va_start c++/arm64/O1 # the C++ front end does not handle a declaration the parser kept as tokens yet
+not-compiled __builtin_ms_va_start c++/arm64/O2 # the C++ front end does not handle a declaration the parser kept as tokens yet
+not-compiled __builtin_ms_va_start c++/x86_64/O0 # the C++ front end does not handle a declaration the parser kept as tokens yet
+not-compiled __builtin_ms_va_start c++/x86_64/O1 # the C++ front end does not handle a declaration the parser kept as tokens yet
+not-compiled __builtin_ms_va_start c++/x86_64/O2 # the C++ front end does not handle a declaration the parser kept as tokens yet
+not-compiled __builtin_nan c++/x86_64/O0 # x86-64: builtin 69 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nan c++/x86_64/O1 # x86-64: builtin 69 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nan c++/x86_64/O2 # x86-64: builtin 69 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nanf c++/x86_64/O0 # x86-64: builtin 70 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nanf c++/x86_64/O1 # x86-64: builtin 70 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nanf c++/x86_64/O2 # x86-64: builtin 70 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nanl c++/x86_64/O0 # x86-64: builtin 69 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nanl c++/x86_64/O1 # x86-64: builtin 69 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nanl c++/x86_64/O2 # x86-64: builtin 69 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nans c++/x86_64/O0 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nans c++/x86_64/O1 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nans c++/x86_64/O2 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nansf c++/x86_64/O0 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nansf c++/x86_64/O1 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nansf c++/x86_64/O2 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nansl c++/x86_64/O0 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nansl c++/x86_64/O1 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_nansl c++/x86_64/O2 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_neon_vaddh_f16 c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vaddh_f16 c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vaddh_f16 c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vaddh_f16 c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vaddh_f16 c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vaddh_f16 c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vsubh_f16 c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vsubh_f16 c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vsubh_f16 c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vsubh_f16 c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vsubh_f16 c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_neon_vsubh_f16 c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_count_ones c++/x86_64/O0 # x86-64: builtin 32 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_stdc_count_ones c++/x86_64/O1 # x86-64: builtin 32 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_stdc_count_ones c++/x86_64/O2 # x86-64: builtin 32 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_stdc_rotate_left c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_left c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_left c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_left c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_left c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_left c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_right c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_right c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_right c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_right c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_right c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_rotate_right c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+not-compiled __builtin_stdc_trailing_zeros c++/x86_64/O0 # x86-64: builtin 33 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_stdc_trailing_zeros c++/x86_64/O1 # x86-64: builtin 33 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_stdc_trailing_zeros c++/x86_64/O2 # x86-64: builtin 33 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subc c++/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subc c++/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subc c++/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subc c/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subc c/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subc c/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcb c++/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcb c++/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcb c++/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcb c/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcb c/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcb c/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcl c++/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcl c++/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcl c++/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcl c/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcl c/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcl c/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcll c++/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcll c++/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcll c++/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcll c/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcll c/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcll c/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcs c++/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcs c++/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcs c++/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcs c/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcs c/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_subcs c/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_vsnprintf c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsnprintf c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsnprintf c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsnprintf c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsnprintf c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsnprintf c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsprintf c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsprintf c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsprintf c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsprintf c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsprintf c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
+not-compiled __builtin_vsprintf c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
