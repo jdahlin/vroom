@@ -344,8 +344,9 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
     if (form == builtin_form::query || form == builtin_form::va_list ||
         form == builtin_form::overflow || form == builtin_form::atomic ||
         form == builtin_form::bit_count || form == builtin_form::generic ||
-        form == builtin_form::launder || form == builtin_form::bswapg ||
-        form == builtin_form::invoke || form == builtin_form::complex) {
+        form == builtin_form::launder || form == builtin_form::clear_padding ||
+        form == builtin_form::bswapg || form == builtin_form::invoke ||
+        form == builtin_form::complex) {
         qualified_type result = void_type;
         /* (the type-generic ones have the signature's result type) */
         if (form == builtin_form::generic || form == builtin_form::bit_count)
@@ -719,6 +720,8 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         return complex_result(n, called, nodes, result);
     case builtin_form::launder:
         return launder_result(n, called, nodes, result);
+    case builtin_form::clear_padding:
+        return clear_padding_result(n, called, nodes, result);
     case builtin_form::bswapg:
         return bswapg_result(n, called, nodes, result);
     case builtin_form::atomic:
@@ -955,6 +958,36 @@ semantic_analysis::launder_result(SyntaxRef n, entity_index called,
                           "pointer to an object type",
                           "ext.clang");
     result = qualified_type::make(t.unqualified(), cv_none);
+    return analysis_result::well_formed;
+}
+
+/* [ext:clang_builtin_functions] void __builtin_clear_padding(T *) */
+analysis_result
+semantic_analysis::clear_padding_result(SyntaxRef n, entity_index called,
+                                        const owned_array<uint32_t> &nodes,
+                                        qualified_type &result)
+{
+    (void)called;
+    if (nodes.size() != 1)
+        return ill_formed(n, "__builtin_clear_padding takes one argument",
+                          "ext.clang");
+    qualified_type t = semantics[nodes[0]].type;
+    if (depends_on_template_parameter(t))
+        return not_supported(n, "temp.dep.constexpr");
+    if (!is_pointer(t))
+        return ill_formed(n,
+                          "the argument of __builtin_clear_padding shall be a "
+                          "pointer to an object type",
+                          "ext.clang");
+    qualified_type pointee = type_table[t.unqualified()].operand;
+    if (type_table[pointee.unqualified()].kind == type_kind::function ||
+        fundamental_of(pointee) == fundamental_type::void_)
+        return ill_formed(n,
+                          "the argument of __builtin_clear_padding shall be a "
+                          "pointer to an object type",
+                          "ext.clang");
+    result = qualified_type::make(
+        type_table.fundamental(fundamental_type::void_), cv_none);
     return analysis_result::well_formed;
 }
 

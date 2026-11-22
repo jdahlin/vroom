@@ -530,12 +530,22 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     VTRY(r,
          function_template_declarator(definition, lead, 0, scope, s, m, type));
     /* an operator function template (libc++'s byte& operator<<=(byte&,
-       _Integer)): its name is operator@ ([over.oper]); not new or delete */
+       _Integer)) or a numeric literal operator template
+       (template<char...> operator""_x(), [over.literal]/5) */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
-        m.allocation != allocation_function::none || m.literal_operator ||
-        function_cv ||
+        m.allocation != allocation_function::none || function_cv ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "temp.fct");
+    if (m.literal_operator) {
+        if (parameters.size() != 1 || !template_parameter_is_pack(first) ||
+            entity_table[template_parameter_entities[first]].kind !=
+                entity_kind::none ||
+            fundamental_of(
+                entity_table[template_parameter_entities[first]].type) !=
+                fundamental_type::char_ ||
+            type_table[type.unqualified()].parameter_count != 0)
+            return not_supported(n, "over.literal");
+    }
     if (c_language)
         return not_supported(n, "temp.fct");
     uint32_t gnu_flags = 0;
@@ -996,12 +1006,18 @@ void semantic_analysis::function_template_overloads(
     uint32_t held_id = entity_table[held].name;
     if (in_ns)
         base_ns = non_inline_ns(entity_table[held].enclosing);
+    auto matches_held = [&](entity_index fn) {
+        for (entity_index h = held; h; h = entity_table[h].using_shadow_of)
+            if (fn == h)
+                return true;
+        return false;
+    };
     for (size_t i = 0; i < function_templates.size(); i++) {
         if (function_templates[i].unusable || function_templates[i].is_class ||
             function_templates[i].is_alias || function_templates[i].is_variable)
             continue;
         entity_index fn = function_templates[i].name;
-        if (fn == held ||
+        if (matches_held(fn) ||
             (in_ns && fn && entity_table[fn].name == held_id &&
              is_namespace(entity_table[fn].enclosing) &&
              non_inline_ns(entity_table[fn].enclosing) == base_ns))
@@ -1876,6 +1892,17 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     if (specialization) {
         return class_specialization_definition(n, specifier, parameters);
     }
+    if (auto qualified = head_name.qualified_class_head_name()) {
+        if (!qualified.nested_name_specifier() || !qualified.identifier())
+            return not_supported(n, "temp.class");
+        nominated_scope ns;
+        VTRY_SET(r, nested_name_specifier(
+                        qualified.nested_name_specifier().index(), ns));
+        if (!is_class_entity(ns.entity) && !is_namespace(ns.entity))
+            return not_supported(n, "temp.class");
+        outer = ns.entity;
+        head_name = qualified.identifier();
+    }
     if (!head_name.is_token() ||
         tokens[head_name.token()].kind != token_kind::identifier)
         return not_supported(n, "temp.class");
@@ -2664,13 +2691,19 @@ bool semantic_analysis::equivalent_template(const function_template &f,
         if (!set[i])
             continue;
         if (template_parameter_is_pack(first + i)) {
-            if (values[i].kind != template_argument::kind_t::pack ||
-                values[i].count != 1)
-                return false;
-            const template_argument &el = pack_arguments[values[i].value];
-            if (el.kind != template_argument::kind_t::pack ||
-                el.count != UINT32_MAX || el.template_entity != pe)
-                return false;
+            if (values[i].kind == template_argument::kind_t::type) {
+                if (entity_table[pe].kind != entity_kind::typedef_name ||
+                    !(values[i].type == entity_table[pe].type))
+                    return false;
+            } else {
+                if (values[i].kind != template_argument::kind_t::pack ||
+                    values[i].count != 1)
+                    return false;
+                const template_argument &el = pack_arguments[values[i].value];
+                if (el.kind != template_argument::kind_t::pack ||
+                    el.count != UINT32_MAX || el.template_entity != pe)
+                    return false;
+            }
         } else if (entity_table[pe].kind != entity_kind::typedef_name ||
                    !(values[i].type == entity_table[pe].type)) {
             return false;
@@ -3321,11 +3354,19 @@ analysis_result semantic_analysis::define_member_template_of(
                                          type);
     uint32_t cv = function_cv;
     leave_instantiation(context);
+    bool constructor = (lead < definition.size() &&
+                        declares_special_member(c, definition[lead])) ||
+                       (lead + 1 < definition.size() &&
+                        definition[lead].is(syntax_kind::decl_specifier_seq) &&
+                        declares_special_member(c, definition[lead + 1]));
     entity_index held = 0;
-    if (r == analysis_result::well_formed && m.has_id)
+    if (r == analysis_result::well_formed && constructor) {
+        held = entity_table[c].constructor_templates;
+    } else if (r == analysis_result::well_formed && m.has_id) {
         held = entity_table.find(c, tokens.identifier(m.id));
-    if (held)
-        held = member_templates_of(held);
+        if (held)
+            held = member_templates_of(held);
+    }
     if (!held)
         return member_definition_unsupported(declaration, recorded);
     /* the declaration the definition matches: not defined yet, the same
@@ -3335,34 +3376,33 @@ analysis_result semantic_analysis::define_member_template_of(
     for (uint32_t g : group) {
         const function_template f = function_templates[g - 1];
         const entity old = entity_table[f.entity];
-        if (f.definition || old.enclosing != c ||
-            f.parameter_count != parameters.size() ||
-            !same_template_parameters(first, f.first_parameter,
-                                      f.parameter_count) ||
-            old.member_cv != cv || old.constexpr_ != s.constexpr_)
+        if (f.definition || old.enclosing != c || old.member_cv != cv ||
+            old.constexpr_ != s.constexpr_)
             continue;
-        owned_array<template_argument> values;
-        owned_array<bool> set;
+        if (!equivalent_template(f, inner, first,
+                                 static_cast<uint32_t>(parameters.size()),
+                                 type))
+            continue;
+        bool renamed = false;
         for (uint32_t i = 0; i < f.parameter_count; i++) {
-            values.append(template_argument());
-            set.append(false);
-        }
-        bool same = deduce_type(old.type, type, values, set, true);
-        for (uint32_t i = 0; i < f.parameter_count && same; i++) {
             entity_index pe = template_parameter_entities[first + i];
             entity_index de =
                 template_parameter_entities[f.first_parameter + i];
-            if (entity_table[pe].name != entity_table[de].name ||
-                (set[i] &&
-                 (entity_table[pe].kind != entity_kind::typedef_name ||
-                  !(values[i].type == entity_table[pe].type))))
-                same = false;
+            if (entity_table[pe].name != entity_table[de].name)
+                renamed = true;
         }
-        if (!same)
-            continue;
+        if (renamed) {
+            VTRY(merged,
+                 merge_template_defaults(declaration, f.first_parameter, first,
+                                         f.parameter_count, false));
+        }
         function_template &record = function_templates[g - 1];
         record.declaration = declaration;
         record.definition = definition;
+        if (renamed) {
+            record.first_parameter = first;
+            entity_table[f.entity].type = type;
+        }
         entity_table[f.entity].defined = true;
         return analysis_result::well_formed;
     }

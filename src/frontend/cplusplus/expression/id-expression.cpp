@@ -866,6 +866,11 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         m = expression_meaning();
         return enumerator_value(t, e, m);
     }
+    if (t && t == overload_target_token) {
+        if (is_namespace(c))
+            return named_entity(t, overload_target_choice, m);
+        return class_member_value(n, t, overload_target_choice, m);
+    }
     lookup_result found = lookup_qualified(c, name, lookup_filter::any);
     if (found.ambiguous)
         /* [namespace.qual]/3: "if the use of m is not one that allows a

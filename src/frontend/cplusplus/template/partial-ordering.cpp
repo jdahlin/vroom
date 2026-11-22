@@ -296,7 +296,105 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
         return 0;
     bool fc = template_head_constrained(function_templates[f - 1].declaration);
     bool gc = template_head_constrained(function_templates[g - 1].declaration);
+    if (fc && gc)
+        return constraint_subsumption_order(f, g);
     return static_cast<int>(fc) - static_cast<int>(gc);
+}
+
+/*
+ * [temp.constr.order]: conjunction subsumption between two function
+ * templates with equivalent template-parameter-lists and parameter types.
+ * Each top-level conjunction atom is either a concept-id C<T_i> (from a
+ * type-constraint or a requires-clause) or an opaque atom.  Template a
+ * subsumes template b when every atom of b appears in a.
+ */
+int semantic_analysis::constraint_subsumption_order(uint32_t f,
+                                                    uint32_t g) const
+{
+    struct atom {
+        entity_index concept_entity = 0;
+        uint32_t param_index = UINT32_MAX;
+    };
+    auto collect_atoms = [&](uint32_t tmpl, owned_array<atom> &out) {
+        const function_template &ft = function_templates[tmpl - 1];
+        entity_index scope = entity_table[ft.entity].enclosing;
+        for (uint32_t i = 0; i < ft.parameter_count; i++) {
+            template_parameter_parts parts;
+            if (!template_parameter_form(
+                    template_parameter_nodes[ft.first_parameter + i], parts) ||
+                !parts.constraint)
+                continue;
+            SyntaxElement q = parts.constraint;
+            if (q.size() == 1 && q[0].is_token()) {
+                entity_index ce = constraint_concept(scope, q[0].token());
+                out.append({ce, i});
+            } else {
+                out.append({0, UINT32_MAX});
+            }
+        }
+        auto split = [&](auto &&self, SyntaxElement c) -> void {
+            while (c.is(syntax_kind::primary_expression) && c.size() == 3 &&
+                   c[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                c = c[1];
+            if (c.is(syntax_kind::constraint_logical_and_expression,
+                     syntax_kind::logical_and_expression) &&
+                c.size() == 3) {
+                self(self, c[0]);
+                self(self, c[2]);
+                return;
+            }
+            if (c.is(syntax_kind::simple_template_id) && c.size() == 4 &&
+                c[0].is_token()) {
+                entity_index ce = constraint_concept(scope, c[0].token());
+                SyntaxElement arg = c[2];
+                while (arg.is_node() && arg.size() == 1 &&
+                       arg.is(syntax_kind::type_id,
+                              syntax_kind::type_specifier_seq))
+                    arg = arg[0];
+                if (ce && arg.is_token()) {
+                    entity_index pe =
+                        constraint_parameter(ft.entity, arg.token());
+                    if (pe) {
+                        out.append({ce, static_cast<uint32_t>(
+                                            entity_table[pe].value)});
+                        return;
+                    }
+                }
+            }
+            out.append({0, UINT32_MAX});
+        };
+        if (SyntaxElement hc = head_constraint(ft.declaration))
+            split(split, hc);
+        if (SyntaxElement tc = trailing_constraint(ft.declaration))
+            split(split, tc);
+    };
+    owned_array<atom> fa, ga;
+    collect_atoms(f, fa);
+    collect_atoms(g, ga);
+    auto subsumes = [](const owned_array<atom> &a, const owned_array<atom> &b) {
+        for (const atom &x : b) {
+            if (!x.concept_entity)
+                return false;
+            bool found = false;
+            for (const atom &y : a) {
+                if (y.concept_entity == x.concept_entity &&
+                    y.param_index == x.param_index) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                return false;
+        }
+        return true;
+    };
+    bool f_sub_g = subsumes(fa, ga);
+    bool g_sub_f = subsumes(ga, fa);
+    if (f_sub_g && !g_sub_f)
+        return 1;
+    if (g_sub_f && !f_sub_g)
+        return -1;
+    return 0;
 }
 
 /*

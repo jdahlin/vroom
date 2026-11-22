@@ -251,6 +251,21 @@ analysis_result semantic_analysis::overloaded_operator(
             break;
         }
     }
+    /* [over.built]: a built-in binary operator (other than , and ->*) requires
+       every class-type operand to convert to a non-class type; if any class
+       operand cannot, no built-in candidate is viable */
+    if (converts && operands.size() == 2 &&
+        op != preprocessing_op_or_punc::COMMA &&
+        op != preprocessing_op_or_punc::ARROW_STAR) {
+        for (const expression_meaning &operand : operands) {
+            const struct type &t = type_table[operand.type.unqualified()];
+            if (t.kind == type_kind::class_type &&
+                !converts_to_non_class(t.entity, logical)) {
+                converts = false;
+                break;
+            }
+        }
+    }
     /* [over.match.oper], Table 15: a=b, a[b] and (by [over.call.object]) a(b)
        have member candidates alone: a of class type */
     bool member_only = op == preprocessing_op_or_punc::EQUAL ||

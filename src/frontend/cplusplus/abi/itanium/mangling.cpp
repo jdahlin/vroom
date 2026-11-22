@@ -531,6 +531,44 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
                     return false;
                 continue;
             }
+            /* a fundamental type keyword (int, long, char, ...) */
+            if (a.is_token()) {
+                standard_keyword kw = a.keyword();
+                fundamental_type ft = fundamental_type::none;
+                switch (kw) {
+                case standard_keyword::void_:
+                    ft = fundamental_type::void_;
+                    break;
+                case standard_keyword::bool_:
+                    ft = fundamental_type::bool_;
+                    break;
+                case standard_keyword::char_:
+                    ft = fundamental_type::char_;
+                    break;
+                case standard_keyword::short_:
+                    ft = fundamental_type::short_int;
+                    break;
+                case standard_keyword::int_:
+                    ft = fundamental_type::int_;
+                    break;
+                case standard_keyword::long_:
+                    ft = fundamental_type::long_int;
+                    break;
+                case standard_keyword::float_:
+                    ft = fundamental_type::float_;
+                    break;
+                case standard_keyword::double_:
+                    ft = fundamental_type::double_;
+                    break;
+                default:
+                    break;
+                }
+                if (ft != fundamental_type::none) {
+                    if (!builtin_type(ft))
+                        return false;
+                    continue;
+                }
+            }
             /* a class of the template's scope */
             entity_index k = analysis.constraint_class(
                 analysis.entity_table[t].enclosing, a.token());

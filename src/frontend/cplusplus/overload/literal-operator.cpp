@@ -119,6 +119,10 @@ analysis_result semantic_analysis::literal_operator_declaration(SyntaxRef n,
        wchar_t*, std::size_t, const char8_t*, std::size_t, const
        char16_t*, std::size_t, const char32_t*, std::size_t" */
     const struct type &function = type_table[x.type.unqualified()];
+    /* [over.literal]/5: a literal operator template specialization has an
+       empty parameter-declaration-clause */
+    if (x.instantiation && !function.parameter_count)
+        return analysis_result::well_formed;
     const qualified_type *parameters =
         type_table.parameters(x.type.unqualified());
     auto character = [](fundamental_type t) {
@@ -194,19 +198,27 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
         return not_supported(current_declaration, "lex.ext");
     uint32_t name = literal_operator_name(suffix.data(), suffix.size());
     lookup_result found = lookup_unqualified(name, lookup_filter::any);
-    if (found.unknown || found.ambiguous)
+    if (found.ambiguous)
         return not_supported(current_declaration, "lex.ext");
-    if (!found.entity)
+    entity_index held_templates = 0;
+    if (found.unknown) {
+        if (!function_template_of(found.unknown_entity))
+            return not_supported(current_declaration, "lex.ext");
+        held_templates = found.unknown_entity;
+    }
+    if (!found.entity && !held_templates)
         return ill_formed_at_token(t,
                                    "the set of declarations found by the "
                                    "lookup of a user-defined-literal's "
                                    "literal operator shall not be empty",
                                    "lex.ext");
-    if (entity_table[found.entity].kind != entity_kind::function ||
-        !is_namespace(entity_table[found.entity].enclosing))
-        return not_supported(current_declaration, "lex.ext");
     owned_array<entity_index> set;
-    overload_set(found.entity, set);
+    if (found.entity) {
+        if (entity_table[found.entity].kind != entity_kind::function ||
+            !is_namespace(entity_table[found.entity].enclosing))
+            return not_supported(current_declaration, "lex.ext");
+        overload_set(found.entity, set);
+    }
     owned_array<expression_meaning> arguments;
     entity_index chosen = 0;
     auto with_parameter = [&](fundamental_type p) {
@@ -259,13 +271,39 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
                 return not_supported(current_declaration, "lex.ext");
         }
         chosen = with_parameter(fundamental_type::unsigned_long_long_int);
-        if (!chosen)
-            /* a raw literal operator or a numeric literal operator
-               template: "operator "" X("n")" */
+        if (chosen) {
+            arguments.append(
+                integer_constant(fundamental_type::unsigned_long_long_int,
+                                 static_cast<uint64_t>(value), t));
+        } else if (held_templates) {
+            /* [lex.ext]/3: a numeric literal operator template:
+               operator "" X<'c1', 'c2', ...>() */
+            owned_array<uint32_t> group;
+            function_template_overloads(held_templates, group);
+            if (group.size() != 1)
+                return not_supported(current_declaration, "lex.ext");
+            uint32_t ft = group[0];
+            owned_array<template_argument> chars;
+            qualified_type char_type = qualified_type::make(
+                type_table.fundamental(fundamental_type::char_), cv_none);
+            for (size_t j = 0; j < length; j++) {
+                if (s[j] == '\'')
+                    continue;
+                template_argument ch;
+                ch.kind = template_argument::kind_t::value;
+                ch.type = char_type;
+                ch.value =
+                    static_cast<uint64_t>(static_cast<unsigned char>(s[j]));
+                chars.append(ch);
+            }
+            template_argument pack =
+                make_pack(chars.data(), static_cast<uint32_t>(chars.size()));
+            VTRY(ir, instantiate(current_declaration,
+                                 function_templates[ft - 1].entity, &pack, 1,
+                                 chosen));
+        } else {
             return not_supported(current_declaration, "lex.ext");
-        arguments.append(
-            integer_constant(fundamental_type::unsigned_long_long_int,
-                             static_cast<uint64_t>(value), t));
+        }
     } else if (k.preprocessing.kind ==
                preprocessing_token_kind::user_defined_character_literal) {
         /* /6: "S shall contain a literal operator ([over.literal]) whose

@@ -45,6 +45,8 @@ static const gnu_builtin builtin_registry[] = {
     ROWL("__builtin_char_memchr", library_alias, 4, string, node, "SSiz",
          "memchr"),
     ROWL("__builtin_launder", launder, 0, identity, identity, nullptr, nullptr),
+    ROWL("__builtin_clear_padding", clear_padding, 0, none, clear_padding,
+         nullptr, nullptr),
     ROW("__builtin_addcb", carry, 0, none),
     ROW("__builtin_addcs", carry, 0, none),
     ROW("__builtin_addc", carry, 0, none),
@@ -229,6 +231,7 @@ bool gnu_builtin_untyped(uint16_t row)
     case builtin_form::atomic:
     case builtin_form::complex:
     case builtin_form::launder:
+    case builtin_form::clear_padding:
     case builtin_form::bswapg:
     case builtin_form::invoke:
     case builtin_form::unsupported:

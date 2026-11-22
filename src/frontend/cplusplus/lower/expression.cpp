@@ -21,6 +21,44 @@ uint32_t c_lowering::expression(uint32_t index)
         return source_location(n);
     case semantic_kind::default_argument:
         return default_argument(n);
+    case semantic_kind::statement_expression: {
+        size_t mark = live.size();
+        owned_array<uint32_t> items;
+        const semantic_node &blk = node(n.a);
+        block_items(blk.first, blk.count, items);
+        const struct type &rt = record(n.type);
+        bool is_void = rt.kind == type_kind::fundamental &&
+                       rt.fundamental == fundamental_type::void_;
+        if (n.b && !is_void) {
+            ast_qualified_type t = type(n.type, n.at);
+            uint32_t val = expression(n.b);
+            if (!val)
+                return 0;
+            if (live.size() > mark) {
+                uint32_t tmp = c_local(c, t);
+                items.append(c_declare(c, tmp));
+                items.append(
+                    c_statement(c, assign(t, c_variable(c, tmp, t), val)));
+                destroy(mark, items, n.at);
+                live.resize(mark);
+                items.append(ast_builder_node(c, AST_NODE_EXPRESSION, t,
+                                              c_variable(c, tmp, t), 0, 0, 0,
+                                              0));
+            } else {
+                items.append(ast_builder_node(c, AST_NODE_EXPRESSION, t, val, 0,
+                                              0, 0, 0));
+            }
+            return statement_expression(t, block(items));
+        }
+        if (n.b) {
+            uint32_t val = discard(n.b);
+            if (val)
+                items.append(c_statement(c, val));
+        }
+        destroy(mark, items, n.at);
+        live.resize(mark);
+        return statement_expression(v, block(items));
+    }
     case semantic_kind::entity: {
         entity_index e = n.a;
         const entity &x = analysis.entity_table[e];

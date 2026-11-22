@@ -161,6 +161,10 @@ struct tree_checker {
         case semantic_kind::string_literal:
         case semantic_kind::zero:
             break;
+        case semantic_kind::statement_expression:
+            child(n, node.a, tree_sort::statement, false, "block");
+            child(n, node.b, tree_sort::expression, true, "result");
+            break;
         case semantic_kind::entity:
             if (!node.a)
                 problem(n, "no entity");

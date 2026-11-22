@@ -1349,6 +1349,7 @@ enum class semantic_kind : uint8_t {
     switch_statement,
     /* value: the case's converted value; a: the statement */
     case_label,
+    statement_expression,
     /* a: the statement */
     default_label,
     /* value: the identifier's number; a: the statement */
@@ -3128,6 +3129,9 @@ class semantic_analysis
     analysis_result launder_result(SyntaxRef n, entity_index called,
                                    const owned_array<uint32_t> &nodes,
                                    qualified_type &result);
+    analysis_result clear_padding_result(SyntaxRef n, entity_index called,
+                                         const owned_array<uint32_t> &nodes,
+                                         qualified_type &result);
     analysis_result bswapg_result(SyntaxRef n, entity_index called,
                                   const owned_array<uint32_t> &nodes,
                                   qualified_type &result);
@@ -4851,6 +4855,7 @@ class semantic_analysis
        cannot tell */
     int function_template_order(uint32_t f, uint32_t g, size_t arguments,
                                 bool &unknown);
+    int constraint_subsumption_order(uint32_t f, uint32_t g) const;
     bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
                                  bool &unknown);
     /* [temp.class.order]: whether partial specialization s (index plus
@@ -5595,10 +5600,12 @@ class semantic_analysis
                                       entity_index &function,
                                       uint32_t &template_index,
                                       owned_array<template_argument> &deduced,
-                                      const char *&why);
+                                      const char *&why,
+                                      entity_index member_class = 0);
     /* the function type FT of the target of a function pointer, function
-       reference or function type */
-    bool function_target(qualified_type target, qualified_type &ft) const;
+       reference, pointer to member function or function type */
+    bool function_target(qualified_type target, qualified_type &ft,
+                         entity_index *member_class = nullptr) const;
     /* [over.ics.scs]: the overload set a converted to the parameter */
     conversion_sequence overload_set_sequence(const expression_meaning &a,
                                               qualified_type parameter);

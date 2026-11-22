@@ -58,9 +58,10 @@ analysis_result semantic_analysis::member_function_template(
        outside it (member_template_definition_of_template): a
        member-declaration of a decl-specifier-seq and a declarator */
     bool defines = definition.is(syntax_kind::function_definition);
-    if (!defines && (constructor || conversion || !specifiers || trailing ||
-                     tail.size() != 3 || tail[1].is_token() ||
-                     !tail[2].is(preprocessing_op_or_punc::SEMICOLON)))
+    if (!defines &&
+        (conversion || (!specifiers && !constructor) || trailing ||
+         tail.size() != 2 + specifiers || tail[specifiers].is_token() ||
+         !tail[specifiers + 1].is(preprocessing_op_or_punc::SEMICOLON)))
         return not_supported(n, "temp.mem");
     if (defines &&
         (tail.size() != 2 + specifiers + trailing ||
@@ -129,9 +130,31 @@ analysis_result semantic_analysis::member_function_template(
             entity_table[head].member_templates = prior;
         }
     } else if (prior && entity_table[prior].enclosing != c) {
-        /* a name a using-declaration or a member enumeration's enumerator
-           brought into the class (class_member_declaration) */
-        return not_supported(n, "class.mem");
+        /* [namespace.udecl]/15, [temp.mem]/2: a name a using-declaration
+           brought from a base class into c; shadow it in c so c's own
+           member function templates join the overload set without mutating
+           the base's bindings */
+        if (entity_table[prior].kind == entity_kind::function &&
+            entity_table[prior].special == special_member::none) {
+            entity copy = entity_table[prior];
+            copy.next_overload = 0;
+            copy.using_shadow_of = prior;
+            entity_index shadow =
+                entity_table.make(entity_kind::function, name, copy.enclosing);
+            entity_index held = make_held_name(name, c);
+            entity_table[held].using_shadow_of = copy.member_templates;
+            copy.member_templates = held;
+            entity_table[shadow] = copy;
+            entity_table.bind(c, name, shadow);
+            prior = held;
+        } else if (member_function_template_of(prior)) {
+            entity_index held = make_held_name(name, c);
+            entity_table[held].using_shadow_of = prior;
+            entity_table.bind(c, name, held);
+            prior = held;
+        } else {
+            return not_supported(n, "class.mem");
+        }
     } else if (prior && !member_function_template_of(prior)) {
         /* [temp.mem]/8: a conversion function template beside a
            non-template conversion function (or a member of another kind):

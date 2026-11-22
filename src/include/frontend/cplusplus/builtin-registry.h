@@ -33,6 +33,8 @@ enum class builtin_form : uint8_t {
     library_alias,
     /* T *__builtin_launder(T *) */
     launder,
+    /* void __builtin_clear_padding(T *) */
+    clear_padding,
     /* T __builtin_bswapg(T), T an integer type of a multiple of 8 bits */
     bswapg,
     /* __builtin_addc (x, y, carry_in, &carry_out) and the subtraction and the
@@ -130,6 +132,8 @@ enum class builtin_lowering : uint8_t {
     trap,
     /* the C front end's byte swap of the argument's width */
     bswap,
+    /* zero the padding bytes of the pointee object */
+    clear_padding,
 };
 
 struct gnu_builtin {

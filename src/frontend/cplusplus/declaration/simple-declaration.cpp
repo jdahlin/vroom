@@ -1748,6 +1748,16 @@ analysis_result semantic_analysis::declare_with_initializer(
        is constant-initialized": whether an initializer that invokes a
        constexpr function is one is the evaluator's; its value becomes the
        initializer, which lowering emits as data */
+    if (s.constexpr_ && value.evaluation == constness::unknown &&
+        (type_table[type.unqualified()].kind == type_kind::lvalue_reference ||
+         type_table[type.unqualified()].kind == type_kind::rvalue_reference) &&
+        value.node &&
+        semantics[value.node].kind == semantic_kind::bind_reference) {
+        uint32_t target = semantics[value.node].a;
+        if (target && semantics[target].kind == semantic_kind::entity &&
+            semantics[target].a && !entity_table[semantics[target].a].automatic)
+            value.evaluation = constness::constant;
+    }
     if ((s.constexpr_ || (!entity_table[declared_entity].automatic &&
                           constexpr_calls != calls_before)) &&
         value.evaluation == constness::unknown) {
