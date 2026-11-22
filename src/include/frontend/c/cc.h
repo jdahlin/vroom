@@ -188,7 +188,8 @@ enum {
     AST_SYMBOL_FUNCTION,
     AST_SYMBOL_TYPEDEF,
     AST_SYMBOL_ENUMERATOR,
-    AST_SYMBOL_BUILTIN
+    AST_SYMBOL_BUILTIN,
+    AST_SYMBOL_BODY_ARGUMENT /* a builtin body's parameter: body is the node it stands for */
 };
 enum {
     AST_STORAGE_NONE,
