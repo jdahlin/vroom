@@ -707,6 +707,8 @@ CC_PRIVATE uint32_t cc_builtin_narrow_math_build(cc *c, const char *name,
                                                  uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
                                           uint32_t loc);
+CC_PRIVATE uint32_t cc_builtin_math_call_build(cc *c, const cc_builtin *b,
+                                               uint32_t loc, bool *handled);
 /* expression.c, call.c */
 CC_PRIVATE uint32_t cc_parenthesized_parse(cc *c, uint32_t loc);
 CC_PRIVATE uint32_t cc_primary_postfix_parse(cc *c, uint32_t begin);

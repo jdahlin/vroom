@@ -280,7 +280,7 @@ static floating_builtin floating_builtin_kind(const char *spelling,
 }
 
 /* the type of a letter of the C front end's builtin signatures (frontend/c/
-   builtin-table.cpp, cc_builtin_signature_type): a scalar, a vector of 16
+   builtins-registry.cpp, cc_builtin_signature_type): a scalar, a vector of 16
    bytes, or a pointer to void or char (p, P, s, S); not a va_list (V, M) */
 bool semantic_analysis::builtin_letter_type(char letter, qualified_type &t)
 {
@@ -312,7 +312,7 @@ bool semantic_analysis::builtin_letter_type(char letter, qualified_type &t)
     return true;
 }
 
-/* a builtin of vcc's C front end (frontend/c/builtin-table.cpp): its
+/* a builtin of vcc's C front end (frontend/c/builtins-registry.cpp): its
    function type is the table's signature when the registry has no row of
    another form, and the call lowers to the C front end's builtin node
    (gnu_compiler_builtin); the form of the registry's row says how a call

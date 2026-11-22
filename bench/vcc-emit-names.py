@@ -72,7 +72,7 @@ int main(void)
 
 BUILTINS = r'''
 #include <assert.h>
-#include "frontend/c/builtin-table.cpp"
+#include "frontend/c/builtins-registry.cpp"
 int (*pp_builtin_known)(const char *);
 bool cc_library_builtin_is_known(const char *name) { (void)name; return false; }
 int main(void) {

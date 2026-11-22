@@ -4,7 +4,7 @@
  * one function type with the standard conversions.  A name of the registry
  * says how its call is checked and typed (builtin_form), and whether and
  * how a constant expression evaluates it (builtin_fold); a name of the C
- * front end's builtin table (frontend/c/builtin-table.cpp) that is not here
+ * front end's builtin table (frontend/c/builtins-registry.cpp) that is not here
  * is a function of the prototype that table gives it
  * (library-builtins.cpp, compiler_builtin).  The registry is the one place
  * the names of these special cases are spelled: analysis, constant
