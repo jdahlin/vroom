@@ -9,6 +9,7 @@
  * constant expression.
  */
 #include "../../cplusplus-internal.h"
+#include "frontend/builtin-fold.h"
 #include "frontend/cplusplus/builtin-registry.h"
 #include "frontend/cplusplus/sema.h"
 
@@ -24,39 +25,37 @@ static unsigned integer_bits(const implementation_defined_behavior &b,
     return fundamental_type_width(b, f);
 }
 
-/* x's low width bits */
-static unsigned __int128 truncated(unsigned __int128 x, unsigned width)
+/* the operation of frontend/builtin-fold.h that a registry row's number
+   names */
+static int shared_integer_operation(builtin_integer_op op)
 {
-    if (width >= 128)
-        return x;
-    return x & ((static_cast<unsigned __int128>(1) << width) - 1);
-}
-
-static unsigned count_ones(unsigned __int128 x)
-{
-    return static_cast<unsigned>(
-        __builtin_popcountll(static_cast<uint64_t>(x)) +
-        __builtin_popcountll(static_cast<uint64_t>(x >> 64)));
-}
-
-/* the leading zeros of the width-bit value x, 0 < x */
-static unsigned leading_zeros(unsigned __int128 x, unsigned width)
-{
-    unsigned high = 0;
-    for (unsigned i = width; i-- > 0;) {
-        if ((x >> i) & 1)
-            break;
-        high++;
+    switch (op) {
+    case builtin_integer_op::clz:
+        return vfold_clz;
+    case builtin_integer_op::ctz:
+        return vfold_ctz;
+    case builtin_integer_op::popcount:
+        return vfold_popcount;
+    case builtin_integer_op::ffs:
+        return vfold_ffs;
+    case builtin_integer_op::parity:
+        return vfold_parity;
+    case builtin_integer_op::clrsb:
+        return vfold_clrsb;
+    case builtin_integer_op::bswap:
+        return vfold_bswap;
+    case builtin_integer_op::bitreverse:
+        return vfold_bitreverse;
+    case builtin_integer_op::rotate_left:
+        return vfold_rotate_left;
+    case builtin_integer_op::rotate_right:
+        return vfold_rotate_right;
+    case builtin_integer_op::absolute:
+        return vfold_absolute;
+    case builtin_integer_op::expect:
+        return vfold_expect;
     }
-    return high;
-}
-
-static unsigned trailing_zeros(unsigned __int128 x)
-{
-    unsigned n = 0;
-    while (!((x >> n) & 1))
-        n++;
-    return n;
+    return vfold_none;
 }
 
 /* [expr.const]: the integer builtins, on the first argument's width */
@@ -77,77 +76,24 @@ constness semantic_analysis::evaluate_integer_builtin(
     if (f == fundamental_type::none)
         return constness::unknown;
     unsigned width = integer_bits(tokens.files.behavior, f);
-    unsigned __int128 bits = truncated(x[0].integer, width);
     unsigned __int128 result = 0;
-    switch (static_cast<builtin_integer_op>(b.which)) {
-    case builtin_integer_op::clz:
-        /* clang: "__builtin_clz(0)" is not a constant (undefined) */
-        if (!bits)
-            return constness::not_constant;
-        result = leading_zeros(bits, width);
-        break;
-    case builtin_integer_op::ctz:
-        if (!bits)
-            return constness::not_constant;
-        result = trailing_zeros(bits);
-        break;
-    case builtin_integer_op::popcount:
-        result = count_ones(bits);
-        break;
-    case builtin_integer_op::ffs:
-        if (bits)
-            result = trailing_zeros(bits) + 1;
-        break;
-    case builtin_integer_op::parity:
-        result = count_ones(bits) & 1;
-        break;
-    case builtin_integer_op::clrsb: {
-        /* the redundant sign bits: the leading bits equal to the sign
-           bit, less that bit */
-        bool negative = (bits >> (width - 1)) & 1;
-        unsigned n = 0;
-        for (unsigned i = width - 1; i-- > 0;) {
-            if (((bits >> i) & 1) != negative)
-                break;
-            n++;
-        }
-        result = n;
-        break;
-    }
-    case builtin_integer_op::bswap:
-        for (unsigned i = 0; i < width / 8; i++)
-            result = (result << 8) | ((bits >> (8 * i)) & 0xff);
-        break;
-    case builtin_integer_op::bitreverse:
-        for (unsigned i = 0; i < width; i++)
-            result = (result << 1) | ((bits >> i) & 1);
-        break;
-    case builtin_integer_op::rotate_left:
-    case builtin_integer_op::rotate_right: {
+    int operation =
+        shared_integer_operation(static_cast<builtin_integer_op>(b.which));
+    switch (operation) {
+    case vfold_rotate_left:
+    case vfold_rotate_right:
         if (call.count != 2)
             return constness::unknown;
-        unsigned amount = static_cast<unsigned>(x[1].integer % width);
-        if (static_cast<builtin_integer_op>(b.which) ==
-            builtin_integer_op::rotate_right)
-            amount = (width - amount) % width;
-        if (amount)
-            result =
-                truncated((bits << amount) | (bits >> (width - amount)), width);
-        else
-            result = bits;
+        result = vfold_rotate(x[0].integer, width, x[1].integer,
+                              operation == vfold_rotate_right);
         break;
-    }
-    case builtin_integer_op::absolute: {
-        __int128 s =
-            integer_value(tokens.files.behavior, f,
-                          integer_wrap(tokens.files.behavior, f, bits));
-        if (s < 0)
-            s = -s;
-        result = static_cast<unsigned __int128>(s);
-        break;
-    }
-    case builtin_integer_op::expect:
+    case vfold_expect:
         result = x[0].integer;
+        break;
+    default:
+        /* clang: "__builtin_clz(0)" is not a constant (undefined) */
+        if (!vfold_integer(operation, x[0].integer, width, &result))
+            return constness::not_constant;
         break;
     }
     fundamental_type r = fundamental_of(call.type);

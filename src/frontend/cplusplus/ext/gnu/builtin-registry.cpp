@@ -139,6 +139,10 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_popcountg", bit_count, 1, bit_count),
     ROW("__builtin_clzg", bit_count, 2, bit_count),
     ROW("__builtin_ctzg", bit_count, 3, bit_count),
+    /* C23's <stdbit.h> counts, as the C front end's table spells them: the
+       result is the table's unsigned int, a zero value has no fallback */
+    ROW("__builtin_stdc_count_ones", bit_count, 4, bit_count),
+    ROW("__builtin_stdc_trailing_zeros", bit_count, 5, bit_count),
     /* the type-generic classifications and comparisons of <math.h> (C17
        7.12.3, 7.12.14): the arguments as they are, unpromoted */
     ROW("__builtin_fpclassify", generic, 6, floating),

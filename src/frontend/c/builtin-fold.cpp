@@ -1,5 +1,6 @@
 /* vcc front end: constant folding of builtins (cc_builtin_classify_type, cc_builtin_fold); see builtin-table.c for where a builtin's other facts live */
 #include "cc-internal.h"
+#include "frontend/builtin-fold.h"
 
 static int cc_builtin_classify_type(cc *c, ast_qualified_type t)
 {
@@ -24,6 +25,59 @@ static int cc_builtin_classify_type(cc *c, ast_qualified_type t)
         if (cc_type_is_float(c, t))
             return 8;
         return 1;
+    }
+}
+
+/* the operation of frontend/builtin-fold.h an integer builtin node is, or
+   vfold_none */
+static int cc_builtin_integer_operation(unsigned id)
+{
+    switch (id) {
+    case CC_BUILTIN_CLZ:
+    case CC_BUILTIN_CLZL:
+    case CC_BUILTIN_CLZLL:
+        return vfold_clz;
+    case CC_BUILTIN_CTZ:
+    case CC_BUILTIN_CTZL:
+    case CC_BUILTIN_CTZLL:
+        return vfold_ctz;
+    case CC_BUILTIN_FFS:
+    case CC_BUILTIN_FFSL:
+    case CC_BUILTIN_FFSLL:
+        return vfold_ffs;
+    case CC_BUILTIN_POPCOUNT:
+    case CC_BUILTIN_POPCOUNTL:
+    case CC_BUILTIN_POPCOUNTLL:
+        return vfold_popcount;
+    case CC_BUILTIN_PARITY:
+    case CC_BUILTIN_PARITYL:
+    case CC_BUILTIN_PARITYLL:
+        return vfold_parity;
+    case CC_BUILTIN_CLRSB:
+    case CC_BUILTIN_CLRSBL:
+    case CC_BUILTIN_CLRSBLL:
+        return vfold_clrsb;
+    case CC_BUILTIN_BSWAP16:
+    case CC_BUILTIN_BSWAP32:
+    case CC_BUILTIN_BSWAP64:
+        return vfold_bswap;
+    case CC_BUILTIN_BITREVERSE8:
+    case CC_BUILTIN_BITREVERSE16:
+    case CC_BUILTIN_BITREVERSE32:
+    case CC_BUILTIN_BITREVERSE64:
+        return vfold_bitreverse;
+    case CC_BUILTIN_ROTL8:
+    case CC_BUILTIN_ROTL16:
+    case CC_BUILTIN_ROTL32:
+    case CC_BUILTIN_ROTL64:
+        return vfold_rotate_left;
+    case CC_BUILTIN_ROTR8:
+    case CC_BUILTIN_ROTR16:
+    case CC_BUILTIN_ROTR32:
+    case CC_BUILTIN_ROTR64:
+        return vfold_rotate_right;
+    default:
+        return vfold_none;
     }
 }
 
@@ -254,7 +308,8 @@ CC_PRIVATE bool cc_builtin_fold(cc *c, const node *x, cc_value *v)
     case CC_BUILTIN_CLRSBLL: {
         ast_qualified_type at;
         unsigned bits;
-        u128 u;
+        u128 u, r = 0;
+        int operation = cc_builtin_integer_operation(x->aux);
 
         if (!cc_constant_eval(c, arg[0], &a) || a.kind != CC_VALUE_INTEGER)
             return false;
@@ -262,84 +317,19 @@ CC_PRIVATE bool cc_builtin_fold(cc *c, const node *x, cc_value *v)
         bits = (unsigned)cc_type_size(c, at) * 8;
         u = (u128)cc_constant_truncate(c, a.i, cc_type_unsigned(c, at));
         v->ice = a.ice;
-        switch (x->aux) {
-        case CC_BUILTIN_CLZ:
-        case CC_BUILTIN_CLZL:
-        case CC_BUILTIN_CLZLL:
-            if (!u)
-                return false;
-            v->i = cc_count_leading_zeros_128(u, bits);
-            break;
-        case CC_BUILTIN_CTZ:
-        case CC_BUILTIN_CTZL:
-        case CC_BUILTIN_CTZLL:
-            if (!u)
-                return false;
-            v->i = __builtin_ctzll((uint64_t)u);
-            break;
-        case CC_BUILTIN_FFS:
-        case CC_BUILTIN_FFSL:
-        case CC_BUILTIN_FFSLL:
-            v->i = u ? __builtin_ctzll((uint64_t)u) + 1 : 0;
-            break;
-        case CC_BUILTIN_POPCOUNT:
-        case CC_BUILTIN_POPCOUNTL:
-        case CC_BUILTIN_POPCOUNTLL:
-            v->i = __builtin_popcountll((uint64_t)u);
-            break;
-        case CC_BUILTIN_PARITY:
-        case CC_BUILTIN_PARITYL:
-        case CC_BUILTIN_PARITYLL:
-            v->i = __builtin_popcountll((uint64_t)u) & 1;
-            break;
-        case CC_BUILTIN_CLRSB:
-        case CC_BUILTIN_CLRSBL:
-        case CC_BUILTIN_CLRSBLL: {
-            u128 s = (u >> (bits - 1)) & 1 ? ~u & (((u128)1 << bits) - 1) : u;
-
-            v->i = cc_count_leading_zeros_128(s, bits) - 1;
-            break;
-        }
-        case CC_BUILTIN_BSWAP16:
-            v->i = __builtin_bswap16((uint16_t)u);
-            break;
-        case CC_BUILTIN_BSWAP32:
-            v->i = __builtin_bswap32((uint32_t)u);
-            break;
-        case CC_BUILTIN_BSWAP64:
-            v->i = (i128)__builtin_bswap64((uint64_t)u);
-            break;
-        case CC_BUILTIN_BITREVERSE8:
-        case CC_BUILTIN_BITREVERSE16:
-        case CC_BUILTIN_BITREVERSE32:
-        case CC_BUILTIN_BITREVERSE64: {
-            u128 reversed = 0;
-            for (unsigned i = 0; i < bits; ++i)
-                reversed = (reversed << 1) | ((u >> i) & 1);
-            v->i = (i128)reversed;
-            break;
-        }
-        case CC_BUILTIN_ROTL8:
-        case CC_BUILTIN_ROTL16:
-        case CC_BUILTIN_ROTL32:
-        case CC_BUILTIN_ROTL64:
-        case CC_BUILTIN_ROTR8:
-        case CC_BUILTIN_ROTR16:
-        case CC_BUILTIN_ROTR32:
-        case CC_BUILTIN_ROTR64: {
+        if (operation == vfold_rotate_left || operation == vfold_rotate_right) {
             cc_value count;
+
             if (x->c != 2 || !cc_constant_eval(c, arg[1], &count) ||
                 count.kind != CC_VALUE_INTEGER)
                 return false;
-            unsigned shift = (unsigned)count.i & (bits - 1);
-            if (x->aux >= CC_BUILTIN_ROTR8)
-                shift = (bits - shift) & (bits - 1);
-            v->i = (i128)((u << shift) | (u >> (bits - shift)));
+            r = vfold_rotate(u, bits, (u128)count.i,
+                             operation == vfold_rotate_right);
             v->ice = v->ice && count.ice;
-            break;
+        } else if (!vfold_integer(operation, u, bits, &r)) {
+            return false; /* clz and ctz of 0 are undefined */
         }
-        }
-        v->i = cc_constant_truncate(c, v->i, x->ty);
+        v->i = cc_constant_truncate(c, (i128)r, x->ty);
         return true;
     }
     default:

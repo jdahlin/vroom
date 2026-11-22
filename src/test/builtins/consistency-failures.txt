@@ -93,12 +93,6 @@ fold-c-only __builtin_arm_rbit64 c++/arm64
 fold-c-only __builtin_arm_rbit64 c++/x86_64
 fold-c-only __builtin_classify_type c++/arm64
 fold-c-only __builtin_classify_type c++/x86_64
-fold-c-only __builtin_stdc_count_ones c++/arm64
-fold-c-only __builtin_stdc_count_ones c++/x86_64
-fold-c-only __builtin_stdc_trailing_zeros c++/arm64
-fold-c-only __builtin_stdc_trailing_zeros c++/x86_64
-fold-cxx-only __builtin_abs c/arm64
-fold-cxx-only __builtin_abs c/x86_64
 fold-cxx-only __builtin_add_overflow c/arm64
 fold-cxx-only __builtin_add_overflow c/x86_64
 fold-cxx-only __builtin_cabs c/arm64
@@ -144,10 +138,6 @@ fold-cxx-only __builtin_issignaling c/arm64
 fold-cxx-only __builtin_issignaling c/x86_64
 fold-cxx-only __builtin_isunordered c/arm64
 fold-cxx-only __builtin_isunordered c/x86_64
-fold-cxx-only __builtin_labs c/arm64
-fold-cxx-only __builtin_labs c/x86_64
-fold-cxx-only __builtin_llabs c/arm64
-fold-cxx-only __builtin_llabs c/x86_64
 fold-cxx-only __builtin_memcmp c/arm64
 fold-cxx-only __builtin_memcmp c/x86_64
 fold-cxx-only __builtin_mul_overflow c/arm64
