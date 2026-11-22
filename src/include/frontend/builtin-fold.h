@@ -81,8 +81,6 @@ enum vfold_op {
     vfold_isunordered,
     vfold_huge_val,
     vfold_nan,
-    vfold_cabs,
-    vfold_carg,
     vfold_fp16_arithmetic,
     /* the string and memory functions on constant arrays */
     vfold_strlen,
@@ -98,7 +96,10 @@ enum vfold_op {
     vfold_add_carry,
 };
 
-/* the languages that evaluate a row */
+/* the languages that evaluate a row (VFOLD_NEITHER: a builtin that is
+   implemented and folds nowhere, which is said so that clang's answer, which
+   is for clang's builtin, is not taken for it) */
+#define VFOLD_NEITHER 0
 #define VFOLD_C 1
 #define VFOLD_CXX 2
 #define VFOLD_BOTH 3

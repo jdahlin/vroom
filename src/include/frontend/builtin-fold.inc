@@ -30,8 +30,8 @@ BUILTIN_FOLD("__builtin_ctzg", ctz_generic, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_popcountg", popcount_generic, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_stdc_count_ones", stdc_count_ones, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_stdc_trailing_zeros", stdc_trailing_zeros, VFOLD_BOTH)
-BUILTIN_FOLD("__builtin_stdc_rotate_left", stdc_rotate_left, VFOLD_BOTH)
-BUILTIN_FOLD("__builtin_stdc_rotate_right", stdc_rotate_right, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_stdc_rotate_left", stdc_rotate_left, VFOLD_C)
+BUILTIN_FOLD("__builtin_stdc_rotate_right", stdc_rotate_right, VFOLD_C)
 
 /* AArch64's spellings of integer operations (target-builtins.inc maps them
    to the C front end's nodes of the same operation) */
@@ -52,13 +52,15 @@ BUILTIN_FOLD("__builtin_object_size", object_size, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_dynamic_object_size", object_size, VFOLD_BOTH)
 
 /* floating values: the sign operations, the constants, the classes and
-   the comparisons of <math.h> */
+   the comparisons of <math.h>.  The C++ front end has no long double
+   constexpr variable yet, so fabsl and copysignl, which make one of their
+   operands' type, are C only; infl and nanl fold as an operand. */
 BUILTIN_FOLD("__builtin_fabs", fabs, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_fabsf", fabs, VFOLD_BOTH)
-BUILTIN_FOLD("__builtin_fabsl", fabs, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_fabsl", fabs, VFOLD_C)
 BUILTIN_FOLD("__builtin_copysign", copysign, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_copysignf", copysign, VFOLD_BOTH)
-BUILTIN_FOLD("__builtin_copysignl", copysign, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_copysignl", copysign, VFOLD_C)
 BUILTIN_FOLD("__builtin_huge_val", huge_val, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_huge_valf", huge_val, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_huge_vall", huge_val, VFOLD_BOTH)
@@ -88,16 +90,10 @@ BUILTIN_FOLD("__builtin_isless", isless, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_islessequal", islessequal, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_islessgreater", islessgreater, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_isunordered", isunordered, VFOLD_BOTH)
-BUILTIN_FOLD("__builtin_cabs", cabs, VFOLD_CXX)
-BUILTIN_FOLD("__builtin_cabsf", cabs, VFOLD_CXX)
-BUILTIN_FOLD("__builtin_cabsl", cabs, VFOLD_CXX)
-BUILTIN_FOLD("__builtin_carg", carg, VFOLD_CXX)
-BUILTIN_FOLD("__builtin_cargf", carg, VFOLD_CXX)
-BUILTIN_FOLD("__builtin_cargl", carg, VFOLD_CXX)
 /* AArch64's scalar half-precision add and subtract fold as the + and - they
-   lower to */
-BUILTIN_FOLD("__builtin_neon_vaddh_f16", fp16_arithmetic, VFOLD_BOTH)
-BUILTIN_FOLD("__builtin_neon_vsubh_f16", fp16_arithmetic, VFOLD_BOTH)
+   lower to; the C++ front end does not yet (a _Float16 operation) */
+BUILTIN_FOLD("__builtin_neon_vaddh_f16", fp16_arithmetic, VFOLD_C)
+BUILTIN_FOLD("__builtin_neon_vsubh_f16", fp16_arithmetic, VFOLD_C)
 
 /* the string and memory functions on arrays of constants */
 BUILTIN_FOLD("__builtin_strlen", strlen, VFOLD_BOTH)
@@ -110,8 +106,7 @@ BUILTIN_FOLD("__builtin_wcslen", wcslen, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_wmemcmp", wmemcmp, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_wmemchr", wmemchr, VFOLD_CXX)
 
-/* the overflow checks (they write the object the third argument points to)
-   and x86's add with carry */
+/* the overflow checks (they write the object the third argument points to) */
 BUILTIN_FOLD("__builtin_add_overflow", overflow, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_sub_overflow", overflow, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_mul_overflow", overflow, VFOLD_CXX)
@@ -133,4 +128,7 @@ BUILTIN_FOLD("__builtin_smulll_overflow", overflow, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_umul_overflow", overflow, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_umull_overflow", overflow, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_umulll_overflow", overflow, VFOLD_CXX)
-BUILTIN_FOLD("__builtin_ia32_addcarryx_u64", add_carry, VFOLD_CXX)
+
+/* x86's add with carry writes through its last argument: no front end
+   evaluates it (clang says it does) */
+BUILTIN_FOLD("__builtin_ia32_addcarryx_u64", add_carry, VFOLD_NEITHER)
