@@ -318,9 +318,11 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
     const ctype *ft = T(c, c->syms[s].ty);
 
     *why = NULL;
-    /* (unwind tables would have to describe the d registers' slots: not written) */
+    /* Keep the allocation policy the same with and without CFI at -O0 and
+     * -O1. The unwinder cannot yet describe saved d registers. */
     a64_vir_registers_describe(&regs, CODEGEN_IS_DARWIN(c),
-                               !e->unit->options->cfi &&
+                               e->unit->options->opt >= 2 &&
+                                   !e->unit->options->cfi &&
                                    !a64_vir_vectors_cross_call(f));
     if (!vir_loops_build(f, &V->loops)) {
         *why = VIRBUILD_FAILURE(loop_analysis);
