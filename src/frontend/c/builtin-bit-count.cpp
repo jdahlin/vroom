@@ -190,7 +190,9 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
     uint32_t x, fb = 0;
     ast_qualified_type xt;
 
-    unsigned maxargs = id == CC_BUILTIN_POPCOUNTG ? 1 : 2;
+    unsigned maxargs = 2;
+    if (id == CC_BUILTIN_POPCOUNTG)
+        maxargs = 1;
     cc_builtin_arguments_parse(c, &args);
     if (!args.n || args.n > maxargs) {
         cc_builtin_arity_check(c, loc, args.n ? maxargs : 1, &args);
