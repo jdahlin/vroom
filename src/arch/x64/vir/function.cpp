@@ -18,6 +18,7 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
     L->compare_condition = UINT32_MAX;
     L->memory_value = L->memory_skip = L->scaled_value = L->scaled_skip =
         L->big_endian_value = L->test_value = L->compare_memory_value = 0;
+    L->carry_value = 0;
 }
 
 static void vx_target_block_enter(void *ctx, uint32_t b)
