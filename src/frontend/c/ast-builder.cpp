@@ -421,6 +421,13 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     const cc_builtin *b = ast_builder_builtin(name, length);
     if (!b)
         return 0;
+    /* a builtin with a C body: the body's tree */
+    if (b->body) {
+        const struct cc_body_binding *k = cc_builtin_body_find(c, b);
+
+        if (k)
+            return cc_builtin_body_apply(c, k, b, args, count, 0);
+    }
     /* an __atomic_*, __sync_* or __c11_atomic_* call: the conversions of
        the parsed call, then its node (the C++ front end has checked the
        arguments) */
@@ -470,7 +477,7 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
             fallback =
                 cc_conversion_apply(c, args[1], cc_type_basic(AST_TYPE_INT));
         return cc_builtin_bit_count_lower(
-            c, b->id, false, cc_conversion_decay(c, args[0]), fallback, 0);
+            c, b->id, cc_conversion_decay(c, args[0]), fallback, 0);
     }
     /* the x86 vector builtins expanded into lanes, as the parsed call does:
        the arguments converted to the signature's types first */

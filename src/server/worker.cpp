@@ -54,8 +54,11 @@ static void vccd_worker_connection_serve(struct vccd_worker *w, int conn)
     if (got) {
         struct vccd_request_header *h = (struct vccd_request_header *)w->raw;
 
-        if (h->build_id && vccd_self_build_id &&
-            h->build_id != vccd_self_build_id) {
+        bool mismatch = h->build_id && vccd_self_build_id &&
+                        h->build_id != vccd_self_build_id;
+        int g0 = mismatch ? vccd_generation_mismatch_enter() : 0;
+
+        if (mismatch && !g0) {
             status = (int32_t)VCCD_STATUS_MISMATCH, kind = "mismatch";
         } else {
             /* a diagnostics query belongs to no build: it must not end the one it asks about */
@@ -64,7 +67,7 @@ static void vccd_worker_connection_serve(struct vccd_worker *w, int conn)
             int g;
 
             vtask_blocking_begin(); /* (waits while another build drains) */
-            g = vccd_generation_enter(q ? 0 : h->process_group);
+            g = mismatch ? g0 : vccd_generation_enter(q ? 0 : h->process_group);
             vtask_blocking_end();
             if (g) {
                 status = (int32_t)VCCD_STATUS_RETRY, kind = "retry";
