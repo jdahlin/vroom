@@ -797,6 +797,10 @@ struct entity {
    inline at the closing }, 0 if none) */
 struct dynamic_class {
     entity_index primary_base = 0;
+    /* [abi:class-types] I: the primary base is a virtual base (a nearly
+       empty one), which shares the class's virtual table pointer; the
+       lowering has no rules for it yet */
+    bool primary_is_virtual = false;
     uint32_t first_slot = 0, slot_count = 0;
     bool abstract = false;
     entity_index key_function = 0;
@@ -1660,6 +1664,11 @@ class semantic_analysis
     /* the virtual base subobject of class c whose class is v, 0 if v is
        no virtual base of c */
     entity_index virtual_base_of(entity_index c, entity_index v) const;
+    /* [abi:class-types] III: whether the virtual base class v is the
+       primary base of class k, of its primary base, and so on (an
+       indirect primary base): it is allocated with that base, not as a
+       virtual base of the class k is a base of */
+    bool primary_chain_has(entity_index k, entity_index v) const;
     /* the virtual bases of class c in inheritance graph order (preorder,
        [abi:class-types] III), classes */
     void virtual_bases_in_graph_order(entity_index c,
@@ -2229,6 +2238,10 @@ class semantic_analysis
     /* function_template_definition: the function_templates index plus one
        of the template its last declaration declared or redeclared */
     uint32_t last_function_template = 0;
+    analysis_result friend_member_function(entity_index c, SyntaxRef n,
+                                           const declarator_meaning &m,
+                                           qualified_type type, bool no_type,
+                                           bool is_constexpr);
     analysis_result friend_function_template(entity_index c,
                                              TemplateDeclaration n,
                                              SyntaxRef inner);
@@ -2444,6 +2457,18 @@ class semantic_analysis
     bool case_or_default_label(SyntaxElement s) const;
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);
     analysis_result gnu_attribute_specifier(SyntaxRef n, specified &s);
+    /* [expr.const]: why an evaluation could not tell, when a function it
+       calls was refused (its reason), else the evaluation's own; cleared
+       when read */
+    const char *evaluation_cause = nullptr;
+    const char *expr_const_reason()
+    {
+        const char *r = "expr.const";
+        if (evaluation_cause)
+            r = evaluation_cause;
+        evaluation_cause = nullptr;
+        return r;
+    }
     analysis_result defer_unsupported_body(SyntaxRef n, entity_index f,
                                            size_t before, analysis_result r);
     analysis_result gnu_compound_literal(SyntaxRef n, expression_meaning &m);
@@ -3120,6 +3145,15 @@ class semantic_analysis
     bool unary_trait(int which, qualified_type t, int64_t &value);
     /* ext/clang/class-traits.cpp: the traits that ask about a class */
     bool class_property_trait(int which, qualified_type t, bool &answer);
+    bool standard_layout_class(entity_index c, bool &answer);
+    bool declares_move_assignment(entity_index c);
+    bool relocatable_type(qualified_type t, bool cpp26, bool &known);
+    bool class_head_names_trivial_abi(entity_index c);
+    bool unique_representation(qualified_type t, bool &answer);
+    bool trivial_default_class(entity_index c, bool &known) const;
+    void base_classes_of(entity_index c, owned_array<entity_index> &out) const;
+    void layout_member_types(entity_index c, owned_array<type_index> &out);
+    bool first_data_class(entity_index c, entity_index &owner) const;
     bool derives_from(entity_index d, entity_index b) const;
     analysis_result clang_base_of_trait(SyntaxRef n, bool virtual_base,
                                         expression_meaning &m);
@@ -5035,6 +5069,9 @@ class semantic_analysis
     analysis_result analyse_function_body(SyntaxRef definition,
                                           SyntaxElement compound,
                                           SyntaxElement ctor_initializer = {});
+    analysis_result analyse_function_body_of(SyntaxRef definition,
+                                             SyntaxElement compound,
+                                             SyntaxElement ctor_initializer);
     /* [class.base.init]: a constructor's member initializations, the
        statements of a block (function_body's b) */
     analysis_result

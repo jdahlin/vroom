@@ -216,6 +216,20 @@ bool semantic_analysis::primary_base_choice(entity_index c,
     return true;
 }
 
+bool semantic_analysis::primary_chain_has(entity_index k, entity_index v) const
+{
+    for (;;) {
+        const dynamic_class *d = dynamic_of(k);
+        if (!d || !d->primary_base)
+            return false;
+        entity_index b =
+            type_table[entity_table[d->primary_base].type.unqualified()].entity;
+        if (d->primary_is_virtual && b == v)
+            return true;
+        k = b;
+    }
+}
+
 /*
  * At the closing } of class c (before its layout): [class.virtual]/1 "A
  * class that declares or inherits a virtual function is called a
@@ -241,15 +255,31 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
            ([abi:class-types] II), out of declaration order */
         return not_supported(n, "class.virtual");
     /* [abi:class-types] I: without a non-virtual dynamic base, "a nearly
-       empty virtual base class" would be the primary base, sharing the
-       virtual table pointer: not analysed */
+       empty virtual base class" (one with nothing but its virtual table
+       pointer) is the primary base, the first in inheritance graph order,
+       sharing the virtual table pointer */
     owned_array<entity_index> virtual_order;
     virtual_bases_in_graph_order(c, virtual_order);
+    bool primary_virtual = false;
     if (!primary)
         for (entity_index v : virtual_order)
-            if (entity_table[v].dynamic &&
-                entity_table[v].nv_size == pointer_size())
-                return not_supported(n, "class.mi");
+            if (!primary && entity_table[v].dynamic &&
+                entity_table[v].nv_size == pointer_size()) {
+                /* its secondary tables are not followed */
+                if (dynamic_of(v)->group_count != 1)
+                    return not_supported(n, "class.mi");
+                primary = virtual_base_of(c, v);
+                primary_virtual = true;
+            }
+    /* the virtual bases allocated with the primary base chain */
+    entity_index primary_class = 0;
+    if (primary)
+        primary_class =
+            type_table[entity_table[primary].type.unqualified()].entity;
+    auto allocated_with_primary = [&](entity_index v) {
+        return primary && ((primary_virtual && primary_class == v) ||
+                           primary_chain_has(primary_class, v));
+    };
     /* [abi:definitions]: a dynamic class "requires a virtual table pointer
        (because it or its bases have one or more virtual member functions
        or virtual base classes)" */
@@ -304,6 +334,7 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
         return not_supported(n, "class.dtor");
     dynamic_class d;
     d.primary_base = primary;
+    d.primary_is_virtual = primary_virtual;
     d.first_slot = static_cast<uint32_t>(vtable_slots.size());
     d.first_group = static_cast<uint32_t>(vtable_groups.size());
     /* a slot copied from a base's group, with its adjustment */
@@ -457,7 +488,8 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
        dynamic virtual base, in inheritance graph order */
     for (entity_index v : virtual_order) {
         const dynamic_class *vd = dynamic_of(v);
-        if (vd)
+        /* the primary virtual base's table is the class's own */
+        if (vd && !allocated_with_primary(v))
             secondary(virtual_base_of(c, v), v, vd, 0);
     }
     d.group_count = static_cast<uint32_t>(vtable_groups.size()) - d.first_group;
