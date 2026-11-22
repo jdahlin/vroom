@@ -797,6 +797,10 @@ struct entity {
    inline at the closing }, 0 if none) */
 struct dynamic_class {
     entity_index primary_base = 0;
+    /* [abi:class-types] I: the primary base is a virtual base (a nearly
+       empty one), which shares the class's virtual table pointer; the
+       lowering has no rules for it yet */
+    bool primary_is_virtual = false;
     uint32_t first_slot = 0, slot_count = 0;
     bool abstract = false;
     entity_index key_function = 0;
@@ -1660,6 +1664,11 @@ class semantic_analysis
     /* the virtual base subobject of class c whose class is v, 0 if v is
        no virtual base of c */
     entity_index virtual_base_of(entity_index c, entity_index v) const;
+    /* [abi:class-types] III: whether the virtual base class v is the
+       primary base of class k, of its primary base, and so on (an
+       indirect primary base): it is allocated with that base, not as a
+       virtual base of the class k is a base of */
+    bool primary_chain_has(entity_index k, entity_index v) const;
     /* the virtual bases of class c in inheritance graph order (preorder,
        [abi:class-types] III), classes */
     void virtual_bases_in_graph_order(entity_index c,
