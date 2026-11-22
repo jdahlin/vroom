@@ -3133,6 +3133,13 @@ class semantic_analysis
     bool unary_trait(int which, qualified_type t, int64_t &value);
     /* ext/clang/class-traits.cpp: the traits that ask about a class */
     bool class_property_trait(int which, qualified_type t, bool &answer);
+    bool standard_layout_class(entity_index c, bool &answer);
+    bool declares_move_assignment(entity_index c);
+    bool unique_representation(qualified_type t, bool &answer);
+    bool trivial_default_class(entity_index c, bool &known) const;
+    void base_classes_of(entity_index c, owned_array<entity_index> &out) const;
+    void layout_member_types(entity_index c, owned_array<type_index> &out);
+    bool first_data_class(entity_index c, entity_index &owner) const;
     bool derives_from(entity_index d, entity_index b) const;
     analysis_result clang_base_of_trait(SyntaxRef n, bool virtual_base,
                                         expression_meaning &m);

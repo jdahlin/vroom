@@ -469,8 +469,30 @@ bool semantic_analysis::assigned_bitwise(entity_index c)
         return false;
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
-    if (found.entity || found.unknown || found.ambiguous)
+    if (found.unknown || found.ambiguous)
         return false;
+    /* another operator= (one of another parameter type) is no copy or
+       move assignment operator: it leaves the implicit one trivial */
+    if (found.entity &&
+        entity_table[found.entity].kind != entity_kind::function)
+        return false;
+    for (entity_index o = found.entity; o; o = entity_table[o].next_overload) {
+        if (entity_table[o].kind != entity_kind::function)
+            return false;
+        if (copy_assignment_operator(o, c))
+            return false;
+        const struct type &f = type_table[entity_table[o].type.unqualified()];
+        if (f.parameter_count == 1) {
+            qualified_type p =
+                type_table.parameters(entity_table[o].type.unqualified())[0];
+            const struct type &r = type_table[p.unqualified()];
+            if (r.kind == type_kind::rvalue_reference &&
+                type_table[r.operand.unqualified()].kind ==
+                    type_kind::class_type &&
+                type_table[r.operand.unqualified()].entity == c)
+                return false;
+        }
+    }
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes)

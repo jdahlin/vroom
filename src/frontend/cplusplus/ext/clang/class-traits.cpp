@@ -198,6 +198,7 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
 bool semantic_analysis::class_property_trait(int which, qualified_type t,
                                              bool &answer)
 {
+    bool const_qualified = (t.cv() & cv_const) != 0;
     t = qualified_type::make(t.unqualified(), cv_none);
     /* an array of T is as T for what follows ([basic.types]/9) */
     type_kind kind = type_table[t.unqualified()].kind;
@@ -205,6 +206,8 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     bool unbounded = array && !type_table[t.unqualified()].bound_known;
     while (kind == type_kind::array) {
         t = type_table[t.unqualified()].operand;
+        if (t.cv() & cv_const)
+            const_qualified = true;
         t = qualified_type::make(t.unqualified(), cv_none);
         kind = type_table[t.unqualified()].kind;
     }
@@ -233,37 +236,82 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
                      fundamental_of(t) != fundamental_type::void_;
             return true;
         }
-        const entity &x = entity_table[c];
-        if (x.dynamic || x.virtual_base_count || x.base_count)
+        return standard_layout_class(c, answer);
+    }
+    /* a POD: trivial and standard-layout ([class.prop]); a scalar is */
+    case unary_trait_kind::is_pod: {
+        if (unbounded)
             return false;
-        uint8_t first_access = 0xff;
-        for (uint32_t i = 0; i < x.member_count; i++) {
-            const entity &m = entity_table[class_members[x.first_member + i]];
-            if (m.kind != entity_kind::variable || !m.nonstatic_member)
-                continue;
-            type_kind mk = type_table[m.type.unqualified()].kind;
-            if (mk == type_kind::lvalue_reference ||
-                mk == type_kind::rvalue_reference) {
-                answer = false;
-                return true;
-            }
-            if (first_access == 0xff)
-                first_access = m.access;
-            else if (m.access != first_access) {
-                answer = false;
-                return true;
-            }
-            bool sub = false;
-            if (!class_property_trait(which, m.type, sub))
-                return false;
-            if (!sub) {
-                answer = false;
-                return true;
-            }
-        }
-        answer = true;
+        bool trivial = false, layout = false;
+        if (!class_property_trait(int(unary_trait_kind::is_trivial), t,
+                                  trivial) ||
+            !class_property_trait(int(unary_trait_kind::is_standard_layout), t,
+                                  layout))
+            return false;
+        answer = trivial && layout;
         return true;
     }
+    /* [basic.types]/10 (literal_type), "unknown" is not answered */
+    case unary_trait_kind::is_literal: {
+        /* a union's: its rule differs between editions */
+        if (is_class && entity_table[c].union_)
+            return false;
+        constness literal = literal_type(t);
+        if (literal == constness::unknown)
+            return false;
+        answer = literal == constness::constant;
+        return true;
+    }
+    /* [ext:clang_type_traits] __has_trivial_constructor, _copy, _assign:
+       what clang answers for a scalar (true; an assignment of a const
+       one, not) and a class (its trivial default constructor, copy
+       constructor, copy assignment operator) */
+    case unary_trait_kind::has_trivial_constructor:
+    case unary_trait_kind::has_trivial_copy:
+    case unary_trait_kind::has_trivial_assign: {
+        if (unbounded || kind == type_kind::function ||
+            kind == type_kind::lvalue_reference ||
+            kind == type_kind::rvalue_reference ||
+            fundamental_of(t) == fundamental_type::void_)
+            return false;
+        if (!is_class) {
+            answer = true;
+            if (static_cast<unary_trait_kind>(which) ==
+                    unary_trait_kind::has_trivial_assign &&
+                const_qualified)
+                answer = false;
+            return true;
+        }
+        if (triviality_unknown(c))
+            return false;
+        /* a declared move constructor or assignment deletes the implicit
+           copy, which clang still answers for as it does not the
+           standard: not followed */
+        if (static_cast<unary_trait_kind>(which) !=
+                unary_trait_kind::has_trivial_constructor &&
+            (declares_move_constructor(c) || declares_move_assignment(c)))
+            return false;
+        switch (static_cast<unary_trait_kind>(which)) {
+        case unary_trait_kind::has_trivial_constructor: {
+            bool known = true;
+            answer = trivial_default_class(c, known);
+            if (!known)
+                return false;
+            break;
+        }
+        case unary_trait_kind::has_trivial_copy:
+            answer = copies_bytes(c);
+            break;
+        default:
+            answer = assigned_bitwise(c);
+            break;
+        }
+        return true;
+    }
+    case unary_trait_kind::has_unique_object_representations:
+        if (unbounded)
+            return false;
+        return unique_representation(t, answer);
     case unary_trait_kind::is_polymorphic:
         answer = !array && is_class && polymorphic_class(c);
         return true;
@@ -295,7 +343,11 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
             bool copyable = class_trivially_copyable(c, known);
             if (!known)
                 return false;
-            answer = copyable && trivial_special_members(c);
+            bool known_default = true;
+            answer = copyable && trivial_special_members(c) &&
+                     trivial_default_class(c, known_default);
+            if (!known_default)
+                return false;
         }
         return true;
     case unary_trait_kind::is_trivially_copyable:
@@ -357,6 +409,360 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     default:
         return false;
     }
+}
+
+/* whether class c declares a move assignment operator X::operator=(X&&) */
+bool semantic_analysis::declares_move_assignment(entity_index c)
+{
+    lookup_result found = lookup_qualified(
+        c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
+    if (found.unknown || found.ambiguous)
+        return true;
+    for (entity_index o = found.entity; o; o = entity_table[o].next_overload) {
+        if (entity_table[o].kind != entity_kind::function)
+            return true;
+        const struct type &f = type_table[entity_table[o].type.unqualified()];
+        if (f.parameter_count != 1)
+            continue;
+        qualified_type p =
+            type_table.parameters(entity_table[o].type.unqualified())[0];
+        const struct type &r = type_table[p.unqualified()];
+        if (r.kind == type_kind::rvalue_reference &&
+            type_table[r.operand.unqualified()].kind == type_kind::class_type &&
+            type_table[r.operand.unqualified()].entity == c)
+            return true;
+    }
+    return false;
+}
+
+/* the direct and indirect base classes of c (non-virtual ones: a class
+   with a virtual base is no standard-layout class) */
+void semantic_analysis::base_classes_of(entity_index c,
+                                        owned_array<entity_index> &out) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index b = type_table[entity_table[class_bases[x.first_base + i]]
+                                        .type.unqualified()]
+                             .entity;
+        out.append(b);
+        base_classes_of(b, out);
+    }
+}
+
+/* [class.prop]/3: the class that declares c's (possibly inherited)
+   first non-static data member, 0 if none; false when two classes of the
+   hierarchy declare some (not standard-layout) */
+bool semantic_analysis::first_data_class(entity_index c,
+                                         entity_index &owner) const
+{
+    owner = 0;
+    owned_array<entity_index> all;
+    all.append(c);
+    base_classes_of(c, all);
+    uint32_t declaring = 0;
+    for (entity_index k : all) {
+        const entity &x = entity_table[k];
+        bool has = false;
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            const entity &m = entity_table[class_members[x.first_member + i]];
+            if (m.kind == entity_kind::variable && m.nonstatic_member &&
+                !m.base_subobject)
+                has = true;
+        }
+        if (has) {
+            owner = k;
+            declaring++;
+        }
+    }
+    return declaring <= 1;
+}
+
+/* [class.prop]/3's M(X) for the standard-layout rule: the types of the
+   first non-static data member of X, and of those, recursively (an
+   array's element type is included); a union's, of every member */
+void semantic_analysis::layout_member_types(entity_index c,
+                                            owned_array<type_index> &out)
+{
+    auto add = [&](auto &&self, qualified_type t) -> void {
+        t = qualified_type::make(t.unqualified(), cv_none);
+        while (type_table[t.unqualified()].kind == type_kind::array) {
+            t = type_table[t.unqualified()].operand;
+            t = qualified_type::make(t.unqualified(), cv_none);
+        }
+        out.append(t.unqualified());
+        if (type_table[t.unqualified()].kind == type_kind::class_type)
+            layout_member_types(type_table[t.unqualified()].entity, out);
+        (void)self;
+    };
+    const entity &x = entity_table[c];
+    if (x.union_) {
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            const entity &m = entity_table[class_members[x.first_member + i]];
+            if (m.kind == entity_kind::variable && m.nonstatic_member &&
+                !m.base_subobject)
+                add(add, m.type);
+        }
+        return;
+    }
+    entity_index owner = 0;
+    first_data_class(c, owner);
+    if (!owner)
+        return;
+    const entity &o = entity_table[owner];
+    for (uint32_t i = 0; i < o.member_count; i++) {
+        const entity &m = entity_table[class_members[o.first_member + i]];
+        if (m.kind == entity_kind::variable && m.nonstatic_member &&
+            !m.base_subobject) {
+            add(add, m.type);
+            return;
+        }
+    }
+}
+
+/* [class.prop]/3: a standard-layout class has no virtual functions or
+   virtual bases, no non-static data member of reference or
+   non-standard-layout type, the same access control for all its
+   non-static data members, no non-standard-layout base class, all its
+   non-static data members (and its bases') first declared in one class,
+   and no base class of a type in M(S).  false: not analysed */
+bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
+{
+    const entity &x = entity_table[c];
+    answer = false;
+    if (x.dynamic || x.virtual_base_count)
+        return true;
+    uint8_t first_access = 0xff;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+            m.base_subobject)
+            continue;
+        type_kind mk = type_table[m.type.unqualified()].kind;
+        if (mk == type_kind::lvalue_reference ||
+            mk == type_kind::rvalue_reference)
+            return true;
+        if (first_access == 0xff)
+            first_access = m.access;
+        else if (m.access != first_access)
+            return true;
+        bool sub = false;
+        if (!class_property_trait(int(unary_trait_kind::is_standard_layout),
+                                  m.type, sub))
+            return false;
+        if (!sub)
+            return true;
+    }
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        bool sub = false;
+        if (!class_property_trait(int(unary_trait_kind::is_standard_layout),
+                                  b.type, sub))
+            return false;
+        if (!sub)
+            return true;
+    }
+    if (x.base_count) {
+        /* an empty base after a bit-field: clang's own rule */
+        for (uint32_t i = 0; i < x.member_count; i++)
+            if (entity_table[class_members[x.first_member + i]].bit_field)
+                return false;
+        entity_index owner = 0;
+        if (!first_data_class(c, owner))
+            return true;
+        /* two base class subobjects of one type cannot have different
+           addresses */
+        owned_array<entity_index> every;
+        base_classes_of(c, every);
+        for (size_t i = 0; i < every.size(); i++)
+            for (size_t j = i + 1; j < every.size(); j++)
+                if (every[i] == every[j])
+                    return true;
+        /* a base's access also counts: all data members of the hierarchy
+           have one access control ([class.prop]/3.2) */
+        owned_array<type_index> forbidden;
+        layout_member_types(c, forbidden);
+        owned_array<entity_index> classes;
+        base_classes_of(c, classes);
+        for (entity_index k : classes)
+            for (type_index f : forbidden)
+                if (entity_table[k].type.unqualified() == f)
+                    return true;
+        for (entity_index k : classes) {
+            const entity &kx = entity_table[k];
+            for (uint32_t i = 0; i < kx.member_count; i++) {
+                const entity &m =
+                    entity_table[class_members[kx.first_member + i]];
+                if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+                    m.base_subobject)
+                    continue;
+                if (first_access == 0xff)
+                    first_access = m.access;
+                else if (m.access != first_access)
+                    return true;
+            }
+        }
+    }
+    answer = true;
+    return true;
+}
+
+/* a class's trivial default constructor ([class.default.ctor]/3): it has
+   one (none is declared, or X() = default is), none is user-provided
+   (or callable without arguments), no virtual function or virtual base, no
+   default member initializer, and every subobject's the same; known is
+   false for a constructor template */
+bool semantic_analysis::trivial_default_class(entity_index c, bool &known) const
+{
+    const entity &x = entity_table[c];
+    if (x.dynamic || x.virtual_base_count)
+        return false;
+    if (x.constructor_template || x.constructor_templates) {
+        known = false;
+        return false;
+    }
+    bool user_declared = false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        if (entity_table[k].implicit)
+            continue;
+        const struct type &f = type_table[entity_table[k].type.unqualified()];
+        /* X() = delete is not user-provided: clang counts it trivial */
+        if (entity_table[k].deleted && !f.parameter_count)
+            continue;
+        user_declared = true;
+        if (f.parameter_count == entity_table[k].default_arguments)
+            return false;
+    }
+    /* a user-declared constructor leaves no implicit default one */
+    if (user_declared && !trivial_defaulted_default_constructor(c))
+        return false;
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (entity_table[class_members[x.first_member + i]].default_initializer)
+            return false;
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (!trivial_default_class(k, known))
+            return false;
+    return true;
+}
+
+/*
+ * [meta.unary.prop] has_unique_object_representations: "T is trivially
+ * copyable, and any two objects of type T with the same value have the same
+ * object representation" ([basic.types]/9 for the value): an integer,
+ * pointer or enumeration type has; a floating-point one has not; an array of
+ * such; a class, when it is trivially copyable, is no dynamic class, and its
+ * bases and members all have, with no padding between or after them (their
+ * bytes cover the class's size); a union, when each member has and fills
+ * it.  false: not analysed (bit-fields, [[no_unique_address]], member
+ * pointers).
+ */
+bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
+{
+    t = qualified_type::make(t.unqualified(), cv_none);
+    while (type_table[t.unqualified()].kind == type_kind::array) {
+        if (!type_table[t.unqualified()].bound_known)
+            return false;
+        t = type_table[t.unqualified()].operand;
+        t = qualified_type::make(t.unqualified(), cv_none);
+    }
+    const struct type &record = type_table[t.unqualified()];
+    answer = false;
+    switch (record.kind) {
+    case type_kind::enumeration:
+    case type_kind::pointer:
+        answer = true;
+        return true;
+    case type_kind::fundamental:
+        if (is_integral(t)) {
+            answer = true;
+            return true;
+        }
+        /* a floating-point type has two representations of a zero */
+        return is_floating(t);
+    case type_kind::class_type:
+        break;
+    default:
+        return false;
+    }
+    entity_index c = record.entity;
+    const entity &x = entity_table[c];
+    if (!x.size)
+        return false;
+    bool known = true;
+    bool copyable = class_trivially_copyable(c, known);
+    if (!known)
+        return false;
+    if (!copyable || x.dynamic || x.virtual_base_count)
+        return true;
+    struct piece {
+        uint64_t offset, size;
+    };
+    owned_array<piece> pieces;
+    bool pieces_in_union = false;
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        entity_index bc = type_table[b.type.unqualified()].entity;
+        /* an empty base has no bytes of its own */
+        if (empty_class(bc))
+            continue;
+        bool sub = false;
+        if (!unique_representation(b.type, sub))
+            return false;
+        if (!sub) {
+            answer = false;
+            return true;
+        }
+        pieces.append(piece{b.offset, entity_table[bc].size});
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+            m.base_subobject)
+            continue;
+        if (m.bit_field || m.no_unique_address)
+            return false;
+        bool sub = false;
+        if (!unique_representation(m.type, sub))
+            return false;
+        if (!sub) {
+            answer = false;
+            return true;
+        }
+        uint64_t size = size_of_type(m.type);
+        if (!size)
+            continue;
+        if (x.union_) {
+            if (size != x.size) {
+                answer = false;
+                return true;
+            }
+            pieces_in_union = true;
+            continue;
+        }
+        pieces.append(piece{m.offset, size});
+    }
+    if (x.union_) {
+        answer = pieces_in_union;
+        return true;
+    }
+    uint64_t end = 0;
+    for (;;) {
+        /* the piece that starts at the end of those taken */
+        bool found = false;
+        for (const piece &p : pieces)
+            if (p.offset == end && p.size) {
+                end += p.size;
+                found = true;
+                break;
+            }
+        if (!found)
+            break;
+    }
+    answer = end == x.size;
+    return true;
 }
 
 } // namespace cplusplus
