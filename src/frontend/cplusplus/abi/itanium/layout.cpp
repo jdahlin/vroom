@@ -17,8 +17,7 @@
  *     III  Virtual base allocation
  *     IV   Finalization: the size rounded up to the alignment
  *
- * A class reaches this file only with rules analysis has: no primary
- * base that is virtual (a nearly empty virtual base, [class.mi]).  A
+ * A class reaches this file only with rules analysis has.  A
  * virtual function declared after the data members moves every one of
  * them (I's virtual table pointer), which is why the layout is not made
  * member by member.
@@ -318,8 +317,7 @@ void class_layout::record(entity_index of, uint64_t at, bool complete)
  * first dynamic base, which analysis takes only as the first base:
  * dynamic_class_record), allocated first by II at offset 0, or else
  * allocates the virtual table pointer at offset 0, the size and alignment
- * of a pointer.  No class with a virtual base is analysed yet
- * ([class.mi]).
+ * of a pointer.  A primary base may be a nearly empty virtual base.
  */
 const char *class_layout::initialization()
 {
@@ -561,6 +559,14 @@ const char *class_layout::allocation_of_members()
     if ((x.gnu_flags & gnu_packed) &&
         (x.base_count || x.virtual_base_count || x.dynamic))
         return "ext.gnu";
+    /* a primary base that is a virtual base is allocated first, at offset
+       0 (the others are the first non-virtual base) */
+    const dynamic_class *dyn = analysis.dynamic_of(c);
+    if (dyn && dyn->primary_is_virtual) {
+        const char *rule = base(table[dyn->primary_base]);
+        if (rule)
+            return rule;
+    }
     for (uint32_t i = 0; i < x.base_count; i++) {
         entity &b = table[analysis.class_bases[x.first_base + i]];
         if (b.virtual_base)
@@ -592,9 +598,9 @@ const char *class_layout::allocation_of_members()
  * [abi:class-types] III: the non-virtual part's size and alignment are
  * nvsize(C) and nvalign(C); then each virtual base, direct or indirect,
  * in inheritance graph order, is allocated as a non-virtual base is (II),
- * its offset that of the subobject in a complete object.  No virtual base
- * is a primary base here (dynamic_class_record), so none is an indirect
- * primary base left out.
+ * its offset that of the subobject in a complete object.  A virtual base
+ * that is the primary base of the class or of its primary base chain (an
+ * indirect primary base) was allocated with it by II, and is left out.
  */
 const char *class_layout::virtual_base_allocation()
 {
@@ -605,8 +611,24 @@ const char *class_layout::virtual_base_allocation()
         return nullptr;
     owned_array<entity_index> order;
     analysis.virtual_bases_in_graph_order(c, order);
+    const dynamic_class *dyn = analysis.dynamic_of(c);
     for (entity_index v : order) {
         entity &b = table[analysis.virtual_base_of(c, v)];
+        if (dyn && dyn->primary_base) {
+            /* allocated with the primary base chain: at the offset of the
+               primary base and of the virtual base within it */
+            const entity &pb = table[dyn->primary_base];
+            entity_index pk = class_of_component(analysis, pb);
+            if (dyn->primary_is_virtual && pk == v) {
+                b.offset = pb.offset;
+                continue;
+            }
+            if (analysis.primary_chain_has(pk, v)) {
+                b.offset =
+                    pb.offset + table[analysis.virtual_base_of(pk, v)].offset;
+                continue;
+            }
+        }
         const char *rule = base(b);
         if (rule)
             return rule;

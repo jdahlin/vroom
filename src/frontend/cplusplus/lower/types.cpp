@@ -278,6 +278,8 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         widths.append(width);
     };
     const dynamic_class *dynamic = analysis.dynamic_of(e);
+    if (dynamic && dynamic->primary_is_virtual)
+        fail("a class whose primary base is a virtual base", at);
     if (dynamic && !dynamic->primary_base) {
         /* [abi:class-types] I: the virtual table pointer at offset 0 */
         add(pointer_to(ast_builder_type_pointer(c, v)), "__vptr", 6, 0, false,
