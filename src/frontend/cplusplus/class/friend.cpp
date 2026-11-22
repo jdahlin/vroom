@@ -246,9 +246,15 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     if (r != analysis_result::well_formed)
         return r;
     if (!s.friend_ || s.typedef_ || s.static_ || s.extern_ || s.virtual_ ||
-        s.declares_class || s.declares_enumeration || !s.has_type)
+        s.declares_class || s.declares_enumeration)
         return not_supported(n, "class.friend");
+    /* a constructor or destructor of another class (friend A::A();) has no
+       type in its decl-specifier-seq */
+    bool no_type = !s.has_type;
     qualified_type type = s.type;
+    if (no_type)
+        type = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
@@ -268,6 +274,10 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
             return not_supported(n, "class.friend");
         return qualified_friend_function(c, n, m, type);
     }
+    if (m.qualifier && m.has_id && !defines)
+        return friend_member_function(c, n, m, type, no_type, s.constexpr_);
+    if (no_type)
+        return not_supported(n, "class.friend");
     /* an operator function ([over.oper]: its declaration's checks are
        operator_function_declaration's), not an allocation function */
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
@@ -358,6 +368,65 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     if (m.operator_function) {
         VTRY(o, operator_function_declaration(n, befriended));
     }
+    entity_table.add_declaration(befriended, n);
+    friend_record f;
+    f.granting = c;
+    f.befriended = befriended;
+    friends.append(f);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.friend]/1: "A friend of a class can be a member function of
+ * another class": friend R A::f(P); friend A::A(P); friend A::~A();  The
+ * declaration "shall refer to a previously declared member of the class
+ * to which the qualifier refers" ([dcl.meaning]/1), by name and type.  It
+ * is that member that is the friend, so its body is in a friend of c.
+ */
+analysis_result semantic_analysis::friend_member_function(
+    entity_index c, SyntaxRef n, const declarator_meaning &m,
+    qualified_type type, bool no_type, bool is_constexpr)
+{
+    entity_index k = m.qualifier;
+    uint32_t name = tokens.identifier(m.id);
+    if (m.operator_function || m.literal_operator || m.conversion_function ||
+        m.aligned || m.gnu_flags || function_cv || c_language ||
+        entity_table[k].kind != entity_kind::class_type ||
+        type_table[type.unqualified()].kind != type_kind::function)
+        return not_supported(n, "class.friend");
+    entity_index befriended = 0;
+    bool special = m.destructor || no_type;
+    if (special) {
+        if (name != entity_table[k].name)
+            return not_supported(n, "class.friend");
+        if (m.destructor) {
+            befriended = entity_table[k].destructor;
+        } else {
+            for (entity_index o = entity_table[k].first_constructor; o;
+                 o = entity_table[o].next_constructor)
+                if (entity_table[o].type == type)
+                    befriended = o;
+        }
+    } else {
+        entity_index first = entity_table.find(k, name);
+        if (first && entity_table[first].kind != entity_kind::function)
+            return not_supported(n, "class.friend");
+        for (entity_index o = first;
+             o && entity_table[o].kind == entity_kind::function;
+             o = entity_table[o].next_overload)
+            if (entity_table[o].type == type)
+                befriended = o;
+    }
+    /* (an implicit special member is declared lazily: not analysed) */
+    if (special && (!befriended || entity_table[befriended].implicit))
+        return not_supported(n, "class.friend");
+    if (!befriended)
+        return ill_formed_at_token(m.id,
+                                   "when the declarator-id is qualified, the "
+                                   "declaration shall refer to a previously "
+                                   "declared member of the class",
+                                   "dcl.meaning");
+    VTRY(cr, constexpr_redeclaration(m.id, befriended, is_constexpr));
     entity_table.add_declaration(befriended, n);
     friend_record f;
     f.granting = c;

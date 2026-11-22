@@ -2229,6 +2229,10 @@ class semantic_analysis
     /* function_template_definition: the function_templates index plus one
        of the template its last declaration declared or redeclared */
     uint32_t last_function_template = 0;
+    analysis_result friend_member_function(entity_index c, SyntaxRef n,
+                                           const declarator_meaning &m,
+                                           qualified_type type, bool no_type,
+                                           bool is_constexpr);
     analysis_result friend_function_template(entity_index c,
                                              TemplateDeclaration n,
                                              SyntaxRef inner);
