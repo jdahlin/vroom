@@ -180,6 +180,11 @@ ranges in metadata and validate them at the call site. Compiler primitives
 remain available to C bodies for operations that need target instructions
 or compiler state.
 
+VIR lowering lives in `src/codegen/vir/builtins-*.cpp` by family.
+`builtins-bit.cpp` binds the existing integer bit builtin IDs to lowering
+functions that emit VIR. The population count and parity bindings share the
+same population count helper, including its baseline x86 expansion.
+
 Start with a fixed signature and a single return expression. Check type
 conversion, repeated parameter references with side effects, constant
 evaluation and absence of a helper call at `-O0` before extending the
