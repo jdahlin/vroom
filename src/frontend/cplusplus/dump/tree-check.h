@@ -165,6 +165,13 @@ struct tree_checker {
             child(n, node.a, tree_sort::statement, false, "block");
             child(n, node.b, tree_sort::expression, true, "result");
             break;
+        case semantic_kind::complex_value:
+            child(n, node.a, tree_sort::expression, false, "real");
+            child(n, node.b, tree_sort::expression, false, "imag");
+            break;
+        case semantic_kind::complex_part:
+            child(n, node.a, tree_sort::expression, false, "operand");
+            break;
         case semantic_kind::entity:
             if (!node.a)
                 problem(n, "no entity");

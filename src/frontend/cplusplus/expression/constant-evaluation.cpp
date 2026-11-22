@@ -450,6 +450,32 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         place_value(state, place) = v;
         return c;
     }
+    if (record.kind == type_kind::complex) {
+        constant_value v;
+        if (zero) {
+            fundamental_type f = evaluated_type(record.operand);
+            if (f == fundamental_type::none)
+                return constness::unknown;
+            constant_value z;
+            z.kind = constant_value_kind::floating;
+            z.floating = 0.0;
+            v.kind = constant_value_kind::array;
+            v.first = static_cast<uint32_t>(state.elements.size());
+            v.count = 2;
+            state.elements.append(z);
+            state.elements.append(z);
+            state.element_read_only.append(read_only);
+            state.element_read_only.append(read_only);
+        } else {
+            constness c = evaluate_node(state, init, v);
+            if (c != constness::constant)
+                return c;
+            if (v.kind != constant_value_kind::array || v.count != 2)
+                return constness::unknown;
+        }
+        place_value(state, place) = v;
+        return constness::constant;
+    }
     if (record.kind != type_kind::array &&
         record.kind != type_kind::class_type) {
         constant_value v;
@@ -599,6 +625,19 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
     const semantic_node x = semantics[node];
     constness c;
     switch (x.kind) {
+    case semantic_kind::complex_part: {
+        if (x.op != 0 && x.op != 1)
+            return constness::unknown;
+        uint32_t base = 0;
+        c = evaluate_object(state, x.a, base);
+        if (c != constness::constant)
+            return c;
+        const constant_value &cv = place_value(state, base);
+        if (cv.kind != constant_value_kind::array || cv.count != 2)
+            return constness::unknown;
+        object = (cv.first + x.op) | element_place;
+        return constness::constant;
+    }
     case semantic_kind::entity: {
         object = frame_object(state, x.a);
         if (object != no_frame_object) {
@@ -619,7 +658,8 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         type_kind tk = type_table[e.type.unqualified()].kind;
         if (x.a && e.kind == entity_kind::variable &&
             (!e.automatic || e.constexpr_) &&
-            (tk == type_kind::array || tk == type_kind::class_type)) {
+            (tk == type_kind::array || tk == type_kind::class_type ||
+             tk == type_kind::complex)) {
             /* [expr.const]/4: a constexpr array (a local one too, read
                outside its function's evaluation) is usable in constant
                expressions, its elements read as the evaluation needs
@@ -1226,6 +1266,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         /* (a null pointer or void conversion is made by the conversion below) */
         type_kind k = type_table[x.type.unqualified()].kind;
         if (k != type_kind::class_type && k != type_kind::pointer &&
+            k != type_kind::complex &&
             fundamental_of(x.type) != fundamental_type::void_)
             return constness::unknown;
     }
@@ -1432,6 +1473,49 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         if (c != constness::constant)
             return c;
         return evaluate_node(state, x.b, v);
+    }
+    case semantic_kind::complex_value: {
+        constant_value re, im;
+        c = evaluate_node(state, x.a, re);
+        if (c != constness::constant)
+            return c;
+        c = evaluate_node(state, x.b, im);
+        if (c != constness::constant)
+            return c;
+        v = constant_value();
+        v.kind = constant_value_kind::array;
+        v.first = static_cast<uint32_t>(state.elements.size());
+        v.count = 2;
+        state.elements.append(re);
+        state.elements.append(im);
+        state.element_read_only.append(0);
+        state.element_read_only.append(0);
+        return constness::constant;
+    }
+    case semantic_kind::complex_part: {
+        constant_value cv;
+        if (semantics[x.a].category != value_category::prvalue) {
+            uint32_t obj = 0;
+            c = evaluate_object(state, x.a, obj);
+            if (c != constness::constant)
+                return c;
+            cv = place_value(state, obj);
+        } else {
+            c = evaluate_node(state, x.a, cv);
+            if (c != constness::constant)
+                return c;
+        }
+        if (cv.kind != constant_value_kind::array || cv.count != 2)
+            return constness::unknown;
+        if (x.op == 0) {
+            v = state.elements[cv.first];
+            return constness::constant;
+        }
+        if (x.op == 1) {
+            v = state.elements[cv.first + 1];
+            return constness::constant;
+        }
+        return constness::unknown;
     }
     /* [expr.post.incr]/1: "The value of the operand object is modified
        ... by adding 1 to it"; a postfix one's value is the old one
@@ -1904,6 +1988,9 @@ uint32_t semantic_analysis::value_tree(const constant_evaluation &state,
             return 0;
         elements.append(e);
     }
+    if (record.kind == type_kind::complex && elements.size() == 2)
+        return expression_node(semantic_kind::complex_value, m, at, elements[0],
+                               elements[1]);
     uint32_t node = expression_node(semantic_kind::initializer_list, m, at);
     semantics.set_list(node, elements.data(), elements.size());
     return node;

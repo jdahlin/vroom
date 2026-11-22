@@ -1871,7 +1871,8 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (!value.node) {
             if (s.constexpr_)
                 return not_supported(declaration, "expr.const");
-        } else if (of_class) {
+        } else if (of_class ||
+                   type_table[type.unqualified()].kind == type_kind::complex) {
             /* an object of class type: the evaluator checks that its
                initialization is a constant expression, and lowering
                initializes it as written (a variable that is not constexpr

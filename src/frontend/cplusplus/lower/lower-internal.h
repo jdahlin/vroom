@@ -479,6 +479,9 @@ class c_lowering
     uint32_t initialize_into(uint32_t s, qualified_type object_type,
                              ast_qualified_type t, uint32_t n,
                              bool through = false);
+    bool piecewise_initializer(uint32_t n) const;
+    uint32_t initialize_list_into(uint32_t object, qualified_type object_type,
+                                  ast_qualified_type t, uint32_t n);
     uint32_t scalar_zero(qualified_type object, ast_qualified_type u,
                          token_index at);
     /* while it lives: the pointer new or delete holds (a variable of type

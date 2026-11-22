@@ -99,9 +99,8 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
                          fundamental_type::float128;
     if (binary128 && passes && passes_binary128(e, m))
         binary128 = false;
-    if (k == type_kind::complex || binary128) {
-        /* [ext:gnu_complex], [ext:gnu_float128] complex and binary128
-           arithmetic is not analysed yet */
+    if (binary128) {
+        /* [ext:gnu_float128] binary128 arithmetic is not analysed yet */
         if (e.is_token())
             return not_supported(current_declaration, "ext.gnu");
         return not_supported(e.index(), "ext.gnu");

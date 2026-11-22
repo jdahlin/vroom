@@ -553,6 +553,8 @@ enum class extension_keyword : uint8_t {
     attribute,
     restrict,
     extension,
+    real_,
+    imag_,
     type_trait,
     type_transformation,
     int128,

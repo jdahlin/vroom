@@ -11,6 +11,7 @@ static_assert(__builtin_ctzl(1ul << 40) == 40);
 static_assert(__builtin_ctzll(6ull) == 1);
 static_assert(__builtin_popcount(0xffu) == 8);
 static_assert(__builtin_popcountl(7ul) == 3);
+static_assert(__builtin_popcountl(1ULL << 40) == (sizeof(long) == 8));
 static_assert(__builtin_popcountll(~0ull) == 64);
 static_assert(__builtin_ffs(0) == 0);
 static_assert(__builtin_ffs(12) == 3);

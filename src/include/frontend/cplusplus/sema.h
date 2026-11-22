@@ -1188,6 +1188,11 @@ enum class semantic_kind : uint8_t {
     /* [ext:gnu_vector_size] __builtin_shufflevector: a, b: the two vectors;
        the list: the constant lane indices (-1 any) */
     vector_shuffle,
+    /* [ext:gnu_complex] __builtin_complex(a, b): a, b real and imaginary parts */
+    complex_value,
+    /* [ext:gnu_complex] op: 0 real (__real__ / creal), 1 imag (__imag__ / cimag),
+       2 conj (__builtin_conj); a: complex operand */
+    complex_part,
     /* [ext:gnu_compound_literals] (T){...}: a: the initializer list; an object
        of the type that lives to the end of the enclosing block */
     compound_literal,
@@ -3107,6 +3112,8 @@ class semantic_analysis
     nontemporal_access(SyntaxRef n, const owned_array<SyntaxElement> &clauses,
                        bool store, expression_meaning &m);
     analysis_result builtin_shufflevector(SyntaxRef n, expression_meaning &m);
+    bool builtin_complex_call(SyntaxRef n);
+    analysis_result builtin_complex(SyntaxRef n, expression_meaning &m);
     /* clang's type-generic bit counts: which one the function e is (1
        popcount, 2 clz, 3 ctz; 0 none), the check of a call's arguments,
        and its value in a constant evaluation */
@@ -4050,10 +4057,11 @@ class semantic_analysis
     /* [over.match.ctor]: the constructor of class c that initializes an
        object from the analysed arguments, the construct node made (its
        object a) */
-    analysis_result construct(SyntaxRef at, qualified_type type,
-                              owned_array<expression_meaning> &arguments,
-                              uint32_t object, initialized_value &result,
-                              bool copy = false);
+    analysis_result
+    construct(SyntaxRef at, qualified_type type,
+              owned_array<expression_meaning> &arguments, uint32_t object,
+              initialized_value &result, bool copy = false,
+              const owned_array<SyntaxElement> *written_arguments = nullptr);
     /* [expr.type.conv]: C(expression-list) or C{} of the class c */
     analysis_result class_conversion(SyntaxRef n, entity_index c,
                                      expression_meaning &m);

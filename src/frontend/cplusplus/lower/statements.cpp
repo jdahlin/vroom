@@ -101,7 +101,11 @@ void c_lowering::initialized_variable(const semantic_node &n,
         guarded_initialization(n, destructor, out);
         return;
     }
-    if (!n.b || node(n.b).kind != semantic_kind::construct || !x.automatic) {
+    if (!n.b ||
+        (node(n.b).kind != semantic_kind::construct &&
+         !(node(n.b).kind == semantic_kind::initializer_list &&
+           piecewise_initializer(n.b))) ||
+        !x.automatic) {
         /* a block's object, whose destructor is called below */
         out.append(declaration(n));
     } else {
@@ -811,7 +815,20 @@ uint32_t c_lowering::statement(uint32_t index)
         } else if (n.a && node(n.a).kind == semantic_kind::initializer_list) {
             /* a class's result initialized by a braced-init-list
                ([stmt.return]/2, [dcl.init.list]/3.4): its value */
-            value = compound_literal(n.a);
+            if (piecewise_initializer(n.a)) {
+                ast_qualified_type t = type(node(n.a).type, n.at);
+                uint32_t temp = c_local(c, t);
+                uint32_t made = initialize_into(temp, node(n.a).type, t, n.a);
+                if (!made)
+                    return 0;
+                uint32_t stmts[3] = {c_declare(c, temp), c_statement(c, made),
+                                     ast_builder_node(c, AST_NODE_EXPRESSION, t,
+                                                      c_variable(c, temp, t), 0,
+                                                      0, 0, 0)};
+                value = statement_expression(t, block(stmts, 3));
+            } else {
+                value = compound_literal(n.a);
+            }
             if (!value)
                 return 0;
         } else if (n.a) {

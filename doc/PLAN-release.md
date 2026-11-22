@@ -81,6 +81,21 @@ same files can run in parallel.
 
 ## Status
 
+### 2026-11-22 builtin correctness and target coverage (G1 and G4)
+
+The builtin coverage ledger tracks 14,690 spellings across the current
+Arm64 and x86-64 Linux, Darwin and MinGW profiles as applicable. Thirty
+fixed-signature integer builtins share registrations between C and C++.
+The reader generates those registrations and 13 target-specific C
+registrations from the pinned inputs. Generated C stubs identify other
+raw builtin spellings on their respective architectures.
+Independent constant and execution tests pass at `-O0` through `-O3`
+in C on AArch64 and x86-64 Linux and in C++ on AArch64 Linux. The C
+tests also emit a MinGW object. C and C++ reject all 60 wrong-arity
+cases generated from the shared table. The rest of the per-spelling
+rejection, execution and ABI matrix remains open in
+[the builtin plan](PLAN-builtins.md).
+
 ### Status 2026-11-14: G3/G4, x86-64 dynamic executables
 
 The ELF linker now reads shared objects and GNU input scripts and links

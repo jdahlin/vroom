@@ -2,12 +2,13 @@
 """Compare builtin feature queries and report unrecognized calls in C.
 
 The candidate inventory is the union of vroom's checked-in reference query
-tables and Clang generated builtin tables if supplied or built by TableGen.
+tables and Clang builtin tables if supplied or read by vroom.
 Query results are
 observations for the selected configuration. The C call probe detects
 undeclared names, and provides no evidence of correct semantic checking.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+CLANG_VENDOR = ROOT / 'contrib/clang-builtins'
 TARGETS = (
     'aarch64-linux-gnu', 'arm64-apple-darwin',
     'x86_64-linux-gnu', 'x86_64-w64-mingw32',
@@ -28,16 +30,11 @@ SNAPSHOT_ROW = re.compile(
 )
 ENUMERATOR = re.compile(r'^\s*BI([A-Za-z_]\w*),\s*$', re.MULTILINE)
 
-CLANG_TABLES = {
-    'Builtins.td': '-gen-clang-builtins',
-    'BuiltinsX86.td': '-gen-clang-builtins',
-    'BuiltinsX86_64.td': '-gen-clang-builtins',
-    'BuiltinsAArch64.td': '-gen-clang-builtins',
-    'arm_neon.td': '-gen-arm-neon-sema',
-    'arm_fp16.td': '-gen-arm-neon-sema',
-    'arm_sve.td': '-gen-arm-sve-builtins',
-    'arm_sme.td': '-gen-arm-sme-builtins',
-}
+CLANG_TABLES = (
+    'Builtins.td', 'BuiltinsX86.td', 'BuiltinsX86_64.td', 'BuiltinsAArch64.td',
+    'arm_neon.td', 'arm_fp16.td', 'arm_sve.td', 'arm_sme.td',
+)
+
 
 def candidates(include_dirs):
     snapshots = sorted((ROOT / 'src/frontend/pp').glob('ppdata*.inc'))
@@ -59,22 +56,53 @@ def candidates(include_dirs):
 
 
 
-def clang_candidates(source, tblgen):
-    basic = source / 'clang/include/clang/Basic'
+def clang_candidates(source, reader, tables=CLANG_TABLES):
+    include = source / 'clang/include'
     extracted = {}
-    for filename, action in CLANG_TABLES.items():
-        path = basic / filename
-        command = [tblgen, action, '-I', str(basic),
-                   '-I', str(source / 'clang/include'),
-                   '-I', str(source / 'llvm/include'), str(path)]
-        proc = run(command, '')
+    for filename in tables:
+        entry = include / 'clang/Basic' / filename
+        proc = run([str(reader.resolve()), str(include), str(entry)], '')
         if proc.returncode:
-            raise RuntimeError(f'{filename}: clang-tblgen failed\n{proc.stderr}')
-        found = set(ENUMERATOR.findall(proc.stdout))
-        if not found:
-            raise RuntimeError(f'{filename}: clang-tblgen produced no recognized builtins')
-        extracted[filename] = found
+            raise RuntimeError(f'{entry}: clang-builtin-reader failed\n{proc.stderr}')
+        spellings = proc.stdout.splitlines()
+        if (not spellings or spellings != sorted(set(spellings)) or
+                any(not re.fullmatch(r'[A-Za-z_]\w*', name) for name in spellings)):
+            raise RuntimeError(f'{entry}: clang-builtin-reader produced invalid spellings')
+        extracted[filename] = set(spellings)
     return extracted
+
+
+def clang_metadata(source, reader, tables):
+    include = source / 'clang/include'
+    metadata = {}
+    for table, spellings in tables.items():
+        entry = include / 'clang/Basic' / table
+        proc = run([str(reader.resolve()), '--metadata', str(include), str(entry)], '')
+        if proc.returncode:
+            raise RuntimeError(f'{entry}: clang-builtin-reader metadata failed\n{proc.stderr}')
+        rows = [json.loads(line) for line in proc.stdout.splitlines()]
+        if {row['spelling'] for row in rows} != spellings:
+            raise RuntimeError(f'{entry}: metadata and spelling inventories differ')
+        for row in rows:
+            metadata.setdefault(row['spelling'], []).append({'table': table, **row})
+    return metadata
+
+
+def check_clang_reader(reader):
+    reference = {}
+    for row in (CLANG_VENDOR / 'spellings.sha256').read_text().splitlines():
+        filename, count, digest = row.split()
+        reference[filename] = (int(count), digest)
+    if reference.keys() != set(CLANG_TABLES):
+        raise RuntimeError('Clang spelling reference must cover all eight input tables')
+    for filename, spellings in clang_candidates(CLANG_VENDOR, reader).items():
+        payload = ''.join(f'{name}\n' for name in sorted(spellings)).encode()
+        actual = len(spellings), hashlib.sha256(payload).hexdigest()
+        expected = reference[filename]
+        if actual != expected:
+            raise RuntimeError(f'{filename}: expected {expected[0]} spellings with SHA-256 '
+                               f'{expected[1]}, got {actual[0]} with SHA-256 {actual[1]}')
+        print(f'{filename}: {actual[0]} spellings match the pinned reference')
 
 
 def run(command, source):
@@ -177,8 +205,8 @@ def query(cc, options, names, kind):
             for name, row in zip(names, rows) if int(row[1].rstrip('uUlL'))}
 
 
-def unrecognized_calls(vpp, options, names):
-    unknown = set()
+def probe_c_names(vpp, options, names):
+    unknown, stubs = set(), set()
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / 'calls.c'
         for offset in range(0, len(names), 200):
@@ -193,12 +221,14 @@ def unrecognized_calls(vpp, options, names):
             missing = re.findall(r"undeclared (?:function|identifier) '([^']+)'",
                                  proc.stderr)
             unknown.update(set(chunk).intersection(missing))
-    return sorted(unknown)
+            stubs.update(set(chunk).intersection(re.findall(
+                r"builtin '([^']+)' is not implemented", proc.stderr)))
+    return sorted(unknown), sorted(stubs)
 
 
-def compare_queries(reference, actual):
+def compare_queries(reference, actual, retain_values=False):
     common = reference.keys() & actual.keys()
-    return {
+    result = {
         'both': sorted(common),
         'reference_only': sorted(reference.keys() - actual.keys()),
         'vroom_only': sorted(actual.keys() - reference.keys()),
@@ -206,9 +236,16 @@ def compare_queries(reference, actual):
                              for name in sorted(common)
                              if reference[name] != actual[name]},
     }
+    if retain_values:
+        result['non_boolean_values'] = {
+            name: [reference.get(name, 0), actual.get(name, 0)]
+            for name in sorted(reference.keys() | actual.keys())
+            if reference.get(name, 0) > 1 or actual.get(name, 0) > 1
+        }
+    return result
 
 
-def report(clang, gcc, vpp, target, language, flags, names, calls, headers):
+def report(clang, gcc, vpp, target, language, flags, names, calls, headers, tables, retain_values=False):
     options = [f'--target={target}', '-x', language, *flags]
     queries = {}
     accepted = set()
@@ -216,55 +253,275 @@ def report(clang, gcc, vpp, target, language, flags, names, calls, headers):
     for kind in ('__has_builtin', '__has_constexpr_builtin'):
         reference = query(clang, options, names, kind)
         actual = query(vpp, options, names, kind)
-        queries[kind] = compare_queries(reference, actual)
+        queries[kind] = compare_queries(reference, actual, retain_values)
         if kind == '__has_builtin':
             accepted = reference
             if gcc:
                 gcc_reference = query(gcc, ['-x', language, *flags], names, kind)
-                gcc_query = compare_queries(gcc_reference, actual)
-    missing = (unrecognized_calls(vpp, options, sorted(accepted))
-               if calls and language == 'c' else None)
+                gcc_query = compare_queries(gcc_reference, actual, retain_values)
+    missing, stubs = (probe_c_names(vpp, options, sorted(accepted))
+                      if calls and language == 'c' else (None, None))
+    claims = queries['__has_builtin']
+    both = set(claims['both'])
+    reference_only = set(claims['reference_only'])
+    vroom_only = set(claims['vroom_only'])
+    unrecognized = set(missing or [])
+    by_table = {}
+    for filename, spellings in tables.items():
+        by_table[filename] = {
+            'spellings': len(spellings),
+            'both': len(spellings & both),
+            'reference_only': len(spellings & reference_only),
+            'vroom_only': len(spellings & vroom_only),
+            'neither': len(spellings - both - reference_only - vroom_only),
+            'unrecognized_c_calls': (len(spellings & unrecognized)
+                                     if missing is not None else None),
+        }
     return {'target': target, 'language': language, 'flags': flags,
             'queries': queries, 'gcc_has_builtin': gcc_query,
+            'clang_tables': by_table,
             'unrecognized_c_calls': missing,
+            'stub_c_calls': stubs,
             'clang_header_apis': header_api(clang, options, headers)}
 
 
-def default_vpp():
+def query_observations(groups):
+    """Expand a pair of sparse feature-query reports without inventing support."""
+    observations = {name: [1, 1] for name in groups['both']}
+    observations.update((name, [1, 0]) for name in groups['reference_only'])
+    observations.update((name, [0, 1]) for name in groups['vroom_only'])
+    observations.update(groups['non_boolean_values'])
+    return observations
+
+
+def coverage_ledger(names, tables, gcc_catalog, gcc_target, reports, samples, metadata):
+    memberships = {name: [] for name in names}
+    for table, spellings in tables.items():
+        for name in spellings:
+            memberships[name].append(table)
+    gcc_common = {}
+    for row in gcc_catalog:
+        gcc_common.setdefault(row['spelling'], []).append(row['id'])
+    gcc_files = {}
+    for path, spellings in gcc_target.items():
+        for name in spellings:
+            gcc_files.setdefault(name, []).append(path)
+    probes = []
+    for report in reports:
+        profile = {key: report[key] for key in ('target', 'language', 'flags')}
+        queries = {key: query_observations(value)
+                   for key, value in report['queries'].items()}
+        if report['gcc_has_builtin'] is not None:
+            queries['gcc_vs_vroom_has_builtin'] = query_observations(report['gcc_has_builtin'])
+        unknown = report['unrecognized_c_calls']
+        probes.append((profile, queries, None if unknown is None else set(unknown),
+                       set(report['stub_c_calls'] or [])))
+    typed = {}
+    for sample in samples:
+        typed.setdefault(sample['spelling'], []).append(sample)
+    for name in names:
+        observations = []
+        for profile, queries, unknown, stubs in probes:
+            item = dict(profile)
+            for kind, values in queries.items():
+                item[kind] = values.get(name, [0, 0])
+            clang_claim = item['__has_builtin'][0]
+            item['c_name_probe'] = (None if unknown is None or not clang_claim
+                                    else 'stub' if name in stubs
+                                    else 'undeclared' if name in unknown
+                                    else 'no_undeclared_diagnostic')
+            observations.append(item)
+        yield {
+            'spelling': name,
+            'clang_tables': memberships[name],
+            'gcc_common_ids': gcc_common.get(name, []),
+            'gcc_target_sources': gcc_files.get(name, []),
+            'profiles': observations,
+            'reference_records': metadata.get(name, []),
+            'typed_compile': typed.get(name, []),
+        }
+
+
+# Each row is a valid C call on the selected profile. SVE and SME use
+# the ACLE declarations, which supply the public signatures for these names.
+X64 = 'x86_64-linux-gnu'
+A64 = 'aarch64-linux-gnu'
+SAMPLE_CALLS = (
+    ('Builtins.td', '__builtin_popcount', X64, (), '',
+     'int f(unsigned x) { return __builtin_popcount(x); }'),
+    ('Builtins.td', '__builtin_popcountl', X64, (), '',
+     'int f(unsigned long x) { return __builtin_popcountl(x); }'),
+    ('BuiltinsX86.td', '__builtin_ia32_crc32qi', X64, ('-msse4.2',), '',
+     'unsigned f(unsigned a, unsigned char b) { return __builtin_ia32_crc32qi(a, b); }'),
+    ('BuiltinsX86.td', '__builtin_ia32_crc32si', X64, ('-msse4.2',), '',
+     'unsigned f(unsigned a, unsigned b) { return __builtin_ia32_crc32si(a, b); }'),
+    ('BuiltinsX86_64.td', '__builtin_ia32_crc32di', X64, ('-msse4.2',), '',
+     'unsigned long long f(unsigned long long a, unsigned long long b) '
+     '{ return __builtin_ia32_crc32di(a, b); }'),
+    ('BuiltinsX86_64.td', '__builtin_ia32_addcarryx_u64', X64, ('-madx',), '',
+     'unsigned char f(unsigned char c, unsigned long long a, unsigned long long b, '
+     'unsigned long long *out) { return __builtin_ia32_addcarryx_u64(c, a, b, out); }'),
+    ('BuiltinsAArch64.td', '__builtin_arm_rbit', A64, (), '',
+     'unsigned f(unsigned x) { return __builtin_arm_rbit(x); }'),
+    ('BuiltinsAArch64.td', '__builtin_arm_clz64', A64, (), '',
+     'unsigned f(unsigned long long x) { return __builtin_arm_clz64(x); }'),
+    ('arm_neon.td', '__builtin_neon_vcntq_v', A64, (), 'arm_neon.h',
+     'uint8x16_t f(uint8x16_t x) { return vcntq_u8(x); }'),
+    ('arm_neon.td', '__builtin_neon_vminq_v', A64, (), 'arm_neon.h',
+     'uint8x16_t f(uint8x16_t a, uint8x16_t b) { return vminq_u8(a, b); }'),
+    ('arm_fp16.td', '__builtin_neon_vaddh_f16', A64, ('-march=armv8.2-a+fp16',), '',
+     '__fp16 f(__fp16 a, __fp16 b) { return __builtin_neon_vaddh_f16(a, b); }'),
+    ('arm_fp16.td', '__builtin_neon_vsubh_f16', A64, ('-march=armv8.2-a+fp16',), '',
+     '__fp16 f(__fp16 a, __fp16 b) { return __builtin_neon_vsubh_f16(a, b); }'),
+    ('arm_sve.td', '__builtin_sve_svcntb', A64, ('-march=armv8-a+sve',), 'arm_sve.h',
+     'unsigned long long f(void) { return svcntb(); }'),
+    ('arm_sve.td', '__builtin_sve_svcntd', A64, ('-march=armv8-a+sve',), 'arm_sve.h',
+     'unsigned long long f(void) { return svcntd(); }'),
+    ('arm_sme.td', '__builtin_sme_svcntsb', A64, ('-march=armv9-a+sme',), 'arm_sme.h',
+     'unsigned long long f(void) { return svcntsb(); }'),
+    ('arm_sme.td', '__builtin_sme_svcntsd', A64, ('-march=armv9-a+sme',), 'arm_sme.h',
+     'unsigned long long f(void) { return svcntsd(); }'),
+)
+
+
+def sample_calls(clang, vpp, tables):
+    results = []
+    resource = subprocess.check_output([clang, '-print-resource-dir'], text=True).strip()
+    vroom_includes = ['-isystem', str(ROOT / 'src/headers'),
+                      '-isystem', str(Path(resource) / 'include')]
+    for table, name, target, flags, header, body in SAMPLE_CALLS:
+        if name not in tables.get(table, ()):
+            raise RuntimeError(f'{table}: sample spelling {name} is missing')
+        options = [f'--target={target}', *flags, '-ffreestanding', '-x', 'c',
+                   '-Werror=implicit-function-declaration']
+        source = (f'#include <{header}>\n' if header else '') + body + '\n'
+        for level in range(4):
+            compile_options = [*options, f'-O{level}', '-c', '-', '-o', os.devnull]
+            reference = run([clang, *compile_options], source)
+            if reference.returncode:
+                raise RuntimeError(f'{table}: Clang rejected sample {name} at -O{level}\n'
+                                   f'{reference.stderr}')
+            actual = run([str(vpp), *vroom_includes, *compile_options], source)
+            if actual.returncode not in (0, 1):
+                raise RuntimeError(f'{table}: vpp failed on sample {name} at -O{level}\n'
+                                   f'{actual.stderr}')
+            results.append({'table': table, 'spelling': name, 'target': target,
+                            'entry': body.split('return ', 1)[1].split('(', 1)[0],
+                            'header': header or None, 'flags': list(flags),
+                            'language': 'c', 'optimization': f'O{level}',
+                            'object_emitted': actual.returncode == 0,
+                            'diagnostic': actual.stderr.strip()})
+    return results
+
+def check_integer_arity(clang, vpp):
+    generator = ROOT / 'src/tools/gen-builtin-tests.py'
+    source = subprocess.check_output([sys.executable, str(generator), '--invalid-arity'],
+                                     text=True)
+    expected = set(range(1, len(source.splitlines()) + 1))
+    with tempfile.TemporaryDirectory() as directory:
+        for language, extension in (('c', 'c'), ('c++', 'cpp')):
+            path = Path(directory) / f'invalid.{extension}'
+            path.write_text(source)
+            for compiler in (clang, str(vpp)):
+                proc = run([compiler, f'--target={A64}', '-fsyntax-only',
+                            '-ferror-limit=0', str(path)], '')
+                diagnostics = set(map(int, re.findall(
+                    rf'{re.escape(str(path))}:(\d+):\d+: error:', proc.stderr)))
+                if proc.returncode != 1 or diagnostics != expected:
+                    missing = sorted(expected - diagnostics)
+                    extra = sorted(diagnostics - expected)
+                    raise RuntimeError(f'{compiler}: {language} arity check exit '
+                                       f'{proc.returncode}, missed lines {missing}, '
+                                       f'unexpected lines {extra}\n{proc.stderr}')
+            print(f'{language}: both compilers rejected all {len(expected)} wrong-arity calls')
+    return 0
+
+
+def check_stubs(vpp):
+    cases = (
+        (A64, '__builtin_neon_vabdh_f16', 'is not implemented'),
+        (A64, '__builtin_sve_svcntb', 'is not implemented'),
+        (A64, '__builtin_sme_svcntsb', 'is not implemented'),
+        (X64, '__builtin_ia32_addcarryx_u32', 'is not implemented'),
+        (X64, '__builtin_sve_svcntb', 'undeclared function'),
+        (A64, '__builtin_vroom_nonexistent', 'undeclared function'),
+    )
+    for target, name, diagnostic in cases:
+        source = f'void test(void) {{ {name}(); }}\n'
+        proc = run([str(vpp), f'--target={target}', '-x', 'c', '-fsyntax-only', '-'], source)
+        if proc.returncode != 1 or diagnostic not in proc.stderr or name not in proc.stderr:
+            raise RuntimeError(f'{target}: unexpected diagnostic for {name}\n{proc.stderr}')
+    print(f'{len(cases)} generated builtin stub diagnostics checked')
+    return 0
+
+
+def default_tool(name):
     if os.environ.get('VCC_BIN'):
-        return Path(os.environ['VCC_BIN']) / 'vpp'
+        return Path(os.environ['VCC_BIN']) / name
     for directory in ('build/linux/src', 'build/src'):
-        path = ROOT / directory / 'vpp'
+        path = ROOT / directory / name
         if path.is_file():
             return path
-    return ROOT / 'build/src/vpp'
+    return ROOT / 'build/src' / name
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--clang', default=os.environ.get('CLANG') or shutil.which('clang'))
-    parser.add_argument('--vpp', default=default_vpp(), type=Path)
+    parser.add_argument('--vpp', default=default_tool('vpp'), type=Path)
     parser.add_argument('--clang-include', type=Path, action='append', default=[],
                         help='directory containing Clang Basic/Builtins*.inc')
-    parser.add_argument('--llvm-source', type=Path,
-                        help='LLVM source checkout containing clang/include and llvm/include')
+    clang_sources = parser.add_mutually_exclusive_group()
+    clang_sources.add_argument('--llvm-source', type=Path,
+                               help='LLVM source checkout containing clang/include and llvm/include')
+    clang_sources.add_argument('--clang-vendored', action='store_true',
+                               help='extract candidates from the pinned Clang TableGen import')
+    clang_sources.add_argument('--clang-common-reader', type=Path,
+                               help='read the pinned common Clang table with clang-builtin-reader')
     parser.add_argument('--gcc', help='GCC executable for the selected target')
     parser.add_argument('--gcc-source', type=Path, help='GCC source checkout')
     parser.add_argument('--header', action='append', default=[],
                         help='inventory a Clang resource header for each selected profile')
-    parser.add_argument('--clang-tblgen', default=os.environ.get('CLANG_TBLGEN'))
+    parser.add_argument('--clang-reader', type=Path, default=default_tool('clang-builtin-reader'),
+                        help='path to the vroom TableGen reader')
+    clang_sources.add_argument('--check-clang-reader', action='store_true',
+                               help='verify all vendored tables against the pinned spelling sets')
     parser.add_argument('--target', action='append', help='repeat for multiple targets')
     parser.add_argument('--all-targets', action='store_true')
     parser.add_argument('--language', action='append', choices=('c', 'c++'))
     parser.add_argument('--flag', action='append', default=[], help='pass as --flag=-mavx2')
     parser.add_argument('--no-calls', action='store_true')
+    parser.add_argument('--check-stubs', action='store_true',
+                        help='check generated C builtin stub diagnostics')
+    parser.add_argument('--check-integer-arity', action='store_true',
+                        help='check C and C++ rejection of wrong-arity fixed integer calls')
+    parser.add_argument('--sample-calls', action='store_true',
+                        help='compile two typed calls per vendored table through both compilers')
     parser.add_argument('--report-only', action='store_true',
                         help='report differences without failing on extra vroom claims')
-    parser.add_argument('--json', action='store_true')
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument('--json', action='store_true')
+    output.add_argument('--coverage-ledger', action='store_true',
+                        help='emit JSON Lines with evidence for each inventoried spelling')
+    parser.add_argument('--spelling', action='append', default=[],
+                        help='limit the ledger to these exact spellings (repeatable)')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
+    if args.spelling and not args.coverage_ledger:
+        parser.error('--spelling requires --coverage-ledger.')
+    if args.coverage_ledger and (args.sample_calls or args.check_clang_reader):
+        parser.error('--coverage-ledger requires an inventory run.')
+    if args.sample_calls and not args.clang_vendored:
+        parser.error('--sample-calls requires --clang-vendored.')
+    if args.check_clang_reader:
+        check_clang_reader(args.clang_reader)
+        return 0
+    if args.check_stubs:
+        return check_stubs(args.vpp)
     if not args.clang:
         parser.error('Clang not found. Supply --clang.')
+    if args.check_integer_arity:
+        return check_integer_arity(args.clang, args.vpp)
     if args.all_targets and args.target:
         parser.error('Choose --all-targets or --target.')
     if any(not re.fullmatch(r'[A-Za-z0-9_./-]+\.h', header) for header in args.header):
@@ -274,17 +531,40 @@ def main():
     names, sources = candidates(args.clang_include)
     extracted = {}
     llvm_revision = None
-    if args.llvm_source:
-        sibling = Path(args.clang).resolve().with_name('clang-tblgen')
-        tblgen = args.clang_tblgen or (str(sibling) if sibling.is_file()
-                                      else shutil.which('clang-tblgen'))
-        if not tblgen:
-            parser.error('clang-tblgen not found. Supply --clang-tblgen.')
-        extracted = clang_candidates(args.llvm_source, tblgen)
-        llvm_revision = source_revision(args.llvm_source)
+    vendored = args.clang_vendored or args.clang_common_reader
+    llvm_source = CLANG_VENDOR if vendored else args.llvm_source
+    if llvm_source:
+        reader = args.clang_common_reader or args.clang_reader
+        if not reader.is_file():
+            parser.error('Build clang-builtin-reader with make -C src clang-builtin-reader '
+                         'or supply its path with --clang-reader.')
+        tables = ('Builtins.td',) if args.clang_common_reader else CLANG_TABLES
+        extracted = clang_candidates(llvm_source, reader, tables)
+        llvm_revision = ((CLANG_VENDOR / 'REVISION').read_text().strip()
+                         if vendored else source_revision(llvm_source))
         names = sorted(set(names).union(*extracted.values()))
-        sources.extend(f'{args.llvm_source}/clang/include/clang/Basic/{name}'
+        source_label = CLANG_VENDOR.relative_to(ROOT) if vendored else llvm_source
+        sources.extend(str(source_label / 'clang/include/clang/Basic' / name)
                        for name in extracted)
+    if args.sample_calls:
+        samples = sample_calls(args.clang, args.vpp, extracted)
+        if args.json:
+            print(json.dumps(samples, indent=2))
+        else:
+            for offset in range(0, len(samples), 4):
+                levels = samples[offset:offset + 4]
+                sample = levels[0]
+                tag = f"{sample['table']} {sample['entry']}"
+                if all(item['object_emitted'] for item in levels):
+                    print(f'{tag}: object emitted at -O0 through -O3')
+                    continue
+                for item in levels:
+                    if not item['object_emitted']:
+                        print(f"{tag} -{item['optimization']}: failed")
+                        lines = item['diagnostic'].splitlines()
+                        if lines:
+                            print(next((line for line in lines if 'error:' in line), lines[0]))
+        return int(not args.report_only and any(not item['object_emitted'] for item in samples))
     gcc_catalog = []
     gcc_target = {}
     gcc_revision = None
@@ -305,9 +585,29 @@ def main():
         if tuple(targets) != (machine,):
             parser.error(f'--gcc requires selecting its target with --target {machine}')
         gcc_version = subprocess.check_output([args.gcc, '--version'], text=True).splitlines()[0]
+    if args.spelling:
+        unknown = set(args.spelling) - set(names)
+        if unknown:
+            parser.error(f'Unknown inventory spellings: {", ".join(sorted(unknown))}')
     reports = [report(args.clang, args.gcc, str(args.vpp), target, language, args.flag, names,
-                      not args.no_calls, args.header)
+                      not args.no_calls, args.header, extracted, args.coverage_ledger)
                for target in targets for language in args.language or ('c',)]
+    if args.coverage_ledger:
+        samples = sample_calls(args.clang, args.vpp, extracted) if args.clang_vendored else []
+        metadata = clang_metadata(llvm_source, reader, extracted) if llvm_source else {}
+        ledger = coverage_ledger(names, extracted, gcc_catalog, gcc_target, reports,
+                                 samples, metadata)
+        selected = set(args.spelling)
+        print(json.dumps({
+            'schema': 'vroom-builtin-coverage-v1', 'clang': clang_version,
+            'llvm_revision': llvm_revision, 'gcc': gcc_version,
+            'gcc_revision': gcc_revision, 'vpp': str(args.vpp.resolve()),
+            'sources': sources, 'query_compiler_order': ['reference', 'vroom'],
+        }))
+        for item in ledger:
+            if not selected or item['spelling'] in selected:
+                print(json.dumps(item, separators=(',', ':')))
+        return 0
     if args.json:
         print(json.dumps({'clang': clang_version, 'sources': sources,
                           'candidate_count': len(names), 'candidates': names,
@@ -328,6 +628,10 @@ def main():
             print(f'  GCC target registration sources: {len(set().union(*gcc_target.values()))} literals')
         for item in reports:
             print(f"{item['target']} {item['language']}")
+            for name, coverage in item['clang_tables'].items():
+                print(f"  {name}: {coverage['both']} both, "
+                      f"{coverage['reference_only']} reference_only, "
+                      f"{coverage['vroom_only']} vroom_only, {coverage['neither']} neither")
             for kind, groups in item['queries'].items():
                 print(f'  {kind}: ' + ', '.join(f'{len(group)} {label}'
                                                for label, group in groups.items()))
@@ -346,6 +650,7 @@ def main():
             if item['unrecognized_c_calls'] is not None:
                 unknown = item['unrecognized_c_calls']
                 print(f'  {len(unknown)} unrecognized C calls')
+                print(f"  {len(item['stub_c_calls'])} C calls diagnosed as stubs")
                 if args.verbose:
                     print('    ' + ' '.join(unknown))
     if args.report_only:

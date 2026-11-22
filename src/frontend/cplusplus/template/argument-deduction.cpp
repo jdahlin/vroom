@@ -733,6 +733,11 @@ analysis_result semantic_analysis::deduce_from_call(
         }
         qualified_type a = arguments[i].type;
         const struct type ar = type_table[a.unqualified()];
+        if (!arguments[i].node && ar.kind == type_kind::none)
+            /* [temp.deduct.call]/1, [temp.deduct.type]/5.6: a
+               braced-init-list is a non-deduced context when P is not
+               std::initializer_list or an array */
+            continue;
         if (ar.kind == type_kind::none || ar.kind == type_kind::placeholder ||
             ar.kind == type_kind::dependent)
             return not_supported(at, "temp.deduct.call");
@@ -808,6 +813,18 @@ analysis_result semantic_analysis::deduce_from_call(
        arguments determined for preceding template parameters into the
        default argument"; /1's "all of the template arguments shall have
        values" otherwise */
+    if (failed) {
+        for (uint32_t i = 0; i < ft.parameter_count; i++) {
+            if (set[i])
+                continue;
+            SyntaxRef node = template_parameter_nodes[ft.first_parameter + i];
+            template_parameter_parts form;
+            if (!template_parameter_form(node, form) || !form.has_default) {
+                *failed = true;
+                return analysis_result::well_formed;
+            }
+        }
+    }
     VTRY(r, default_template_arguments(at, function_template, values, set));
     /* [temp.deduct]/5: "If the function template has associated
        constraints ([temp.constr.decl]), those constraints are checked for

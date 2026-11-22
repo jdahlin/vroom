@@ -4129,6 +4129,45 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
         return WALK_LOWER(bitop)(e, sz == 8 ? CC_BUILTIN_CLZLL : CC_BUILTIN_CLZ,
                                  sz, v);
     }
+    case CC_BUILTIN_ROTL8:
+    case CC_BUILTIN_ROTL16:
+    case CC_BUILTIN_ROTL32:
+    case CC_BUILTIN_ROTL64:
+    case CC_BUILTIN_ROTR8:
+    case CC_BUILTIN_ROTR16:
+    case CC_BUILTIN_ROTR32:
+    case CC_BUILTIN_ROTR64: {
+        int bits = 8 << ((x->aux - CC_BUILTIN_ROTL8) & 3);
+        int size = bits == 64 ? 8 : 4;
+        bool left = x->aux < CC_BUILTIN_ROTR8;
+        codegen_value mask = codegen_value_constant(bits - 1);
+        codegen_value value = walk_value_emit(e, arg[0]);
+        codegen_value count = walk_value_emit(e, arg[1]);
+        int r = walk_value_to_register(e, &value);
+        if (bits < 32)
+            WALK_LOWER(ext)(e, r, bits / 8, false);
+        count =
+            WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, size, false, count, mask);
+        int s = walk_value_to_register(e, &count);
+        codegen_value reverse = WALK_LOWER(bin)(
+            e, LEX_TOKEN_MINUS, size, false, codegen_value_constant(0),
+            walk_value_from_register(walk_register_duplicate(e, s)));
+        reverse =
+            WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, size, false, reverse, mask);
+        codegen_value part1 = WALK_LOWER(bin)(
+            e, left ? LEX_TOKEN_LESS_LESS : LEX_TOKEN_GREATER_GREATER, size,
+            false, walk_value_from_register(walk_register_duplicate(e, r)),
+            walk_value_from_register(s));
+        codegen_value part2 = WALK_LOWER(bin)(
+            e, left ? LEX_TOKEN_GREATER_GREATER : LEX_TOKEN_LESS_LESS, size,
+            false, walk_value_from_register(r), reverse);
+        codegen_value result =
+            WALK_LOWER(bin)(e, LEX_TOKEN_PIPE, size, false, part1, part2);
+        if (bits < 32)
+            WALK_LOWER(ext)(e, walk_value_to_register(e, &result), bits / 8,
+                            false);
+        return result;
+    }
     case CC_BUILTIN_BITREVERSE8:
     case CC_BUILTIN_BITREVERSE16:
     case CC_BUILTIN_BITREVERSE32:

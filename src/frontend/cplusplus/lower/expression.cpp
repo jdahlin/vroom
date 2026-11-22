@@ -250,6 +250,20 @@ uint32_t c_lowering::expression(uint32_t index)
             c, AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at)), a, b,
             indices, n.count);
     }
+    case semantic_kind::complex_value: {
+        uint32_t re = expression(n.a);
+        uint32_t im = expression(n.b);
+        if (!re || !im)
+            return 0;
+        return ast_builder_complex(
+            c, AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at)), re, im);
+    }
+    case semantic_kind::complex_part: {
+        uint32_t v = expression(n.a);
+        if (!v)
+            return 0;
+        return ast_builder_complex_part(c, v, n.op);
+    }
     case semantic_kind::bind_reference:
         return bind_reference(n);
     case semantic_kind::construct:

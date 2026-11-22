@@ -1655,4 +1655,101 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
     return analysis_result::well_formed;
 }
 
+static int complex_builtin_kind(const char *s, size_t len)
+{
+    if (len == 17 && !memcmp(s, "__builtin_complex", 17))
+        return 1;
+    if ((len == 15 && !memcmp(s, "__builtin_creal", 15)) ||
+        (len == 16 && (!memcmp(s, "__builtin_crealf", 16) ||
+                       !memcmp(s, "__builtin_creall", 16))))
+        return 2;
+    if ((len == 15 && !memcmp(s, "__builtin_cimag", 15)) ||
+        (len == 16 && (!memcmp(s, "__builtin_cimagf", 16) ||
+                       !memcmp(s, "__builtin_cimagl", 16))))
+        return 3;
+    if ((len == 14 && !memcmp(s, "__builtin_conj", 14)) ||
+        (len == 15 && (!memcmp(s, "__builtin_conjf", 15) ||
+                       !memcmp(s, "__builtin_conjl", 15))))
+        return 4;
+    return 0;
+}
+
+bool semantic_analysis::builtin_complex_call(SyntaxRef n)
+{
+    if (n.size() != 4 || !n[0].is_identifier() ||
+        !tokens.files.behavior.has(extension::gnu_library_builtins))
+        return false;
+    uint32_t name = tokens.identifier(n[0].token());
+    size_t len = 0;
+    const char *s = tokens.pp.identifier_spelling(name - 1, &len);
+    if (!complex_builtin_kind(s, len))
+        return false;
+    lookup_result x = lookup_unqualified(name, lookup_filter::any);
+    return !x.entity && !x.unknown && !x.ambiguous;
+}
+
+analysis_result semantic_analysis::builtin_complex(SyntaxRef n,
+                                                   expression_meaning &m)
+{
+    uint32_t name = tokens.identifier(n[0].token());
+    size_t len = 0;
+    const char *s = tokens.pp.identifier_spelling(name - 1, &len);
+    int kind = complex_builtin_kind(s, len);
+    owned_array<SyntaxElement> clauses;
+    if (n[2].is(syntax_kind::initializer_list)) {
+        VTRY(r, list_clauses(n[2].index(), clauses));
+    } else {
+        clauses.append(n[2]);
+    }
+    if (kind == 1) {
+        if (clauses.size() != 2)
+            return ill_formed(n, "__builtin_complex takes two arguments",
+                              "ext.gnu");
+        expression_meaning re, im;
+        VTRY(r1, expression(clauses[0], re));
+        VTRY(r2, expression(clauses[1], im));
+        VTRY(r3, operand_value(n, re));
+        VTRY(r4, operand_value(n, im));
+        if (!is_floating(re.type) ||
+            re.type.unqualified() != im.type.unqualified())
+            return ill_formed(n,
+                              "arguments to __builtin_complex must have the "
+                              "same real floating type",
+                              "ext.gnu");
+        type_index ct = type_table.complex_of(
+            qualified_type::make(re.type.unqualified(), cv_none));
+        m = expression_meaning();
+        m.type = qualified_type::make(ct, cv_none);
+        m.category = value_category::prvalue;
+        m.evaluation = constness::unknown;
+        if (re.evaluation == constness::not_constant ||
+            im.evaluation == constness::not_constant)
+            m.evaluation = constness::not_constant;
+        m.beyond_integral_constant = true;
+        m.node = expression_node(semantic_kind::complex_value, m,
+                                 n.first_token(), re.node, im.node);
+        return analysis_result::well_formed;
+    }
+    if (clauses.size() != 1)
+        return ill_formed(n, "wrong number of arguments to the builtin",
+                          "ext.gnu");
+    expression_meaning arg;
+    VTRY(r1, expression(clauses[0], arg));
+    VTRY(r2, operand_value(n, arg));
+    const struct type at = type_table[arg.type.unqualified()];
+    if (at.kind != type_kind::complex)
+        return not_supported(n, "ext.gnu");
+    m = expression_meaning();
+    if (kind == 4)
+        m.type = qualified_type::make(arg.type.unqualified(), cv_none);
+    else
+        m.type = qualified_type::make(at.operand.unqualified(), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = arg.evaluation;
+    m.beyond_integral_constant = true;
+    m.node = expression_node(semantic_kind::complex_part, m, n.first_token(),
+                             arg.node, 0, static_cast<uint8_t>(kind - 2));
+    return analysis_result::well_formed;
+}
+
 } // namespace cplusplus

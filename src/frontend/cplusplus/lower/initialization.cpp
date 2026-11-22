@@ -82,6 +82,8 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
         return make(AST_NODE_CONDITIONAL, v, cond, cast(b, v, AST_CAST_VOID),
                     cast(c_, v, AST_CAST_VOID), 0, 0);
     }
+    if (x.kind == semantic_kind::initializer_list && piecewise_initializer(n))
+        return initialize_list_into(object, object_type, t, n);
     uint32_t value = 0;
     if (x.kind == semantic_kind::initializer_list)
         /* a braced-init-list's object, its value stored */
@@ -94,6 +96,86 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
     if (!value)
         return 0;
     return assign(t, object, value);
+}
+
+bool c_lowering::piecewise_initializer(uint32_t n) const
+{
+    const semantic_node &x = node(n);
+    if (x.kind == semantic_kind::construct)
+        return true;
+    if (x.kind == semantic_kind::initializer_list) {
+        const uint32_t *items = analysis.semantics.items(x.first);
+        for (uint32_t i = 0; i < x.count; i++)
+            if (piecewise_initializer(items[i]))
+                return true;
+    }
+    return false;
+}
+
+uint32_t c_lowering::initialize_list_into(uint32_t object,
+                                          qualified_type object_type,
+                                          ast_qualified_type t, uint32_t n)
+{
+    const semantic_node &x = node(n);
+    if (x.kind == semantic_kind::construct && !x.a)
+        return construct_at(x, object, 0, x.at);
+    if (x.kind == semantic_kind::initializer_list) {
+        const uint32_t *items = analysis.semantics.items(x.first);
+        owned_array<uint32_t> stmts;
+        if (record(object_type).kind == type_kind::class_type) {
+            entity_index ce = record(object_type).entity;
+            const entity &k = analysis.entity_table[ce];
+            class_type(ce, x.at);
+            for (uint32_t i = 0, item = 0; item < x.count; i++) {
+                if (i >= k.member_count)
+                    return fail("an initializer for no member", x.at);
+                entity_index member =
+                    analysis.class_members[k.first_member + i];
+                const entity &m = analysis.entity_table[member];
+                if (m.bit_field && !m.name)
+                    continue;
+                ast_qualified_type mt = type(m.type, x.at);
+                uint32_t field =
+                    ast_builder_member(c, object, c_fields[member], mt);
+                uint32_t one =
+                    initialize_list_into(field, m.type, mt, items[item++]);
+                if (!one)
+                    return 0;
+                stmts.append(c_statement(c, one));
+            }
+            return statement_expression(v, block(stmts));
+        }
+        if (record(object_type).kind == type_kind::array) {
+            qualified_type et = record(object_type).operand;
+            ast_qualified_type elem_t = type(et, x.at);
+            ast_qualified_type ptr_t = pointer_to(elem_t);
+            ast_qualified_type idx_t = ast_builder_type_basic(AST_TYPE_LONG);
+            for (uint32_t i = 0; i < x.count; i++) {
+                uint32_t base = cast(address_of(object, pointer_to(t)), ptr_t,
+                                     AST_CAST_POINTER_TO_POINTER);
+                uint32_t idx =
+                    ast_builder_integer(c, idx_t, static_cast<int64_t>(i));
+                uint32_t elem = make(AST_NODE_INDEX, elem_t, base, idx, 0, 0,
+                                     AST_NODE_FLAG_LVALUE);
+                uint32_t one = initialize_list_into(elem, et, elem_t, items[i]);
+                if (!one)
+                    return 0;
+                stmts.append(c_statement(c, one));
+            }
+            return statement_expression(v, block(stmts));
+        }
+    }
+    uint32_t value = 0;
+    if (x.kind == semantic_kind::initializer_list)
+        value = compound_literal(n);
+    else if (x.kind == semantic_kind::zero &&
+             record(x.type).kind != type_kind::class_type)
+        value = scalar_zero(x.type, t, x.at);
+    else
+        value = initializer(n);
+    if (!value)
+        return 0;
+    return assign(AST_QUALIFIED_TYPE_UNQUALIFIED(t), object, value);
 }
 
 /* [dcl.init]/6: "To zero-initialize an object ... of scalar type T means
