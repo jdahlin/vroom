@@ -2069,6 +2069,7 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     if (held) {
         record.unusable = true;
         entity_table[held].kind = entity_kind::none;
+        note_held(held);
         entity_table[held].held_by_template = true;
         for (function_template &other : function_templates)
             if (other.name == held)

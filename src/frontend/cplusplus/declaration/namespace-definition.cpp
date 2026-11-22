@@ -508,7 +508,7 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
        known */
     auto unknown = [&](analysis_result r) {
         if (r != analysis_result::well_formed)
-            entity_table[scope].unknown_names = true;
+            note_unknown_scope(scope);
         return r;
     };
     if (defining_class)

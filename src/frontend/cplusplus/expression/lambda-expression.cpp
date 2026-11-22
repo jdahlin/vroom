@@ -490,6 +490,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     if (r != analysis_result::well_formed) {
         lambda_captures.resize(l.first_capture);
         entity_table[c].kind = entity_kind::none;
+        note_held(c);
         return r;
     }
     bool has_capture = n.lambda_introducer().size() > 2;
@@ -503,8 +504,10 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
         r = lambda_call_type(n, declarator, l, type, parameters);
     if (r != analysis_result::well_formed || generic) {
         lambda_captures.resize(l.first_capture);
-        if (r != analysis_result::well_formed)
+        if (r != analysis_result::well_formed) {
             entity_table[c].kind = entity_kind::none;
+            note_held(c);
+        }
         return r;
     }
 
@@ -543,6 +546,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
         r = closure_class(c, n, has_capture);
     if (r != analysis_result::well_formed) {
         entity_table[c].kind = entity_kind::none;
+        note_held(c);
         entity_table[c].size = 0;
         return r;
     }

@@ -1242,6 +1242,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                                               current_scope);
                     entity_table.bind(current_scope, name, found);
                 }
+                note_held(found);
                 break;
             }
         }
@@ -1412,8 +1413,13 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             }
             if (!e || entity_table[e].kind != entity_kind::typedef_name) {
                 entity_index unknown = e;
-                if (!unknown)
-                    unknown = found.unknown_entity;
+                if (!unknown) {
+                    analysis_result r = not_supported(
+                        seq,
+                        unknown_name_subclause(found, "basic.lookup.unqual"));
+                    name_lookup_detail(t, found);
+                    return r;
+                }
                 return not_supported(seq, unknown_name_subclause(
                                               unknown, "basic.lookup.unqual"));
             }
