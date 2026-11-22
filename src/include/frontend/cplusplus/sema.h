@@ -3487,6 +3487,8 @@ class semantic_analysis
                                       const gnu_builtin &b,
                                       const semantic_node &call,
                                       constant_value &v);
+    constness evaluate_classify_type_builtin(const semantic_node &call,
+                                             constant_value &v);
     constness evaluate_object_size_builtin(constant_evaluation &state,
                                            const semantic_node &call,
                                            constant_value &v);

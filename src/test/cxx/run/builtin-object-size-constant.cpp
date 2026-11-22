@@ -14,6 +14,28 @@ static_assert(__builtin_isfpclass(1.5, 0x100) && !__builtin_isfpclass(1.5, 0x8),
 static_assert(__builtin_isfpclass(-1.5, 0x8) && __builtin_isfpclass(-0.0, 0x20),
               "");
 
+
+/* __builtin_classify_type: the class number of the argument's type */
+struct Class {
+    int a;
+};
+union Union {
+    int a;
+};
+enum Enum { first };
+int array[2];
+void function();
+static_assert(__builtin_classify_type(1) == 1 &&
+                  __builtin_classify_type(true) == 4 &&
+                  __builtin_classify_type(1.5f) == 8 &&
+                  __builtin_classify_type(first) == 3 &&
+                  __builtin_classify_type(&array[0]) == 5 &&
+                  __builtin_classify_type(array) == 5 &&
+                  __builtin_classify_type(function) == 5 &&
+                  __builtin_classify_type(Class()) == 12 &&
+                  __builtin_classify_type(Union()) == 13,
+              "");
+
 int main()
 {
     return 0;

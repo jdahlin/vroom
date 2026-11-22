@@ -35,19 +35,19 @@ BUILTIN_FOLD("__builtin_stdc_rotate_right", stdc_rotate_right, VFOLD_BOTH)
 
 /* AArch64's spellings of integer operations (target-builtins.inc maps them
    to the C front end's nodes of the same operation) */
-BUILTIN_FOLD("__builtin_arm_clz", clz, VFOLD_C)
-BUILTIN_FOLD("__builtin_arm_clz64", clz, VFOLD_C)
-BUILTIN_FOLD("__builtin_arm_cls", clrsb, VFOLD_C)
-BUILTIN_FOLD("__builtin_arm_cls64", clrsb, VFOLD_C)
-BUILTIN_FOLD("__builtin_arm_rbit", bitreverse, VFOLD_C)
-BUILTIN_FOLD("__builtin_arm_rbit64", bitreverse, VFOLD_C)
+BUILTIN_FOLD("__builtin_arm_clz", clz, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_arm_clz64", clz, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_arm_cls", clrsb, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_arm_cls64", clrsb, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_arm_rbit", bitreverse, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_arm_rbit64", bitreverse, VFOLD_BOTH)
 
 /* queries */
 BUILTIN_FOLD("__builtin_constant_p", constant_p, VFOLD_BOTH)
 BUILTIN_FOLD("__atomic_always_lock_free", lock_free, VFOLD_BOTH)
 BUILTIN_FOLD("__atomic_is_lock_free", lock_free, VFOLD_BOTH)
 BUILTIN_FOLD("__c11_atomic_is_lock_free", lock_free, VFOLD_BOTH)
-BUILTIN_FOLD("__builtin_classify_type", classify_type, VFOLD_C)
+BUILTIN_FOLD("__builtin_classify_type", classify_type, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_object_size", object_size, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_dynamic_object_size", object_size, VFOLD_BOTH)
 

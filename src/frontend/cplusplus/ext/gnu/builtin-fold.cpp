@@ -410,6 +410,59 @@ constness semantic_analysis::evaluate_string_builtin(constant_evaluation &state,
 }
 
 /*
+ * __builtin_classify_type (e): the class number of the type of e, which is
+ * not evaluated (GCC's type_class values, clang's): 0 void, 1 an integer
+ * type, 3 an enumeration, 4 bool, 5 a pointer, array or function, 8 a
+ * floating type, 12 a class, 13 a union.  A type this front end has no
+ * number for yet is not a constant.
+ */
+constness
+semantic_analysis::evaluate_classify_type_builtin(const semantic_node &call,
+                                                  constant_value &v)
+{
+    if (call.count != 1)
+        return constness::unknown;
+    qualified_type t = semantics[semantics.items(call.first)[0]].type;
+    const struct type &r = type_table[t.unqualified()];
+    int number = -1;
+    switch (r.kind) {
+    case type_kind::fundamental: {
+        fundamental_type f = fundamental_of(t);
+        if (f == fundamental_type::void_)
+            number = 0;
+        else if (f == fundamental_type::bool_)
+            number = 4;
+        else if (fundamental_type_is_floating(f))
+            number = 8;
+        else if (fundamental_type_is_integral(f))
+            number = 1;
+        break;
+    }
+    case type_kind::enumeration:
+        number = 3;
+        break;
+    case type_kind::pointer:
+    case type_kind::array:
+    case type_kind::function:
+        number = 5;
+        break;
+    case type_kind::class_type:
+        number = 12;
+        if (entity_table[r.entity].union_)
+            number = 13;
+        break;
+    default:
+        break;
+    }
+    if (number < 0)
+        return constness::unknown;
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer = static_cast<unsigned __int128>(number);
+    return constness::constant;
+}
+
+/*
  * __builtin_object_size (p, type) for the types 1 and 3 of a pointer into an
  * array of constant objects of an integer type (a string literal): the bytes
  * from the pointer to the end of the array, as clang's ExprConstant.cpp
@@ -542,6 +595,8 @@ constness semantic_analysis::evaluate_builtin_fold(constant_evaluation &state,
         return evaluate_overflow_builtin(state, b, call, v);
     case builtin_fold::object_size:
         return evaluate_object_size_builtin(state, call, v);
+    case builtin_fold::classify_type:
+        return evaluate_classify_type_builtin(call, v);
     default:
         break;
     }

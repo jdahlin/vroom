@@ -73,6 +73,9 @@ enum class builtin_fold : uint8_t {
     /* __builtin_object_size and __builtin_dynamic_object_size of a pointer
        into an array of constants */
     object_size,
+    /* __builtin_classify_type: the class number of the argument's type,
+       which is not evaluated */
+    classify_type,
     floating_constant,
     /* the first argument's value */
     identity,

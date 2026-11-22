@@ -100,7 +100,20 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_wcslen", library, 5, string),
     ROW("__builtin_wmemcmp", library, 6, string),
     ROW("__builtin_wmemchr", library, 7, string),
-    ROW("__builtin_object_size", signature, 0, object_size),
+    ROW("__builtin_classify_type", generic, 0, classify_type),
+/* AArch64's spellings of integer operations: the C front end's table
+       maps them to its nodes of the operation */
+#define ARM_INTEGER_BUILTIN(name, operation)                                   \
+    ROW(name, signature, static_cast<uint8_t>(builtin_integer_op::operation),  \
+        integer),
+    ARM_INTEGER_BUILTIN("__builtin_arm_clz",
+                        clz) ARM_INTEGER_BUILTIN("__builtin_arm_clz64", clz)
+        ARM_INTEGER_BUILTIN("__builtin_arm_cls", clrsb)
+            ARM_INTEGER_BUILTIN("__builtin_arm_cls64", clrsb)
+                ARM_INTEGER_BUILTIN("__builtin_arm_rbit", bitreverse)
+                    ARM_INTEGER_BUILTIN("__builtin_arm_rbit64", bitreverse)
+#undef ARM_INTEGER_BUILTIN
+                        ROW("__builtin_object_size", signature, 0, object_size),
     ROW("__builtin_dynamic_object_size", signature, 0, object_size),
     /* int __builtin_constant_p(...), and the lock-free queries */
     ROW("__builtin_constant_p", query, 1, constant_p),
