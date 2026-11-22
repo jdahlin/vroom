@@ -677,9 +677,14 @@ void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
         for (size_t i = 1; i < analysis.unsupported.size(); i++) {
             const unsupported_construct &u = analysis.unsupported[i];
             source_position at = tokens.position(tree[u.node].first_token);
-            vbuffer_format_append(out, "[%s] %s %s:%u:%u\n", u.subclause,
+            vbuffer_format_append(out, "[%s] %s %s:%u:%u", u.subclause,
                                   syntax_kind_name(tree[u.node].kind),
                                   at.file_name, at.line, at.column);
+            /* the form that has no rules (a name and why, or the
+               construct's first tokens), after a tab */
+            if (*u.detail)
+                vbuffer_format_append(out, "\t%s", u.detail);
+            vbuffer_string_append(out, "\n");
         }
     }
     if (r.has(dump_output::declaration_claims))

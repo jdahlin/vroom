@@ -77,9 +77,11 @@ analysis_result semantic_analysis::class_specifier(ClassSpecifier n,
         if (!e) {
             e = entity_table.make(entity_kind::none, name, held_in);
             entity_table.bind(held_in, name, e);
+            note_held(e);
         } else if (entity_table[e].kind == entity_kind::class_type) {
             entity_table[e].kind = entity_kind::none;
             entity_table[e].size = 0;
+            note_held(e);
         }
         break;
     }
@@ -335,6 +337,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                    incomplete from here on */
                 if (declared) {
                     entity_table[y].kind = entity_kind::none;
+                    note_held(y);
                     entity_table[y].size = 0;
                 }
                 return not_supported(n, "class.nest");
@@ -358,6 +361,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 /* (in its own namespace: clang's extra qualification, a
                    warning): the class may be defined here all the same */
                 entity_table[found.entity].kind = entity_kind::none;
+                note_held(found.entity);
                 entity_table[found.entity].size = 0;
                 return not_supported(n, "class.pre");
             }
@@ -424,6 +428,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             if (entity_table[c].kind == entity_kind::class_type &&
                 tokens.files.behavior.microsoft_extensions) {
                 entity_table[c].kind = entity_kind::none;
+                note_held(c);
                 entity_table[c].size = 0;
             }
             return not_supported(n, "namespace.udecl");
@@ -563,6 +568,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     if (result != analysis_result::well_formed) {
         resume_outer();
         entity_table[c].kind = entity_kind::none;
+        note_held(c);
         entity_table[c].size = 0;
         return result;
     }
@@ -627,6 +633,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            later declarations can use, and a type that names it (a typedef
            of it declared before) is neither complete nor incomplete */
         entity_table[c].kind = entity_kind::none;
+        note_held(c);
         entity_table[c].size = 0;
         return result;
     }
@@ -760,6 +767,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     current_scope = enclosing_scope;
     if (result != analysis_result::well_formed) {
         entity_table[c].kind = entity_kind::none;
+        note_held(c);
         entity_table[c].size = 0;
     }
     return result;
