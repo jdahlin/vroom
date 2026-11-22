@@ -2,15 +2,48 @@
 # --check fails on a violation not listed here and on a listed one that no longer happens: fix it, then
 # `bench/vcc-builtins-consistency.py --bless` in the same commit.  Never add a line to hide a regression.
 # The text after # is informational and not compared.
+c-only-callable __builtin___vsnprintf_chk c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+c-only-callable __builtin___vsnprintf_chk c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+c-only-callable __builtin___vsprintf_chk c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+c-only-callable __builtin___vsprintf_chk c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+c-only-callable __builtin_ia32_addcarryx_u64 c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
 c-only-callable __builtin_ia32_lfence c++/arm64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 c-only-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 c-only-callable __builtin_ia32_mfence c++/arm64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 c-only-callable __builtin_ia32_mfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 c-only-callable __builtin_ia32_sfence c++/arm64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 c-only-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+c-only-callable __builtin_ms_va_copy c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
+c-only-callable __builtin_ms_va_copy c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
+c-only-callable __builtin_ms_va_end c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
+c-only-callable __builtin_ms_va_end c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
+c-only-callable __builtin_ms_va_start c++/x86_64 # the C++ front end does not handle a declaration the parser kept as tokens yet
+c-only-callable __builtin_neon_vaddh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet
+c-only-callable __builtin_neon_vsubh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet
+c-only-callable __builtin_stdc_rotate_left c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+c-only-callable __builtin_stdc_rotate_left c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+c-only-callable __builtin_stdc_rotate_right c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+c-only-callable __builtin_stdc_rotate_right c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+c-only-callable __builtin_vsnprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+c-only-callable __builtin_vsnprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+c-only-callable __builtin_vsprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
+c-only-callable __builtin_vsprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
+claimed-not-callable __builtin___vsnprintf_chk c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+claimed-not-callable __builtin___vsnprintf_chk c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
+claimed-not-callable __builtin___vsprintf_chk c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+claimed-not-callable __builtin___vsprintf_chk c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+claimed-not-callable __builtin_ia32_addcarryx_u64 c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
 claimed-not-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_mfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+claimed-not-callable __builtin_stdc_rotate_left c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+claimed-not-callable __builtin_stdc_rotate_left c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
+claimed-not-callable __builtin_stdc_rotate_right c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+claimed-not-callable __builtin_stdc_rotate_right c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
+claimed-not-callable __builtin_vsnprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+claimed-not-callable __builtin_vsnprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
+claimed-not-callable __builtin_vsprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
+claimed-not-callable __builtin_vsprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
 constexpr-claimed-not-folded __builtin_add_overflow c++/arm64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_add_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_huge_val c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
@@ -73,26 +106,8 @@ fold-c-only __builtin_copysignl c++/arm64
 fold-c-only __builtin_copysignl c++/x86_64
 fold-c-only __builtin_fabsl c++/arm64
 fold-c-only __builtin_fabsl c++/x86_64
-fold-c-only __builtin_neon_vaddh_f16 c++/arm64
-fold-c-only __builtin_neon_vsubh_f16 c++/arm64
-fold-c-only __builtin_stdc_rotate_left c++/arm64
-fold-c-only __builtin_stdc_rotate_left c++/x86_64
-fold-c-only __builtin_stdc_rotate_right c++/arm64
-fold-c-only __builtin_stdc_rotate_right c++/x86_64
 fold-cxx-only __builtin_is_constant_evaluated c/arm64
 fold-cxx-only __builtin_is_constant_evaluated c/x86_64
-not-compiled __builtin___vsnprintf_chk c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsnprintf_chk c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsnprintf_chk c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsnprintf_chk c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsnprintf_chk c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsnprintf_chk c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsprintf_chk c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsprintf_chk c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsprintf_chk c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsprintf_chk c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsprintf_chk c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
-not-compiled __builtin___vsprintf_chk c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
 not-compiled __builtin_addc c++/x86_64/O0 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_addc c++/x86_64/O1 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_addc c++/x86_64/O2 # x86-64: builtin 52 is not supported yet (PLAN-x86.md X3)
@@ -207,12 +222,6 @@ not-compiled __builtin_flt_rounds c++/x86_64/O2 # x86-64: builtin 86 is not supp
 not-compiled __builtin_flt_rounds c/x86_64/O0 # x86-64: builtin 86 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_flt_rounds c/x86_64/O1 # x86-64: builtin 86 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_flt_rounds c/x86_64/O2 # x86-64: builtin 86 is not supported yet (PLAN-x86.md X3)
-not-compiled __builtin_ia32_addcarryx_u64 c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
-not-compiled __builtin_ia32_addcarryx_u64 c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
-not-compiled __builtin_ia32_addcarryx_u64 c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
-not-compiled __builtin_ia32_addcarryx_u64 c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
-not-compiled __builtin_ia32_addcarryx_u64 c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
-not-compiled __builtin_ia32_addcarryx_u64 c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
 not-compiled __builtin_isfpclass c++/x86_64/O0 # x86-64: builtin 149 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_isfpclass c++/x86_64/O1 # x86-64: builtin 149 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_isfpclass c++/x86_64/O2 # x86-64: builtin 149 is not supported yet (PLAN-x86.md X3)
@@ -222,24 +231,6 @@ not-compiled __builtin_issubnormal c++/x86_64/O2 # x86-64: builtin 150 is not su
 not-compiled __builtin_iszero c++/x86_64/O0 # x86-64: builtin 151 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_iszero c++/x86_64/O1 # x86-64: builtin 151 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_iszero c++/x86_64/O2 # x86-64: builtin 151 is not supported yet (PLAN-x86.md X3)
-not-compiled __builtin_ms_va_copy c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_copy c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_copy c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_copy c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_copy c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_copy c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_copy is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_end c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_end c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_end c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_end c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_end c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_end c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
-not-compiled __builtin_ms_va_start c++/arm64/O0 # the C++ front end does not handle a declaration the parser kept as tokens yet
-not-compiled __builtin_ms_va_start c++/arm64/O1 # the C++ front end does not handle a declaration the parser kept as tokens yet
-not-compiled __builtin_ms_va_start c++/arm64/O2 # the C++ front end does not handle a declaration the parser kept as tokens yet
-not-compiled __builtin_ms_va_start c++/x86_64/O0 # the C++ front end does not handle a declaration the parser kept as tokens yet
-not-compiled __builtin_ms_va_start c++/x86_64/O1 # the C++ front end does not handle a declaration the parser kept as tokens yet
-not-compiled __builtin_ms_va_start c++/x86_64/O2 # the C++ front end does not handle a declaration the parser kept as tokens yet
 not-compiled __builtin_nan c++/x86_64/O0 # x86-64: builtin 69 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_nan c++/x86_64/O1 # x86-64: builtin 69 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_nan c++/x86_64/O2 # x86-64: builtin 69 is not supported yet (PLAN-x86.md X3)
@@ -258,33 +249,9 @@ not-compiled __builtin_nansf c++/x86_64/O2 # x86-64: builtin 147 is not supporte
 not-compiled __builtin_nansl c++/x86_64/O0 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_nansl c++/x86_64/O1 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_nansl c++/x86_64/O2 # x86-64: builtin 147 is not supported yet (PLAN-x86.md X3)
-not-compiled __builtin_neon_vaddh_f16 c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vaddh_f16 c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vaddh_f16 c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vaddh_f16 c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vaddh_f16 c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vaddh_f16 c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vsubh_f16 c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vsubh_f16 c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vsubh_f16 c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vsubh_f16 c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vsubh_f16 c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
-not-compiled __builtin_neon_vsubh_f16 c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
 not-compiled __builtin_stdc_count_ones c++/x86_64/O0 # x86-64: builtin 32 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_stdc_count_ones c++/x86_64/O1 # x86-64: builtin 32 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_stdc_count_ones c++/x86_64/O2 # x86-64: builtin 32 is not supported yet (PLAN-x86.md X3)
-not-compiled __builtin_stdc_rotate_left c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_left c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_left c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_left c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_left c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_left c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_right c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_right c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_right c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_right c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_right c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
-not-compiled __builtin_stdc_rotate_right c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
 not-compiled __builtin_stdc_trailing_zeros c++/x86_64/O0 # x86-64: builtin 33 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_stdc_trailing_zeros c++/x86_64/O1 # x86-64: builtin 33 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_stdc_trailing_zeros c++/x86_64/O2 # x86-64: builtin 33 is not supported yet (PLAN-x86.md X3)
@@ -318,15 +285,3 @@ not-compiled __builtin_subcs c++/x86_64/O2 # x86-64: builtin 53 is not supported
 not-compiled __builtin_subcs c/x86_64/O0 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_subcs c/x86_64/O1 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_subcs c/x86_64/O2 # x86-64: builtin 53 is not supported yet (PLAN-x86.md X3)
-not-compiled __builtin_vsnprintf c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsnprintf c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsnprintf c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsnprintf c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsnprintf c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsnprintf c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsprintf c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsprintf c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsprintf c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsprintf c++/x86_64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsprintf c++/x86_64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
-not-compiled __builtin_vsprintf c++/x86_64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported

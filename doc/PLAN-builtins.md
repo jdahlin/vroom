@@ -364,7 +364,7 @@ bench/vcc-builtins.py --target aarch64-linux-gnu --header arm_neon.h --header ar
 ### Consistency check (vcc only)
 
 `bench/vcc-builtins.py --check-consistency --vpp build/linux/src/vpp`
-(`bench/vcc-builtins-consistency.py`, no clang at check time, about 1.5 s,
+(`bench/vcc-builtins-consistency.py`, no clang at check time, about 1.9 s,
 wired into `ci/premerge.sh` as `builtin-consistency`) takes every spelling
 of vcc's C table (699 with a typed call; the stub catalog is left out) and
 runs vpp for aarch64-linux-gnu and x86_64-linux-gnu, in C and in C++:
@@ -381,13 +381,13 @@ no new line, no line that passes now; `--bless` rewrites it).
 
 | invariant | known lines |
 | --- | --- |
-| claimed-not-callable (`__has_builtin` 1, call rejected) | 3 |
-| c-only-callable (callable in C, rejected in C++) | 6 |
-| not-compiled (callable, `-c` fails at -O0/-O1/-O2) | 249 |
+| claimed-not-callable (`__has_builtin` 1, call rejected) | 16 |
+| c-only-callable (callable in C, rejected in C++) | 26 |
+| not-compiled (callable, `-c` fails at -O0/-O1/-O2) | 177 |
 | crash (vpp dies on the call) | 0 |
 | constexpr-claimed-not-folded (`__has_constexpr_builtin` 1, no fold) | 58 |
 | constexpr-folds-unclaimed (folds, claim 0) | 0 |
-| fold-c-only / fold-cxx-only (folds in one language only) | 10 / 2 |
+| fold-c-only / fold-cxx-only (folds in one language only) | 4 / 2 |
 
 Each step that fixes a violation removes its lines in the same commit.
 
@@ -396,14 +396,18 @@ fold either, in the shape the probe writes them (clang answers 1 for them):
 a cast of an infinity or NaN to `long` (`inf`, `huge_val`, `nan` and their
 `f`/`l`/`s` forms), the overflow builtins with a null result pointer, and the
 wide string functions on a null pointer.  `fold-c-only` is `fabsl` and
-`copysignl` (the C++ front end has no long double constexpr variable),
-the AArch64 `_Float16` add and subtract, and `__builtin_stdc_rotate_*` (not
-callable in C++ yet); `fold-cxx-only` is `__builtin_is_constant_evaluated`,
+`copysignl` (the C++ front end has no long double constexpr variable); `fold-cxx-only` is `__builtin_is_constant_evaluated`,
 which vcc's C accepts and does not fold.  In the C++ probe of the folds a
 line that vcc refuses ("the rules of ... are not implemented yet") is
 reported only in a translation unit with no other error, so the lines
 without an error are probed again together until a unit has none
-(`probe(..., refusals=True)`); without that a refused fold looks ok.
+(`probe(..., refusals=True)`); without that a refused fold looks ok.  The
+`-fsyntax-only` call probes use it too (a refused call used to look callable
+whenever its batch held another error: claimed-not-callable 3 -> 16,
+c-only-callable 6 -> 26, not-compiled 249 -> 177, fold-c-only 10 -> 4, as the
+AArch64 `_Float16` add/subtract and `__builtin_stdc_rotate_*` are now
+recognised as not callable in C++).  The `-c` probes bisect to single lines,
+so they never hid a refusal.
 
 ### The fold table
 

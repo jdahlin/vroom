@@ -447,7 +447,7 @@ def collect(vpp, rows, jobs, verbose):
                 lines = {n: special_wrapper(i, *getattr(samples[n], variant))
                          for i, n in enumerate(names)}
                 futures[('call' + variant, language, target)] = pool.submit(
-                    probe, vpp, target, language, 0, 'syntax', lines)
+                    probe, vpp, target, language, 0, 'syntax', lines, True)
             fold = [n for n in names if samples[n].constant]
             if language == 'c':
                 lines = {n: f'char c{i}[1 + 0 * (long)({samples[n].constant})];'
