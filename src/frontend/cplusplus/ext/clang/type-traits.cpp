@@ -274,6 +274,11 @@ static int unary_trait_named(const char *s, size_t n)
 #include "unary-traits.inc"
 #undef UNARY_TRAIT
     };
+    /* clang's other spellings of a trait */
+    if (spelled(s, n, "__is_sealed"))
+        s = "__is_final", n = 10;
+    if (spelled(s, n, "__is_literal_type"))
+        s = "__is_literal", n = 12;
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++)
         if (spelled(s, n, names[i]))
             return int(i);
@@ -416,6 +421,12 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     case unary_trait_kind::is_nothrow_destructible:
     case unary_trait_kind::is_final:
     case unary_trait_kind::is_standard_layout:
+    case unary_trait_kind::is_pod:
+    case unary_trait_kind::is_literal:
+    case unary_trait_kind::has_trivial_constructor:
+    case unary_trait_kind::has_trivial_copy:
+    case unary_trait_kind::has_trivial_assign:
+    case unary_trait_kind::has_unique_object_representations:
         if (!class_property_trait(which, t, answer))
             return false;
         break;
