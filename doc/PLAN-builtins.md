@@ -337,6 +337,93 @@ bench/vcc-builtins.py --target aarch64-linux-gnu --header arm_neon.h --header ar
 
 [GCC builtin definitions at the pinned test revision](https://github.com/gcc-mirror/gcc/blob/917da9c6e019407c9d469455ad4c50c062470d6c/gcc/builtins.def)
 
+## Executable builtin bodies
+
+A builtin whose behaviour is ordinary C over other builtins needs no id, no
+front-end case and no arm in a code generator: it gets a C body, and every
+backend at every -O level lowers what the body is made of.  Adding one is a
+row in `builtin-body.cpp` (its text, its parameters, the spellings it is bound
+to) and the `body` flag on the spelling's row in the builtin table.
+
+- **Where bodies live.**  As text in `src/frontend/c/builtin-body.cpp`,
+  compiled into vcc as string literals.  Nothing is parsed at start-up and a
+  translation unit that calls no such builtin pays nothing (one flag test per
+  builtin call, none per identifier).  A call lexes the body (`lex_tokenize`
+  on a stack copy, 100-200 bytes) and appends its tokens to the lazy-body token
+  array, then runs the C parser over them exactly as a deferred function body
+  is parsed (`lz_on`, the same save and restore of the token window).  No
+  preprocessing, so a user's macros cannot reach a body.  Caching the typed
+  AST per TU was left out: the parse is shorter than the cloning with local
+  remapping a cached tree would need.
+- **Binding.**  `cc_body_bindings` rows name a spelling, a parameter string,
+  the parameter names, the text and where `__T` comes from.  `__T` is a typedef
+  the mechanism declares for the body: the builtin's result type (the
+  signature's first letter), so `addc`, `addcl`, `addcll` and the `b`/`s`
+  forms share one text, or the type of the first argument (`iszero`,
+  `stdc_count_ones`); for those `__N` is the argument type's precision as an
+  `int` constant.  A spelling's row in `builtin-table.cpp` keeps its name,
+  `__has_builtin` flag and signature; `body` marks it.  A binding may be
+  skipped on a target whose code generator lowers the builtin better itself
+  (`a64_native`: arm64's `adds/adcs` for `addc`/`subc`).
+- **Arguments.**  Each argument is declined to an rvalue, checked by its
+  parameter letter (`T` converted to T, `F` floating, `U` unsigned integer,
+  `P` pointer; the diagnostics are the old ones) and bound to a parameter
+  symbol (`AST_SYMBOL_BODY_ARGUMENT`, whose use in the body is a copy of the
+  node it stands for).  A constant is substituted; a pure expression too, when
+  the body writes through no pointer; anything else is evaluated once, in
+  argument order, into a temporary by the sequence `cc_lowering_save` and
+  `cc_lowering_sequence` already build for complex numbers (`(t0 = a0, t1 =
+  a1, body)`), so no statement is needed for the single-expression bodies.
+- **Result.**  A body is one expression, converted to the signature's result
+  type; more than one statement is a statement expression `({ ... })`, which
+  the walkers already lower (the `_BitInt` bit counts use one).  A body may
+  use only what every backend lowers: arithmetic, comparisons, loads and
+  stores through pointers, other builtins that already have a lowering.
+- **C and C++.**  The C parser calls `cc_builtin_body_apply` where it parsed
+  the arguments; the C++ front end reaches it from `ast_builder_builtin_call`
+  with the nodes it built.  The C++ side keeps its own overload and
+  constant-evaluation story: `constexpr` calls fold through the fold table
+  (`builtin-fold.inc`) before lowering; the body is what the code generators
+  see.
+- **Constant evaluation (C).**  The substituted tree is ordinary C, so
+  `cc_eval` folds it when the arguments are constants; the bodies are
+  written so that it does (no statement expression in `iszero`).  A body
+  with locals (`addc`) is not a constant expression, as in clang.
+- **Cost.**  A body call costs a short lex and parse (about 40 tokens) and
+  a handful of symbols and nodes.  A translation unit with no body call pays a
+  flag test per builtin call and one kind test per identifier reference;
+  measured on sqlite3.c (`vpp -O2 -w -c`, user instructions, three runs each):
+  3.9651 / 3.9654 / 3.9665 G before, 3.9680 / 3.9644 / 3.9643 G after (noise
+  +-0.05 %); best-of-five wall time 453 ms both ways at -O2, 127 / 125 ms at
+  -O0.  `bench/cxx-fe-bench.py` over the 764 common programs: -0.39 % (budget
+  +0.5 %).
+- **Moved so far.**  `__builtin_addc{,b,s,l,ll}` and `__builtin_subc*` (statement
+  expression with an out-parameter; arm64 keeps its adds/adcs lowering),
+  `__builtin_iszero`, `__builtin_issubnormal` (one expression over `isfinite`
+  and `isnormal`), `__builtin_stdc_count_ones` and `__builtin_stdc_trailing_zeros`
+  (`__T` from the argument, `__N` its precision).  Consistency check:
+  not-compiled 177 -> 105; the 72 lines that left are the x86-64 `-c` failures
+  of exactly these spellings in C and C++.  Four builtin ids, the C front
+  end's iszero/issubnormal tree and the `stdc` paths of the generic bit counts
+  are gone; one id, `CC_BUILTIN_BODY`, stands for every body.  `tests`:
+  `src/test/vcc/builtin_body_*.c` (also x86-64, -O0 to -O3),
+  `src/test/cxx/run/builtin-body-calls.cpp`, and `bench/vcc-builtin-bodies.py`
+  (no helper call in `-S` output for either target, in premerge).  The
+  long double iszero on arm64 compares through `__eqtf2` as the tree it
+  replaced did; clang's `isfpclass` is inline integer code, which needs a
+  VIR/emitter primitive, not a body.
+
+Not covered, and what the next step needs: a body with a loop or a branch
+that must stay a statement (they work inside `({ })`, but a call in a constant
+expression of C++ then needs the body evaluated by the C++ evaluator, which
+does not read the C AST); builtins that take a string or a type argument
+(`nan`, `offsetof`), a constant that must be checked (`isfpclass`'s mask: a
+parameter letter for "integer constant expression"); variadic and
+type-generic families (`add_overflow`, atomics, which need `T` from several
+arguments); target-specific intrinsics (`debugtrap`, `flt_rounds`, `arm_*`),
+which need a primitive that does the work (a trap, a read of FPCR or MXCSR),
+not a body.
+
 ## Status
 
 - B0 in progress. Portable C/C++ feature-query matrix and C name recognition
@@ -383,7 +470,7 @@ no new line, no line that passes now; `--bless` rewrites it).
 | --- | --- |
 | claimed-not-callable (`__has_builtin` 1, call rejected) | 16 |
 | c-only-callable (callable in C, rejected in C++) | 26 |
-| not-compiled (callable, `-c` fails at -O0/-O1/-O2) | 177 |
+| not-compiled (callable, `-c` fails at -O0/-O1/-O2) | 105 |
 | crash (vpp dies on the call) | 0 |
 | constexpr-claimed-not-folded (`__has_constexpr_builtin` 1, no fold) | 58 |
 | constexpr-folds-unclaimed (folds, claim 0) | 0 |
