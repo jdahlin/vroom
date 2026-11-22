@@ -699,6 +699,9 @@ CC_PRIVATE uint32_t cc_builtin_body_apply(cc *c,
                                           const uint32_t *args, uint32_t n,
                                           uint32_t loc);
 CC_PRIVATE unsigned cc_builtin_body_arity(const struct cc_body_binding *k);
+CC_PRIVATE uint32_t cc_builtin_pointer_argument(cc *c, uint32_t a,
+                                                ast_qualified_type pointee,
+                                                uint32_t index, uint32_t loc);
 CC_PRIVATE uint32_t cc_fpclassify_build(cc *c, const uint32_t *v, uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_node_new(cc *c, int id, ast_qualified_type ty,
                                         uint32_t loc, const cc_id_list *args);
