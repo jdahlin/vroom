@@ -152,24 +152,39 @@ from the converted operand. The registry should preserve that property.
 
 ## Executable builtin bodies
 
-Clang's TableGen records describe builtin spellings, prototypes, attributes
-and feature requirements. They do not generally carry executable bodies.
-Clang's frontend checks calls and constant-expression rules; CodeGen emits
-LLVM intrinsics, target instructions, or ordinary runtime/library calls.
-ACLE headers also provide ordinary C wrappers around builtins.
+Clang's [TableGen emitter](https://github.com/llvm/llvm-project/blob/main/clang/utils/TableGen/ClangBuiltinsEmitter.cpp)
+generates registration data from builtin names, prototypes, attributes and
+target features. Executable behavior lives elsewhere. For example,
+[Clang's AVX header](https://github.com/llvm/llvm-project/blob/main/clang/lib/Headers/avxintrin.h)
+implements `_mm256_add_ps` with ordinary vector addition and calls a target
+builtin for `_mm256_addsub_pd`. Clang's
+[builtin lowering](https://github.com/llvm/llvm-project/blob/main/clang/lib/CodeGen/CGBuiltin.cpp)
+maps the population count spellings to the same LLVM intrinsic.
 
-Vroom should keep those roles distinct. The `.td` reader can generate
-declarative call metadata and test inventories. A vroom-owned implementation
-may provide a C body for a builtin whose semantics are expressible in C; the
-frontend can parse that body once and substitute its AST at each call, with
-argument evaluation preserved exactly once. This is semantic expansion, not
-an optimizer promise: it works at `-O0` and avoids depending on the optimizer
-to inline a helper. Operations requiring target instructions, special
-operand constraints, or compiler-only constant evaluation still need a
-dedicated lowering/folding implementation. Initial experiments should
-compare a body-backed integer builtin against the existing handwritten
-lowering for diagnostics, side effects, `constexpr`, code size and runtime
-behavior before expanding the mechanism.
+In vroom, put executable definitions in ordinary C functions grouped by
+family, such as `builtins-math.c`, `builtins-x86.c` and
+`builtins-x86-avx.c`. Keep the Clang tables as the source of public names,
+types and feature gates. A small vroom mapping binds names to C functions
+or shared compiler primitives. The generator can resolve aliases and
+typed variants into those bindings at build time. Adding a C body should
+require its definition and binding, without adding a builtin ID or switch
+arm. Generate the combined registration and body inputs under the build
+directory.
+
+Parse each needed body once in the target's type environment and substitute
+its typed AST at the call. Bind converted arguments to fresh locals so each
+is evaluated once, and remap locals when cloning the body. Expand before
+constant evaluation and optimization so C and C++ can share the bodies and
+calls can expand at `-O0`. Keep argument constraints such as AVX immediate
+ranges in metadata and validate them at the call site. Compiler primitives
+remain available to C bodies for operations that need target instructions
+or compiler state.
+
+Start with a fixed signature and a single return expression. Check type
+conversion, repeated parameter references with side effects, constant
+evaluation and absence of a helper call at `-O0` before extending the
+substitution to local declarations and general control flow.
+
 [Clang's population-count definitions](https://github.com/llvm/llvm-project/blob/5b10d2d74929eae78912771222c9855af97496f4/clang/include/clang/Basic/Builtins.td#L738)
 
 | Spelling | Converted argument | Result | Operation |
