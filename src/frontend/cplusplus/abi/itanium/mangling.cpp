@@ -142,6 +142,7 @@ class itanium_mangler
     bool specialization_encoding(entity_index e);
     bool constraint_expression(entity_index t, SyntaxElement c);
     bool dependent_expression(SyntaxElement c);
+    const char *binary_operator_code(SyntaxElement op) const;
     bool punctuator(SyntaxElement c, preprocessing_op_or_punc op) const
     {
         return c.is(op);
@@ -461,27 +462,44 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         return constraint_expression(t, c[1]);
     case syntax_kind::relational_expression:
     case syntax_kind::equality_expression: {
-        static const struct {
-            preprocessing_op_or_punc op;
-            const char *code;
-        } comparisons[] = {
-            {preprocessing_op_or_punc::EQUAL_EQUAL, "eq"},
-            {preprocessing_op_or_punc::EXCLAMATION_EQUAL, "ne"},
-            {preprocessing_op_or_punc::LESS, "lt"},
-            {preprocessing_op_or_punc::GREATER, "gt"},
-            {preprocessing_op_or_punc::LESS_EQUAL, "le"},
-            {preprocessing_op_or_punc::GREATER_EQUAL, "ge"},
-        };
         if (c.size() != 3)
             return false;
-        const char *code = nullptr;
-        for (const auto &x : comparisons)
-            if (punctuator(c[1], x.op))
-                code = x.code;
+        const char *code = binary_operator_code(c[1]);
         if (!code)
             return false;
         text(code);
         return constraint_expression(t, c[0]) && constraint_expression(t, c[2]);
+    }
+    case syntax_kind::requires_expression: {
+        /* [abi:expressions]: requires-expression without parameter list
+           ("rq" <requirement>+ "E"), simple-requirement ("X" <expression>) */
+        if (c.size() != 2)
+            return false;
+        SyntaxElement body = c[1];
+        uint32_t first = 1;
+        uint32_t count = 0;
+        if (body.size() >= 2)
+            count = body.size() - 2;
+        if (count == 1 && body[1].is(syntax_kind::requirement_seq)) {
+            body = body[1];
+            first = 0;
+            count = body.size();
+        }
+        if (!count)
+            return false;
+        text("rq");
+        for (uint32_t i = first; i < first + count; i++) {
+            SyntaxElement req = body[i];
+            if (req.is(syntax_kind::simple_requirement) && req.size() >= 1) {
+                text("X");
+                if (!dependent_expression(req[0]))
+                    return false;
+            } else {
+                return false;
+            }
+        }
+        text("E");
+        return true;
     }
     case syntax_kind::simple_template_id: {
         if (!c[0].is_token() || !analysis.constraint_template(t, c[0].token()))
@@ -549,22 +567,38 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
  *
  * The function parameter forms below omit the CV-qualifiers.
  */
+const char *itanium_mangler::binary_operator_code(SyntaxElement op) const
+{
+    static const struct {
+        preprocessing_op_or_punc token;
+        const char *code;
+    } table[] = {
+        {preprocessing_op_or_punc::PLUS, "pl"},
+        {preprocessing_op_or_punc::MINUS, "mi"},
+        {preprocessing_op_or_punc::STAR, "ml"},
+        {preprocessing_op_or_punc::SLASH, "dv"},
+        {preprocessing_op_or_punc::PERCENT, "rm"},
+        {preprocessing_op_or_punc::EQUAL_EQUAL, "eq"},
+        {preprocessing_op_or_punc::EXCLAMATION_EQUAL, "ne"},
+        {preprocessing_op_or_punc::LESS, "lt"},
+        {preprocessing_op_or_punc::GREATER, "gt"},
+        {preprocessing_op_or_punc::LESS_EQUAL, "le"},
+        {preprocessing_op_or_punc::GREATER_EQUAL, "ge"},
+    };
+    for (const auto &x : table)
+        if (punctuator(op, x.token))
+            return x.code;
+    return nullptr;
+}
+
 bool itanium_mangler::dependent_expression(SyntaxElement expression)
 {
     if (expression.size() == 3 &&
         (expression.kind() == syntax_kind::additive_expression ||
-         expression.kind() == syntax_kind::multiplicative_expression)) {
-        const char *op = nullptr;
-        if (punctuator(expression[1], preprocessing_op_or_punc::PLUS))
-            op = "pl";
-        else if (punctuator(expression[1], preprocessing_op_or_punc::MINUS))
-            op = "mi";
-        else if (punctuator(expression[1], preprocessing_op_or_punc::STAR))
-            op = "ml";
-        else if (punctuator(expression[1], preprocessing_op_or_punc::SLASH))
-            op = "dv";
-        else if (punctuator(expression[1], preprocessing_op_or_punc::PERCENT))
-            op = "rm";
+         expression.kind() == syntax_kind::multiplicative_expression ||
+         expression.kind() == syntax_kind::relational_expression ||
+         expression.kind() == syntax_kind::equality_expression)) {
+        const char *op = binary_operator_code(expression[1]);
         if (!op)
             return false;
         text(op);

@@ -1710,8 +1710,11 @@ constness semantic_analysis::evaluate_invocation(
        a constexpr function "if it satisfies the requirements for a
        constexpr function": evaluated, and not a constant expression where
        its body is not one */
-    bool implicit_constexpr = e.enclosing && entity_table[e.enclosing].lambda &&
-                              entity_table[e.enclosing].call_operator == f;
+    bool implicit_constexpr =
+        (e.enclosing && entity_table[e.enclosing].lambda &&
+         entity_table[e.enclosing].call_operator == f) ||
+        (e.implicit && e.special == special_member::constructor && !count &&
+         e.definition);
     if (!e.constexpr_ && !implicit_constexpr) {
         /* (a library builtin, declared with C language linkage, may be
            one the evaluator does not know clang evaluates) */
@@ -1814,27 +1817,34 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
     entity_index c_entity = evaluated_class(entity_table[k.enclosing].type);
     if (k.implicit) {
         /* [class.default.ctor]/1: the implicit default constructor of a
-           class with no members and no bases does nothing */
+           class with no members and no bases does nothing; one with a
+           synthesized definition (default member initializers) is evaluated
+           below ([class.default.ctor]/4) */
         if (!x.count) {
             if (c_entity && !entity_table[c_entity].member_count)
                 return constness::constant;
-            return constness::unknown;
+            if (!k.definition || !c_entity ||
+                entity_table[c_entity].base_count ||
+                entity_table[c_entity].dynamic)
+                return constness::unknown;
+        } else {
+            if (x.count != 1 || !c_entity ||
+                !is_copy_constructor(c_entity, x.b))
+                return constness::unknown;
+            uint32_t argument = semantics.items(x.first)[0];
+            if (semantics[argument].kind != semantic_kind::bind_reference)
+                return constness::unknown;
+            uint32_t from = 0;
+            constness c = evaluate_object(state, semantics[argument].a, from);
+            if (c != constness::constant)
+                return c;
+            constant_value v = place_value(state, from);
+            if (v.kind != constant_value_kind::class_object)
+                return constness::unknown;
+            constant_value copied = copy_value(state, v, false);
+            place_value(state, place) = copied;
+            return constness::constant;
         }
-        if (x.count != 1 || !c_entity || !is_copy_constructor(c_entity, x.b))
-            return constness::unknown;
-        uint32_t argument = semantics.items(x.first)[0];
-        if (semantics[argument].kind != semantic_kind::bind_reference)
-            return constness::unknown;
-        uint32_t from = 0;
-        constness c = evaluate_object(state, semantics[argument].a, from);
-        if (c != constness::constant)
-            return c;
-        constant_value v = place_value(state, from);
-        if (v.kind != constant_value_kind::class_object)
-            return constness::unknown;
-        constant_value copied = copy_value(state, v, false);
-        place_value(state, place) = copied;
-        return constness::constant;
     }
     constant_value self;
     self.kind = constant_value_kind::pointer;

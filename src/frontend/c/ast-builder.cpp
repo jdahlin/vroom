@@ -670,13 +670,18 @@ uint32_t ast_builder_asm(cc *c, ast_builder_asm_text tmpl, bool is_volatile,
     return cc_statement_new(c, AST_NODE_ASM, 0, ai, 0, 0);
 }
 
-uint32_t ast_builder_case(cc *c, int64_t value, uint32_t s)
+uint32_t ast_builder_case_range(cc *c, int64_t lo, int64_t hi, uint32_t s)
 {
     uint32_t n =
         cc_statement_new(c, AST_NODE_CASE, 0, c->nipool, c->nipool + 1, s);
 
-    c->ipool[c->nipool] = (i128)value;
-    c->ipool[c->nipool + 1] = (i128)value;
+    c->ipool[c->nipool] = (i128)lo;
+    c->ipool[c->nipool + 1] = (i128)hi;
     c->nipool += 2;
     return n;
+}
+
+uint32_t ast_builder_case(cc *c, int64_t value, uint32_t s)
+{
+    return ast_builder_case_range(c, value, value, s);
 }

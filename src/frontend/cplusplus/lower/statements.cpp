@@ -723,9 +723,13 @@ uint32_t c_lowering::statement(uint32_t index)
         live.resize(mark);
         return block(items);
     }
-    case semantic_kind::case_label:
-        return ast_builder_case(c, static_cast<int64_t>(n.value),
-                                statement(n.a));
+    case semantic_kind::case_label: {
+        int64_t lo = static_cast<int64_t>(n.value);
+        int64_t hi = lo;
+        if (n.b)
+            hi = static_cast<int64_t>(node(n.b).value);
+        return ast_builder_case_range(c, lo, hi, statement(n.a));
+    }
     case semantic_kind::default_label:
         return ast_builder_node(c, AST_NODE_DEFAULT, v, 0, 0, statement(n.a), 0,
                                 0);

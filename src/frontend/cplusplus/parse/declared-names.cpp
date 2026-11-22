@@ -137,23 +137,32 @@ void declared_names::declare_in(scope_index in, uint32_t name, name_kind kind,
     scopes[in].declarations.append({name, kind, region, dependent});
     journal.append(in);
     if (scopes[in].kind == scope_kind::class_ && is_template_kind(kind))
-        assume_member_template(name);
+        assume_member_template(name, kind == name_kind::variable_template);
 }
 
-void declared_names::assume_member_template(uint32_t name)
+void declared_names::assume_member_template(uint32_t name, bool variable)
 {
     size_t old = member_template_names.size();
     if (name >= old) {
         member_template_names.resize(name + 1);
         for (size_t i = old; i <= name; i++)
-            member_template_names[i] = false;
+            member_template_names[i] = 0;
     }
-    member_template_names[name] = true;
+    member_template_names[name] |= 1u;
+    if (variable)
+        member_template_names[name] |= 2u;
 }
 
 bool declared_names::declared_as_member_template(uint32_t name) const
 {
-    return name < member_template_names.size() && member_template_names[name];
+    return name < member_template_names.size() &&
+           (member_template_names[name] & 1u) != 0;
+}
+
+bool declared_names::declared_as_member_variable_template(uint32_t name) const
+{
+    return name < member_template_names.size() &&
+           (member_template_names[name] & 2u) != 0;
 }
 
 void declared_names::declare_template_parameter(uint32_t name, name_kind kind)

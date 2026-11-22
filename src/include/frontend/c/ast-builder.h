@@ -210,8 +210,9 @@ uint32_t ast_builder_label_define(cc *c, uint32_t label, uint32_t statement);
 uint32_t ast_builder_label_address(cc *c, uint32_t label);
 /* goto *address; (GNU): address a void * node */
 uint32_t ast_builder_goto_indirect(cc *c, uint32_t address);
-/* AST_NODE_CASE for value, its statement s */
+/* AST_NODE_CASE for value (or GNU case range lo ... hi), its statement s */
 uint32_t ast_builder_case(cc *c, int64_t value, uint32_t s);
+uint32_t ast_builder_case_range(cc *c, int64_t lo, int64_t hi, uint32_t s);
 
 /* GNU asm: a string (the template, a constraint, a clobber) after its
    escape sequences, text[0..length) */
