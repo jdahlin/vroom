@@ -3,11 +3,11 @@
 vcc has two code generators.  The **direct emitter** walks the AST and emits
 machine records, cleaning them up afterwards.  **VIR** (`PLAN-vir.md`,
 `SPEC-vir.md`) builds an SSA function from the same walker, optimizes it,
-allocates registers and lowers it to the same records.  The `-O` level picks
-the code generator and what runs in it; nothing else does.  There are no
+allocates registers and lowers it to the same records.  VIR is tried first at every optimization level on the native targets.
+The direct emitter handles functions for which VIR cannot generate code.  There are no
 environment variables for optimization.
 
-The levels are resolved in the driver (`src/driver/optimization.c`) into
+The levels are resolved in the driver (`src/driver/optimization.cpp`) into
 `cc_opts.opt` (0-3) and `cc_opts.optimize`.  The options a level turns on are
 one table, `CC_OPTIMIZATIONS` in `src/include/frontend/c/cc.h`.  Under vccd the
 options are per job, like every other option.
@@ -16,8 +16,8 @@ options are per job, like every other option.
 
 | Option | Level | Code generator | `__OPTIMIZE__` |
 |---|---|---|---|
-| `-O0` (default) | 0 | direct emitter, unoptimized | no |
-| `-O1`, `-Og`, `-O` | 1 | direct emitter | yes |
+| `-O0` (default) | 0 | VIR with required construction passes | no |
+| `-O1`, `-Og`, `-O` | 1 | VIR with required construction passes and local optimizations | yes |
 | `-O2`, `-Os`, `-Oz` | 2 | VIR; the direct emitter of `-O1` for what VIR cannot build | yes |
 | `-O3`, `-O4` and up, `-Ofast` | 3 | as `-O2`, with the loop vectorizer | yes |
 
@@ -27,13 +27,13 @@ clang, `-ffast-math` is its own option.  The last `-O` on the command line wins.
 
 ### -O0
 
-Every local lives in its frame slot; an expression's value goes through
-scratch registers.  Only what C requires is folded (constant expressions),
-and only `always_inline` functions are inlined.
+VIR runs the passes required to construct and lower SSA. The optional
+SSA optimization passes start at `-O2`. The walker retains its existing
+`-O0` folding and inlining rules.
 
-### -O1: the direct emitter
+### -O1
 
-What the direct emitter does when `cc_opts.opt >= 1`:
+The frontend and walker also apply local optimizations when `cc_opts.opt >= 1`.
 
 - **Front end**: constant folding across a function body
   (`frontend/c/function-body-fold.c`), library calls known by their arguments
@@ -132,13 +132,11 @@ Neither runs under `-mgeneral-regs-only` (the kernel's flag).
 ## Options for one optimization
 
 Each row of `CC_OPTIMIZATIONS` is `-fNAME` and `-fno-NAME`, on from its level
-up.  An option overrides the level whatever their order.  None of them has an
-effect below `-O2`: VIR is `-O2`'s code generator, and `-fvir` does not bring
-it to a lower level.
+up.  An option overrides the level whatever their order.  VIR is on by default. The optional VIR optimization passes run from `-O2`.
 
 | Option | From | What it does |
 |---|---|---|
-| `-fvir` | `-O2` | functions go through VIR; `-fno-vir` gives `-O1`'s code at `-O2` |
+| `-fvir` | `-O0` | try VIR for each function. Use `-fno-vir` to select the direct emitter |
 | `-frotate-loops` | `-O2` | the lowering puts a loop's test at its bottom |
 | `-fshrink-wrap` | `-O2` | arm64: the prologue moves to the paths that need a frame |
 | `-fvectorize` (`-ftree-vectorize`) | `-O3` | the loop vectorizer |

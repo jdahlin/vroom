@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from hostenv import R, llvm
+from hostenv import BUILD, R, llvm
 
 SOURCE = r'''
 #include <assert.h>
@@ -72,7 +72,7 @@ int main(void)
 
 BUILTINS = r'''
 #include <assert.h>
-#include "frontend/c/builtin-table.cpp"
+#include "frontend/c/builtins-registry.cpp"
 int (*pp_builtin_known)(const char *);
 bool cc_library_builtin_is_known(const char *name) { (void)name; return false; }
 int main(void) {
@@ -99,6 +99,8 @@ int main(void) {
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--sanitize', action='store_true')
 args = parser.parse_args()
+subprocess.run(['make', '-C', str(Path(R) / 'src'), '-j', '6',
+                'OUT=' + BUILD, 'builtin-registrations'], check=True)
 with tempfile.TemporaryDirectory(prefix='vcc-emit-names-') as tmp:
     source = Path(tmp) / 'test.c'
     binary = Path(tmp) / 'test'
@@ -106,7 +108,9 @@ with tempfile.TemporaryDirectory(prefix='vcc-emit-names-') as tmp:
     for program in (SOURCE, BUILTINS):
         source.write_text(program)
         command = [llvm('clang'), '-std=c11', '-D_GNU_SOURCE', '-O1', '-ffunction-sections',
-                   '-fdata-sections', '-I' + str(Path(R) / 'src'), '-I' + str(Path(R) / 'src' / 'include'), *flags, str(source),
+                   '-fdata-sections', '-I' + str(Path(R) / 'src'),
+                   '-I' + str(Path(R) / 'src' / 'include'),
+                   '-I' + str(Path(BUILD) / 'generated' / 'include'), *flags, str(source),
                    ('-Wl,-dead_strip' if platform.system() == 'Darwin' else '-Wl,--gc-sections'),
                    '-o', str(binary)]
         subprocess.run(command, check=True)

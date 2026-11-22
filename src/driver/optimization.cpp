@@ -6,8 +6,8 @@
  * -fno-NAME says otherwise (the last one given wins, wherever -O stands).  doc/OPTIMIZATION.md
  * is the same in prose, with what a level contains that has no option.
  *
- *   -O0            nothing: the direct emitter, every local in its frame slot
- *   -O1 -Og -O     the direct emitter with its folds and record clean-ups
+ *   -O0            VIR with its required construction passes
+ *   -O1 -Og -O     VIR and the walker's local optimizations
  *   -O2 -Os -Oz    functions go through VIR (codegen/vir/); what VIR cannot build is -O1's code
  *   -O3 -Ofast     ... with the loop vectorizer
  *
@@ -131,9 +131,7 @@ VPRIV cc_optimizations driver_optimization_resolve(const struct driver_job *job)
         on[i] = job->optimization[i]
                     ? job->optimization[i] > 0
                     : job->optimization_level >= driver_optimizations[i].level;
-    /* VIR is -O2's code generator: an option does not bring it to a lower level, and without
-	   it there is nothing for the other rows to work on */
-    vir = on[DRIVER_OPT_vir] && job->optimization_level >= 2;
+    vir = on[DRIVER_OPT_vir];
     cc_optimizations result = {
 #define X(field, name, level) .field = vir && on[DRIVER_OPT_##field],
         CC_OPTIMIZATIONS(X)

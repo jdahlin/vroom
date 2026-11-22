@@ -21,7 +21,7 @@ CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want,
 }
 
 static const cc_builtin cc_builtin_table[] = {
-#include "target-builtins.inc"
+#include "frontend/c/target-builtins.inc"
     {"__builtin_ia32_pblendvb128", CC_BUILTIN_X86_BLENDVB, 1, "BBBB"},
     {"__builtin_elementwise_abs", CC_BUILTIN_ELEMENTWISE_ABS, 1, "i."},
     {"__builtin_elementwise_min", CC_BUILTIN_ELEMENTWISE_MIN, 1, "i."},
@@ -627,7 +627,7 @@ CC_PRIVATE const cc_builtin *cc_builtin_lookup(uint32_t id)
     return i ? &cc_builtin_table[i - 1] : NULL;
 }
 
-#include "builtin-stubs.inc"
+#include "frontend/c/builtin-stubs.inc"
 
 /* Search only when a call failed the normal builtin and library lookup. */
 CC_PRIVATE bool cc_builtin_stub_known(cc *c, uint32_t id)

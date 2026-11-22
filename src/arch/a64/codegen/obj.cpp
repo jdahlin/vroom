@@ -163,7 +163,9 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
         bool sub = i->opcode == A64_OP_SUBI || i->opcode == A64_OP_SUBSI;
         unsigned n;
 
-        if (v < 0 && v != INT64_MIN) {
+        /* Flipping ADD/SUB at signed minimum changes the overflow flag. */
+        if (v < 0 && v != INT64_MIN &&
+            (sf || !flags || (uint32_t)v != UINT32_C(0x80000000))) {
             v = -v;
             sub = !sub;
         }

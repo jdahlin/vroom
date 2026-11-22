@@ -78,7 +78,7 @@ VCC_SAN   ?=
 VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
 # include/: the headers other modules include (common/region.h, frontend/pp/pp.h, ...)
-VCC_INC    = -I$(abspath include)
+VCC_INC    = -I$(abspath include) -I$(abspath $(OUT)/generated/include)
 VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
@@ -253,12 +253,22 @@ $(OUT)/clang-builtin-reader: $(CLANG_BUILTIN_READER_SRC) tools/clang-builtins/re
 .PHONY: clang-builtin-reader clang-builtin-reader-check builtin-registrations
 clang-builtin-reader: $(OUT)/clang-builtin-reader
 
-clang-builtin-reader-check: clang-builtin-reader
+clang-builtin-reader-check: clang-builtin-reader $(BUILTIN_GENERATED)
 	python3 ../bench/vcc-builtins.py --check-clang-reader --clang-reader $(OUT)/clang-builtin-reader
-	python3 tools/gen-builtin-registrations.py --check --reader $(OUT)/clang-builtin-reader
+	python3 tools/gen-builtin-registrations.py --check --reader $(OUT)/clang-builtin-reader \
+		--output-root $(OUT)/generated/include
 
-builtin-registrations: clang-builtin-reader
-	python3 tools/gen-builtin-registrations.py --reader $(OUT)/clang-builtin-reader
+BUILTIN_TD = $(wildcard ../contrib/clang-builtins/clang/include/clang/Basic/*.td)
+BUILTIN_GENERATED = $(OUT)/generated/include/frontend/integer-builtins.inc \
+	$(OUT)/generated/include/frontend/c/target-builtins.inc \
+	$(OUT)/generated/include/frontend/c/builtin-stubs.inc
+$(BUILTIN_GENERATED) &: $(OUT)/clang-builtin-reader tools/gen-builtin-registrations.py $(BUILTIN_TD)
+	python3 tools/gen-builtin-registrations.py --reader $(OUT)/clang-builtin-reader \
+		--output-root $(OUT)/generated/include
+
+builtin-registrations: $(BUILTIN_GENERATED)
+
+$(OBJ)/unity/cc.o $(call o,$(cc_SRC)) $(OBJ)/unity/cplusplus.o $(call o,$(cplusplus_SRC) $(cxxlower_SRC)): $(BUILTIN_GENERATED)
 
 # viralloc: VIR register allocation with a synthetic target (PLAN-vir.md V4)
 VIRALLOC_SRC = $(VIRA_SRC) vir/synthetic-target.cpp

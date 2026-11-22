@@ -177,6 +177,7 @@ def main():
         variants = [
             ('O0', ['-O0'], False),
             ('O1', ['-O1'], True),
+            ('direct-O1', ['-O1', '-fno-vir'], True),
             ('O2', ['-O2'], True),
             ('O3', ['-O3'], True),
             ('no-cfi', ['-O2', '-fno-asynchronous-unwind-tables'], True),
@@ -192,9 +193,8 @@ def main():
             for function in ['fl_literal', 'fl_empty', 'fl_callee', 'fl_other_literal']:
                 if framed(body(text, function)) == omit:
                     raise RuntimeError(f'{name}: wrong frame policy for {function}')
-            # VIR (-O2 and up) omits the frame of these too, as clang -O2 does: it reads stack
-            # arguments from %rsp and aligns a call with subq; the direct emitter keeps a frame
-            vir = omit and flags[0] in ('-O2', '-O3')
+            # VIR reads stack arguments from %rsp and aligns calls with subq.
+            vir = omit and '-fno-vir' not in flags
             for function in ['fl_parameter', 'fl_stack', 'fl_call']:
                 if vir and framed(body(text, function)):
                     raise RuntimeError(f'{name}: VIR kept a frame in {function}')

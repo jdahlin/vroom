@@ -415,7 +415,9 @@ def sample_calls(clang, vpp, tables):
 
 def check_integer_arity(clang, vpp):
     generator = ROOT / 'src/tools/gen-builtin-tests.py'
-    source = subprocess.check_output([sys.executable, str(generator), '--invalid-arity'],
+    registry = vpp.resolve().parent / 'generated/include/frontend/integer-builtins.inc'
+    source = subprocess.check_output([sys.executable, str(generator), '--invalid-arity',
+                                     '--registry', str(registry)],
                                      text=True)
     expected = set(range(1, len(source.splitlines()) + 1))
     with tempfile.TemporaryDirectory() as directory:
