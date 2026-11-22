@@ -13,10 +13,18 @@ _Static_assert(__has_constexpr_builtin(__builtin_abs), "claim");
 _Static_assert(__has_constexpr_builtin(__builtin_llabs), "claim");
 #endif
 
+/* the string comparisons of literals fold too (their results are -1, 0, 1) */
+_Static_assert(__builtin_strcmp("abc", "abd") < 0, "strcmp");
+_Static_assert(__builtin_strcmp("abc", "abc") == 0, "strcmp equal");
+_Static_assert(__builtin_strncmp("abcx", "abcy", 3) == 0, "strncmp");
+_Static_assert(__builtin_memcmp("a\0b", "a\0c", 3) < 0, "memcmp");
+static int compare_table[2 + __builtin_strcmp("a", "b")];
+
 int main(void)
 {
     volatile int runtime = -9;
-    if (A != 4 || sizeof table != 5 * sizeof(int) || global != 6)
+    if (A != 4 || sizeof table != 5 * sizeof(int) || global != 6 ||
+        sizeof compare_table != 1 * sizeof(int))
         return 1;
     if (__builtin_abs(runtime) != 9)
         return 2;

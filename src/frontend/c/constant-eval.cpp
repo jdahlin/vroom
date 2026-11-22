@@ -625,6 +625,20 @@ CC_PRIVATE void cc_constexpr_conversion_check(cc *c, uint32_t n,
     }
 }
 
+/* the bytes of a narrow string literal n is (through its conversions) and
+   how many, the terminator included; false: n is something else */
+static bool cc_string_literal_bytes(cc *c, uint32_t n, const unsigned char **s,
+                                    uint32_t *count)
+{
+    while (AST_NODE(n)->op == AST_NODE_CAST)
+        n = AST_NODE(n)->a;
+    if (AST_NODE(n)->op != AST_NODE_STRING || c->strs[AST_NODE(n)->a].esz != 1)
+        return false;
+    *s = (const unsigned char *)c->strs[AST_NODE(n)->a].s;
+    *count = c->strs[AST_NODE(n)->a].n;
+    return true;
+}
+
 /*
  * A call of a C library function that clang folds as the builtin it is: the
  * fold table's row for __builtin_NAME (frontend/builtin-fold.h) says whether
@@ -682,6 +696,41 @@ static bool cc_library_call_fold(cc *c, const node *x, cc_value *v)
         v->kind = CC_VALUE_INTEGER;
         v->ice = false;
         v->i = (i128)strlen(c->strs[AST_NODE(s)->a].s);
+        return true;
+    }
+    case vfold_strcmp:
+    case vfold_strncmp:
+    case vfold_memcmp: {
+        const unsigned char *p, *q;
+        uint32_t np, nq;
+        u128 limit = ~(u128)0;
+        bool ice = true;
+
+        if (x->c != 2 + (row->op != vfold_strcmp) ||
+            !cc_string_literal_bytes(c, arg[0], &p, &np) ||
+            !cc_string_literal_bytes(c, arg[1], &q, &nq))
+            return false;
+        if (row->op != vfold_strcmp) {
+            if (!cc_constant_eval(c, arg[2], &a) || a.kind != CC_VALUE_INTEGER)
+                return false;
+            limit = (u128)a.i;
+            ice = a.ice;
+        }
+        v->kind = CC_VALUE_INTEGER;
+        v->ice = ice;
+        v->i = 0;
+        for (u128 i = 0; i < limit; i++) {
+            if (i >= np || i >= nq)
+                return false; /* reads past an array: not a constant */
+            if (p[i] != q[i]) {
+                v->i = -1;
+                if (p[i] > q[i])
+                    v->i = 1;
+                return true;
+            }
+            if (!p[i] && row->op != vfold_memcmp)
+                break;
+        }
         return true;
     }
     case vfold_absolute: {

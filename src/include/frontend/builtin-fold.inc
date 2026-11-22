@@ -101,9 +101,9 @@ BUILTIN_FOLD("__builtin_neon_vsubh_f16", fp16_arithmetic, VFOLD_BOTH)
 
 /* the string and memory functions on arrays of constants */
 BUILTIN_FOLD("__builtin_strlen", strlen, VFOLD_BOTH)
-BUILTIN_FOLD("__builtin_strcmp", strcmp, VFOLD_CXX)
-BUILTIN_FOLD("__builtin_strncmp", strncmp, VFOLD_CXX)
-BUILTIN_FOLD("__builtin_memcmp", memcmp, VFOLD_CXX)
+BUILTIN_FOLD("__builtin_strcmp", strcmp, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_strncmp", strncmp, VFOLD_BOTH)
+BUILTIN_FOLD("__builtin_memcmp", memcmp, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_memchr", memchr, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_char_memchr", memchr, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_wcslen", wcslen, VFOLD_CXX)
