@@ -673,7 +673,7 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
     bool constant = false, value = false;
     VTRY(r, bool_constant_expression(n, n[2], constant, value));
     if (!constant)
-        return not_supported(n, "expr.const");
+        return not_supported(n, expr_const_reason());
     if (!value)
         return ill_formed(n,
                           "if the value of the expression when so converted "
@@ -1870,7 +1870,7 @@ analysis_result semantic_analysis::declare_with_initializer(
             !(element == type);
         if (!value.node) {
             if (s.constexpr_)
-                return not_supported(declaration, "expr.const");
+                return not_supported(declaration, expr_const_reason());
         } else if (of_class ||
                    type_table[type.unqualified()].kind == type_kind::complex) {
             /* an object of class type: the evaluator checks that its
@@ -1882,7 +1882,7 @@ analysis_result semantic_analysis::declare_with_initializer(
                 constness c = evaluate_variable(type, value.node,
                                                 semantics[value.node].at, data);
                 if (c == constness::unknown)
-                    return not_supported(declaration, "expr.const");
+                    return not_supported(declaration, expr_const_reason());
                 if (c == constness::not_constant)
                     value.evaluation = constness::not_constant;
                 /* [basic.start.static]/2: constant initialization, its

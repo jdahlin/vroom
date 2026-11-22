@@ -280,7 +280,22 @@ void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
 
 } // namespace
 
+/* the function being defined, last_declared, holds the reason a refused
+   body gives: a constant expression that calls it is refused for that */
 analysis_result semantic_analysis::analyse_function_body(
+    SyntaxRef definition, SyntaxElement compound, SyntaxElement ctor_init)
+{
+    entity_index f = last_declared;
+    size_t before = unsupported.size();
+    analysis_result result =
+        analyse_function_body_of(definition, compound, ctor_init);
+    if (result == analysis_result::unsupported && unsupported.size() > before &&
+        f && !entity_table[f].held_because)
+        entity_table[f].held_because = unsupported[before].subclause;
+    return result;
+}
+
+analysis_result semantic_analysis::analyse_function_body_of(
     SyntaxRef definition, SyntaxElement compound, SyntaxElement ctor_init)
 {
     entity_index f = last_declared;
