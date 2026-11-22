@@ -356,11 +356,11 @@ to) and the `body` flag on the spelling's row in the builtin table.
   AST per TU was left out: the parse is shorter than the cloning with local
   remapping a cached tree would need.
 - **Binding.**  `cc_body_bindings` rows name a spelling, a parameter string,
-  the parameter names, the text and where `T` comes from.  `T` is a typedef
+  the parameter names, the text and where `__T` comes from.  `__T` is a typedef
   the mechanism declares for the body: the builtin's result type (the
   signature's first letter), so `addc`, `addcl`, `addcll` and the `b`/`s`
   forms share one text, or the type of the first argument (`iszero`,
-  `stdc_count_ones`); for those `N` is the argument type's precision as an
+  `stdc_count_ones`); for those `__N` is the argument type's precision as an
   `int` constant.  A spelling's row in `builtin-table.cpp` keeps its name,
   `__has_builtin` flag and signature; `body` marks it.  A binding may be
   skipped on a target whose code generator lowers the builtin better itself

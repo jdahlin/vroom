@@ -181,7 +181,8 @@ struct cc {
     uint32_t *
         switch_cases; /* AST_NODE_CASE/AST_NODE_DEFAULT nodes of the innermost switch */
     int in_loop, in_switch, in_stmtexpr;
-    bool sw_default;              /* the innermost switch has a default label */
+    int in_body;     /* parsing a builtin's C body (builtin-body.cpp) */
+    bool sw_default; /* the innermost switch has a default label */
     struct cc_switch_case *cases; /* the open switches' case labels */
     uint32_t ncase, capcase, case_base;
     ast_qualified_type switch_ty;
@@ -299,8 +300,6 @@ enum {
     CC_BUILTIN_CLZG,
     CC_BUILTIN_CTZG,
     CC_BUILTIN_POPCOUNTG,
-    CC_BUILTIN_STDC_COUNT_ONES,
-    CC_BUILTIN_STDC_TRAILING_ZEROS,
     CC_BUILTIN_SHUFFLEVECTOR,
     CC_BUILTIN_CONVERTVECTOR,
     CC_BUILTIN_BSWAP16,
@@ -420,8 +419,7 @@ enum {
     CC_BUILTIN_NANS,
     CC_BUILTIN_ISSIGNALING,
     CC_BUILTIN_ISFPCLASS,
-    CC_BUILTIN_ISSUBNORMAL,
-    CC_BUILTIN_ISZERO,
+    CC_BUILTIN_BODY, /* has a C body (builtin-body.cpp): substituted at the call, never reaches a code generator */
     CC_BUILTIN_X86_SIMD,
     CC_BUILTIN_X86_PCMPSTR,
     CC_BUILTIN_X86_BLENDVB,

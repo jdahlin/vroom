@@ -833,6 +833,13 @@ cc_primary_symbol_build(cc *c, uint32_t s, uint32_t id, uint32_t loc)
             AST_NODE(n)->aux |= AST_NUMBER_ENUMERATOR;
         return n;
     }
+    if (unlikely(y->kind == AST_SYMBOL_BODY_ARGUMENT)) {
+        /* a builtin body's parameter: a copy of the argument's node */
+        uint32_t n = cc_node_new(c, AST_NODE_NONE, y->ty, loc);
+
+        *AST_NODE(n) = *AST_NODE(y->body);
+        return n;
+    }
     if (unlikely(y->kind == AST_SYMBOL_TYPEDEF))
         cc_report_fatal(c, loc,
                         "unexpected type name '%.*s': expected expression",
@@ -1076,7 +1083,9 @@ CC_PRIVATE uint32_t cc_parenthesized_parse(cc *c, uint32_t loc)
                                         "pedantic", NULL};
         bool mac = tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO;
 
-        if (!(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO))
+        if (unlikely(c->in_body)) {
+            /* (a builtin's body is vcc's own text: no extension to report) */
+        } else if (!(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO))
             CC_REPORT_EXTENSION(c, "gnu-statement-expression",
                                 cc_warning_group_gnu, tok(c)->loc,
                                 "use of GNU statement expression extension");

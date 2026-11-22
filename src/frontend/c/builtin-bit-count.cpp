@@ -1,4 +1,4 @@
-/* vcc front end: popcount, clz, ctz and the stdc_ bit operations lowered to ordinary code; see builtin-table.c for where a builtin's other facts live */
+/* vcc front end: popcount, clz and ctz (the generic forms) lowered to ordinary code; see builtin-table.c for where a builtin's other facts live */
 #include "cc-internal.h"
 
 /* A fixed-width bit operation used by the generic forms. */
@@ -190,12 +190,7 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
     uint32_t x, fb = 0;
     ast_qualified_type xt;
 
-    bool stdc = id == CC_BUILTIN_STDC_COUNT_ONES ||
-                id == CC_BUILTIN_STDC_TRAILING_ZEROS;
-    if (stdc)
-        id = id == CC_BUILTIN_STDC_COUNT_ONES ? CC_BUILTIN_POPCOUNTG
-                                              : CC_BUILTIN_CTZG;
-    unsigned maxargs = stdc || id == CC_BUILTIN_POPCOUNTG ? 1 : 2;
+    unsigned maxargs = id == CC_BUILTIN_POPCOUNTG ? 1 : 2;
     cc_builtin_arguments_parse(c, &args);
     if (!args.n || args.n > maxargs) {
         cc_builtin_arity_check(c, loc, args.n ? maxargs : 1, &args);
@@ -203,9 +198,7 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
     }
     x = cc_conversion_decay(c, args.v[0]);
     xt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(x)->ty);
-    if (!cc_type_is_integer(c, xt) || cc_type_is_signed(c, xt) ||
-        (stdc && (AST_TYPE_KIND(c, xt) == AST_TYPE_BOOL ||
-                  AST_TYPE_KIND(c, xt) == AST_TYPE_ENUM))) {
+    if (!cc_type_is_integer(c, xt) || cc_type_is_signed(c, xt)) {
         cc_report_error(c, AST_NODE(x)->loc,
                         "1st argument must be a scalar unsigned integer type");
         return cc_node_integer_new(c, 0, cc_type_basic(AST_TYPE_INT), loc);
@@ -221,14 +214,13 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc)
         }
         fb = cc_conversion_apply(c, y, cc_type_basic(AST_TYPE_INT));
     }
-    return cc_builtin_bit_count_lower(c, id, stdc, x, fb, loc);
+    return cc_builtin_bit_count_lower(c, id, x, fb, loc);
 }
 
 /* the generic bit count of x (an unsigned integer, decayed), fb its value for 0 (0: none; an int), from
    nodes: C's builtin call above, C++'s */
-CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id, bool stdc,
-                                               uint32_t x, uint32_t fb,
-                                               uint32_t loc)
+CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id, uint32_t x,
+                                               uint32_t fb, uint32_t loc)
 {
     ast_qualified_type xt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(x)->ty);
     unsigned bits = AST_TYPE_KIND(c, xt) == AST_TYPE_BOOL
@@ -239,13 +231,8 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id, bool stdc,
                                  : 32;
     uint32_t r, pre, fbpre = 0;
 
-    if (stdc && id == CC_BUILTIN_CTZG)
-        fb = cc_node_integer_new(c, bits, cc_type_basic(AST_TYPE_INT), loc);
     if (bits > 128) {
-        r = cc_builtin_bit_count_bitint(c, id, x, fb, bits, loc);
-        return stdc ? cc_conversion_apply(c, r,
-                                          cc_type_basic(AST_TYPE_UNSIGNED_INT))
-                    : r;
+        return cc_builtin_bit_count_bitint(c, id, x, fb, bits, loc);
     }
     x = cc_lowering_once(c, x, &pre);
     if (fb)
@@ -301,13 +288,7 @@ CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id, bool stdc,
             cc_binary_build(c, LEX_TOKEN_EXCLAMATION_EQUAL, x,
                             cc_node_integer_new(c, 0, xt, loc), loc),
             r, fb, loc);
-    return cc_lowering_sequence(
-        c, pre,
-        cc_lowering_sequence(
-            c, fbpre,
-            stdc ? cc_conversion_apply(c, r,
-                                       cc_type_basic(AST_TYPE_UNSIGNED_INT))
-                 : r));
+    return cc_lowering_sequence(c, pre, cc_lowering_sequence(c, fbpre, r));
 }
 
 /* Generic rotations preserve the first operand's type and evaluate each
