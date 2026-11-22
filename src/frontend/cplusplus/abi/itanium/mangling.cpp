@@ -471,9 +471,8 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         return constraint_expression(t, c[0]) && constraint_expression(t, c[2]);
     }
     case syntax_kind::requires_expression: {
-        /* [abi:expressions]:
-           <requires-expr> ::= rq <requirement>+ E  (no parameter list)
-           <simple-requirement> ::= X <expression> */
+        /* [abi:expressions]: requires-expression without parameter list
+           ("rq" <requirement>+ "E"), simple-requirement ("X" <expression>) */
         if (c.size() != 2)
             return false;
         SyntaxElement body = c[1];
