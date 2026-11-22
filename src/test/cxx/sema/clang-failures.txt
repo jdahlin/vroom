@@ -79,6 +79,70 @@ layout SemaCXX/alignment-of-derived-class.cpp -std=c++11: 39: layout of `B4`: si
 layout SemaCXX/alignment-of-derived-class.cpp -std=c++11: 48: layout of `B5`: sizeof, dsize, align (16, 0, 16), clang (1, 0, 1)
 layout SemaCXX/alignment-of-derived-class.cpp -std=c++11: 53: layout of `B6`: sizeof, dsize, align (32, 0, 32), clang (1, 0, 1)
 layout SemaCXX/alignment-of-derived-class.cpp -std=c++11: 7: layout of `A`: sizeof, dsize, align (16, 16, 16), clang (1, 1, 1)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=14 -Wno-invalid-offsetof: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=14 -Wno-invalid-offsetof: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=14 -Wno-invalid-offsetof: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=14 -Wno-invalid-offsetof: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=14 -Wno-invalid-offsetof: 700: layout of `cxx11_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=14 -Wno-invalid-offsetof: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=15 -Wno-invalid-offsetof: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=15 -Wno-invalid-offsetof: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=15 -Wno-invalid-offsetof: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=15 -Wno-invalid-offsetof: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=15 -Wno-invalid-offsetof: 700: layout of `cxx11_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=15 -Wno-invalid-offsetof: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: 700: layout of `cxx11_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=6 -Wno-invalid-offsetof: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=6 -Wno-invalid-offsetof: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=6 -Wno-invalid-offsetof: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=6 -Wno-invalid-offsetof: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=6 -Wno-invalid-offsetof: 700: layout of `cxx11_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=6 -Wno-invalid-offsetof: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=14: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=14: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=14: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=14: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=14: 700: layout of `cxx11_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=14: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=15: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=15: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=15: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=15: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=15: 700: layout of `cxx11_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=15: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: 700: layout of `cxx11_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=6: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=6: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=6: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=6: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=6: 700: layout of `cxx11_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=6: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: 700: layout of `cxx11_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-c++11-extensions -Wno-invalid-offsetof: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-c++11-extensions -Wno-invalid-offsetof: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-c++11-extensions -Wno-invalid-offsetof: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-c++11-extensions -Wno-invalid-offsetof: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-c++11-extensions -Wno-invalid-offsetof: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-offsetof -Wno-c++11-extensions: 455: layout of `PR16537::test13::might_use_tail_padding`: base 16 PR16537::test13::C, clang base 0 PR16537::test13::D
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-offsetof -Wno-c++11-extensions: 650: layout of `non_pod::t2`: sizeof, dsize, align (8, 8, 1), clang (12, 12, 4)
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-offsetof -Wno-c++11-extensions: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-offsetof -Wno-c++11-extensions: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
+layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-offsetof -Wno-c++11-extensions: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
 layout SemaCXX/constant-expression-cxx14.cpp -std=c++14 -Werror=return-type: 575: layout of `loops::ignore`: sizeof, dsize, align (1, 1, 1), clang (1, 0, 1)
 layout SemaCXX/constant-expression-cxx14.cpp -std=c++20 -Werror=return-type: 575: layout of `loops::ignore`: sizeof, dsize, align (1, 1, 1), clang (1, 0, 1)
 layout SemaCXX/constant-expression-cxx14.cpp -std=c++23 -Werror=return-type: 575: layout of `loops::ignore`: sizeof, dsize, align (1, 1, 1), clang (1, 0, 1)
@@ -1628,6 +1692,18 @@ types SemaCXX/bitfield.cpp -std=gnu++17 -Wms-bitfield-padding: 31:41: `+ ( t . n
 types SemaCXX/bitfield.cpp -std=gnu++17 -Wms-bitfield-padding: 32:41: `+ ( t . n -- )` is no `int`
 types SemaCXX/bitfield.cpp -std=gnu++17: 31:41: `+ ( t . n ++ )` is no `int`
 types SemaCXX/bitfield.cpp -std=gnu++17: 32:41: `+ ( t . n -- )` is no `int`
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=14 -Wno-invalid-offsetof: 658:39: `_Alignof ( t2 ) == 1` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=14 -Wno-invalid-offsetof: 658:39: `_Alignof ( t2 )` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=15 -Wno-invalid-offsetof: 658:39: `_Alignof ( t2 ) == 1` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=15 -Wno-invalid-offsetof: 658:39: `_Alignof ( t2 )` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=6 -Wno-invalid-offsetof: 658:39: `_Alignof ( t2 ) == 1` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=6 -Wno-invalid-offsetof: 658:39: `_Alignof ( t2 )` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=14: 658:39: `_Alignof ( t2 ) == 1` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=14: 658:39: `_Alignof ( t2 )` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=15: 658:39: `_Alignof ( t2 ) == 1` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=15: 658:39: `_Alignof ( t2 )` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=6: 658:39: `_Alignof ( t2 ) == 1` is not the constant 1ULL
+types SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=6: 658:39: `_Alignof ( t2 )` is not the constant 1ULL
 types SemaCXX/complex-folding.cpp -std=c++1z: 65:52: `__real__ ( InfInf )` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::const_<float>>`
 types SemaCXX/complex-folding.cpp -std=c++1z: 66:52: `__imag__ ( InfInf )` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::const_<float>>`
 types SemaCXX/constant-expression-cxx11.cpp -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include: 1405:46: `__real test3` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::const_<double>>`
@@ -1817,6 +1893,11 @@ verdict SemaCXX/builtin-object-size-cxx14.cpp -std=c++2b: ill-formed for us, acc
 verdict SemaCXX/builtins-elementwise-math.cpp -std=c++17 -pedantic: ill-formed for us, accepted by clang: line 29 (6 declarations)
 verdict SemaCXX/builtins.cpp -std=c++11: ill-formed for us, accepted by clang: line 82 (4 declarations)
 verdict SemaCXX/builtins.cpp -std=c++1z: ill-formed for us, accepted by clang: line 82 (5 declarations)
+verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: ill-formed for us, accepted by clang: line 661 (1 declarations)
+verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: ill-formed for us, accepted by clang: line 661 (1 declarations)
+verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: ill-formed for us, accepted by clang: line 661 (1 declarations)
+verdict SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-c++11-extensions -Wno-invalid-offsetof: ill-formed for us, accepted by clang: line 661 (1 declarations)
+verdict SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-offsetof -Wno-c++11-extensions: ill-formed for us, accepted by clang: line 661 (1 declarations)
 verdict SemaCXX/constant-expression-cxx11.cpp -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include: ill-formed for us, accepted by clang: line 1597 (2 declarations)
 verdict SemaCXX/constant-expression-cxx11.cpp -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include: ill-formed for us, accepted by clang: line 1455 (3 declarations)
 verdict SemaCXX/constant-expression-cxx11.cpp -std=c++23 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include: ill-formed for us, accepted by clang: line 1455 (3 declarations)

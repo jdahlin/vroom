@@ -681,9 +681,11 @@ void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
                                   syntax_kind_name(tree[u.node].kind),
                                   at.file_name, at.line, at.column);
             /* the form that has no rules (a name and why, or the
-               construct's first tokens), after a tab */
-            if (*u.detail)
-                vbuffer_format_append(out, "\t%s", u.detail);
+               construct's first tokens), after a tab, then the file and line of
+               the check that refused it */
+            vbuffer_format_append(out, "\t%s", u.detail);
+            /* the check in vcc that refused it */
+            vbuffer_format_append(out, "\t%s:%u", u.file, u.line);
             vbuffer_string_append(out, "\n");
         }
     }

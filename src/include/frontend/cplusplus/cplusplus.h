@@ -650,10 +650,16 @@ class source_files
        evaluation was seen (#pragma STDC, float_control, fenv_access,
        clang fp): constant evaluation leaves floating-point values unknown */
     bool floating_point_pragma = false;
-    /* a pragma that changes the layout of classes was seen (#pragma pack,
-       ms_struct, options align): analysis has no rules for them, so the
-       classes of the translation unit are not laid out */
+    /* a pragma that changes the layout of classes is in effect here
+       (#pragma pack with a value, ms_struct on, options align): analysis
+       has no rules for them, so the classes in a region of one are not laid
+       out.  The preprocessor keeps the state (layout_pragma_directive); the
+       token stream records where it changes. */
     bool layout_pragma = false;
+    bool pack_pragma = false;
+    bool ms_struct_pragma = false;
+    bool other_layout_pragma = false;
+    owned_array<bool> pack_stack;
     /* text that is not a file: the predefined macros, the command line's,
        or a preprocessing token phase 4 spelled ("<scratch space>") */
     entry &add_text(const char *name, const char *text, size_t length,
@@ -1072,6 +1078,8 @@ class preprocessor
     void rest_of_line(source_location from, owned_buffer &out);
     void directive_error(const preprocessing_token &name, bool warning);
     void directive_pragma(const preprocessing_token &name);
+    void layout_pragma_directive(const preprocessing_token *tokens,
+                                 size_t count);
     void execute_pragma(const preprocessing_token *tokens, size_t count,
                         source_location at);
     void pragma_message(const preprocessing_token *tokens, size_t count,
