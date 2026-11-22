@@ -2010,7 +2010,6 @@ verdict SemaTemplate/default-arguments-cxx0x.cpp -std=c++14: ill-formed for us, 
 verdict SemaTemplate/default-arguments-cxx0x.cpp -std=c++20: ill-formed for us, accepted by clang: line 40 (1 declarations)
 verdict SemaTemplate/default-expr-arguments.cpp -std=c++11: ill-formed for us, accepted by clang: line 43 (1 declarations)
 verdict SemaTemplate/default-expr-arguments.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 43 (1 declarations)
-verdict SemaTemplate/dependent-base-classes.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 145 (1 declarations)
 verdict SemaTemplate/instantiate-member-template.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 255 (1 declarations)
 verdict SemaTemplate/nested-implicit-deduction-guides.cpp -std=c++20: ill-formed for us, accepted by clang: line 13 (5 declarations)
 verdict SemaTemplate/operator-template.cpp -std=c++2a: ill-formed for us, accepted by clang: line 25 (1 declarations)

@@ -245,9 +245,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     friend_allowed = outer;
     if (r != analysis_result::well_formed)
         return r;
-    /* (inline or constexpr only on a definition here) */
-    if (!s.friend_ || s.typedef_ || s.static_ || s.extern_ ||
-        ((s.inline_ || s.constexpr_) && !defines) || s.virtual_ ||
+    if (!s.friend_ || s.typedef_ || s.static_ || s.extern_ || s.virtual_ ||
         s.declares_class || s.declares_enumeration || !s.has_type)
         return not_supported(n, "class.friend");
     qualified_type type = s.type;
@@ -341,10 +339,21 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         if (entity_table[befriended].defined)
             return not_supported(n, "basic.def.odr");
         entity_table[befriended].inline_ = true;
-        if (s.constexpr_)
-            entity_table[befriended].constexpr_ = true;
         bodies.append(n);
         friend_definitions.append({n, befriended, c});
+    }
+    /* [dcl.inline]: a function is inline once a declaration says so;
+       [dcl.constexpr]/1: constexpr implies inline, and every declaration
+       of the function must have it */
+    if (s.inline_)
+        entity_table[befriended].inline_ = true;
+    if (entity_table[befriended].first_declaration) {
+        VTRY(c1, constexpr_redeclaration(m.id, befriended, s.constexpr_));
+    }
+    if (s.constexpr_) {
+        entity_table[befriended].inline_ = true;
+        entity_table[befriended].constexpr_ = true;
+        entity_table[befriended].immediate = s.consteval_;
     }
     if (m.operator_function) {
         VTRY(o, operator_function_declaration(n, befriended));
