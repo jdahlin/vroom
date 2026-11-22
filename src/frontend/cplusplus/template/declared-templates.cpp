@@ -240,12 +240,22 @@ semantic_analysis::deduction_guide_candidate(TemplateDeclaration t,
     current_scope = outer;
     if (r != analysis_result::well_formed)
         return r;
+    if (index != function_templates.size()) {
+        index = static_cast<uint32_t>(function_templates.size());
+        for (size_t i = 0; i < parameters.size(); i++) {
+            entity_index e = template_parameter_entities[first + i];
+            if (entity_table[e].kind != entity_kind::template_entity)
+                entity_table[e].instantiation = index + 1;
+        }
+    }
     function_template record =
         new_template(tokens.identifier(guide_parts_of(n).name), outer, t, index,
                      first, static_cast<uint32_t>(parameters.size()));
     record.declarator = n;
     record.guide_of = ct;
     entity_table[record.entity].type = type;
+    if (!is_namespace(outer))
+        entity_table[record.entity].inline_ = true;
     function_templates.append(record);
     return analysis_result::well_formed;
 }
@@ -1153,6 +1163,14 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
     }
     if (r != analysis_result::well_formed)
         return r;
+    if (index != function_templates.size()) {
+        index = static_cast<uint32_t>(function_templates.size());
+        for (size_t i = 0; i < parameters.size(); i++) {
+            entity_index e = template_parameter_entities[first + i];
+            if (entity_table[e].kind != entity_kind::template_entity)
+                entity_table[e].instantiation = index + 1;
+        }
+    }
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     entity_table[record.entity].defined = true;

@@ -115,30 +115,50 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             return false;
         entity_index pt = specialized_template(pr.entity);
         entity_index at = specialized_template(ar.entity);
+        bool ttp_trailing_pack = false;
+        uint32_t ttp_fixed = 0;
         if (template_template_parameter(pt)) {
-            /* a pack among its arguments (TT<T, Rest...>), whose template
-               may take fewer parameters: not analysed */
-            for (uint32_t i = 0; i < specialization_argument_count(pr.entity);
-                 i++)
-                if (specialization_template_argument(pr.entity, i).kind ==
-                    template_argument::kind_t::pack) {
-                    deduction_unknowns++;
-                    return false;
-                }
-            /* /8's TT<T>: TT a template template-parameter, deduced as
-               A's template when their parameters are the same
-               ([temp.arg.template]/3's matching, nothing more) */
+            /* /8's TT<T> or TT<T, Rest...>: TT a template template-parameter,
+               deduced as A's template when their parameters match
+               ([temp.arg.template]/3) */
             const function_template x =
                 function_templates[entity_table[pt].instantiation - 1];
             const function_template y =
                 function_templates[entity_table[at].instantiation - 1];
             uint64_t k = entity_table[pt].value;
-            if (y.is_parameter || y.primary ||
-                x.parameter_count != y.parameter_count ||
-                !same_template_parameters(x.first_parameter, y.first_parameter,
-                                          x.parameter_count) ||
-                k >= deduced.size())
+            bool x_has_pack = x.parameter_count > 0 &&
+                              template_parameter_is_pack(x.first_parameter +
+                                                         x.parameter_count - 1);
+            if (y.is_parameter || y.primary || k >= deduced.size())
                 return false;
+            if (x_has_pack) {
+                uint32_t fixed = x.parameter_count - 1;
+                if (y.parameter_count < fixed ||
+                    !same_template_parameters(x.first_parameter,
+                                              y.first_parameter, fixed))
+                    return false;
+                for (uint32_t j = fixed; j < y.parameter_count; j++) {
+                    entity_index pe =
+                        template_parameter_entities[y.first_parameter + j];
+                    if (entity_table[pe].kind != entity_kind::typedef_name)
+                        return false;
+                }
+                ttp_trailing_pack = true;
+                ttp_fixed = fixed;
+            } else {
+                for (uint32_t i = 0;
+                     i < specialization_argument_count(pr.entity); i++)
+                    if (specialization_template_argument(pr.entity, i).kind ==
+                        template_argument::kind_t::pack) {
+                        deduction_unknowns++;
+                        return false;
+                    }
+                if (x.parameter_count != y.parameter_count ||
+                    !same_template_parameters(x.first_parameter,
+                                              y.first_parameter,
+                                              x.parameter_count))
+                    return false;
+            }
             template_argument named;
             named.kind = template_argument::kind_t::template_name;
             named.value = at;
@@ -151,6 +171,35 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         }
 
         uint32_t count = specialization_argument_count(pr.entity);
+        uint32_t ar_count = specialization_argument_count(ar.entity);
+        if (ttp_trailing_pack && count == ttp_fixed + 1 &&
+            specialization_template_argument(pr.entity, ttp_fixed).kind ==
+                template_argument::kind_t::pack) {
+            if (ar_count < ttp_fixed)
+                return false;
+            for (uint32_t i = 0; i < ttp_fixed; i++) {
+                const template_argument &x =
+                    specialization_template_argument(pr.entity, i);
+                const template_argument &y =
+                    specialization_template_argument(ar.entity, i);
+                if (x.kind == template_argument::kind_t::type) {
+                    if (!deduce_type(x.type, y.type, deduced, set, exact))
+                        return false;
+                } else if (!(x == y)) {
+                    return false;
+                }
+            }
+            template_argument y_pack;
+            y_pack.kind = template_argument::kind_t::pack;
+            y_pack.value = static_cast<uint64_t>(pack_arguments.size());
+            y_pack.count = ar_count - ttp_fixed;
+            for (uint32_t i = ttp_fixed; i < ar_count; i++)
+                pack_arguments.append(
+                    specialization_template_argument(ar.entity, i));
+            const template_argument x_pack =
+                specialization_template_argument(pr.entity, ttp_fixed);
+            return deduce_pack_argument(x_pack, y_pack, deduced, set);
+        }
         for (uint32_t i = 0; i < count; i++) {
             const template_argument &x =
                 specialization_template_argument(pr.entity, i);

@@ -78,9 +78,9 @@ analysis_result semantic_analysis::closure_class(entity_index c, SyntaxRef n,
  * __invoke, which calls the function call operator on an object of its
  * own (the closure has no members), its parameters forwarded.
  */
-analysis_result semantic_analysis::closure_conversion(entity_index c,
-                                                      entity_index call,
-                                                      SyntaxRef n)
+analysis_result
+semantic_analysis::closure_conversion(entity_index c, entity_index call,
+                                      SyntaxRef n, entity_index *out_conversion)
 {
     qualified_type function_type = entity_table[call].type;
     const struct type f = type_table[function_type.unqualified()];
@@ -96,7 +96,8 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     entity_table[invoke].inline_ = true;
     entity_table[invoke].defined = true;
     entity_table.add_declaration(invoke, n);
-    entity_table.bind(c, invoke_name, invoke);
+    if (!entity_table.find(c, invoke_name))
+        entity_table.bind(c, invoke_name, invoke);
     qualified_type pointer =
         qualified_type::make(type_table.pointer_to(function_type), cv_none);
     bool non_throwing = tokens.files.behavior.has(
@@ -112,7 +113,55 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     entity_table[conversion].inline_ = true;
     entity_table[conversion].defined = true;
     entity_table.add_declaration(conversion, n);
-    entity_table.bind(c, conversion_name, conversion);
+    /* [expr.prim.lambda.closure]/8: for a generic lambda's conversion
+       function template specialization, give __invoke and the conversion
+       operator their template specialization records so Itanium mangling
+       matches clang's __invoke<T...>(T...) and operator auto(*)(T...)<T...>() */
+    if (uint32_t call_inst = entity_table[call].instantiation) {
+        const instantiation_record orig = instantiations[call_inst - 1];
+        entity_index call_tmpl = orig.template_entity;
+        qualified_type pat_type = entity_table[call_tmpl].type;
+
+        entity_index inv_tmpl =
+            entity_table.make(entity_kind::template_entity, invoke_name, c);
+        entity_table[inv_tmpl].type = pat_type;
+        entity_table[inv_tmpl].instantiation =
+            entity_table[call_tmpl].instantiation;
+        instantiation_record inv_rec = orig;
+        inv_rec.template_entity = inv_tmpl;
+        inv_rec.specialization = invoke;
+        instantiations.append(inv_rec);
+        entity_table[invoke].instantiation =
+            static_cast<uint32_t>(instantiations.size());
+
+        qualified_type pat_ptr =
+            qualified_type::make(type_table.pointer_to(pat_type), cv_none);
+        entity_index conv_tmpl =
+            entity_table.make(entity_kind::template_entity, conversion_name, c);
+        entity_table[conv_tmpl].type = qualified_type::make(
+            type_table.function(pat_ptr, nullptr, 0, false, non_throwing),
+            cv_none);
+        entity_table[conv_tmpl].nonstatic_member = true;
+        entity_table[conv_tmpl].member_cv = cv_const;
+        entity_table[conv_tmpl].conversion_function = true;
+        entity_table[conv_tmpl].instantiation =
+            entity_table[call_tmpl].instantiation;
+        instantiation_record conv_rec = orig;
+        conv_rec.template_entity = conv_tmpl;
+        conv_rec.specialization = conversion;
+        instantiations.append(conv_rec);
+        entity_table[conversion].instantiation =
+            static_cast<uint32_t>(instantiations.size());
+    }
+    if (entity_index existing = entity_table.find(c, conversion_name)) {
+        entity_table[conversion].next_overload =
+            entity_table[existing].next_overload;
+        entity_table[existing].next_overload = conversion;
+    } else {
+        entity_table.bind(c, conversion_name, conversion);
+    }
+    if (out_conversion)
+        *out_conversion = conversion;
 
     /* __invoke: its parameters, an object of the closure type, and the
        call operator's call on it, returned */
@@ -208,6 +257,108 @@ analysis_result semantic_analysis::closure_conversion(entity_index c,
     block = statement_node(semantic_kind::block, at);
     semantics.set_list(block, &statement, 1);
     finish_synthesized(sf, current_declaration, at, block);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [expr.prim.lambda.closure]/8: a generic lambda without a lambda-capture
+ * has a conversion function template to pointer to function: deduce the
+ * call operator template's arguments from the target function pointer's
+ * parameters, instantiate the call operator, synthesize __invoke and the
+ * conversion function, and convert m through it.
+ */
+analysis_result semantic_analysis::generic_closure_conversion(
+    entity_index c, qualified_type to, SyntaxRef at, expression_meaning &m)
+{
+    if (entity_table[c].member_count != 0)
+        return not_supported(at, "expr.prim.lambda.closure");
+    const struct type to_ptr = type_table[to.unqualified()];
+    if (to_ptr.kind != type_kind::pointer)
+        return not_supported(at, "expr.prim.lambda.closure");
+    const struct type to_fn = type_table[to_ptr.operand.unqualified()];
+    if (to_fn.kind != type_kind::function || to_fn.variadic)
+        return not_supported(at, "expr.prim.lambda.closure");
+    entity_index call_tpl = entity_table[c].call_operator;
+    uint32_t ft = entity_table[call_tpl].instantiation;
+    if (!ft)
+        return not_supported(at, "expr.prim.lambda.closure");
+    const function_template f = function_templates[ft - 1];
+    const struct type pat_fn =
+        type_table[entity_table[f.entity].type.unqualified()];
+    if (pat_fn.kind != type_kind::function || pat_fn.variadic ||
+        pat_fn.parameter_count != to_fn.parameter_count)
+        return not_supported(at, "expr.prim.lambda.closure");
+    const qualified_type *pat_params =
+        type_table.parameters(entity_table[f.entity].type.unqualified());
+    const qualified_type *to_params =
+        type_table.parameters(to_ptr.operand.unqualified());
+    owned_array<template_argument> values;
+    owned_array<bool> set;
+    for (uint32_t i = 0; i < f.parameter_count; i++) {
+        values.append(template_argument());
+        set.append(false);
+    }
+    for (uint32_t i = 0; i < pat_fn.parameter_count; i++)
+        if (!deduce_type(pat_params[i], to_params[i], values, set, false))
+            return not_supported(at, "expr.prim.lambda.closure");
+    VTRY(dr, default_template_arguments(at, ft, values, set));
+    entity_index call = 0;
+    VTRY(ir, instantiate(at, call_tpl, values.data(),
+                         static_cast<uint32_t>(values.size()), call));
+    if (!call)
+        return not_supported(at, "expr.prim.lambda.closure");
+    const struct type inst_fn =
+        type_table[entity_table[call].type.unqualified()];
+    if (inst_fn.kind != type_kind::function ||
+        !(inst_fn.operand == to_fn.operand) ||
+        inst_fn.parameter_count != to_fn.parameter_count)
+        return not_supported(at, "expr.prim.lambda.closure");
+    const qualified_type *inst_params =
+        type_table.parameters(entity_table[call].type.unqualified());
+    for (uint32_t i = 0; i < inst_fn.parameter_count; i++)
+        if (!(inst_params[i] == to_params[i]))
+            return not_supported(at, "expr.prim.lambda.closure");
+    function_context enclosing_function =
+        static_cast<function_context &&>(function_state);
+    function_state = function_context();
+    owned_array<entity_index> enclosing_block_variables =
+        static_cast<owned_array<entity_index> &&>(block_variables);
+    block_variables = owned_array<entity_index>();
+    entity_index enclosing_scope = current_scope;
+    SyntaxRef declaration = current_declaration;
+    entity_index conversion = 0;
+    analysis_result r = closure_conversion(c, call, at, &conversion);
+    function_state = static_cast<function_context &&>(enclosing_function);
+    block_variables =
+        static_cast<owned_array<entity_index> &&>(enclosing_block_variables);
+    current_scope = enclosing_scope;
+    current_declaration = declaration;
+    if (r != analysis_result::well_formed || !conversion)
+        return not_supported(at, "expr.prim.lambda.closure");
+    token_index tok = at.first_token();
+    expression_meaning obj = m;
+    qualified_type this_ptr =
+        qualified_type::make(type_table.pointer_to(qualified_type::make(
+                                 entity_table[c].type.unqualified(), cv_const)),
+                             cv_none);
+    uint32_t this_node =
+        expression_node(semantic_kind::address,
+                        expression_meaning{this_ptr, value_category::prvalue,
+                                           constness::not_constant},
+                        tok, obj.node);
+    expression_meaning callee;
+    callee.type = entity_table[conversion].type;
+    callee.category = value_category::lvalue;
+    callee.evaluation = constness::constant;
+    callee.entity = conversion;
+    uint32_t callee_node =
+        expression_node(semantic_kind::entity, callee, tok, conversion);
+    m = expression_meaning();
+    m.type = qualified_type::make(to.unqualified(), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::not_constant;
+    m.node =
+        expression_node(semantic_kind::call, m, tok, callee_node, this_node);
     return analysis_result::well_formed;
 }
 

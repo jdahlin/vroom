@@ -446,6 +446,64 @@ uint32_t c_lowering::call(const semantic_node &n)
                 AST_QUALIFIED_TYPE_UNQUALIFIED(
                     type(record(function_type).operand, n.at)),
                 0);
+        if (node(named).kind == semantic_kind::entity &&
+            (analysis.entity_table[node(named).a].gnu_flags &
+             gnu_coroutine_builtin)) {
+            const uint32_t *items = analysis.semantics.items(n.first);
+            uint32_t seq = 0;
+            uint32_t first_arg = 0;
+            for (uint32_t i = 0; i < n.count; i++) {
+                uint32_t a = expression(items[i]);
+                if (!a)
+                    return 0;
+                if (i == 0)
+                    first_arg = a;
+                if (seq)
+                    seq = make(AST_NODE_COMMA, type_of(a), seq, a, 0, 0, 0);
+                else
+                    seq = a;
+            }
+            ast_qualified_type rtype =
+                AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
+            const struct type &rt = analysis.type_table[n.type.unqualified()];
+            if (rt.kind == type_kind::fundamental &&
+                rt.fundamental == fundamental_type::void_) {
+                if (seq)
+                    return cast(seq, rtype, AST_CAST_VOID);
+                return cast(ast_builder_integer(
+                                c, ast_builder_type_basic(AST_TYPE_INT), 0),
+                            rtype, AST_CAST_VOID);
+            }
+            uint32_t result = 0;
+            if (n.count == 0 && rt.kind == type_kind::pointer) {
+                if (!noop_coro_symbol) {
+                    static const char nm[] = "__NoopCoro_ResumeDestroy";
+                    noop_coro_symbol = local_function(nm, sizeof nm - 1);
+                    ast_builder_symbol_body(
+                        c, noop_coro_symbol,
+                        make(AST_NODE_BLOCK, 0, 0, 0, 0, 0, 0));
+                    ast_builder_symbol_flags_add(c, noop_coro_symbol,
+                                                 AST_SYMBOL_FLAG_DEFINED);
+                }
+                ast_qualified_type fn_t =
+                    ast_builder_type_function(c, v, nullptr, 0, 0);
+                uint32_t fn_ref = c_variable(c, noop_coro_symbol, fn_t);
+                result = cast(address_of(fn_ref, pointer_to(fn_t)), rtype,
+                              AST_CAST_POINTER_TO_POINTER);
+            } else if (n.count == 3 && first_arg) {
+                result = first_arg;
+            } else {
+                int ck = AST_CAST_INTEGER;
+                if (rt.kind == type_kind::pointer)
+                    ck = AST_CAST_INTEGER_TO_POINTER;
+                result = cast(ast_builder_integer(
+                                  c, ast_builder_type_basic(AST_TYPE_INT), 0),
+                              rtype, ck);
+            }
+            if (seq && result != first_arg)
+                return make(AST_NODE_COMMA, rtype, seq, result, 0, 0, 0);
+            return result;
+        }
         /* [impl.clang] std::move, std::forward, std::as_const of a single
            argument: fold to the argument itself (no function call emitted) */
         if (node(named).kind == semantic_kind::entity && n.count == 1 &&

@@ -3,10 +3,4 @@ old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented ye
 old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
-old-ttp-patterns-vdtor	vcc: the rules of [class.base.init] are not implemented yet
-# [temp.mem] forms not done yet (the temp-mem- tests; PLAN: one PR per group)
-temp-mem-member-deduction-guide	vcc: the rules of [temp.mem] are not implemented yet
-lambda-capture-generic-conversion	vcc: the rules of [expr.prim.lambda.closure] are not implemented yet
 gnu-builtin-complex	vcc: the rules of [ext.gnu] are not implemented yet
-gnu-builtin-coroutine	vcc: the rules of [basic.lookup.unqual] are not implemented yet
-gnu-builtin-vector	vcc: the rules of [ext.gnu] are not implemented yet

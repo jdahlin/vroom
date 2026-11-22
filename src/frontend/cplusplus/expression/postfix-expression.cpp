@@ -726,14 +726,15 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                                                  entity_index &c)
 {
     c = 0;
-    owned_array<uint32_t> group;
-    for (size_t i = 0; i < function_templates.size(); i++)
-        if (function_templates[i].guide_of == ct)
-            group.append(static_cast<uint32_t>(i + 1));
-    if (group.empty())
-        return not_supported(n, "over.match.class.deduct");
     owned_array<SyntaxElement> clauses;
-    if (n[1].is(syntax_kind::braced_init_list)) {
+    if (n.is(syntax_kind::braced_init_list)) {
+        VTRY(gathered, list_clauses(n, clauses, nullptr));
+    } else if (n.is(syntax_kind::initializer)) {
+        if (n.size() == 3) {
+            for (SyntaxElement a : n[1].items(syntax_kind::initializer_list))
+                clauses.append(a);
+        }
+    } else if (n[1].is(syntax_kind::braced_init_list)) {
         VTRY(gathered, list_clauses(n[1], clauses, nullptr));
     } else if (n.size() == 4) {
         for (SyntaxElement a : n[2].items(syntax_kind::initializer_list))
@@ -752,27 +753,124 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             return not_supported(n, "over.match.class.deduct");
         arguments.append(e);
     }
-    owned_array<overload_candidate> candidates;
-    owned_array<uint32_t> first_arguments;
-    owned_array<template_argument> all;
-    VTRY(added,
-         template_candidates(n, group, arguments.data(),
-                             static_cast<uint32_t>(arguments.size()),
-                             candidates, &first_arguments, &all, nullptr, 0));
-    if (candidates.empty())
-        return not_supported(n, "over.match.class.deduct");
-    size_t chosen = 0;
-    VTRY(best, best_viable_function(n, candidates, nullptr, arguments, chosen));
-    /* (the arguments are analysed again by the initialization) */
-    expressions.resize(expressions_before);
-    name_uses.resize(uses_before);
-    qualified_type function = entity_table[candidates[chosen].function].type;
-    const struct type &returned =
-        type_table[type_table[function.unqualified()].operand.unqualified()];
-    if (returned.kind != type_kind::class_type)
-        return not_supported(n, "over.match.class.deduct");
-    c = returned.entity;
-    return analysis_result::well_formed;
+    owned_array<uint32_t> group;
+    for (size_t i = 0; i < function_templates.size(); i++)
+        if (function_templates[i].guide_of == ct)
+            group.append(static_cast<uint32_t>(i + 1));
+    if (!group.empty()) {
+        owned_array<overload_candidate> candidates;
+        owned_array<uint32_t> first_arguments;
+        owned_array<template_argument> all;
+        VTRY(added, template_candidates(n, group, arguments.data(),
+                                        static_cast<uint32_t>(arguments.size()),
+                                        candidates, &first_arguments, &all,
+                                        nullptr, 0));
+        if (!candidates.empty()) {
+            size_t chosen = 0;
+            VTRY(best, best_viable_function(n, candidates, nullptr, arguments,
+                                            chosen));
+            /* (the arguments are analysed again by the initialization) */
+            expressions.resize(expressions_before);
+            name_uses.resize(uses_before);
+            qualified_type function =
+                entity_table[candidates[chosen].function].type;
+            const struct type &returned =
+                type_table[type_table[function.unqualified()]
+                               .operand.unqualified()];
+            if (returned.kind != type_kind::class_type)
+                return not_supported(n, "over.match.class.deduct");
+            c = returned.entity;
+            return analysis_result::well_formed;
+        }
+    }
+    /* [over.match.class.deduct]/1.1: implicit deduction guides synthesized
+       from the primary class template's non-template constructors */
+    const function_template ct_rec = function_templates[ct - 1];
+    if (ct_rec.definition &&
+        ct_rec.definition.is(syntax_kind::class_specifier)) {
+        entity_index outer_scope = entity_table[ct_rec.entity].enclosing;
+        uint32_t class_name = entity_table[ct_rec.entity].name;
+        entity_index saved_scope = current_scope;
+        entity_index saved_class = defining_class;
+        uint32_t saved_cv = function_cv;
+        owned_array<parameter_meaning> saved_params =
+            static_cast<owned_array<parameter_meaning> &&>(function_parameters);
+        entity_index param_scope =
+            entity_table.make(entity_kind::block_scope, 0, outer_scope);
+        for (uint32_t i = 0; i < ct_rec.parameter_count; i++) {
+            entity_index pe =
+                template_parameter_entities[ct_rec.first_parameter + i];
+            if (entity_table[pe].name)
+                entity_table.bind(param_scope, entity_table[pe].name, pe);
+        }
+        auto members =
+            ct_rec.definition.class_specifier().member_specification();
+        for (SyntaxElement mem : members.elements()) {
+            if (!mem.is(syntax_kind::function_definition,
+                        syntax_kind::member_declaration))
+                continue;
+            uint32_t at = leading_gnu_attributes(mem.index());
+            if (at < mem.size() && mem[at].is(syntax_kind::decl_specifier_seq))
+                at++;
+            if (at >= mem.size() ||
+                !mem[at].is(syntax_kind::noptr_declarator) ||
+                mem[at].size() < 2 || !mem[at][0].is_identifier() ||
+                tokens.identifier(mem[at][0].token()) != class_name ||
+                !mem[at][1].is(syntax_kind::parameters_and_qualifiers))
+                continue;
+            current_scope = param_scope;
+            defining_class = 0;
+            function_cv = 0;
+            function_parameters.clear();
+            qualified_type ctor_type = qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none);
+            analysis_result fr = function(mem[at][1].index(), ctor_type);
+            current_scope = saved_scope;
+            defining_class = saved_class;
+            function_cv = saved_cv;
+            function_parameters =
+                static_cast<owned_array<parameter_meaning> &&>(saved_params);
+            if (fr != analysis_result::well_formed)
+                continue;
+            const struct type ftype = type_table[ctor_type.unqualified()];
+            if (ftype.kind != type_kind::function || ftype.variadic ||
+                ftype.parameter_count != arguments.size())
+                continue;
+            const qualified_type *params =
+                type_table.parameters(ctor_type.unqualified());
+            owned_array<template_argument> values;
+            owned_array<bool> set;
+            for (uint32_t i = 0; i < ct_rec.parameter_count; i++) {
+                values.append(template_argument());
+                set.append(false);
+            }
+            bool ok = true;
+            for (uint32_t i = 0; i < ftype.parameter_count && ok; i++) {
+                qualified_type atype = arguments[i].type;
+                if (type_table[params[i].unqualified()].kind !=
+                        type_kind::lvalue_reference &&
+                    type_table[params[i].unqualified()].kind !=
+                        type_kind::rvalue_reference)
+                    atype = qualified_type::make(atype.unqualified(), cv_none);
+                ok = deduce_type(params[i], atype, values, set, false);
+            }
+            if (!ok)
+                continue;
+            if (default_template_arguments(n, ct, values, set) !=
+                analysis_result::well_formed)
+                continue;
+            expressions.resize(expressions_before);
+            name_uses.resize(uses_before);
+            return instantiate_class(n, ct, values.data(),
+                                     static_cast<uint32_t>(values.size()), c);
+        }
+        current_scope = saved_scope;
+        defining_class = saved_class;
+        function_cv = saved_cv;
+        function_parameters =
+            static_cast<owned_array<parameter_meaning> &&>(saved_params);
+    }
+    return not_supported(n, "over.match.class.deduct");
 }
 
 /*

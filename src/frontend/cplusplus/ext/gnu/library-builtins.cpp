@@ -515,6 +515,31 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
         return declare_builtin(name, name,
                                builtin_scalar(fundamental_type::bool_), nullptr,
                                0, false, gnu_is_constant_evaluated);
+    /* [ext:clang_builtin_functions] coroutine handle builtins */
+    if (length >= 15 && !memcmp(spelling, "__builtin_coro_", 15)) {
+        qualified_type void_t = builtin_scalar(fundamental_type::void_);
+        qualified_type void_ptr =
+            qualified_type::make(type_table.pointer_to(void_t), cv_none);
+        qualified_type bool_t = builtin_scalar(fundamental_type::bool_);
+        qualified_type int_t = builtin_scalar(fundamental_type::int_);
+        const char *rest = spelling + 15;
+        size_t rlen = length - 15;
+        if ((rlen == 6 && !memcmp(rest, "resume", 6)) ||
+            (rlen == 7 && !memcmp(rest, "destroy", 7)))
+            return declare_builtin(name, name, void_t, &void_ptr, 1, false,
+                                   gnu_coroutine_builtin);
+        if (rlen == 4 && !memcmp(rest, "done", 4))
+            return declare_builtin(name, name, bool_t, &void_ptr, 1, false,
+                                   gnu_coroutine_builtin);
+        if (rlen == 4 && !memcmp(rest, "noop", 4))
+            return declare_builtin(name, name, void_ptr, nullptr, 0, false,
+                                   gnu_coroutine_builtin);
+        if (rlen == 7 && !memcmp(rest, "promise", 7)) {
+            qualified_type params[3] = {void_ptr, int_t, bool_t};
+            return declare_builtin(name, name, void_ptr, params, 3, false,
+                                   gnu_coroutine_builtin);
+        }
+    }
     if (entity_index e = compiler_builtin(name, spelling, length))
         return e;
     return library_function_builtin(name, spelling, length);
@@ -1407,6 +1432,12 @@ int semantic_analysis::vector_builtin_kind(uint32_t name)
     static const char store[] = "__builtin_nontemporal_store";
     static const char load[] = "__builtin_nontemporal_load";
     static const char abs_[] = "__builtin_elementwise_abs";
+    static const char red_add[] = "__builtin_reduce_add";
+    static const char red_max[] = "__builtin_reduce_max";
+    static const char red_min[] = "__builtin_reduce_min";
+    static const char red_and[] = "__builtin_reduce_and";
+    static const char red_or[] = "__builtin_reduce_or";
+    static const char red_xor[] = "__builtin_reduce_xor";
     if (name == tokens.pp.identifier(shuffle, sizeof shuffle - 1) + 1)
         return 1;
     if (name == tokens.pp.identifier(minimum, sizeof minimum - 1) + 1)
@@ -1423,6 +1454,18 @@ int semantic_analysis::vector_builtin_kind(uint32_t name)
         return 7;
     if (name == tokens.pp.identifier(abs_, sizeof abs_ - 1) + 1)
         return 8;
+    if (name == tokens.pp.identifier(red_add, sizeof red_add - 1) + 1)
+        return 9;
+    if (name == tokens.pp.identifier(red_max, sizeof red_max - 1) + 1)
+        return 10;
+    if (name == tokens.pp.identifier(red_min, sizeof red_min - 1) + 1)
+        return 11;
+    if (name == tokens.pp.identifier(red_and, sizeof red_and - 1) + 1)
+        return 12;
+    if (name == tokens.pp.identifier(red_or, sizeof red_or - 1) + 1)
+        return 13;
+    if (name == tokens.pp.identifier(red_xor, sizeof red_xor - 1) + 1)
+        return 14;
     return 0;
 }
 
@@ -1491,6 +1534,27 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
         clauses.append(n[2]);
     }
     int kind = vector_builtin_kind(tokens.identifier(n[0].token()));
+    if (kind >= 9) {
+        if (clauses.size() != 1)
+            return ill_formed(n, "wrong number of arguments to the builtin",
+                              "ext.clang");
+        expression_meaning a;
+        VTRY_SET(r, expression(clauses[0], a));
+        VTRY_SET(r, operand_value(n, a));
+        const struct type t = type_table[a.type.unqualified()];
+        if (t.kind != type_kind::vector || !is_integral(t.operand))
+            return ill_formed(n, "argument must be an integer vector",
+                              "ext.clang");
+        m = expression_meaning();
+        m.type = qualified_type::make(t.operand.unqualified(), cv_none);
+        m.category = value_category::prvalue;
+        m.evaluation = constness::not_constant;
+        m.beyond_integral_constant = true;
+        m.node =
+            expression_node(semantic_kind::vector_shuffle, m, n.first_token(),
+                            a.node, a.node, static_cast<uint8_t>(kind));
+        return analysis_result::well_formed;
+    }
     if (kind == 8) {
         if (clauses.size() != 1)
             return ill_formed(n, "wrong number of arguments to the builtin",

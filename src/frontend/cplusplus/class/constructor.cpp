@@ -127,9 +127,12 @@ analysis_result semantic_analysis::member_template_declaration(
     /* [temp.deduct.guide]: a deduction guide for a member class template */
     if (inner.is(syntax_kind::deduction_guide) && is_namespace(top)) {
         entity_index saved = current_scope;
+        entity_index saved_class = defining_class;
         current_scope = c;
+        defining_class = 0;
         analysis_result r =
             deduction_guide(n.template_declaration(), inner.deduction_guide());
+        defining_class = saved_class;
         current_scope = saved;
         return r;
     }

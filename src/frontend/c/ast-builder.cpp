@@ -524,6 +524,11 @@ uint32_t ast_builder_vector_abs(cc *c, uint32_t a)
     return cc_vector_abs(c, a, 0);
 }
 
+uint32_t ast_builder_vector_reduce(cc *c, int op, uint32_t a)
+{
+    return cc_vector_reduce(c, op, a, 0);
+}
+
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
                                     uint32_t vector)
 {
