@@ -1575,10 +1575,23 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         if (!e || entity_table[e].kind != entity_kind::variable)
             /* a pure-specifier ([class.abstract]) */
             return not_supported(d.index(), "class.abstract");
-        if (entity_table[c].union_ || !entity_table[c].name)
-            /* [class.union.anon]: at most one variant member's; an unnamed
-               class's members are initialized by no constructor of its own */
+        if (!entity_table[c].name)
+            /* an unnamed class's members are initialized by no constructor
+               of its own */
             return not_supported(d.index(), "class.union");
+        if (entity_table[c].union_) {
+            /* [class.union]/2: "At most one variant member of a union may
+               have a default member initializer" */
+            const entity &x = entity_table[c];
+            for (uint32_t i = 0; i < x.member_count; i++) {
+                entity_index o = class_members[x.first_member + i];
+                if (o != e && entity_table[o].default_initializer)
+                    return ill_formed(declaration,
+                                      "initializing multiple members of "
+                                      "union",
+                                      "class.union");
+            }
+        }
         entity_table[e].default_initializer = d[1].index();
         return analysis_result::well_formed;
     }
