@@ -231,6 +231,8 @@ uint32_t c_lowering::expression(uint32_t index)
         uint32_t a = expression(n.a);
         if (!a)
             return 0;
+        if (n.op >= 9)
+            return ast_builder_vector_reduce(c, n.op - 9, a);
         if (n.op == 8)
             return ast_builder_vector_abs(c, a);
         uint32_t b = expression(n.b);

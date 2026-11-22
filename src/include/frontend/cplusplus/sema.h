@@ -350,6 +350,8 @@ enum gnu_attribute_flag : uint32_t {
     /* [ext:gnu_library_builtins] __builtin_is_constant_evaluated: a
        manifestly constant evaluation's call is true, any other false */
     gnu_is_constant_evaluated = 16384,
+    /* [ext:clang_builtin_functions] coroutine handle builtins */
+    gnu_coroutine_builtin = 1u << 29,
     /* [ext:gnu_library_builtins] a builtin of vcc's C front end
        (__builtin_unreachable, __c11_atomic_thread_fence): lowered to its
        builtin node, no function */
@@ -2919,7 +2921,11 @@ class semantic_analysis
     void call_result(qualified_type result, expression_meaning &m) const;
     analysis_result immediate_invocation(SyntaxRef n, expression_meaning &m);
     analysis_result closure_conversion(entity_index c, entity_index call,
-                                       SyntaxRef n);
+                                       SyntaxRef n,
+                                       entity_index *out_conversion = nullptr);
+    analysis_result generic_closure_conversion(entity_index c,
+                                               qualified_type to, SyntaxRef at,
+                                               expression_meaning &m);
     /* [expr.prim.paren] */
     analysis_result parenthesized(SyntaxRef n, expression_meaning &m);
     /* [expr.unary] */

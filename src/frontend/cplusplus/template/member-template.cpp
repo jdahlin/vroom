@@ -34,9 +34,12 @@ analysis_result semantic_analysis::member_function_template(
     owned_array<SyntaxRef> parameters;
     /* (the template-head's rules are a namespace-scope template's) */
     entity_index saved_class = defining_class;
+    entity_index saved_scope = current_scope;
     defining_class = 0;
+    current_scope = enclosing_namespace(c);
     analysis_result head =
         template_head_parameters(n, parameters, true, true, true, true);
+    current_scope = saved_scope;
     defining_class = saved_class;
     if (head != analysis_result::well_formed)
         return head;

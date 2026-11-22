@@ -870,14 +870,14 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
     if (from == fundamental_type::none) {
         /* [expr.prim.lambda.closure]/8: a generic lambda without a
            lambda-capture has a conversion function template to pointer to
-           function, which is not declared (closure_class) */
+           function */
         const struct type source = type_table[m.type.unqualified()];
         if (source.kind == type_kind::class_type && source.entity &&
             entity_table[source.entity].lambda &&
             entity_table[source.entity].call_operator &&
             entity_table[entity_table[source.entity].call_operator].kind ==
                 entity_kind::template_entity)
-            return not_supported(at, "expr.prim.lambda.closure");
+            return generic_closure_conversion(source.entity, to, at, m);
         return not_supported(at, "conv");
     }
     return ill_formed(at, rule, "dcl.init");

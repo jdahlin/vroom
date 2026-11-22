@@ -377,6 +377,63 @@ CC_PRIVATE uint32_t cc_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b,
                                 cc_lowering_sequence(c, pre[1], result));
 }
 
+/* __builtin_reduce_{add,max,min,and,or,xor}(v): horizontal reduction across
+ * the lanes of an integer vector, op = 0..5. */
+CC_PRIVATE uint32_t cc_vector_reduce(cc *c, int op, uint32_t arg, uint32_t loc)
+{
+    arg = cc_node_rvalue(c, arg);
+    ast_qualified_type vt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(arg)->ty);
+    if (!cc_type_is_vector(c, vt) ||
+        !cc_type_is_integer(c, AST_TYPE(c, vt)->base))
+        return cc_node_error_new(c, loc);
+    ast_qualified_type et = AST_TYPE(c, vt)->base;
+    uint32_t n = AST_TYPE(c, vt)->n;
+    uint32_t sym = cc_symbol_new(c, AST_SYMBOL_VARIABLE, 0, vt, loc);
+    c->syms[sym].sc = AST_STORAGE_AUTO;
+    uint32_t saved = cc_node_new(c, AST_NODE_VARIABLE, vt, loc);
+    AST_NODE(saved)->a = sym;
+    AST_NODE(saved)->flags = AST_NODE_FLAG_LVALUE;
+    uint32_t seq =
+        cc_node_new_operands(c, AST_NODE_ASSIGN, vt, loc, saved, arg);
+    uint32_t acc_sym = cc_symbol_new(c, AST_SYMBOL_VARIABLE, 0, et, loc);
+    c->syms[acc_sym].sc = AST_STORAGE_AUTO;
+    uint32_t acc = cc_node_new(c, AST_NODE_VARIABLE, et, loc);
+    AST_NODE(acc)->a = acc_sym;
+    AST_NODE(acc)->flags = AST_NODE_FLAG_LVALUE;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t idx =
+            cc_node_integer_new(c, i, cc_type_basic(AST_TYPE_INT), loc);
+        uint32_t lane =
+            cc_node_new_operands(c, AST_NODE_INDEX, et, loc, saved, idx);
+        AST_NODE(lane)->flags = AST_NODE_FLAG_LVALUE;
+        uint32_t val = cc_node_rvalue(c, lane);
+        uint32_t next = val;
+        if (i > 0) {
+            uint32_t cur = cc_node_rvalue(c, acc);
+            if (op == 0)
+                next = cc_node_binary_new(c, LEX_TOKEN_PLUS, et, cur, val, loc);
+            else if (op == 1 || op == 2) {
+                int cmp_tok = op == 1 ? LEX_TOKEN_GREATER : LEX_TOKEN_LESS;
+                uint32_t cond = cc_node_binary_new(
+                    c, cmp_tok, cc_type_basic(AST_TYPE_INT), cur, val, loc);
+                next = cc_conversion_apply(
+                    c, cc_conditional_build(c, cond, cur, val, loc), et);
+            } else if (op == 3)
+                next = cc_node_binary_new(c, LEX_TOKEN_AMPERSAND, et, cur, val,
+                                          loc);
+            else if (op == 4)
+                next = cc_node_binary_new(c, LEX_TOKEN_PIPE, et, cur, val, loc);
+            else
+                next =
+                    cc_node_binary_new(c, LEX_TOKEN_CARET, et, cur, val, loc);
+        }
+        uint32_t assign =
+            cc_node_new_operands(c, AST_NODE_ASSIGN, et, loc, acc, next);
+        seq = cc_lowering_sequence(c, seq, assign);
+    }
+    return cc_lowering_sequence(c, seq, cc_node_rvalue(c, acc));
+}
+
 CC_PRIVATE uint32_t cc_builtin_elementwise_minmax_build(cc *c,
                                                         const cc_builtin *b,
                                                         uint32_t loc)

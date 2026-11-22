@@ -145,9 +145,13 @@ CC_PRIVATE uint32_t cc_builtin_elementwise_minmax_build(cc *c,
                                                         const cc_builtin *b,
                                                         uint32_t loc);
 CC_PRIVATE uint32_t cc_vector_abs(cc *c, uint32_t arg, uint32_t loc);
+CC_PRIVATE uint32_t cc_vector_reduce(cc *c, int op, uint32_t arg, uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_elementwise_abs_build(cc *c, const cc_builtin *b,
                                                      uint32_t loc);
 CC_PRIVATE bool cc_builtin_has_effects(cc *c, uint32_t n, bool load);
+CC_PRIVATE uint32_t cc_builtin_x86_addcarry_build(cc *c, const cc_builtin *b,
+                                                  const cc_id_list *args,
+                                                  uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_x86_pcmpstr_build(cc *c, const cc_builtin *b,
                                                  cc_id_list *args,
                                                  ast_qualified_type rt,
@@ -637,6 +641,7 @@ CC_PRIVATE uint32_t cc_complex_node_new(cc *c, ast_qualified_type t,
                                         uint32_t re, uint32_t im, uint32_t loc);
 CC_PRIVATE uint32_t cc_lowering_zero(cc *c, ast_qualified_type t, uint32_t loc);
 CC_PRIVATE uint32_t cc_lowering_once(cc *c, uint32_t n, uint32_t *pre);
+CC_PRIVATE uint32_t cc_lowering_save(cc *c, uint32_t n, uint32_t *pre);
 CC_PRIVATE uint32_t cc_lowering_sequence(cc *c, uint32_t pre, uint32_t n);
 CC_PRIVATE uint32_t cc_complex_part(cc *c, uint32_t n, int k);
 CC_PRIVATE uint32_t cc_complex_convert(cc *c, uint32_t n, ast_qualified_type t);
@@ -679,6 +684,7 @@ CC_PRIVATE uint32_t cc_address_of_build(cc *c, uint32_t n, uint32_t loc);
 /* builtin.c */
 CC_PRIVATE void cc_builtin_table_init(void);
 CC_PRIVATE const cc_builtin *cc_builtin_lookup(uint32_t id);
+CC_PRIVATE bool cc_builtin_stub_known(cc *c, uint32_t id);
 bool cc_eval(cc *c, uint32_t n, cc_value *v);
 CC_PRIVATE bool cc_builtin_fold(cc *c, const node *x, cc_value *v);
 CC_PRIVATE uint32_t cc_builtin_arguments_parse(cc *c, cc_id_list *args);

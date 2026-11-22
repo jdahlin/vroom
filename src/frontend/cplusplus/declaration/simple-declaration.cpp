@@ -771,7 +771,26 @@ analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
  */
 analysis_result semantic_analysis::simple_declaration(SyntaxRef n)
 {
-    uint32_t k = leading_gnu_attributes(n);
+    uint32_t k = 0;
+    while (k < n.size() && !n[k].is_token()) {
+        if (gnu_or_without_effect(n[k]) ||
+            n[k].is(syntax_kind::alignment_specifier)) {
+            k++;
+            continue;
+        }
+        if (n[k].is(syntax_kind::attribute_specifier_seq)) {
+            bool ok = true;
+            for (SyntaxElement e : n[k].elements())
+                if (!gnu_or_without_effect(e) &&
+                    !e.is(syntax_kind::alignment_specifier))
+                    ok = false;
+            if (ok) {
+                k++;
+                continue;
+            }
+        }
+        break;
+    }
     SyntaxTail tail(n, k);
     if (k >= n.size() || !tail[0].is(syntax_kind::decl_specifier_seq))
         return not_supported(n, "dcl.attr");
@@ -1025,7 +1044,59 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     scoped_value<bool> group(placeholder_group, false);
     scoped_value<entity_index> member_context(
         access_class, declarator_access_class(declaration, specifiers));
-    analysis_result r = decl_specifier_seq(specifiers, s, false);
+    /* [dcl.type.class.deduct]/1: a placeholder for a deduced class type
+       (C b(args); or O::C b(args);) */
+    analysis_result r = analysis_result::well_formed;
+    bool ctad_done = false;
+    if (!definition && specifiers.size() == 1 && declaration.size() >= 3) {
+        uint32_t ct = 0;
+        if (specifiers[0].is_identifier()) {
+            lookup_result found = lookup_unqualified(
+                tokens.identifier(specifiers[0].token()), lookup_filter::any);
+            ct = class_template_of(found.unknown_entity);
+        } else if (specifiers[0].is(syntax_kind::simple_type_specifier) &&
+                   specifiers[0].size() == 2 &&
+                   specifiers[0][0].is(syntax_kind::nested_name_specifier) &&
+                   specifiers[0][1].is_identifier()) {
+            nominated_scope ns;
+            if (nested_name_specifier(specifiers[0][0].index(), ns) ==
+                analysis_result::well_formed) {
+                uint32_t nm = tokens.identifier(specifiers[0][1].token());
+                entity_index held = 0;
+                if (is_namespace(ns.entity))
+                    held =
+                        lookup_in_namespace(ns.entity, nm, lookup_filter::any)
+                            .unknown_entity;
+                else if (is_class_entity(ns.entity))
+                    held = entity_table.find(ns.entity, nm);
+                ct = class_template_of(held);
+            }
+        }
+        if (ct && !function_templates[ct - 1].is_alias) {
+            uint32_t spec_at = 0;
+            while (spec_at < declaration.size() &&
+                   !(declaration[spec_at].is(syntax_kind::decl_specifier_seq) &&
+                     declaration[spec_at].index() == specifiers))
+                spec_at++;
+            if (spec_at + 1 < declaration.size() &&
+                declaration[spec_at + 1].is(syntax_kind::init_declarator) &&
+                declaration[spec_at + 1].size() == 2 &&
+                declaration[spec_at + 1][0].is_identifier() &&
+                declaration[spec_at + 1][1].is(syntax_kind::initializer,
+                                               syntax_kind::braced_init_list)) {
+                entity_index deduced_c = 0;
+                r = deduced_class(declaration[spec_at + 1][1].index(), ct,
+                                  deduced_c);
+                if (r == analysis_result::well_formed && deduced_c) {
+                    s.type = entity_table[deduced_c].type;
+                    s.has_type = true;
+                    ctad_done = true;
+                }
+            }
+        }
+    }
+    if (!ctad_done && r == analysis_result::well_formed)
+        r = decl_specifier_seq(specifiers, s, false);
     sole_elaborated = 0;
     if (r != analysis_result::well_formed)
         return r;
@@ -1033,8 +1104,24 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     while (first < declaration.size() &&
            !(declaration[first].is(syntax_kind::decl_specifier_seq) &&
              declaration[first].index() == specifiers)) {
-        /* [ext:gnu_attributes] before the decl-specifier-seq */
-        VTRY_SET(r, gnu_attribute_specifier(declaration[first], s));
+        /* [dcl.align]/1, [ext:gnu_attributes] before the decl-specifier-seq */
+        auto apply_lead = [&](SyntaxElement elem) -> analysis_result {
+            if (elem.is(syntax_kind::alignment_specifier)) {
+                uint64_t a = 0;
+                VTRY(ar, alignment_specifier(elem.alignment_specifier(), a));
+                if (a > s.aligned)
+                    s.aligned = static_cast<uint32_t>(a);
+                return analysis_result::well_formed;
+            }
+            return gnu_attribute_specifier(elem, s);
+        };
+        if (declaration[first].is(syntax_kind::attribute_specifier_seq)) {
+            for (SyntaxElement e : declaration[first].elements()) {
+                VTRY_SET(r, apply_lead(e));
+            }
+        } else {
+            VTRY_SET(r, apply_lead(declaration[first]));
+        }
         first++;
     }
     owned_array<SyntaxElement> items;
