@@ -189,17 +189,35 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
     }
     type_kind result_kind = type_table[returns.unqualified()].kind;
     entity_index movable = implicitly_movable(operand);
-    if (movable && (result_kind == type_kind::lvalue_reference ||
-                    result_kind == type_kind::rvalue_reference))
+    bool reference_result = result_kind == type_kind::lvalue_reference ||
+                            result_kind == type_kind::rvalue_reference;
+    /* a dependent reference type is bound when instantiated, and clang
+       accepts an instantiation of a forwarding function (std::move) in the
+       old modes that a plain function is refused in: not analysed */
+    if (movable && reference_result &&
+        (instantiating || entity_table[function_state.function].instantiation ||
+         depends_on_template_parameter(returns) ||
+         depends_on_template_parameter(entity_table[movable].type)))
         return not_supported(n, "class.copy.elision");
     /* [over.over]/1: "the return value of a function" */
     analysis_result r = analysis_result::well_formed;
     if (!function_state.deducing)
         VTRY_SET(r, target_expression(operand, returns, m));
     const struct type &object = type_table[m.type.unqualified()];
-    if (movable && m.category == value_category::lvalue &&
-        object.kind == type_kind::class_type &&
-        declares_move_constructor(object.entity)) {
+    if (movable && reference_result) {
+        /* [class.copy.elision]/3 (C++23, P2266R3): the name of an implicitly
+           movable entity is an xvalue, whatever the result's type: a
+           reference to it binds as to any xvalue.  Before C++23 it is the
+           lvalue it names (the rvalue treatment chooses a constructor, and
+           a reference has none).  C++23's feature set is that of
+           multidimensional_subscript */
+        if (tokens.files.behavior.has(
+                language_feature::multidimensional_subscript) &&
+            m.category == value_category::lvalue)
+            m.category = value_category::xvalue;
+    } else if (movable && m.category == value_category::lvalue &&
+               object.kind == type_kind::class_type &&
+               declares_move_constructor(object.entity)) {
         /* the first overload resolution, as an rvalue, finds the move
            constructor viable: it is chosen ([over.ics.rank]/3.2.3), deleted
            or not.  For another class (a converting constructor), C++11 to
