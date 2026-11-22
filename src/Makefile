@@ -243,6 +243,23 @@ $(OUT)/vasm: $(call o,bin/vasm/vasm.cpp $(LIB_SRC)) $(AS_OBJ)
 $(OUT)/virtest: $(call o,bin/virtest/virtest.cpp $(LIB_SRC)) $(call mod,vir)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
 
+# The offline reader exercises C++20 and the host standard library.
+CLANG_BUILTIN_READER_CXX ?= $(HOST_CXX)
+CLANG_BUILTIN_READER_SRC = tools/clang-builtins/main.cpp tools/clang-builtins/reader.cpp tools/clang-builtins/arm.cpp
+
+$(OUT)/clang-builtin-reader: $(CLANG_BUILTIN_READER_SRC) tools/clang-builtins/reader.h | $(OUT)
+	$(CLANG_BUILTIN_READER_CXX) -std=c++20 -O2 -Wall -Wextra -Werror $(CLANG_BUILTIN_READER_SRC) -o $@
+
+.PHONY: clang-builtin-reader clang-builtin-reader-check builtin-registrations
+clang-builtin-reader: $(OUT)/clang-builtin-reader
+
+clang-builtin-reader-check: clang-builtin-reader
+	python3 ../bench/vcc-builtins.py --check-clang-reader --clang-reader $(OUT)/clang-builtin-reader
+	python3 tools/gen-builtin-registrations.py --check --reader $(OUT)/clang-builtin-reader
+
+builtin-registrations: clang-builtin-reader
+	python3 tools/gen-builtin-registrations.py --reader $(OUT)/clang-builtin-reader
+
 # viralloc: VIR register allocation with a synthetic target (PLAN-vir.md V4)
 VIRALLOC_SRC = $(VIRA_SRC) vir/synthetic-target.cpp
 $(OUT)/viralloc: $(call o,bin/viralloc/viralloc.cpp $(VIRALLOC_SRC) $(LIB_SRC)) $(call mod,vir)

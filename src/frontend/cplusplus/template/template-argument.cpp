@@ -273,19 +273,39 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
         return e;
     }
     entity_index ns_scope = 0;
+    uint32_t ns_depth = 0;
     SyntaxElement spec_node;
-    if (qualifier.size() == 2 &&
-        qualifier[0].is(syntax_kind::simple_template_id)) {
-        spec_node = qualifier[0];
-    } else if (qualifier.size() == 4 && qualifier[0].is_identifier() &&
-               qualifier[2].is(syntax_kind::simple_template_id)) {
-        lookup_result ns = lookup_unqualified(
-            tokens.identifier(qualifier[0].token()), lookup_filter::any);
-        if (!ns.entity ||
-            entity_table[ns.entity].kind != entity_kind::namespace_entity)
-            return e;
-        ns_scope = ns.entity;
-        spec_node = qualifier[2];
+    if (qualifier.size() >= 2 &&
+        qualifier[qualifier.size() - 2].is(syntax_kind::simple_template_id)) {
+        uint32_t qi = 0;
+        bool qualified = false;
+        if (qualifier[0].is(preprocessing_op_or_punc::COLON_COLON)) {
+            qi = 1;
+            qualified = true;
+        }
+        entity_index scope = 0;
+        while (qi + 2 < qualifier.size()) {
+            if (!qualifier[qi].is_identifier())
+                return e;
+            lookup_result ns;
+            if (qualified)
+                ns = lookup_qualified(scope,
+                                      tokens.identifier(qualifier[qi].token()),
+                                      lookup_filter::any);
+            else
+                ns =
+                    lookup_unqualified(tokens.identifier(qualifier[qi].token()),
+                                       lookup_filter::any);
+            if (!ns.entity ||
+                entity_table[ns.entity].kind != entity_kind::namespace_entity)
+                return e;
+            scope = ns.entity;
+            qualified = true;
+            ns_depth++;
+            qi += 2;
+        }
+        ns_scope = scope;
+        spec_node = qualifier[qualifier.size() - 2];
     } else {
         return e;
     }
@@ -307,6 +327,8 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     uint64_t value = 1;
     if (negated)
         value = 3;
+    if (ns_depth > 1)
+        value |= static_cast<uint64_t>(ns_depth) << 8;
     for (entity_index d : dependent_values)
         if (entity_table[d].type == type && entity_table[d].name == name &&
             entity_table[d].value == value &&

@@ -74,6 +74,112 @@ unit feature queries and function target attributes have different contexts.
 [Clang call checks](https://github.com/llvm/llvm-project/blob/main/clang/lib/Sema/SemaChecking.cpp) ·
 [NEON header and compiler table generation](https://github.com/llvm/llvm-project/blob/main/clang/utils/TableGen/NeonEmitter.cpp)
 
+## Reading the Clang inputs
+
+Use a vroom-owned offline reader for the pinned `.td` files. The
+[TableGen Programmer’s Reference](https://llvm.org/docs/TableGen/ProgRef.html)
+provides grammar productions alongside the evaluation rules. Implement
+the subset exercised by the imported corpus, with source-located errors
+for unsupported syntax or unresolved values.
+
+The lexer, recursive-descent parser and evaluator handle the records used
+by all eight imported tables, including template arguments and defaults,
+inheritance, scoped `let`, `multiclass`, `defm`, `foreach`, and the
+required value operators. The generic extractor handles common, x86,
+x86-64 and AArch64 records. NEON and FP16 share an extractor, and SVE
+and SME share scalable type and name expansion. The reader treats NEON
+header bodies as opaque DAGs. Their presence determines whether a
+record emits a compiler builtin.
+
+`make -C src -j 6 clang-builtin-reader-check` checks the sorted spelling
+set for each table against a digest captured from the pinned LLVM
+revision. The common, x86, x86-64 and AArch64 record-based tables export
+prototype templates, type substitutions, feature guards, language and
+header fields, attribute names, and library aliases. The ACLE tables
+export the original encoded prototypes, result and operand variants,
+guards, flags, merge suffixes, and intrinsic names. SVE reinterpret
+records include tuple sizes. Decoding the full ACLE type language and
+extracting immediate-check and attribute operands remain open.
+The inventory tool reads both the vendored files and compatible LLVM
+source checkouts with the vroom reader.
+
+The reader is a C++20 self-hosting workload. Its host build uses the C++
+standard library. A vpp syntax check with GCC 15's C++ include paths
+currently stops in `type_traits` and `shared_ptr_base.h`; building and
+running the reader with vpp remains a milestone.
+
+## First registry migration
+
+The first shared table covers 30 fixed-signature integer spellings in
+[`integer-builtins.inc`](../src/include/frontend/integer-builtins.inc).
+C uses each row's ABI-relative signature and AST ID. C++ uses the same
+signature via the C AST builder and the row's named fold operation. Both
+frontends exercise the generated independent constant and runtime cases.
+The generator also emits 13 target-specific registrations for x86 CRC
+and add-carry, AArch64 bit operations, and scalar FP16 add and subtract.
+These rows use explicit vroom dispatch IDs and derive spellings and
+prototype codes from the pinned inputs.
+
+```sh
+make -C src -j 6 builtin-registrations
+make -C src -j 6 clang-builtin-reader-check
+bench/vcc-builtins.py --check-stubs
+```
+
+Generated C stubs cover the inventoried `__builtin_*` spellings on their
+table's architecture. They use a sorted suffix pool and packed offsets,
+consulted only when ordinary builtin and library lookup fail. A stub
+reports that the builtin is unimplemented. The table adds no feature
+query claims or per-TU registrations. Normal builds consume the generated
+includes directly. Only regeneration and freshness checks run the reader.
+The C frontend now folds fixed-width bit reversal and rotation in
+constant expressions. The shared walker also lowers the fixed-width
+rotations for x86-64. The arity check requires rejection of too-few and
+too-many calls for all 30 rows in both languages.
+
+Fixed-signature population counts are the starting case.
+Clang describes these with one templated record. In vroom, the C table
+records three spellings and signatures, the C++ registry lists all three
+again for call checking and folding, and the code generators dispatch
+all three IDs. The shared walker already gets the machine operand width
+from the converted operand. The registry should preserve that property.
+[Clang's population-count definitions](https://github.com/llvm/llvm-project/blob/5b10d2d74929eae78912771222c9855af97496f4/clang/include/clang/Basic/Builtins.td#L738)
+
+| Spelling | Converted argument | Result | Operation |
+| --- | --- | --- | --- |
+| `__builtin_popcount` | `unsigned int` | `int` | Population count |
+| `__builtin_popcountl` | `unsigned long` | `int` | Population count |
+| `__builtin_popcountll` | `unsigned long long` | `int` | Population count |
+
+Store the public spelling and prototype on the variant. Store the semantic
+operation and its fold on the family. Resolve the argument type in each
+frontend before folding or constructing the AST. For example, the width of
+`unsigned long` is 64 bits on the supported Linux and Darwin targets and
+32 bits on MinGW. A test with `1ULL << 40` passed to `__builtin_popcountl`
+should fold to 1 on LP64 and 0 on MinGW. Cover the same conversion with a
+runtime operand, and check in C and C++ that an argument with side effects
+is evaluated once. Exercise direct codegen and VIR with the existing
+target test tooling.
+
+Generate adapters for the existing C and C++ lookup entry points and keep
+the existing AST IDs for this first migration. This lets the new
+definition prove that it can replace duplicated frontend registration
+while the current ABI and backend paths remain testable. Check C++ calls
+through template instantiation, constant evaluation and runtime lowering,
+and compare feature queries before and after the migration. Consolidate
+backend dispatch only once the shared description preserves those results.
+Use `__builtin_popcountg` as the follow-up that exercises a type-generic
+operand without the fixed-prototype conversion.
+
+The upstream inventory and vroom's registry have separate update paths.
+Clang's records contain useful spelling, prototype, attribute and feature
+information, and some records delegate their type checking to Clang's
+handwritten Sema. A TableGen enumerator establishes inventory membership.
+Vroom's registry entries must point to vroom's own checking and lowering;
+only those entries can contribute implemented support to the coverage
+ledger. Retain original Clang table membership so revisions can be
+compared even when multiple records generate the same spelling.
+
 ## Implementation steps
 
 - **B0 Inventory.** Make coverage tooling portable. Add pinned Clang and GCC
@@ -127,10 +233,13 @@ With a built vpp and Clang on PATH, run:
 ```sh
 bench/vcc-builtins.py --all-targets --language c --language c++ --json
 bench/vcc-builtins.py --target x86_64-linux-gnu --flag=-mavx2 --language c++
+make -C src -j 6 clang-builtin-reader
+bench/vcc-builtins.py --clang-vendored --all-targets --language c --language c++ --json
 bench/vcc-builtins.py --llvm-source /path/to/llvm-project --all-targets --language c --language c++ --json
 ```
 
-With an LLVM checkout and a matching clang-tblgen, the source mode extracts
+With the [vendored inputs](../contrib/clang-builtins/README.md) or a compatible
+LLVM checkout, the vroom reader extracts
 the common, x86, x86-64, AArch64, NEON, FP16, SVE and SME builtin enumerators.
 The JSON preserves membership in each upstream table. The checked-in snapshots
 alone contribute 3,178 spellings. At LLVM revision 5b10d2d74929 the union with
@@ -139,6 +248,53 @@ the selected target and flags. Report status 1 indicates additional vroom
 builtin claims relative to the Clang executable used for the probes. Pass
 --report-only for inventory exports that should exit successfully on differences.
 Probe errors still exit with status 2.
+
+The vendored report counts feature-query outcomes for every spelling in
+each table, including names that neither compiler advertises in the
+requested profile. For C profiles it also counts calls reported as
+undeclared. Neither measure establishes that a valid call lowers correctly.
+
+Run the typed sample probes and the execution tests separately.
+
+```sh
+bench/vcc-builtins.py --clang-vendored --sample-calls
+bench/vcc-ctests.py -j 6 --suite vcc 'builtin-'
+bench/vcc-x86.py -j 6 --suite vcc --obj 'builtin-popcount-abi|builtin-x86-addcarry|x86_crc32|x86_sse_builtins'
+bench/cxx-run.py -j 6 gnu-builtin-constexpr-integers
+bench/cxx-run.py -j 6 shared-integer-builtins
+bench/vcc-builtins.py --check-integer-arity
+```
+
+The sample probe builds two typed C calls per upstream table at each
+optimization level from `-O0` through `-O3`. NEON, SVE
+and SME samples exercise public ACLE entry points. The other samples
+call the raw builtin. All 64 builds emit objects with Clang and vroom. The
+runtime cases check popcount conversions and evaluation, x86 carry,
+CRC and SSE, AArch64 bit operations and FP16 rounding, NEON lane values,
+and SVE and SME vector lengths. CI checks the typed samples and
+spelling-set parity for all eight upstream tables.
+
+The x86 carry builtin uses unsigned C AST operations, with an explicit
+store through the output pointer. The FP16 add and subtract builtins
+reuse the half arithmetic path. AArch64 Linux feature-query parity
+for `-march=...+fp16` still needs driver support. The SME header currently
+offers `svcntsb` and `svcntsd` through `rdsvl`. SME feature tracking,
+raw builtins, streaming ABI and ZA state remain open.
+
+Export the per-spelling coverage ledger as JSON Lines.
+
+```sh
+bench/vcc-builtins.py --clang-vendored --all-targets --language c --language c++ \
+    --coverage-ledger --spelling __builtin_popcountl --spelling __builtin_sme_svcntsb
+```
+
+Omit `--spelling` to export the full inventory. Each row preserves source
+table membership, available reference records, exact feature-query values
+for each selected profile, the optional C undeclared-name probe, and
+typed object-emission observations. Header-backed observations identify
+the actual entry point and flags. Execution, ABI checks, and invalid-call
+evidence still need integration with the ledger before it can enforce the
+release gate.
 
 [LLVM revision 5b10d2d74929](https://github.com/llvm/llvm-project/tree/5b10d2d74929/clang/include/clang/Basic)
 
@@ -175,11 +331,22 @@ bench/vcc-builtins.py --target aarch64-linux-gnu --header arm_neon.h --header ar
 
 - B0 in progress. Portable C/C++ feature-query matrix and C name recognition
   probe implemented. Clang source extraction covers the eight tables above.
+  The pinned inputs and their transitive includes are checked in under
+  `contrib/clang-builtins` and can be used without an LLVM checkout.
+  Vroom's offline reader matches the exact spelling sets for all eight
+  tables without LLVM tools. The coverage ledger records query and sample
+  object-emission evidence per spelling. All eight tables contribute
+  reference records and type-variant metadata.
   GCC common definitions, literal target names, live GCC queries and Clang
   resource header observations are available. Generated GCC target
   registrations, public wrapper classification and the per-stage ledger remain.
-- B1 groundwork includes the existing C AST builder's builtin lookup and
-  call construction. The general family registry and migration remain.
+- B1 generates 30 fixed-signature integer spellings for the C and C++
+  frontends and 13 fixed-signature target registrations for C. Generated
+  C stubs provide diagnostics for the remaining raw Clang spellings.
+  General prototype decoding and C++ stub lookup remain open.
 - B2 and B6 groundwork includes generated scalar regression cases with
-  independent expected answers and a CI freshness check. B3 through B5
-  and the remaining coverage gates are pending.
+  independent expected answers and a CI freshness check. Typed compile
+  and runtime samples cover every imported table. B3 includes the FP16
+  add and subtract samples. B4 includes the x86-64 add-carry sample.
+  B5 includes the SME streaming-length queries. Per-spelling execution
+  coverage and the remaining B3–B6 work are pending.

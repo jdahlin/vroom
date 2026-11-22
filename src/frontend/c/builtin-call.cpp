@@ -493,6 +493,8 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
         break;
     }
     cc_builtin_arguments_parse(c, &args);
+    if (b->id == CC_BUILTIN_X86_ADDCARRY)
+        return cc_builtin_x86_addcarry_build(c, b, &args, loc);
     if (b->id == CC_BUILTIN_VA_START &&
         !strcmp(b->name, "__builtin_c23_va_start") && args.n > 2) {
         cc_builtin_arity_check(c, loc, 2, &args);
@@ -521,6 +523,19 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
         if (args.n < np ||
             (args.n > np && !(f->flags & AST_TYPE_FLAG_VARIADIC)))
             cc_builtin_arity_check(c, loc, np, &args);
+        if (b->id == CC_BUILTIN_ARM_FP16_ADD ||
+            b->id == CC_BUILTIN_ARM_FP16_SUB) {
+            if (c->o->target != PP_LINUX_AARCH64 && c->o->target != PP_DARWIN) {
+                cc_report_error(c, loc, "builtin '%s' requires AArch64",
+                                b->name);
+                return cc_node_error_new(c, loc);
+            }
+            if (args.n != 2)
+                return cc_node_error_new(c, loc);
+            int op = b->id == CC_BUILTIN_ARM_FP16_ADD ? LEX_TOKEN_PLUS
+                                                      : LEX_TOKEN_MINUS;
+            return cc_node_binary_new(c, op, rt, args.v[0], args.v[1], loc);
+        }
         if (b->id == CC_BUILTIN_X86_PCMPSTR)
             return cc_builtin_x86_pcmpstr_build(c, b, &args, rt, loc);
         if (b->id == CC_BUILTIN_X86_SIMD)

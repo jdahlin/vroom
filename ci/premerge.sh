@@ -76,6 +76,11 @@ arm64)
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
 	step builtin-tests-generated python3 src/tools/gen-builtin-tests.py --check
+	step builtin-integer-arity python3 bench/vcc-builtins.py --check-integer-arity --vpp "$BUILD/vpp"
+	step builtin-stubs python3 bench/vcc-builtins.py --check-stubs --vpp "$BUILD/vpp"
+	step clang-builtin-reader make -C src -j "$J" OUT="$BUILD" clang-builtin-reader-check
+	step builtin-typed-samples python3 bench/vcc-builtins.py --clang-vendored --sample-calls \
+		--clang-reader "$BUILD/clang-builtin-reader" --vpp "$BUILD/vpp"
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
 	# the C++ front end's citations and quoted grammar against docs/cxx-spec
 	step cxx-spec-refs python3 bench/cxx-spec-refs.py

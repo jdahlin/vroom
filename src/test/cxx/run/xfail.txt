@@ -1,6 +1,1 @@
 # expected failures of bench/cxx-run.py: NAME<TAB>vcc first error
-old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented yet
-old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
-old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
-old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
-gnu-builtin-complex	vcc: the rules of [ext.gnu] are not implemented yet

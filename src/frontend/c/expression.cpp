@@ -986,6 +986,13 @@ static __attribute__((noinline)) uint32_t cc_primary_unbound_parse(cc *c,
             c->syms[ls].flags |= AST_SYMBOL_FLAG_USED;
             return n;
         }
+        if (cc_builtin_stub_known(c, id)) {
+            cc_id_list args;
+            cc_report_error(c, loc, "builtin '%.*s' is not implemented",
+                            CC_IDENTIFIER(id));
+            cc_builtin_arguments_parse(c, &args);
+            return cc_node_error_new(c, loc);
+        }
         lt = cc_library_implicit_type(c, id);
         if (!c->o->implicit_fn && lt)
             cc_report_error(

@@ -529,6 +529,34 @@ uint32_t ast_builder_vector_reduce(cc *c, int op, uint32_t a)
     return cc_vector_reduce(c, op, a, 0);
 }
 
+uint32_t ast_builder_complex(cc *c, ast_qualified_type t, uint32_t re,
+                             uint32_t im)
+{
+    uint32_t p0 = 0, p1 = 0;
+    re = cc_lowering_once(c, cc_node_rvalue(c, re), &p0);
+    im = cc_lowering_once(c, cc_node_rvalue(c, im), &p1);
+    return cc_lowering_sequence(
+        c, p0,
+        cc_lowering_sequence(c, p1, cc_complex_node_new(c, t, re, im, 0)));
+}
+
+uint32_t ast_builder_complex_part(cc *c, uint32_t v, int op)
+{
+    if (op == 0 || op == 1)
+        return cc_complex_part(c, v, op);
+    uint32_t pre = 0;
+    v = cc_lowering_once(c, cc_node_rvalue(c, v), &pre);
+    ast_qualified_type vt = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(v)->ty);
+    ast_qualified_type et = cc_complex_element_type(c, vt);
+    uint32_t re = cc_node_rvalue(c, cc_complex_part(c, v, 0));
+    uint32_t im = cc_node_rvalue(c, cc_complex_part(c, v, 1));
+    uint32_t neg_im = cc_node_new(c, AST_NODE_UNARY, et, 0);
+    AST_NODE(neg_im)->a = im;
+    AST_NODE(neg_im)->aux = LEX_TOKEN_MINUS;
+    return cc_lowering_sequence(c, pre,
+                                cc_complex_node_new(c, vt, re, neg_im, 0));
+}
+
 uint32_t ast_builder_convert_vector(cc *c, ast_qualified_type t,
                                     uint32_t vector)
 {

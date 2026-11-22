@@ -21,10 +21,7 @@ CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want,
 }
 
 static const cc_builtin cc_builtin_table[] = {
-    {"__builtin_ia32_crc32qi", CC_BUILTIN_X86_CRC32, 1, "uuC"},
-    {"__builtin_ia32_crc32hi", CC_BUILTIN_X86_CRC32, 1, "uuh"},
-    {"__builtin_ia32_crc32si", CC_BUILTIN_X86_CRC32, 1, "uuu"},
-    {"__builtin_ia32_crc32di", CC_BUILTIN_X86_CRC32, 1, "WWW"},
+#include "target-builtins.inc"
     {"__builtin_ia32_pblendvb128", CC_BUILTIN_X86_BLENDVB, 1, "BBBB"},
     {"__builtin_elementwise_abs", CC_BUILTIN_ELEMENTWISE_ABS, 1, "i."},
     {"__builtin_elementwise_min", CC_BUILTIN_ELEMENTWISE_MIN, 1, "i."},
@@ -88,36 +85,18 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_ia32_sfence", CC_BUILTIN_SYNC_SYNCHRONIZE, 0, "v"},
     {"__builtin_ia32_lfence", CC_BUILTIN_SYNC_SYNCHRONIZE, 0, "v"},
     {"__builtin_ia32_mfence", CC_BUILTIN_SYNC_SYNCHRONIZE, 0, "v"},
-    {"__builtin_clz", CC_BUILTIN_CLZ, 1, "iu"},
-    {"__builtin_clzl", CC_BUILTIN_CLZL, 1, "iL"},
-    {"__builtin_clzll", CC_BUILTIN_CLZLL, 1, "iW"},
-    {"__builtin_ctz", CC_BUILTIN_CTZ, 1, "iu"},
-    {"__builtin_ctzl", CC_BUILTIN_CTZL, 1, "iL"},
-    {"__builtin_ctzll", CC_BUILTIN_CTZLL, 1, "iW"},
+#define INTEGER_BUILTIN(name, id, flags, signature, fold)                      \
+    {name, id, flags, signature},
+#include "frontend/integer-builtins.inc"
+#undef INTEGER_BUILTIN
     {"__builtin_ffs", CC_BUILTIN_FFS, 1, "ii"},
     {"__builtin_ffsl", CC_BUILTIN_FFSL, 1, "il"},
     {"__builtin_ffsll", CC_BUILTIN_FFSLL, 1, "iw"},
-    {"__builtin_popcount", CC_BUILTIN_POPCOUNT, 1, "iu"},
-    {"__builtin_popcountl", CC_BUILTIN_POPCOUNTL, 1, "iL"},
-    {"__builtin_popcountll", CC_BUILTIN_POPCOUNTLL, 1, "iW"},
     {"__builtin_clzg", CC_BUILTIN_CLZG, 1, "i."},
     {"__builtin_ctzg", CC_BUILTIN_CTZG, 1, "i."},
     {"__builtin_stdc_count_ones", CC_BUILTIN_STDC_COUNT_ONES, 1, "u."},
     {"__builtin_stdc_trailing_zeros", CC_BUILTIN_STDC_TRAILING_ZEROS, 1, "u."},
     {"__builtin_popcountg", CC_BUILTIN_POPCOUNTG, 1, "i."},
-    {"__builtin_parity", CC_BUILTIN_PARITY, 1, "iu"},
-    {"__builtin_parityl", CC_BUILTIN_PARITYL, 1, "iL"},
-    {"__builtin_parityll", CC_BUILTIN_PARITYLL, 1, "iW"},
-    {"__builtin_clrsb", CC_BUILTIN_CLRSB, 1, "ii"},
-    {"__builtin_clrsbl", CC_BUILTIN_CLRSBL, 1, "il"},
-    {"__builtin_clrsbll", CC_BUILTIN_CLRSBLL, 1, "iw"},
-    {"__builtin_bswap16", CC_BUILTIN_BSWAP16, 1, "hh"},
-    {"__builtin_bswap32", CC_BUILTIN_BSWAP32, 1, "uu"},
-    {"__builtin_bswap64", CC_BUILTIN_BSWAP64, 1, "WW"},
-    {"__builtin_bitreverse8", CC_BUILTIN_BITREVERSE8, 1, "CC"},
-    {"__builtin_bitreverse16", CC_BUILTIN_BITREVERSE16, 1, "hh"},
-    {"__builtin_bitreverse32", CC_BUILTIN_BITREVERSE32, 1, "uu"},
-    {"__builtin_bitreverse64", CC_BUILTIN_BITREVERSE64, 1, "WW"},
     {"__builtin_unreachable", CC_BUILTIN_UNREACHABLE, 0, "v"},
     {"__builtin_trap", CC_BUILTIN_TRAP, 0, "v"},
     {"__builtin_debugtrap", CC_BUILTIN_DEBUGTRAP, 0, "v"},
@@ -204,21 +183,7 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_flt_rounds", CC_BUILTIN_FLT_ROUNDS, 0, "i"},
     {"__builtin_os_log_format", CC_BUILTIN_OS_LOG_FORMAT, 0, "ppS."},
     {"__builtin_os_log_format_buffer_size", CC_BUILTIN_OS_LOG_SIZE, 0, "zS."},
-    {"__builtin_rotateleft8", CC_BUILTIN_ROTL8, 0, "CCC"},
-    {"__builtin_rotateleft16", CC_BUILTIN_ROTL16, 0, "hhh"},
-    {"__builtin_rotateleft32", CC_BUILTIN_ROTL32, 0, "uuu"},
-    {"__builtin_rotateleft64", CC_BUILTIN_ROTL64, 0, "WWW"},
-    {"__builtin_rotateright8", CC_BUILTIN_ROTR8, 0, "CCC"},
-    {"__builtin_rotateright16", CC_BUILTIN_ROTR16, 0, "hhh"},
-    {"__builtin_rotateright32", CC_BUILTIN_ROTR32, 0, "uuu"},
-    {"__builtin_rotateright64", CC_BUILTIN_ROTR64, 0, "WWW"},
-    /* ACLE (arm_acle.h): bit operations as the generic ones, hints, barriers */
-    {"__builtin_arm_rbit", CC_BUILTIN_BITREVERSE32, 1, "uu"},
-    {"__builtin_arm_rbit64", CC_BUILTIN_BITREVERSE64, 1, "WW"},
-    {"__builtin_arm_clz", CC_BUILTIN_CLZ, 1, "uu"},
-    {"__builtin_arm_clz64", CC_BUILTIN_CLZLL, 1, "uW"},
-    {"__builtin_arm_cls", CC_BUILTIN_CLRSB, 1, "uu"},
-    {"__builtin_arm_cls64", CC_BUILTIN_CLRSBLL, 1, "uW"},
+    /* ACLE (arm_acle.h): hints and barriers */
     {"__builtin_arm_nop", CC_BUILTIN_ARM_NOP, 0, "v"},
     {"__builtin_arm_yield", CC_BUILTIN_ARM_YIELD, 0, "v"},
     {"__builtin_arm_wfe", CC_BUILTIN_ARM_WFE, 0, "v"},
@@ -531,6 +496,8 @@ CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch)
         return cc_type_basic(AST_TYPE_DOUBLE);
     case 'f':
         return cc_type_basic(AST_TYPE_FLOAT);
+    case 'e':
+        return cc_type_basic(AST_TYPE_FLOAT16);
     case 'F':
         return cc_type_vector(c, cc_type_basic(AST_TYPE_FLOAT), 16);
     case 'c':
@@ -554,6 +521,8 @@ CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch)
     case 'P':
         return cc_type_pointer(
             c, AST_QUALIFIED_TYPE(AST_TYPE_VOID, AST_QUALIFIER_CONST));
+    case 'R':
+        return cc_type_pointer(c, cc_type_basic(AST_TYPE_UNSIGNED_LONG_LONG));
     case 's':
         return cc_type_pointer(c, cc_type_basic(AST_TYPE_CHAR));
     case 'S':
@@ -601,11 +570,14 @@ static uint32_t *cc_builtin_directory[CC_DIRECTORY_COUNT];
 /* __has_builtin for the names the front end implements (the pp asks through pp_builtin_known) */
 static int cc_builtin_is_known(const char *n)
 {
-    /* x86-64 only: answered by the x86 tables (ppdata-x86.inc, ppdata-win64.inc), not for other targets */
+    /* The target snapshots answer these architecture-specific queries. */
     if (!strncmp(n, "__builtin_ms_va_", 16) ||
         !strcmp(n, "__builtin_ia32_sfence") ||
         !strcmp(n, "__builtin_ia32_lfence") ||
-        !strcmp(n, "__builtin_ia32_mfence"))
+        !strcmp(n, "__builtin_ia32_mfence") ||
+        !strcmp(n, "__builtin_ia32_addcarryx_u64") ||
+        !strcmp(n, "__builtin_neon_vaddh_f16") ||
+        !strcmp(n, "__builtin_neon_vsubh_f16"))
         return 0;
     for (uint32_t i = 0; cc_builtin_table[i].name; i++)
         if (!strcmp(cc_builtin_table[i].name, n))
@@ -653,6 +625,44 @@ CC_PRIVATE const cc_builtin *cc_builtin_lookup(uint32_t id)
     uint32_t i = pg ? pg[id & (CC_DIRECTORY_PAGE - 1)] : 0;
 
     return i ? &cc_builtin_table[i - 1] : NULL;
+}
+
+#include "builtin-stubs.inc"
+
+/* Search only when a call failed the normal builtin and library lookup. */
+CC_PRIVATE bool cc_builtin_stub_known(cc *c, uint32_t id)
+{
+    static const char prefix[] = "__builtin_";
+    const char *name = cc_identifier_string(id);
+    size_t length = (size_t)cc_identifier_length(id);
+    size_t skip = sizeof prefix - 1;
+    unsigned target =
+        CC_X86_64(c)                                                      ? 2u
+        : (c->o->target == PP_LINUX_AARCH64 || c->o->target == PP_DARWIN) ? 1u
+                                                                          : 0u;
+    if (!target || length <= skip || memcmp(name, prefix, skip))
+        return false;
+    name += skip;
+    length -= skip;
+
+    size_t low = 0, high = sizeof cc_builtin_stub_offsets /
+                           sizeof cc_builtin_stub_offsets[0];
+    while (low < high) {
+        size_t middle = low + (high - low) / 2;
+        uint32_t offset = cc_builtin_stub_offsets[middle];
+        const char *candidate = cc_builtin_stub_names + (offset >> 2);
+        int order = strncmp(name, candidate, length);
+        if (!order) {
+            if (!candidate[length])
+                return (offset & target) != 0;
+            order = -1;
+        }
+        if (order < 0)
+            high = middle;
+        else
+            low = middle + 1;
+    }
+    return false;
 }
 
 bool cc_eval(cc *c, uint32_t n, cc_value *v)

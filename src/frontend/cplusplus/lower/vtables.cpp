@@ -42,7 +42,9 @@ uint32_t c_lowering::vtable(entity_index k, token_index at)
     if (!d->key_function)
         flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
     if (x.linkage_of_name == linkage::internal ||
-        x.linkage_of_name == linkage::none) {
+        x.linkage_of_name == linkage::none ||
+        (x.instantiation &&
+         analysis.type_without_external_linkage(x.type, true, true))) {
         storage = AST_STORAGE_STATIC;
         flags = AST_SYMBOL_FLAG_GLOBAL;
     }

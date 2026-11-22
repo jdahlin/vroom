@@ -170,6 +170,8 @@ PRODUCTION(gnu_asm_statements, "gnu-asm-label-list", "gnu-asm-label-list , ident
 /* ---- GCC manual 6.12, Complex Numbers ---- */
 
 PRODUCTION(gnu_complex, "simple-type-specifier", "_Complex")
+PRODUCTION(gnu_complex, "unary-expression", "__real__ cast-expression")
+PRODUCTION(gnu_complex, "unary-expression", "__imag__ cast-expression")
 
 /* ---- GCC manual 6.3, Labels as Values ---- */
 

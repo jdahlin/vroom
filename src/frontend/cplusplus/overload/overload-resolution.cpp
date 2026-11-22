@@ -151,21 +151,28 @@ analysis_result semantic_analysis::best_viable_function(
                     type_table.parameters(c.type.unqualified())[i - first];
                 if (written_arguments &&
                     (*written_arguments)[k].is(syntax_kind::braced_init_list)) {
-                    if (type_table[target.unqualified()].kind ==
+                    qualified_type list_target = target;
+                    const struct type &tr = type_table[target.unqualified()];
+                    if (tr.kind == type_kind::rvalue_reference ||
+                        (tr.kind == type_kind::lvalue_reference &&
+                         (tr.operand.cv() & cv_const)))
+                        list_target = qualified_type::make(
+                            tr.operand.unqualified(), cv_none);
+                    if (type_table[list_target.unqualified()].kind ==
                         type_kind::class_type) {
                         /* [over.ics.list]: probe class list initialization.
                            The selected parameter is copy-list-initialized
-                           in call_with. */
+                           in call_with or construct. */
                         substitution_mark mark = mark_substitution();
                         initialized_value value;
                         substituting++;
                         analysis_result r = list_initialization(
-                            (*written_arguments)[k], target, true, value);
+                            (*written_arguments)[k], list_target, true, value);
                         substituting--;
                         bool rolled_back = undo_substitution(mark);
                         if (r == analysis_result::well_formed) {
                             a.kind = sequence::form::user_defined;
-                            a.target = target;
+                            a.target = list_target;
                             if (semantics[value.node].kind ==
                                 semantic_kind::construct)
                                 a.function = semantics[value.node].b;
