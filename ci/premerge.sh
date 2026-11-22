@@ -78,6 +78,10 @@ arm64)
 	step builtin-tests-generated python3 src/tools/gen-builtin-tests.py --check
 	step builtin-integer-arity python3 bench/vcc-builtins.py --check-integer-arity --vpp "$BUILD/vpp"
 	step builtin-stubs python3 bench/vcc-builtins.py --check-stubs --vpp "$BUILD/vpp"
+	# __has_builtin, typed calls, -c and constant folding per language and target against the known list
+	step builtin-consistency python3 bench/vcc-builtins.py --check-consistency --vpp "$BUILD/vpp"
+	# builtins with a C body leave no helper call at any level
+	step builtin-bodies python3 bench/vcc-builtin-bodies.py --vpp "$BUILD/vpp"
 	step clang-builtin-reader make -C src -j "$J" OUT="$BUILD" clang-builtin-reader-check
 	step builtin-typed-samples python3 bench/vcc-builtins.py --clang-vendored --sample-calls \
 		--clang-reader "$BUILD/clang-builtin-reader" --vpp "$BUILD/vpp"

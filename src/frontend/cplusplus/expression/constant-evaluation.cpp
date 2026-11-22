@@ -1689,6 +1689,9 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
     /* [ext:gnu_library_builtins] clang evaluates the bit counts */
     if (uint16_t row = entity_table[semantics[callee].a].gnu_builtin_row) {
         const gnu_builtin &b = gnu_builtin_at(row);
+        /* the fold table says whether it is evaluated at all */
+        if (b.fold != builtin_fold::none && !gnu_builtin_folds(b))
+            return constness::not_constant;
         switch (b.fold) {
         case builtin_fold::bit_count:
             return evaluate_bit_count(state, b.which, x, v);

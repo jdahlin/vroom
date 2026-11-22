@@ -1,6 +1,7 @@
 /* vcc front end: constant evaluation (integer constant expressions and foldable ones, as clang) */
 #include "common/literal.h"
 #include "cc-internal.h"
+#include "frontend/builtin-fold.h"
 
 CC_PRIVATE i128 cc_constant_truncate(cc *c, i128 v, ast_qualified_type t)
 {
@@ -624,6 +625,133 @@ CC_PRIVATE void cc_constexpr_conversion_check(cc *c, uint32_t n,
     }
 }
 
+/* the bytes of a narrow string literal n is (through its conversions) and
+   how many, the terminator included; false: n is something else */
+static bool cc_string_literal_bytes(cc *c, uint32_t n, const unsigned char **s,
+                                    uint32_t *count)
+{
+    while (AST_NODE(n)->op == AST_NODE_CAST)
+        n = AST_NODE(n)->a;
+    if (AST_NODE(n)->op != AST_NODE_STRING || c->strs[AST_NODE(n)->a].esz != 1)
+        return false;
+    *s = (const unsigned char *)c->strs[AST_NODE(n)->a].s;
+    *count = c->strs[AST_NODE(n)->a].n;
+    return true;
+}
+
+/*
+ * A call of a C library function that clang folds as the builtin it is: the
+ * fold table's row for __builtin_NAME (frontend/builtin-fold.h) says whether
+ * the C front end evaluates it and which operation it is.  Only a call of
+ * the library's own extern function counts, as the declared one is not
+ * known to be the library's.
+ */
+static bool cc_library_call_fold(cc *c, const node *x, cc_value *v)
+{
+    const uint32_t *arg = &c->lists[x->b];
+    uint32_t f = x->a;
+    char spelling[64];
+    const vfold_row *row;
+    cc_value a;
+    const char *nm;
+    int l;
+
+    while (AST_NODE(f)->op == AST_NODE_CAST ||
+           AST_NODE(f)->op == AST_NODE_ADDRESS)
+        f = AST_NODE(f)->a;
+    if (AST_NODE(f)->op != AST_NODE_VARIABLE ||
+        (c->syms[AST_NODE(f)->a].kind != AST_SYMBOL_FUNCTION &&
+         c->syms[AST_NODE(f)->a].kind != AST_SYMBOL_BUILTIN) ||
+        c->syms[AST_NODE(f)->a].sc == AST_STORAGE_STATIC)
+        return false;
+    if (c->syms[AST_NODE(f)->a].kind == AST_SYMBOL_BUILTIN) {
+        nm = cc_builtin_table_get()[c->syms[AST_NODE(f)->a].val].name;
+        l = (int)strlen(nm);
+    } else {
+        nm = cc_identifier_name(c->syms[AST_NODE(f)->a].name, &l);
+    }
+    if (l < 2 || l > 40)
+        return false;
+    if (l > 10 && !memcmp(nm, "__builtin_", 10)) {
+        row = vfold_find(nm, (size_t)l); /* the builtin's own symbol */
+    } else {
+        memcpy(spelling, "__builtin_", 10);
+        memcpy(spelling + 10, nm, (size_t)l);
+        row = vfold_find(spelling, (size_t)l + 10);
+    }
+    if (!vfold_in_language(row, 0))
+        return false;
+    switch (row->op) {
+    case vfold_strlen: {
+        uint32_t s;
+
+        if (x->c != 1)
+            return false;
+        s = arg[0];
+        while (AST_NODE(s)->op == AST_NODE_CAST)
+            s = AST_NODE(s)->a;
+        if (AST_NODE(s)->op != AST_NODE_STRING ||
+            c->strs[AST_NODE(s)->a].esz != 1)
+            return false;
+        v->kind = CC_VALUE_INTEGER;
+        v->ice = false;
+        v->i = (i128)strlen(c->strs[AST_NODE(s)->a].s);
+        return true;
+    }
+    case vfold_strcmp:
+    case vfold_strncmp:
+    case vfold_memcmp: {
+        const unsigned char *p, *q;
+        uint32_t np, nq;
+        u128 limit = ~(u128)0;
+        bool ice = true;
+
+        if (x->c != 2 + (row->op != vfold_strcmp) ||
+            !cc_string_literal_bytes(c, arg[0], &p, &np) ||
+            !cc_string_literal_bytes(c, arg[1], &q, &nq))
+            return false;
+        if (row->op != vfold_strcmp) {
+            if (!cc_constant_eval(c, arg[2], &a) || a.kind != CC_VALUE_INTEGER)
+                return false;
+            limit = (u128)a.i;
+            ice = a.ice;
+        }
+        v->kind = CC_VALUE_INTEGER;
+        v->ice = ice;
+        v->i = 0;
+        for (u128 i = 0; i < limit; i++) {
+            if (i >= np || i >= nq)
+                return false; /* reads past an array: not a constant */
+            if (p[i] != q[i]) {
+                v->i = -1;
+                if (p[i] > q[i])
+                    v->i = 1;
+                return true;
+            }
+            if (!p[i] && row->op != vfold_memcmp)
+                break;
+        }
+        return true;
+    }
+    case vfold_absolute: {
+        u128 magnitude;
+
+        if (x->c != 1 || !cc_constant_eval(c, arg[0], &a) ||
+            a.kind != CC_VALUE_INTEGER ||
+            !vfold_integer(vfold_absolute, (u128)a.i,
+                           (unsigned)cc_type_size(c, AST_NODE(arg[0])->ty) * 8,
+                           &magnitude))
+            return false;
+        v->kind = CC_VALUE_INTEGER;
+        v->ice = a.ice;
+        v->i = cc_constant_truncate(c, (i128)magnitude, x->ty);
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
 CC_PRIVATE bool cc_constant_eval(cc *c, uint32_t n, cc_value *v)
 {
     const node *x = AST_NODE(n);
@@ -872,32 +1000,8 @@ CC_PRIVATE bool cc_constant_eval(cc *c, uint32_t n, cc_value *v)
             return false;
         v->ice = false;
         return true;
-    case AST_NODE_CALL: { /* strlen("literal"): clang folds the library builtin */
-        uint32_t f = x->a, s;
-        int l;
-        const char *nm;
-
-        while (AST_NODE(f)->op == AST_NODE_CAST ||
-               AST_NODE(f)->op == AST_NODE_ADDRESS)
-            f = AST_NODE(f)->a;
-        if (AST_NODE(f)->op != AST_NODE_VARIABLE || x->c != 1 ||
-            c->syms[AST_NODE(f)->a].kind != AST_SYMBOL_FUNCTION ||
-            c->syms[AST_NODE(f)->a].sc == AST_STORAGE_STATIC)
-            return false;
-        nm = cc_identifier_name(c->syms[AST_NODE(f)->a].name, &l);
-        if (l != 6 || memcmp(nm, "strlen", 6))
-            return false;
-        s = c->lists[x->b];
-        while (AST_NODE(s)->op == AST_NODE_CAST)
-            s = AST_NODE(s)->a;
-        if (AST_NODE(s)->op != AST_NODE_STRING ||
-            c->strs[AST_NODE(s)->a].esz != 1)
-            return false;
-        v->kind = CC_VALUE_INTEGER;
-        v->ice = false;
-        v->i = (i128)strlen(c->strs[AST_NODE(s)->a].s);
-        return true;
-    }
+    case AST_NODE_CALL: /* abs(-3), strlen("literal"): clang folds the library builtin */
+        return cc_library_call_fold(c, x, v);
     case AST_NODE_BINARY: {
         int op = x->aux;
         ast_qualified_type lt = AST_NODE(x->a)->ty, rt;
