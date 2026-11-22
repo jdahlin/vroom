@@ -390,8 +390,28 @@ to) and the `body` flag on the spelling's row in the builtin table.
   written so that it does (no statement expression in `iszero`).  A body
   with locals (`addc`) is not a constant expression, as in clang.
 - **Cost.**  A body call costs a short lex and parse (about 40 tokens) and
-  a handful of symbols and nodes; compile time of a translation unit with no
-  body call is unchanged (measured below).
+  a handful of symbols and nodes.  A translation unit with no body call pays a
+  flag test per builtin call and one kind test per identifier reference;
+  measured on sqlite3.c (`vpp -O2 -w -c`, user instructions, three runs each):
+  3.9651 / 3.9654 / 3.9665 G before, 3.9680 / 3.9644 / 3.9643 G after (noise
+  +-0.05 %); best-of-five wall time 453 ms both ways at -O2, 127 / 125 ms at
+  -O0.  `bench/cxx-fe-bench.py` over the 764 common programs: -0.39 % (budget
+  +0.5 %).
+- **Moved so far.**  `__builtin_addc{,b,s,l,ll}` and `__builtin_subc*` (statement
+  expression with an out-parameter; arm64 keeps its adds/adcs lowering),
+  `__builtin_iszero`, `__builtin_issubnormal` (one expression over `isfinite`
+  and `isnormal`), `__builtin_stdc_count_ones` and `__builtin_stdc_trailing_zeros`
+  (`__T` from the argument, `__N` its precision).  Consistency check:
+  not-compiled 177 -> 105; the 72 lines that left are the x86-64 `-c` failures
+  of exactly these spellings in C and C++.  Four builtin ids, the C front
+  end's iszero/issubnormal tree and the `stdc` paths of the generic bit counts
+  are gone; one id, `CC_BUILTIN_BODY`, stands for every body.  `tests`:
+  `src/test/vcc/builtin_body_*.c` (also x86-64, -O0 to -O3),
+  `src/test/cxx/run/builtin-body-calls.cpp`, and `bench/vcc-builtin-bodies.py`
+  (no helper call in `-S` output for either target, in premerge).  The
+  long double iszero on arm64 compares through `__eqtf2` as the tree it
+  replaced did; clang's `isfpclass` is inline integer code, which needs a
+  VIR/emitter primitive, not a body.
 
 Not covered, and what the next step needs: a body with a loop or a branch
 that must stay a statement (they work inside `({ })`, but a call in a constant
@@ -450,7 +470,7 @@ no new line, no line that passes now; `--bless` rewrites it).
 | --- | --- |
 | claimed-not-callable (`__has_builtin` 1, call rejected) | 16 |
 | c-only-callable (callable in C, rejected in C++) | 26 |
-| not-compiled (callable, `-c` fails at -O0/-O1/-O2) | 177 |
+| not-compiled (callable, `-c` fails at -O0/-O1/-O2) | 105 |
 | crash (vpp dies on the call) | 0 |
 | constexpr-claimed-not-folded (`__has_constexpr_builtin` 1, no fold) | 58 |
 | constexpr-folds-unclaimed (folds, claim 0) | 0 |
