@@ -96,6 +96,9 @@ arm64)
 	step cxx-sema-claims env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py selftest
 	# the multiple-include guard skip: text and diagnostics as clang -E -P (src/test/cxx/include-guard)
 	step cxx-include-guard env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-include-guard.py --bin-dir "$BUILD"
+	# semantic analysis vs clang on clang's own C++ tests (CXX, SemaCXX, SemaTemplate; fetched, pinned):
+	# no failure beyond src/test/cxx/sema/clang-failures.txt, and none of its lines that passes now
+	step cxx-sema-clang sh -c 'sh bench/fetch-testsuites.sh llvm && env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py -j "$1" --bin-dir "$2" --check' sh "$J" "$BUILD"
 	# C++ programs lowered to C's AST (vpp -c, -O0..-O3) run as clang++'s under qemu
 	step cxx-run      python3 bench/cxx-run.py -j "$J"
 	# programs using libc++ headers: OK or a clean refusal, never a crash (needs libc++ headers; skipped without)

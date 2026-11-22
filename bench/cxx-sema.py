@@ -113,6 +113,23 @@ LLVM_TEST = cxxparse.LLVM_TEST
 TARGET = cxxparse.TRIPLE + ['-fno-signed-char']
 ALIASES = ['-mconstructor-aliases']
 SUITES = ('CXX', 'SemaCXX', 'SemaTemplate')
+KNOWN_FAILURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              'src/test/cxx/sema/clang-failures.txt')
+METRICS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'src/test/cxx/sema/clang-metrics.json')
+# a number that differs by this much or less from the baseline is host noise (CI's arm64 runner
+# counts one declaration differently from an x86-64 host), not progress and not a regression
+TOLERANCE = 3
+# metric -> better direction: a number that gets worse fails --check (the rest is shown)
+HIGHER_IS_BETTER = ('decl_agree', 'declared_verified', 'types_verified', 'constants_verified',
+                    'lookup_verified', 'symbols_verified', 'layout_verified', 'lowering_lowered')
+LOWER_IS_BETTER = ('crashes', 'decl_we_reject', 'decl_we_accept', 'declared_refuted', 'types_refuted',
+                   'constants_refuted', 'lookup_refuted', 'symbols_refuted', 'layout_refuted',
+                   'lowering_refuted')
+KNOWN_HEADER = '''# failures of bench/cxx-sema.py on clang's C++ tests that are known (xfail): KIND TEST OPTIONS: reason.
+# --check fails on a failure not listed here and on a listed one that passes now: fix it, then
+# `bench/cxx-sema.py --bless` in the same commit.  Never add a line to hide a regression.
+'''
 
 
 def known_differences():
@@ -847,6 +864,11 @@ def main():
     ap.add_argument('--bin-dir')
     ap.add_argument('--unsupported', type=int, default=10, metavar='N',
                     help='how many subclauses of the work list to print')
+    ap.add_argument('--check', action='store_true',
+                    help=f'fail on a failure not listed in {relative(KNOWN_FAILURES)}, '
+                         'or on a listed one that passes now')
+    ap.add_argument('--bless', action='store_true',
+                    help=f'rewrite {relative(KNOWN_FAILURES)} with the current failures (a full run)')
     ap.add_argument('patterns', nargs='*')
     a = ap.parse_args()
     clang = cxxpp.find_clang()
@@ -881,6 +903,7 @@ def main():
     lookup, layout = collections.Counter(), collections.Counter()
     crashes = failures = skipped = 0
     seen = set()
+    failed = set()
     for r in results:
         seen.add(r['test'])
         verdict.update(r['verdict'])
@@ -895,6 +918,8 @@ def main():
         crashes += 'crash' in kinds
         failures += bool(kinds)
         skipped += bool(r.get('skip'))
+        for k, why in r['fail']:
+            failed.add(failure_key(r, k, why))
         if r['fail'] or a.v:
             for k, why in r['fail'] or [('ok', '')]:
                 print(f'{k:7} {relative(r["test"])} {" ".join(r["opts"])}: {why}')
@@ -931,7 +956,118 @@ def main():
         print(f'unsupported by subclause ({len(unsupported)}): {top}')
     if missing:
         print(f'not fetched: clang/test/{", clang/test/".join(missing)} (bench/fetch-testsuites.sh llvm)')
+    metrics = {
+        'runs': runs, 'tests': len(seen), 'crashes': crashes,
+        'decl_agree': verdict['agree'], 'decl_we_reject': verdict['we_reject'],
+        'decl_we_accept': verdict['we_accept'], 'decl_unsupported': verdict['unsupported'],
+        'decl_not_parsed': verdict['not_parsed'],
+        'declared_verified': declared['verified'], 'declared_refuted': declared['refuted'],
+        'types_verified': types['verified'], 'types_refuted': types['refuted'],
+        'constants_verified': types['value_verified'], 'constants_refuted': types['value_refuted'],
+        'lookup_verified': lookup['verified'], 'lookup_refuted': lookup['refuted'],
+        'symbols_verified': symbols['verified'], 'symbols_refuted': symbols['refuted'],
+        'layout_verified': layout['verified'], 'layout_refuted': layout['refuted'],
+        'lowering_lowered': lowering['lowered'], 'lowering_refuted': lowering['refuted'],
+        'known_failures': len(failed),
+        'unsupported_by_subclause': dict(sorted(unsupported.items())),
+    }
+    if a.bless:
+        if a.patterns:
+            print('--bless needs a full run (no PATTERN)')
+            return 1
+        with open(KNOWN_FAILURES, 'w') as f:
+            f.write(KNOWN_HEADER)
+            for key in sorted(failed):
+                f.write(key + '\n')
+        print(f'{relative(KNOWN_FAILURES)}: {len(failed)} known failures')
+        with open(METRICS, 'w') as f:
+            json.dump(metrics, f, indent=1, sort_keys=True)
+            f.write('\n')
+        print(f'{relative(METRICS)}: written')
+        return 0
+    if a.check:
+        rc = check_known(failed, {relative(t) for t in seen})
+        if not a.patterns:
+            rc |= check_metrics(metrics)
+        return rc
     return 1 if failures else 0
+
+
+def check_metrics(now):
+    """The numbers against src/test/cxx/sema/clang-metrics.json, as a table (also in the
+    CI step summary): one that gets worse fails, the rest is progress to review in the diff."""
+    if not os.path.exists(METRICS):
+        print(f'no {relative(METRICS)}: bench/cxx-sema.py --bless')
+        return 1
+    base = json.load(open(METRICS))
+    rows, worse = [], []
+    for k in HIGHER_IS_BETTER + LOWER_IS_BETTER + ('decl_unsupported', 'decl_not_parsed', 'known_failures'):
+        b, n = base.get(k, 0), now[k]
+        mark = ''
+        if abs(n - b) <= TOLERANCE and k not in ('known_failures', 'crashes'):
+            pass
+        elif k in HIGHER_IS_BETTER and n < b or k in LOWER_IS_BETTER and n > b:
+            mark = 'WORSE'
+            worse.append(k)
+        elif k in HIGHER_IS_BETTER and n > b or k in LOWER_IS_BETTER and n < b:
+            mark = 'better'
+        elif k in ('decl_unsupported', 'decl_not_parsed', 'known_failures') and n != b:
+            mark = 'better' if n < b else 'more'
+        rows.append((k, b, n, mark))
+    sub_b, sub_n = base.get('unsupported_by_subclause', {}), now['unsupported_by_subclause']
+    moved = sorted(((sub_n.get(k, 0) - sub_b.get(k, 0), k) for k in set(sub_b) | set(sub_n)
+                    if sub_n.get(k, 0) != sub_b.get(k, 0)), key=lambda x: x[0])
+    lines = ['| metric | baseline | now | change |', '|---|---:|---:|---|']
+    for k, b, n, mark in rows:
+        lines.append(f'| {k} | {b} | {n} | {n - b:+d} {mark} |' if n != b else f'| {k} | {b} | {n} | |')
+    if moved:
+        lines += ['', 'unsupported by subclause (declarations whose first refusal it is), changed: '
+                  + ', '.join(f'[{k}] {sub_b.get(k, 0)} -> {sub_n.get(k, 0)}' for _, k in moved[:12])
+                  + (f' ... {len(moved)} changed' if len(moved) > 12 else '')]
+    text = '\n'.join(lines)
+    print(text)
+    summary = os.environ.get('GITHUB_STEP_SUMMARY')
+    if summary:
+        with open(summary, 'a') as f:
+            f.write('\n### cxx-sema against clang\'s C++ tests\n' + text + '\n')
+    if worse:
+        print(f'WORSE: {", ".join(worse)} (a fix that is worth it: --bless, saying why)')
+        return 1
+    if any(mark for _, _, _, mark in rows) or any(abs(d) > TOLERANCE for d, _ in moved):
+        print(f'numbers changed: bench/cxx-sema.py --bless puts them in {relative(METRICS)}, '
+              'so the PR shows the progress')
+        return 1
+    return 0
+
+
+def failure_key(r, kind, why):
+    """One failure as a line of the known-failures file: the kind, the test
+    with its options and the reason, without line numbers of vcc's own source."""
+    why = re.sub(r"(refused by vcc's [^ :]+):\d+ ", r'\1:N ', why)
+    # a crash is a signal on one host and a timeout on another (a runaway recursion)
+    why = re.sub(r'^status (-\d+|timeout)', 'status signal-or-timeout', why)
+    return f'{kind} {relative(r["test"])} {" ".join(r["opts"])}: {why}'.replace('\n', ' ')
+
+
+def check_known(failed, ran):
+    """A failure that is not in the known list is a regression; a listed one
+    that no longer happens is stale (xfail: remove it in the same commit)."""
+    known = set()
+    if os.path.exists(KNOWN_FAILURES):
+        for line in open(KNOWN_FAILURES):
+            line = line.rstrip('\n')
+            if line and not line.startswith('#'):
+                known.add(line)
+    new = sorted(failed - known)
+    # only an entry of a test that ran can be stale (a PATTERN runs a part)
+    stale = sorted(k for k in known - failed if k.split(' ', 2)[1] in ran)
+    for k in new:
+        print(f'NEW    {k}')
+    for k in stale:
+        print(f'STALE  {k}')
+    print(f'known failures: {len(known)} listed, {len(new)} new, {len(stale)} stale '
+          f'(a fix removes its line: bench/cxx-sema.py --bless)')
+    return 1 if new or stale else 0
 
 
 if __name__ == '__main__':
