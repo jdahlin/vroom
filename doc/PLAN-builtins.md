@@ -111,7 +111,7 @@ running the reader with vpp remains a milestone.
 ## First registry migration
 
 The first shared table covers 30 fixed-signature integer spellings in
-[`integer-builtins.inc`](../src/include/frontend/integer-builtins.inc).
+the integer registration table generated under `$(OUT)/generated/include/frontend/`.
 C uses each row's ABI-relative signature and AST ID. C++ uses the same
 signature via the C AST builder and the row's named fold operation. Both
 frontends exercise the generated independent constant and runtime cases.
@@ -131,7 +131,13 @@ table's architecture. They use a sorted suffix pool and packed offsets,
 consulted only when ordinary builtin and library lookup fail. A stub
 reports that the builtin is unimplemented. The table adds no feature
 query claims or per-TU registrations. Normal builds consume the generated
-includes directly. Only regeneration and freshness checks run the reader.
+includes from `$(OUT)/generated/include/`; no generated registration or
+stub include is checked in. The compiler build first builds the host reader,
+then generates these includes as dependencies of the C and C++ frontend
+objects. The TableGen inputs and generator are dependencies, so an upstream
+table or generator change regenerates the output. The test fixture remains
+checked in for now; moving generated test output to the build tree is a
+separate harness change.
 The C frontend now folds fixed-width bit reversal and rotation in
 constant expressions. The shared walker also lowers the fixed-width
 rotations for x86-64. The arity check requires rejection of too-few and
@@ -143,6 +149,27 @@ records three spellings and signatures, the C++ registry lists all three
 again for call checking and folding, and the code generators dispatch
 all three IDs. The shared walker already gets the machine operand width
 from the converted operand. The registry should preserve that property.
+
+## Executable builtin bodies
+
+Clang's TableGen records describe builtin spellings, prototypes, attributes
+and feature requirements. They do not generally carry executable bodies.
+Clang's frontend checks calls and constant-expression rules; CodeGen emits
+LLVM intrinsics, target instructions, or ordinary runtime/library calls.
+ACLE headers also provide ordinary C wrappers around builtins.
+
+Vroom should keep those roles distinct. The `.td` reader can generate
+declarative call metadata and test inventories. A vroom-owned implementation
+may provide a C body for a builtin whose semantics are expressible in C; the
+frontend can parse that body once and substitute its AST at each call, with
+argument evaluation preserved exactly once. This is semantic expansion, not
+an optimizer promise: it works at `-O0` and avoids depending on the optimizer
+to inline a helper. Operations requiring target instructions, special
+operand constraints, or compiler-only constant evaluation still need a
+dedicated lowering/folding implementation. Initial experiments should
+compare a body-backed integer builtin against the existing handwritten
+lowering for diagnostics, side effects, `constexpr`, code size and runtime
+behavior before expanding the mechanism.
 [Clang's population-count definitions](https://github.com/llvm/llvm-project/blob/5b10d2d74929eae78912771222c9855af97496f4/clang/include/clang/Basic/Builtins.td#L738)
 
 | Spelling | Converted argument | Result | Operation |

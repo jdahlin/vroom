@@ -75,7 +75,8 @@ arm64)
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
-	step builtin-tests-generated python3 src/tools/gen-builtin-tests.py --check
+	step builtin-tests-generated python3 src/tools/gen-builtin-tests.py --check \
+		--registry "$BUILD/generated/include/frontend/integer-builtins.inc"
 	step builtin-integer-arity python3 bench/vcc-builtins.py --check-integer-arity --vpp "$BUILD/vpp"
 	step builtin-stubs python3 bench/vcc-builtins.py --check-stubs --vpp "$BUILD/vpp"
 	step clang-builtin-reader make -C src -j "$J" OUT="$BUILD" clang-builtin-reader-check
