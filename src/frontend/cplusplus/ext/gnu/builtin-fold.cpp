@@ -214,6 +214,50 @@ constness semantic_analysis::evaluate_floating_classification(
     case builtin_float_op::isunordered:
         result = unordered;
         break;
+    case builtin_float_op::iszero:
+        result = k == fp_zero;
+        break;
+    case builtin_float_op::issubnormal:
+        result = k == fp_subnormal;
+        break;
+    case builtin_float_op::isfpclass: {
+        /* LLVM's FPClassTest bits: signalling and quiet NaN, then negative
+           infinity, normal, subnormal, zero and the positive ones; a NaN
+           is signalling when the quiet bit of its double is clear */
+        uint64_t bits;
+        memcpy(&bits, &a, sizeof bits);
+        bool negative = (bits >> 63) != 0;
+        unsigned selected = 0;
+        switch (k) {
+        case fp_nan:
+            selected = 1;
+            if ((bits >> 51) & 1)
+                selected = 2;
+            break;
+        case fp_infinite:
+            selected = 0x200;
+            if (negative)
+                selected = 0x4;
+            break;
+        case fp_normal:
+            selected = 0x100;
+            if (negative)
+                selected = 0x8;
+            break;
+        case fp_subnormal:
+            selected = 0x80;
+            if (negative)
+                selected = 0x10;
+            break;
+        case fp_zero:
+            selected = 0x40;
+            if (negative)
+                selected = 0x20;
+            break;
+        }
+        result = (static_cast<unsigned>(c2) & selected) != 0;
+        break;
+    }
     case builtin_float_op::fabs:
         v = constant_value();
         v.kind = constant_value_kind::floating;
@@ -366,6 +410,54 @@ constness semantic_analysis::evaluate_string_builtin(constant_evaluation &state,
 }
 
 /*
+ * __builtin_object_size (p, type) for the types 1 and 3 of a pointer into an
+ * array of constant objects of an integer type (a string literal): the bytes
+ * from the pointer to the end of the array, as clang's ExprConstant.cpp
+ * answers; any other call is not a constant here.
+ */
+constness semantic_analysis::evaluate_object_size_builtin(
+    constant_evaluation &state, const semantic_node &call, constant_value &v)
+{
+    const uint32_t *items = semantics.items(call.first);
+    if (call.count != 2)
+        return constness::unknown;
+    /* (the pointer as written, before the conversion to const void *) */
+    uint32_t node = items[0];
+    while (semantics[node].kind == semantic_kind::conversion &&
+           (static_cast<conversion_kind>(semantics[node].op) ==
+                conversion_kind::pointer ||
+            static_cast<conversion_kind>(semantics[node].op) ==
+                conversion_kind::qualification_cast))
+        node = semantics[node].a;
+    constant_value pointer, type;
+    constness c = evaluate_node(state, node, pointer);
+    if (c != constness::constant)
+        return c;
+    c = evaluate_node(state, items[1], type);
+    if (c != constness::constant)
+        return c;
+    qualified_type from = semantics[node].type;
+    /* (clang folds the closest-subobject types 1 and 3 of a literal; the
+       whole-object types 0 and 2 it leaves to run time, and so do we) */
+    if (pointer.kind != constant_value_kind::pointer ||
+        type.kind != constant_value_kind::integer || !pointer.count ||
+        !pointer.extent || !is_pointer(from) ||
+        (type.integer != 1 && type.integer != 3))
+        return constness::unknown;
+    fundamental_type f = fundamental_of(type_table[from.unqualified()].operand);
+    if (f == fundamental_type::none)
+        return constness::unknown;
+    unsigned bytes = integer_bits(tokens.files.behavior, f) / 8;
+    uint64_t left = 0;
+    if (pointer.offset < pointer.extent)
+        left = pointer.extent - pointer.offset;
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer = left * bytes;
+    return constness::constant;
+}
+
+/*
  * __builtin_add_overflow (a, b, &r) and the subtraction and multiplication
  * ones, typed forms included: r gets the exact result converted to its
  * type; the value is whether that changed it.  A constant expression
@@ -448,6 +540,8 @@ constness semantic_analysis::evaluate_builtin_fold(constant_evaluation &state,
         return evaluate_string_builtin(state, b, call, v);
     case builtin_fold::overflow:
         return evaluate_overflow_builtin(state, b, call, v);
+    case builtin_fold::object_size:
+        return evaluate_object_size_builtin(state, call, v);
     default:
         break;
     }

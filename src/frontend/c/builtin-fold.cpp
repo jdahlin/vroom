@@ -81,6 +81,43 @@ static int cc_builtin_integer_operation(unsigned id)
     }
 }
 
+/*
+ * Whether a builtin node of this id changes nothing by itself: its value
+ * depends on its arguments alone (what cc_builtin_fold computes), so the
+ * effects of the node are those of its arguments.  An array bound of such a
+ * call that folds is a constant bound, as in clang (which folds a bound
+ * that is not an integer constant expression and says it is an extension).
+ */
+CC_PRIVATE bool cc_builtin_is_pure(unsigned id)
+{
+    if (cc_builtin_integer_operation(id) != vfold_none)
+        return true;
+    switch (id) {
+    case CC_BUILTIN_CLASSIFY_TYPE:
+    case CC_BUILTIN_CONSTANT_P:
+    case CC_BUILTIN_EXPECT:
+    case CC_BUILTIN_EXPECT_PROB:
+    case CC_BUILTIN_ISNAN:
+    case CC_BUILTIN_ISINF:
+    case CC_BUILTIN_ISINF_SIGN:
+    case CC_BUILTIN_ISFINITE:
+    case CC_BUILTIN_ISNORMAL:
+    case CC_BUILTIN_SIGNBIT:
+    case CC_BUILTIN_ISSIGNALING:
+    case CC_BUILTIN_ISGREATER:
+    case CC_BUILTIN_ISGREATEREQUAL:
+    case CC_BUILTIN_ISLESS:
+    case CC_BUILTIN_ISLESSEQUAL:
+    case CC_BUILTIN_ISLESSGREATER:
+    case CC_BUILTIN_ISUNORDERED:
+    case CC_BUILTIN_OBJECT_SIZE:
+    case CC_BUILTIN_DYNAMIC_OBJECT_SIZE:
+        return true;
+    default:
+        return false;
+    }
+}
+
 CC_PRIVATE bool cc_builtin_fold(cc *c, const node *x, cc_value *v)
 {
     const uint32_t *arg = &c->lists[x->b];

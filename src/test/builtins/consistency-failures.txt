@@ -11,8 +11,6 @@ c-only-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the a
 claimed-not-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_mfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
-constexpr-claimed-not-folded __builtin_dynamic_object_size c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_dynamic_object_size c/x86_64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_huge_val c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_huge_val c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_huge_val c/arm64 # variably modified type declaration not allowed at file scope
@@ -35,30 +33,6 @@ constexpr-claimed-not-folded __builtin_infl c/arm64 # variably modified type dec
 constexpr-claimed-not-folded __builtin_infl c/x86_64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_is_constant_evaluated c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_is_constant_evaluated c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_isfinite c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isfinite c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isgreater c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isgreater c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isgreaterequal c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isgreaterequal c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isinf c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isinf c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isinf_sign c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isinf_sign c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isless c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isless c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_islessequal c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_islessequal c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_islessgreater c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_islessgreater c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isnan c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isnan c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isnormal c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isnormal c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_issignaling c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_issignaling c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isunordered c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isunordered c/x86_64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nan c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nan c/x86_64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nanf c/arm64 # variably modified type declaration not allowed at file scope
@@ -71,10 +45,6 @@ constexpr-claimed-not-folded __builtin_nansf c/arm64 # variably modified type de
 constexpr-claimed-not-folded __builtin_nansf c/x86_64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nansl c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nansl c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_object_size c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_object_size c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_signbit c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_signbit c/x86_64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_wcslen c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_wcslen c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_wmemcmp c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
@@ -107,37 +77,11 @@ fold-cxx-only __builtin_cargf c/arm64
 fold-cxx-only __builtin_cargf c/x86_64
 fold-cxx-only __builtin_cargl c/arm64
 fold-cxx-only __builtin_cargl c/x86_64
-fold-cxx-only __builtin_fpclassify c/arm64
-fold-cxx-only __builtin_fpclassify c/x86_64
 fold-cxx-only __builtin_huge_vall c/arm64
 fold-cxx-only __builtin_huge_vall c/x86_64
 fold-cxx-only __builtin_ia32_addcarryx_u64 c/x86_64
 fold-cxx-only __builtin_infl c/arm64
 fold-cxx-only __builtin_infl c/x86_64
-fold-cxx-only __builtin_isfinite c/arm64
-fold-cxx-only __builtin_isfinite c/x86_64
-fold-cxx-only __builtin_isgreater c/arm64
-fold-cxx-only __builtin_isgreater c/x86_64
-fold-cxx-only __builtin_isgreaterequal c/arm64
-fold-cxx-only __builtin_isgreaterequal c/x86_64
-fold-cxx-only __builtin_isinf c/arm64
-fold-cxx-only __builtin_isinf c/x86_64
-fold-cxx-only __builtin_isinf_sign c/arm64
-fold-cxx-only __builtin_isinf_sign c/x86_64
-fold-cxx-only __builtin_isless c/arm64
-fold-cxx-only __builtin_isless c/x86_64
-fold-cxx-only __builtin_islessequal c/arm64
-fold-cxx-only __builtin_islessequal c/x86_64
-fold-cxx-only __builtin_islessgreater c/arm64
-fold-cxx-only __builtin_islessgreater c/x86_64
-fold-cxx-only __builtin_isnan c/arm64
-fold-cxx-only __builtin_isnan c/x86_64
-fold-cxx-only __builtin_isnormal c/arm64
-fold-cxx-only __builtin_isnormal c/x86_64
-fold-cxx-only __builtin_issignaling c/arm64
-fold-cxx-only __builtin_issignaling c/x86_64
-fold-cxx-only __builtin_isunordered c/arm64
-fold-cxx-only __builtin_isunordered c/x86_64
 fold-cxx-only __builtin_memcmp c/arm64
 fold-cxx-only __builtin_memcmp c/x86_64
 fold-cxx-only __builtin_mul_overflow c/arm64
@@ -154,8 +98,6 @@ fold-cxx-only __builtin_nansf c/arm64
 fold-cxx-only __builtin_nansf c/x86_64
 fold-cxx-only __builtin_nansl c/arm64
 fold-cxx-only __builtin_nansl c/x86_64
-fold-cxx-only __builtin_signbit c/arm64
-fold-cxx-only __builtin_signbit c/x86_64
 fold-cxx-only __builtin_strcmp c/arm64
 fold-cxx-only __builtin_strcmp c/x86_64
 fold-cxx-only __builtin_strncmp c/arm64

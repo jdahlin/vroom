@@ -70,6 +70,9 @@ enum class builtin_fold : uint8_t {
     /* the string and memory functions on arrays of constants
        (builtin_string_op) */
     string,
+    /* __builtin_object_size and __builtin_dynamic_object_size of a pointer
+       into an array of constants */
+    object_size,
     floating_constant,
     /* the first argument's value */
     identity,
@@ -107,6 +110,9 @@ enum class builtin_float_op : uint8_t {
     isunordered,
     fabs,
     copysign,
+    iszero,
+    issubnormal,
+    isfpclass,
 };
 
 enum class builtin_string_op : uint8_t {

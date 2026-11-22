@@ -100,6 +100,8 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_wcslen", library, 5, string),
     ROW("__builtin_wmemcmp", library, 6, string),
     ROW("__builtin_wmemchr", library, 7, string),
+    ROW("__builtin_object_size", signature, 0, object_size),
+    ROW("__builtin_dynamic_object_size", signature, 0, object_size),
     /* int __builtin_constant_p(...), and the lock-free queries */
     ROW("__builtin_constant_p", query, 1, constant_p),
     ROW("__atomic_always_lock_free", query, 2, lock_free),
@@ -158,6 +160,9 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_isnormal", generic, 3, floating),
     ROW("__builtin_issignaling", generic, 0, floating_constant),
     ROW("__builtin_isunordered", generic, 12, floating),
+    ROW("__builtin_iszero", generic, 15, floating),
+    ROW("__builtin_issubnormal", generic, 16, floating),
+    ROW("__builtin_isfpclass", generic, 17, floating),
     ROW("__builtin_signbit", generic, 4, floating),
     /* the floating constants: infinity and quiet or signalling NaNs */
     ROW("__builtin_huge_val", floating_constant, 0, floating_constant),
