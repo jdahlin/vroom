@@ -427,6 +427,9 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     case unary_trait_kind::has_trivial_copy:
     case unary_trait_kind::has_trivial_assign:
     case unary_trait_kind::has_unique_object_representations:
+    case unary_trait_kind::is_trivially_relocatable:
+    case unary_trait_kind::is_cpp_trivially_relocatable:
+    case unary_trait_kind::is_trivially_equality_comparable:
         if (!class_property_trait(which, t, answer))
             return false;
         break;

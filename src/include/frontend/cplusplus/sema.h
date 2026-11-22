@@ -3135,6 +3135,8 @@ class semantic_analysis
     bool class_property_trait(int which, qualified_type t, bool &answer);
     bool standard_layout_class(entity_index c, bool &answer);
     bool declares_move_assignment(entity_index c);
+    bool relocatable_type(qualified_type t, bool cpp26, bool &known);
+    bool class_head_names_trivial_abi(entity_index c);
     bool unique_representation(qualified_type t, bool &answer);
     bool trivial_default_class(entity_index c, bool &known) const;
     void base_classes_of(entity_index c, owned_array<entity_index> &out) const;

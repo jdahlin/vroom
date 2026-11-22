@@ -312,6 +312,48 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
         if (unbounded)
             return false;
         return unique_representation(t, answer);
+    /* [ext:clang_type_traits] __is_trivially_relocatable (clang's own
+       rule) and __builtin_is_cpp_trivially_relocatable ([class.prop] of
+       C++26, P2786): an array is as its element */
+    case unary_trait_kind::is_trivially_relocatable:
+    case unary_trait_kind::is_cpp_trivially_relocatable: {
+        bool known = true;
+        answer =
+            relocatable_type(t,
+                             static_cast<unary_trait_kind>(which) ==
+                                 unary_trait_kind::is_cpp_trivially_relocatable,
+                             known);
+        return known;
+    }
+    /* clang: not an array or an enumeration; a class needs a defaulted
+       operator==, which is not followed; else the type has unique object
+       representations without being trivially copyable */
+    case unary_trait_kind::is_trivially_equality_comparable: {
+        if (array)
+            return true;
+        if (is_class)
+            return false;
+        /* an enumeration is, unless an operator== of its namespace may
+           take it: not followed */
+        if (kind == type_kind::enumeration) {
+            entity_index space =
+                entity_table[type_table[t.unqualified()].entity].enclosing;
+            if (entity_table.find(
+                    space,
+                    operator_name(preprocessing_op_or_punc::EQUAL_EQUAL)))
+                return false;
+            answer = true;
+            return true;
+        }
+        if (kind == type_kind::function ||
+            kind == type_kind::lvalue_reference ||
+            kind == type_kind::rvalue_reference ||
+            fundamental_of(t) == fundamental_type::void_) {
+            answer = false;
+            return true;
+        }
+        return unique_representation(t, answer);
+    }
     case unary_trait_kind::is_polymorphic:
         answer = !array && is_class && polymorphic_class(c);
         return true;
@@ -762,6 +804,144 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
             break;
     }
     answer = end == x.size;
+    return true;
+}
+
+/*
+ * Whether t is trivially relocatable.  cpp26 is clang's
+ * __builtin_is_cpp_trivially_relocatable (P2786: a const field, a
+ * defaulted move, a union with a member that is not are not; a polymorphic
+ * class may be), else __is_trivially_relocatable (clang's own: the
+ * classic rule).  A scalar is; a reference, void and a function are not; an
+ * array is as its element; a class is not with a virtual base, a
+ * user-provided destructor, copy or move constructor, or a base or member
+ * that is not.  known is false for what clang answers by rules this does
+ * not follow (a defaulted or deleted special member beside others, a
+ * union, a user-provided copy assignment).
+ */
+/* whether the head of class c's definition has [[clang::trivial_abi]]
+   (which makes it trivially relocatable for clang's old rule): not kept by
+   the analysis, which found it without effect, so read from the tokens up
+   to the first { */
+bool semantic_analysis::class_head_names_trivial_abi(entity_index c)
+{
+    uint32_t d = entity_table[c].first_declaration;
+    if (!d)
+        return false;
+    SyntaxRef node = entity_table.declaration(d).node;
+    if (!node)
+        return false;
+    for (token_index t = node.first_token(); t < node.end_token(); t++) {
+        owned_buffer text;
+        tokens.spelling(t, text.get());
+        if (text.size() == 1 && text.data()[0] == '{')
+            break;
+        if (text.size() == 11 && !memcmp(text.data(), "trivial_abi", 11))
+            return true;
+    }
+    return false;
+}
+
+bool semantic_analysis::relocatable_type(qualified_type t, bool cpp26,
+                                         bool &known)
+{
+    t = qualified_type::make(t.unqualified(), cv_none);
+    while (type_table[t.unqualified()].kind == type_kind::array) {
+        t = type_table[t.unqualified()].operand;
+        t = qualified_type::make(t.unqualified(), cv_none);
+    }
+    const struct type &record = type_table[t.unqualified()];
+    switch (record.kind) {
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+    case type_kind::function:
+        return false;
+    case type_kind::class_type:
+        break;
+    case type_kind::fundamental:
+        return fundamental_of(t) != fundamental_type::void_;
+    case type_kind::pointer:
+    case type_kind::enumeration:
+    case type_kind::pointer_to_member:
+        return true;
+    default:
+        known = false;
+        return false;
+    }
+    entity_index c = record.entity;
+    const entity &x = entity_table[c];
+    if (!x.size) {
+        known = false;
+        return false;
+    }
+    if (x.virtual_base_count)
+        return false;
+    if (class_head_names_trivial_abi(c)) {
+        known = false;
+        return false;
+    }
+    if (x.dynamic && !cpp26)
+        return false;
+    /* a user-declared move assignment operator: user-provided or deleted */
+    if (cpp26 && declares_move_assignment(c))
+        return false;
+    if (x.union_) {
+        /* a union of members that copy as bytes */
+        bool copyable_known = true;
+        bool copyable = class_trivially_copyable(c, copyable_known);
+        if (!copyable_known || !copyable) {
+            known = false;
+            return false;
+        }
+        return true;
+    }
+    if (x.destructor && !entity_table[x.destructor].implicit)
+        return false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (!entity_table[k].implicit && is_copy_constructor(c, k))
+            return false;
+    if (x.user_copy_assignments || x.implicit_copy_deleted ||
+        x.constructor_template || x.constructor_templates) {
+        known = false;
+        return false;
+    }
+    if (cpp26 &&
+        (x.defaulted_move_constructor || x.defaulted_move_assignment ||
+         x.defaulted_copy_constructor || x.defaulted_copy_assignment)) {
+        known = false;
+        return false;
+    }
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        if (!relocatable_type(b.type, cpp26, known) || !known)
+            return false;
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+            m.base_subobject)
+            continue;
+        qualified_type f = m.type;
+        bool constant = (f.cv() & cv_const) != 0;
+        while (type_table[f.unqualified()].kind == type_kind::array) {
+            f = type_table[f.unqualified()].operand;
+            constant = constant || (f.cv() & cv_const);
+        }
+        type_kind fk = type_table[f.unqualified()].kind;
+        /* a reference member: P2786's rule excludes it, clang's own does
+           not */
+        if (fk == type_kind::lvalue_reference ||
+            fk == type_kind::rvalue_reference) {
+            if (cpp26)
+                return false;
+            continue;
+        }
+        if (cpp26 && constant)
+            return false;
+        if (!relocatable_type(f, cpp26, known) || !known)
+            return false;
+    }
     return true;
 }
 
