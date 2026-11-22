@@ -373,8 +373,6 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
        the template's scope that no name binds there */
     uint32_t specialization = class_instantiating;
     class_instantiating = 0;
-    if (has_bases && !is_namespace(scope))
-        return not_supported(n, inner_class_rule(scope));
     token_index id = head_children[0].token();
     uint32_t name = 0;
     entity_index c = 0;
