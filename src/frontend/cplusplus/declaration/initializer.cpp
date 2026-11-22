@@ -1752,6 +1752,13 @@ analysis_result semantic_analysis::aggregate_elements(
         count = types.size();
         if (x.union_ && count > 1)
             count = 1;
+        /* [dcl.init.aggr]/5.4.2 (C++20 /5.4): an empty list initializes a
+           union's member that has a default member initializer, not its
+           first member: not analysed */
+        if (x.union_ && next >= clauses.size())
+            for (size_t i = 1; i < defaults.size(); i++)
+                if (defaults[i])
+                    return not_supported(list, "dcl.init.aggr");
     }
     owned_array<uint32_t> elements;
     constness all = constness::constant;
