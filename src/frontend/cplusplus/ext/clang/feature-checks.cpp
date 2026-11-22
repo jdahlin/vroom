@@ -13,7 +13,10 @@
  *   __is_target_arch(x), __is_target_vendor(x), __is_target_os(x),
  *   __is_target_environment(x)             the target's parts
  *   __building_module(x)                   0: no modules are built
- *   __has_constexpr_builtin(x)             0: no builtin is constant yet
+ *   __has_constexpr_builtin(x)             what the front end evaluates, as
+ *                                          frontend/builtin-fold.h says, for a
+ *                                          builtin it implements; clang's
+ *                                          answer for one it does not
  *   __FLT_EVAL_METHOD__                    0 (clang_flt_eval_method)
  *
  * and [ext:clang_has_include_next] (__has_include_next, evaluated with
@@ -24,6 +27,9 @@
 #include <stdio.h>
 
 #include "../../cplusplus-internal.h"
+#include "frontend/builtin-fold.h"
+#include "frontend/c/ast-builder.h"
+#include "frontend/cplusplus/builtin-registry.h"
 
 namespace cplusplus
 {
@@ -322,9 +328,31 @@ bool has_builtin(const implementation_defined_behavior &b, const char *name,
     return answer(b, check_kind::builtin, name, length) != 0;
 }
 
+/* whether the front end implements the builtin: the C front end's table,
+   the registry of this front end, or a C library function's builtin */
+static bool builtin_is_implemented(const char *name, size_t length)
+{
+    uint16_t row = 0;
+    const char *signature = nullptr, *symbol = nullptr;
+    bool clang_encoding = false;
+    if (ast_builder_builtin_signature(name, length) ||
+        gnu_builtin_find(name, length, &row))
+        return true;
+    if (length > 10 && !memcmp(name, "__builtin_", 10))
+        return ast_builder_library_builtin(name + 10, length - 10, &signature,
+                                           &clang_encoding, &symbol);
+    return false;
+}
+
 static bool has_constexpr_builtin(const implementation_defined_behavior &b,
                                   const char *name, size_t length)
 {
+    int claim = vfold_claim(name, length, 1);
+    if (claim >= 0)
+        return claim != 0;
+    /* a builtin the front end implements and no evaluator folds */
+    if (builtin_is_implemented(name, length))
+        return false;
     return answer(b, check_kind::constexpr_builtin, name, length) != 0;
 }
 
