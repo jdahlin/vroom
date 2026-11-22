@@ -124,6 +124,15 @@ analysis_result semantic_analysis::member_template_declaration(
     entity_index top = entity_table[c].enclosing;
     while (top && entity_table[top].kind == entity_kind::class_type)
         top = entity_table[top].enclosing;
+    /* [temp.deduct.guide]: a deduction guide for a member class template */
+    if (inner.is(syntax_kind::deduction_guide) && is_namespace(top)) {
+        entity_index saved = current_scope;
+        current_scope = c;
+        analysis_result r =
+            deduction_guide(n.template_declaration(), inner.deduction_guide());
+        current_scope = saved;
+        return r;
+    }
     if ((!inner.is(syntax_kind::function_definition,
                    syntax_kind::member_declaration)) ||
         !is_namespace(top))
@@ -139,14 +148,23 @@ analysis_result semantic_analysis::member_template_declaration(
           inner[at].is(syntax_kind::decl_specifier_seq) &&
           declares_special_member(c, inner[at + 1])))
         return member_function_template(c, n, inner, access);
-    /* [temp.mem]/1: a static data member variable template defined in-class */
+    /* [temp.mem]/1: a static data member variable template (defined in-class
+       or declared only) */
     if (inner.is(syntax_kind::member_declaration) && at + 1 < inner.size() &&
         inner[at].is(syntax_kind::decl_specifier_seq)) {
         SyntaxElement item = inner[at + 1];
         if (item.is(syntax_kind::member_declarator_list) && item.size() == 1)
             item = item[0];
-        if (item.is(syntax_kind::member_declarator) && item.size() == 2 &&
-            item[1].is(syntax_kind::brace_or_equal_initializer)) {
+        bool initialized_var =
+            item.is(syntax_kind::member_declarator) && item.size() == 2 &&
+            item[1].is(syntax_kind::brace_or_equal_initializer);
+        bool declared_var = false;
+        if (!initialized_var && item.is_token() && item.is_identifier()) {
+            for (auto sp : inner[at].elements())
+                if (sp.is(standard_keyword::static_))
+                    declared_var = true;
+        }
+        if (initialized_var || declared_var) {
             entity_index saved = current_scope;
             current_scope = c;
             analysis_result r = variable_template_definition(n, inner);
@@ -186,9 +204,11 @@ analysis_result semantic_analysis::member_template_declaration(
         VTRY(r, constructor_specifiers(inner[at], s, false));
         at++;
     }
-    /* a constructor's declarator, not a destructor's (which [temp.mem]/3
-       does not allow a template of) */
-    if (at >= inner.size() || !declares_special_member(c, inner[at]) ||
+    /* a constructor's or conversion function's declarator, not a destructor's
+       (which [temp.mem]/3 does not allow a template of) */
+    if (at >= inner.size() ||
+        (!declares_special_member(c, inner[at]) &&
+         !conversion_function_id_of(inner)) ||
         inner[at][0].is(syntax_kind::unqualified_id))
         return not_supported(n, "temp.mem");
     return member_function_template(c, n, inner, access);
@@ -2859,15 +2879,19 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
     /* a decl-specifier-seq before the declarator holds constexpr and inline
        alone (function_specifiers_only) */
     bool constexpr_specified = false, inline_specified = false;
-    if (at == 1)
-        function_specifiers_only(n[0], constexpr_specified, nullptr, nullptr,
-                                 &inline_specified);
+    if (at > 0 && n[at - 1].is(syntax_kind::decl_specifier_seq))
+        function_specifiers_only(n[at - 1], constexpr_specified, nullptr,
+                                 nullptr, &inline_specified);
     auto body = n.function_definition().function_body();
     if (n.size() != at + 2 || !body || body.function_try_block() ||
         at_block_scope() || function_state.active)
         return not_supported(n, "dcl.fct.def.general");
     qualified_type type = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
+    SyntaxRef conversion = conversion_function_id_of(n);
+    if (conversion) {
+        VTRY(cr, conversion_type(conversion, type));
+    }
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
@@ -2883,6 +2907,20 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
     entity_index c = m.qualifier;
     if (!c || !m.has_id || m.aligned || (m.gnu_flags & (gnu_packed | gnu_used)))
         return not_supported(n, "dcl.fct.def.general");
+    if (conversion && instantiating) {
+        specified s;
+        s.constexpr_ = constexpr_specified;
+        s.inline_ = inline_specified;
+        entity_index e = 0;
+        VTRY_SET(r, declare_specialization(n, m.id, type, s, e));
+        if (!body.plain())
+            return not_supported(n, "dcl.fct.def.general");
+        last_declared = e;
+        analysis_result br =
+            analyse_function_body(n, body.compound_statement());
+        last_declared = e;
+        return br;
+    }
     if (tokens.identifier(m.id) != entity_table[c].name)
         /* a conversion function, or ~ with another name */
         return not_supported(n, "class.dtor");

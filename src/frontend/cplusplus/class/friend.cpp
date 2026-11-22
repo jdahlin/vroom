@@ -451,6 +451,80 @@ analysis_result semantic_analysis::friend_function_template(
                   syntax_kind::function_definition) ||
         inner.size() != lead + 3)
         return not_supported(n, "temp.friend");
+    /* [temp.friend]/1: a member function template of another class befriended:
+       template <class T> friend R G::f(P); */
+    if (inner.is(syntax_kind::member_declaration) &&
+        !inner[lead + 1].is_token()) {
+        SyntaxElement d = inner[lead + 1];
+        while (d.is(syntax_kind::ptr_declarator) && d.size() >= 2)
+            d = d[d.size() - 1];
+        if (d.is(syntax_kind::noptr_declarator) && d.size() >= 1 &&
+            d[0].is(syntax_kind::qualified_id) && d[0].size() == 2 &&
+            d[0][0].is(syntax_kind::nested_name_specifier)) {
+            nominated_scope ns;
+            VTRY(nr, nested_name_specifier(d[0][0].index(), ns));
+            if (is_class_entity(ns.entity)) {
+                entity_index target = ns.entity;
+                owned_array<SyntaxRef> parameters;
+                entity_index saved_class = defining_class;
+                defining_class = 0;
+                analysis_result hr = template_head_parameters(
+                    n, parameters, true, true, true, true);
+                defining_class = saved_class;
+                if (hr != analysis_result::well_formed)
+                    return hr;
+                uint32_t number = 0, first = 0;
+                entity_index scope = 0;
+                VTRY(tr, template_parameter_scope(n, parameters, target, 0,
+                                                  number, scope, first));
+                specified s;
+                declarator_meaning m;
+                qualified_type type;
+                entity_index saved_scope = current_scope;
+                uint32_t saved_cv = function_cv;
+                bool saved_friend = friend_allowed;
+                scoped_value<entity_index> member_scope(template_member_scope,
+                                                        scope);
+                defining_class = 0;
+                friend_allowed = true;
+                analysis_result dr = function_template_declarator(
+                    inner, lead, target, scope, s, m, type);
+                uint32_t cv = function_cv;
+                current_scope = saved_scope;
+                defining_class = saved_class;
+                function_cv = saved_cv;
+                friend_allowed = saved_friend;
+                if (dr != analysis_result::well_formed)
+                    return dr;
+                if (!m.has_id || m.qualifier != target)
+                    return not_supported(n, "temp.friend");
+                entity_index held =
+                    entity_table.find(target, tokens.identifier(m.id));
+                if (held)
+                    held = member_templates_of(held);
+                if (!held)
+                    return not_supported(n, "temp.friend");
+                owned_array<uint32_t> group;
+                function_template_overloads(held, group);
+                for (uint32_t g : group) {
+                    const function_template f = function_templates[g - 1];
+                    const entity old = entity_table[f.entity];
+                    if (old.enclosing != target || old.member_cv != cv)
+                        continue;
+                    if (!equivalent_template(
+                            f, n, first,
+                            static_cast<uint32_t>(parameters.size()), type))
+                        continue;
+                    friend_record rec;
+                    rec.granting = c;
+                    rec.template_entity = f.entity;
+                    friends.append(rec);
+                    return analysis_result::well_formed;
+                }
+                return not_supported(n, "temp.friend");
+            }
+        }
+    }
     entity_index saved_scope = current_scope, saved_class = defining_class;
     bool saved_friend = friend_allowed;
     current_scope = enclosing_namespace(c);

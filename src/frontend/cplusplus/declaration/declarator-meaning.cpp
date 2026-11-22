@@ -1167,16 +1167,28 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             m.destructor = true;
             name = dtor.identifier();
         }
-        /* [over.oper]/1: an operator function's name, X::operator@ */
-        bool operator_name = !m.destructor && name.operator_function_id();
+        /* [over.oper]/1: an operator function's name, X::operator@,
+           or X::operator T (conversion-function-id), or X::f<A>
+           (simple-template-id in an explicit specialization/instantiation) */
+        bool operator_name = !m.destructor && (name.operator_function_id() ||
+                                               name.conversion_function_id());
+        bool template_name = !m.destructor && declarator_template_id &&
+                             name.is(syntax_kind::simple_template_id) &&
+                             name.size() >= 3 && name[0].is_identifier();
         if (q.size() != 2 || !q.nested_name_specifier() ||
-            (!operator_name && !name.is_identifier()))
+            (!operator_name && !template_name && !name.is_identifier()))
             return not_supported(q, "dcl.meaning");
         VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
         if (m.destructor && !m.qualifier)
             return not_supported(q, "class.dtor");
         has_head = true;
-        head = name;
+        if (template_name) {
+            m.template_id = name.index();
+            declarator_template_id = false;
+            head = name[0];
+        } else {
+            head = name;
+        }
         i = 1;
         /* the suffixes are the member's: a cv-qualifier-seq may follow one
            of a class */

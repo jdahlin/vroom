@@ -42,6 +42,33 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     if (n.size() != 4 || n[3].is_token())
         return not_supported(n, "temp.expl.spec");
     auto inner = n[3];
+    /* [temp.expl.spec]/16: template <> template <> ... (explicit
+       specialization of a member function template of an explicitly or
+       implicitly specialized class template) */
+    if (inner.is(syntax_kind::explicit_specialization))
+        return explicit_specialization(inner.explicit_specialization());
+    /* [temp.expl.spec]/16: template <> template <class T> R H<char>::h(T) */
+    if (inner.is(syntax_kind::template_declaration) && inner.size() == 2 &&
+        inner[1].is(syntax_kind::function_definition)) {
+        SyntaxRef def = inner[1];
+        uint32_t lead_attr = leading_gnu_attributes(def);
+        SyntaxTail tail(def, lead_attr);
+        if (tail.size() >= 2 && !tail[1].is_token()) {
+            SyntaxElement d = tail[1];
+            while (d.is(syntax_kind::ptr_declarator) && d.size() >= 2)
+                d = d[d.size() - 1];
+            if (d.is(syntax_kind::noptr_declarator) && d.size() >= 1 &&
+                d[0].is(syntax_kind::qualified_id) && d[0].size() == 2 &&
+                d[0][0].is(syntax_kind::nested_name_specifier)) {
+                nominated_scope ns;
+                VTRY(nr, nested_name_specifier(d[0][0].index(), ns));
+                if (is_class_entity(ns.entity))
+                    return define_member_template_of(ns.entity, n, inner, def,
+                                                     false, true);
+            }
+        }
+        return not_supported(n, "temp.expl.spec");
+    }
     entity_index qualifier = 0;
     if (SyntaxRef id = variable_specialization_id(inner))
         return variable_specialization(n, inner, id, qualifier);
@@ -134,6 +161,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                         entity_table.add_declaration(match, inner);
                         return analysis_result::well_formed;
                     }
+                    entity_table[match].defined = false;
+                    entity_table[match].definition = 0;
+                    entity_table[match].inline_ = ms.inline_;
                     return function_definition(inner);
                 }
             }
@@ -421,16 +451,20 @@ analysis_result semantic_analysis::named_specialization(
     if (specialization)
         rule = "temp.expl.spec";
     SyntaxTail tail(declaration, lead);
-    if (leading_gnu_attributes(declaration) != lead || tail.size() != 3 ||
-        !tail[0].is(syntax_kind::decl_specifier_seq) || tail[1].is_token() ||
-        (!tail[1].is(syntax_kind::noptr_declarator,
-                     syntax_kind::ptr_declarator)))
+    SyntaxRef conversion = conversion_function_id_of(declaration);
+    uint32_t has_spec =
+        tail.size() > 0 && tail[0].is(syntax_kind::decl_specifier_seq);
+    if (leading_gnu_attributes(declaration) != lead ||
+        tail.size() != 2 + has_spec || (!has_spec && !conversion) ||
+        tail[has_spec].is_token() ||
+        (!tail[has_spec].is(syntax_kind::noptr_declarator,
+                            syntax_kind::ptr_declarator)))
         return not_supported(n, rule);
     if (declaration.is(syntax_kind::function_definition) &&
-        !declaration.function_definition().plain())
+        !declaration.function_definition().function_body().plain())
         return not_supported(n, rule);
     if (declaration.is(syntax_kind::simple_declaration) &&
-        !tail[2].is(preprocessing_op_or_punc::SEMICOLON))
+        !tail[has_spec + 1].is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported(n, rule);
     if (!is_namespace(current_scope) || defining_class || function_state.active)
         return not_supported(n, rule);
@@ -444,20 +478,31 @@ analysis_result semantic_analysis::named_specialization(
         static_cast<owned_array<parameter_meaning> &&>(function_parameters);
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = decl_specifier_seq(tail[0], s, false);
+    analysis_result r = analysis_result::well_formed;
+    if (has_spec) {
+        bool outer_explicit = explicit_allowed;
+        explicit_allowed = outer_explicit || conversion;
+        r = decl_specifier_seq(tail[0], s, false);
+        explicit_allowed = outer_explicit;
+    }
     uint32_t cv = 0;
     if (r == analysis_result::well_formed) {
         type = s.type;
+        if (conversion)
+            r = conversion_type(conversion, type);
+    }
+    if (r == analysis_result::well_formed) {
         function_cv = 0;
         function_parameters.clear();
         declarator_template_id = true;
-        r = declarator(declaration, tail[1], type, m);
+        r = declarator(declaration, tail[has_spec], type, m);
         declarator_template_id = false;
         cv = function_cv;
         if (r == analysis_result::well_formed)
             r = misplaced_function_qualifiers(
                 declaration, type,
-                entity_table[current_scope].kind == entity_kind::class_type);
+                entity_table[current_scope].kind == entity_kind::class_type ||
+                    m.qualifier != 0);
     }
     bool defaults = false;
     for (const parameter_meaning &p : function_parameters)
@@ -473,9 +518,12 @@ analysis_result semantic_analysis::named_specialization(
         return r;
     /* [temp.expl.spec]/14 and [temp.explicit]/2's kinds of declaration;
        default arguments are [dcl.fct.default]/4's error */
-    if (!m.has_id || m.qualifier || m.qualified_namespace ||
-        m.operator_function || m.literal_operator || cv || defaults ||
+    if (!m.has_id || m.qualified_namespace || m.operator_function ||
+        m.literal_operator || cv || defaults ||
         type_table[type.unqualified()].kind != type_kind::function)
+        return not_supported(n, rule);
+    if (m.qualifier &&
+        entity_table[m.qualifier].kind != entity_kind::class_type)
         return not_supported(n, rule);
     if (s.typedef_ || s.static_ || s.extern_ || s.gnu_flags || m.gnu_flags ||
         s.aligned || m.aligned || s.section || m.section || m.asm_label)
@@ -490,19 +538,33 @@ analysis_result semantic_analysis::named_specialization(
     uint32_t ft = 0;
     owned_array<template_argument> values;
     bool qualified = false;
-    SyntaxElement callee = SyntaxElement::from_token(m.id);
-    if (m.template_id)
-        callee = m.template_id;
-    else
-        ft = function_template_of(
-            lookup_unqualified(tokens.identifier(m.id), lookup_filter::any)
-                .unknown_entity);
-    if (m.template_id) {
-        size_t before = name_uses.size();
-        r = template_callee_parts(callee, name, ft, values, qualified);
-        name_uses.resize(before);
-        if (r != analysis_result::well_formed)
-            return r;
+    entity_index owner_scope = current_scope;
+    if (m.qualifier) {
+        owner_scope = m.qualifier;
+        entity_index held =
+            entity_table.find(m.qualifier, tokens.identifier(m.id));
+        if (held)
+            held = member_templates_of(held);
+        if (held)
+            ft = member_function_template_of(held);
+        if (ft && m.template_id && m.template_id.size() > 3) {
+            VTRY(ar, template_id_arguments(m.template_id, ft, values));
+        }
+    } else {
+        SyntaxElement callee = SyntaxElement::from_token(m.id);
+        if (m.template_id)
+            callee = m.template_id;
+        else
+            ft = function_template_of(
+                lookup_unqualified(tokens.identifier(m.id), lookup_filter::any)
+                    .unknown_entity);
+        if (m.template_id) {
+            size_t before = name_uses.size();
+            r = template_callee_parts(callee, name, ft, values, qualified);
+            name_uses.resize(before);
+            if (r != analysis_result::well_formed)
+                return r;
+        }
     }
     if (!ft)
         return not_supported(n, rule);
@@ -516,7 +578,7 @@ analysis_result semantic_analysis::named_specialization(
     }
     const function_template f = function_templates[ft - 1];
     const entity t = entity_table[f.entity];
-    if (t.enclosing != current_scope || f.primary)
+    if (t.enclosing != owner_scope || f.primary)
         return not_supported(n, rule);
     /* [temp.deduct.decl]/1: the arguments from the function type */
     owned_array<bool> set;

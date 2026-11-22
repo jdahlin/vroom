@@ -839,20 +839,20 @@ semantic_analysis::function_definition(FunctionDefinition definition)
     SyntaxRef n = definition;
     uint32_t k = leading_gnu_attributes(n);
     SyntaxTail tail(n, k);
-    if (k && (k >= n.size() || !tail[0].is(syntax_kind::decl_specifier_seq)))
+    if (k >= n.size())
         return not_supported(n, "dcl.fct.def.general");
-    if (n.size() && !tail[0].is(syntax_kind::decl_specifier_seq))
+    if (!tail[0].is(syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
-        return special_member_definition(n, 0);
+        return special_member_definition(n, k);
     bool constexpr_specified = false, inline_specified = false;
-    if (!k && n.size() == 3 &&
-        function_specifiers_only(n[0], constexpr_specified, nullptr, nullptr,
+    if (tail.size() == 3 &&
+        function_specifiers_only(tail[0], constexpr_specified, nullptr, nullptr,
                                  &inline_specified))
         /* the same, constexpr or inline ([class.ctor]/1): a
            decl-specifier-seq of those alone has no type, so names no other
            function */
-        return special_member_definition(n, 1);
+        return special_member_definition(n, k + 1);
     if (!n.size())
         return not_supported(n, "dcl.fct.def.general");
     VTRY(r, init_declarators(n, tail[0], true));
@@ -1412,7 +1412,17 @@ analysis_result semantic_analysis::declare_with_initializer(
             return not_supported(declaration, "dcl.init.ref");
     }
     entity_index declared_entity = 0;
-    if (m.qualifier) {
+    if (m.qualifier && (instantiating || variable_instantiating)) {
+        bool var_inst = variable_instantiating != 0;
+        if (var_inst)
+            r = declare(declaration, m.id, kind, type, s, definition,
+                        initialized, declared_entity);
+        else
+            r = declare_specialization(declaration, m.id, type, s,
+                                       declared_entity);
+        if (r == analysis_result::well_formed && !var_inst)
+            current_scope = m.qualifier;
+    } else if (m.qualifier) {
         r = static_member_definition(declaration, m.id, m.qualifier, type, s,
                                      definition, declared_entity);
         if (r == analysis_result::well_formed)

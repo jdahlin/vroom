@@ -59,7 +59,7 @@ analysis_result semantic_analysis::member_function_template(
        member-declaration of a decl-specifier-seq and a declarator */
     bool defines = definition.is(syntax_kind::function_definition);
     if (!defines &&
-        (conversion || (!specifiers && !constructor) || trailing ||
+        ((!specifiers && !constructor && !conversion) || trailing ||
          tail.size() != 2 + specifiers || tail[specifiers].is_token() ||
          !tail[specifiers + 1].is(preprocessing_op_or_punc::SEMICOLON)))
         return not_supported(n, "temp.mem");
