@@ -1,3 +1,4 @@
+/* vcc-flags: -O2 */
 /* statements after an inlined function's taken return are not generated (the kernel's bio_integrity_action: if (!blk_get_integrity(d)) return 0; ... return __bio_integrity_action(b)); act() is never defined */
 extern unsigned act(void *b);
 struct d { void *q; };

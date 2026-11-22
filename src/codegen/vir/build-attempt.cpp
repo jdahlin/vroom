@@ -2,7 +2,7 @@
  * A function through VIR (PLAN-vir.md): the VIR walker builds it
  * (codegen/vir/preir.h); what it cannot build is emitted as before (X8).
  *
- * VIR is -O2's code generator: cc_options.optimize.vir (driver/optimization.cpp,
+ * VIR is the default code generator: cc_options.optimize.vir (driver/optimization.cpp,
  * doc/OPTIMIZATION.md).  The developer's aids, cc_options.vir_aid:
  *   -fno-vir-lower         build VIR, then emit the function as before
  *   -fvir-verify           run the verifier on it (failures to stderr)

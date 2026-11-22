@@ -104,10 +104,10 @@ arm64)
 	step cxx-run      python3 bench/cxx-run.py -j "$J"
 	# programs using libc++ headers: OK or a clean refusal, never a crash (needs libc++ headers; skipped without)
 	[ -d "${LIBCXX_INC:-/usr/lib/llvm-23/include/c++/v1}" ] && step cxx-libcxx-apps python3 bench/cxx-libcxx-apps.py -j "$J" --bin-dir "$BUILD"
-	# the suites at each code generator (doc/OPTIMIZATION.md): -O2 VIR (the default), -O1 the
-	# direct emitter, -O3 VIR with the vectorizer and its checks (verifier, allocation check)
+	# Cover VIR at -O0, -O2 and -O3, and the direct emitter at -O1.
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
-	step ctests-O1    python3 bench/vcc-ctests.py -j "$J" -O1
+	step ctests-O0    python3 bench/vcc-ctests.py -j "$J" --suite vcc -O0 --vflags "-fvir-verify -fvir-check"
+	step ctests-O1    python3 bench/vcc-ctests.py -j "$J" -O1 --vflags "-fno-vir"
 	step ctests-O3    python3 bench/vcc-ctests.py -j "$J" -O3 --vflags "-fvir-verify -fvir-check"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
@@ -194,7 +194,7 @@ asan)
 	# Explicit vcc-timeout limits measure the normal compiler. ASan/UBSan
 	# makes init_large about 7x slower; allow sanitizer overhead as for TSan.
 	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
-	step ctests-vcc-O1 env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc -O1
+	step ctests-vcc-O1 env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc -O1 --vflags "-fno-vir"
 	step vir-tests-asan python3 bench/vir-test.py -j "$J" --bin-dir "$B"
 	step vir-exposure-asan python3 bench/vir-exposure.py --bin-dir "$B"
 	# Hosted atomics use the runner's native libc/libatomic; arm64 is covered above.

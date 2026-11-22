@@ -409,10 +409,10 @@ enum { CC_DISABLED_BUILTIN_WORDS = 6 }; /* generated libbuiltins.inc indices */
  * -fNAME and -fno-NAME, on by default at -O<LEVEL> and above.  The driver resolves the level
  * and the options into cc_options.optimize (driver/optimization.cpp); doc/OPTIMIZATION.md says
  * what each row does and what else a level contains.  Every row runs on VIR, so none has an
- * effect without `vir`, and VIR itself needs -O2: below it the rows are all off.
+ * effect without `vir`. VIR is enabled at every optimization level.
  */
 #define CC_OPTIMIZATIONS(X)                                                    \
-    X(vir, "vir", 2) /* functions go through VIR (codegen/vir/) */             \
+    X(vir, "vir", 0) /* functions go through VIR (codegen/vir/) */             \
     X(rotate_loops, "rotate-loops",                                            \
       2) /* the lowering puts a loop's test at its end */                      \
     X(shrink_wrap, "shrink-wrap",                                              \

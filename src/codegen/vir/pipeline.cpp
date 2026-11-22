@@ -132,6 +132,9 @@ VPRIV bool virbuild_function_emit(codegen_context *e)
         const virbuild_pass *p = &t[i];
         bool changed;
 
+        if (e->unit->options->opt < 2 && !w->active &&
+            !(p->flags & VIRBUILD_PASS_FLAG_REQUIRED))
+            continue;
         if ((p->flags & VIRBUILD_PASS_FLAG_IF_PREVIOUS_CHANGED) && !last)
             continue;
         if (!w->active)
