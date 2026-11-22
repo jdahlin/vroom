@@ -180,7 +180,7 @@ analysis_result semantic_analysis::constant_expression(SyntaxRef at,
     if (m.evaluation == constness::unknown) {
         /* what the operators could not fold: the evaluator's */
         if (!m.node)
-            return not_supported(at, "expr.const");
+            return not_supported(at, expr_const_reason());
         constant_value v;
         analysis_result r = evaluate_constant(at, m.node, v, constant);
         if (r == analysis_result::well_formed && constant)
@@ -211,7 +211,7 @@ analysis_result semantic_analysis::integral_constant_expression(
     if (!tokens.files.behavior.has(language_feature::list_initialization) &&
         m.beyond_integral_constant) {
         constant = false;
-        return not_supported(at, "expr.const");
+        return not_supported(at, expr_const_reason());
     }
     return analysis_result::well_formed;
 }

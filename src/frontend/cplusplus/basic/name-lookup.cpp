@@ -116,23 +116,49 @@ entity_index semantic_analysis::declared_in(entity_index scope, uint32_t name,
 }
 
 const char *
+semantic_analysis::unknown_name_subclause(const lookup_result &r,
+                                          const char *otherwise) const
+{
+    if (!r.unknown_entity && r.unknown_because)
+        return r.unknown_because;
+    return unknown_name_subclause(r.unknown_entity, otherwise);
+}
+
+const char *
 semantic_analysis::unknown_name_subclause(entity_index e,
                                           const char *otherwise) const
 {
-    /* a name a refused template-declaration held: that declaration's
-       reason (a use of it must not hide it), else [temp.names]/1: "A
+    /* a name a refused declaration held: that declaration's reason (a
+       use of it must not hide it), else, for a template's name, [temp.names]/1: "A
        template specialization ... can be referred to by a template-id" */
-    if (e && entity_table[e].held_by_template) {
-        if (entity_table[e].held_because)
-            return entity_table[e].held_because;
+    if (e && entity_table[e].held_because)
+        return entity_table[e].held_because;
+    if (e && entity_table[e].held_by_template)
         return "temp.names";
-    }
     return otherwise;
 }
 
 void semantic_analysis::note_held(entity_index e)
 {
     held_pending.append(e);
+    /* a local declaration refused inside a body: the names after it need
+       the reason now, not when the whole declaration ends */
+    if (!entity_table[e].held_because &&
+        unsupported.size() > declaration_refusals)
+        entity_table[e].held_because =
+            unsupported[declaration_refusals].subclause;
+}
+
+/* scope's names are not all known from now on, for the reason the
+   declaration being analysed is refused for */
+void semantic_analysis::note_unknown_scope(entity_index scope)
+{
+    entity_table[scope].unknown_names = true;
+    unknown_scopes_pending.append(scope);
+    if (!entity_table[scope].unknown_because &&
+        unsupported.size() > declaration_refusals)
+        entity_table[scope].unknown_because =
+            unsupported[declaration_refusals].subclause;
 }
 
 /* a name that the member function templates, or the constructor
@@ -147,13 +173,36 @@ entity_index semantic_analysis::make_held_name(uint32_t name,
     return held;
 }
 
+/* a name that is not known, and the subclause whose rules would tell
+   (the first reason stays) */
+void semantic_analysis::mark_unknown(lookup_result &r, const char *because,
+                                     held_cause by) const
+{
+    r.unknown = true;
+    if (!r.unknown_because) {
+        r.unknown_because = because;
+        r.unknown_by = by;
+    }
+}
+
+/* why a scope's names are not all known: the refusal of the declaration
+   that made them so, else the using-directive's */
+const char *semantic_analysis::unknown_scope_subclause(entity_index s) const
+{
+    if (entity_table[s].unknown_because)
+        return entity_table[s].unknown_because;
+    return "namespace.udir";
+}
+
 void semantic_analysis::found_also(lookup_result &r, entity_index e,
                                    entity_index in) const
 {
     if (entity_table[e].kind == entity_kind::none) {
         r.unknown = true;
-        if (!r.unknown_entity)
+        if (!r.unknown_entity) {
             r.unknown_entity = e;
+            r.unknown_by = entity_table[e].held_by;
+        }
         return;
     }
     if (!r.entity) {
@@ -193,7 +242,7 @@ void semantic_analysis::found_also(lookup_result &r, entity_index e,
        set */
     if (entity_table[r.entity].kind == entity_kind::function &&
         entity_table[e].kind == entity_kind::function)
-        r.unknown = true;
+        mark_unknown(r, "namespace.udir");
     else
         r.ambiguous = true;
 }
@@ -294,7 +343,8 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
                 if (e)
                     found_also(r, e, v.nominated);
                 else if (entity_table[v.nominated].unknown_names)
-                    r.unknown = true;
+                    mark_unknown(r, unknown_scope_subclause(v.nominated),
+                                 entity_table[v.nominated].unknown_by);
             }
         } else if (entity_table[s].kind == entity_kind::class_type) {
             if (filter == lookup_filter::non_members) {
@@ -316,9 +366,9 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
                     unknown = true;
             }
             if (unknown)
-                r.unknown = true;
+                mark_unknown(r, "temp.dep");
             if (ambiguous)
-                r.unknown = true;
+                mark_unknown(r, "class.member.lookup");
             else if (e) {
                 /* the class or base the member is declared in */
                 entity_index in = entity_table[e].enclosing;
@@ -335,7 +385,8 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
         /* a scope with names analysis did not follow: one not found so
            far may be among them */
         if (!r.entity && entity_table[s].unknown_names)
-            r.unknown = true;
+            mark_unknown(r, unknown_scope_subclause(s),
+                         entity_table[s].unknown_by);
         if (r.entity || r.unknown || r.ambiguous || !s)
             break;
     }
@@ -352,14 +403,14 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
             uint32_t d = entity_table[o].first_declaration;
             if (d &&
                 entity_table.declaration(d).node.first_token() > lookup_horizon)
-                r.unknown = true;
+                mark_unknown(r, "temp.dep");
             if (entity_table[o].kind != entity_kind::function)
                 break;
         }
     /* a pack named outside a pack expansion's pattern: ill-formed
        ([temp.variadic]/7) unless it is one analysis has no rules for */
     if (r.entity && entity_table[r.entity].kind == entity_kind::pack)
-        r.unknown = true;
+        mark_unknown(r, "temp.variadic");
     if (r.unknown || r.ambiguous)
         r.entity = 0;
     return r;
@@ -432,7 +483,8 @@ semantic_analysis::lookup_in_namespace(entity_index n, uint32_t name,
             entity_index e = declared_in(searched[i], name, filter);
             if (!e) {
                 if (entity_table[searched[i]].unknown_names)
-                    r.unknown = true;
+                    mark_unknown(r, unknown_scope_subclause(searched[i]),
+                                 entity_table[searched[i]].unknown_by);
                 continue;
             }
             found_also(r, e, searched[i]);
@@ -475,7 +527,7 @@ semantic_analysis::lookup_qualified(entity_index scope, uint32_t name,
         bool ambiguous = false;
         entity_index e = class_member_lookup(scope, name, ambiguous);
         if (ambiguous) {
-            r.unknown = true;
+            mark_unknown(r, "class.member.lookup");
             return r;
         }
         if (!e)

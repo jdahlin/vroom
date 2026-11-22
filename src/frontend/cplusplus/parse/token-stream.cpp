@@ -34,10 +34,26 @@ preprocessing_token token_stream::read()
     return pp.next();
 }
 
+bool token_stream::layout_pragma_at(token_index i)
+{
+    make_through(i);
+    bool in_effect = false;
+    for (size_t k = 0; k < layout_change_at.size() && layout_change_at[k] <= i;
+         k++)
+        in_effect = layout_change_to[k];
+    return in_effect;
+}
+
 void token_stream::make_through(token_index i)
 {
     while (!complete && tokens.size() <= i) {
         preprocessing_token first = read();
+        if (files.layout_pragma != layout_pragma_before) {
+            /* a layout pragma ran before this token */
+            layout_pragma_before = files.layout_pragma;
+            layout_change_at.append(static_cast<token_index>(tokens.size()));
+            layout_change_to.append(layout_pragma_before);
+        }
         first_piece.append(static_cast<uint32_t>(preprocessing_tokens.size()));
         preprocessing_tokens.append(first);
         identifiers.append(0);

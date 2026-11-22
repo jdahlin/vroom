@@ -78,6 +78,35 @@ analysis_result semantic_analysis::not_supported(SyntaxRef n,
     return analysis_result::unsupported;
 }
 
+void semantic_analysis::name_lookup_detail(token_index t,
+                                           const lookup_result &found)
+{
+    if (found.unknown && found.unknown_by != held_cause::refused)
+        name_held_detail(t, found.unknown_by);
+    else if (found.unknown_entity)
+        name_unsupported_detail(t, "is declared by a declaration with no "
+                                   "rules yet");
+    else if (found.unknown)
+        name_unsupported_detail(t, "has no declaration the analysis knows: a "
+                                   "scope it was searched in has names "
+                                   "analysis did not follow");
+    else
+        name_unsupported_detail(t, "has no declaration the analysis knows: no "
+                                   "scope has it");
+}
+
+/* the last refusal's name was held by a declaration that was not
+   analysed for another reason than a missing rule */
+void semantic_analysis::name_held_detail(token_index t, held_cause by)
+{
+    if (by == held_cause::ill_formed)
+        name_unsupported_detail(
+            t, "is declared by a declaration that is ill-formed");
+    else if (by == held_cause::not_parsed)
+        name_unsupported_detail(
+            t, "is declared by a declaration that is not parsed");
+}
+
 /* the last refusal recorded names the identifier at t: "NAME what" */
 void semantic_analysis::name_unsupported_detail(token_index t, const char *what)
 {
@@ -179,7 +208,10 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     d.node = n;
     current_declaration = n;
     size_t unsupported_before = unsupported.size();
+    size_t outer_refusals = declaration_refusals;
+    declaration_refusals = unsupported_before;
     size_t held_before = held_pending.size();
+    size_t scopes_before = unknown_scopes_pending.size();
     if (is_namespace_definition(tree, n)) {
         /* the declarations of its body are analysed as declarations of
            their own: one of them not parsed does not make the namespace
@@ -205,12 +237,28 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
         tree[n].kind != syntax_kind::linkage_specification)
         hold_names(n);
     /* the names a template-declaration held while it was refused say why */
+    held_cause cause = held_cause::refused;
+    if (!d.has_unsupported && d.result == analysis_result::ill_formed)
+        cause = held_cause::ill_formed;
+    else if (!d.has_unsupported && d.result == analysis_result::not_parsed)
+        cause = held_cause::not_parsed;
     for (size_t i = held_before; i < held_pending.size(); i++) {
         entity &held = entity_table[held_pending[i]];
         if (d.has_unsupported && !held.held_because)
             held.held_because = unsupported[unsupported_before].subclause;
+        else if (!d.has_unsupported && !held.held_because)
+            held.held_by = cause;
     }
     held_pending.resize(held_before);
+    for (size_t i = scopes_before; i < unknown_scopes_pending.size(); i++) {
+        entity &scope = entity_table[unknown_scopes_pending[i]];
+        if (d.has_unsupported && !scope.unknown_because)
+            scope.unknown_because = unsupported[unsupported_before].subclause;
+        else if (!d.has_unsupported && !scope.unknown_because)
+            scope.unknown_by = cause;
+    }
+    unknown_scopes_pending.resize(scopes_before);
+    declaration_refusals = outer_refusals;
     declarations.append(d);
     return d.result;
 }

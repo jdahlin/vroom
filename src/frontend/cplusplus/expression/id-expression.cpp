@@ -619,9 +619,9 @@ analysis_result semantic_analysis::id_expression(token_index t,
     if (!e)
         e = allocation_builtin(name);
     if (!e) {
-        analysis_result r = not_supported(
-            current_declaration, unknown_name_subclause(found.unknown_entity,
-                                                        "basic.lookup.unqual"));
+        analysis_result r =
+            not_supported(current_declaration,
+                          unknown_name_subclause(found, "basic.lookup.unqual"));
         /* a builtin of clang's that this front end has not (its name is
            the implementation's, [lex.name]/3), or the name that has no
            declaration analysis knows: the error names it */
@@ -629,8 +629,7 @@ analysis_result semantic_analysis::id_expression(token_index t,
             name_unsupported_detail(t, "is a compiler builtin this front end "
                                        "does not have");
         else
-            name_unsupported_detail(t, "has no declaration the analysis "
-                                       "knows");
+            name_lookup_detail(t, found);
         return r;
     }
     return named_entity(t, e, m);

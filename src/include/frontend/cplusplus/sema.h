@@ -243,6 +243,10 @@ using entity_index = uint32_t;
    template specialization, namespace, or pack."  The kinds a declaration
    introduces; a class member or a bit-field is a variable or a function
    whose scope is a class. */
+/* why a declaration that holds names was not analysed, when no rule is
+   missing for it: an error in it, or the parser kept it as tokens */
+enum class held_cause : uint8_t { refused, ill_formed, not_parsed };
+
 enum class entity_kind : uint8_t {
     none,
     variable, /* an object or a reference: [basic.pre]/6 */
@@ -445,8 +449,16 @@ struct entity {
     /* the subclause whose missing rules made the declaration that
        hold_names held this name not analysed (declaration() sets it from
        that declaration's first refusal): a use of the name is refused for
-       that reason, not for [temp.names] */
+       that reason, not for [basic.lookup.unqual] or [temp.names] */
     const char *held_because = nullptr;
+    /* with no held_because: why the declaration that held the name was
+       not analysed, told in a refusal's detail */
+    held_cause held_by = held_cause::refused;
+    /* with unknown_names: the subclause whose missing rules made the
+       declaration that left the scope's names not all known not
+       analysed (declaration() sets it), else the using-directive's */
+    const char *unknown_because = nullptr;
+    held_cause unknown_by = held_cause::refused;
     /* a scope (a namespace, 0 the global one, or a block): a
        using-directive appears in it ([namespace.udir]; an unnamed or
        inline namespace's implied one in its enclosing namespace) */
@@ -785,6 +797,10 @@ struct entity {
    inline at the closing }, 0 if none) */
 struct dynamic_class {
     entity_index primary_base = 0;
+    /* [abi:class-types] I: the primary base is a virtual base (a nearly
+       empty one), which shares the class's virtual table pointer; the
+       lowering has no rules for it yet */
+    bool primary_is_virtual = false;
     uint32_t first_slot = 0, slot_count = 0;
     bool abstract = false;
     entity_index key_function = 0;
@@ -1611,6 +1627,12 @@ class semantic_analysis
     owned_array<unsupported_construct> unsupported;
     /* the names held (note_held) by the declarations being analysed */
     owned_array<entity_index> held_pending;
+    /* where the refusals of the declaration being analysed start in
+       `unsupported`: a name held while analysing it is held for the first */
+    size_t declaration_refusals = 0;
+    /* scopes the declaration being analysed left with names not all known
+       (unknown_names): it gives them their reason when it is refused */
+    owned_array<entity_index> unknown_scopes_pending;
     owned_array<unsupported_construct> body_failures;
     /* whether the token is in a system header (clang's; lowering) */
     bool token_in_system_header(token_index at) const
@@ -1642,6 +1664,11 @@ class semantic_analysis
     /* the virtual base subobject of class c whose class is v, 0 if v is
        no virtual base of c */
     entity_index virtual_base_of(entity_index c, entity_index v) const;
+    /* [abi:class-types] III: whether the virtual base class v is the
+       primary base of class k, of its primary base, and so on (an
+       indirect primary base): it is allocated with that base, not as a
+       virtual base of the class k is a base of */
+    bool primary_chain_has(entity_index k, entity_index v) const;
     /* the virtual bases of class c in inheritance graph order (preorder,
        [abi:class-types] III), classes */
     void virtual_bases_in_graph_order(entity_index c,
@@ -2039,9 +2066,11 @@ class semantic_analysis
     analysis_result declarator_qualifier(SyntaxRef nested,
                                          declarator_meaning &m);
     void hold_names(SyntaxRef declaration);
-    /* e was just held by a template-declaration (held_by_template): the
-       declaration being analysed gives it its reason when it is refused */
+    /* e was just held by the declaration being analysed (a template's:
+       held_by_template): that declaration gives it its reason when it is
+       refused */
     void note_held(entity_index e);
+    void note_unknown_scope(entity_index scope);
     entity_index make_held_name(uint32_t name, entity_index scope);
     bool declared_by(entity_index e, SyntaxRef node) const;
     analysis_result declare_local(SyntaxRef declaration, token_index id,
@@ -2091,12 +2120,26 @@ class semantic_analysis
         /* unknown: the first name found that analysis kept with no entity
            (kind none) */
         entity_index unknown_entity = 0;
+        /* unknown with no entity: the subclause whose rules would tell
+           (an unknown scope's refused declaration, [temp.dep], ...) */
+        const char *unknown_because = nullptr;
+        held_cause unknown_by = held_cause::refused;
     };
     /* the subclause an unsupported use of the name found as r (not
        known, kind none) waits for: [temp.names] for a template's name,
        else otherwise */
     const char *unknown_name_subclause(entity_index e,
                                        const char *otherwise) const;
+    const char *unknown_name_subclause(const lookup_result &r,
+                                       const char *otherwise) const;
+    void mark_unknown(lookup_result &r, const char *because,
+                      held_cause by = held_cause::refused) const;
+    /* the refusal at t names the name it could not resolve and why:
+       held by a declaration ill-formed or not parsed, in a scope with
+       names analysis did not follow, or in no scope */
+    void name_lookup_detail(token_index t, const lookup_result &found);
+    void name_held_detail(token_index t, held_cause by);
+    const char *unknown_scope_subclause(entity_index s) const;
     lookup_result lookup_unqualified(uint32_t name, lookup_filter filter) const;
     /* [namespace.qual]/2: the name looked up in the namespace n (0: the
        global namespace) */
@@ -2195,6 +2238,10 @@ class semantic_analysis
     /* function_template_definition: the function_templates index plus one
        of the template its last declaration declared or redeclared */
     uint32_t last_function_template = 0;
+    analysis_result friend_member_function(entity_index c, SyntaxRef n,
+                                           const declarator_meaning &m,
+                                           qualified_type type, bool no_type,
+                                           bool is_constexpr);
     analysis_result friend_function_template(entity_index c,
                                              TemplateDeclaration n,
                                              SyntaxRef inner);
@@ -2410,6 +2457,18 @@ class semantic_analysis
     bool case_or_default_label(SyntaxElement s) const;
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);
     analysis_result gnu_attribute_specifier(SyntaxRef n, specified &s);
+    /* [expr.const]: why an evaluation could not tell, when a function it
+       calls was refused (its reason), else the evaluation's own; cleared
+       when read */
+    const char *evaluation_cause = nullptr;
+    const char *expr_const_reason()
+    {
+        const char *r = "expr.const";
+        if (evaluation_cause)
+            r = evaluation_cause;
+        evaluation_cause = nullptr;
+        return r;
+    }
     analysis_result defer_unsupported_body(SyntaxRef n, entity_index f,
                                            size_t before, analysis_result r);
     analysis_result gnu_compound_literal(SyntaxRef n, expression_meaning &m);
@@ -3086,6 +3145,15 @@ class semantic_analysis
     bool unary_trait(int which, qualified_type t, int64_t &value);
     /* ext/clang/class-traits.cpp: the traits that ask about a class */
     bool class_property_trait(int which, qualified_type t, bool &answer);
+    bool standard_layout_class(entity_index c, bool &answer);
+    bool declares_move_assignment(entity_index c);
+    bool relocatable_type(qualified_type t, bool cpp26, bool &known);
+    bool class_head_names_trivial_abi(entity_index c);
+    bool unique_representation(qualified_type t, bool &answer);
+    bool trivial_default_class(entity_index c, bool &known) const;
+    void base_classes_of(entity_index c, owned_array<entity_index> &out) const;
+    void layout_member_types(entity_index c, owned_array<type_index> &out);
+    bool first_data_class(entity_index c, entity_index &owner) const;
     bool derives_from(entity_index d, entity_index b) const;
     analysis_result clang_base_of_trait(SyntaxRef n, bool virtual_base,
                                         expression_meaning &m);
@@ -3453,6 +3521,11 @@ class semantic_analysis
                                       const gnu_builtin &b,
                                       const semantic_node &call,
                                       constant_value &v);
+    constness evaluate_classify_type_builtin(const semantic_node &call,
+                                             constant_value &v);
+    constness evaluate_object_size_builtin(constant_evaluation &state,
+                                           const semantic_node &call,
+                                           constant_value &v);
     constness evaluate_overflow_builtin(constant_evaluation &state,
                                         const gnu_builtin &b,
                                         const semantic_node &call,
@@ -4996,6 +5069,9 @@ class semantic_analysis
     analysis_result analyse_function_body(SyntaxRef definition,
                                           SyntaxElement compound,
                                           SyntaxElement ctor_initializer = {});
+    analysis_result analyse_function_body_of(SyntaxRef definition,
+                                             SyntaxElement compound,
+                                             SyntaxElement ctor_initializer);
     /* [class.base.init]: a constructor's member initializations, the
        statements of a block (function_body's b) */
     analysis_result

@@ -188,7 +188,8 @@ enum {
     AST_SYMBOL_FUNCTION,
     AST_SYMBOL_TYPEDEF,
     AST_SYMBOL_ENUMERATOR,
-    AST_SYMBOL_BUILTIN
+    AST_SYMBOL_BUILTIN,
+    AST_SYMBOL_BODY_ARGUMENT /* a builtin body's parameter: body is the node it stands for */
 };
 enum {
     AST_STORAGE_NONE,
@@ -422,7 +423,9 @@ enum { CC_DISABLED_BUILTIN_WORDS = 6 }; /* generated libbuiltins.inc indices */
     X(hoist_loop_constants, "hoist-loop-constants",                            \
       3) /* a loop's constants are made once in front of it */                 \
     X(address_clone, "address-clone",                                          \
-      2) /* x86-64: a constant offset several accesses use is added at each */
+      2) /* x86-64: a constant offset several accesses use is added at each */ \
+    X(carry_flags, "carry-flags",                                              \
+      2) /* an unsigned carry or borrow test reads the addition's flags */
 
 typedef struct cc_optimizations {
 #define X(field, name, level) bool field;

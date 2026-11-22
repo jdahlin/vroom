@@ -344,6 +344,7 @@ VPRIV bool virbuild_arm_is_hoistable(virbuild_context *V, uint32_t a,
                                      uint32_t b, uint32_t cond, uint32_t *n);
 VPRIV bool virbuild_if_convert(codegen_context *e);
 VPRIV bool virbuild_addresses_clone(codegen_context *e);
+VPRIV bool virbuild_carries_place(codegen_context *e);
 
 /* condition-merge.c */
 VPRIV bool virbuild_conditions_merge(codegen_context *e);

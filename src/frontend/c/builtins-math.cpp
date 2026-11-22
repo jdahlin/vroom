@@ -46,12 +46,10 @@ CC_PRIVATE uint32_t cc_builtin_math_call_build(cc *c, const cc_builtin *b,
     cc_id_list args;
     *handled = false;
     switch (b->id) {
-    case CC_BUILTIN_ISFPCLASS:
-    case CC_BUILTIN_ISSUBNORMAL:
-    case CC_BUILTIN_ISZERO: {
+    case CC_BUILTIN_ISFPCLASS: {
         *handled = true;
-        i128 mask = b->id == CC_BUILTIN_ISSUBNORMAL ? 144 : 96;
-        unsigned nargs = b->id == CC_BUILTIN_ISFPCLASS ? 2 : 1;
+        i128 mask;
+        unsigned nargs = 2;
         uint32_t pre;
 
         cc_builtin_arguments_parse(c, &args);
@@ -66,8 +64,7 @@ CC_PRIVATE uint32_t cc_builtin_math_call_build(cc *c, const cc_builtin *b,
                             tyname(c, AST_NODE(args.v[0])->ty));
             return cc_node_error_new(c, loc);
         }
-        if (b->id == CC_BUILTIN_ISFPCLASS &&
-            !cc_constant_integer(c, args.v[1], &mask)) {
+        if (!cc_constant_integer(c, args.v[1], &mask)) {
             cc_report_error(
                 c, loc, "argument to '%s' must be a constant integer", b->name);
             return cc_node_error_new(c, loc);

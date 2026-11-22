@@ -1016,7 +1016,7 @@ def check_metrics(now):
         rows.append((k, b, n, mark))
     sub_b, sub_n = base.get('unsupported_by_subclause', {}), now['unsupported_by_subclause']
     moved = sorted(((sub_n.get(k, 0) - sub_b.get(k, 0), k) for k in set(sub_b) | set(sub_n)
-                    if sub_n.get(k, 0) != sub_b.get(k, 0)), key=lambda x: x[0])
+                    if sub_n.get(k, 0) != sub_b.get(k, 0)), key=lambda x: -abs(x[0]))
     lines = ['| metric | baseline | now | change |', '|---|---:|---:|---|']
     for k, b, n, mark in rows:
         lines.append(f'| {k} | {b} | {n} | {n - b:+d} {mark} |' if n != b else f'| {k} | {b} | {n} | |')

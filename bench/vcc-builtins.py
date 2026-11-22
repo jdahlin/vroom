@@ -495,6 +495,9 @@ def main():
     parser.add_argument('--no-calls', action='store_true')
     parser.add_argument('--check-stubs', action='store_true',
                         help='check generated C builtin stub diagnostics')
+    parser.add_argument('--check-consistency', action='store_true',
+                        help='bench/vcc-builtins-consistency.py --check: __has_builtin, calls, -c and '
+                             'constant folding per language and target against the known list (vcc only)')
     parser.add_argument('--check-integer-arity', action='store_true',
                         help='check C and C++ rejection of wrong-arity fixed integer calls')
     parser.add_argument('--sample-calls', action='store_true',
@@ -520,6 +523,9 @@ def main():
         return 0
     if args.check_stubs:
         return check_stubs(args.vpp)
+    if args.check_consistency:
+        return subprocess.call([sys.executable, str(ROOT / 'bench/vcc-builtins-consistency.py'),
+                                '--check', '--vpp', str(args.vpp)])
     if not args.clang:
         parser.error('Clang not found. Supply --clang.')
     if args.check_integer_arity:

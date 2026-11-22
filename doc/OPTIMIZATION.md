@@ -93,16 +93,23 @@ What a function gets, in order (the rows of `codegen/vir/pass-table.c`):
 8. **Address cloning** (`address-clone.cpp`, x86-64): a pointer plus a
    constant that several loads and stores use is added again in front of each,
    so that every one folds it as its displacement instead of sharing an `lea`.
-9. **Edge splitting**, conversion to VIR and its canonical form (`split`,
+9. **Carry placement** (`carry-placement.cpp`): the compare that asks whether
+   an unsigned addition wrapped (`s < x` after `s = x + y`) or an unsigned
+   subtraction borrowed (`x < y` beside `x - y`) moves to right behind it, and
+   the lowerings read it from that instruction's flags (`adds`/`subs` and a
+   condition on arm64, `add`/`sub` and `setb`, `jb` or `cmovb` on x86-64)
+   instead of comparing again.  A multi-word addition written in C and the C
+   bodies of `__builtin_addc`/`__builtin_subc` are the shape.
+10. **Edge splitting**, conversion to VIR and its canonical form (`split`,
    `slot-uses`, `to-vir`, `canon`).
-10. **Register allocation** (`vir/alloc.c`, `SPEC-vir.md` 15): greedy, in block
+11. **Register allocation** (`vir/alloc.c`, `SPEC-vir.md` 15): greedy, in block
    order, on SSA, with parallel moves on edges; callee-saved registers chosen
    per function.
-11. **Lowering** (`arch/a64/vir/`, `arch/x64/vir/`): block layout with loop
+12. **Lowering** (`arch/a64/vir/`, `arch/x64/vir/`): block layout with loop
     rotation (the test at the bottom of a loop) and duplication of a loop's
     entry test; on arm64, shrink-wrapping (the prologue only on the paths
     that need a frame; not with `-fasynchronous-unwind-tables` on ELF).
-12. **Records**: the same clean-up passes as `-O1`.
+13. **Records**: the same clean-up passes as `-O1`.
 
 ### -O3: the vectorizer
 
@@ -135,6 +142,7 @@ up.  An option overrides the level whatever their order.  VIR is on by default. 
 | `-fvectorize` (`-ftree-vectorize`) | `-O3` | the loop vectorizer |
 | `-fhoist-loop-constants` | `-O3` | an innermost loop's constants made once in front of it |
 | `-faddress-clone` | `-O2` | x86-64: a pointer plus a constant that several accesses use is added again at each (`-fno-address-clone` keeps one shared `lea`) |
+| `-fcarry-flags` | `-O2` | an unsigned carry or borrow test reads the flags of its addition or subtraction (`-fno-carry-flags` compares again) |
 
 The direct emitter's own optimizations have no options of their own, apart
 from the ones clang has: `-fno-jump-tables`, `-fno-optimize-sibling-calls`,

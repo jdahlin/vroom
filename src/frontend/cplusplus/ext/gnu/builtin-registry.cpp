@@ -13,6 +13,7 @@
  */
 #include "../../cplusplus-internal.h"
 #include "frontend/c/ast-builder.h"
+#include "frontend/builtin-fold.h"
 #include "frontend/cplusplus/builtin-registry.h"
 
 namespace cplusplus
@@ -99,6 +100,21 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_wcslen", library, 5, string),
     ROW("__builtin_wmemcmp", library, 6, string),
     ROW("__builtin_wmemchr", library, 7, string),
+    ROW("__builtin_classify_type", generic, 0, classify_type),
+/* AArch64's spellings of integer operations: the C front end's table
+       maps them to its nodes of the operation */
+#define ARM_INTEGER_BUILTIN(name, operation)                                   \
+    ROW(name, signature, static_cast<uint8_t>(builtin_integer_op::operation),  \
+        integer),
+    ARM_INTEGER_BUILTIN("__builtin_arm_clz",
+                        clz) ARM_INTEGER_BUILTIN("__builtin_arm_clz64", clz)
+        ARM_INTEGER_BUILTIN("__builtin_arm_cls", clrsb)
+            ARM_INTEGER_BUILTIN("__builtin_arm_cls64", clrsb)
+                ARM_INTEGER_BUILTIN("__builtin_arm_rbit", bitreverse)
+                    ARM_INTEGER_BUILTIN("__builtin_arm_rbit64", bitreverse)
+#undef ARM_INTEGER_BUILTIN
+                        ROW("__builtin_object_size", signature, 0, object_size),
+    ROW("__builtin_dynamic_object_size", signature, 0, object_size),
     /* int __builtin_constant_p(...), and the lock-free queries */
     ROW("__builtin_constant_p", query, 1, constant_p),
     ROW("__atomic_always_lock_free", query, 2, lock_free),
@@ -138,6 +154,10 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_popcountg", bit_count, 1, bit_count),
     ROW("__builtin_clzg", bit_count, 2, bit_count),
     ROW("__builtin_ctzg", bit_count, 3, bit_count),
+    /* C23's <stdbit.h> counts, as the C front end's table spells them: the
+       result is the table's unsigned int, a zero value has no fallback */
+    ROW("__builtin_stdc_count_ones", bit_count, 4, bit_count),
+    ROW("__builtin_stdc_trailing_zeros", bit_count, 5, bit_count),
     /* the type-generic classifications and comparisons of <math.h> (C17
        7.12.3, 7.12.14): the arguments as they are, unpromoted */
     ROW("__builtin_fpclassify", generic, 6, floating),
@@ -153,6 +173,9 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_isnormal", generic, 3, floating),
     ROW("__builtin_issignaling", generic, 0, floating_constant),
     ROW("__builtin_isunordered", generic, 12, floating),
+    ROW("__builtin_iszero", generic, 15, floating),
+    ROW("__builtin_issubnormal", generic, 16, floating),
+    ROW("__builtin_isfpclass", generic, 17, floating),
     ROW("__builtin_signbit", generic, 4, floating),
     /* the floating constants: infinity and quiet or signalling NaNs */
     ROW("__builtin_huge_val", floating_constant, 0, floating_constant),
@@ -195,6 +218,11 @@ const gnu_builtin *gnu_builtin_find(const char *spelling, size_t length,
 const gnu_builtin &gnu_builtin_at(uint16_t row)
 {
     return builtin_registry[row - 1];
+}
+
+bool gnu_builtin_folds(const gnu_builtin &b)
+{
+    return vfold_in_language(vfold_find(b.name, strlen(b.name)), 1);
 }
 
 bool gnu_builtin_untyped(uint16_t row)

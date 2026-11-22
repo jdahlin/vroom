@@ -188,6 +188,18 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
     if (handled)
         return math;
 
+    if (unlikely(b->body)) {
+        const struct cc_body_binding *k = cc_builtin_body_find(c, b);
+
+        if (k) {
+            cc_builtin_arguments_parse(c, &args);
+            if (args.n != cc_builtin_body_arity(k)) {
+                cc_builtin_arity_check(c, loc, cc_builtin_body_arity(k), &args);
+                return cc_node_error_new(c, loc);
+            }
+            return cc_builtin_body_apply(c, k, b, args.v, args.n, loc);
+        }
+    }
     switch (b->id) {
     case CC_BUILTIN_OS_LOG_FORMAT:
     case CC_BUILTIN_OS_LOG_SIZE:
@@ -349,8 +361,6 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
         return cc_node_rvalue(c,
                               cc_complex_part(c, a, b->id == CC_BUILTIN_CIMAG));
     }
-    case CC_BUILTIN_STDC_COUNT_ONES:
-    case CC_BUILTIN_STDC_TRAILING_ZEROS:
     case CC_BUILTIN_CLZG:
     case CC_BUILTIN_CTZG:
     case CC_BUILTIN_POPCOUNTG:
@@ -446,9 +456,9 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
         }
         case CC_BUILTIN_ADDC:
         case CC_BUILTIN_SUBC:
-            if (args.n != 4 || !cc_type_is_pointer(c, AST_NODE(args.v[3])->ty))
-                cc_report_error(
-                    c, loc, "carry-out argument to builtin must be a pointer");
+            if (args.n == 4)
+                args.v[3] =
+                    cc_builtin_pointer_argument(c, args.v[3], rt, 3, loc);
             break;
         case CC_BUILTIN_ISNAN:
         case CC_BUILTIN_ISINF:

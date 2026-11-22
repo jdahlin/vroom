@@ -661,7 +661,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
     }
     if (declaration.is(syntax_kind::using_directive)) {
         /* [namespace.udir]: what it makes visible is not known */
-        entity_table[current_scope].unknown_names = true;
+        note_unknown_scope(current_scope);
         return;
     }
     if (declaration.is(syntax_kind::using_declaration,
@@ -865,7 +865,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
             /* a namespace-definition that was not analysed: the
                namespace's members are not all known; the namespace is
                still the namespace */
-            entity_table[found].unknown_names = true;
+            note_unknown_scope(found);
             continue;
         }
         if (found &&
@@ -891,8 +891,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
             entity_index e =
                 entity_table.make(entity_kind::none, name, current_scope);
             entity_table[e].held_by_template = by_template;
-            if (by_template)
-                note_held(e);
+            note_held(e);
             entity_table[e].hidden_type = found;
             entity_table.bind(current_scope, name, e);
             continue;
@@ -903,10 +902,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                what the name denotes is not known from here on */
             if (!declared_by(found, declaration)) {
                 entity_table[found].kind = entity_kind::none;
-                if (by_template) {
+                if (by_template)
                     entity_table[found].held_by_template = true;
-                    note_held(found);
-                }
+                note_held(found);
                 /* a function template's name declared again (an explicit
                    specialization, an overload): its calls need more than
                    the template */
@@ -919,8 +917,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         entity_index e =
             entity_table.make(entity_kind::none, name, current_scope);
         entity_table[e].held_by_template = by_template;
-        if (by_template)
-            note_held(e);
+        note_held(e);
         entity_table.bind(current_scope, name, e);
     }
 }
@@ -953,8 +950,6 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
     if (at_block_scope() || function_state.active ||
         (defining_class && !friend_declarator))
         return not_supported(nested, "dcl.meaning");
-    if (friend_declarator && !is_namespace(scope.entity))
-        return not_supported(nested, "class.friend");
     /* [basic.lookup.qual]/3: what follows the qualified-id is looked up in
        its namespace, not in the class a friend declaration is in */
     defining_class = 0;

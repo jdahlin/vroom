@@ -2139,6 +2139,20 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         if (!copies_bytes(k) && !(move_seen && move_usable) &&
             !(!move_seen && copy_usable))
             move_deleted = true;
+        /* [class.default.ctor]/2.2: a variant member of a union with a
+           default member initializer does not delete the constructor */
+        bool variant_initialized = false;
+        if (x.union_)
+            for (uint32_t j = 0; j < x.member_count; j++)
+                if (entity_table[class_members[x.first_member + j]]
+                        .default_initializer)
+                    variant_initialized = true;
+        if (variant_initialized && construction && !default_ok &&
+            (!x.first_constructor || x.defaulted_default_constructor) &&
+            default_constructed(c, k))
+            /* the constructor initializes that member alone: not analysed
+               for a variant member that has no default constructor */
+            return not_supported(n, "class.default.ctor");
         if (construction && !default_ok &&
             (!x.first_constructor || x.defaulted_default_constructor) &&
             default_constructed(c, k)) {

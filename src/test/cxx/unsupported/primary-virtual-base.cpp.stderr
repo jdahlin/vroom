@@ -1,0 +1,1 @@
+primary-virtual-base.cpp:5:1: error: C++ code generation does not handle a class whose primary base is a virtual base yet

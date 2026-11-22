@@ -9,6 +9,7 @@
  * constant expression.
  */
 #include "../../cplusplus-internal.h"
+#include "frontend/builtin-fold.h"
 #include "frontend/cplusplus/builtin-registry.h"
 #include "frontend/cplusplus/sema.h"
 
@@ -24,39 +25,37 @@ static unsigned integer_bits(const implementation_defined_behavior &b,
     return fundamental_type_width(b, f);
 }
 
-/* x's low width bits */
-static unsigned __int128 truncated(unsigned __int128 x, unsigned width)
+/* the operation of frontend/builtin-fold.h that a registry row's number
+   names */
+static int shared_integer_operation(builtin_integer_op op)
 {
-    if (width >= 128)
-        return x;
-    return x & ((static_cast<unsigned __int128>(1) << width) - 1);
-}
-
-static unsigned count_ones(unsigned __int128 x)
-{
-    return static_cast<unsigned>(
-        __builtin_popcountll(static_cast<uint64_t>(x)) +
-        __builtin_popcountll(static_cast<uint64_t>(x >> 64)));
-}
-
-/* the leading zeros of the width-bit value x, 0 < x */
-static unsigned leading_zeros(unsigned __int128 x, unsigned width)
-{
-    unsigned high = 0;
-    for (unsigned i = width; i-- > 0;) {
-        if ((x >> i) & 1)
-            break;
-        high++;
+    switch (op) {
+    case builtin_integer_op::clz:
+        return vfold_clz;
+    case builtin_integer_op::ctz:
+        return vfold_ctz;
+    case builtin_integer_op::popcount:
+        return vfold_popcount;
+    case builtin_integer_op::ffs:
+        return vfold_ffs;
+    case builtin_integer_op::parity:
+        return vfold_parity;
+    case builtin_integer_op::clrsb:
+        return vfold_clrsb;
+    case builtin_integer_op::bswap:
+        return vfold_bswap;
+    case builtin_integer_op::bitreverse:
+        return vfold_bitreverse;
+    case builtin_integer_op::rotate_left:
+        return vfold_rotate_left;
+    case builtin_integer_op::rotate_right:
+        return vfold_rotate_right;
+    case builtin_integer_op::absolute:
+        return vfold_absolute;
+    case builtin_integer_op::expect:
+        return vfold_expect;
     }
-    return high;
-}
-
-static unsigned trailing_zeros(unsigned __int128 x)
-{
-    unsigned n = 0;
-    while (!((x >> n) & 1))
-        n++;
-    return n;
+    return vfold_none;
 }
 
 /* [expr.const]: the integer builtins, on the first argument's width */
@@ -77,77 +76,24 @@ constness semantic_analysis::evaluate_integer_builtin(
     if (f == fundamental_type::none)
         return constness::unknown;
     unsigned width = integer_bits(tokens.files.behavior, f);
-    unsigned __int128 bits = truncated(x[0].integer, width);
     unsigned __int128 result = 0;
-    switch (static_cast<builtin_integer_op>(b.which)) {
-    case builtin_integer_op::clz:
-        /* clang: "__builtin_clz(0)" is not a constant (undefined) */
-        if (!bits)
-            return constness::not_constant;
-        result = leading_zeros(bits, width);
-        break;
-    case builtin_integer_op::ctz:
-        if (!bits)
-            return constness::not_constant;
-        result = trailing_zeros(bits);
-        break;
-    case builtin_integer_op::popcount:
-        result = count_ones(bits);
-        break;
-    case builtin_integer_op::ffs:
-        if (bits)
-            result = trailing_zeros(bits) + 1;
-        break;
-    case builtin_integer_op::parity:
-        result = count_ones(bits) & 1;
-        break;
-    case builtin_integer_op::clrsb: {
-        /* the redundant sign bits: the leading bits equal to the sign
-           bit, less that bit */
-        bool negative = (bits >> (width - 1)) & 1;
-        unsigned n = 0;
-        for (unsigned i = width - 1; i-- > 0;) {
-            if (((bits >> i) & 1) != negative)
-                break;
-            n++;
-        }
-        result = n;
-        break;
-    }
-    case builtin_integer_op::bswap:
-        for (unsigned i = 0; i < width / 8; i++)
-            result = (result << 8) | ((bits >> (8 * i)) & 0xff);
-        break;
-    case builtin_integer_op::bitreverse:
-        for (unsigned i = 0; i < width; i++)
-            result = (result << 1) | ((bits >> i) & 1);
-        break;
-    case builtin_integer_op::rotate_left:
-    case builtin_integer_op::rotate_right: {
+    int operation =
+        shared_integer_operation(static_cast<builtin_integer_op>(b.which));
+    switch (operation) {
+    case vfold_rotate_left:
+    case vfold_rotate_right:
         if (call.count != 2)
             return constness::unknown;
-        unsigned amount = static_cast<unsigned>(x[1].integer % width);
-        if (static_cast<builtin_integer_op>(b.which) ==
-            builtin_integer_op::rotate_right)
-            amount = (width - amount) % width;
-        if (amount)
-            result =
-                truncated((bits << amount) | (bits >> (width - amount)), width);
-        else
-            result = bits;
+        result = vfold_rotate(x[0].integer, width, x[1].integer,
+                              operation == vfold_rotate_right);
         break;
-    }
-    case builtin_integer_op::absolute: {
-        __int128 s =
-            integer_value(tokens.files.behavior, f,
-                          integer_wrap(tokens.files.behavior, f, bits));
-        if (s < 0)
-            s = -s;
-        result = static_cast<unsigned __int128>(s);
-        break;
-    }
-    case builtin_integer_op::expect:
+    case vfold_expect:
         result = x[0].integer;
+        break;
+    default:
+        /* clang: "__builtin_clz(0)" is not a constant (undefined) */
+        if (!vfold_integer(operation, x[0].integer, width, &result))
+            return constness::not_constant;
         break;
     }
     fundamental_type r = fundamental_of(call.type);
@@ -268,6 +214,50 @@ constness semantic_analysis::evaluate_floating_classification(
     case builtin_float_op::isunordered:
         result = unordered;
         break;
+    case builtin_float_op::iszero:
+        result = k == fp_zero;
+        break;
+    case builtin_float_op::issubnormal:
+        result = k == fp_subnormal;
+        break;
+    case builtin_float_op::isfpclass: {
+        /* LLVM's FPClassTest bits: signalling and quiet NaN, then negative
+           infinity, normal, subnormal, zero and the positive ones; a NaN
+           is signalling when the quiet bit of its double is clear */
+        uint64_t bits;
+        memcpy(&bits, &a, sizeof bits);
+        bool negative = (bits >> 63) != 0;
+        unsigned selected = 0;
+        switch (k) {
+        case fp_nan:
+            selected = 1;
+            if ((bits >> 51) & 1)
+                selected = 2;
+            break;
+        case fp_infinite:
+            selected = 0x200;
+            if (negative)
+                selected = 0x4;
+            break;
+        case fp_normal:
+            selected = 0x100;
+            if (negative)
+                selected = 0x8;
+            break;
+        case fp_subnormal:
+            selected = 0x80;
+            if (negative)
+                selected = 0x10;
+            break;
+        case fp_zero:
+            selected = 0x40;
+            if (negative)
+                selected = 0x20;
+            break;
+        }
+        result = (static_cast<unsigned>(c2) & selected) != 0;
+        break;
+    }
     case builtin_float_op::fabs:
         v = constant_value();
         v.kind = constant_value_kind::floating;
@@ -420,6 +410,107 @@ constness semantic_analysis::evaluate_string_builtin(constant_evaluation &state,
 }
 
 /*
+ * __builtin_classify_type (e): the class number of the type of e, which is
+ * not evaluated (GCC's type_class values, clang's): 0 void, 1 an integer
+ * type, 3 an enumeration, 4 bool, 5 a pointer, array or function, 8 a
+ * floating type, 12 a class, 13 a union.  A type this front end has no
+ * number for yet is not a constant.
+ */
+constness
+semantic_analysis::evaluate_classify_type_builtin(const semantic_node &call,
+                                                  constant_value &v)
+{
+    if (call.count != 1)
+        return constness::unknown;
+    qualified_type t = semantics[semantics.items(call.first)[0]].type;
+    const struct type &r = type_table[t.unqualified()];
+    int number = -1;
+    switch (r.kind) {
+    case type_kind::fundamental: {
+        fundamental_type f = fundamental_of(t);
+        if (f == fundamental_type::void_)
+            number = 0;
+        else if (f == fundamental_type::bool_)
+            number = 4;
+        else if (fundamental_type_is_floating(f))
+            number = 8;
+        else if (fundamental_type_is_integral(f))
+            number = 1;
+        break;
+    }
+    case type_kind::enumeration:
+        number = 3;
+        break;
+    case type_kind::pointer:
+    case type_kind::array:
+    case type_kind::function:
+        number = 5;
+        break;
+    case type_kind::class_type:
+        number = 12;
+        if (entity_table[r.entity].union_)
+            number = 13;
+        break;
+    default:
+        break;
+    }
+    if (number < 0)
+        return constness::unknown;
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer = static_cast<unsigned __int128>(number);
+    return constness::constant;
+}
+
+/*
+ * __builtin_object_size (p, type) for the types 1 and 3 of a pointer into an
+ * array of constant objects of an integer type (a string literal): the bytes
+ * from the pointer to the end of the array, as clang's ExprConstant.cpp
+ * answers; any other call is not a constant here.
+ */
+constness semantic_analysis::evaluate_object_size_builtin(
+    constant_evaluation &state, const semantic_node &call, constant_value &v)
+{
+    const uint32_t *items = semantics.items(call.first);
+    if (call.count != 2)
+        return constness::unknown;
+    /* (the pointer as written, before the conversion to const void *) */
+    uint32_t node = items[0];
+    while (semantics[node].kind == semantic_kind::conversion &&
+           (static_cast<conversion_kind>(semantics[node].op) ==
+                conversion_kind::pointer ||
+            static_cast<conversion_kind>(semantics[node].op) ==
+                conversion_kind::qualification_cast))
+        node = semantics[node].a;
+    constant_value pointer, type;
+    constness c = evaluate_node(state, node, pointer);
+    if (c != constness::constant)
+        return c;
+    c = evaluate_node(state, items[1], type);
+    if (c != constness::constant)
+        return c;
+    qualified_type from = semantics[node].type;
+    /* (clang folds the closest-subobject types 1 and 3 of a literal; the
+       whole-object types 0 and 2 it leaves to run time, and so do we) */
+    if (pointer.kind != constant_value_kind::pointer ||
+        type.kind != constant_value_kind::integer || !pointer.count ||
+        !pointer.extent || !is_pointer(from) ||
+        (type.integer != 1 && type.integer != 3))
+        return constness::unknown;
+    fundamental_type f = fundamental_of(type_table[from.unqualified()].operand);
+    if (f == fundamental_type::none)
+        return constness::unknown;
+    unsigned bytes = integer_bits(tokens.files.behavior, f) / 8;
+    uint64_t left = 0;
+    if (pointer.offset < pointer.extent)
+        left = pointer.extent - pointer.offset;
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer = left * bytes;
+    return constness::constant;
+}
+
+/*
  * __builtin_add_overflow (a, b, &r) and the subtraction and multiplication
  * ones, typed forms included: r gets the exact result converted to its
  * type; the value is whether that changed it.  A constant expression
@@ -502,6 +593,10 @@ constness semantic_analysis::evaluate_builtin_fold(constant_evaluation &state,
         return evaluate_string_builtin(state, b, call, v);
     case builtin_fold::overflow:
         return evaluate_overflow_builtin(state, b, call, v);
+    case builtin_fold::object_size:
+        return evaluate_object_size_builtin(state, call, v);
+    case builtin_fold::classify_type:
+        return evaluate_classify_type_builtin(call, v);
     default:
         break;
     }

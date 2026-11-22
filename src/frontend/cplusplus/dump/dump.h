@@ -59,7 +59,8 @@ namespace cplusplus
       "per declaration: its kind, first and last token, and well-formed, "     \
       "ill-formed, not-parsed or unsupported=[SUBCLAUSE]")                     \
     X(unsupported, "unsupported", analysis,                                    \
-      "per construct without rules: [SUBCLAUSE] nonterminal FILE:LINE:COL")    \
+      "per construct without rules: [SUBCLAUSE] nonterminal FILE:LINE:COL, a " \
+      "tab and its detail")                                                    \
     X(declaration_claims, "declaration-claims", analysis,                      \
       "per declared name: the type analysis gave it")                          \
     X(type_claims, "type-claims", analysis,                                    \

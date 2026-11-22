@@ -601,8 +601,10 @@ analysis_result semantic_analysis::structured_binding_declaration(
        follow */
     auto give_up = [&](analysis_result r) {
         if (r != analysis_result::well_formed)
-            for (uint32_t k = 0; k < count; k++)
+            for (uint32_t k = 0; k < count; k++) {
                 entity_table[first_binding + k].kind = entity_kind::none;
+                note_held(first_binding + k);
+            }
         return r;
     };
     expression_meaning m;
