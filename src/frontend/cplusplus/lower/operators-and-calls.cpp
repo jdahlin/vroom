@@ -250,6 +250,7 @@ uint32_t c_lowering::assignment(const semantic_node &n)
  * argument's width (__builtin_bswapg).
  */
 uint32_t c_lowering::special_builtin(builtin_lowering lowering,
+                                     const semantic_node &n,
                                      ast_qualified_type t,
                                      const owned_array<uint32_t> &arguments)
 {
@@ -293,6 +294,89 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
         uint32_t swapped =
             ast_builder_builtin_call(c, name, strlen(name), u, &x, 1);
         return cast(swapped, t, AST_CAST_INTEGER);
+    }
+    case builtin_lowering::clear_padding: {
+        /* [ext:clang_builtin_functions] zero every byte of the pointee object
+           that no base or non-static data member occupies */
+        if (!n.count)
+            return cast(
+                ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0),
+                v, AST_CAST_VOID);
+        uint32_t arg_node = analysis.semantics.items(n.first)[0];
+        qualified_type ptr_type = node(arg_node).type;
+        qualified_type pointee = record(ptr_type).operand;
+        uint64_t total = ast_builder_type_size(c, type(pointee, n.at));
+        if (!total || record(pointee).kind != type_kind::class_type)
+            return cast(arguments[0], v, AST_CAST_VOID);
+        owned_array<uint8_t> covered;
+        covered.resize(static_cast<size_t>(total));
+        for (size_t i = 0; i < covered.size(); i++)
+            covered[i] = 0;
+        auto mark_type = [&](auto &&self, qualified_type qt,
+                             uint64_t base_off) -> void {
+            const struct type &rt = record(qt);
+            if (rt.kind == type_kind::array && rt.bound_known) {
+                uint64_t elem_size =
+                    ast_builder_type_size(c, type(rt.operand, n.at));
+                for (uint64_t i = 0; i < rt.bound; i++)
+                    self(self, rt.operand, base_off + i * elem_size);
+                return;
+            }
+            if (rt.kind == type_kind::class_type) {
+                entity_index ce = rt.entity;
+                const entity &cx = analysis.entity_table[ce];
+                for (uint32_t i = 0; i < cx.base_count; i++) {
+                    const entity &b =
+                        analysis.entity_table
+                            [analysis.class_bases[cx.first_base + i]];
+                    if (!b.virtual_base)
+                        self(self, b.type, base_off + b.offset);
+                }
+                for (uint32_t i = 0; i < cx.member_count; i++) {
+                    entity_index me =
+                        analysis.class_members[cx.first_member + i];
+                    const entity &mx = analysis.entity_table[me];
+                    if (mx.bit_field) {
+                        uint64_t start_byte = (base_off * 8 + mx.offset) / 8;
+                        uint64_t end_byte =
+                            (base_off * 8 + mx.offset + mx.bit_width + 7) / 8;
+                        for (uint64_t b = start_byte; b < end_byte && b < total;
+                             b++)
+                            covered[static_cast<size_t>(b)] = 1;
+                    } else {
+                        self(self, mx.type, base_off + mx.offset);
+                    }
+                }
+                return;
+            }
+            uint64_t sz = ast_builder_type_size(c, type(qt, n.at));
+            for (uint64_t b = 0; b < sz && base_off + b < total; b++)
+                covered[static_cast<size_t>(base_off + b)] = 1;
+        };
+        mark_type(mark_type, pointee, 0);
+        ast_qualified_type u8 = ast_builder_type_basic(AST_TYPE_UNSIGNED_CHAR);
+        ast_qualified_type u8p = pointer_to(u8);
+        ast_qualified_type sz_t = ast_builder_type_basic(AST_TYPE_LONG);
+        uint32_t base_ptr =
+            cast(arguments[0], u8p, AST_CAST_POINTER_TO_POINTER);
+        uint32_t tmp = c_local(c, u8p);
+        owned_array<uint32_t> stmts;
+        stmts.append(c_declare(c, tmp));
+        stmts.append(
+            c_statement(c, assign(u8p, c_variable(c, tmp, u8p), base_ptr)));
+        uint32_t zero = ast_builder_integer(c, u8, 0);
+        for (uint64_t off = 0; off < total; off++) {
+            if (covered[static_cast<size_t>(off)])
+                continue;
+            uint32_t ptr = c_variable(c, tmp, u8p);
+            if (off)
+                ptr = make(AST_NODE_BINARY, u8p, ptr,
+                           ast_builder_integer(c, sz_t, off), 0, LEX_TOKEN_PLUS,
+                           0);
+            stmts.append(
+                c_statement(c, assign(u8, dereference(ptr, u8), zero)));
+        }
+        return statement_expression(v, block(stmts));
     }
     case builtin_lowering::node:
         break;
@@ -506,7 +590,7 @@ uint32_t c_lowering::call(const semantic_node &n)
     uint32_t count = static_cast<uint32_t>(arguments.size());
     uint32_t made = 0;
     if (builtin && lowering != builtin_lowering::node) {
-        made = special_builtin(lowering, t, arguments);
+        made = special_builtin(lowering, n, t, arguments);
         if (!made)
             return 0;
     } else if (builtin) {

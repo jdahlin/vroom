@@ -299,7 +299,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     entity_index scope = current_scope;
     if (outer)
         scope = outer;
-    if (head_qualifier) {
+    if (head_qualifier && !class_instantiating) {
         /* [class.pre]/3: "If a class-head-name contains a
            nested-name-specifier, the class-specifier shall refer to a
            class that was previously declared directly in the class or
@@ -371,7 +371,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     uint32_t name = 0;
     entity_index c = 0;
     if (specialization) {
-        if (unnamed || head_qualifier || outer)
+        if (unnamed || outer)
             return not_supported(n, "temp.class");
         id = head_name;
         name = tokens.identifier(id);
@@ -2375,6 +2375,8 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     const bool constexpr_floating = s.constexpr_ &&
                                     record.kind == type_kind::fundamental &&
                                     is_floating(type);
+    const bool constexpr_class =
+        s.constexpr_ && record.kind == type_kind::class_type;
     /* [expr.const]/3: until the initializer is analysed (and if analysis
        has no rules for it) whether a member that may be usable in constant
        expressions is one, and its value, are unknown: a later member's
@@ -2383,7 +2385,7 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         ((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration))
         entity_table[e].usable = constness::unknown;
     if (!(cv & cv_const) || (cv & cv_volatile) ||
-        (!integral_or_enumeration && !constexpr_floating))
+        (!integral_or_enumeration && !constexpr_floating && !constexpr_class))
         return not_supported(declarator, "class.static.data");
     initialized_value value;
     value.evaluation = constness::unknown;
@@ -2391,7 +2393,16 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     VTRY(r, initializer(init, type, value));
     /* [expr.const]/5: an initializer that calls a function (a constexpr
        function, or a builtin clang evaluates) is the evaluator's */
-    if (value.evaluation == constness::unknown && value.node) {
+    if (constexpr_class && value.node) {
+        uint32_t data = 0;
+        constness c =
+            evaluate_variable(type, value.node, semantics[value.node].at, data);
+        if (c == constness::unknown)
+            return not_supported(declarator, "expr.const");
+        value.evaluation = c;
+        if (data)
+            value.node = data;
+    } else if (value.evaluation == constness::unknown && value.node) {
         constant_value v;
         bool constant = false;
         VTRY_SET(r, evaluate_constant(declarator, value.node, v, constant));

@@ -39,9 +39,22 @@ node_index parser::primary_expression()
         return 0;
     }
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
-        if (at(preprocessing_op_or_punc::LEFT_BRACE, 1))
-            /* [ext.gnu] a statement expression, ({ ... }): P9 */
-            return beyond_this_step();
+        if (at(preprocessing_op_or_punc::LEFT_BRACE, 1)) {
+            /* [ext:gnu_statement_expressions]:
+                 primary-expression:
+                     ( compound-statement ) */
+            size_t mark = begin_node();
+            token_index first = position;
+            flag_set greater(greater_is_operator, true);
+            add_token();
+            compound_statement();
+            if (failed())
+                return 0;
+            if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+                return expected("')' to close the statement expression",
+                                "expr.prim.paren");
+            return finish_node(syntax_kind::primary_expression, mark, first);
+        }
         if (fold_expression_follows())
             return fold_expression();
         size_t mark = begin_node();
@@ -202,6 +215,68 @@ analysis_result semantic_analysis::parenthesized(SyntaxRef n,
 {
     if (n.size() != 3 || !n[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return not_supported(n, "expr.prim");
+    if (n[1].is(syntax_kind::compound_statement)) {
+        /* [ext.gnu] statement expression ({ stmt; ... expr; }) */
+        if (!function_state.active)
+            return not_supported(n, "ext.gnu");
+        entity_index outer = current_scope;
+        open_scope(0, false);
+        owned_array<SyntaxElement> items;
+        for (auto c : n[1].elements()) {
+            if (c.is(preprocessing_op_or_punc::LEFT_BRACE,
+                     preprocessing_op_or_punc::RIGHT_BRACE))
+                continue;
+            if (c.is(syntax_kind::statement_seq)) {
+                for (auto child : c.elements())
+                    items.append(child);
+                continue;
+            }
+            items.append(c);
+        }
+        analysis_result result = analysis_result::well_formed;
+        owned_array<uint32_t> statements;
+        size_t body_count = items.size();
+        bool has_value =
+            body_count > 0 &&
+            items[body_count - 1].is(syntax_kind::expression_statement) &&
+            items[body_count - 1].size() == 2;
+        if (has_value)
+            body_count--;
+        for (size_t i = 0; i < body_count; i++) {
+            uint32_t one = 0;
+            result = worse(result, statement(items[i], one));
+            statements.append(one);
+        }
+        uint32_t block = block_statement(n.first_token(), statements);
+        uint32_t val_node = 0;
+        if (has_value && result == analysis_result::well_formed) {
+            expression_meaning val;
+            result = expression(items[items.size() - 1][0], val);
+            if (result == analysis_result::well_formed) {
+                if (fundamental_of(val.type) != fundamental_type::void_ &&
+                    type_table[val.type.unqualified()].kind !=
+                        type_kind::class_type) {
+                    VTRY_SET(result, operand_value(n, val));
+                }
+                m = val;
+                m.category = value_category::prvalue;
+                m.evaluation = constness::not_constant;
+                val_node = val.node;
+            }
+        } else {
+            m = expression_meaning();
+            m.type = qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none);
+            m.category = value_category::prvalue;
+            m.evaluation = constness::not_constant;
+        }
+        current_scope = outer;
+        if (result != analysis_result::well_formed)
+            return result;
+        m.node = expression_node(semantic_kind::statement_expression, m,
+                                 n.first_token(), block, val_node);
+        return analysis_result::well_formed;
+    }
     return expression(n[1], m);
 }
 

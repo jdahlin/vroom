@@ -554,8 +554,23 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         }
         if (parenthesized && n.size() == 4) {
             if (n[2].is(syntax_kind::initializer_list)) {
-                if (has_pack_expansion(n[2]))
-                    return not_supported(n, "temp.variadic");
+                if (has_pack_expansion(n[2])) {
+                    owned_array<expression_meaning> expanded;
+                    VTRY(r, expression_list_meanings(n[2], expanded));
+                    if (expanded.empty()) {
+                        m = expression_meaning();
+                        m.type = to;
+                        m.evaluation = constness::constant;
+                        m.value = 0;
+                        m.node = expression_node(semantic_kind::constant, m,
+                                                 n.first_token());
+                        return analysis_result::well_formed;
+                    }
+                    if (expanded.size() == 1) {
+                        m = expanded[0];
+                        return explicit_conversion(n, to, m);
+                    }
+                }
                 /* [dcl.init]/14: "If the entity being initialized does not
                    have class type, the expression-list in a parenthesized
                    initializer shall be a single expression." */
@@ -936,7 +951,18 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
        lookup's */
     owned_array<entity_index> found_by_adl;
     bool looked_up = false;
+    token_index adl_token = 0;
+    uint32_t adl_name = 0;
     if (n[0].is_token() && n[0].is_identifier()) {
+        adl_token = n[0].token();
+        adl_name = tokens.identifier(adl_token);
+    } else if (auto op = n[0].operator_function_id()) {
+        declarator_meaning dm;
+        VTRY_SET(r, operator_function_id(op, dm));
+        adl_token = dm.id;
+        adl_name = tokens.identifier(adl_token);
+    }
+    if (adl_token) {
         /* [basic.lookup.argdep]/3: "Let X be the lookup set produced by
            unqualified lookup and let Y be the lookup set produced by argument
            dependent lookup (defined as follows).  If X contains (3.1) a
@@ -947,8 +973,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
            associated with the argument types as described below.  The set of
            declarations found by the lookup of the name is the union of X and
            Y." */
-        token_index t = n[0].token();
-        uint32_t name = tokens.identifier(t);
+        token_index t = adl_token;
+        uint32_t name = adl_name;
         lookup_result x = lookup_unqualified(name, lookup_filter::any);
         /* ([lex.name]/3 reserves __builtin_x to the implementation: a
            builtin function, found by the call's analysis of the name) */

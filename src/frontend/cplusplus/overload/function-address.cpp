@@ -98,9 +98,54 @@ bool semantic_analysis::named_function_set(SyntaxElement e,
     if (name.is(syntax_kind::unary_expression) && name.size() == 2 &&
         name[0].is(preprocessing_op_or_punc::AMPERSAND))
         name = without_parentheses(name[1]);
-    if (!name.is_identifier())
-        return false;
-    return function_set_at(name.token(), out);
+    if (name.is_identifier())
+        return function_set_at(name.token(), out);
+    if (name.is(syntax_kind::qualified_id) && name.size() == 2 &&
+        name[0].is(syntax_kind::nested_name_specifier) &&
+        name[1].is_identifier()) {
+        /* C::f or N::f: simple nested-name-specifier naming a class or
+           namespace */
+        SyntaxElement qual = name[0];
+        if (qual.size() != 2 || !qual[0].is_identifier())
+            return false;
+        lookup_result scope = lookup_unqualified(
+            tokens.identifier(qual[0].token()), lookup_filter::any);
+        if (!scope.entity || scope.ambiguous || scope.unknown)
+            return false;
+        entity_index c = scope.entity;
+        if (!is_class_entity(c) && !is_namespace(c))
+            return false;
+        token_index at = name[1].token();
+        lookup_result found =
+            lookup_qualified(c, tokens.identifier(at), lookup_filter::any);
+        if (found.ambiguous)
+            return false;
+        out.at = at;
+        if (found.unknown) {
+            if (!function_template_of(found.unknown_entity) &&
+                !member_function_template_of(found.unknown_entity))
+                return false;
+            function_template_overloads(found.unknown_entity, out.templates);
+            for (const template_name_function &x : template_name_functions)
+                if (x.name == found.unknown_entity)
+                    out.functions.append(x.function);
+            if (found.entity)
+                overload_set(found.entity, out.functions);
+            return !out.templates.empty() || !out.functions.empty();
+        }
+        if (!found.entity)
+            return false;
+        const entity &first = entity_table[found.entity];
+        if (first.kind != entity_kind::function)
+            return false;
+        if (!first.next_overload && !first.member_templates)
+            return false;
+        overload_set(found.entity, out.functions);
+        if (first.member_templates)
+            function_template_overloads(first.member_templates, out.templates);
+        return true;
+    }
+    return false;
 }
 
 bool semantic_analysis::overload_set_operand(SyntaxElement e,
@@ -115,13 +160,21 @@ bool semantic_analysis::overload_set_operand(SyntaxElement e,
 }
 
 bool semantic_analysis::function_target(qualified_type target,
-                                        qualified_type &ft) const
+                                        qualified_type &ft,
+                                        entity_index *member_class) const
 {
+    if (member_class)
+        *member_class = 0;
     ft = target;
     const struct type &t = type_table[target.unqualified()];
     if (t.kind == type_kind::pointer || t.kind == type_kind::lvalue_reference ||
-        t.kind == type_kind::rvalue_reference)
+        t.kind == type_kind::rvalue_reference) {
         ft = t.operand;
+    } else if (t.kind == type_kind::pointer_to_member) {
+        ft = t.operand;
+        if (member_class)
+            *member_class = t.entity;
+    }
     return type_table[ft.unqualified()].kind == type_kind::function;
 }
 
@@ -139,7 +192,8 @@ bool semantic_analysis::function_target(qualified_type target,
 analysis_result semantic_analysis::select_for_target(
     SyntaxRef at, const function_set &set, qualified_type ft,
     set_selection &how, entity_index &function, uint32_t &template_index,
-    owned_array<template_argument> &deduced, const char *&why)
+    owned_array<template_argument> &deduced, const char *&why,
+    entity_index member_class)
 {
     how = set_selection::none;
     function = 0;
@@ -153,7 +207,10 @@ analysis_result semantic_analysis::select_for_target(
     bool close = false;
     for (entity_index f : set.functions) {
         const entity &x = entity_table[f];
-        if (x.nonstatic_member) {
+        if (member_class) {
+            if (!x.nonstatic_member)
+                continue;
+        } else if (x.nonstatic_member) {
             /* /4: a pointer to member */
             how = set_selection::unknown;
             return analysis_result::well_formed;
@@ -183,8 +240,11 @@ analysis_result semantic_analysis::select_for_target(
         return analysis_result::well_formed;
     }
     for (uint32_t t : set.templates) {
-        if (!is_namespace(
-                entity_table[function_templates[t - 1].entity].enclosing)) {
+        const entity &te = entity_table[function_templates[t - 1].entity];
+        if (member_class) {
+            if (!te.nonstatic_member)
+                continue;
+        } else if (!is_namespace(te.enclosing) && te.nonstatic_member) {
             how = set_selection::unknown;
             return analysis_result::well_formed;
         }
@@ -270,7 +330,8 @@ analysis_result semantic_analysis::target_expression(SyntaxElement e,
                                                      expression_meaning &m)
 {
     qualified_type ft;
-    if (!function_target(target, ft))
+    entity_index member_class = 0;
+    if (!function_target(target, ft, &member_class))
         return expression(e, m);
     function_set set;
     if (!named_function_set(e, set))
@@ -286,7 +347,7 @@ analysis_result semantic_analysis::target_expression(SyntaxElement e,
     owned_array<template_argument> deduced;
     const char *why = nullptr;
     VTRY(r, select_for_target(at, set, ft, how, chosen, template_index, deduced,
-                              why));
+                              why, member_class));
     if (how == set_selection::unknown)
         return not_supported(current_declaration, why);
     if (how == set_selection::none)

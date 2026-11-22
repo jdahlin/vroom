@@ -47,6 +47,8 @@ bool semantic_analysis::declares_special_member(entity_index c,
     if (d.size() != 2 || !d[1].is(syntax_kind::parameters_and_qualifiers))
         return false;
     SyntaxElement head = d[0];
+    if (head.is(syntax_kind::qualified_id) && head.size() == 2)
+        head = head[1];
     if (head.is(syntax_kind::unqualified_id)) {
         auto parts = head;
         if (parts.size() != 2 || !parts[0].is(preprocessing_op_or_punc::TILDE))
@@ -152,6 +154,18 @@ analysis_result semantic_analysis::member_template_declaration(
             return r;
         }
     }
+    /* [temp.mem]/1: a member class template only declared (defined outside
+       the class) */
+    if (inner.is(syntax_kind::member_declaration)) {
+        SyntaxRef only = sole_decl_specifier(inner);
+        if (only && only.is(syntax_kind::elaborated_type_specifier)) {
+            entity_index saved = current_scope;
+            current_scope = c;
+            analysis_result r = class_template_declaration(n, only);
+            current_scope = saved;
+            return r;
+        }
+    }
     /* [temp.mem]/1: a member function template only declared (defined
        outside the class) */
     if (inner.is(syntax_kind::member_declaration) && at + 1 < inner.size() &&
@@ -177,11 +191,7 @@ analysis_result semantic_analysis::member_template_declaration(
     if (at >= inner.size() || !declares_special_member(c, inner[at]) ||
         inner[at][0].is(syntax_kind::unqualified_id))
         return not_supported(n, "temp.mem");
-    if (inner.is(syntax_kind::function_definition))
-        return member_function_template(c, n, inner, access);
-    if (!entity_table[c].constructor_template)
-        entity_table[c].constructor_template = n;
-    return analysis_result::well_formed;
+    return member_function_template(c, n, inner, access);
 }
 
 /*

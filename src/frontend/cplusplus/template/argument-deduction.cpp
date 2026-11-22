@@ -272,6 +272,19 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
            type in the parameter-type-list of A"; a pack not at the end is
            a non-deduced context ([temp.deduct.type]/5.7), and a pattern
            other than the pack's own name is not analysed */
+        if (exact && pr.parameter_count == ar.parameter_count &&
+            pr.parameter_count > 0 &&
+            type_table[pp[pr.parameter_count - 1].unqualified()].kind ==
+                type_kind::pack_expansion &&
+            type_table[ap[ar.parameter_count - 1].unqualified()].kind ==
+                type_kind::pack_expansion) {
+            if (!deduce_type(pr.operand, ar.operand, deduced, set, true))
+                return false;
+            for (uint32_t i = 0; i < pr.parameter_count; i++)
+                if (!deduce_type(pp[i], ap[i], deduced, set, true))
+                    return false;
+            return true;
+        }
         uint32_t fixed = pr.parameter_count;
         for (uint32_t i = 0; i < pr.parameter_count; i++)
             if (type_table[pp[i].unqualified()].kind ==

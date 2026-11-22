@@ -8770,6 +8770,7 @@ struct ParenthesizedOrThis : SyntaxExtra<ParenthesizedOrThis> {
         narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
     }
     static bool accepts(syntax_kind k);
+    CompoundStatement compound_statement() const;
     Expression expression() const;
     SyntaxElement identifier() const;
 };
@@ -13829,6 +13830,11 @@ inline bool ParenthesizedOrThis::accepts(syntax_kind k)
     return k == syntax_kind::primary_expression;
 }
 
+inline CompoundStatement ParenthesizedOrThis::compound_statement() const
+{
+    return first<CompoundStatement>();
+}
+
 inline Expression ParenthesizedOrThis::expression() const
 {
     return first<Expression>();
@@ -17448,7 +17454,7 @@ static const uint64_t syntax_allowed_children[][4] = {
     {0x4002000u, 0x0u, 0x1000000000u, 0xc00000u}, /* nested_name_specifier */
     {0x14000000u, 0x1c000000000000u, 0x3000000000u, 0xc00000u}, /* qualified_id */
     {0x6000u, 0x0u, 0x1000000000u, 0xc00000u}, /* unqualified_id */
-    {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* primary_expression */
+    {0xfffe081ff8000000u, 0x81c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* primary_expression */
     {0xfffe081ff8006400u, 0x1c000006001003u, 0x3000b000000000u, 0xfff1c0u}, /* postfix_expression */
     {0x60813f8000000u, 0x1c000000001000u, 0x30003000000000u, 0xc7b1c0u}, /* unary_expression */
     {0xfffe081ff8000000u, 0x1c000000000003u, 0x30003000000000u, 0xc7b1c0u}, /* noexcept_expression */
