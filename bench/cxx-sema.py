@@ -113,6 +113,12 @@ LLVM_TEST = cxxparse.LLVM_TEST
 TARGET = cxxparse.TRIPLE + ['-fno-signed-char']
 ALIASES = ['-mconstructor-aliases']
 SUITES = ('CXX', 'SemaCXX', 'SemaTemplate')
+KNOWN_FAILURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              'src/test/cxx/sema/clang-failures.txt')
+KNOWN_HEADER = '''# failures of bench/cxx-sema.py on clang's C++ tests that are known (xfail): KIND TEST OPTIONS: reason.
+# --check fails on a failure not listed here and on a listed one that passes now: fix it, then
+# `bench/cxx-sema.py --bless` in the same commit.  Never add a line to hide a regression.
+'''
 
 
 def known_differences():
@@ -847,6 +853,11 @@ def main():
     ap.add_argument('--bin-dir')
     ap.add_argument('--unsupported', type=int, default=10, metavar='N',
                     help='how many subclauses of the work list to print')
+    ap.add_argument('--check', action='store_true',
+                    help=f'fail on a failure not listed in {relative(KNOWN_FAILURES)}, '
+                         'or on a listed one that passes now')
+    ap.add_argument('--bless', action='store_true',
+                    help=f'rewrite {relative(KNOWN_FAILURES)} with the current failures (a full run)')
     ap.add_argument('patterns', nargs='*')
     a = ap.parse_args()
     clang = cxxpp.find_clang()
@@ -881,6 +892,7 @@ def main():
     lookup, layout = collections.Counter(), collections.Counter()
     crashes = failures = skipped = 0
     seen = set()
+    failed = set()
     for r in results:
         seen.add(r['test'])
         verdict.update(r['verdict'])
@@ -895,6 +907,8 @@ def main():
         crashes += 'crash' in kinds
         failures += bool(kinds)
         skipped += bool(r.get('skip'))
+        for k, why in r['fail']:
+            failed.add(failure_key(r, k, why))
         if r['fail'] or a.v:
             for k, why in r['fail'] or [('ok', '')]:
                 print(f'{k:7} {relative(r["test"])} {" ".join(r["opts"])}: {why}')
@@ -931,7 +945,47 @@ def main():
         print(f'unsupported by subclause ({len(unsupported)}): {top}')
     if missing:
         print(f'not fetched: clang/test/{", clang/test/".join(missing)} (bench/fetch-testsuites.sh llvm)')
+    if a.bless:
+        if a.patterns:
+            print('--bless needs a full run (no PATTERN)')
+            return 1
+        with open(KNOWN_FAILURES, 'w') as f:
+            f.write(KNOWN_HEADER)
+            for key in sorted(failed):
+                f.write(key + '\n')
+        print(f'{relative(KNOWN_FAILURES)}: {len(failed)} known failures')
+        return 0
+    if a.check:
+        return check_known(failed, {relative(t) for t in seen})
     return 1 if failures else 0
+
+
+def failure_key(r, kind, why):
+    """One failure as a line of the known-failures file: the kind, the test
+    with its options and the reason, without line numbers of vcc's own source."""
+    why = re.sub(r"(refused by vcc's [^ :]+):\d+ ", r'\1:N ', why)
+    return f'{kind} {relative(r["test"])} {" ".join(r["opts"])}: {why}'.replace('\n', ' ')
+
+
+def check_known(failed, ran):
+    """A failure that is not in the known list is a regression; a listed one
+    that no longer happens is stale (xfail: remove it in the same commit)."""
+    known = set()
+    if os.path.exists(KNOWN_FAILURES):
+        for line in open(KNOWN_FAILURES):
+            line = line.rstrip('\n')
+            if line and not line.startswith('#'):
+                known.add(line)
+    new = sorted(failed - known)
+    # only an entry of a test that ran can be stale (a PATTERN runs a part)
+    stale = sorted(k for k in known - failed if k.split(' ', 2)[1] in ran)
+    for k in new:
+        print(f'NEW    {k}')
+    for k in stale:
+        print(f'STALE  {k}')
+    print(f'known failures: {len(known)} listed, {len(new)} new, {len(stale)} stale '
+          f'(a fix removes its line: bench/cxx-sema.py --bless)')
+    return 1 if new or stale else 0
 
 
 if __name__ == '__main__':
