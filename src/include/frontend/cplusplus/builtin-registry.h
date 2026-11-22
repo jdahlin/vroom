@@ -70,6 +70,12 @@ enum class builtin_fold : uint8_t {
     /* the string and memory functions on arrays of constants
        (builtin_string_op) */
     string,
+    /* __builtin_object_size and __builtin_dynamic_object_size of a pointer
+       into an array of constants */
+    object_size,
+    /* __builtin_classify_type: the class number of the argument's type,
+       which is not evaluated */
+    classify_type,
     floating_constant,
     /* the first argument's value */
     identity,
@@ -107,6 +113,9 @@ enum class builtin_float_op : uint8_t {
     isunordered,
     fabs,
     copysign,
+    iszero,
+    issubnormal,
+    isfpclass,
 };
 
 enum class builtin_string_op : uint8_t {
@@ -156,6 +165,11 @@ constexpr uint16_t gnu_builtin_unsupported_row = 2;
 const gnu_builtin *gnu_builtin_find(const char *spelling, size_t length,
                                     uint16_t *row);
 const gnu_builtin &gnu_builtin_at(uint16_t row);
+/* whether a constant expression evaluates the builtin: the fold table's
+   row (frontend/builtin-fold.h) for the C++ language says so; a registry row
+   names how, the table says whether, and the same table answers
+   __has_constexpr_builtin */
+bool gnu_builtin_folds(const gnu_builtin &b);
 /* whether a call of the builtin of the row is typed by its arguments, not
    by one function type (the form is not `signature`, `generic` or
    `floating_constant`) */

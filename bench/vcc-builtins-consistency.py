@@ -328,10 +328,11 @@ def vpp_run(vpp, args, source, suffix):
         return ('ok' if proc.returncode == 0 else 'error'), errors, proc.stderr
 
 
-def probe(vpp, target, language, level, mode, lines):
+def probe(vpp, target, language, level, mode, lines, refusals=False):
     """Run one TU of one-line items, bisecting on a failure that cannot be
     attributed by line.  lines: {key: source line}.  Result: {key: (status,
-    detail)} with status ok, error or crash."""
+    detail)} with status ok, error or crash.  refusals: the translation unit
+    is a C++ one where a refusal ("not implemented yet") matters, see go."""
     suffix = '.c' if language == 'c' else '.cpp'
     flags = [f'--target={target}', *TARGET_FLAGS[target], '-x', language, '-w', '-ferror-limit=0']
     if mode == 'syntax':
@@ -355,11 +356,23 @@ def probe(vpp, target, language, level, mode, lines):
             return
         if status == 'error' and mode == 'syntax' and errors and all(
                 PRELUDE_LINES < n <= PRELUDE_LINES + len(batch) for n in errors):
+            # vcc's C++ front end says that it does not implement a construct
+            # only when it reported no other error: a line that was refused
+            # (not implemented yet) looks ok in a translation unit with other
+            # errors.  With `refusals` the lines without an error are probed
+            # again together, until a translation unit has none (C reports
+            # every line).
+            rest = []
             for index, key in enumerate(batch):
                 line = PRELUDE_LINES + 1 + index
                 if line in errors:
                     result[key] = ('error', errors[line])
                 else:
+                    rest.append(key)
+            if refusals and language == 'c++':
+                go(rest)
+            else:
+                for key in rest:
                     result[key] = ('ok', '')
             return
         middle = len(batch) // 2
@@ -443,7 +456,7 @@ def collect(vpp, rows, jobs, verbose):
                 lines = {n: f'constexpr long c{i} = (long)({samples[n].constant});'
                          for i, n in enumerate(fold)}
             futures[('fold', language, target)] = pool.submit(probe, vpp, target, language, 0,
-                                                              'syntax', lines)
+                                                              'syntax', lines, True)
     observed = {key: future.result() for key, future in futures.items()}
     # the compile probes need the syntax results: the variant that type-checks
     compile_futures = {}

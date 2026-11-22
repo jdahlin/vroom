@@ -11,42 +11,8 @@ c-only-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the a
 claimed-not-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_mfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
-constexpr-claimed-not-folded __builtin_abs c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_abs c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_add_overflow c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_add_overflow c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_classify_type c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_classify_type c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_dynamic_object_size c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_dynamic_object_size c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_dynamic_object_size c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_dynamic_object_size c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fmax c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fmax c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fmax c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fmax c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fmaxf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fmaxf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fmaxf c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fmaxf c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fmaxl c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fmaxl c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fmaxl c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fmaxl c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fmin c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fmin c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fmin c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fmin c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fminf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fminf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fminf c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fminf c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fminl c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fminl c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_fminl c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fminl c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fpclassify c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_fpclassify c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_add_overflow c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_add_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_huge_val c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_huge_val c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_huge_val c/arm64 # variably modified type declaration not allowed at file scope
@@ -55,17 +21,10 @@ constexpr-claimed-not-folded __builtin_huge_valf c++/arm64 # in any constexpr va
 constexpr-claimed-not-folded __builtin_huge_valf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_huge_valf c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_huge_valf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_huge_vall c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_huge_vall c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_huge_vall c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_huge_vall c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_ia32_addcarryx_u64 c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_ia32_crc32di c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_ia32_crc32di c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_ia32_crc32hi c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_ia32_crc32hi c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_ia32_crc32qi c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_ia32_crc32qi c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_ia32_crc32si c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_ia32_crc32si c/x86_64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_inf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_inf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_inf c/arm64 # variably modified type declaration not allowed at file scope
@@ -74,241 +33,54 @@ constexpr-claimed-not-folded __builtin_inff c++/arm64 # in any constexpr variabl
 constexpr-claimed-not-folded __builtin_inff c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_inff c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_inff c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_infl c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_infl c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_infl c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_infl c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_is_constant_evaluated c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_is_constant_evaluated c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_isfinite c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isfinite c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isgreater c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isgreater c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isgreaterequal c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isgreaterequal c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isinf c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isinf c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isinf_sign c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isinf_sign c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isless c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isless c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_islessequal c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_islessequal c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_islessgreater c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_islessgreater c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isnan c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isnan c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isnormal c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isnormal c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isunordered c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_isunordered c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_labs c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_labs c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_llabs c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_llabs c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_memcmp c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_memcmp c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_mul_overflow c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_mul_overflow c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_mul_overflow c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_mul_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nan c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nan c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_nan c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nan c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nanf c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nanf c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_nanf c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nanf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nanl c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nanl c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_nanl c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nanl c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nans c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nans c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_nans c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nans c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nansf c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nansf c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_nansf c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nansf c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_nansl c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nansl c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_nansl c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nansl c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_object_size c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_object_size c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_object_size c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_object_size c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_signbit c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_signbit c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_signbitf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_signbitf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_signbitf c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_signbitf c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_signbitl c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_signbitl c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_signbitl c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_signbitl c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_stdc_count_ones c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_stdc_count_ones c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_stdc_trailing_zeros c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_stdc_trailing_zeros c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_strcmp c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_strcmp c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_strncmp c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_sub_overflow c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_sub_overflow c/x86_64 # variably modified type declaration not allowed at file scope
+constexpr-claimed-not-folded __builtin_sub_overflow c++/arm64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_sub_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet
 constexpr-claimed-not-folded __builtin_wcslen c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_wcslen c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_wcslen c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_wcslen c/x86_64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_wmemcmp c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_wmemcmp c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
-constexpr-claimed-not-folded __builtin_wmemcmp c/arm64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_wmemcmp c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-folds-unclaimed __builtin_arm_cls c/arm64
-constexpr-folds-unclaimed __builtin_arm_cls c/x86_64
-constexpr-folds-unclaimed __builtin_arm_cls64 c/arm64
-constexpr-folds-unclaimed __builtin_arm_cls64 c/x86_64
-constexpr-folds-unclaimed __builtin_arm_clz c/arm64
-constexpr-folds-unclaimed __builtin_arm_clz c/x86_64
-constexpr-folds-unclaimed __builtin_arm_clz64 c/arm64
-constexpr-folds-unclaimed __builtin_arm_clz64 c/x86_64
-constexpr-folds-unclaimed __builtin_arm_rbit c/arm64
-constexpr-folds-unclaimed __builtin_arm_rbit c/x86_64
-constexpr-folds-unclaimed __builtin_arm_rbit64 c/arm64
-constexpr-folds-unclaimed __builtin_arm_rbit64 c/x86_64
-constexpr-folds-unclaimed __builtin_bitreverse16 c/arm64
-constexpr-folds-unclaimed __builtin_bitreverse32 c/arm64
-constexpr-folds-unclaimed __builtin_bitreverse64 c/arm64
-constexpr-folds-unclaimed __builtin_cabs c++/arm64
-constexpr-folds-unclaimed __builtin_cabs c++/x86_64
-constexpr-folds-unclaimed __builtin_cabsf c++/arm64
-constexpr-folds-unclaimed __builtin_cabsf c++/x86_64
-constexpr-folds-unclaimed __builtin_cabsl c++/arm64
-constexpr-folds-unclaimed __builtin_cabsl c++/x86_64
-constexpr-folds-unclaimed __builtin_carg c++/arm64
-constexpr-folds-unclaimed __builtin_carg c++/x86_64
-constexpr-folds-unclaimed __builtin_cargf c++/arm64
-constexpr-folds-unclaimed __builtin_cargf c++/x86_64
-constexpr-folds-unclaimed __builtin_cargl c++/arm64
-constexpr-folds-unclaimed __builtin_cargl c++/x86_64
-constexpr-folds-unclaimed __builtin_clrsb c++/arm64
-constexpr-folds-unclaimed __builtin_clrsb c++/x86_64
-constexpr-folds-unclaimed __builtin_clrsb c/arm64
-constexpr-folds-unclaimed __builtin_clrsb c/x86_64
-constexpr-folds-unclaimed __builtin_clrsbl c++/arm64
-constexpr-folds-unclaimed __builtin_clrsbl c++/x86_64
-constexpr-folds-unclaimed __builtin_clrsbl c/arm64
-constexpr-folds-unclaimed __builtin_clrsbl c/x86_64
-constexpr-folds-unclaimed __builtin_clrsbll c++/arm64
-constexpr-folds-unclaimed __builtin_clrsbll c++/x86_64
-constexpr-folds-unclaimed __builtin_clrsbll c/arm64
-constexpr-folds-unclaimed __builtin_clrsbll c/x86_64
-constexpr-folds-unclaimed __builtin_ia32_addcarryx_u64 c++/arm64
-constexpr-folds-unclaimed __builtin_issignaling c++/arm64
-constexpr-folds-unclaimed __builtin_issignaling c++/x86_64
-constexpr-folds-unclaimed __builtin_neon_vaddh_f16 c++/arm64
-constexpr-folds-unclaimed __builtin_neon_vaddh_f16 c++/x86_64
-constexpr-folds-unclaimed __builtin_neon_vaddh_f16 c/arm64
-constexpr-folds-unclaimed __builtin_neon_vsubh_f16 c++/arm64
-constexpr-folds-unclaimed __builtin_neon_vsubh_f16 c++/x86_64
-constexpr-folds-unclaimed __builtin_neon_vsubh_f16 c/arm64
-constexpr-folds-unclaimed __builtin_parityl c++/arm64
-constexpr-folds-unclaimed __builtin_parityl c++/x86_64
-constexpr-folds-unclaimed __builtin_parityl c/arm64
-constexpr-folds-unclaimed __builtin_parityl c/x86_64
-constexpr-folds-unclaimed __builtin_parityll c++/arm64
-constexpr-folds-unclaimed __builtin_parityll c++/x86_64
-constexpr-folds-unclaimed __builtin_parityll c/arm64
-constexpr-folds-unclaimed __builtin_parityll c/x86_64
-constexpr-folds-unclaimed __builtin_stdc_rotate_left c++/arm64
-constexpr-folds-unclaimed __builtin_stdc_rotate_left c++/x86_64
-constexpr-folds-unclaimed __builtin_stdc_rotate_left c/arm64
-constexpr-folds-unclaimed __builtin_stdc_rotate_left c/x86_64
-constexpr-folds-unclaimed __builtin_stdc_rotate_right c++/arm64
-constexpr-folds-unclaimed __builtin_stdc_rotate_right c++/x86_64
-constexpr-folds-unclaimed __builtin_stdc_rotate_right c/arm64
-constexpr-folds-unclaimed __builtin_stdc_rotate_right c/x86_64
-constexpr-folds-unclaimed __builtin_strncmp c++/arm64
-fold-c-only __builtin_arm_cls c++/arm64
-fold-c-only __builtin_arm_cls c++/x86_64
-fold-c-only __builtin_arm_cls64 c++/arm64
-fold-c-only __builtin_arm_cls64 c++/x86_64
-fold-c-only __builtin_arm_clz c++/arm64
-fold-c-only __builtin_arm_clz c++/x86_64
-fold-c-only __builtin_arm_clz64 c++/arm64
-fold-c-only __builtin_arm_clz64 c++/x86_64
-fold-c-only __builtin_arm_rbit c++/arm64
-fold-c-only __builtin_arm_rbit c++/x86_64
-fold-c-only __builtin_arm_rbit64 c++/arm64
-fold-c-only __builtin_arm_rbit64 c++/x86_64
-fold-c-only __builtin_classify_type c++/arm64
-fold-c-only __builtin_classify_type c++/x86_64
-fold-c-only __builtin_stdc_count_ones c++/arm64
-fold-c-only __builtin_stdc_count_ones c++/x86_64
-fold-c-only __builtin_stdc_trailing_zeros c++/arm64
-fold-c-only __builtin_stdc_trailing_zeros c++/x86_64
-fold-cxx-only __builtin_abs c/arm64
-fold-cxx-only __builtin_abs c/x86_64
-fold-cxx-only __builtin_add_overflow c/arm64
-fold-cxx-only __builtin_add_overflow c/x86_64
-fold-cxx-only __builtin_cabs c/arm64
-fold-cxx-only __builtin_cabs c/x86_64
-fold-cxx-only __builtin_cabsf c/arm64
-fold-cxx-only __builtin_cabsf c/x86_64
-fold-cxx-only __builtin_cabsl c/arm64
-fold-cxx-only __builtin_cabsl c/x86_64
-fold-cxx-only __builtin_carg c/arm64
-fold-cxx-only __builtin_carg c/x86_64
-fold-cxx-only __builtin_cargf c/arm64
-fold-cxx-only __builtin_cargf c/x86_64
-fold-cxx-only __builtin_cargl c/arm64
-fold-cxx-only __builtin_cargl c/x86_64
-fold-cxx-only __builtin_fpclassify c/arm64
-fold-cxx-only __builtin_fpclassify c/x86_64
-fold-cxx-only __builtin_huge_vall c/arm64
-fold-cxx-only __builtin_huge_vall c/x86_64
-fold-cxx-only __builtin_ia32_addcarryx_u64 c/x86_64
-fold-cxx-only __builtin_infl c/arm64
-fold-cxx-only __builtin_infl c/x86_64
-fold-cxx-only __builtin_isfinite c/arm64
-fold-cxx-only __builtin_isfinite c/x86_64
-fold-cxx-only __builtin_isgreater c/arm64
-fold-cxx-only __builtin_isgreater c/x86_64
-fold-cxx-only __builtin_isgreaterequal c/arm64
-fold-cxx-only __builtin_isgreaterequal c/x86_64
-fold-cxx-only __builtin_isinf c/arm64
-fold-cxx-only __builtin_isinf c/x86_64
-fold-cxx-only __builtin_isinf_sign c/arm64
-fold-cxx-only __builtin_isinf_sign c/x86_64
-fold-cxx-only __builtin_isless c/arm64
-fold-cxx-only __builtin_isless c/x86_64
-fold-cxx-only __builtin_islessequal c/arm64
-fold-cxx-only __builtin_islessequal c/x86_64
-fold-cxx-only __builtin_islessgreater c/arm64
-fold-cxx-only __builtin_islessgreater c/x86_64
-fold-cxx-only __builtin_isnan c/arm64
-fold-cxx-only __builtin_isnan c/x86_64
-fold-cxx-only __builtin_isnormal c/arm64
-fold-cxx-only __builtin_isnormal c/x86_64
-fold-cxx-only __builtin_issignaling c/arm64
-fold-cxx-only __builtin_issignaling c/x86_64
-fold-cxx-only __builtin_isunordered c/arm64
-fold-cxx-only __builtin_isunordered c/x86_64
-fold-cxx-only __builtin_labs c/arm64
-fold-cxx-only __builtin_labs c/x86_64
-fold-cxx-only __builtin_llabs c/arm64
-fold-cxx-only __builtin_llabs c/x86_64
-fold-cxx-only __builtin_memcmp c/arm64
-fold-cxx-only __builtin_memcmp c/x86_64
-fold-cxx-only __builtin_mul_overflow c/arm64
-fold-cxx-only __builtin_mul_overflow c/x86_64
-fold-cxx-only __builtin_nan c/arm64
-fold-cxx-only __builtin_nan c/x86_64
-fold-cxx-only __builtin_nanf c/arm64
-fold-cxx-only __builtin_nanf c/x86_64
-fold-cxx-only __builtin_nanl c/arm64
-fold-cxx-only __builtin_nanl c/x86_64
-fold-cxx-only __builtin_nans c/arm64
-fold-cxx-only __builtin_nans c/x86_64
-fold-cxx-only __builtin_nansf c/arm64
-fold-cxx-only __builtin_nansf c/x86_64
-fold-cxx-only __builtin_nansl c/arm64
-fold-cxx-only __builtin_nansl c/x86_64
-fold-cxx-only __builtin_signbit c/arm64
-fold-cxx-only __builtin_signbit c/x86_64
-fold-cxx-only __builtin_strcmp c/arm64
-fold-cxx-only __builtin_strcmp c/x86_64
-fold-cxx-only __builtin_strncmp c/arm64
-fold-cxx-only __builtin_strncmp c/x86_64
-fold-cxx-only __builtin_sub_overflow c/arm64
-fold-cxx-only __builtin_sub_overflow c/x86_64
+fold-c-only __builtin_copysignl c++/arm64
+fold-c-only __builtin_copysignl c++/x86_64
+fold-c-only __builtin_fabsl c++/arm64
+fold-c-only __builtin_fabsl c++/x86_64
+fold-c-only __builtin_neon_vaddh_f16 c++/arm64
+fold-c-only __builtin_neon_vsubh_f16 c++/arm64
+fold-c-only __builtin_stdc_rotate_left c++/arm64
+fold-c-only __builtin_stdc_rotate_left c++/x86_64
+fold-c-only __builtin_stdc_rotate_right c++/arm64
+fold-c-only __builtin_stdc_rotate_right c++/x86_64
+fold-cxx-only __builtin_is_constant_evaluated c/arm64
+fold-cxx-only __builtin_is_constant_evaluated c/x86_64
 not-compiled __builtin___vsnprintf_chk c++/arm64/O0 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
 not-compiled __builtin___vsnprintf_chk c++/arm64/O1 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
 not-compiled __builtin___vsnprintf_chk c++/arm64/O2 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported

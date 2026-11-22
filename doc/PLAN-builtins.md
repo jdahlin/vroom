@@ -385,8 +385,57 @@ no new line, no line that passes now; `--bless` rewrites it).
 | c-only-callable (callable in C, rejected in C++) | 6 |
 | not-compiled (callable, `-c` fails at -O0/-O1/-O2) | 249 |
 | crash (vpp dies on the call) | 0 |
-| constexpr-claimed-not-folded (`__has_constexpr_builtin` 1, no fold) | 140 |
-| constexpr-folds-unclaimed (folds, claim 0) | 65 |
-| fold-c-only / fold-cxx-only (folds in one language only) | 18 / 75 |
+| constexpr-claimed-not-folded (`__has_constexpr_builtin` 1, no fold) | 58 |
+| constexpr-folds-unclaimed (folds, claim 0) | 0 |
+| fold-c-only / fold-cxx-only (folds in one language only) | 10 / 2 |
 
 Each step that fixes a violation removes its lines in the same commit.
+
+The remaining `constexpr-claimed-not-folded` lines are calls clang cannot
+fold either, in the shape the probe writes them (clang answers 1 for them):
+a cast of an infinity or NaN to `long` (`inf`, `huge_val`, `nan` and their
+`f`/`l`/`s` forms), the overflow builtins with a null result pointer, and the
+wide string functions on a null pointer.  `fold-c-only` is `fabsl` and
+`copysignl` (the C++ front end has no long double constexpr variable),
+the AArch64 `_Float16` add and subtract, and `__builtin_stdc_rotate_*` (not
+callable in C++ yet); `fold-cxx-only` is `__builtin_is_constant_evaluated`,
+which vcc's C accepts and does not fold.  In the C++ probe of the folds a
+line that vcc refuses ("the rules of ... are not implemented yet") is
+reported only in a translation unit with no other error, so the lines
+without an error are probed again together until a unit has none
+(`probe(..., refusals=True)`); without that a refused fold looks ok.
+
+### The fold table
+
+Whether a builtin folds in a constant expression, and as which operation, is
+one fact: [`builtin-fold.inc`](../src/include/frontend/builtin-fold.inc) (with
+`integer-builtins.inc`'s rows), read through
+[`builtin-fold.h`](../src/include/frontend/builtin-fold.h).  A row is a
+spelling, a named operation (`vfold_op`: the operation is the key, not the
+spelling: `clz`, `clzl` and `clzll` are one, so are `fabs`, `fabsf` and
+`fabsl`) and the languages that evaluate it (`VFOLD_C`, `VFOLD_CXX`).  Readers:
+
+- `__has_constexpr_builtin(NAME)` answers `vfold_claim` for every builtin vcc
+  implements: the row's bit for the language, 0 when vcc implements the
+  builtin and has no row; clang's generated table (`ppdata*.inc`,
+  `feature-checks.inc`) answers only for names vcc does not implement
+  (`frontend/pp/builtin.cpp`, `frontend/cplusplus/ext/clang/feature-checks.cpp`).
+  A claim cannot drift from the fold by being a second table.
+- the C++ evaluator folds a registry row only where the row has the C++ bit
+  (`gnu_builtin_folds`), so a clear bit is a fold that cannot happen;
+- the C front end folds a library call through the row (`cc_library_call_fold`:
+  `abs`, `labs`, `llabs`, `strlen`, `strcmp`, `strncmp`, `memcmp`);
+- the arithmetic of an operation that does not depend on a front end's values
+  is in the header and used by both (`vfold_integer`, `vfold_rotate`: clz, ctz,
+  ffs, popcount, parity, clrsb, bswap, bitreverse, rotates, abs, and the C++
+  bit counts), so the two cannot disagree about it.
+
+A set bit is a promise the evaluator keeps for a call on constants; the
+consistency check tests it.  The floating classifications still have two
+implementations (the C front end's on binary128 bits, the C++ evaluator's on
+doubles), and so have the string functions on a literal and an array of
+constants; sharing them is left.  `__builtin_arm_clz`, `cls`, `rbit` and the
+64-bit forms fold in both languages and clang folds none of them: the claim is
+the fold (1).  Where clang says 1 and vcc does not fold (`fmin`, `fmax`,
+`wcscmp`, the x86 `crc32` builtins, `cabs`, `carg`, ...), the claim is 0 until
+it does.
