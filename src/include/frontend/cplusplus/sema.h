@@ -4150,7 +4150,10 @@ class semantic_analysis
            destructor, where each is declared */
         owned_array<jump_point> destroyed;
         owned_array<switch_record> switches;
-        owned_array<uint64_t> case_values;
+        struct case_range {
+            uint64_t lo = 0, hi = 0;
+        };
+        owned_array<case_range> case_values;
         /* a non-static member function's `this` ([class.this]): the
            variable lowering makes its first parameter */
         entity_index this_entity = 0;
@@ -4711,6 +4714,11 @@ class semantic_analysis
        types, count of each */
     bool same_template_parameters(uint32_t first, uint32_t other_first,
                                   uint32_t count);
+    /* [temp.param]/10, /12, /14: merge default template-arguments from
+       prior declaration (old_first) into redeclaration (new_first) */
+    analysis_result merge_template_defaults(SyntaxRef n, uint32_t old_first,
+                                            uint32_t new_first, uint32_t count,
+                                            bool require_trailing_defaults);
     bool equivalent_template(const function_template &f, SyntaxRef n,
                              uint32_t first, uint32_t count,
                              qualified_type type);
@@ -5056,8 +5064,40 @@ class semantic_analysis
     linkage binding_storage = linkage::none;
     analysis_result jump_statement(JumpStatement n, uint32_t &built);
     analysis_result labeled_statement(LabeledStatement n, uint32_t &built);
-    analysis_result case_label(SyntaxRef n, SyntaxElement value,
-                               size_t innermost);
+    analysis_result case_value(SyntaxRef n, SyntaxElement value,
+                               size_t innermost, uint64_t &out);
+    analysis_result case_label(SyntaxRef n, SyntaxElement low,
+                               SyntaxElement high, size_t innermost,
+                               uint64_t &lo, uint64_t &hi);
+    /* RAII guard for temporary function-parameter list parsing (e.g.
+       requires-expressions and trailing requires-clauses) */
+    struct function_parameter_guard {
+        semantic_analysis &self;
+        owned_array<parameter_meaning> parameters;
+        uint32_t cv;
+        uint32_t empty_pack;
+        bool exceptions_specified;
+        bool member_declarator;
+        explicit function_parameter_guard(semantic_analysis &s)
+            : self(s),
+              parameters(static_cast<owned_array<parameter_meaning> &&>(
+                  s.function_parameters)),
+              cv(s.function_cv), empty_pack(s.function_empty_pack),
+              exceptions_specified(s.function_exceptions_specified),
+              member_declarator(s.in_member_declarator)
+        {
+            s.function_parameters.clear();
+        }
+        ~function_parameter_guard()
+        {
+            self.function_cv = cv;
+            self.function_empty_pack = empty_pack;
+            self.function_exceptions_specified = exceptions_specified;
+            self.in_member_declarator = member_declarator;
+            self.function_parameters =
+                static_cast<owned_array<parameter_meaning> &&>(parameters);
+        }
+    };
     /* operand: the operand's node, initialized as the result (0: none) */
     analysis_result return_statement(SyntaxRef n, uint32_t &operand);
     /* the variables declared at block scope, in order, until the

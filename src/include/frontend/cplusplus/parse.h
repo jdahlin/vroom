@@ -389,9 +389,10 @@ class declared_names
        of a member-specification both declared it, which is the safe side
        (more names are possible templates). */
     bool declared_as_member_template(uint32_t name) const;
+    bool declared_as_member_variable_template(uint32_t name) const;
     /* a declaration kept as its tokens may declare a member template of the
        name: the names in it count as declared */
-    void assume_member_template(uint32_t name);
+    void assume_member_template(uint32_t name, bool variable = false);
     /* how many lookups have found a dependent name ([temp.dep]): a
        caller that compares it before and after a construct knows whether
        the construct names one */
@@ -506,8 +507,8 @@ class declared_names
     /* each change, to undo: a declaration added (where) or a scope searched
        with another (where, with the high bit) */
     owned_array<uint32_t> journal;
-    /* by name: a class declares a member template of it */
-    owned_array<bool> member_template_names;
+    /* by name: bit 0 = member template, bit 1 = member variable template */
+    owned_array<uint8_t> member_template_names;
     const declaration *find(scope_index in, uint32_t name,
                             unsigned depth = 0) const;
     /* find skips the names of no type (lookup_elaborated) */

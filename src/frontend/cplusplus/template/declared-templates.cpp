@@ -677,6 +677,11 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         if (!s.friend_)
             function_templates[earlier - 1].hidden_friend = false;
         if (defines) {
+            if (renamed) {
+                VTRY(merged,
+                     merge_template_defaults(n, f.first_parameter, first,
+                                             f.parameter_count, false));
+            }
             function_template &record = function_templates[earlier - 1];
             record.declaration = n;
             record.definition = definition;
@@ -1918,32 +1923,8 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
                                       d.parameter_count) ||
             !same_constraints(d.declaration, n))
             return not_supported(n, "temp.class");
-        /* [temp.param]/12: "A template-parameter shall not be given
-           default arguments by two different declarations in the same
-           scope"; /10: "The set of default template-arguments available
-           for use is obtained by merging the default arguments from all
-           prior declarations": the definition's parameters take the
-           declaration's defaults, which keep the declaration's parameter
-           names ([temp.over.link]: names do not matter;
-           template_parameter_default_names) */
-        for (uint32_t i = 0; i < d.parameter_count; i++) {
-            SyntaxRef before = template_parameter_nodes[d.first_parameter + i];
-            if (!template_parameter_has_default(before))
-                continue;
-            if (template_parameter_has_default(parameters[i]))
-                return not_supported(n, "temp.param");
-            template_parameter_nodes[first + i] = before;
-            template_parameter_default_names[first + i] =
-                template_parameter_default_names[d.first_parameter + i];
-        }
-        /* [temp.param]/14 on the merged defaults (clang's error is the
-           definition's) */
-        for (uint32_t i = 1; i < d.parameter_count; i++)
-            if (template_parameter_has_default(
-                    template_parameter_nodes[first + i - 1]) &&
-                !template_parameter_has_default(
-                    template_parameter_nodes[first + i]))
-                return not_supported(n, "temp.param");
+        VTRY(merged, merge_template_defaults(n, d.first_parameter, first,
+                                             d.parameter_count, true));
         for (uint32_t i = 0; i < d.parameter_count; i++)
             if (entity_table[template_parameter_entities[first + i]].kind !=
                 entity_kind::template_entity)
@@ -2680,11 +2661,60 @@ bool semantic_analysis::equivalent_template(const function_template &f,
         return false;
     for (uint32_t i = 0; i < count; i++) {
         entity_index pe = template_parameter_entities[first + i];
-        if (set[i] && (entity_table[pe].kind != entity_kind::typedef_name ||
-                       !(values[i].type == entity_table[pe].type)))
+        if (!set[i])
+            continue;
+        if (template_parameter_is_pack(first + i)) {
+            if (values[i].kind != template_argument::kind_t::pack ||
+                values[i].count != 1)
+                return false;
+            const template_argument &el = pack_arguments[values[i].value];
+            if (el.kind != template_argument::kind_t::pack ||
+                el.count != UINT32_MAX || el.template_entity != pe)
+                return false;
+        } else if (entity_table[pe].kind != entity_kind::typedef_name ||
+                   !(values[i].type == entity_table[pe].type)) {
             return false;
+        }
     }
     return true;
+}
+
+/*
+ * [temp.param]/12: "A template-parameter shall not be given default
+ * arguments by two different declarations in the same scope"; /10: "The
+ * set of default template-arguments available for use is obtained by
+ * merging the default arguments from all prior declarations": the new
+ * declaration's parameters take the prior declaration's defaults, which
+ * keep the prior declaration's parameter names
+ * (template_parameter_default_names).
+ */
+analysis_result
+semantic_analysis::merge_template_defaults(SyntaxRef n, uint32_t old_first,
+                                           uint32_t new_first, uint32_t count,
+                                           bool require_trailing_defaults)
+{
+    for (uint32_t i = 0; i < count; i++) {
+        SyntaxRef before = template_parameter_nodes[old_first + i];
+        if (!template_parameter_has_default(before))
+            continue;
+        if (template_parameter_has_default(
+                template_parameter_nodes[new_first + i]))
+            return not_supported(n, "temp.param");
+        template_parameter_nodes[new_first + i] = before;
+        template_parameter_default_names[new_first + i] =
+            template_parameter_default_names[old_first + i];
+    }
+    if (require_trailing_defaults) {
+        /* [temp.param]/14 on the merged defaults (clang's error is the
+           definition's) */
+        for (uint32_t i = 1; i < count; i++)
+            if (template_parameter_has_default(
+                    template_parameter_nodes[new_first + i - 1]) &&
+                !template_parameter_has_default(
+                    template_parameter_nodes[new_first + i]))
+                return not_supported(n, "temp.param");
+    }
+    return analysis_result::well_formed;
 }
 
 bool semantic_analysis::same_template_parameters(uint32_t first,

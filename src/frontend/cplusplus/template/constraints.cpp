@@ -240,13 +240,7 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
     if (list) {
         /* [expr.prim.req]/5: the local parameters, their types
            substituted first */
-        owned_array<parameter_meaning> saved_parameters =
-            static_cast<owned_array<parameter_meaning> &&>(function_parameters);
-        uint32_t saved_cv = function_cv;
-        uint32_t saved_pack = function_empty_pack;
-        bool saved_specified = function_exceptions_specified;
-        bool saved_member = in_member_declarator;
-        function_parameters.clear();
+        function_parameter_guard saved(*this);
         substitution_mark mark = mark_substitution();
         qualified_type type = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
@@ -258,12 +252,6 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
             satisfied = false;
             result = analysis_result::well_formed;
         }
-        function_cv = saved_cv;
-        function_empty_pack = saved_pack;
-        function_exceptions_specified = saved_specified;
-        in_member_declarator = saved_member;
-        function_parameters =
-            static_cast<owned_array<parameter_meaning> &&>(saved_parameters);
     }
     unevaluated++;
     for (uint32_t i = first; result == analysis_result::well_formed &&
@@ -598,11 +586,14 @@ analysis_result semantic_analysis::template_constraints_satisfied(
     satisfied = true;
     const struct function_template ft =
         function_templates[function_template - 1];
+    bool is_trailing = false;
     SyntaxElement constraint = head_constraint(ft.declaration);
     /* (a trailing requires-clause only where the head has none: the
        definitions refuse both) */
-    if (!constraint)
+    if (!constraint) {
         constraint = trailing_constraint(ft.declaration);
+        is_trailing = static_cast<bool>(constraint);
+    }
     /* [temp.constr.decl]/3: the associated constraints are the
        conjunction of the type-constraints' immediately-declared
        constraints, in order, then the requires-clause's
@@ -665,8 +656,42 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         if (k == key)
             return not_supported(constraint, "temp.constr");
     constraints_in_progress.append(key);
+    entity_index constraint_scope = scope;
+    if (is_trailing && ft.declarator) {
+        /* [basic.scope.param]/1: function parameters are in scope in a
+           trailing requires-clause */
+        function_parameter_guard saved(*this);
+        scoped_value<entity_index> saved_scope(current_scope, scope);
+        scoped_value<token_index> saved_horizon(lookup_horizon,
+                                                ft.declaration.first_token());
+        entity_index owner = entity_table[ft.entity].enclosing;
+        entity_index member_of = 0;
+        if (is_class_entity(owner))
+            member_of = owner;
+        uint32_t lead = leading_gnu_attributes(ft.declarator);
+        specified s;
+        declarator_meaning m;
+        qualified_type type;
+        substituting++;
+        substitution_mark mark = mark_substitution();
+        analysis_result pr = function_template_declarator(
+            ft.declarator, lead, member_of, scope, s, m, type);
+        substituting--;
+        if (pr == analysis_result::well_formed) {
+            open_parameter_scope();
+            constraint_scope = current_scope;
+        } else if (pr == analysis_result::ill_formed &&
+                   undo_substitution(mark)) {
+            constraints_in_progress.resize(constraints_in_progress.size() - 1);
+            satisfied = false;
+            return analysis_result::well_formed;
+        } else {
+            constraints_in_progress.resize(constraints_in_progress.size() - 1);
+            return pr;
+        }
+    }
     analysis_result r = constraint_satisfied(
-        constraint, scope, ft.declaration.first_token(), satisfied);
+        constraint, constraint_scope, ft.declaration.first_token(), satisfied);
     constraints_in_progress.resize(constraints_in_progress.size() - 1);
     return r;
 }

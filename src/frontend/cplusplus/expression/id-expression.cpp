@@ -419,21 +419,28 @@ node_index parser::id_expression(bool member)
             } else if ((member || (!known && !dependent_qualifier)) &&
                        !dependent_qualifier &&
                        (!member || member_name_may_be_template(
-                                       name, qualifier != 0, known, scope)) &&
-                       angle_group_follows_call()) {
-                /* a member's name and a name of a class the parser does not
-                   know may be a template's: the tokens are a template-id
-                   when they parse as one and a call or a '::' follows.
-                   The token scan first: a speculative parse per '<' of
-                   r.a < r.b && r.a < r.b && ... is exponential */
-                tentative_parse attempt(*this);
-                template_id_rest(id_mark, id_first,
-                                 syntax_kind::simple_template_id);
-                if (!failed() &&
-                    (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
-                     at(preprocessing_op_or_punc::COLON_COLON))) {
-                    attempt.commit();
-                    unknown_name = false;
+                                       name, qualifier != 0, known, scope))) {
+                bool maybe_var =
+                    member && names.declared_as_member_variable_template(name);
+                if (angle_group_follows_call() ||
+                    (maybe_var && angle_group_end(0))) {
+                    /* a member's name and a name of a class the parser does not
+                       know may be a template's: the tokens are a template-id
+                       when they parse as one and a call, a '::', or (for a
+                       member variable template) an operator/punctuator follows.
+                       The token scan first: a speculative parse per '<' of
+                       r.a < r.b && r.a < r.b && ... is exponential */
+                    tentative_parse attempt(*this);
+                    template_id_rest(id_mark, id_first,
+                                     syntax_kind::simple_template_id);
+                    if (!failed() &&
+                        (at(preprocessing_op_or_punc::LEFT_PARENTHESIS) ||
+                         at(preprocessing_op_or_punc::COLON_COLON) ||
+                         (maybe_var &&
+                          peek().kind == token_kind::operator_or_punctuator))) {
+                        attempt.commit();
+                        unknown_name = false;
+                    }
                 }
             }
         }

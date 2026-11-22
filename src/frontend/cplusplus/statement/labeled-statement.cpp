@@ -27,9 +27,12 @@ node_index parser::labeled_statement()
         constant_expression();
         if (failed())
             return 0;
-        if (at(preprocessing_op_or_punc::ELLIPSIS))
-            /* [ext.gnu] a case range, case 1 ... 3: P9 */
-            return beyond_this_step();
+        if (accept(preprocessing_op_or_punc::ELLIPSIS)) {
+            /* [ext.gnu] a case range, case lo ... hi: */
+            constant_expression();
+            if (failed())
+                return 0;
+        }
     } else {
         add_token(); /* default, or the identifier */
     }
@@ -118,7 +121,8 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
     }
     size_t innermost = function_state.switches.size() - 1;
     semantic_kind kind = semantic_kind::default_label;
-    uint64_t value = 0;
+    uint64_t lo = 0, hi = 0;
+    bool is_range = false;
     if (k == standard_keyword::default_) {
         if (n.size() != 3)
             return not_supported(n, "stmt.label");
@@ -131,14 +135,17 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
                                 "stmt.switch");
         function_state.switches[innermost].has_default = true;
     } else {
-        /* case constant-expression : statement; GNU's case ranges
-           (case a ... b) are not analysed */
-        if (n.size() != 4)
+        /* case constant-expression : statement, or GNU case lo ... hi :
+           statement */
+        SyntaxElement high;
+        if (n.size() == 6 && n[2].is(preprocessing_op_or_punc::ELLIPSIS)) {
+            high = n[3];
+            is_range = true;
+        } else if (n.size() != 4) {
             return not_supported(n, "stmt.switch");
-        result = case_label(n, n[1], innermost);
+        }
+        result = case_label(n, n[1], high, innermost, lo, hi);
         kind = semantic_kind::case_label;
-        if (result == analysis_result::well_formed)
-            value = function_state.case_values.back();
     }
     if (result != analysis_result::ill_formed &&
         jump_bypasses(function_state.switches[innermost].point, here))
@@ -149,19 +156,24 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
                             "stmt.dcl");
     uint32_t labelled = 0;
     result = worse(result, statement(last, labelled));
-    built = statement_node(kind, first, labelled);
-    semantics[built].value = value;
+    uint32_t hi_node = 0;
+    if (is_range && result == analysis_result::well_formed) {
+        expression_meaning hi_m = integer_constant(
+            function_state.switches[innermost].type, hi, first);
+        hi_node = hi_m.node;
+    }
+    built = statement_node(kind, first, labelled, hi_node);
+    semantics[built].value = lo;
     return result;
 }
 
 /*
  * [stmt.switch]/2: "case constant-expression : where the
  * constant-expression shall be a converted constant expression of the
- * adjusted type of the switch condition.  No two of the case constants in
- * the same switch shall have the same value after conversion."
+ * adjusted type of the switch condition."
  */
-analysis_result semantic_analysis::case_label(SyntaxRef n, SyntaxElement value,
-                                              size_t innermost)
+analysis_result semantic_analysis::case_value(SyntaxRef n, SyntaxElement value,
+                                              size_t innermost, uint64_t &out)
 {
     expression_meaning m;
     VTRY(r, expression(value, m));
@@ -189,14 +201,44 @@ analysis_result semantic_analysis::case_label(SyntaxRef n, SyntaxElement value,
     VTRY_SET(r, converted_constant_expression(n, m, adjusted, constant));
     if (!constant)
         return not_supported(n, "expr.const");
+    out = m.value;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [stmt.switch]/2: "No two of the case constants in the same switch shall
+ * have the same value after conversion."  For a GNU case range lo ... hi,
+ * neither endpoint may overlap an earlier case value or range.
+ */
+analysis_result semantic_analysis::case_label(SyntaxRef n, SyntaxElement low,
+                                              SyntaxElement high,
+                                              size_t innermost, uint64_t &lo,
+                                              uint64_t &hi)
+{
+    VTRY(r, case_value(n, low, innermost, lo));
+    hi = lo;
+    if (high)
+        VTRY_SET(r, case_value(n, high, innermost, hi));
+    fundamental_type adjusted = function_state.switches[innermost].type;
+    bool is_signed =
+        fundamental_type_is_signed(tokens.files.behavior, adjusted);
+    auto less = [is_signed](uint64_t a, uint64_t b) {
+        if (is_signed)
+            return static_cast<int64_t>(a) < static_cast<int64_t>(b);
+        return a < b;
+    };
+    if (high && less(hi, lo))
+        return analysis_result::well_formed;
     for (size_t i = function_state.switches[innermost].first_value;
-         i < function_state.case_values.size(); i++)
-        if (function_state.case_values[i] == m.value)
+         i < function_state.case_values.size(); i++) {
+        const auto &prev = function_state.case_values[i];
+        if (!less(hi, prev.lo) && !less(prev.hi, lo))
             return ill_formed(n,
                               "no two of the case constants in the same switch "
                               "shall have the same value after conversion",
                               "stmt.switch");
-    function_state.case_values.append(m.value);
+    }
+    function_state.case_values.append({lo, hi});
     return analysis_result::well_formed;
 }
 

@@ -4,15 +4,11 @@ old-aggregate-class-arrays	vcc: the rules of [class.ctor] are not implemented ye
 old-braced-template-arguments	vcc: the rules of [over.match.list] are not implemented yet
 old-decltype-returns	vcc: the rules of [class.static.data] are not implemented yet
 old-defaulted-key-dtor	vcc: the rules of [class.copy.elision] are not implemented yet
-old-enums-switch	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
-old-inherited-defaults	vcc: the rules of [temp.arg] are not implemented yet
 old-member-templates	vcc: the rules of [temp.mem] are not implemented yet
 old-ooc-member-class	vcc: the rules of [temp.class] are not implemented yet
 old-ooc-partial-overloads	vcc: the rules of [temp.res] are not implemented yet
 old-partial-later	vcc: the rules of [temp.class.spec] are not implemented yet
-old-requires-params	vcc: the rules of [expr.prim.req] are not implemented yet
 old-statement-expression	vcc: the C++ front end does not handle a declaration the parser kept as tokens yet
-old-static-local-object	symbols: missing [] extra ['_ZGVZL1gvE1u', '_ZN1UC2Ev'] binding []
 old-ttp-patterns-vdtor	vcc: the rules of [class.base.init] are not implemented yet
 temp-names-concept-id	vcc: the rules of [temp.func.order] are not implemented yet
 temp-names-literal-operator-template	vcc: the rules of [temp.fct] are not implemented yet
@@ -28,7 +24,6 @@ temp-mem-specialization-member-class	vcc: the rules of [temp.expl.spec] are not 
 temp-mem-specialization-member-of-class	vcc: the rules of [dcl.meaning] are not implemented yet
 temp-mem-specialization-member-of-class-template	vcc: the rules of [temp.expl.spec] are not implemented yet
 temp-mem-using-declaration	vcc: the rules of [temp.mem] are not implemented yet
-temp-mem-variable-template-constexpr	vcc: the rules of [class.mem] are not implemented yet
 temp-mem-variable-template-out-of-class	vcc: the rules of [temp.mem] are not implemented yet
 lambda-capture-generic-conversion	vcc: the rules of [expr.prim.lambda.closure] are not implemented yet
 gnu-builtin-clear-padding	vcc: the rules of [ext.clang] are not implemented yet

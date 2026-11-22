@@ -1626,6 +1626,15 @@ analysis_result semantic_analysis::declare_with_initializer(
             owned_array<expression_meaning> none;
             initialized_value value;
             VTRY_SET(r, construct(declaration, object, none, 0, value));
+            /* [basic.start.static]/2: constant initialization for a static
+               variable default-initialized by a constexpr constructor */
+            if (!entity_table[declared_entity].automatic && value.node) {
+                uint32_t data = 0;
+                constness c = evaluate_variable(type, value.node,
+                                                semantics[value.node].at, data);
+                if (c == constness::constant && data)
+                    value.node = data;
+            }
             entity_table[declared_entity].definition = value.node;
             default_constructed = true;
         }
