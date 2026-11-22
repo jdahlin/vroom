@@ -2062,7 +2062,9 @@ analysis_result semantic_analysis::call_with(
           entity_table[entity_table[called].enclosing].lambda) &&
         !(entity_table[called].gnu_builtin_row &&
           gnu_builtin_at(entity_table[called].gnu_builtin_row).fold !=
-              builtin_fold::none))
+              builtin_fold::none) &&
+        /* (the evaluator answers __builtin_is_constant_evaluated) */
+        !(entity_table[called].gnu_flags & gnu_is_constant_evaluated))
         m.evaluation = constness::not_constant;
     /* a constexpr member function's invocation is the evaluator's */
     if (called && entity_table[called].constexpr_) {

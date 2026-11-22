@@ -95,7 +95,8 @@ typedef struct cc_builtin {
     uint8_t id;
     uint8_t flags; /* bit 0: constexpr; upper bits: CC_LIB_* kind */
     const char
-        *sig; /* return type then parameters; '.' variadic (see sigtype) */
+        *sig;     /* return type then parameters; '.' variadic (see sigtype) */
+    uint8_t body; /* 1: a C body is bound to the spelling (builtin-body.cpp) */
 } cc_builtin;
 
 typedef struct cc_object_bound {
@@ -121,9 +122,8 @@ CC_PRIVATE void cc_builtin_atomic_shape(const cc_builtin *b, int *written,
 CC_PRIVATE uint32_t cc_builtin_rotate_build(cc *c, const cc_builtin *b,
                                             uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_bit_count_generic(cc *c, int id, uint32_t loc);
-CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id, bool stdc,
-                                               uint32_t x, uint32_t fb,
-                                               uint32_t loc);
+CC_PRIVATE uint32_t cc_builtin_bit_count_lower(cc *c, int id, uint32_t x,
+                                               uint32_t fb, uint32_t loc);
 CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n,
                                                      cc_object_bound *b,
                                                      unsigned depth,
@@ -687,7 +687,21 @@ CC_PRIVATE const cc_builtin *cc_builtin_lookup(uint32_t id);
 CC_PRIVATE bool cc_builtin_stub_known(cc *c, uint32_t id);
 bool cc_eval(cc *c, uint32_t n, cc_value *v);
 CC_PRIVATE bool cc_builtin_fold(cc *c, const node *x, cc_value *v);
+CC_PRIVATE bool cc_builtin_is_pure(unsigned id);
 CC_PRIVATE uint32_t cc_builtin_arguments_parse(cc *c, cc_id_list *args);
+/* builtin-body.cpp: builtins written as C over other builtins */
+struct cc_body_binding;
+CC_PRIVATE const struct cc_body_binding *
+cc_builtin_body_find(const cc *c, const cc_builtin *b);
+CC_PRIVATE uint32_t cc_builtin_body_apply(cc *c,
+                                          const struct cc_body_binding *k,
+                                          const cc_builtin *b,
+                                          const uint32_t *args, uint32_t n,
+                                          uint32_t loc);
+CC_PRIVATE unsigned cc_builtin_body_arity(const struct cc_body_binding *k);
+CC_PRIVATE uint32_t cc_builtin_pointer_argument(cc *c, uint32_t a,
+                                                ast_qualified_type pointee,
+                                                uint32_t index, uint32_t loc);
 CC_PRIVATE uint32_t cc_fpclassify_build(cc *c, const uint32_t *v, uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_node_new(cc *c, int id, ast_qualified_type ty,
                                         uint32_t loc, const cc_id_list *args);
@@ -890,6 +904,7 @@ CC_PRIVATE void cc_return_stack_address_check(cc *c, uint32_t e, bool addr);
 /* lazy.c */
 CC_PRIVATE bool cc_lazy_body_eligible(cc *c, uint32_t s,
                                       const cc_declarator *d);
+CC_PRIVATE void cc_lazy_body_token_append(cc *c, const ptok *t);
 CC_PRIVATE void cc_lazy_body_capture(cc *c, uint32_t s, const cc_declarator *d);
 CC_PRIVATE void cc_lazy_body_replayed(const cc_lazy_function *L, uint32_t n);
 CC_PRIVATE void cc_lazy_body_closure(cc *c);

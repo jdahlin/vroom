@@ -211,9 +211,15 @@ CC_PRIVATE bool cc_expression_has_side_effects(cc *c, uint32_t n)
     case AST_NODE_POST_INCREMENT:
     case AST_NODE_POST_DECREMENT:
     case AST_NODE_STATEMENT_EXPRESSION:
-    case AST_NODE_BUILTIN:
     case AST_NODE_VA_ARG:
         return true;
+    case AST_NODE_BUILTIN:
+        if (!cc_builtin_is_pure(x->aux))
+            return true;
+        for (uint32_t i = 0; i < x->c; i++)
+            if (cc_expression_has_side_effects(c, c->lists[x->b + i]))
+                return true;
+        return false;
     case AST_NODE_CAST:
     case AST_NODE_UNARY:
     case AST_NODE_ADDRESS:
