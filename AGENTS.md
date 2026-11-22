@@ -378,6 +378,7 @@ bench/fetch-testsuites.sh [NAME]    # external suites -> work/testsuites (clang,
 bench/vcc-verify.py -j 6 [-v] [PAT] # clang's -verify tests (C/, Sema/, ...): vcc vs the expected-* directives (~6 s warm, 2.5 min cold)
 bench/vcc-builtins.py [-v]          # clang builtins unknown to vcc, __has_builtin differences (<1 s)
 bench/vcc-builtins.py --check-consistency --vpp build/linux/src/vpp   # vcc only: per builtin in the C table, __has_builtin, a typed call, -c at -O0..2 and constant folding in C and C++ on arm64 and x86-64; no violation beyond src/test/builtins/consistency-failures.txt (--bless: bench/vcc-builtins-consistency.py; ~1.5 s)
+bench/vcc-builtins-demand.py [-j N]   # which builtins real code references (work/ projects, libc++, clang's intrinsic headers) and what vcc does with each: writes doc/builtins-demand.md (by hand: its inputs are not in the checkout; ~10 s)
 bench/clangdiag.py fetch|stats      # clang's Diagnostic*.td -> work/clang-td/VER/ (once); counts per language
 bench/vcc-diagcov.py [-v] [--missing]   # vcc's diagnostics vs clang's table: coverage, gaps (~1 s)
 bench/vcc-mutate.py -j 6             # one injected error per valid TU, vcc vs clang: first error, follow-ons (~25 s warm)
