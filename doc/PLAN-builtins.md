@@ -74,6 +74,16 @@ unit feature queries and function target attributes have different contexts.
 [Clang call checks](https://github.com/llvm/llvm-project/blob/main/clang/lib/Sema/SemaChecking.cpp) ·
 [NEON header and compiler table generation](https://github.com/llvm/llvm-project/blob/main/clang/utils/TableGen/NeonEmitter.cpp)
 
+Organize handwritten behavior by builtin family too. The C frontend has a
+`builtins-*.cpp` module prefix: registration, generic call routing, math,
+atomics, vectors and x86-specific calls live in distinct files. Continue this
+at the code generation layers: shared family implementations under `codegen/`
+and target-specific implementations under `arch/<cpu>/codegen/`, with focused
+files such as `builtins-x86-avx.cpp` for AVX behavior. A target family should
+not be hidden in a generic builtin switch. Keep the call dispatcher as a small
+router; family-specific validation, folding and lowering should sit with that
+family. New modules enter through the existing unity and file-by-file builds.
+
 ## Reading the Clang inputs
 
 Use a vroom-owned offline reader for the pinned `.td` files. The

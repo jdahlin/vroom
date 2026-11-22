@@ -287,8 +287,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     standard_keyword key = head_children[0].keyword();
     if (!is_class_key(key))
         return not_supported(n, "class.pre");
-    /* #pragma pack and the like change the layout: no rules yet */
-    if (tokens.files.layout_pragma)
+    /* #pragma pack and the like change the layout: no rules yet, for the
+       classes in a region of one */
+    if (tokens.layout_pragma_at(n.first_token()))
         return not_supported(n, "cpp.pragma");
     /* [class.union]/1: "A union shall not have base classes." (clang's
        error) */
