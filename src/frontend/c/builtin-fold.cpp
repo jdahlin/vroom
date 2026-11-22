@@ -237,6 +237,18 @@ CC_PRIVATE bool cc_builtin_fold(cc *c, const node *x, cc_value *v)
     case CC_BUILTIN_BSWAP16:
     case CC_BUILTIN_BSWAP32:
     case CC_BUILTIN_BSWAP64:
+    case CC_BUILTIN_BITREVERSE8:
+    case CC_BUILTIN_BITREVERSE16:
+    case CC_BUILTIN_BITREVERSE32:
+    case CC_BUILTIN_BITREVERSE64:
+    case CC_BUILTIN_ROTL8:
+    case CC_BUILTIN_ROTL16:
+    case CC_BUILTIN_ROTL32:
+    case CC_BUILTIN_ROTL64:
+    case CC_BUILTIN_ROTR8:
+    case CC_BUILTIN_ROTR16:
+    case CC_BUILTIN_ROTR32:
+    case CC_BUILTIN_ROTR64:
     case CC_BUILTIN_CLRSB:
     case CC_BUILTIN_CLRSBL:
     case CC_BUILTIN_CLRSBLL: {
@@ -297,6 +309,35 @@ CC_PRIVATE bool cc_builtin_fold(cc *c, const node *x, cc_value *v)
         case CC_BUILTIN_BSWAP64:
             v->i = (i128)__builtin_bswap64((uint64_t)u);
             break;
+        case CC_BUILTIN_BITREVERSE8:
+        case CC_BUILTIN_BITREVERSE16:
+        case CC_BUILTIN_BITREVERSE32:
+        case CC_BUILTIN_BITREVERSE64: {
+            u128 reversed = 0;
+            for (unsigned i = 0; i < bits; ++i)
+                reversed = (reversed << 1) | ((u >> i) & 1);
+            v->i = (i128)reversed;
+            break;
+        }
+        case CC_BUILTIN_ROTL8:
+        case CC_BUILTIN_ROTL16:
+        case CC_BUILTIN_ROTL32:
+        case CC_BUILTIN_ROTL64:
+        case CC_BUILTIN_ROTR8:
+        case CC_BUILTIN_ROTR16:
+        case CC_BUILTIN_ROTR32:
+        case CC_BUILTIN_ROTR64: {
+            cc_value count;
+            if (x->c != 2 || !cc_constant_eval(c, arg[1], &count) ||
+                count.kind != CC_VALUE_INTEGER)
+                return false;
+            unsigned shift = (unsigned)count.i & (bits - 1);
+            if (x->aux >= CC_BUILTIN_ROTR8)
+                shift = (bits - shift) & (bits - 1);
+            v->i = (i128)((u << shift) | (u >> (bits - shift)));
+            v->ice = v->ice && count.ice;
+            break;
+        }
         }
         v->i = cc_constant_truncate(c, v->i, x->ty);
         return true;

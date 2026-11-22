@@ -631,6 +631,12 @@ const char *itanium_mangler::binary_operator_code(SyntaxElement op) const
 
 bool itanium_mangler::dependent_expression(SyntaxElement expression)
 {
+    if (expression.is(syntax_kind::expression) && expression.size() == 3 &&
+        punctuator(expression[1], preprocessing_op_or_punc::COMMA)) {
+        text("cm");
+        return dependent_expression(expression[0]) &&
+               dependent_expression(expression[2]);
+    }
     if (expression.size() == 3 &&
         (expression.kind() == syntax_kind::additive_expression ||
          expression.kind() == syntax_kind::multiplicative_expression ||
@@ -647,6 +653,105 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
         expression.size() == 3 &&
         expression[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return dependent_expression(expression[1]);
+
+    if (expression.is(syntax_kind::postfix_expression) &&
+        expression.size() == 3 && expression[0].is_token() &&
+        expression[0].keyword() == standard_keyword::void_ &&
+        expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        expression[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        text("cvv_E");
+        return true;
+    }
+
+    if (expression.is(syntax_kind::qualified_id) && expression.size() == 2 &&
+        expression[0].is(syntax_kind::nested_name_specifier)) {
+        SyntaxElement qual = expression[0];
+        SyntaxElement member = expression[1];
+        bool global = qual.size() >= 1 &&
+                      qual[0].is(preprocessing_op_or_punc::COLON_COLON);
+        uint32_t qi = 0;
+        if (global)
+            qi = 1;
+        if (member.is_token() && member.is_identifier()) {
+            entity_index scope = 0;
+            bool first_lookup = !global;
+            while (qi + 1 < qual.size()) {
+                if (!qual[qi].is_identifier())
+                    return false;
+                uint32_t id = analysis.token_identifier(qual[qi].token());
+                entity_index next = 0;
+                if (first_lookup) {
+                    entity_index s =
+                        analysis.entity_table[encoding_template].enclosing;
+                    for (;; s = analysis.entity_table[s].enclosing) {
+                        next = analysis.entity_table.find(s, id);
+                        if (next || !s)
+                            break;
+                    }
+                    first_lookup = false;
+                } else {
+                    next = analysis.entity_table.find(scope, id);
+                }
+                if (!next)
+                    return false;
+                scope = next;
+                qi += 2;
+            }
+            entity_index target = analysis.entity_table.find(
+                scope, analysis.token_identifier(member.token()));
+            if (target &&
+                analysis.entity_table[target].kind == entity_kind::variable) {
+                text("L_Z");
+                if (!encoding(target))
+                    return false;
+                text("E");
+                return true;
+            }
+            return false;
+        }
+        if (member.is(syntax_kind::simple_template_id) && member.size() >= 3 &&
+            member[0].is_token()) {
+            if (global)
+                text("gs");
+            text("sr");
+            while (qi + 1 < qual.size()) {
+                if (!qual[qi].is_identifier())
+                    return false;
+                if (!source_name(analysis.token_identifier(qual[qi].token())))
+                    return false;
+                qi += 2;
+            }
+            text("E");
+            if (!source_name(analysis.token_identifier(member[0].token())))
+                return false;
+            text("I");
+            owned_array<SyntaxElement> written;
+            for (uint32_t i = 2; i + 1 < member.size(); i++) {
+                if (member[i].is(syntax_kind::template_argument_list))
+                    for (auto x : member[i].elements())
+                        written.append(x);
+                else
+                    written.append(member[i]);
+            }
+            for (SyntaxElement a : written) {
+                if (a.is(preprocessing_op_or_punc::COMMA))
+                    continue;
+                while (
+                    a.is_node() && a.size() == 1 &&
+                    a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
+                    a = a[0];
+                if (!a.is_token())
+                    return false;
+                entity_index pe =
+                    analysis.constraint_parameter(encoding_template, a.token());
+                if (!pe || !type(analysis.entity_table[pe].type))
+                    return false;
+            }
+            text("E");
+            return true;
+        }
+        return false;
+    }
 
     if (expression.is(syntax_kind::postfix_expression) &&
         expression.size() >= 3) {
@@ -1280,8 +1385,20 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     if (x.value & 2)
         text("nt");
     text("sr");
-    if (x.enclosing && !source_name(analysis.entity_table[x.enclosing].name))
-        return false;
+    if (x.enclosing) {
+        uint32_t depth = static_cast<uint32_t>(x.value >> 8);
+        if (!depth)
+            depth = 1;
+        owned_array<entity_index> chain;
+        entity_index s = x.enclosing;
+        for (uint32_t i = 0; i < depth && s; i++) {
+            chain.append(s);
+            s = analysis.entity_table[s].enclosing;
+        }
+        for (size_t i = chain.size(); i-- > 0;)
+            if (!source_name(analysis.entity_table[chain[i]].name))
+                return false;
+    }
     if (!source_name(spec.name) || !template_args(q))
         return false;
     text("E");

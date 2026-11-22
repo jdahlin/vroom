@@ -92,7 +92,8 @@ node_index parser::unary_expression()
         tokens.files.behavior.has(extension::gnu_labels_as_values))
         return gnu_label_address();
     if (is_unary_operator(peek()) || at(preprocessing_op_or_punc::PLUS_PLUS) ||
-        at(preprocessing_op_or_punc::MINUS_MINUS)) {
+        at(preprocessing_op_or_punc::MINUS_MINUS) ||
+        at(extension_keyword::real_) || at(extension_keyword::imag_)) {
         add_token();
         cast_expression();
         if (failed())
@@ -740,6 +741,26 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
             return size_of(n, true, m);
         if (p.extension_keyword_of(op) == extension_keyword::datasizeof_)
             return size_of(n, false, m, true);
+        extension_keyword ek = p.extension_keyword_of(op);
+        if (ek == extension_keyword::real_ || ek == extension_keyword::imag_) {
+            expression_meaning operand;
+            VTRY(r, expression(n[1], operand));
+            const struct type ot = type_table[operand.type.unqualified()];
+            if (ot.kind != type_kind::complex)
+                return not_supported(n, "ext.gnu");
+            uint8_t part = 0;
+            if (ek == extension_keyword::imag_)
+                part = 1;
+            m = expression_meaning();
+            m.type = qualified_type::make(ot.operand.unqualified(),
+                                          operand.type.cv());
+            m.category = operand.category;
+            m.evaluation = operand.evaluation;
+            m.beyond_integral_constant = true;
+            m.node = expression_node(semantic_kind::complex_part, m,
+                                     n.first_token(), operand.node, 0, part);
+            return analysis_result::well_formed;
+        }
         return not_supported(n, "expr.unary");
     }
     if (op.kind != token_kind::operator_or_punctuator || n.size() != 2)

@@ -892,6 +892,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         return builtin_addressof(n, m);
     if (builtin_shufflevector_call(n))
         return builtin_shufflevector(n, m);
+    if (builtin_complex_call(n))
+        return builtin_complex(n, m);
     /* [expr.prim.id.dtor]/2: a destructor's name is a call's callee alone */
     if ((n.size() == 3 || n.size() == 4) &&
         n[0].is(syntax_kind::postfix_expression) && n[0].size() == 3 &&

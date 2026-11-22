@@ -84,7 +84,9 @@ uint32_t c_lowering::object(uint32_t n)
             return 0;
         return member_access(node(n), held);
     }
-    if (node(n).kind == semantic_kind::conditional && !is_glvalue(node(n)) &&
+    if ((node(n).kind == semantic_kind::conditional ||
+         node(n).kind == semantic_kind::initializer_list) &&
+        !is_glvalue(node(n)) &&
         record(node(n).type).kind == type_kind::class_type)
         return temporary_object(n);
     uint32_t made = expression(n);

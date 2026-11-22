@@ -481,8 +481,7 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
           type_table[r.operand.unqualified()].kind == type_kind::class_type &&
           type_table[m.type.unqualified()].kind == type_kind::class_type &&
           type_table[r.operand.unqualified()].entity ==
-              type_table[m.type.unqualified()].entity &&
-          !entity_table[type_table[m.type.unqualified()].entity].destructor))
+              type_table[m.type.unqualified()].entity))
         return not_supported(at, "class.temporary");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const lvalue or rvalue reference is bound to a
@@ -898,6 +897,17 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
             return not_supported(at, "dcl.init");
         VTRY_SET(r, operand_value(at, m));
         result.evaluation = constness::not_constant;
+        result.value = 0;
+        result.node = m.node;
+        return analysis_result::well_formed;
+    }
+    if (target.kind == type_kind::complex) {
+        /* [ext:gnu_complex] a complex value initialized from the same complex
+           type */
+        if (m.type.unqualified() != type.unqualified())
+            return not_supported(at, "dcl.init");
+        VTRY_SET(r, operand_value(at, m));
+        result.evaluation = m.evaluation;
         result.value = 0;
         result.node = m.node;
         return analysis_result::well_formed;
@@ -1576,13 +1586,14 @@ analysis_result semantic_analysis::constructor_list_initialization(
     }
     owned_array<expression_meaning> arguments;
     for (SyntaxElement clause : clauses) {
-        if (clause.is(syntax_kind::braced_init_list))
-            return not_supported(list, "over.match.list");
         expression_meaning e;
-        VTRY(r, expression(clause, e));
+        if (!clause.is(syntax_kind::braced_init_list)) {
+            VTRY(r, expression(clause, e));
+        }
         arguments.append(e);
     }
     if (arguments.size() == 1 &&
+        !clauses[0].is(syntax_kind::braced_init_list) &&
         arguments[0].category == value_category::prvalue &&
         arguments[0].type.unqualified() == type.unqualified())
         /* one prvalue of the class itself: clang initializes the object
@@ -1593,7 +1604,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
     owned_array<expression_meaning> before;
     for (const expression_meaning &e : arguments)
         before.append(e);
-    VTRY(r, construct(list, type, arguments, 0, result));
+    VTRY(r, construct(list, type, arguments, 0, result, false, &clauses));
     entity_index chosen = semantics[result.node].b;
     if (!chosen || semantics[result.node].kind != semantic_kind::construct)
         return not_supported(list, "over.match.list");
@@ -1609,6 +1620,8 @@ analysis_result semantic_analysis::constructor_list_initialization(
     uint32_t count =
         type_table[entity_table[chosen].type.unqualified()].parameter_count;
     for (size_t i = 0; i < before.size() && i < count; i++) {
+        if (clauses[i].is(syntax_kind::braced_init_list))
+            continue;
         qualified_type to = parameters[i];
         const struct type &p = type_table[to.unqualified()];
         bool reference = p.kind == type_kind::lvalue_reference ||
@@ -1759,7 +1772,14 @@ analysis_result semantic_analysis::aggregate_elements(
         }
         if (next < clauses.size()) {
             VTRY(r, aggregate_element(list, clauses, next, element, one));
-        } else if (arraylike) {
+        } else if (arraylike &&
+                   !(type_table[element.unqualified()].kind ==
+                         type_kind::class_type &&
+                     entity_table[type_table[element.unqualified()].entity]
+                             .kind == entity_kind::class_type &&
+                     (entity_table[type_table[element.unqualified()].entity]
+                          .first_constructor ||
+                      destroys(type_table[element.unqualified()].entity)))) {
             /* the rest of an array: zero, as the lowering fills it */
             break;
         } else {
@@ -1835,13 +1855,6 @@ analysis_result semantic_analysis::omitted_element_checks(
     SyntaxRef list, qualified_type element, bool has_default)
 {
     const struct type of_element = type_table[element.unqualified()];
-    if (!has_default && of_element.kind == type_kind::class_type &&
-        entity_table[of_element.entity].kind == entity_kind::class_type &&
-        (entity_table[of_element.entity].first_constructor ||
-         destroys(of_element.entity)))
-        /* (5.2): an element left out is copy-initialized from an empty
-           initializer list: a constructor call, not analysed */
-        return not_supported(list, "dcl.init.aggr");
     if ((of_element.kind == type_kind::lvalue_reference ||
          of_element.kind == type_kind::rvalue_reference) &&
         !has_default)
@@ -1885,8 +1898,15 @@ semantic_analysis::omitted_element_value(SyntaxRef list, qualified_type element,
         return analysis_result::well_formed;
     }
     /* (5.2): from an empty initializer list: value-initialization
-       ([dcl.init.list]/3.11 for a scalar, an aggregate's own
-       elements for an aggregate), all zero for these members */
+       ([dcl.init.list]/3.11 for a scalar, a default constructor for a
+       class with constructors, all zero otherwise) */
+    const struct type of_element = type_table[element.unqualified()];
+    if (of_element.kind == type_kind::class_type &&
+        entity_table[of_element.entity].kind == entity_kind::class_type &&
+        entity_table[of_element.entity].first_constructor) {
+        owned_array<expression_meaning> none;
+        return construct(list, element, none, 0, one);
+    }
     expression_meaning zero;
     zero.type = qualified_type::make(element.unqualified(), cv_none);
     zero.evaluation = constness::constant;

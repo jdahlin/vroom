@@ -1,6 +1,62 @@
 /* vcc front end: x86 SSE and pcmpstr builtins in ordinary vector lanes; see builtin-table.c for where a builtin's other facts live */
 #include "cc-internal.h"
 
+CC_PRIVATE uint32_t cc_builtin_x86_addcarry_build(cc *c, const cc_builtin *b,
+                                                  const cc_id_list *args,
+                                                  uint32_t loc)
+{
+    uint32_t saved[4], pre = 0, assign;
+
+    if (!CC_X86_64(c)) {
+        cc_report_error(c, loc, "builtin '%s' requires an x86-64 target",
+                        b->name);
+        return cc_node_error_new(c, loc);
+    }
+    if (args->n != 4) {
+        cc_builtin_arity_check(c, loc, 4, args);
+        return cc_node_error_new(c, loc);
+    }
+    for (unsigned i = 0; i < 4; ++i) {
+        c->cv_arg = i;
+        c->cv_callee = loc;
+        uint32_t arg =
+            cc_conversion_apply_as(c, cc_conversion_decay(c, args->v[i]),
+                                   cc_builtin_signature_type(c, b->sig[i + 1]),
+                                   CC_CONVERSION_CONTEXT_ARGUMENT, loc);
+        if (AST_NODE_IS_ERROR(arg))
+            return cc_node_error_new(c, loc);
+        saved[i] = cc_lowering_save(c, arg, &assign);
+        pre = cc_lowering_sequence(c, pre, assign);
+    }
+
+    /* Add the two words and then the normalized carry byte. Either
+       addition can overflow. Compute the carry before storing the result
+       through a pointer that can alias an input. */
+    uint32_t carry_in =
+        cc_conversion_apply(c, saved[0], cc_type_basic(AST_TYPE_BOOL));
+    uint32_t first =
+        cc_binary_build(c, LEX_TOKEN_PLUS, saved[1], saved[2], loc);
+    first = cc_lowering_save(c, first, &assign);
+    pre = cc_lowering_sequence(c, pre, assign);
+    uint32_t sum = cc_binary_build(c, LEX_TOKEN_PLUS, first, carry_in, loc);
+    sum = cc_lowering_save(c, sum, &assign);
+    pre = cc_lowering_sequence(c, pre, assign);
+    uint32_t carry_first =
+        cc_binary_build(c, LEX_TOKEN_LESS, first, saved[1], loc);
+    uint32_t carry_second = cc_binary_build(c, LEX_TOKEN_LESS, sum, first, loc);
+    uint32_t carry =
+        cc_binary_build(c, LEX_TOKEN_PIPE, carry_first, carry_second, loc);
+    carry = cc_lowering_save(
+        c, cc_conversion_apply(c, carry, cc_type_basic(AST_TYPE_UNSIGNED_CHAR)),
+        &assign);
+    pre = cc_lowering_sequence(c, pre, assign);
+    uint32_t store =
+        cc_assignment_build(c, 0, cc_dereference_build(c, saved[3], loc),
+                            cc_node_rvalue(c, sum), loc);
+    return cc_lowering_sequence(
+        c, pre, cc_lowering_sequence(c, store, cc_node_rvalue(c, carry)));
+}
+
 /* The builtin converts its constant control to char, as Clang does. The final hidden
  * argument identifies the result projection and explicit-length variant. */
 CC_PRIVATE uint32_t cc_builtin_x86_pcmpstr_build(cc *c, const cc_builtin *b,
