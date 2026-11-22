@@ -383,7 +383,7 @@ analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
         !value_kept_exactly(semantics[node].type, v))
         c = constness::unknown;
     if (c == constness::unknown)
-        return not_supported(at, "expr.const");
+        return not_supported(at, expr_const_reason());
     constant = c == constness::constant;
     return analysis_result::well_formed;
 }
@@ -1824,8 +1824,11 @@ constness semantic_analysis::evaluate_invocation(
     if (!body || semantics[body].kind != semantic_kind::function_body ||
         semantics[body].evaluation == constness::not_constant ||
         semantics[body].c || semantics[body].count != count + with_this ||
-        (state.defined_before && semantics[body].at > state.defined_before))
+        (state.defined_before && semantics[body].at > state.defined_before)) {
+        if (entity_table[f].held_because)
+            evaluation_cause = entity_table[f].held_because;
         return constness::unknown;
+    }
     /* [expr.call]/8: "The initialization of a parameter ... is
        indeterminately sequenced with respect to that of any other
        parameter": in order, as none of them can see another.  The

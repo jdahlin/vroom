@@ -2457,6 +2457,18 @@ class semantic_analysis
     bool case_or_default_label(SyntaxElement s) const;
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);
     analysis_result gnu_attribute_specifier(SyntaxRef n, specified &s);
+    /* [expr.const]: why an evaluation could not tell, when a function it
+       calls was refused (its reason), else the evaluation's own; cleared
+       when read */
+    const char *evaluation_cause = nullptr;
+    const char *expr_const_reason()
+    {
+        const char *r = "expr.const";
+        if (evaluation_cause)
+            r = evaluation_cause;
+        evaluation_cause = nullptr;
+        return r;
+    }
     analysis_result defer_unsupported_body(SyntaxRef n, entity_index f,
                                            size_t before, analysis_result r);
     analysis_result gnu_compound_literal(SyntaxRef n, expression_meaning &m);
@@ -5052,6 +5064,9 @@ class semantic_analysis
     analysis_result analyse_function_body(SyntaxRef definition,
                                           SyntaxElement compound,
                                           SyntaxElement ctor_initializer = {});
+    analysis_result analyse_function_body_of(SyntaxRef definition,
+                                             SyntaxElement compound,
+                                             SyntaxElement ctor_initializer);
     /* [class.base.init]: a constructor's member initializations, the
        statements of a block (function_body's b) */
     analysis_result
