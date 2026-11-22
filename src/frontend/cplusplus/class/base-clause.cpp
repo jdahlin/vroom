@@ -205,6 +205,18 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
     if (named != analysis_result::well_formed) {
         /* a class whose definition was not analysed, a name not found */
         unsupported.resize(before);
+        /* a base a refused declaration held: that declaration's reason */
+        if (name.is_token() &&
+            tokens[name.token()].kind == token_kind::identifier) {
+            lookup_result found = lookup_unqualified(
+                tokens.identifier(name.token()), lookup_filter::types);
+            if (found.unknown) {
+                analysis_result held = not_supported(
+                    n, unknown_name_subclause(found, "class.derived"));
+                name_lookup_detail(name.token(), found);
+                return held;
+            }
+        }
         return not_supported(n, "class.derived");
     }
     return analysis_result::well_formed;
