@@ -460,6 +460,12 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     case unary_trait_kind::has_trivial_constructor:
     case unary_trait_kind::has_trivial_copy:
     case unary_trait_kind::has_trivial_assign:
+    case unary_trait_kind::has_trivial_move_constructor:
+    case unary_trait_kind::has_trivial_move_assign:
+    case unary_trait_kind::has_nothrow_copy:
+    case unary_trait_kind::has_nothrow_assign:
+    case unary_trait_kind::has_nothrow_constructor:
+    case unary_trait_kind::has_nothrow_move_assign:
     case unary_trait_kind::has_unique_object_representations:
     case unary_trait_kind::is_trivially_relocatable:
     case unary_trait_kind::is_cpp_trivially_relocatable:

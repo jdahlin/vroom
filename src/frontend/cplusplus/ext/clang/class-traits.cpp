@@ -319,6 +319,74 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
         }
         return true;
     }
+    /* [ext:clang_type_traits] the deprecated __has_trivial_move_* and
+       __has_nothrow_* traits.  A scalar: true (an assignment of a const
+       one, not).  A class: what clang answers by its implicit special
+       members; one that declares its own copy or move members, or has a
+       non-trivial subobject, is not followed (clang's answer there is
+       by the declared exception specifications and by overload
+       resolution of the copy and move members) */
+    case unary_trait_kind::has_trivial_move_constructor:
+    case unary_trait_kind::has_trivial_move_assign:
+    case unary_trait_kind::has_nothrow_copy:
+    case unary_trait_kind::has_nothrow_assign:
+    case unary_trait_kind::has_nothrow_constructor:
+    case unary_trait_kind::has_nothrow_move_assign: {
+        unary_trait_kind w = static_cast<unary_trait_kind>(which);
+        if (unbounded || kind == type_kind::function ||
+            kind == type_kind::lvalue_reference ||
+            kind == type_kind::rvalue_reference ||
+            fundamental_of(t) == fundamental_type::void_)
+            return false;
+        bool assign = w == unary_trait_kind::has_nothrow_assign;
+        if (!is_class) {
+            answer = !(assign && const_qualified);
+            return true;
+        }
+        if (triviality_unknown(c))
+            return false;
+        const entity &x = entity_table[c];
+        if (declares_move_constructor(c) || declares_move_assignment(c) ||
+            declares_copy_constructor(c) || x.user_copy_assignments)
+            return false;
+        bool declared_destructor =
+            x.destructor && !entity_table[x.destructor].implicit;
+        switch (w) {
+        case unary_trait_kind::has_trivial_move_constructor:
+        case unary_trait_kind::has_trivial_move_assign:
+        case unary_trait_kind::has_nothrow_move_assign:
+            /* a user-declared destructor leaves no implicit move */
+            if (declared_destructor)
+                return false;
+            break;
+        default:
+            break;
+        }
+        switch (w) {
+        case unary_trait_kind::has_trivial_move_constructor:
+        case unary_trait_kind::has_nothrow_copy:
+            answer = copies_bytes(c);
+            break;
+        case unary_trait_kind::has_nothrow_constructor: {
+            if (clang_template_default_constructor_of(x))
+                return false;
+            bool known = true;
+            answer = trivial_default_constructor(c, known);
+            if (!known)
+                return false;
+            break;
+        }
+        default:
+            if (assign && const_qualified) {
+                answer = false;
+                return true;
+            }
+            answer = assigned_bitwise(c);
+            break;
+        }
+        /* a non-trivial answer rests on exception specifications */
+        return answer;
+    }
     case unary_trait_kind::has_unique_object_representations:
         if (unbounded)
             return false;
