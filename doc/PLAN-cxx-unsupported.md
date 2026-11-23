@@ -453,6 +453,15 @@ it; none adds a second way to instantiate.
   friend's noexcept in a complete-class context ([class.mem]/7); enumerators
   of a refused enum-specifier not held.  Patch with the scope marks:
   scratchpad unknown-scopes-b62.patch.
+- 6.3 (eec81e142, a031b5924, 31364413f; simplify after): a parameter's
+  name in later parameters, a lambda's parameters in its trailing return
+  type ([basic.scope.param]/1), using enum of a scoped enumeration
+  ([enum.udecl]/2).  Unsupported 38657 -> 38639, we reject -1, we accept +1
+  (canonical-expr-type.cpp:12: equivalent dependent expressions in function
+  template signatures, [temp.over.link], not checked: queue).  Left of
+  6.2's list: anonymous union members at namespace scope, extern "C"
+  redeclaration bodies, GNU attribute arguments, a friend's noexcept,
+  enumerators of a refused enum-specifier.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
