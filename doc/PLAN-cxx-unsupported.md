@@ -226,6 +226,15 @@ after step 0 the work list gives a better estimate, recorded here.
   special/class.dtor/p3-0x.cpp is a new known failure: no typeinfo for
   classes with a vtable (S7), hidden before.  The agent ran past its limit
   with work left in the background; stopped by the orchestrator.
+- 1.4 (5d4a09877 fix, b0766d326 simplify): ext_vector_type(N) on a typedef
+  (either position), through the alias path's code; only the typedef path
+  opts in.  Unsupported 39298 -> 39155, agree +153, types +567, no refuted
+  or we reject moved.  Left: bool vectors, vector values ([ext.clang] rose
+  1302 -> 1419: those declarations stop at vector expressions now).  Also
+  c5b744d0d: --why keeps an extension's name in its key.
+- Batch 1 done: 39709 -> 39155 (-554).  Lessons: size with --why only;
+  brief "an exposed unrelated bug: report and stop", so a commit holds one
+  fix.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
