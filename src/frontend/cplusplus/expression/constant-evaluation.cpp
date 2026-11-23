@@ -431,6 +431,26 @@ analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
     return analysis_result::well_formed;
 }
 
+/* [dcl.init]/8: whether value-initializing an object of class c is more
+   than zero-initializing it: a member or base with a default member
+   initializer is initialized by it after the zeros ([class.mem]/10) */
+bool semantic_analysis::has_default_member_initializer(entity_index c) const
+{
+    const entity &k = entity_table[c];
+    for (uint32_t i = 0; i < k.member_count; i++) {
+        const entity &m = entity_table[class_members[k.first_member + i]];
+        if (m.default_initializer)
+            return true;
+        const struct type *t = &type_table[m.type.unqualified()];
+        while (t->kind == type_kind::array)
+            t = &type_table[t->operand.unqualified()];
+        if (t->kind == type_kind::class_type && t->entity != c &&
+            has_default_member_initializer(t->entity))
+            return true;
+    }
+    return false;
+}
+
 /* [dcl.init.aggr]/4: whether an element of an initializer list is the
    member's: all but an unnamed bit-field ([class.bit]/2) */
 bool semantic_analysis::initializer_member(entity_index member) const
@@ -465,6 +485,15 @@ uint32_t semantic_analysis::frame_object(const constant_evaluation &state,
 
 constant_value &semantic_analysis::place_value(constant_evaluation &state,
                                                uint32_t place)
+{
+    if (place & element_place)
+        return state.elements[place & ~element_place];
+    return state.objects[place].value;
+}
+
+const constant_value &
+semantic_analysis::place_value(const constant_evaluation &state,
+                               uint32_t place) const
 {
     if (place & element_place)
         return state.elements[place & ~element_place];
@@ -579,8 +608,10 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
            element).  A `zero` that stands for value-initialization of a
            class with a constructor ([dcl.init]/8) runs that constructor,
            which is not this */
-        if (zero && init != zero_fill && c.first_constructor &&
-            !trivial_defaulted_default_constructor(c_entity))
+        if (zero && init != zero_fill &&
+            ((c.first_constructor &&
+              !trivial_defaulted_default_constructor(c_entity)) ||
+             has_default_member_initializer(c_entity)))
             return CONST_UNKNOWN;
     }
     if (init && !zero) {
@@ -615,8 +646,6 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         given = semantics[init].count;
         items = semantics.items(semantics[init].first);
     }
-    /* (a member a list does not give may have a default member
-       initializer, which analysis does not keep in the tree) */
     /* [dcl.init.aggr]/4: the elements the list covers: an unnamed
        bit-field has no initializer and is zero */
     uint32_t listed = count;
@@ -629,10 +658,28 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
     }
     if (given > listed || (c_entity && init && !zero && given != listed))
         return CONST_UNKNOWN;
+    /* an object made again at its place (a constructor's initialization of
+       a member the object's own allocation made) keeps the elements it
+       has: those made now would be above the invocation's and go with it
+       ([basic.stc.auto]/1) while the object holds them */
+    const constant_value held = place_value(state, place);
     uint32_t first = static_cast<uint32_t>(state.elements.size());
-    for (uint32_t i = 0; i < count; i++) {
-        state.elements.append(constant_value());
-        state.element_read_only.append(read_only);
+    constant_value_kind shape = constant_value_kind::array;
+    if (c_entity)
+        shape = constant_value_kind::class_object;
+    if (held.kind == shape && held.count == count &&
+        (!c_entity || held.designator == c_entity) &&
+        held.first + count <= state.elements.size()) {
+        first = held.first;
+        for (uint32_t i = 0; i < count; i++) {
+            state.elements[first + i] = constant_value();
+            state.element_read_only[first + i] = read_only;
+        }
+    } else {
+        for (uint32_t i = 0; i < count; i++) {
+            state.elements.append(constant_value());
+            state.element_read_only.append(read_only);
+        }
     }
     constant_value v;
     v.kind = constant_value_kind::array;
@@ -900,6 +947,21 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 return pointed_place(state, r, object);
             }
         return CONST_UNKNOWN;
+    }
+    /* [conv.ptr]/3's and [expr.static.cast]/2's glvalue forms: the base
+       class subobject of the object, or the object it is the base of */
+    case semantic_kind::conversion: {
+        conversion_kind k = static_cast<conversion_kind>(x.op);
+        if (k != conversion_kind::derived_to_base &&
+            k != conversion_kind::base_to_derived)
+            break;
+        uint32_t from = 0;
+        c = evaluate_object(state, x.a, from);
+        if (c != constness::constant)
+            return c;
+        if (k == conversion_kind::derived_to_base)
+            return base_subobject_place(state, from, x.b, object);
+        return derived_object_place(state, from, x.b, object);
     }
     case semantic_kind::construct: {
         if (!x.a)
@@ -1196,6 +1258,95 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
        by member */
     if (v.kind == constant_value_kind::class_object)
         v = copy_value(state, v, false);
+    return constness::constant;
+}
+
+/* [class.derived]/2: the place of the base class subobject base inside
+   the class object at place (the subobjects with data are members of
+   the class, base-clause.cpp), or unknown: an empty base has none */
+constness
+semantic_analysis::base_subobject_place(const constant_evaluation &state,
+                                        uint32_t place, entity_index base,
+                                        uint32_t &out) const
+{
+    if (!base)
+        return CONST_UNKNOWN;
+    const constant_value &o = place_value(state, place);
+    if (o.kind != constant_value_kind::class_object || !o.designator)
+        return CONST_UNKNOWN;
+    const entity &k = entity_table[o.designator];
+    for (uint32_t i = 0; i < k.member_count; i++)
+        if (class_members[k.first_member + i] == base) {
+            out = element_place | (o.first + i);
+            return constness::constant;
+        }
+    return CONST_UNKNOWN;
+}
+
+/* [expr.static.cast]/11: the class object that holds the base subobject at
+   place: found among the objects and elements of the evaluation */
+constness
+semantic_analysis::derived_object_place(const constant_evaluation &state,
+                                        uint32_t place, entity_index base,
+                                        uint32_t &out) const
+{
+    if (!base || !(place & element_place))
+        return CONST_UNKNOWN;
+    uint32_t index = place & ~element_place;
+    for (size_t pass = 0; pass < 2; pass++) {
+        size_t n = state.objects.size();
+        if (pass)
+            n = state.elements.size();
+        for (size_t i = 0; i < n; i++) {
+            const constant_value *v = &state.elements[0];
+            if (pass)
+                v = &state.elements[i];
+            else
+                v = &state.objects[i].value;
+            if (v->kind != constant_value_kind::class_object ||
+                !v->designator || index < v->first ||
+                index >= v->first + v->count)
+                continue;
+            const entity &k = entity_table[v->designator];
+            if (class_members[k.first_member + (index - v->first)] != base)
+                continue;
+            out = static_cast<uint32_t>(i);
+            if (pass)
+                out |= element_place;
+            return constness::constant;
+        }
+    }
+    return CONST_UNKNOWN;
+}
+
+/* [conv.ptr]/3, [expr.static.cast]/11: the pointer p converted to the
+   base class subobject (to_base) or back to the class object holding it */
+constness semantic_analysis::convert_base_pointer(
+    const constant_evaluation &state, bool to_base, entity_index base,
+    const constant_value &p, constant_value &v) const
+{
+    if (p.kind != constant_value_kind::pointer)
+        return CONST_UNKNOWN;
+    v = p;
+    if (!p.count)
+        return constness::constant;
+    uint32_t place = 0;
+    constness c = pointed_place(state, p, place);
+    if (c != constness::constant)
+        return c;
+    uint32_t moved = 0;
+    if (to_base)
+        c = base_subobject_place(state, place, base, moved);
+    else
+        c = derived_object_place(state, place, base, moved);
+    if (c != constness::constant)
+        return c;
+    v = constant_value();
+    v.kind = constant_value_kind::pointer;
+    v.count = 1;
+    v.first = moved;
+    if (!(moved & element_place))
+        v.stamp = state.objects[moved].serial;
     return constness::constant;
 }
 
@@ -1614,6 +1765,15 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
                 return CONST_UNKNOWN;
             v = value_of(to, value);
             return c;
+        }
+        if (k == conversion_kind::derived_to_base ||
+            k == conversion_kind::base_to_derived) {
+            constant_value p;
+            c = evaluate_node(state, x.a, p);
+            if (c != constness::constant)
+                return c;
+            return convert_base_pointer(
+                state, k == conversion_kind::derived_to_base, x.b, p, v);
         }
         if (k != conversion_kind::integral && k != conversion_kind::floating &&
             k != conversion_kind::floating_integral &&
@@ -2095,6 +2255,15 @@ constness semantic_analysis::evaluate_invocation(
             return CONST_UNKNOWN;
         return constness::not_constant;
     }
+    /* a defaulted constructor's default member initializers with a
+       location builtin were folded at the wrong place */
+    if (e.implicit && e.enclosing) {
+        const entity &k = entity_table[e.enclosing];
+        for (uint32_t i = 0; i < k.member_count; i++)
+            if (entity_table[class_members[k.first_member + i]]
+                    .initializer_located)
+                return CONST_UNKNOWN;
+    }
     analyse_postponed_body(f);
     uint32_t body = entity_table[f].definition;
     uint32_t with_this = 0;
@@ -2211,9 +2380,7 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
         if (!x.count) {
             if (c_entity && !entity_table[c_entity].member_count)
                 return constness::constant;
-            if (!k.definition || !c_entity ||
-                entity_table[c_entity].base_count ||
-                entity_table[c_entity].dynamic)
+            if (!k.definition || !c_entity || entity_table[c_entity].dynamic)
                 return CONST_UNKNOWN;
         } else {
             if (x.count != 1 || !c_entity ||

@@ -524,6 +524,10 @@ struct entity {
        ([class.mem]/10: a brace-or-equal-initializer or braced-init-list
        node), 0 if none */
     SyntaxRef default_initializer = 0;
+    /* a member: its default member initializer holds a source location
+       builtin, folded for a defaulted constructor defined where it is used
+       and not where it is declared: the value is not clang's */
+    bool initializer_located = false;
     /* ... and whether it can throw ([except.spec]/7), once a constructor
        using it is defined (semantic_analysis::default_member_initializer) */
     initializer_exception initializer_throws = initializer_exception::unknown;
@@ -1843,6 +1847,9 @@ class semantic_analysis
     /* [dcl.init.aggr]/4: whether the member has an element in the
        initializer list of its class (not an unnamed bit-field) */
     bool initializer_member(entity_index member) const;
+    /* [class.mem]/10: whether a member or base of the class has a default
+       member initializer (value-initialization is more than zeros) */
+    bool has_default_member_initializer(entity_index c) const;
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -3248,6 +3255,10 @@ class semantic_analysis
        default member initializer: the constructor) */
     unsigned call_site_depth = 0;
     uint32_t call_site_nodes = 0;
+    /* the source location builtins analysed so far */
+    uint32_t source_location_uses = 0;
+    /* define_defaulted_special_member is analysing a definition */
+    bool defining_defaulted_member = false;
     token_index source_location_at = 0;
     uint32_t wrap_call_site(uint32_t node, token_index at,
                             uint32_t nodes_before);
@@ -3528,6 +3539,16 @@ class semantic_analysis
        designates among state.objects; evaluate_read: the value a glvalue's
        lvalue-to-rvalue conversion reads; evaluate_statement: returned is set
        by a return statement, with its value in result */
+    constness base_subobject_place(const constant_evaluation &state,
+                                   uint32_t place, entity_index base,
+                                   uint32_t &out) const;
+    constness derived_object_place(const constant_evaluation &state,
+                                   uint32_t place, entity_index base,
+                                   uint32_t &out) const;
+    constness convert_base_pointer(const constant_evaluation &state,
+                                   bool to_base, entity_index base,
+                                   const constant_value &p,
+                                   constant_value &v) const;
     constness evaluate_subscript_pointer(constant_evaluation &state,
                                          uint32_t node, constant_value &moved);
     bool pointer_offset_count(qualified_type type, const constant_value &i,
@@ -3644,6 +3665,8 @@ class semantic_analysis
        when element_place is set */
     static constexpr uint32_t element_place = 0x80000000u;
     constant_value &place_value(constant_evaluation &state, uint32_t place);
+    const constant_value &place_value(const constant_evaluation &state,
+                                      uint32_t place) const;
     bool place_read_only(const constant_evaluation &state,
                          uint32_t place) const;
     /* the index in state.objects of the entity's object in the current

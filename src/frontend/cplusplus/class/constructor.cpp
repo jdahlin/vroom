@@ -343,10 +343,17 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     source_location_at = at;
     entity_index outer_member = initialized_member;
     initialized_member = e;
+    uint32_t locations_before = source_location_uses;
     r = initializer(init, type, value);
     initialized_member = outer_member;
     if (r != analysis_result::well_formed)
         return r;
+    /* [ext:clang_source_location] a builtin in the initializer is the
+       constructor's place: a defaulted one is defined where it is first
+       used or at the end of its class, whose place is not the
+       declaration's that clang answers */
+    if (defining_defaulted_member && source_location_uses != locations_before)
+        entity_table[e].initializer_located = true;
     if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         (semantics[value.node].kind != semantic_kind::construct ||
          semantics[value.node].a))
@@ -2705,6 +2712,15 @@ semantic_analysis::define_defaulted_special_member(entity_index c,
 {
     current_declaration = n;
     token_index at = n.first_token();
+    struct defining_scope {
+        bool &flag;
+        bool before;
+        ~defining_scope()
+        {
+            flag = before;
+        }
+    } defining = {defining_defaulted_member, defining_defaulted_member};
+    defining_defaulted_member = true;
     synthesized_function sf;
     begin_synthesized(
         sf, f,

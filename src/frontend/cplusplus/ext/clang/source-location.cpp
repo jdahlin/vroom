@@ -131,6 +131,7 @@ analysis_result semantic_analysis::clang_source_location(SyntaxRef n,
                    which == source_location_builtin::column;
     m = expression_meaning();
     m.category = value_category::prvalue;
+    source_location_uses++;
     if (numeric) {
         m.type = qualified_type::make(
             type_table.fundamental(fundamental_type::unsigned_int), cv_none);
