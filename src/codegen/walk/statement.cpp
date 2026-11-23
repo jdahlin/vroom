@@ -460,6 +460,27 @@ VPRIV void walk_cleanups_run(codegen_context *e, int to)
     }
 }
 
+/* exceptions: what a call made now unwinds into: 0 nothing (no cleanup live; _Unwind_Resume in a
+   pad), UINT32_MAX the terminate pad (a cleanup's call in a landing pad), else the node of the
+   innermost live cleanup (a cleanup running on the normal path covers only the ones below it) */
+VPRIV uint32_t walk_eh_call_node(codegen_context *e)
+{
+    walk_state *W = e->walk_state;
+    int live = W->cleanup_count;
+
+    if (!W->eh_fn)
+        return 0;
+    if (W->eh_in_pads == 2)
+        return UINT32_MAX;
+    if (W->eh_in_pads)
+        return 0;
+    if (W->eh_cleanup_limit < live)
+        live = W->eh_cleanup_limit;
+    if (!live)
+        return 0;
+    return W->cleanup_symbol_nodes[W->cleanups[live - 1]];
+}
+
 static void walk_declaration_emit(codegen_context *e, const node *x)
 {
     cc *c = e->compile_context;
@@ -2187,16 +2208,12 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
         walk_vla_scan(e, y->body, &top);
     }
     /* exceptions: a function with cleanup variables gets an exception table (every call's bounds, the
-	   landing pads that run the cleanups live there); x86-64's direct emitter only, VIR refuses the
-	   function (its eh_pads, before anything is built: doc/PLAN-vir-eh.md E5) */
+	   landing pads that run the cleanups live there): x86-64's direct emitter, and VIR's invokes and
+	   landing pads (codegen/vir/exceptions.cpp) */
     W->eh_nsites = W->eh_marks = 0, W->eh_in_pads = W->eh_overflow = 0;
     W->eh_cleanup_limit = INT32_MAX;
     W->eh_fn = e->unit->options->eh && e->unit->options->cfi &&
                W->cleanup_node_count > 0 && c->eh_resume_sym;
-#ifdef WALK_LOWER_PREFIX
-    if (W->eh_fn)
-        WALK_LOWER(eh_pads)(e);
-#endif
     walk_statement_emit(e, y->body);
     if (walk_function_is_main(c, s) &&
         KIND(c, W->return_type) == AST_TYPE_INT) {
@@ -2206,10 +2223,8 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
             e, &z, codegen_type_primitive(AST_TYPE_INT),
             W->return_label); /* falling off the end of main returns 0 */
     }
-#ifndef WALK_LOWER_PREFIX
     if (W->eh_fn)
         WALK_LOWER(eh_pads)(e); /* (before the return label, jumped over) */
-#endif
     walk_label_place(e, W->return_label);
     WALK_LOWER(finish)(e, s);
     if (pa != pabuf)

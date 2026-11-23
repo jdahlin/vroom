@@ -342,9 +342,13 @@ void ast_builder_exceptions_ready(cc *c, bool cxx)
         c->eh_terminate_sym =
             ast_builder_runtime_function(c, "_ZSt9terminatev", false);
         c->eh_personality = "__gxx_personality_v0";
+        c->eh_personality_sym =
+            ast_builder_runtime_function(c, c->eh_personality, false);
     } else {
         c->eh_terminate_sym = ast_builder_runtime_function(c, "abort", false);
         c->eh_personality = "__gcc_personality_v0";
+        c->eh_personality_sym =
+            ast_builder_runtime_function(c, c->eh_personality, false);
     }
 }
 

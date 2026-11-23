@@ -51,18 +51,27 @@ VPRIV bool virbuild_to_vir_insn_emit(codegen_context *e, uint32_t i, uint32_t b)
             !(in.op == VIR_OP_BRIF && k > 0))
             w[k] = virbuild_to_vir_value(e, w[k]);
     switch (in.op) {
-    case VIR_OP_CALL: {
-        uint32_t n = V->extra[in.c], o;
+    case VIR_OP_CALL:
+    case VIR_OP_INVOKE: {
+        uint32_t n = V->extra[in.c], o, successors = 0;
 
+        if (in.op == VIR_OP_INVOKE)
+            successors = 2;
         w[1] = vir_extra_add(f, &V->extra[in.b],
                              3 + 2 * VIR_SIGNATURE_GROUP_COUNT(V->extra[in.b]));
-        o = vir_extra_add(f, &V->extra[in.c], 1 + n);
+        o = vir_extra_add(f, &V->extra[in.c], 1 + n + successors);
         for (uint32_t k = 0; k < n; k++)
             f->extra[o + 1 + k] =
                 virbuild_to_vir_value(e, V->extra[in.c + 1 + k]);
+        for (uint32_t k = 0; k < successors; k++)
+            f->extra[o + 1 + n + k] =
+                virbuild_to_vir_block(V, V->extra[in.c + 1 + n + k]);
         w[2] = o;
         break;
     }
+    case VIR_OP_LANDINGPAD: /* flags, clause count, clauses (no symbols from the builder yet) */
+        w[0] = vir_extra_add(f, &V->extra[in.a], 2 + V->extra[in.a + 1]);
+        break;
     case VIR_OP_RET: {
         uint32_t n = V->extra[in.c],
                  o = vir_extra_add(f, &V->extra[in.c], 1 + n);

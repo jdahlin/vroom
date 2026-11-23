@@ -214,12 +214,18 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
             virbuild_constant_make(e, VIR_OP_SYMADDR, VIR_TYPE_PTR, ref, 0, 0);
     }
     sig = virbuild_call_signature_make(e, a, n, variadic, rt, &rpc);
+    /* exceptions: with cleanups live, an invoke (its normal and unwind block after the values) */
+    uint32_t unwind = virbuild_eh_unwind_block(e), successor_words = 0;
+
+    if (unwind != VIRBUILD_BLOCK_NONE)
+        successor_words = 2;
     o = V->extra_count;
     uint32_t count = sret, word = 0;
     for (int k = 0; k < n; k++)
         count += a[k].is_in_memory ? 1 : a[k].eightbyte_count;
-    VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity, 1 + count);
-    V->extra_count += 1 + count;
+    VIRBUILD_ARRAY_GROW(V->extra, V->extra_count, V->extra_capacity,
+                        1 + count + successor_words);
+    V->extra_count += 1 + count + successor_words;
     V->extra[o] = count;
     if (sret) {
         uint32_t ptr = virbuild_call_slot_pointer(e, r->slot);
@@ -238,11 +244,25 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
         }
     }
     bool multi = r && r->eightbyte_count == 2;
-    v = virbuild_insn_append(e, VIR_OP_CALL,
-                             multi ? VIR_TYPE_MULTI
-                             : rpc ? virbuild_pass_class_type(rpc)
-                                   : VIR_TYPE_VOID,
-                             0, callee, sig, o);
+    uint32_t result_type = VIR_TYPE_VOID;
+
+    if (multi)
+        result_type = VIR_TYPE_MULTI;
+    else if (rpc)
+        result_type = virbuild_pass_class_type(rpc);
+    if (unwind != VIRBUILD_BLOCK_NONE) {
+        uint32_t normal = virbuild_block_new(e);
+
+        V->extra[o + 1 + count] = normal;
+        V->extra[o + 2 + count] = unwind;
+        v = virbuild_preir_insn_add(e, VIR_OP_INVOKE, result_type, 0, callee,
+                                    sig, o, V->current_block);
+        V->blocks[V->current_block].terminator = v;
+        V->current_block = normal;
+        V->store_count = 0;
+    } else
+        v = virbuild_insn_append(e, VIR_OP_CALL, result_type, 0, callee, sig,
+                                 o);
     virbuild_store_table_clear(e, true);
     if (r && !sret) {
         uint32_t values[2] = {v};

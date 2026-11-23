@@ -216,6 +216,7 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
         int novtag =
             e->volatile_untag_depth; /* (a bail out of a volatile access leaves it raised) */
 
+        virbuild_eh_function_begin(e);
         virbuild_walk_function_emit(e, s);
         e->volatile_untag_depth = novtag;
     }
@@ -281,9 +282,14 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
             V->failure_detail[0] = 0;
             if (timed)
                 t0 = vperformance_now();
-            ok = CODEGEN_IS_X64(e->compile_context)
-                     ? x64_vir_function_lower(e, s, &why)
-                     : a64_vir_function_lower(e, s, &why);
+            /* exceptions: invoke and landing pads are not lowered yet (doc/PLAN-vir-eh.md E6) */
+            if (V->f.flags & VIR_FUNCTION_FLAG_EH) {
+                ok = false;
+                why = VIRBUILD_FAILURE(exceptions_lowering);
+            } else if (CODEGEN_IS_X64(e->compile_context))
+                ok = x64_vir_function_lower(e, s, &why);
+            else
+                ok = a64_vir_function_lower(e, s, &why);
             if (timed)
                 virbuild_pass_note(
                     e->unit, VIRBUILD_PASS_ROW_LOWER(npass),

@@ -68,6 +68,9 @@ VPRIV uint32_t walk_label_new(codegen_context *e);
 VPRIV void walk_call_slot_argument(codegen_context *e, uint32_t fn,
                                    int64_t slot);
 VPRIV void walk_cleanup_call(codegen_context *e, uint32_t s);
+VPRIV uint32_t walk_eh_call_node(
+    codegen_context *
+        e); /* what a call unwinds into: 0 none, UINT32_MAX terminate, else a cleanup node */
 VPRIV void WALK_LOWER(eh_pads)(
     codegen_context *
         e); /* arch/x64/codegen/eh.cpp: the landing pads of the function's exception table (VIR: refuses) */

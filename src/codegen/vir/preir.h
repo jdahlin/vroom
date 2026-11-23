@@ -57,6 +57,7 @@ typedef struct virbuild_preir_block {
     uint8_t falls_through, is_reachable;
     uint8_t
         has_definition; /* a variable is written in it: not empty, whatever its instructions */
+    uint8_t is_landing_pad; /* VIR_BLOCK_FLAG_LPAD (exceptions.cpp) */
 } virbuild_preir_block;
 
 typedef struct virbuild_variable_entry {
@@ -91,6 +92,8 @@ typedef struct virbuild_store_entry {
 typedef struct virbuild_location {
     uint32_t symbol, instance;
 } virbuild_location;
+
+#define VIRBUILD_EH_NODES 1025 /* WALK_CLEANUP_MAX + 1 */
 
 typedef struct virbuild_context {
     virbuild_preir_insn *insns;
@@ -164,9 +167,16 @@ typedef struct virbuild_context {
         lowering_label_capacity; /* x86 lowering buffers, reused per codegen_context */
     vir_loops loops;
     vir_alloc_out allocation;
+    /* exceptions (exceptions.cpp): per walker cleanup node its landing pad and the slot of its
+       variable (+1; 0 none yet), the terminate pad; eh_used: entries to clear for the next function */
+    uint32_t eh_pad_blocks[VIRBUILD_EH_NODES], eh_node_slots[VIRBUILD_EH_NODES];
+    uint32_t eh_terminate_block;
+    bool eh_used;
 } virbuild_context;
 
 #define VIRBUILD_REGISTER_NONE 255
+#define VIRBUILD_EXCEPTION_VARIABLE                                            \
+    256 /* a landing pad's exception, to its _Unwind_Resume */
 #define VIRBUILD_FLOAT_REGISTER_FIRST 192 /* float names 192..254 */
 #define VIRBUILD_RESULT_VARIABLE 255      /* the result variable */
 #define VIRBUILD_JUMP_VARIABLE 257
@@ -210,7 +220,8 @@ typedef struct virbuild_context {
                 uint32_t *O_ = &(&x_->insn.a)[k_];                             \
                 BODY_;                                                         \
             }                                                                  \
-        if (x_->insn.op == VIR_OP_CALL || x_->insn.op == VIR_OP_RET)           \
+        if (x_->insn.op == VIR_OP_CALL || x_->insn.op == VIR_OP_RET ||         \
+            x_->insn.op == VIR_OP_INVOKE)                                      \
             for (uint32_t k_ = 0; k_ < (V_)->extra[x_->insn.c]; k_++) {        \
                 uint32_t *O_ = &(V_)->extra[x_->insn.c + 1 + k_];              \
                 BODY_;                                                         \
@@ -352,6 +363,10 @@ VPRIV bool virbuild_conditions_merge(codegen_context *e);
 /* to-vir.c */
 VPRIV bool virbuild_to_vir_insn_emit(codegen_context *e, uint32_t i,
                                      uint32_t b);
+
+/* exceptions.c */
+VPRIV void virbuild_eh_function_begin(codegen_context *e);
+VPRIV uint32_t virbuild_eh_unwind_block(codegen_context *e);
 
 /* pipeline.c */
 VPRIV bool virbuild_function_emit(codegen_context *e);

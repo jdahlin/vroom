@@ -59,6 +59,11 @@ VPRIV bool virbuild_function_to_vir(codegen_context *e)
          AST_TYPE_FLAG_VARIADIC)
             ? VIR_FUNCTION_FLAG_VARIADIC
             : 0);
+    if (V->eh_used) { /* exceptions: the personality routine (frontend/c ast_builder_exceptions_ready) */
+        f->flags |= VIR_FUNCTION_FLAG_EH;
+        f->personality = CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL,
+                                                c->eh_personality_sym);
+    }
     VIRBUILD_ARRAY_GROW(V->value_map, 0, V->value_map_capacity,
                         V->insn_count + 1);
     memset(V->value_map, 0, (size_t)V->insn_count * sizeof *V->value_map);
@@ -72,6 +77,14 @@ VPRIV bool virbuild_function_to_vir(codegen_context *e)
 
         if (vir_block_add(f, 0) == VIR_BLOCK_NONE)
             return false;
+        if (V->blocks[b].is_landing_pad) {
+            /* (a pad takes no parameters: 8.8; values reach it through slots) */
+            if (V->blocks[b].first_parameter) {
+                V->failure_reason = VIRBUILD_FAILURE(exceptions);
+                return false;
+            }
+            f->blocks[f->block_count - 1].flags |= VIR_BLOCK_FLAG_LPAD;
+        }
         for (uint32_t p = V->blocks[b].first_parameter; p; p = V->insns[p].next)
             if (V->forward[p] == p &&
                 !(V->value_map[p] = vir_insn_add(
