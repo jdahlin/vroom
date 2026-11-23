@@ -449,39 +449,14 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
         else if (x.instantiation && !entity_table[best].instantiation)
             cmp = 1;
         else if (x.instantiation && entity_table[best].instantiation) {
-            /* [over.match.best]/2.5, [temp.func.order]: partial ordering of
-               conversion function templates by their return types */
+            /* [over.match.best]/2.5: the more specialized template */
             entity_index t1 =
                 instantiations[x.instantiation - 1].template_entity;
             entity_index t2 =
                 instantiations[entity_table[best].instantiation - 1]
                     .template_entity;
-            if (t1 != t2) {
-                const function_template ft1 =
-                    function_templates[entity_table[t1].instantiation - 1];
-                const function_template ft2 =
-                    function_templates[entity_table[t2].instantiation - 1];
-                qualified_type r1 =
-                    type_table[entity_table[t1].type.unqualified()].operand;
-                qualified_type r2 =
-                    type_table[entity_table[t2].type.unqualified()].operand;
-                owned_array<template_argument> v1, v2;
-                owned_array<bool> s1, s2;
-                for (uint32_t i = 0; i < ft1.parameter_count; i++) {
-                    v1.append(template_argument());
-                    s1.append(false);
-                }
-                for (uint32_t i = 0; i < ft2.parameter_count; i++) {
-                    v2.append(template_argument());
-                    s2.append(false);
-                }
-                bool two_from_one = deduce_type(r2, r1, v2, s2, true);
-                bool one_from_two = deduce_type(r1, r2, v1, s1, true);
-                if (two_from_one && !one_from_two)
-                    cmp = -1;
-                else if (one_from_two && !two_from_one)
-                    cmp = 1;
-            }
+            if (t1 != t2)
+                cmp = -conversion_template_order(t1, t2);
         }
         if (cmp < 0) {
             best = f;
