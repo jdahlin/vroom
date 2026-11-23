@@ -287,18 +287,34 @@ VPRIV void virbuild_critical_edges_split(codegen_context *e)
         return;
     /* the edge blocks right after the block they leave (layout: a fall-through, not a jump back) */
     {
+        /* each block's edge blocks as a list in their order: one pass, not one per block */
+        uint32_t nb = V->block_count, ne = V->block_order_count - n0;
         uint32_t *o = (uint32_t *)(virbuild_pass_scratch_get(
-                     e, (uint64_t)V->block_order_count * sizeof *o)),
-                 m = 0;
+                     e,
+                     ((uint64_t)V->block_order_count + 2 * (uint64_t)nb + ne) *
+                         sizeof *o)),
+                 *head = o + V->block_order_count, *tail = head + nb,
+                 *next = tail + nb, m = 0;
 
+        for (uint32_t b = 0; b < nb; b++)
+            head[b] = VIRBUILD_BLOCK_NONE;
+        for (uint32_t j = 0; j < ne; j++) {
+            uint32_t q = V->block_order[n0 + j],
+                     b = V->predecessors[V->blocks[q].predecessor_first];
+
+            next[j] = VIRBUILD_BLOCK_NONE;
+            if (head[b] == VIRBUILD_BLOCK_NONE)
+                head[b] = j;
+            else
+                next[tail[b]] = j;
+            tail[b] = j;
+        }
         for (uint32_t i = 0; i < n0; i++) {
             uint32_t b = V->block_order[i];
 
             o[m++] = b;
-            for (uint32_t j = n0; j < V->block_order_count; j++)
-                if (V->predecessors[V->blocks[V->block_order[j]]
-                                        .predecessor_first] == b)
-                    o[m++] = V->block_order[j];
+            for (uint32_t j = head[b]; j != VIRBUILD_BLOCK_NONE; j = next[j])
+                o[m++] = V->block_order[n0 + j];
         }
         memcpy(V->block_order, o, (size_t)m * sizeof *o);
     }
