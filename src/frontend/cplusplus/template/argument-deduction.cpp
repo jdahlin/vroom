@@ -72,8 +72,12 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
            was specified using a qualified-id" is a non-deduced context;
            the argument's conversion is checked on the specialization.
            Comparing two declarations ([temp.over.link]/7), the same name
-           of an equivalent qualifier */
-        if (!exact)
+           of an equivalent qualifier; matching a declaration to a function
+           template ([temp.deduct.decl]: a friend's, once the class is
+           instantiated) a type with no template parameter in it is checked
+           against the specialization's by the caller */
+        if (!exact ||
+            (matching_declaration && !depends_on_template_parameter(a)))
             return true;
         const struct type &ar = type_table[a.unqualified()];
         if (ar.kind != type_kind::dependent || p.cv() != a.cv() ||

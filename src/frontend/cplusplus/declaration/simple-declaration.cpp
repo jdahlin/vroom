@@ -697,7 +697,9 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
        the attributes only those that change nothing vcc generates */
     uint32_t type_at = 3;
     gnu_attributes g;
-    if (n.size() == 6 && attributes_without_effect(n[2])) {
+    if (n.size() == 6 && (attributes_without_effect(n[2]) ||
+                          gnu_attributes_without_effect(n[2]))) {
+        /* (GNU's too: libc++'s _LIBCPP_DEPRECATED_IN_CXX17, a diagnostic) */
         type_at = 4;
     } else if (n.size() == 6 && !n[2].is_token() &&
                tokens.files.behavior.has(extension::clang_ext_vector_type)) {
@@ -1822,6 +1824,28 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (target && semantics[target].kind == semantic_kind::entity &&
             semantics[target].a && !entity_table[semantics[target].a].automatic)
             value.evaluation = constness::constant;
+    }
+    /* [expr.const]/3: a const integral local may be usable in constant
+       expressions, which decides whether a lambda that names it captures
+       it: evaluated, not refused if the evaluator cannot tell (it is then
+       unknown, as before) */
+    if (entity_table[declared_entity].automatic && !s.constexpr_ &&
+        value.node && value.evaluation == constness::unknown &&
+        entity_table[declared_entity].usable == constness::unknown) {
+        constant_value v;
+        constness c = evaluate_value(value.node, v);
+        if (c == constness::not_constant) {
+            value.evaluation = c;
+        } else if (c == constness::constant) {
+            expression_meaning folded;
+            folded.type = semantics[value.node].type;
+            folded.category = value_category::prvalue;
+            evaluated_meaning(folded, v);
+            value.node = expression_node(semantic_kind::constant, folded,
+                                         semantics[value.node].at);
+            value.evaluation = constness::constant;
+            value.value = folded.value;
+        }
     }
     if ((s.constexpr_ || (!entity_table[declared_entity].automatic &&
                           constexpr_calls != calls_before)) &&

@@ -113,8 +113,8 @@ analysis_result semantic_analysis::member_function_template(
                                    "class.static.mfct");
     uint32_t gnu_flags = 0;
     token_index abi_tag = 0;
-    VTRY_SET(r, function_template_attributes(n, s, m, 0, "temp.mem", gnu_flags,
-                                             abi_tag));
+    VTRY_SET(r, function_template_attributes(n, s, m, gnu_inline_flags,
+                                             "temp.mem", gnu_flags, abi_tag));
     uint32_t name = tokens.identifier(m.id);
     /* [temp.over]/1: other member function templates of the name are
        overloads; a non-template member of the name too ([temp.mem]/2):

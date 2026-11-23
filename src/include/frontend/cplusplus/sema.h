@@ -706,6 +706,10 @@ struct entity {
     /* [ext:gnu_asm_labels] a function's or variable's asm label: the
        string-literal that is its symbol, 0 if none */
     token_index asm_label = 0;
+    /* [expr.typeid]: the std::type_info object of this static type (made
+       by typeid_object, a variable named _ZTI <type> by the ABI), 0 for
+       any other entity */
+    type_index typeinfo_of = 0;
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
@@ -1332,8 +1336,6 @@ enum class semantic_kind : uint8_t {
     delete_object,
     /* [expr.throw]: a: the operand (0: none, a rethrow); not lowered */
     throw_exception,
-    /* [expr.typeid]: an lvalue of type const std::type_info; not lowered */
-    type_identification,
     /* [ext:gnu_va_arg] __builtin_va_arg (a, T): a: the va_list (an
        lvalue); a prvalue of the node's type */
     va_arg_,
@@ -1730,6 +1732,15 @@ class semantic_analysis
             return nullptr;
         return &dynamic_classes[entity_table[c].dynamic - 1];
     }
+    /* t, or the type a reference t refers to ([dcl.ref]) */
+    qualified_type referenced_type(qualified_type t) const
+    {
+        const struct type &r = type_table[t.unqualified()];
+        if (r.kind == type_kind::lvalue_reference ||
+            r.kind == type_kind::rvalue_reference)
+            return r.operand;
+        return t;
+    }
     /* t, or the innermost element type of an array t ([dcl.array]) */
     qualified_type element_type(qualified_type t) const
     {
@@ -1785,6 +1796,15 @@ class semantic_analysis
     /* the explicit instantiation a function is the subject of, its own or
        its class's ([temp.explicit]/10) */
     instantiation_kind explicitly_instantiated(entity_index f) const;
+    /* [temp.explicit]/1: e explicitly instantiated, a declaration (extern)
+       or a definition */
+    void mark_explicit_instantiation(entity_index e, bool extern_);
+    /* the function of the overload set that starts at first with type and
+       member_cv cv, 0 if none ([dcl.meaning]/1: the one a member declarator
+       declares again) */
+    entity_index
+    overload_of_type(entity_index first, qualified_type type, uint32_t cv,
+                     bool ignore_exception_specification = false) const;
     /* [basic.types]/10: whether t is a literal type (unknown:
        analysis cannot tell; basic/literal-types.cpp) */
     constness literal_type(qualified_type t) const;
@@ -2020,7 +2040,8 @@ class semantic_analysis
     analysis_result named_specialization(SyntaxRef n, SyntaxRef declaration,
                                          uint32_t lead, bool specialization,
                                          bool extern_, specified &s,
-                                         uint32_t &index);
+                                         uint32_t &index,
+                                         entity_index friend_of = 0);
     /* [dcl.type.simple] Table 14: the type of the simple-type-specifier
        keywords of a decl-specifier-seq */
     struct simple_type_keywords {
@@ -2082,6 +2103,14 @@ class semantic_analysis
            allows it) */
         token_index pack = 0;
     };
+    /* the member a member explicit instantiation names (a destructor, a
+       constructor, a static data member or a member function of class c),
+       0 if none */
+    entity_index explicit_instantiation_target(const entity &c,
+                                               const declarator_meaning &m,
+                                               qualified_type type, uint32_t cv,
+                                               bool has_specifiers,
+                                               bool variable);
     /* [dcl.fct]/2: noptr-declarator parameters-and-qualifiers
        trailing-return-type (placeholder-type-specifier.cpp) */
     analysis_result trailing_return(SyntaxRef declaration, SyntaxRef n,
@@ -2266,6 +2295,11 @@ class semantic_analysis
        blocks: members of their namespaces whose names are not bound
        there */
     owned_array<entity_index> block_declared;
+    /* [expr.typeid]/1: the object typeid of the static type names, made
+       once per type: a variable of type const info, whose symbol the
+       ABI names _ZTI <type> ([abi:mangling-special-vtables]) */
+    owned_array<entity_index> typeid_objects;
+    entity_index typeid_object(qualified_type type, entity_index info);
     /* [class.friend]/1: a class's friends.  A friend class not declared
        yet ([namespace.memdef]/3: the elaborated-type-specifier declares it
        in the innermost enclosing namespace, where ordinary lookup does
@@ -3551,6 +3585,9 @@ class semantic_analysis
        unsupported where the evaluator has no rules yet */
     analysis_result evaluate_constant(SyntaxRef at, uint32_t node,
                                       constant_value &v, bool &constant);
+    /* ... the evaluation alone: constant with the value in v, not_constant,
+       or unknown (no refusal recorded) */
+    constness evaluate_value(uint32_t node, constant_value &v);
     /* one evaluation's state: the objects of the evaluation (locals and
        parameters of the constexpr functions it calls, [expr.const]/5.8:
        their lifetime began within it), the depth of invocations and the
@@ -3581,6 +3618,11 @@ class semantic_analysis
             uint32_t serial = 0;
             /* a string literal's array */
             bool literal = false;
+            /* ... or an object whose lifetime began outside the evaluation
+               and is not usable in it ([expr.const]/5.8, /5.16): designated
+               (its address is a constant), a read or a write is not a
+               constant expression */
+            bool outside = false;
             constant_value value;
         };
         owned_array<object> objects;
@@ -4377,6 +4419,7 @@ class semantic_analysis
        function uses may be declared later in the class, where a complete-
        class context would find it */
     bool noexcept_names_later_member(SyntaxRef n);
+    bool names_template_or_scope(token_index t) const;
     /* [ext:gnu_attributes] the alignment aligned attributes after a
        class-specifier's closing brace ask of the class the
        decl-specifier-seq defines (GCC: they apply to the type), 0 if none;
@@ -4566,6 +4609,10 @@ class semantic_analysis
            construct it could not analyse, for the uses that follow */
         bool has_failure = false;
         unsupported_construct failure;
+        /* a class named only as a member function's return type
+           ([temp.inst]/2: no completely-defined type is needed there):
+           declared, defined by complete_instantiation when a use needs it */
+        bool lazy = false;
     };
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,
@@ -4694,6 +4741,11 @@ class semantic_analysis
                                                    entity_index f);
     /* the definitions pending_definitions waits for */
     void instantiate_pending();
+    /* a lazily named specialization (instantiation_record::lazy) defined
+       now: a use that needs the class complete (a call's result, a member
+       lookup, its size); nothing for any other class */
+    void complete_instantiation(entity_index c);
+    void complete_class_type(qualified_type t);
     /* in an instantiation, the template's first token: a namespace's
        name declared after it is not the template's to find
        (lookup_unqualified) */
@@ -5751,6 +5803,9 @@ class semantic_analysis
     };
     owned_array<deferred_class_instantiation> deferred_class_instantiations;
     uint32_t require_complete_class = 0;
+    /* deduce_type matches a function declaration's type to a function
+       template's ([temp.deduct.decl]) */
+    bool matching_declaration = false;
     bool member_return_type = false;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says
@@ -5814,6 +5869,9 @@ class semantic_analysis
     /* the conversion-function-id that is the declarator-id of the
        member-declaration or function-definition n, 0 if none */
     SyntaxRef conversion_function_id_of(SyntaxRef n) const;
+    analysis_result qualified_conversion_type(SyntaxRef declaration,
+                                              SyntaxRef conversion,
+                                              qualified_type &type);
     /* the conversion function of class c the definition declared, 0 if
        none */
     entity_index conversion_function_declared_by(entity_index c,

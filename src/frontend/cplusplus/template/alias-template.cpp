@@ -220,8 +220,14 @@ analysis_result semantic_analysis::alias_template_specialization(
     if (!partial_arguments &&
         !depends_on_template_parameter(
             qualified_type::make(t.unqualified(), cv_none))) {
-        if (dependent_arguments(arguments))
-            return not_supported(id, "temp.alias");
+        if (dependent_arguments(arguments)) {
+            /* the template-id itself, dependent: substituted again with
+               each instantiation, where a failure is the deduction's */
+            type = dependent_specialization(ft.entity, arguments);
+            if (cv)
+                *cv = t.cv();
+            return analysis_result::well_formed;
+        }
     }
     type = t.unqualified();
     if (cv)

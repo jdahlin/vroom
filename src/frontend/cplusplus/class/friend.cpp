@@ -528,6 +528,24 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     if (no_type)
         type = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
+    /* [temp.friend]/1, [temp.arg.explicit]: friend R f<>(P); names the
+       specialization of the function template f the declared type picks
+       (as an explicit instantiation declaration names it): it is the
+       friend */
+    if (!defines && !no_type &&
+        DeclaratorParts::of_declaration(n).id.is(
+            syntax_kind::simple_template_id)) {
+        uint32_t index = 0;
+        specified named;
+        scoped_value<bool> allowed(friend_allowed, true);
+        VTRY_SET(r, named_specialization(n, n, leading, false, true, named,
+                                         index, c));
+        friend_record f;
+        f.granting = c;
+        f.befriended = instantiations[index].specialization;
+        friends.append(f);
+        return analysis_result::well_formed;
+    }
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();

@@ -59,7 +59,6 @@ const char *semantic_kind_name(semantic_kind kind)
         "array_size",
         "delete_object",
         "throw_exception",
-        "type_identification",
         "va_arg",
         "label_address",
         "gnu_asm_operand",
@@ -139,6 +138,7 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
             function = b;
         if (function)
             entity_table[function].member_definition_needed = true;
+        complete_class_type(m.type);
         if (m.category == value_category::prvalue)
             require_destructor_definition(m.type);
     }

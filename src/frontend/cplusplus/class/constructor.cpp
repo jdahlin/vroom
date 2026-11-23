@@ -1970,10 +1970,13 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         for (entity_index q = sub.first_constructor; q;
              q = entity_table[q].next_constructor) {
             /* [class.access]/1: c a friend of k may call it, where an
-               aggregate initialization may not (not analysed) */
+               aggregate initialization of c may not (not analysed for an
+               aggregate c; any other class initializes k in its own
+               members' context) */
             bool is_default =
                 !type_table[entity_table[q].type.unqualified()].parameter_count;
-            if (entity_table[q].access && grants(k, c) && !is_default)
+            if (entity_table[q].access && grants(k, c) && !is_default &&
+                is_aggregate(c))
                 return not_supported(n, "class.friend");
             bool allowed = !entity_table[q].access || grants(k, c);
             if (is_default && entity_table[q].access == 1) {
@@ -2905,7 +2908,7 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
         type_table.fundamental(fundamental_type::void_), cv_none);
     SyntaxRef conversion = conversion_function_id_of(n);
     if (conversion) {
-        VTRY(cr, conversion_type(conversion, type));
+        VTRY(cr, qualified_conversion_type(n, conversion, type));
     }
     declarator_meaning m;
     function_cv = 0;
@@ -2936,11 +2939,16 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
         last_declared = e;
         return br;
     }
-    if (tokens.identifier(m.id) != entity_table[c].name)
-        /* a conversion function, or ~ with another name */
-        return not_supported(n, "class.dtor");
     entity_index e = 0;
-    if (m.destructor) {
+    if (conversion) {
+        /* [class.conv.fct]: the conversion function of the declared type
+           and cv-qualifiers (its cv-qualifier-seq is const here, unlike a
+           constructor's or destructor's) */
+        e = overload_of_type(own_conversion_functions(c), type, function_cv);
+    } else if (tokens.identifier(m.id) != entity_table[c].name) {
+        /* ~ with another name */
+        return not_supported(n, "class.dtor");
+    } else if (m.destructor) {
         e = entity_table[c].destructor;
     } else {
         for (entity_index k = entity_table[c].first_constructor; k;
@@ -2948,7 +2956,7 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
             if (entity_table[k].type == type)
                 e = k;
     }
-    if (!e || function_cv)
+    if (!e || (function_cv && !conversion))
         return ill_formed_at_token(m.id,
                                    "when the declarator-id is qualified, the "
                                    "declaration shall refer to a previously "
