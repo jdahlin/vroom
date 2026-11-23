@@ -474,6 +474,24 @@ it; none adds a second way to instantiate.
   use, and dependent rules checked too early (dcl.constexpr/p6.cpp:60).
   Decision: split, not hard: 7.2 works through those rejections by cause.
   Patch: scratchpad b71.patch, the new failures b71-new-after-harness.txt.
+- 7.2 (dropped: we reject +110 even with a fix for the non-dependent
+  errors): the causes, counted: eager instantiation where no complete type
+  is needed (~40: extern S<int> *p; a template argument; a parameter type;
+  a pointer), a non-dependent error inside the template (13: a heuristic
+  patch saved), a template-time check vcc does late (14), dependent rules
+  vcc checks and clang does not (~15).  Patches: scratchpad
+  b72-independent-error.patch.
+- Step design, [temp.inst]/2 (the design note's first item, deferred until
+  now): a class template specialization is defined only where a complete
+  type is needed.  Today template_type (declared-templates.cpp) instantiates
+  every template-id; a lazy path exists for member return types
+  (lazy_return, complete_instantiation), and only three places complete a
+  lazy class (name-lookup, base-clause, instantiation).  7.3a: one helper,
+  require_complete(qualified_type) (through arrays and cv), called at every
+  place that reads a class's completeness, size, members or bases; with
+  classes still eager no metric moves (a pure refactor).  7.3b: template_type
+  declares the specialization (lazy) unless the context needs it complete,
+  and the uses complete it.  Then 7.1's propagation again.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
