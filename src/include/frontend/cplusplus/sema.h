@@ -411,6 +411,19 @@ const uint32_t gnu_function_symbol_flags =
 const uint32_t gnu_inline_flags =
     gnu_noinline | gnu_always_inline | gnu_noreturn;
 
+/* [ext:clang_ext_vector_type] ext_vector_type(N) taken where a declaration
+   allows it (an alias-declaration, a typedef): N, or the entity of the
+   non-type template-parameter N names */
+struct ext_vector_attribute {
+    bool allowed = false;
+    uint64_t count = 0;
+    entity_index parameter = 0;
+    bool given() const
+    {
+        return count || parameter;
+    }
+};
+
 struct entity {
     entity_kind kind = entity_kind::none;
     linkage linkage_of_name = linkage::none;
@@ -2005,9 +2018,7 @@ class semantic_analysis
              inline_ = false, constexpr_ = false, virtual_ = false;
         /* [ext:clang_ext_vector_type] ext_vector_type(N) among the specifiers
            (only where the declaration applies it: ext_vector_allowed) */
-        bool ext_vector_allowed = false;
-        uint64_t ext_vector = 0;
-        entity_index ext_vector_parameter = 0;
+        ext_vector_attribute ext_vector;
         /* [dcl.constexpr]/2: consteval (constexpr_ too) */
         bool consteval_ = false;
         /* [class.friend]: the friend specifier (only where friend_allowed) */
@@ -2102,9 +2113,7 @@ class semantic_analysis
         uint64_t vector_bytes = 0;
         /* [ext:clang_ext_vector_type] a typedef's ext_vector_type(N): N, or
            the template parameter */
-        bool ext_vector_allowed = false;
-        uint64_t ext_vector = 0;
-        entity_index ext_vector_parameter = 0;
+        ext_vector_attribute ext_vector;
         /* [ext:gnu_asm_labels] the asm label's string-literal, 0 if none */
         token_index asm_label = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */
@@ -2606,9 +2615,7 @@ class semantic_analysis
         /* [ext:clang_ext_vector_type] taken where allowed (an
            alias-declaration): ext_vector_type(N)'s N, or the entity of the
            non-type template-parameter N names */
-        bool ext_vector_allowed = false;
-        uint64_t ext_vector = 0;
-        entity_index ext_vector_parameter = 0;
+        ext_vector_attribute ext_vector;
     };
     analysis_result gnu_attribute_specifier(SyntaxRef n, gnu_attributes &g);
     analysis_result add_gnu_abi_tag(SyntaxRef at, token_index literal,

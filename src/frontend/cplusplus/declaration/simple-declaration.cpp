@@ -704,10 +704,10 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
     } else if (n.size() == 6 && !n[2].is_token() &&
                tokens.files.behavior.has(extension::clang_ext_vector_type)) {
         /* [ext:clang_ext_vector_type] */
-        g.ext_vector_allowed = true;
+        g.ext_vector.allowed = true;
         VTRY(r, gnu_attribute_specifier(n[2], g));
         if (g.flags || g.aligned || g.section || g.abi_tag ||
-            (!g.ext_vector && !g.ext_vector_parameter))
+            !g.ext_vector.given())
             return not_supported(n, "dcl.attr");
         type_at = 4;
     }
@@ -740,7 +740,7 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
         if (r != analysis_result::well_formed)
             return r;
     }
-    if (g.ext_vector || g.ext_vector_parameter)
+    if (g.ext_vector.given())
         return clang_ext_vector_type(n, g, type);
     return analysis_result::well_formed;
 }
@@ -1067,7 +1067,7 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     }
     /* [ext:clang_ext_vector_type] a typedef's, applied by
        declare_with_initializer */
-    s.ext_vector_allowed = true;
+    s.ext_vector.allowed = true;
     if (!ctad_done && r == analysis_result::well_formed)
         r = decl_specifier_seq(specifiers, s, false);
     sole_elaborated = 0;
@@ -1205,7 +1205,7 @@ analysis_result semantic_analysis::declare_with_initializer(
     last_declared = 0;
     qualified_type type = s.type;
     declarator_meaning m;
-    m.ext_vector_allowed = s.ext_vector_allowed;
+    m.ext_vector.allowed = s.ext_vector.allowed;
     function_cv = 0;
     /* the parameters of this declarator's function declarator, if it has
        one (function sets them) */
@@ -1276,18 +1276,14 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (r != analysis_result::well_formed)
             return r;
     }
-    if (m.ext_vector || m.ext_vector_parameter || s.ext_vector ||
-        s.ext_vector_parameter) {
+    if (m.ext_vector.given() || s.ext_vector.given()) {
         /* [ext:clang_ext_vector_type] only a typedef-name's */
         if (!s.typedef_ || m.qualifier || m.qualified_namespace)
             return not_supported(declaration, "ext.clang");
         gnu_attributes g;
         g.ext_vector = m.ext_vector;
-        g.ext_vector_parameter = m.ext_vector_parameter;
-        if (!g.ext_vector && !g.ext_vector_parameter) {
+        if (!g.ext_vector.given())
             g.ext_vector = s.ext_vector;
-            g.ext_vector_parameter = s.ext_vector_parameter;
-        }
         r = clang_ext_vector_type(declaration, g, type);
         if (r != analysis_result::well_formed)
             return r;
