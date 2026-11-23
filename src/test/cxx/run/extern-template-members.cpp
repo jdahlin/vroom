@@ -35,6 +35,20 @@ extern template B<char> &B<char>::assign(const char *);
 extern template B<char> &B<char>::operator=(char);
 extern template B<char>::size_type B<char>::find(char, unsigned) const;
 extern template __attribute__((__visibility__("default"))) void B<char>::init(const char *, unsigned);
+/* constructors, destructors and a static data member, declared and never used
+   (their definitions are another translation unit's) */
+template <class C> struct Q {
+  typedef unsigned size_type;
+  static const size_type npos = 7;
+  Q();
+  Q(const Q &);
+  ~Q();
+};
+extern template Q<char>::Q();
+extern template Q<char>::Q(const Q &);
+extern template Q<char>::~Q();
+extern template const Q<char>::size_type Q<char>::npos;
+
 int main()
 {
   B<char> b;

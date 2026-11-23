@@ -244,6 +244,12 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
             return not_supported(n, "temp.explicit");
         return class_explicit_instantiation(n, ec[id], extern_);
     }
+    /* a constructor or destructor: no decl-specifier-seq,
+       extern template S<A>::S(); S<A>::~S(); */
+    if (tail.size() == 2 && tail[0].is(syntax_kind::noptr_declarator) &&
+        tail[0].size() && tail[0][0].is(syntax_kind::qualified_id) &&
+        tail[1].is(preprocessing_op_or_punc::SEMICOLON))
+        return member_explicit_instantiation(n, d, lead, extern_);
     if (tail.size() != 3 || !tail[0].is(syntax_kind::decl_specifier_seq) ||
         tail[1].is_token() || !tail[2].is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported(n, "temp.explicit");
@@ -256,9 +262,10 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
            named_declarator.size() &&
            !named_declarator[named_declarator.size() - 1].is_token())
         named_declarator = named_declarator[named_declarator.size() - 1];
-    if (named_declarator.is(syntax_kind::noptr_declarator) &&
-        named_declarator.size() &&
-        named_declarator[0].is(syntax_kind::qualified_id))
+    if (named_declarator.is(syntax_kind::qualified_id) ||
+        (named_declarator.is(syntax_kind::noptr_declarator) &&
+         named_declarator.size() &&
+         named_declarator[0].is(syntax_kind::qualified_id)))
         return member_explicit_instantiation(n, d, lead, extern_);
     specified s;
     uint32_t index = 0;
@@ -763,13 +770,23 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     specified s;
     declarator_meaning m;
     qualified_type type;
-    analysis_result r = decl_specifier_seq(tail[0], s, false);
+    /* (a constructor's or destructor's has none: its type is void's) */
+    bool has_specifiers = tail[0].is(syntax_kind::decl_specifier_seq);
+    analysis_result r = analysis_result::well_formed;
+    if (has_specifiers)
+        r = decl_specifier_seq(tail[0], s, false);
     uint32_t cv = 0;
     if (r == analysis_result::well_formed) {
         type = s.type;
+        if (!has_specifiers)
+            type = qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none);
         function_cv = 0;
         function_parameters.clear();
-        r = declarator(declaration, tail[1], type, m);
+        uint32_t declarator_at = 0;
+        if (has_specifiers)
+            declarator_at = 1;
+        r = declarator(declaration, tail[declarator_at], type, m);
         cv = function_cv;
         if (r == analysis_result::well_formed)
             r = misplaced_function_qualifiers(
@@ -788,11 +805,14 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
         return not_supported(n, "temp.explicit");
-    if (!m.has_id || !m.qualifier || m.literal_operator || m.destructor ||
-        defaults || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
-        s.constexpr_ || s.gnu_flags || m.gnu_flags || s.aligned || m.aligned ||
-        s.section || m.section || m.asm_label ||
-        type_table[type.unqualified()].kind != type_kind::function)
+    if (!m.has_id || !m.qualifier || m.literal_operator || defaults ||
+        s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
+        s.gnu_flags || m.gnu_flags || s.aligned || m.aligned || s.section ||
+        m.section || m.asm_label)
+        return not_supported(n, "temp.explicit");
+    /* a static data member (const B<char>::size_type B<char>::npos) */
+    bool variable = type_table[type.unqualified()].kind != type_kind::function;
+    if (variable && !has_specifiers)
         return not_supported(n, "temp.explicit");
     const entity c = entity_table[m.qualifier];
     if (c.kind != entity_kind::class_type || !c.instantiation ||
@@ -804,20 +824,50 @@ analysis_result semantic_analysis::member_explicit_instantiation(
         !function_templates[record.pattern - 1].parameter_count)
         return not_supported(n, "temp.explicit");
     /* the member: one function of the name, of the declared type */
-    uint32_t member_name = tokens.identifier(m.id);
-    if (m.operator_function)
-        member_name = operator_name(m.implemented);
-    entity_index f = entity_table.find(m.qualifier, member_name);
-    /* (a name with overloads: the one of the declared type) */
-    while (f &&
-           !(entity_table[f].kind == entity_kind::function &&
-             entity_table[f].type == type && entity_table[f].member_cv == cv))
-        f = entity_table[f].next_overload;
+    entity_index f = 0;
+    if (m.destructor) {
+        f = c.destructor;
+    } else if (!has_specifiers) {
+        /* a constructor: the one of the declared type */
+        for (entity_index k = c.first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (entity_table[k].type == type && entity_table[k].member_cv == cv)
+                f = k;
+    } else if (variable) {
+        f = entity_table.find(m.qualifier, tokens.identifier(m.id));
+        if (f && (entity_table[f].kind != entity_kind::variable ||
+                  !(entity_table[f].type == type)))
+            f = 0;
+    } else {
+        uint32_t member_name = tokens.identifier(m.id);
+        if (m.operator_function)
+            member_name = operator_name(m.implemented);
+        f = entity_table.find(m.qualifier, member_name);
+        /* (a name with overloads: the one of the declared type) */
+        while (f && !(entity_table[f].kind == entity_kind::function &&
+                      entity_table[f].type == type &&
+                      entity_table[f].member_cv == cv))
+            f = entity_table[f].next_overload;
+        if (f && entity_table[f].special != special_member::none)
+            f = 0;
+    }
     if (!f || entity_table[f].enclosing != m.qualifier ||
-        entity_table[f].special != special_member::none)
+        (!variable && entity_table[f].kind != entity_kind::function))
         return not_supported(n, "temp.explicit");
-    /* clang's "explicit instantiation of undefined function" */
-    if (!entity_table[f].defined)
+    if (variable) {
+        /* a declaration only: the member is defined where the
+           definition is instantiated, which a use asks for */
+        if (!extern_ || entity_table[f].explicitly_instantiated ==
+                            instantiation_kind::definition)
+            return not_supported(n, "temp.explicit");
+        entity_table[f].explicitly_instantiated =
+            instantiation_kind::declaration;
+        return analysis_result::well_formed;
+    }
+    /* clang's "explicit instantiation of undefined function" (a
+       declaration of one is allowed: its definition is another
+       translation unit's) */
+    if (!extern_ && !entity_table[f].defined)
         return not_supported(n, "temp.explicit");
     /* (a declaration: whether a use before it was emitted is left to
        clang) */
