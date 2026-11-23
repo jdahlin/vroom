@@ -38,6 +38,9 @@ relative to it); `TODO.md` stays at the top.
   `-f` options of one optimization and the `-fvir-*` developer options.  No
   environment variable selects an optimization; a new one gets a row in
   `CC_OPTIMIZATIONS` (`include/frontend/c/cc.h`) and a line in that document.
+- `PLAN-vir-eh.md` (steps E0-E8): Itanium exceptions in VIR, both lowerings and
+  the direct emitter (`invoke`, landing pads, LSDA), and the AST nodes the C++
+  front end will produce; RTTI and modules need nothing from VIR.
 - `PLAN-vir.md` (steps V0-V7), `SPEC-vir.md` (VIR format, draft) and
   `RESEARCH-vir.md` (LLVM IR's problems): VIR, an SSA IR used at `-O2` and up,
   built by compiling the shared walker a second time against a virtual
