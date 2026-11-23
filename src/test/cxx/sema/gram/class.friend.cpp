@@ -248,3 +248,53 @@ template <class T> int A<T>::h(T) const { C::foo(); return 0; }
 template <> struct A<char> { void f() { C::foo(); } };
 template <class T> void A<T>::g() { C::foo(); }    // error: g is no friend
 }
+
+// [temp.friend]/4, the standard's example 4: deduction from C (A<T *>
+// is in temp4p: clang does not analyse it and turns off access control)
+namespace temp4x {
+template <class T> struct A {
+  struct B {};
+  void f();
+  struct D { void g(); };
+};
+template <> struct A<int> { struct B {}; int f(); struct D { void g(); }; };
+class C {
+  template <class T> friend struct A<T>::B;
+  template <class T> friend void A<T>::f();
+  enum { a = 1 };
+};
+int A<int>::f() { return C::a; }               // error: return type differs
+class X {
+  template <class T> friend void A<T>::D::g();   // error: not C at the end
+};
+template <class T> struct E;
+class G {
+  template <class T, class U> friend struct E<T>::F;   // error: U not deducible
+};
+}
+
+// [temp.friend]/9: constrained friends
+namespace temp9 {
+template <class T> concept Big = sizeof(T) > 1;
+template <class T> struct N {
+  friend int f(N) requires Big<T> { return 1; }
+  friend int f(N) requires (!Big<T>) { return 2; }
+  template <class U> friend int g(U, N) requires Big<T> { return 3; }
+};
+N<int> ni;
+N<char> nc;
+int a = f(ni);
+int b = f(nc);
+static_assert(sizeof(f(ni)) == sizeof(int));
+struct P {
+  friend void h() requires true;             // error: not a definition
+};
+struct Q {
+  friend void k() requires true {}           // error: not templated
+};
+template <class R> concept Any = true;
+template <class S> struct T1 {
+  template <Any U> friend void d();          // a constraint of its own
+};
+T1<int> t1;
+}

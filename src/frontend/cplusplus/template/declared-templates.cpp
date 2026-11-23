@@ -669,7 +669,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
        the first's record */
     entity_index prior = entity_table.find(outer, name);
     owned_array<uint32_t> group;
-    if (prior)
+    /* [temp.friend]/9: a friend template constrained by an enclosing
+       template's parameter redeclares none */
+    if (prior && !distinct_friend_template)
         function_template_overloads(prior, group);
     uint32_t earlier = 0;
     for (uint32_t g : group) {

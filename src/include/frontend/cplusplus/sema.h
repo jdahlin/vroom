@@ -2277,9 +2277,6 @@ class semantic_analysis
         /* [temp.friend]/1: a function template (its entity) all of whose
            specializations are friends */
         entity_index template_entity = 0;
-        /* [temp.friend]/4: a class template (its entity) the class `name`
-           of each of whose specializations is a friend */
-        entity_index member_of_template = 0;
     };
     owned_array<friend_record> friends;
     /* function_template_definition: the function_templates index plus one
@@ -2298,28 +2295,36 @@ class semantic_analysis
                                              SyntaxRef inner);
     analysis_result friend_class_template(entity_index c, TemplateDeclaration n,
                                           SyntaxElement seq);
-    /* [temp.friend]/4: a friend declaration of a member function of a
-       dependent type, resolved per specialization of the class template */
-    struct member_function_friend {
+    /* [temp.friend]/4: a friend declaration of a member of a dependent
+       type, C = A<args>: resolved per specialization of A
+       (template/friend-template.cpp).  C's arguments in terms of the
+       friend's template parameters are template_arguments[first_pattern
+       .. + pattern_count), the parameters
+       template_parameter_entities[first_parameter .. + parameter_count) */
+    struct member_friend {
         entity_index granting = 0, template_entity = 0;
         TemplateDeclaration declaration;
-        SyntaxRef inner;
+        /* the elaborated-type-specifier, or the function's
+           member-declaration */
+        SyntaxElement member;
+        uint32_t first_parameter = 0, parameter_count = 0;
+        uint32_t first_pattern = 0, pattern_count = 0;
     };
-    owned_array<member_function_friend> member_function_friends;
-    analysis_result deducible_member_template(TemplateDeclaration n,
-                                              SyntaxElement id,
-                                              entity_index &template_entity);
-    analysis_result dependent_member_friend_function(entity_index c,
-                                                     TemplateDeclaration n,
-                                                     SyntaxRef inner,
-                                                     SyntaxElement id);
-    void member_function_friends_of(entity_index s);
-    void befriend_member_function(const member_function_friend &f,
-                                  entity_index s);
-    analysis_result dependent_member_friend_class(entity_index c,
-                                                  TemplateDeclaration n,
-                                                  SyntaxElement id,
-                                                  token_index name);
+    owned_array<member_friend> member_friends;
+    analysis_result dependent_member_friend(entity_index c,
+                                            TemplateDeclaration n,
+                                            SyntaxElement declaration,
+                                            SyntaxElement id);
+    void member_friends_of(entity_index s, bool complete);
+    /* function_template_definition declares a new template whatever the
+       namespace has ([temp.friend]/9) */
+    bool distinct_friend_template = false;
+    bool constraint_names_enclosing_parameter(entity_index c,
+                                              TemplateDeclaration n) const;
+    void befriend_member(uint32_t k, entity_index s);
+    bool redeclares_member_class(SyntaxElement elaborated, entity_index s);
+    entity_index redeclared_member_function(SyntaxElement inner,
+                                            entity_index s);
     analysis_result qualified_friend_class_template(entity_index c,
                                                     TemplateDeclaration n,
                                                     SyntaxElement elaborated);
@@ -2343,6 +2348,12 @@ class semantic_analysis
                                       entity_index f, const specified &s,
                                       const declarator_meaning &m, bool defines,
                                       owned_array<SyntaxRef> &bodies);
+    analysis_result constrained_friend_function(entity_index c, SyntaxRef n,
+                                                const declarator_meaning &m,
+                                                qualified_type type,
+                                                const specified &s,
+                                                SyntaxElement requires_clause,
+                                                owned_array<SyntaxRef> &bodies);
     analysis_result local_friend_function(entity_index c, SyntaxRef n,
                                           const declarator_meaning &m,
                                           qualified_type type);

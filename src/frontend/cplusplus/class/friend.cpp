@@ -21,7 +21,8 @@
  *                function: friend_type, friend_elaborated_class.
  *   /4, /5       a friend function, its linkage and the one function of an
  *                overload set it names: friend_function,
- *                friend_member_function, qualified_friend_function.
+ *                friend_member_function (with implicitly_declares for a
+ *                special member not declared yet), qualified_friend_function.
  *   /6, /7       a function defined in a friend declaration:
  *                friend_function, friend_function_body, lexical_parent.
  *   /8           no storage-class-specifier: friend_function.
@@ -30,7 +31,9 @@
  *   /11          a friend declaration in a local class: local_scope_of,
  *                friend_elaborated_class, local_friend_function.
  *
- * [temp.friend] (friend templates) is template/friend-template.cpp;
+ * [temp.friend]/9's non-template constrained friend is
+ * constrained_friend_function; the rest of [temp.friend] (friend templates,
+ * members of dependent types) is template/friend-template.cpp;
  * [class.compare.default] (a defaulted friend operator==) is
  * class/defaulted-comparison.cpp.  A class template's friends are declared
  * per specialization (instantiate_class), each granting only that
@@ -92,16 +95,6 @@ bool semantic_analysis::friend_names(const friend_record &f,
     if (f.befriended)
         return f.befriended == e;
     const entity &x = entity_table[e];
-    if (f.member_of_template) {
-        /* [temp.friend]/4: the class of that name of each specialization of
-           the class template */
-        if (x.kind != entity_kind::class_type || x.name != f.name ||
-            !x.enclosing)
-            return false;
-        uint32_t i = entity_table[x.enclosing].instantiation;
-        return entity_table[x.enclosing].kind == entity_kind::class_type && i &&
-               instantiations[i - 1].template_entity == f.member_of_template;
-    }
     return x.kind == entity_kind::class_type && x.enclosing == f.scope &&
            x.name == f.name;
 }
@@ -460,9 +453,15 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     uint32_t count = n.size() - leading;
     bool defines = n.is(syntax_kind::function_definition);
     entity_index local = local_scope_of(c);
+    /* a requires-clause between the declarator and the body (the
+       trailing one of [dcl.decl]/1) */
+    SyntaxElement requires_clause = {};
+    if (defines && count == 4 && tail[2].is(syntax_kind::requires_clause))
+        requires_clause = tail[2];
     if (defines) {
         auto body = n.function_definition().function_body();
-        if (count != 3 || !tail[0].is(syntax_kind::decl_specifier_seq) ||
+        if ((count != 3 && !requires_clause) ||
+            !tail[0].is(syntax_kind::decl_specifier_seq) ||
             !body.is(syntax_kind::function_body))
             return not_supported(n, "class.friend");
         if (!body.defaulted() && !body.plain())
@@ -473,6 +472,15 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
                               "a function cannot be defined in a friend "
                               "declaration of a local class",
                               "class.friend");
+    } else if (n.is(syntax_kind::member_declaration) && count == 4 &&
+               tail[2].is(syntax_kind::requires_clause)) {
+        /* [temp.friend]/9: "A non-template friend declaration with a
+           requires-clause shall be a definition." (in a class that is not
+           templated, [dcl.decl]/4 forbids the requires-clause too) */
+        return ill_formed(tail[2],
+                          "a non-template friend declaration with a "
+                          "requires-clause shall be a definition",
+                          "temp.friend");
     } else if (!n.is(syntax_kind::member_declaration) || count != 3 ||
                !tail[2].is(preprocessing_op_or_punc::SEMICOLON)) {
         return not_supported(n, "class.friend");
@@ -562,11 +570,14 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         if (parameter.default_argument)
             return not_supported(n, "dcl.fct.default");
     uint32_t name = tokens.identifier(m.id);
-    if (defines && explicit_body(tail[2], standard_keyword::default_) &&
+    if (defines && explicit_body(tail[count - 1], standard_keyword::default_) &&
         !defaulted_equality_declared(c, name, type))
         return not_supported(n, "class.compare.default");
     if (local)
         return local_friend_function(c, n, m, type);
+    if (requires_clause)
+        return constrained_friend_function(c, n, m, type, s, requires_clause,
+                                           bodies);
     entity_index space = enclosing_namespace(c);
     if (entity_table[space].unknown_names ||
         entity_table.bound_by_using(space, name))
@@ -617,6 +628,67 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         block_declared.append(befriended);
     }
     return befriend_function(c, n, befriended, s, m, defines, bodies);
+}
+
+/*
+ * A friend function definition with a requires-clause, friend R f(P)
+ * requires E { ... }:
+ *
+ *   [dcl.decl]/4: "The optional requires-clause in an init-declarator or
+ *   member-declarator shall be present only if the declarator declares a
+ *   templated function": c is a templated entity, a class template's
+ *   specialization or a class in one ([temp.pre]/8).
+ *   [temp.friend]/9: "A non-template friend declaration with a
+ *   requires-clause shall be a definition (friend_function checks a
+ *   declaration) ... Such a constrained friend function ... declaration
+ *   does not declare the same function ... as a declaration in any other
+ *   scope": each specialization of the enclosing template declares a
+ *   function of its own, never a redeclaration of a namespace's, found by
+ *   argument-dependent lookup through c ([basic.lookup.argdep]/4.3).
+ *   [over.match.viable]/3: one whose constraints are not satisfied is not
+ *   viable: E is checked with c's template arguments (as a member
+ *   function's, class-specifier.cpp), the function marked
+ *   constraint_unsatisfied, and its body not analysed ([temp.inst]/11:
+ *   not instantiated unless used, which it cannot be).
+ */
+analysis_result semantic_analysis::constrained_friend_function(
+    entity_index c, SyntaxRef n, const declarator_meaning &m,
+    qualified_type type, const specified &s, SyntaxElement requires_clause,
+    owned_array<SyntaxRef> &bodies)
+{
+    bool templated = false;
+    for (entity_index k = c; !is_namespace(k); k = entity_table[k].enclosing)
+        if (entity_table[k].instantiation)
+            templated = true;
+    if (!templated)
+        return ill_formed(requires_clause,
+                          "a trailing requires-clause is present only if the "
+                          "declarator declares a templated function",
+                          "dcl.decl");
+    if (requires_clause.size() != 2)
+        return not_supported(n, "temp.constr");
+    bool satisfied = true;
+    VTRY(r, constraint_satisfied(requires_clause[1], current_scope,
+                                 lookup_horizon, satisfied));
+    entity_index space = enclosing_namespace(c);
+    entity_index f = entity_table.make(entity_kind::function,
+                                       tokens.identifier(m.id), space);
+    entity &made = entity_table[f];
+    made.type = type;
+    made.implemented = m.implemented;
+    made.operator_function = m.operator_function;
+    made.linkage_of_name = linkage::external;
+    if (within_unnamed_namespace(space))
+        made.linkage_of_name = linkage::internal;
+    made.constraint_unsatisfied = !satisfied;
+    block_declared.append(f);
+    if (!satisfied) {
+        /* declared, not defined: its body is not instantiated */
+        entity_table.add_declaration(f, n);
+        befriend(c, f);
+        return analysis_result::well_formed;
+    }
+    return befriend_function(c, n, f, s, m, true, bodies);
 }
 
 /*

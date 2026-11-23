@@ -520,6 +520,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     if (gnu.abi_tag)
         entity_table[c].abi_tag = gnu.abi_tag;
     entity_table[c].defined = true;
+    /* [temp.friend]/4: member classes of a specialization befriended */
+    member_friends_of(c, false);
     entity_table[c].final_ = is_final;
     entity_table[c].union_ = key == standard_keyword::union_;
     entity_table[c].class_key = head_children[0].token();
@@ -638,7 +640,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     }
     /* [temp.friend]/4: the members of a specialization that friend
        declarations of a dependent type's member name */
-    member_function_friends_of(c);
+    member_friends_of(c, true);
     /* [temp.inst]/2: complete class template specializations that named c
        while c was being defined, now that c's layout is complete */
     {
