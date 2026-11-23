@@ -534,6 +534,18 @@ it; none adds a second way to instantiate.
   Counts drop with those runs (unsupported -677, we reject -29).
 - Decision (2026-11-23, from the user): push the branch to the PR after
   each commit lands, not only at a step's end.
+- Decision (2026-11-23, from the user: low-hanging fruit, 2-3k): after 7.5,
+  four cheap batches by the work list's extension groups (4691 declarations
+  in all): (8.1) clang's type traits, ~770 (__has_unique_object_representations
+  312, __is_layout_compatible 113, __is_trivially_relocatable 71,
+  __is_trivially_equality_comparable 69, __is_literal(_type) 95, ...);
+  (8.2) attributes clang takes with little effect, ~600
+  (require_constant_initialization 133, target_version 98,
+  reentrant_capability 91, address_space 81, code_seg, consumable,
+  preferred_type, unavailable, init_priority, cpu_specific); (8.3) builtins,
+  ~300 (__builtin_stdc_* bit operations, __builtin_is_within_lifetime,
+  __builtin_infer_alloc_token); (8.4) split [dcl.attr]'s 456.  enable_if
+  (185, overload resolution) after them.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
