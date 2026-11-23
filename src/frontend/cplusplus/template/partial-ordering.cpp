@@ -223,9 +223,10 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
  * function, the return types of the conversion function templates are
  * used."  Of the templates t1 and t2 (entities), 1 when t1 is more
  * specialized (t2's return type is deduced from t1's and not the other way
- * round), -1 when t2 is, 0 when neither.  The return types are compared as
- * they are: the transformations of /5 to /9 (references, cv) are not
- * applied.
+ * round), -1 when t2 is, 0 when neither.  The return types are transformed
+ * as call ordering's parameter types are: /5 "If P is a reference type, P
+ * is replaced by the type referred to", /7 "Remove any top-level
+ * cv-qualifiers", and /9 for two references identical after that.
  */
 int semantic_analysis::conversion_template_order(entity_index t1,
                                                  entity_index t2)
@@ -234,8 +235,11 @@ int semantic_analysis::conversion_template_order(entity_index t1,
         function_templates[entity_table[t1].instantiation - 1];
     const function_template ft2 =
         function_templates[entity_table[t2].instantiation - 1];
-    qualified_type r1 = type_table[entity_table[t1].type.unqualified()].operand;
-    qualified_type r2 = type_table[entity_table[t2].type.unqualified()].operand;
+    qualified_type o1 = type_table[entity_table[t1].type.unqualified()].operand;
+    qualified_type o2 = type_table[entity_table[t2].type.unqualified()].operand;
+    unsigned cv1 = 0, cv2 = 0;
+    qualified_type r1 = transformed(type_table, o1, cv1);
+    qualified_type r2 = transformed(type_table, o2, cv2);
     owned_array<template_argument> v1, v2;
     owned_array<bool> s1, s2;
     for (uint32_t i = 0; i < ft1.parameter_count; i++) {
@@ -248,6 +252,29 @@ int semantic_analysis::conversion_template_order(entity_index t1,
     }
     bool two_from_one = deduce_type(r2, r1, v2, s2, true);
     bool one_from_two = deduce_type(r1, r2, v1, s1, true);
+    if (two_from_one && one_from_two && is_reference(type_table, o1) &&
+        is_reference(type_table, o2)) {
+        /* /9: "if the type from the argument template was an lvalue
+           reference and the type from the parameter template was not, the
+           parameter type is not considered to be at least as specialized as
+           the argument type; otherwise, if the type from the argument
+           template is more cv-qualified than the type from the parameter
+           template ..., the parameter type is not considered to be at least
+           as specialized as the argument type" */
+        bool l1 =
+            type_table[o1.unqualified()].kind == type_kind::lvalue_reference;
+        bool l2 =
+            type_table[o2.unqualified()].kind == type_kind::lvalue_reference;
+        if (l1 != l2) {
+            /* the lvalue reference is the more specialized */
+            two_from_one = l1;
+            one_from_two = l2;
+        } else if (more_cv(cv1, cv2) || more_cv(cv2, cv1)) {
+            /* the more cv-qualified is the more specialized */
+            two_from_one = more_cv(cv1, cv2);
+            one_from_two = more_cv(cv2, cv1);
+        }
+    }
     if (two_from_one && !one_from_two)
         return 1;
     if (one_from_two && !two_from_one)

@@ -345,9 +345,19 @@ bool semantic_analysis::deduce_conversion_templates(
     const owned_array<entity_index> &conv_templates, qualified_type to,
     owned_array<entity_index> &candidates)
 {
-    /* [temp.deduct.conv]/1: deduce template arguments for conversion function
-       templates from the destination type 'to' */
+    /* [temp.deduct.conv]/1: "Template argument deduction is done by
+       comparing the return type of the conversion function template (call
+       it P) with the type that is required as the result of the conversion
+       (call it A)"; /4: "If A is a cv-qualified type, the top-level
+       cv-qualifiers of A's type are ignored for type deduction.  If A is a
+       reference type, the type referred to by A is used for type
+       deduction." */
+    bool a_reference =
+        type_table[to.unqualified()].kind == type_kind::lvalue_reference ||
+        type_table[to.unqualified()].kind == type_kind::rvalue_reference;
     qualified_type dest = qualified_type::make(to.unqualified(), cv_none);
+    if (a_reference)
+        dest = type_table[to.unqualified()].operand;
     for (entity_index held : conv_templates) {
         owned_array<uint32_t> group;
         function_template_overloads(held, group);
@@ -355,6 +365,17 @@ bool semantic_analysis::deduce_conversion_templates(
             const function_template ft = function_templates[g - 1];
             qualified_type ret =
                 type_table[entity_table[ft.entity].type.unqualified()].operand;
+            /* /2: "If P is a reference type, the type referred to by P is
+               used in place of P"; /3: "If A is not a reference type: ...
+               If P is a cv-qualified type, the top-level cv-qualifiers of
+               P's type are ignored for type deduction" (an array or a
+               function, its other bullets, is no return type) */
+            const struct type &rk = type_table[ret.unqualified()];
+            if (rk.kind == type_kind::lvalue_reference ||
+                rk.kind == type_kind::rvalue_reference)
+                ret = rk.operand;
+            if (!a_reference)
+                ret = qualified_type::make(ret.unqualified(), cv_none);
             owned_array<template_argument> values;
             owned_array<bool> set;
             for (uint32_t i = 0; i < ft.parameter_count; i++) {
