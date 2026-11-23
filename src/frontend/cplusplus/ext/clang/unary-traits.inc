@@ -53,3 +53,4 @@ UNARY_TRAIT(is_cpp_trivially_relocatable,
             "__builtin_is_cpp_trivially_relocatable")
 UNARY_TRAIT(is_trivially_equality_comparable,
             "__is_trivially_equality_comparable")
+UNARY_TRAIT(is_complete_type, "__is_complete_type")

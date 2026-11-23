@@ -331,6 +331,26 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     case unary_trait_kind::is_arithmetic:
         answer = is_arithmetic(t);
         break;
+    /* [ext:clang_type_traits] __is_complete_type: not void, an array of
+       unknown bound or an incomplete class (or array of one); an
+       enumeration is not followed */
+    case unary_trait_kind::is_complete_type: {
+        qualified_type e = t;
+        while (type_table[e.unqualified()].kind == type_kind::array) {
+            if (!type_table[e.unqualified()].bound_known)
+                break;
+            e = type_table[e.unqualified()].operand;
+        }
+        const struct type &ek = type_table[e.unqualified()];
+        if (ek.kind == type_kind::enumeration)
+            return false;
+        answer = !is_void && ek.kind != type_kind::array;
+        if (ek.kind == type_kind::class_type) {
+            require_complete(ek.entity);
+            answer = entity_table[ek.entity].size != 0;
+        }
+        break;
+    }
     /* [ext:gnu_zero_length_array]: clang answers false for T[0], which is
        no array of [dcl.array]/1 (its bound is greater than zero); a bound
        that is a template-parameter's (entity) is not 0 */
