@@ -493,40 +493,24 @@ semantic_analysis::variable_length_declaration(SyntaxRef declaration,
 /*
  * [dcl.meaning]/1: "A declarator contains exactly one declarator-id; it
  * names the entity that is declared."  The declarator-id of d when it is an
- * identifier, without analysing the rest of d; 0 for an operator name, a
- * qualified-id or none.  The first identifier outside the
- * parameters-and-qualifiers, ptr-operators, attributes and initializer is
- * the declarator-id: a noptr-declarator's head comes before its suffixes,
- * so an identifier in an array bound comes after it.
+ * identifier, without analysing the rest of d: a template-id's template
+ * name, an operator's first token (operator), 0 for a qualified-id, a
+ * destructor's ~ class-name or none (DeclaratorParts).
  */
 token_index semantic_analysis::declarator_id(SyntaxElement d) const
 {
-    if (d.is_identifier())
-        return d.token();
-    if (d.is_token())
-        return 0;
-    if (d.is(syntax_kind::simple_template_id)) {
-        if (d.size() && d[0].is_identifier())
-            return d[0].token();
+    SyntaxElement id = DeclaratorParts(d).id;
+    if (id.is_identifier())
+        return id.token();
+    if (id.is(syntax_kind::simple_template_id)) {
+        if (id[0].is_identifier())
+            return id[0].token();
         return 0;
     }
-    if (d.is(syntax_kind::operator_function_id,
-             syntax_kind::literal_operator_id,
-             syntax_kind::conversion_function_id))
-        return d.first_token();
-    if (!d.is(syntax_kind::init_declarator, syntax_kind::declarator,
-              syntax_kind::ptr_declarator, syntax_kind::noptr_declarator))
-        return 0;
-    for (auto c : d.elements()) {
-        if (c.is_token()) {
-            if (c.is_identifier())
-                return c.token();
-            continue;
-        }
-        token_index id = declarator_id(c);
-        if (id || c.qualified_id() || c.destructor_type_id())
-            return id;
-    }
+    if (id.is(syntax_kind::operator_function_id,
+              syntax_kind::literal_operator_id,
+              syntax_kind::conversion_function_id))
+        return id.first_token();
     return 0;
 }
 
@@ -638,9 +622,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                     if (name.is_identifier()) {
                         ids.append(name.token());
                         class_template = true;
-                    } else if (name.is(syntax_kind::simple_template_id) &&
-                               name.size() && name[0].is_identifier()) {
-                        ids.append(name[0].token());
+                    } else if (SyntaxElement t =
+                                   name.simple_template_id().template_name()) {
+                        ids.append(t.token());
                         class_template = true;
                     }
                     continue;
@@ -651,9 +635,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                 if (name.is_identifier()) {
                     ids.append(name.token());
                     class_template = true;
-                } else if (name.is(syntax_kind::simple_template_id) &&
-                           name.size() && name[0].is_identifier()) {
-                    ids.append(name[0].token());
+                } else if (SyntaxElement t =
+                               name.simple_template_id().template_name()) {
+                    ids.append(t.token());
                     class_template = true;
                 }
             }
@@ -1132,8 +1116,8 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         has_head = true;
         head = id;
         i = 1;
-    } else if (declarator_template_id && id.simple_template_id() &&
-               id.size() >= 3 && id[0].is_identifier()) {
+    } else if (declarator_template_id &&
+               id.simple_template_id().template_name()) {
         /* [temp.expl.spec]/1, [temp.explicit]/3: a specialization's
            template-id (its template-name the declarator-id's name) */
         m.template_id = id;
@@ -1168,8 +1152,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         bool operator_name = !m.destructor && (name.operator_function_id() ||
                                                name.conversion_function_id());
         bool template_name = !m.destructor && declarator_template_id &&
-                             name.is(syntax_kind::simple_template_id) &&
-                             name.size() >= 3 && name[0].is_identifier();
+                             name.simple_template_id().template_name();
         if (q.size() != 2 || !q.nested_name_specifier() ||
             (!operator_name && !template_name && !name.is_identifier()))
             return not_supported(q, "dcl.meaning");

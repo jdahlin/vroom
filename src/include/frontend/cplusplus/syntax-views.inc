@@ -316,6 +316,18 @@ struct UsingDirective;
 struct UsingEnumDeclaration;
 struct VirtSpecifierSeq;
 struct YieldExpression;
+struct DestructorTypeIdDestructor;
+struct ElaboratedClassSpecifierNamed;
+struct ElaboratedClassSpecifierTemplated;
+struct MemInitializerBraced;
+struct MemInitializerParenthesized;
+struct PostfixOperationCall;
+struct PostfixOperationIncrement;
+struct PostfixOperationMemberAccess;
+struct PostfixOperationNamedCast;
+struct PostfixOperationSubscript;
+struct PostfixOperationTypeConversion;
+struct PostfixOperationTypeidOperation;
 /* a member of a sum, or a sum within it, converts to the sum */
 template <> inline constexpr bool syntax_converts<NoptrAbstractDeclarator, AbstractDeclarator> = true;
 template <> inline constexpr bool syntax_converts<PointerAbstractDeclarator, AbstractDeclarator> = true;
@@ -5385,6 +5397,8 @@ struct DestructorTypeId : SyntaxExtra<DestructorTypeId> {
     DecltypeSpecifier decltype_specifier() const;
     SimpleTemplateId type_name() const;
     SyntaxElement identifier() const;
+    /* ~ type-name; ~ decltype-specifier */
+    DestructorTypeIdDestructor destructor() const;
 };
 
 /* the dynamic-exception-specification node */
@@ -5429,6 +5443,10 @@ struct ElaboratedClassSpecifier : SyntaxExtra<ElaboratedClassSpecifier> {
     NestedNameSpecifier nested_name_specifier() const;
     SimpleTemplateId simple_template_id() const;
     SyntaxElement identifier() const;
+    /* class-key attribute-specifier-seq_opt nested-name-specifier_opt identifier */
+    ElaboratedClassSpecifierNamed named() const;
+    /* class-key nested-name-specifier template_opt simple-template-id; class-key simple-template-id */
+    ElaboratedClassSpecifierTemplated templated() const;
 };
 
 /* the elaborated-enum-specifier node */
@@ -7587,6 +7605,10 @@ struct MemInitializer : SyntaxExtra<MemInitializer> {
         narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
     }
     static bool accepts(syntax_kind k);
+    /* mem-initializer-id braced-init-list */
+    MemInitializerBraced braced() const;
+    /* mem-initializer-id ( expression-list_opt ) */
+    MemInitializerParenthesized parenthesized() const;
 };
 
 /* mem-initializer-id: one of class_or_decltype, decltype_specifier, simple_template_id */
@@ -8982,6 +9004,20 @@ struct PostfixOperation : SyntaxExtra<PostfixOperation> {
     static bool accepts(syntax_kind k);
     TypeId type_id() const;
     TypenameSpecifier typename_specifier() const;
+    /* postfix-expression ( expression-list_opt ) */
+    PostfixOperationCall call() const;
+    /* postfix-expression ++; postfix-expression -- */
+    PostfixOperationIncrement increment() const;
+    /* postfix-expression . template_opt id-expression; postfix-expression -> template_opt id-expression */
+    PostfixOperationMemberAccess member_access() const;
+    /* dynamic_cast < type-id > ( expression ); static_cast < type-id > ( expression ); reinterpret_cast < type-id > ( expression ); const_cast < type-id > ( expression ) */
+    PostfixOperationNamedCast named_cast() const;
+    /* postfix-expression [ expr-or-braced-init-list ]; postfix-expression [ expression-list_opt ] */
+    PostfixOperationSubscript subscript() const;
+    /* simple-type-specifier ( expression-list_opt ); typename-specifier ( expression-list_opt ); simple-type-specifier braced-init-list; typename-specifier braced-init-list */
+    PostfixOperationTypeConversion type_conversion() const;
+    /* typeid ( type-id ); typeid ( expression ) */
+    PostfixOperationTypeidOperation typeid_operation() const;
 };
 
 /* primary-expression: one of clang_bit_cast_expression, clang_convertvector_expression, clang_source_location_expression, clang_type_trait_expression, conversion_function_id, fold_expression, gnu_offsetof_expression, gnu_va_arg_expression, lambda_expression, literal_operator_id, operator_function_id, primary_expression, qualified_id, requires_expression, simple_template_id, template_id, unqualified_id */
@@ -14933,6 +14969,482 @@ inline SyntaxElement YieldExpression::identifier() const
     return token_of_kind(token_kind::identifier);
 }
 
+
+/* DestructorTypeId::destructor(): ~ type-name; ~ decltype-specifier */
+struct DestructorTypeIdDestructor : SyntaxAlternative<1> {
+    DestructorTypeIdDestructor() = default;
+    explicit DestructorTypeIdDestructor(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::TILDE), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, [](syntax_kind k) { return SimpleTemplateId::accepts(k) || k == syntax_kind::placeholder_type_specifier; }},
+        };
+        static const syntax_pattern_item a1[] = {
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::TILDE), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, false, 0, 0, [](syntax_kind k) { return DecltypeSpecifier::accepts(k) || k == syntax_kind::placeholder_type_specifier; }},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0, a1};
+        static const uint32_t counts[] = {2, 2};
+        static const int8_t anchors[] = {0, 0};
+        match(n, alternatives, counts, anchors, 2);
+    }
+    SyntaxElement type() const
+    {
+        return slots[0];
+    }
+};
+
+inline DestructorTypeIdDestructor DestructorTypeId::destructor() const
+{
+    return DestructorTypeIdDestructor(*this);
+}
+
+/* ElaboratedClassSpecifier::named(): class-key attribute-specifier-seq_opt nested-name-specifier_opt identifier */
+struct ElaboratedClassSpecifierNamed : SyntaxAlternative<4> {
+    ElaboratedClassSpecifierNamed() = default;
+    explicit ElaboratedClassSpecifierNamed(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, nullptr},
+            {syntax_pattern_item::nonterminal, true, false, 0, 1, &AttributeSpecifierSeq::accepts},
+            {syntax_pattern_item::nonterminal, true, false, 0, 2, &NestedNameSpecifier::accepts},
+            {syntax_pattern_item::nonterminal, false, true, 0, 3, nullptr},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0};
+        static const uint32_t counts[] = {4};
+        static const int8_t anchors[] = {-1};
+        match(n, alternatives, counts, anchors, 1);
+    }
+    SyntaxElement class_key() const
+    {
+        return slots[0];
+    }
+    SyntaxElement attribute_specifier_seq() const
+    {
+        return slots[1];
+    }
+    SyntaxElement nested_name_specifier() const
+    {
+        return slots[2];
+    }
+    SyntaxElement name() const
+    {
+        return slots[3];
+    }
+};
+
+inline ElaboratedClassSpecifierNamed ElaboratedClassSpecifier::named() const
+{
+    return ElaboratedClassSpecifierNamed(*this);
+}
+
+/* ElaboratedClassSpecifier::templated(): class-key nested-name-specifier template_opt simple-template-id; class-key simple-template-id */
+struct ElaboratedClassSpecifierTemplated : SyntaxAlternative<4> {
+    ElaboratedClassSpecifierTemplated() = default;
+    explicit ElaboratedClassSpecifierTemplated(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, nullptr},
+            {syntax_pattern_item::nonterminal, false, false, 0, 1, &NestedNameSpecifier::accepts},
+            {syntax_pattern_item::keyword, true, false, static_cast<uint8_t>(standard_keyword::template_), 2, nullptr},
+            {syntax_pattern_item::nonterminal, false, false, 0, 3, &SimpleTemplateId::accepts},
+        };
+        static const syntax_pattern_item a1[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, nullptr},
+            {syntax_pattern_item::nonterminal, false, false, 0, 3, &SimpleTemplateId::accepts},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0, a1};
+        static const uint32_t counts[] = {4, 2};
+        static const int8_t anchors[] = {-1, -1};
+        match(n, alternatives, counts, anchors, 2);
+    }
+    SyntaxElement class_key() const
+    {
+        return slots[0];
+    }
+    SyntaxElement nested_name_specifier() const
+    {
+        return slots[1];
+    }
+    SyntaxElement template_keyword() const
+    {
+        return slots[2];
+    }
+    SyntaxElement simple_template_id() const
+    {
+        return slots[3];
+    }
+};
+
+inline ElaboratedClassSpecifierTemplated ElaboratedClassSpecifier::templated() const
+{
+    return ElaboratedClassSpecifierTemplated(*this);
+}
+
+/* MemInitializer::braced(): mem-initializer-id braced-init-list */
+struct MemInitializerBraced : SyntaxAlternative<2> {
+    MemInitializerBraced() = default;
+    explicit MemInitializerBraced(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, [](syntax_kind k) { return MemInitializerId::accepts(k) || k == syntax_kind::placeholder_type_specifier; }},
+            {syntax_pattern_item::nonterminal, false, false, 0, 1, [](syntax_kind k) { return BracedInitList::accepts(k) || k == syntax_kind::placeholder_type_specifier; }},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0};
+        static const uint32_t counts[] = {2};
+        static const int8_t anchors[] = {-1};
+        match(n, alternatives, counts, anchors, 1);
+    }
+    SyntaxElement id() const
+    {
+        return slots[0];
+    }
+    SyntaxElement list() const
+    {
+        return slots[1];
+    }
+};
+
+inline MemInitializerBraced MemInitializer::braced() const
+{
+    return MemInitializerBraced(*this);
+}
+
+/* MemInitializer::parenthesized(): mem-initializer-id ( expression-list_opt ) */
+struct MemInitializerParenthesized : SyntaxAlternative<2> {
+    MemInitializerParenthesized() = default;
+    explicit MemInitializerParenthesized(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, [](syntax_kind k) { return MemInitializerId::accepts(k) || k == syntax_kind::placeholder_type_specifier; }},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, true, true, 0, 1, [](syntax_kind k) { return ExpressionList::accepts(k) || k == syntax_kind::placeholder_type_specifier; }},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0};
+        static const uint32_t counts[] = {4};
+        static const int8_t anchors[] = {1};
+        match(n, alternatives, counts, anchors, 1);
+    }
+    SyntaxElement id() const
+    {
+        return slots[0];
+    }
+    SyntaxElement arguments() const
+    {
+        return slots[1];
+    }
+};
+
+inline MemInitializerParenthesized MemInitializer::parenthesized() const
+{
+    return MemInitializerParenthesized(*this);
+}
+
+/* PostfixOperation::call(): postfix-expression ( expression-list_opt ) */
+struct PostfixOperationCall : SyntaxAlternative<3> {
+    PostfixOperationCall() = default;
+    explicit PostfixOperationCall(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &PostfixExpression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), 1, nullptr},
+            {syntax_pattern_item::nonterminal, true, true, 0, 2, &ExpressionList::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0};
+        static const uint32_t counts[] = {4};
+        static const int8_t anchors[] = {1};
+        match(n, alternatives, counts, anchors, 1);
+    }
+    SyntaxElement callee() const
+    {
+        return slots[0];
+    }
+    SyntaxElement parenthesis() const
+    {
+        return slots[1];
+    }
+    SyntaxElement arguments() const
+    {
+        return slots[2];
+    }
+};
+
+inline PostfixOperationCall PostfixOperation::call() const
+{
+    return PostfixOperationCall(*this);
+}
+
+/* PostfixOperation::increment(): postfix-expression ++; postfix-expression -- */
+struct PostfixOperationIncrement : SyntaxAlternative<2> {
+    PostfixOperationIncrement() = default;
+    explicit PostfixOperationIncrement(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &PostfixExpression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::PLUS_PLUS), 1, nullptr},
+        };
+        static const syntax_pattern_item a1[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &PostfixExpression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::MINUS_MINUS), 1, nullptr},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0, a1};
+        static const uint32_t counts[] = {2, 2};
+        static const int8_t anchors[] = {1, 1};
+        match(n, alternatives, counts, anchors, 2);
+    }
+    SyntaxElement operand() const
+    {
+        return slots[0];
+    }
+    SyntaxElement op() const
+    {
+        return slots[1];
+    }
+};
+
+inline PostfixOperationIncrement PostfixOperation::increment() const
+{
+    return PostfixOperationIncrement(*this);
+}
+
+/* PostfixOperation::member_access(): postfix-expression . template_opt id-expression; postfix-expression -> template_opt id-expression */
+struct PostfixOperationMemberAccess : SyntaxAlternative<4> {
+    PostfixOperationMemberAccess() = default;
+    explicit PostfixOperationMemberAccess(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &PostfixExpression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::DOT), 1, nullptr},
+            {syntax_pattern_item::keyword, true, false, static_cast<uint8_t>(standard_keyword::template_), 2, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 3, &IdExpression::accepts},
+        };
+        static const syntax_pattern_item a1[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &PostfixExpression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::ARROW), 1, nullptr},
+            {syntax_pattern_item::keyword, true, false, static_cast<uint8_t>(standard_keyword::template_), 2, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 3, &IdExpression::accepts},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0, a1};
+        static const uint32_t counts[] = {4, 4};
+        static const int8_t anchors[] = {1, 1};
+        match(n, alternatives, counts, anchors, 2);
+    }
+    SyntaxElement object() const
+    {
+        return slots[0];
+    }
+    SyntaxElement op() const
+    {
+        return slots[1];
+    }
+    SyntaxElement template_keyword() const
+    {
+        return slots[2];
+    }
+    SyntaxElement member() const
+    {
+        return slots[3];
+    }
+};
+
+inline PostfixOperationMemberAccess PostfixOperation::member_access() const
+{
+    return PostfixOperationMemberAccess(*this);
+}
+
+/* PostfixOperation::named_cast(): dynamic_cast < type-id > ( expression ); static_cast < type-id > ( expression ); reinterpret_cast < type-id > ( expression ); const_cast < type-id > ( expression ) */
+struct PostfixOperationNamedCast : SyntaxAlternative<3> {
+    PostfixOperationNamedCast() = default;
+    explicit PostfixOperationNamedCast(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::keyword, false, false, static_cast<uint8_t>(standard_keyword::dynamic_cast_), 0, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LESS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 1, &TypeId::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::GREATER), -1, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 2, &Expression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item a1[] = {
+            {syntax_pattern_item::keyword, false, false, static_cast<uint8_t>(standard_keyword::static_cast_), 0, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LESS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 1, &TypeId::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::GREATER), -1, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 2, &Expression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item a2[] = {
+            {syntax_pattern_item::keyword, false, false, static_cast<uint8_t>(standard_keyword::reinterpret_cast_), 0, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LESS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 1, &TypeId::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::GREATER), -1, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 2, &Expression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item a3[] = {
+            {syntax_pattern_item::keyword, false, false, static_cast<uint8_t>(standard_keyword::const_cast_), 0, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LESS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 1, &TypeId::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::GREATER), -1, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 2, &Expression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0, a1, a2, a3};
+        static const uint32_t counts[] = {7, 7, 7, 7};
+        static const int8_t anchors[] = {0, 0, 0, 0};
+        match(n, alternatives, counts, anchors, 4);
+    }
+    SyntaxElement keyword() const
+    {
+        return slots[0];
+    }
+    SyntaxElement type_id() const
+    {
+        return slots[1];
+    }
+    SyntaxElement operand() const
+    {
+        return slots[2];
+    }
+};
+
+inline PostfixOperationNamedCast PostfixOperation::named_cast() const
+{
+    return PostfixOperationNamedCast(*this);
+}
+
+/* PostfixOperation::subscript(): postfix-expression [ expr-or-braced-init-list ]; postfix-expression [ expression-list_opt ] */
+struct PostfixOperationSubscript : SyntaxAlternative<3> {
+    PostfixOperationSubscript() = default;
+    explicit PostfixOperationSubscript(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &PostfixExpression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_BRACKET), 1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 2, &ExprOrBracedInitList::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_BRACKET), -1, nullptr},
+        };
+        static const syntax_pattern_item a1[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &PostfixExpression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_BRACKET), 1, nullptr},
+            {syntax_pattern_item::nonterminal, true, true, 0, 2, &ExpressionList::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_BRACKET), -1, nullptr},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0, a1};
+        static const uint32_t counts[] = {4, 4};
+        static const int8_t anchors[] = {1, 1};
+        match(n, alternatives, counts, anchors, 2);
+    }
+    SyntaxElement operand() const
+    {
+        return slots[0];
+    }
+    SyntaxElement bracket() const
+    {
+        return slots[1];
+    }
+    SyntaxElement index() const
+    {
+        return slots[2];
+    }
+};
+
+inline PostfixOperationSubscript PostfixOperation::subscript() const
+{
+    return PostfixOperationSubscript(*this);
+}
+
+/* PostfixOperation::type_conversion(): simple-type-specifier ( expression-list_opt ); typename-specifier ( expression-list_opt ); simple-type-specifier braced-init-list; typename-specifier braced-init-list */
+struct PostfixOperationTypeConversion : SyntaxAlternative<4> {
+    PostfixOperationTypeConversion() = default;
+    explicit PostfixOperationTypeConversion(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &SimpleTypeSpecifier::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), 1, nullptr},
+            {syntax_pattern_item::nonterminal, true, true, 0, 2, &ExpressionList::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item a1[] = {
+            {syntax_pattern_item::nonterminal, false, false, 0, 0, &TypenameSpecifier::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), 1, nullptr},
+            {syntax_pattern_item::nonterminal, true, true, 0, 2, &ExpressionList::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item a2[] = {
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &SimpleTypeSpecifier::accepts},
+            {syntax_pattern_item::nonterminal, false, false, 0, 3, &BracedInitList::accepts},
+        };
+        static const syntax_pattern_item a3[] = {
+            {syntax_pattern_item::nonterminal, false, false, 0, 0, &TypenameSpecifier::accepts},
+            {syntax_pattern_item::nonterminal, false, false, 0, 3, &BracedInitList::accepts},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0, a1, a2, a3};
+        static const uint32_t counts[] = {4, 4, 2, 2};
+        static const int8_t anchors[] = {1, 1, -1, -1};
+        match(n, alternatives, counts, anchors, 4);
+    }
+    SyntaxElement type() const
+    {
+        return slots[0];
+    }
+    SyntaxElement parenthesis() const
+    {
+        return slots[1];
+    }
+    SyntaxElement arguments() const
+    {
+        return slots[2];
+    }
+    SyntaxElement braced() const
+    {
+        return slots[3];
+    }
+};
+
+inline PostfixOperationTypeConversion PostfixOperation::type_conversion() const
+{
+    return PostfixOperationTypeConversion(*this);
+}
+
+/* PostfixOperation::typeid_operation(): typeid ( type-id ); typeid ( expression ) */
+struct PostfixOperationTypeidOperation : SyntaxAlternative<1> {
+    PostfixOperationTypeidOperation() = default;
+    explicit PostfixOperationTypeidOperation(SyntaxRef n)
+    {
+        static const syntax_pattern_item a0[] = {
+            {syntax_pattern_item::keyword, false, false, static_cast<uint8_t>(standard_keyword::typeid_), -1, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &TypeId::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item a1[] = {
+            {syntax_pattern_item::keyword, false, false, static_cast<uint8_t>(standard_keyword::typeid_), -1, nullptr},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::LEFT_PARENTHESIS), -1, nullptr},
+            {syntax_pattern_item::nonterminal, false, true, 0, 0, &Expression::accepts},
+            {syntax_pattern_item::punctuator, false, false, static_cast<uint8_t>(preprocessing_op_or_punc::RIGHT_PARENTHESIS), -1, nullptr},
+        };
+        static const syntax_pattern_item *const alternatives[] = {a0, a1};
+        static const uint32_t counts[] = {4, 4};
+        static const int8_t anchors[] = {0, 0};
+        match(n, alternatives, counts, anchors, 2);
+    }
+    SyntaxElement operand() const
+    {
+        return slots[0];
+    }
+};
+
+inline PostfixOperationTypeidOperation PostfixOperation::typeid_operation() const
+{
+    return PostfixOperationTypeidOperation(*this);
+}
 /* the view of s's kind if that kind is a member of S, else s itself */
 template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)
 {
@@ -17644,4 +18156,21 @@ static const uint64_t syntax_allowed_children[][4] = {
 };
 /* the list kinds: a child of the same kind is a list not flattened */
 static const uint64_t syntax_list_kinds[4] = {0x10000400002u, 0x1000004008040004u, 0x100000044000000u, 0x0u};
+/* a node of a kind with alternative views: whether one of them reads it
+   (true for the other kinds) */
+static bool syntax_alternative_matches(SyntaxRef n)
+{
+    switch (n.kind()) {
+    case syntax_kind::unqualified_id:
+        return static_cast<bool>(DestructorTypeIdDestructor(n));
+    case syntax_kind::elaborated_type_specifier:
+        return static_cast<bool>(ElaboratedClassSpecifierNamed(n)) || static_cast<bool>(ElaboratedClassSpecifierTemplated(n));
+    case syntax_kind::mem_initializer:
+        return static_cast<bool>(MemInitializerBraced(n)) || static_cast<bool>(MemInitializerParenthesized(n));
+    case syntax_kind::postfix_expression:
+        return static_cast<bool>(PostfixOperationCall(n)) || static_cast<bool>(PostfixOperationIncrement(n)) || static_cast<bool>(PostfixOperationMemberAccess(n)) || static_cast<bool>(PostfixOperationNamedCast(n)) || static_cast<bool>(PostfixOperationSubscript(n)) || static_cast<bool>(PostfixOperationTypeConversion(n)) || static_cast<bool>(PostfixOperationTypeidOperation(n));
+    default:
+        return true;
+    }
+}
 #endif

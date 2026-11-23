@@ -1104,9 +1104,10 @@ semantic_analysis::template_of_form(entity_index e,
 bool semantic_analysis::template_id_name(SyntaxRef id, lookup_result &x,
                                          entity_index &named) const
 {
-    if (id.size() < 3 || !id[0].is_identifier())
+    SyntaxElement template_name = id.simple_template_id().template_name();
+    if (!template_name)
         return false;
-    x = lookup_unqualified(tokens.identifier(id[0].token()),
+    x = lookup_unqualified(tokens.identifier(template_name.token()),
                            lookup_filter::any);
     named = x.entity;
     if (!named)
@@ -1204,7 +1205,11 @@ analysis_result semantic_analysis::variable_partial_specialization(
     lookup_result x;
     entity_index named = 0;
     if (qualifier) {
-        x = lookup_in_namespace(qualifier, tokens.identifier(id[0].token()),
+        SyntaxElement template_name = id.simple_template_id().template_name();
+        if (!template_name)
+            return not_supported(n, "temp.class.spec");
+        x = lookup_in_namespace(qualifier,
+                                tokens.identifier(template_name.token()),
                                 lookup_filter::any);
         named = x.entity;
         if (!named)
@@ -2513,9 +2518,10 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
                                                  bool qualified,
                                                  type_index &type, uint32_t *cv)
 {
-    if (id.size() < 3 || !id[0].is_identifier())
+    SyntaxElement template_name = id.simple_template_id().template_name();
+    if (!template_name)
         return not_supported(id, "temp.names");
-    uint32_t name = tokens.identifier(id[0].token());
+    uint32_t name = tokens.identifier(template_name.token());
     lookup_result x;
     if (qualified)
         x = lookup_qualified(scope, name, lookup_filter::any);
@@ -2525,7 +2531,7 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
     if (!named)
         named = x.unknown_entity;
     if (!named && qualified && !x.unknown) {
-        VTRY(m, missing_member(id[0].token(), scope));
+        VTRY(m, missing_member(template_name.token(), scope));
     }
     if (!named && !qualified && is_builtin_common_type(name))
         return builtin_common_type(id, type);
@@ -3021,42 +3027,29 @@ SyntaxRef semantic_analysis::out_of_class_nested(SyntaxRef definition,
     if ((parts.size() != 3 && parts.size() != 2) || parts[at].is_token() ||
         (parts.size() == 3 && !parts[0].is(syntax_kind::decl_specifier_seq)))
         return 0;
-    auto x = parts[at];
-    /* (a trailing-return-type follows the declarator it belongs to) */
-    if (x.is(syntax_kind::declarator) && x.size() == 2 &&
-        x[1].is(syntax_kind::trailing_return_type))
-        x = x[0];
-    while (x.is(syntax_kind::ptr_declarator)) {
-        auto pd = x;
-        if (pd.size() != 2 || x[1].is_token())
-            return 0;
-        x = x[1];
-    }
-    if (!x.is(syntax_kind::noptr_declarator) || !x.size() ||
-        !x[0].is(syntax_kind::qualified_id))
+    DeclaratorParts d(parts[at]);
+    SyntaxElement nested = d.qualifier();
+    if (!d.noptr || !nested)
         return 0;
-    auto q = x[0];
-    if (q.size() != 2 || !q[0].is(syntax_kind::nested_name_specifier))
-        return 0;
+    SyntaxElement member = d.unqualified();
     /* (an operator function's name is made when the declarator is
        analysed: [over.oper]) */
-    bool operator_name = static_cast<bool>(q[1].operator_function_id());
-    bool conversion_name = q[1].is(syntax_kind::conversion_function_id);
+    bool operator_name = static_cast<bool>(member.operator_function_id());
+    bool conversion_name = member.is(syntax_kind::conversion_function_id);
     /* ([class.dtor]/1: ~ and the class's name) */
-    bool destructor = q[1].is(syntax_kind::unqualified_id) &&
-                      q[1].size() == 2 && q[1][1].is_identifier();
+    bool destructor = member.is(syntax_kind::unqualified_id) &&
+                      member.size() == 2 && member[1].is_identifier();
     if (!operator_name && !conversion_name && !destructor &&
-        !q[1].is_identifier())
+        !member.is_identifier())
         return 0;
-    auto nested = q[0];
     if (name && destructor)
-        *name = q[1][1].token();
+        *name = member[1].token();
     else if (name && operator_name)
-        *name = q[1].operator_function_id().operator_keyword().token();
+        *name = member.operator_function_id().operator_keyword().token();
     else if (name && conversion_name)
-        *name = q[1][0].token();
+        *name = member[0].token();
     else if (name)
-        *name = q[1].token();
+        *name = member.token();
     return nested.index();
 }
 
