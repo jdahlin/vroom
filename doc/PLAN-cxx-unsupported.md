@@ -140,6 +140,46 @@ There are about 200 keys in total (184 subclauses, several sites each).
 At an average of 200 declarations per step, that is about 200 steps;
 after step 0 the work list gives a better estimate, recorded here.
 
+## Template design note (before the first template step)
+
+The design exists: PLAN-cxx-sema.md 3.5 (an instantiation is a recorded
+unit: its key, the template and arguments, and everything it read from
+outside) and S6b's status (a class template's specialization is
+instantiated by analysing its class-specifier again with the parameters
+bound to the arguments and the injected-class-name bound to the
+specialization, `instantiate_class` in sema/instantiation.cpp; function
+templates the same way per deduced argument list; an instantiation's
+errors make the use unsupported, not the template).  Template steps follow
+it; none adds a second way to instantiate.
+
+- One mechanism.  New template features extend `instantiate_class`, the
+  function template path and the substitution of bound parameters; a step
+  that wants a separate copy of the class-specifier analysis stops and
+  comes back to the orchestrator.
+- [temp.inst]/2: a class template specialization is instantiated only
+  where a complete type is needed (today a template-id instantiates); the
+  step that changes this goes before the steps that add more instantiable
+  forms, since it decides which errors clang would report at all.
+- Order, by the work list and by dependency: (1) template-ids in
+  expressions and template-names that name what they should ([temp.names],
+  postfix-expression.cpp:1490, declared-templates.cpp:854); (2) what class
+  templates still lack: default template arguments, non-type parameters,
+  members ([temp.class], [temp.param], [temp.mem], [temp.mem.func]);
+  (3) explicit specializations and partial specializations
+  ([temp.expl.spec], [temp.class.spec], the matching and partial ordering of
+  [temp.spec.partial.match]/[temp.func.order]); (4) explicit instantiations
+  ([temp.explicit]); (5) member templates, friends of templates, variable
+  templates.
+- Dependent constructs in a template's own definition are checked only as
+  far as [temp.res] requires (no instantiation of the definition); what
+  needs an instantiation is decided at instantiation.
+- Each specialization is keyed (template, arguments) once: an explicit or
+  partial specialization is found by that key before the primary is
+  instantiated ([temp.spec.partial.match], [temp.expl.spec]/7).
+- Lowering: a specialization's symbol and its vague linkage as the
+  existing mangling does; a step changes lowering only where cxx-run or the
+  lowering claims need it.
+
 ## Status
 
 - 2026-11-23: plan written; baseline above (on a stale main; origin/main
