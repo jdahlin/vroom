@@ -483,6 +483,7 @@ tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:213:3: do_state
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:228:3: do_statement: no substatement
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:245:5: do_statement: no substatement
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:252:5: do_statement: no substatement
+tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:58:5: do_statement: no substatement
 tree CXX/temp/temp.decls/temp.friend/p5.cpp -std=c++11: p5.cpp:180:5: declarations: no expression
 tree CXX/temp/temp.decls/temp.friend/p5.cpp -std=c++14: p5.cpp:180:5: declarations: no expression
 tree CXX/temp/temp.decls/temp.friend/p5.cpp -std=c++17: p5.cpp:180:5: declarations: no expression
@@ -1891,8 +1892,8 @@ verdict SemaCXX/builtin-object-size-cxx14.cpp -std=c++14: ill-formed for us, acc
 verdict SemaCXX/builtin-object-size-cxx14.cpp -std=c++2a: ill-formed for us, accepted by clang: line 110 (1 declarations)
 verdict SemaCXX/builtin-object-size-cxx14.cpp -std=c++2b: ill-formed for us, accepted by clang: line 110 (1 declarations)
 verdict SemaCXX/builtins-elementwise-math.cpp -std=c++17 -pedantic: ill-formed for us, accepted by clang: line 29 (6 declarations)
-verdict SemaCXX/builtins.cpp -std=c++11: ill-formed for us, accepted by clang: line 82 (4 declarations)
-verdict SemaCXX/builtins.cpp -std=c++1z: ill-formed for us, accepted by clang: line 82 (5 declarations)
+verdict SemaCXX/builtins.cpp -std=c++11: ill-formed for us, accepted by clang: line 82 (5 declarations)
+verdict SemaCXX/builtins.cpp -std=c++1z: ill-formed for us, accepted by clang: line 82 (6 declarations)
 verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: ill-formed for us, accepted by clang: line 661 (1 declarations)
 verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: ill-formed for us, accepted by clang: line 661 (1 declarations)
 verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: ill-formed for us, accepted by clang: line 661 (1 declarations)

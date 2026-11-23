@@ -391,6 +391,10 @@ enum gnu_attribute_flag : uint32_t {
     /* "cleanup (cleanup_function)": a local variable's function, called
        with its address when it goes out of scope (gnu_cleanup) */
     gnu_cleanup = 67108864,
+    /* nonnull, with or without argument positions: a null pointer passed
+       is not a constant expression (clang), which the evaluator does not
+       decide by position: it does not answer for a null argument */
+    gnu_nonnull = 1u << 31,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -1058,6 +1062,11 @@ struct constant_value {
        index of the element pointed to (extent: one past the last), first
        its place; extent 0: a pointer to one object */
     uint32_t base = 0, extent = 0;
+    /* pointer to a single object: its serial (constant_evaluation::object),
+       0: none kept */
+    uint32_t stamp = 0;
+    /* pointer into a string literal's array ([lex.string]/9) */
+    bool literal = false;
 };
 
 /* [implimits]/2's quantities for constant evaluation, the bracketed
@@ -3459,9 +3468,27 @@ class semantic_analysis
             /* a parameter whose value the check of a body for a potential
                constant expression does not know: a read of it is unknown */
             bool opaque = false;
+            /* a variable of static storage duration that is not usable in
+               constant expressions: its address is known, reading it is
+               not constant ([expr.const]/5.8) */
+            bool unusable = false;
+            /* its number among the evaluation's objects: unlike its
+               place, never reused */
+            uint32_t serial = 0;
+            /* a string literal's array */
+            bool literal = false;
             constant_value value;
         };
         owned_array<object> objects;
+        /* the string literals evaluated, one object each, which stay for
+           the whole evaluation: what lies below them stays too */
+        struct literal_object {
+            token_index at = 0;
+            uint32_t object = 0;
+        };
+        owned_array<literal_object> literals;
+        uint32_t object_floor = 0, element_floor = 0;
+        uint32_t serials = 0;
         uint32_t depth = 0;
         uint32_t full_expressions = 0;
         /* the frame of the invocation being evaluated (0: none) and the
@@ -3492,6 +3519,12 @@ class semantic_analysis
        designates among state.objects; evaluate_read: the value a glvalue's
        lvalue-to-rvalue conversion reads; evaluate_statement: returned is set
        by a return statement, with its value in result */
+    constness evaluate_subscript_pointer(constant_evaluation &state,
+                                         uint32_t node, constant_value &moved);
+    bool pointer_offset_count(qualified_type type, const constant_value &i,
+                              __int128 &n) const;
+    constness permitted_result(const constant_evaluation &state,
+                               const constant_value &v) const;
     constness evaluate_node(constant_evaluation &state, uint32_t node,
                             constant_value &v);
     constness evaluate_statement(constant_evaluation &state, uint32_t node,

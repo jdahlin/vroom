@@ -1890,6 +1890,44 @@ lines:
   clang 30185, 0 we reject and clang accepts, 0 refuted (types 39465,
   constants 15796); cxx-run 188/188 (constexpr-classes.cpp);
   cxx-c-suites 2214 pass, 0 wrong.
+  Pointers in the evaluator, on the evaluator above: assignment,
+  `p += n` and `p -= n` on a pointer object; a single object is an array of
+  one element ([basic.compound]/3.3), so `&x + 1` is a pointer one past it
+  (not dereferenceable, comparable with `&x`, `e - 1` back); `&a[i]` is a
+  pointer into its array, `a[i]` and `*p` as before; variables of static
+  storage duration are objects of the evaluation on first use (a usable
+  scalar with its value, a constexpr pointer or object evaluated from its
+  definition, any other with an address and no readable value:
+  [expr.const]/5.8; volatile, weak and thread-local ones too), so `&g`, a
+  reference to a global and a constexpr pointer variable
+  (`constexpr const int *p = a + 1;`, `constexpr const char *s = "abc";`)
+  are constant; a string literal is one object per literal for the whole
+  evaluation (it stays when the scope that evaluated it ends:
+  [lex.string]/9; what lies below it stays too), and the comparison of the
+  address of a literal with another pointer is not constant, as clang's.  A
+  pointer carries the serial of its object (`constant_value::stamp`), so
+  the slot a later block reuses is not taken for the object that went (two
+  dead locals' addresses compare unknown, not equal).  A constexpr
+  variable of pointer type is checked by `evaluate_variable`
+  (`permitted_result`, [expr.const]/13: static storage, a literal, null;
+  the address of a local constexpr variable is not), and lowering emits its
+  read as its initializer (clang folds it; the variable is not emitted for
+  a read).  Offsets of unsigned types above what a count holds are not
+  constant ([expr.add]/4), a member call on a null or one-past-the-end
+  pointer neither, and a null argument passed to a function with
+  `nonnull` is unknown (`gnu_nonnull`; clang: not constant).  Test
+  `constexpr-pointers.cpp`.  cxx-sema: declarations as clang 83682 ->
+  83899, unsupported 40598 -> 40383 ([expr.const] 3333 -> 3108), 0 refuted
+  more (constants 23); we accept and clang rejects 4260 -> 4256; the two
+  more "we reject and clang accepts" are clang's own crash on
+  SemaCXX/builtins.cpp (its verdicts after line 61 are none); verified
+  claims fall by the declarations now diagnosed (`static_assert(&x == &y)`
+  and the like); cxx-run 770/770 programs; cxx-c-suites unchanged (3023
+  pass, same as before).  Still unknown: `new` and `delete`, unions,
+  bit-fields, `goto`, base classes and derived-to-base pointers, arrays of
+  class type, destructors, member pointers, long double and 128-bit values,
+  pointer results lowered as data.
+
   S6b's first rules: function templates.  A namespace-scope
   function-definition after `template<class T, typename U>` (type
   parameters, no defaults, packs or constraints) is a `template_entity`

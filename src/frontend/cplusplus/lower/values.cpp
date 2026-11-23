@@ -348,6 +348,23 @@ uint32_t c_lowering::conversion(const semantic_node &n)
             }
             return cast(read(n.a), t, AST_CAST_NOP);
         }
+        {
+            /* [expr.const]/5.8.1: a constexpr pointer variable is usable
+               in constant expressions, its read the constant its
+               initializer is (clang folds it: the variable is not emitted
+               for a read) */
+            const semantic_node &object = node(n.a);
+            if (object.kind == semantic_kind::entity) {
+                const entity &x = analysis.entity_table[object.a];
+                if (x.kind == entity_kind::variable && x.constexpr_ &&
+                    x.definition && !(x.type.cv() & cv_volatile) &&
+                    analysis.type_table[x.type.unqualified()].kind ==
+                        type_kind::pointer &&
+                    analysis.type_table[node(x.definition).type.unqualified()]
+                            .kind == type_kind::pointer)
+                    return expression(x.definition);
+            }
+        }
         return read(n.a);
     case conversion_kind::array_to_pointer: {
         uint32_t a = object(n.a);
