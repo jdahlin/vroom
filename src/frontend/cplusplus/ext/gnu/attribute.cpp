@@ -433,6 +433,19 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        no effect */
     {"interrupt", 0},
     {"no_caller_saved_registers", 0},
+    /* [ext:gnu_attributes] attributes clang accepts and that change no code
+       vcc generates: optnone (no optimization), the consumed analysis
+       (consumable, callable_when, param_typestate, test_typestate),
+       reentrant_capability (thread-safety analysis) and preferred_type (a
+       debugger's hint for a bit-field).  Not yet: set_typestate and
+       return_typestate (an argument count and kind to check),
+       pass_object_size */
+    {"optnone", 0},
+    {"consumable", 0},
+    {"callable_when", 0},
+    {"param_typestate", 0},
+    {"test_typestate", 0},
+    {"reentrant_capability", 0},
     /* clang's enable_if(condition, message) (below) */
     {"enable_if", gnu_enable_if},
 };
