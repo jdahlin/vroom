@@ -510,6 +510,14 @@ it; none adds a second way to instantiate.
   ill-formed specializations judged well-formed).  Then a fix of 7.3a's
   garbled if in name-lookup.cpp (missed in its review: read every changed
   condition) and copied arguments for re-instantiation.
+- 7.3c (eac5a6835, c666658e3, bd26f9148, 726bd4d2b, 5232bb7cb, e7b397359;
+  each intermediate commit builds, checked): the five bugs, then the lazy
+  line: a class template specialization named where no complete type is
+  needed is declared, not defined ([temp.inst]/2).  Unsupported 38639 ->
+  38327, we reject 561 -> 524, agree +288, types +181; we accept +61
+  (explicit instantiations of, and members of, specializations only named
+  that clang finds ill-formed: queue).  No simplify needed (conditions
+  read).  Next: 7.1's propagation again (7.4).
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
