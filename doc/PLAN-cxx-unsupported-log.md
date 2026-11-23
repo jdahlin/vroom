@@ -483,3 +483,24 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   implicit B(const B&) (cwg6xx.cpp:1160, class.copy/p12-0x.cpp:76).
 - Decision (rule change): a small bug a fix exposes is fixed first by the
   same agent, as its own commit (the drops kept costing a whole agent).
+- 9.2 (c8b42030e, e9aac844f, cfda5040c): __is_trivially_constructible of a
+  class from its own type chooses the copy/move constructor by overload
+  resolution (trivial_copy_selected: source constness and value category,
+  user-declared X(X&) beside X(const X&) = default, as CWG 683); the small
+  exposed bug: X(const X&) = default beside a user X(X&) was no candidate
+  (declared as the implicit one now).  [class.copy.ctor]/7: the implicit copy
+  constructor is X(X&) when a base or member has no const copy constructor
+  (has_const_copy_constructor, declare_implicit's nonconst_copy);
+  X(const X&) = default where that applies is refused with a reason (a
+  we-accept otherwise: ill-formed before C++20, deleted from C++20).
+  Unsupported 36493 -> 36382 (-111), we reject 492 and we accept 5423
+  unchanged.  Details for the queue: defaulted comparison operators 180
+  ([class.compare.default], constructor.cpp:874), aggregate prvalue
+  temporaries (initializer.cpp 233, member-access.cpp 227,
+  conversion-function.cpp 203), default member initializers in unnamed
+  classes 217 (an unnamed struct's or anonymous union's implicit constructor
+  has no mangled symbol: removing the refusal passes the analysis and fails
+  the lowering, "symbol is not mangled yet"), a deleted subobject destructor
+  197 (virtual-function.cpp:328: the vtable slot of a deleted destructor).
+  Left: the implicit copy assignment's X& operator=(X&) form
+  (implicit-assignment.cpp subobject_assignment returns unknown for it).
