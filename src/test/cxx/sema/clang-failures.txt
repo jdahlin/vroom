@@ -715,7 +715,6 @@ verdict CXX/temp/temp.fct.spec/temp.deduct/cwg1170.cpp -std=c++11: ill-formed fo
 verdict CXX/temp/temp.fct.spec/temp.deduct/p7.cpp -std=c++11: ill-formed for us, accepted by clang: line 12 (1 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/p7.cpp -std=c++2a: ill-formed for us, accepted by clang: line 12 (1 declarations)
 verdict CXX/temp/temp.spec/func.spec.cpp -std=c++17: ill-formed for us, accepted by clang: line 78 (1 declarations)
-verdict CXX/temp/temp.spec/part.spec.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 358 (7 declarations)
 verdict CXX/temp/temp.spec/temp.expl.spec/p14-23.cpp -std=c++20: ill-formed for us, accepted by clang: line 32 (5 declarations)
 verdict SemaCXX/MicrosoftCompatibilityNoExceptions.cpp -std=gnu++17 -fms-compatibility: ill-formed for us, accepted by clang: line 7 (1 declarations)
 verdict SemaCXX/alignof.cpp -std=c++11: ill-formed for us, accepted by clang: line 69 (3 declarations)

@@ -399,6 +399,18 @@ analysis_result semantic_analysis::declare_template_parameters(
                type, or typename enable_if<B, int>::type = 0 (libc++'s
                SFINAE), analysed again with the arguments
                (template_argument_for) */
+            /* [temp.param]/8: "A non-type template-parameter of type
+               'array of T' or 'function type T' is adjusted to be of type
+               'pointer to T'." */
+            {
+                const struct type &adjusted = type_table[type.unqualified()];
+                if (adjusted.kind == type_kind::array)
+                    type = qualified_type::make(
+                        type_table.pointer_to(adjusted.operand), cv_none);
+                else if (adjusted.kind == type_kind::function)
+                    type = qualified_type::make(type_table.pointer_to(type),
+                                                cv_none);
+            }
             bool own_parameter_type =
                 own_type_parameter_position(type, scope, first) != UINT32_MAX;
             bool placeholder = contains_placeholder(type);
@@ -406,8 +418,12 @@ analysis_result semantic_analysis::declare_template_parameters(
                  !made_of_template_parameter(type_table, type) &&
                  !structural_parameter_type(type)) ||
                 sp.typedef_ || sp.static_ || sp.extern_ || sp.constexpr_ ||
-                sp.inline_ || sp.gnu_flags)
-                return not_supported(node, "temp.param");
+                sp.inline_ || sp.gnu_flags) {
+                analysis_result refused = not_supported(node, "temp.param");
+                const char *why = parameter_refusal_reason(type, sp);
+                last_unsupported_detail(why, strlen(why));
+                return refused;
+            }
             e = entity_table.make(entity_kind::none, name, scope);
             /* /6: "the top-level cv-qualifiers on the template-parameter
                are ignored when determining its type" */

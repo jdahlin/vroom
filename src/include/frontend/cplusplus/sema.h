@@ -5040,6 +5040,10 @@ class semantic_analysis
     /* [temp.param]/6: a non-type template-parameter's type with rules
        here; one whose arguments are addresses */
     bool structural_parameter_type(qualified_type t) const;
+    /* why a non-type template-parameter is refused: the type's kind or the
+       decl-specifier, for a refusal's detail */
+    const char *parameter_refusal_reason(qualified_type t,
+                                         const specified &sp) const;
     /* [temp.param]/4: the position of the earlier type parameter of the
        same template-parameter-list that is t, UINT32_MAX if none */
     uint32_t own_type_parameter_position(qualified_type t, entity_index scope,

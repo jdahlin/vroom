@@ -16,7 +16,7 @@ namespace cplusplus
  * a type that contains a placeholder type, or a placeholder for a deduced
  * class type."  Of /7's structural types, those with rules here: integral
  * and enumeration types, std::nullptr_t, pointers to objects and
- * functions, lvalue references to them (no placeholder: auto is
+ * functions, pointers to members, lvalue references to them (no placeholder: auto is
  * [dcl.spec.auto]'s).
  */
 bool semantic_analysis::structural_parameter_type(qualified_type t) const
@@ -26,6 +26,8 @@ bool semantic_analysis::structural_parameter_type(qualified_type t) const
         return true;
     if (r.kind == type_kind::fundamental)
         return r.fundamental == fundamental_type::std_nullptr_t;
+    if (r.kind == type_kind::pointer_to_member)
+        return true;
     if (r.kind != type_kind::pointer && r.kind != type_kind::lvalue_reference)
         return false;
     const struct type &to = type_table[r.operand.unqualified()];
@@ -33,6 +35,54 @@ bool semantic_analysis::structural_parameter_type(qualified_type t) const
            to.kind == type_kind::fundamental || to.kind == type_kind::pointer ||
            to.kind == type_kind::enumeration ||
            to.kind == type_kind::class_type;
+}
+
+const char *
+semantic_analysis::parameter_refusal_reason(qualified_type t,
+                                            const specified &sp) const
+{
+    if (sp.typedef_)
+        return "parameter has decl-specifier typedef";
+    if (sp.static_)
+        return "parameter has decl-specifier static";
+    if (sp.extern_)
+        return "parameter has decl-specifier extern";
+    if (sp.constexpr_)
+        return "parameter has decl-specifier constexpr";
+    if (sp.inline_)
+        return "parameter has decl-specifier inline";
+    if (sp.gnu_flags)
+        return "parameter has a GNU decl-specifier";
+    const struct type &r = type_table[t.unqualified()];
+    if (r.kind == type_kind::pointer || r.kind == type_kind::lvalue_reference) {
+        type_kind to = type_table[r.operand.unqualified()].kind;
+        if (r.kind == type_kind::lvalue_reference) {
+            if (to == type_kind::array)
+                return "parameter type reference to array";
+            if (to == type_kind::pointer_to_member)
+                return "parameter type reference to pointer to member";
+            return "parameter type reference to other";
+        }
+        if (to == type_kind::array)
+            return "parameter type pointer to array";
+        return "parameter type pointer to other";
+    }
+    if (is_floating(t))
+        return "parameter type floating-point";
+    switch (r.kind) {
+    case type_kind::class_type:
+        return "parameter type class type";
+    case type_kind::pointer_to_member:
+        return "parameter type pointer to member";
+    case type_kind::rvalue_reference:
+        return "parameter type rvalue reference";
+    case type_kind::array:
+        return "parameter type array";
+    case type_kind::function:
+        return "parameter type function";
+    default:
+        return "parameter type other";
+    }
 }
 
 /* a non-type argument that is an object's or function's address (a
