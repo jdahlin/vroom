@@ -201,27 +201,10 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
    in the decl-specifier-seq, the parameters or the body */
 SyntaxRef semantic_analysis::conversion_function_id_of(SyntaxRef n) const
 {
-    owned_array<SyntaxRef> work;
-    for (SyntaxElement x : n.elements()) {
-        if (!x.is_token() &&
-            !x.is(syntax_kind::decl_specifier_seq, syntax_kind::function_body))
-            work.append(x);
-    }
-    while (!work.empty()) {
-        SyntaxRef k = work.back();
-        work.resize(work.size() - 1);
-        syntax_kind kind = k.kind();
-        if (kind == syntax_kind::conversion_function_id)
-            return k;
-        if (kind == syntax_kind::parameters_and_qualifiers ||
-            kind == syntax_kind::brace_or_equal_initializer ||
-            kind == syntax_kind::braced_init_list)
-            continue;
-        for (auto child : k.elements())
-            if (!child.is_token())
-                work.append(child);
-    }
-    return 0;
+    SyntaxElement id = DeclaratorParts::of_declaration(n).unqualified();
+    if (!id.is(syntax_kind::conversion_function_id))
+        return 0;
+    return id.index();
 }
 
 entity_index semantic_analysis::own_conversion_functions(entity_index c) const

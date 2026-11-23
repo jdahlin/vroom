@@ -851,6 +851,169 @@ struct NoptrDeclaratorParts : SyntaxRef {
 };
 
 /*
+ * [dcl.meaning]/1: "A declarator contains exactly one declarator-id; it
+ * names the entity that is declared."  A declarator taken apart by its
+ * syntax alone, without its meaning (which is semantic_analysis::declarator's):
+ * the declarator-id, the noptr-declarator it heads and what wraps them.
+ *
+ * It reads through
+ *
+ *     init-declarator, member-declarator: the declarator (an initializer,
+ *         virt-specifiers, a bit-field width or a requires-clause after
+ *         it are not the declarator's)
+ *     declarator: noptr-declarator parameters-and-qualifiers
+ *         trailing-return-type ([dcl.decl.general]/4), the trailing one
+ *     [ext:gnu_asm_labels] declarator gnu-asm-label_opt attributes
+ *     ptr-declarator: ptr-operator ptr-declarator ([dcl.ptr], [dcl.ref],
+ *         [dcl.mptr])
+ *     noptr-declarator: ( ptr-declarator ) suffixes
+ *
+ * to the noptr-declarator whose head is the declarator-id, or to the
+ * declarator-id itself when it stands alone (the parser makes no node for
+ * a noptr-declarator that is only its declarator-id).  The abstract forms
+ * are read alike, with no declarator-id.
+ */
+struct DeclaratorParts {
+    /* the declarator-id: an identifier token, or a qualified-id,
+       unqualified-id (~ class-name), simple-template-id,
+       operator-function-id, literal-operator-id or conversion-function-id
+       node; {} for an abstract declarator or what is no declarator */
+    SyntaxElement id;
+    /* the noptr-declarator (or noptr-abstract-declarator) whose head is the
+       declarator-id or the ... of a pack, and whose suffixes are the first
+       derivations of what is declared ([dcl.meaning]/3); {} when the
+       declarator-id stands alone */
+    SyntaxRef noptr;
+    /* the ... of a parameter pack's declarator ([dcl.fct]/21) */
+    SyntaxElement ellipsis;
+    /* declarator's trailing-return-type ([dcl.fct]/2), {} without one */
+    SyntaxElement trailing_return;
+    /* no ptr-operator and no parentheses come between the declarator and
+       its declarator-id: what it declares is the declarator-id's own
+       noptr-declarator's derivations, then the decl-specifier-seq's type */
+    bool direct = true;
+
+    DeclaratorParts() = default;
+    explicit DeclaratorParts(SyntaxElement d)
+    {
+        while (d) {
+            if (d.is_token()) {
+                if (d.is_identifier())
+                    id = d;
+                else if (d.is(preprocessing_op_or_punc::ELLIPSIS))
+                    ellipsis = d;
+                return;
+            }
+            switch (d.kind()) {
+            case syntax_kind::init_declarator:
+            case syntax_kind::member_declarator:
+            case syntax_kind::gnu_declarator:
+                d = d[0];
+                continue;
+            case syntax_kind::declarator:
+            case syntax_kind::abstract_declarator:
+                if (d.back().is(syntax_kind::trailing_return_type))
+                    trailing_return = d.back();
+                d = d[0];
+                continue;
+            case syntax_kind::ptr_declarator:
+            case syntax_kind::ptr_abstract_declarator:
+                /* ptr-operator ptr-declarator_opt */
+                direct = false;
+                if (d.size() != 2)
+                    return;
+                d = d[1];
+                continue;
+            case syntax_kind::noptr_declarator:
+            case syntax_kind::noptr_abstract_declarator: {
+                SyntaxRef node = d;
+                NoptrDeclaratorParts parts(node);
+                if (SyntaxElement inner = parts.parenthesized()) {
+                    direct = false;
+                    d = inner;
+                    continue;
+                }
+                noptr = node;
+                ellipsis = parts.ellipsis();
+                id = parts.declarator_id();
+                return;
+            }
+            case syntax_kind::qualified_id:
+            case syntax_kind::unqualified_id:
+            case syntax_kind::simple_template_id:
+            case syntax_kind::operator_function_id:
+            case syntax_kind::literal_operator_id:
+            case syntax_kind::conversion_function_id:
+                id = d;
+                return;
+            default:
+                return;
+            }
+        }
+    }
+    /* the first declarator of a simple-declaration, member-declaration or
+       function-definition (a template-declaration's or
+       explicit-specialization's: its declaration's), taken apart; a
+       declarator is taken apart as itself.  The decl-specifier-seq,
+       attributes and function-body are not declarators, and a declarator
+       that is only its identifier is that token ([dcl.decl.general]/1) */
+    static DeclaratorParts of_declaration(SyntaxRef n)
+    {
+        while (n.is(syntax_kind::template_declaration,
+                    syntax_kind::explicit_specialization) &&
+               n.back().is_node())
+            n = n.back();
+        if (!n.is(syntax_kind::simple_declaration,
+                  syntax_kind::member_declaration,
+                  syntax_kind::function_definition))
+            return DeclaratorParts(n);
+        for (SyntaxElement c : n.elements()) {
+            if (c.is(syntax_kind::init_declarator_list,
+                     syntax_kind::member_declarator_list))
+                return DeclaratorParts(c[0]);
+            if (c.is_identifier() || (c.is_node() && DeclaratorParts(c).id))
+                return DeclaratorParts(c);
+        }
+        return {};
+    }
+    /* the nested-name-specifier of a qualified declarator-id
+       ([dcl.meaning]/2), {} for an unqualified one */
+    SyntaxElement qualifier() const
+    {
+        if (!id.is(syntax_kind::qualified_id) ||
+            !id[0].is(syntax_kind::nested_name_specifier))
+            return {};
+        return id[0];
+    }
+    /* the declarator-id without its nested-name-specifier (and the
+       template keyword after it) */
+    SyntaxElement unqualified() const
+    {
+        if (!qualifier())
+            return id;
+        return id.back();
+    }
+    /* the parameters-and-qualifiers right after the declarator-id (and its
+       attributes): the declarator-id names a function ([dcl.fct]/1),
+       whatever ptr-operators around it make of its return type; {} else */
+    SyntaxElement parameters() const
+    {
+        if (!noptr)
+            return {};
+        uint32_t at = 0;
+        if (ellipsis)
+            at++;
+        if (id)
+            at++;
+        while (noptr[at].is_attribute())
+            at++;
+        if (!noptr[at].is(syntax_kind::parameters_and_qualifiers))
+            return {};
+        return noptr[at];
+    }
+};
+
+/*
  * [stmt.iter]/1:
  *
  *     iteration-statement:

@@ -42,18 +42,17 @@ namespace cplusplus
 bool semantic_analysis::declares_special_member(entity_index c,
                                                 SyntaxElement d) const
 {
-    if (!d.is(syntax_kind::noptr_declarator))
+    /* (the declarator-id and its parameters-and-qualifiers alone: no
+       attributes, trailing-return-type or other wrapper) */
+    DeclaratorParts parts(d);
+    if (!d.is_node() || parts.noptr != d.index() || d.size() != 2 ||
+        !parts.parameters())
         return false;
-    if (d.size() != 2 || !d[1].is(syntax_kind::parameters_and_qualifiers))
-        return false;
-    SyntaxElement head = d[0];
-    if (head.is(syntax_kind::qualified_id) && head.size() == 2)
-        head = head[1];
+    SyntaxElement head = parts.unqualified();
     if (head.is(syntax_kind::unqualified_id)) {
-        auto parts = head;
-        if (parts.size() != 2 || !parts[0].is(preprocessing_op_or_punc::TILDE))
+        if (head.size() != 2 || !head[0].is(preprocessing_op_or_punc::TILDE))
             return false;
-        head = parts[1];
+        head = head[1];
     }
     if (!head.is_token() || tokens[head.token()].kind != token_kind::identifier)
         return false;

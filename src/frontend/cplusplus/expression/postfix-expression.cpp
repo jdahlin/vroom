@@ -812,11 +812,10 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             uint32_t at = leading_gnu_attributes(mem.index());
             if (at < mem.size() && mem[at].is(syntax_kind::decl_specifier_seq))
                 at++;
-            if (at >= mem.size() ||
-                !mem[at].is(syntax_kind::noptr_declarator) ||
-                mem[at].size() < 2 || !mem[at][0].is_identifier() ||
-                tokens.identifier(mem[at][0].token()) != class_name ||
-                !mem[at][1].is(syntax_kind::parameters_and_qualifiers))
+            DeclaratorParts ctor(mem[at]);
+            if (!ctor.direct || !ctor.id.is_identifier() ||
+                tokens.identifier(ctor.id.token()) != class_name ||
+                !ctor.parameters())
                 continue;
             current_scope = param_scope;
             defining_class = 0;
@@ -824,7 +823,7 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             function_parameters.clear();
             qualified_type ctor_type = qualified_type::make(
                 type_table.fundamental(fundamental_type::void_), cv_none);
-            analysis_result fr = function(mem[at][1].index(), ctor_type);
+            analysis_result fr = function(ctor.parameters().index(), ctor_type);
             current_scope = saved_scope;
             defining_class = saved_class;
             function_cv = saved_cv;

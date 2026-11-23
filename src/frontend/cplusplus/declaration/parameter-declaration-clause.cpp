@@ -716,21 +716,16 @@ bool semantic_analysis::abbreviated_parameters(
     }
     if (!d.function_definition() && !d.simple_declaration())
         return true;
-    /* the declarator's parameters-and-qualifiers */
-    SyntaxRef declarator;
+    /* the parameters-and-qualifiers of the function the declarator
+       declares (not those of a function type in its return type) */
+    SyntaxElement list;
     for (auto c : d.elements())
-        if (c.is(syntax_kind::ptr_declarator, syntax_kind::noptr_declarator)) {
-            declarator = c;
+        if (c.is(syntax_kind::init_declarator, syntax_kind::declarator,
+                 syntax_kind::gnu_declarator, syntax_kind::ptr_declarator,
+                 syntax_kind::noptr_declarator)) {
+            list = DeclaratorParts(c).parameters();
             break;
         }
-    while (declarator.is(syntax_kind::ptr_declarator))
-        declarator = declarator.back();
-    if (!declarator.is(syntax_kind::noptr_declarator))
-        return true;
-    SyntaxElement list;
-    for (auto c : declarator.elements())
-        if (c.parameters_and_qualifiers())
-            list = c;
     if (!list)
         return true;
     return abbreviated_clause(list, parameters);

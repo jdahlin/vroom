@@ -4152,8 +4152,7 @@ class semantic_analysis
     /* [class.access]/6: the class a member's qualified declarator-id
        nominates while its declaration is analysed, 0 otherwise (declarator_access_class) */
     entity_index access_class = 0;
-    entity_index declarator_access_class(SyntaxRef declaration,
-                                         SyntaxRef specifiers) const;
+    entity_index declarator_access_class(SyntaxRef declaration) const;
     /* the tokens of the member-specification of the class being defined
        (class_specifier), 0 outside one */
     token_index defining_members_first = 0, defining_members_end = 0;
