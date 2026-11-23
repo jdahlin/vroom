@@ -441,7 +441,11 @@ void semantic_analysis::evaluate_analysed_expressions()
 void semantic_analysis::evaluator_stop_detail()
 {
     char text[64] = "evaluator answered no value";
-    if (last_unknown_line)
+    if (constant_stop == 1)
+        snprintf(text, sizeof text, "analysis folded it as not constant");
+    else if (constant_stop == 2)
+        snprintf(text, sizeof text, "no semantic node for the evaluator");
+    else if (last_unknown_line)
         snprintf(text, sizeof text, "evaluator met L%u", last_unknown_line);
     last_unsupported_detail(text, strlen(text));
 }
