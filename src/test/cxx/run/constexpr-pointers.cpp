@@ -60,6 +60,26 @@ constexpr int through_argument()
 
 constexpr int read(const int *p) { return *p; }
 
+/* a pointer a function computes is constant data ([expr.const]/13) */
+constexpr const int *find(const int *p, const int *end, int v)
+{
+    while (p != end && *p != v)
+        ++p;
+    return p;
+}
+
+constexpr const int *found = find(a, a + 3, 2);
+constexpr const int *missing = find(a, a + 3, 9);
+constexpr const char *after_a = word + 1;
+constexpr const char *skip(const char *s, int n)
+{
+    for (int i = 0; i < n; ++i)
+        ++s;
+    return s;
+}
+constexpr const char *tail = skip(word, 2);
+constexpr const int *nowhere = find(a, a, 1) == a ? nullptr : a;
+
 static_assert(walk() == 2);
 static_assert(one_past() == 9);
 static_assert(element_address() == 7);
@@ -71,10 +91,15 @@ static_assert(length("hello") == 5);
 static_assert(through_argument() == 3);
 static_assert(read(&v) == 3 && read(second) == 2);
 static_assert(pg != nullptr);
+static_assert(*found == 2 && found == a + 1);
+static_assert(missing == a + 3);
+static_assert(after_a[0] == 'b' && *tail == 'c');
+static_assert(nowhere == nullptr);
 
 int main()
 {
-    printf("%d %d %d %d %d %d\n", walk(), one_past(), element_address(),
-           length(word), through_argument(), read(pv) + *pg);
+    printf("%d %d %d %d %d %d %d %c %c\n", walk(), one_past(),
+           element_address(), length(word), through_argument(),
+           read(pv) + *pg, *found, *after_a, *tail);
     return 0;
 }

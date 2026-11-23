@@ -3587,6 +3587,9 @@ class semantic_analysis
                                            constant_value v) const;
     bool pointer_offset_count(qualified_type type, const constant_value &i,
                               __int128 &n) const;
+    void pin_objects(constant_evaluation &state) const;
+    uint32_t pointer_tree(const constant_evaluation &state, qualified_type t,
+                          const constant_value &v, token_index at);
     constness permitted_result(const constant_evaluation &state,
                                const constant_value &v) const;
     constness evaluate_node(constant_evaluation &state, uint32_t node,
