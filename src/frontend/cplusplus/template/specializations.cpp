@@ -315,52 +315,6 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
          named_declarator.size() &&
          named_declarator[0].is(syntax_kind::qualified_id)))
         return member_explicit_instantiation(n, d, lead, extern_);
-    /* [temp.explicit]/10: the static data member of a class template's
-       specialization, template T C<A>::m; its definition is instantiated
-       with the class's ([temp.inst]/3); defined by the template, else
-       clang's error ("explicit instantiation of undefined static data
-       member") */
-    {
-        token_index member_name = 0;
-        if (!lead && !extern_ &&
-            out_of_class_variable_member(d, &member_name)) {
-            specified vs;
-            VTRY(dr, decl_specifier_seq(tail[0], vs, false));
-            nominated_scope ns;
-            VTRY(nr, nested_name_specifier(tail[1][0].index(), ns));
-            entity_index v = 0;
-            uint32_t record = 0;
-            if (is_class_entity(ns.entity)) {
-                define_waiting_members(ns.entity, member_name);
-                v = entity_table.find(ns.entity,
-                                      tokens.identifier(member_name));
-                record = entity_table[ns.entity].instantiation;
-            }
-            if (v && record &&
-                instantiations[record - 1].specialization == ns.entity &&
-                entity_table[v].kind == entity_kind::variable &&
-                entity_table[v].defined && entity_table[v].type == vs.type &&
-                !vs.typedef_ && !vs.static_ && !vs.extern_ && !vs.inline_ &&
-                !vs.constexpr_ && !vs.gnu_flags && !vs.aligned && !vs.section) {
-                entity_table[v].explicitly_instantiated =
-                    instantiation_kind::definition;
-                /* (emitted whether used or not: lowering walks `declared`) */
-                declared_name x;
-                x.declaration = d;
-                x.outermost = n;
-                x.entity = v;
-                x.kind = entity_kind::variable;
-                x.type = entity_table[v].type;
-                x.claimable = false;
-                declared.append(x);
-                return analysis_result::well_formed;
-            }
-            return not_supported_because(
-                n, "temp.explicit",
-                "a static data member not defined by the template, "
-                "or of another type");
-        }
-    }
     specified s;
     uint32_t index = 0;
     VTRY(r, named_specialization(n, d, lead, false, extern_, s, index));
@@ -948,12 +902,33 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     if (!f || entity_table[f].enclosing != m.qualifier)
         return not_supported(n, "temp.explicit");
     if (variable) {
-        /* a declaration only: the member is defined where the
-           definition is instantiated, which a use asks for */
-        if (!extern_ || entity_table[f].explicitly_instantiated ==
-                            instantiation_kind::definition)
-            return not_supported(n, "temp.explicit");
-        mark_explicit_instantiation(f, true);
+        /* an explicit instantiation declaration: the member is defined
+           where the definition is instantiated, which a use asks for */
+        if (extern_) {
+            if (entity_table[f].explicitly_instantiated ==
+                instantiation_kind::definition)
+                return not_supported(n, "temp.explicit");
+            mark_explicit_instantiation(f, true);
+            return analysis_result::well_formed;
+        }
+        /* [temp.explicit]/10: an explicit instantiation definition of the
+           static data member, defined by the template ([temp.inst]/3),
+           else clang's "explicit instantiation of undefined static data
+           member"; emitted whether used or not (lowering walks
+           `declared`) */
+        if (!entity_table[f].defined)
+            return not_supported_because(n, "temp.explicit",
+                                         "a static data member the template "
+                                         "does not define");
+        mark_explicit_instantiation(f, false);
+        declared_name x;
+        x.declaration = declaration;
+        x.outermost = n;
+        x.entity = f;
+        x.kind = entity_kind::variable;
+        x.type = entity_table[f].type;
+        x.claimable = false;
+        declared.append(x);
         return analysis_result::well_formed;
     }
     /* clang's "explicit instantiation of undefined function" (a
