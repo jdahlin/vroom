@@ -65,6 +65,17 @@ bool is_object_value(const constant_value &v)
            v.kind == constant_value_kind::union_object;
 }
 
+/* a read or a write of an object whose value the evaluation does not have:
+   [expr.const]/5.8, /5.16 make it not constant when the object began its
+   life outside the evaluation, unknown otherwise (a parameter of the body a
+   potential-constant check looks at) */
+template <class Object> constness opaque_access(const Object &o)
+{
+    if (o.outside)
+        return constness::not_constant;
+    return CONST_UNKNOWN;
+}
+
 bool is_value(const constant_value &v)
 {
     return v.kind == constant_value_kind::integer ||
@@ -418,14 +429,10 @@ void semantic_analysis::evaluate_analysed_expressions()
     }
 }
 
-analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
-                                                     uint32_t node,
-                                                     constant_value &v,
-                                                     bool &constant)
+constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
 {
-    constant = false;
     if (semantics[node].evaluation == constness::not_constant)
-        return analysis_result::well_formed;
+        return constness::not_constant;
     constant_evaluation state;
     constness c = evaluate_node(state, node, v);
     /* [expr.const]/5.18: an allocation not deallocated in the evaluation:
@@ -440,6 +447,16 @@ analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
     if (c == constness::constant &&
         !value_kept_exactly(semantics[node].type, v))
         c = constness::unknown;
+    return c;
+}
+
+analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
+                                                     uint32_t node,
+                                                     constant_value &v,
+                                                     bool &constant)
+{
+    constant = false;
+    constness c = evaluate_value(node, v);
     if (c == constness::unknown)
         return not_supported(at, expr_const_reason());
     constant = c == constness::constant;
@@ -1093,6 +1110,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                ([expr.const]/13) and its value is not known (opaque) */
             if (!e.constexpr_ || !e.definition) {
                 o.opaque = true;
+                o.outside = true;
                 append_object(state, o);
                 return constness::constant;
             }
@@ -1133,9 +1151,21 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         /* an automatic variable whose lifetime did not begin within the
            evaluation: [expr.const]/5.8 forbids an lvalue-to-rvalue
            conversion of it, not designating it (the object expression of
-           a member call that reads nothing, [impl.clang] as clang accepts),
-           which the evaluation has no object for; a variable of static storage
-           duration may not be modified (/5.16) */
+           a member call that reads nothing, [impl.clang] as clang accepts), which the
+           evaluation has no object for; a variable of static storage
+           duration may not be modified (/5.16): the object of a class or
+           array type is designated, opaque and outside */
+        if (x.a && e.kind == entity_kind::variable && e.automatic &&
+            !e.constexpr_ &&
+            (tk == type_kind::array || tk == type_kind::class_type)) {
+            constant_evaluation::object o;
+            o.entity = x.a;
+            o.opaque = true;
+            o.outside = true;
+            object = static_cast<uint32_t>(state.objects.size());
+            append_object(state, o);
+            return constness::constant;
+        }
         return CONST_UNKNOWN;
     }
     /* [expr.unary.op]/1: "the result is an lvalue referring to the object
@@ -1171,6 +1201,15 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         c = evaluate_object(state, x.a, whole);
         if (c != constness::constant)
             return c;
+        if (!(whole & element_place) && state.objects[whole].opaque) {
+            /* a member of an automatic variable of the enclosing function:
+               its address is no constant ([expr.const]/13) nor its value
+               ([expr.const]/5.8) */
+            const auto &w = state.objects[whole];
+            if (w.outside && entity_table[w.entity].automatic)
+                return constness::not_constant;
+            return constness::unknown;
+        }
         constant_value o = place_value(state, whole);
         if (o.kind == constant_value_kind::union_object) {
             /* [class.union]/2: only the active member holds a value; an
@@ -1354,7 +1393,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 right == fundamental_type::none)
                 return CONST_UNKNOWN;
             if (!(target & element_place) && state.objects[target].opaque)
-                return CONST_UNKNOWN;
+                return opaque_access(state.objects[target]);
             constant_value old = place_value(state, target);
             if (old.kind == constant_value_kind::none)
                 return undefined_value(state);
@@ -1558,7 +1597,7 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     if (c != constness::constant)
         return c;
     if (!(object & element_place) && state.objects[object].opaque)
-        return CONST_UNKNOWN;
+        return opaque_access(state.objects[object]);
     /* [expr.const]/5.8: a variable that is not usable in constant
        expressions, read through a pointer or a reference */
     if (!(object & element_place) && state.objects[object].unusable)
@@ -1944,7 +1983,7 @@ constness semantic_analysis::evaluate_array_pointer(constant_evaluation &state,
     if (c != constness::constant)
         return c;
     if (!(array & element_place) && state.objects[array].opaque)
-        return CONST_UNKNOWN;
+        return opaque_access(state.objects[array]);
     const constant_value a = place_value(state, array);
     if (a.kind != constant_value_kind::array || !a.count)
         return CONST_UNKNOWN;
@@ -2449,7 +2488,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         if (place_read_only(state, object))
             return constness::not_constant;
         if (!(object & element_place) && state.objects[object].opaque)
-            return CONST_UNKNOWN;
+            return opaque_access(state.objects[object]);
         constant_value old = place_value(state, object);
         if (old.kind == constant_value_kind::none)
             return undefined_value(state);

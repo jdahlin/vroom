@@ -1825,6 +1825,28 @@ analysis_result semantic_analysis::declare_with_initializer(
             semantics[target].a && !entity_table[semantics[target].a].automatic)
             value.evaluation = constness::constant;
     }
+    /* [expr.const]/3: a const integral local may be usable in constant
+       expressions, which decides whether a lambda that names it captures
+       it: evaluated, not refused if the evaluator cannot tell (it is then
+       unknown, as before) */
+    if (entity_table[declared_entity].automatic && !s.constexpr_ &&
+        value.node && value.evaluation == constness::unknown &&
+        entity_table[declared_entity].usable == constness::unknown) {
+        constant_value v;
+        constness c = evaluate_value(value.node, v);
+        if (c == constness::not_constant) {
+            value.evaluation = c;
+        } else if (c == constness::constant) {
+            expression_meaning folded;
+            folded.type = semantics[value.node].type;
+            folded.category = value_category::prvalue;
+            evaluated_meaning(folded, v);
+            value.node = expression_node(semantic_kind::constant, folded,
+                                         semantics[value.node].at);
+            value.evaluation = constness::constant;
+            value.value = folded.value;
+        }
+    }
     if ((s.constexpr_ || (!entity_table[declared_entity].automatic &&
                           constexpr_calls != calls_before)) &&
         value.evaluation == constness::unknown) {

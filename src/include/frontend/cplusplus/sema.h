@@ -3578,6 +3578,9 @@ class semantic_analysis
        unsupported where the evaluator has no rules yet */
     analysis_result evaluate_constant(SyntaxRef at, uint32_t node,
                                       constant_value &v, bool &constant);
+    /* ... the evaluation alone: constant with the value in v, not_constant,
+       or unknown (no refusal recorded) */
+    constness evaluate_value(uint32_t node, constant_value &v);
     /* one evaluation's state: the objects of the evaluation (locals and
        parameters of the constexpr functions it calls, [expr.const]/5.8:
        their lifetime began within it), the depth of invocations and the
@@ -3608,6 +3611,11 @@ class semantic_analysis
             uint32_t serial = 0;
             /* a string literal's array */
             bool literal = false;
+            /* ... or an object whose lifetime began outside the evaluation
+               and is not usable in it ([expr.const]/5.8, /5.16): designated
+               (its address is a constant), a read or a write is not a
+               constant expression */
+            bool outside = false;
             constant_value value;
         };
         owned_array<object> objects;
