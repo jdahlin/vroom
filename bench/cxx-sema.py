@@ -930,6 +930,8 @@ UNSUPPORTED_LINE = re.compile(r'^\[([^\]]*)\] (\S+) (.*?):(\d+):(\d+)\t(.*?)\t(.
 HELD = re.compile(r'^(\S+) is declared by a declaration (that is not parsed|that is ill-formed|with no rules yet)$')
 INSTANTIATION = re.compile(r'^instantiation refused: \[([^\]]*)\] (\S+:\d+) ?(.*)$')
 WHY_DEPTH = 8
+# a refusal that names the declaration (not analysed) it depends on
+HELD_AT = re.compile(r'declared by the declaration at (.*?):(\d+):(\d+), not analysed')
 
 
 def unwrap_instantiation(sub, detail, site):
@@ -1038,6 +1040,14 @@ def root_causes(test, opts, vpp, counted):
         r = first_refusal(d)
         if r is None:
             return f'[{d["sub"]}] (no refusal line in the declaration)', d
+        at = HELD_AT.search(r['detail'])
+        if at and depth < WHY_DEPTH:
+            pos = (int(at.group(2)), int(at.group(3)))
+            for j in range(i - 1, -1, -1):
+                dj = decls[j]
+                if os.path.basename(dj['path']) == os.path.basename(at.group(1)) and \
+                        (dj['l1'], dj['c1']) <= pos <= (dj['l2'], dj['c2']):
+                    return root(j, depth + 1)
         h = HELD.match(unwrap_instantiation(r['sub'], r['detail'], r['site'])[1])
         if h and depth < WHY_DEPTH:
             j = holder(i, h.group(1))

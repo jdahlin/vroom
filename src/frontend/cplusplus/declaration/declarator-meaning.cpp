@@ -560,8 +560,11 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
     for (token_index t = declaration.first_token(); t < declaration.end_token();
          t++)
         if (tokens[t].kind == token_kind::keyword &&
-            p.keyword_of(tokens[t]) == standard_keyword::operator_)
+            p.keyword_of(tokens[t]) == standard_keyword::operator_) {
             operators_held = true;
+            if (!operators_held_at)
+                operators_held_at = t;
+        }
     if (declaration.is(syntax_kind::linkage_specification)) {
         /* extern "C" { ... }: the declarations in it are the scope's */
         for (auto c : declaration.elements()) {

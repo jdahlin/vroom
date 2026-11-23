@@ -6154,6 +6154,9 @@ class semantic_analysis
     /* a declaration analysis did not follow may declare an operator
        function (hold_names): what an operator means is not known */
     bool operators_held = false;
+    /* the first operator keyword of such a declaration (0: none), which a
+       refused operator's detail names */
+    token_index operators_held_at = 0;
     /* [class.copy.assign]/1: f is a copy assignment operator of class c */
     bool copy_assignment_operator(entity_index f, entity_index c) const;
     /* [class.copy.assign]/3: f is a move assignment operator of class c

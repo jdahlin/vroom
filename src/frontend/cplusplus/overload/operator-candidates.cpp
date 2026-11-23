@@ -279,8 +279,19 @@ analysis_result semantic_analysis::overloaded_operator(
     if (member_only && type_table[operands[0].type.unqualified()].kind !=
                            type_kind::class_type)
         return analysis_result::well_formed;
-    if (operators_held)
-        return not_supported(n, "over.match.oper");
+    if (operators_held) {
+        /* (the detail names the first declaration not analysed that may
+           declare an operator function: --why follows it) */
+        char at[256] = "a declaration not analysed";
+        if (operators_held_at) {
+            source_position where = tokens.position(operators_held_at);
+            snprintf(at, sizeof at,
+                     "an operator function may be declared by the "
+                     "declaration at %s:%u:%u, not analysed",
+                     where.file_name, where.line, where.column);
+        }
+        return not_supported_because(n, "over.match.oper", at);
+    }
     owned_array<overload_candidate> candidates;
     auto stripped = [&](qualified_type t) {
         const struct type &r = type_table[t.unqualified()];
