@@ -550,6 +550,15 @@ it; none adds a second way to instantiate.
   Unsupported 37643 -> 37344 (-299), we reject and we accept unchanged.
   Left: implicit lifetime, standard layout with bit-fields, unions and
   bases in layout compatibility, bitwise_cloneable, trivial_abi.
+- 8.2 (5b7c6edcc, 821c9f313, 2d7eb1d51; no simplify needed: table rows
+  and constinit's check reused): x86 attributes clang ignores on aarch64;
+  attributes with no effect on code (optnone, consumed analysis,
+  reentrant_capability, preferred_type); require_constant_initialization
+  as constinit's check.  Unsupported 37344 -> 37047 (-297), we reject and
+  we accept unchanged.  Queue: pass_object_size raised refuted claims in
+  files that do not use it (bitfield.cpp, class-layout.cpp:658): a flag
+  collision?; unavailable, init_priority, multiversioning, address_space,
+  code_seg/uuid checks, swiftcall's checks.
 - Decision (2026-11-23, from the user: low-hanging fruit, 2-3k): after 7.5,
   four cheap batches by the work list's extension groups (4691 declarations
   in all): (8.1) clang's type traits, ~770 (__has_unique_object_representations
