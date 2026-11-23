@@ -921,7 +921,7 @@ entity_index semantic_analysis::evaluated_class(qualified_type t) const
     if (record.kind != type_kind::class_type)
         return 0;
     const entity &x = entity_table[record.entity];
-    if (!x.defined || x.dynamic || x.virtual_base_count)
+    if (!x.defined || x.virtual_base_count)
         return 0;
     return record.entity;
 }
@@ -1653,6 +1653,118 @@ constness semantic_analysis::convert_base_pointer(
     v.first = moved;
     if (!(moved & element_place))
         v.stamp = state.objects[moved].serial;
+    return constness::constant;
+}
+
+/* the most derived class object the subobject at place is part of: the
+   enclosing object while the place is a base class subobject of one */
+uint32_t semantic_analysis::most_derived_place(const constant_evaluation &state,
+                                               uint32_t place) const
+{
+    for (size_t guard = 0; guard < 64; guard++) {
+        if (!(place & element_place))
+            return place;
+        uint32_t index = place & ~element_place;
+        bool climbed = false;
+        for (size_t pass = 0; pass < 2 && !climbed; pass++) {
+            size_t n = state.objects.size();
+            if (pass)
+                n = state.elements.size();
+            for (size_t i = 0; i < n; i++) {
+                const constant_value *candidate = &state.objects[i].value;
+                if (pass)
+                    candidate = &state.elements[i];
+                const constant_value &o = *candidate;
+                if (o.kind != constant_value_kind::class_object ||
+                    !o.designator || index < o.first ||
+                    index >= o.first + o.count)
+                    continue;
+                const entity &k = entity_table[o.designator];
+                entity_index member =
+                    class_members[k.first_member + (index - o.first)];
+                if (!entity_table[member].base_subobject)
+                    return place;
+                place = static_cast<uint32_t>(i);
+                if (pass)
+                    place |= element_place;
+                climbed = true;
+                break;
+            }
+        }
+        if (!climbed)
+            return place;
+    }
+    return place;
+}
+
+/* the place of the subobject of class target in the class object at place
+   (itself, or one of its base class subobjects, depth first) */
+bool semantic_analysis::subobject_of_class(const constant_evaluation &state,
+                                           uint32_t place, entity_index target,
+                                           uint32_t &out) const
+{
+    const constant_value &o = place_value(state, place);
+    if (o.kind != constant_value_kind::class_object)
+        return false;
+    if (o.designator == target) {
+        out = place;
+        return true;
+    }
+    const entity &k = entity_table[o.designator];
+    for (uint32_t i = 0; i < k.member_count; i++) {
+        if (!entity_table[class_members[k.first_member + i]].base_subobject)
+            continue;
+        if (subobject_of_class(state, element_place | (o.first + i), target,
+                               out))
+            return true;
+    }
+    return false;
+}
+
+/* [class.virtual]/16: for the virtual function f called on the object self
+   points to: the final overrider g in the dynamic class of the object, and
+   a pointer to the subobject of g's class that is its `this` */
+constness semantic_analysis::virtual_target(const constant_evaluation &state,
+                                            const constant_value &self,
+                                            entity_index f, entity_index &g,
+                                            constant_value &adjusted) const
+{
+    uint32_t place = 0;
+    constness c = pointed_place(state, self, place);
+    if (c != constness::constant)
+        return c;
+    uint32_t top = most_derived_place(state, place);
+    const constant_value &o = place_value(state, top);
+    if (o.kind != constant_value_kind::class_object || !o.designator)
+        return CONST_UNKNOWN;
+    const dynamic_class *d = dynamic_of(o.designator);
+    if (!d || !d->group_count)
+        return CONST_UNKNOWN;
+    const vtable_group &first = vtable_groups[d->first_group];
+    const vtable_group &last =
+        vtable_groups[d->first_group + d->group_count - 1];
+    entity_index found = 0;
+    for (uint32_t k = first.first_slot; k < last.first_slot + last.slot_count;
+         k++) {
+        entity_index slot = vtable_slots[k];
+        if (slot == f || overrides_function(slot, f)) {
+            found = slot;
+            break;
+        }
+    }
+    if (!found || entity_table[found].pure ||
+        entity_table[found].kind != entity_kind::function)
+        return CONST_UNKNOWN;
+    uint32_t sub = 0;
+    if (!subobject_of_class(state, top, entity_table[found].enclosing, sub))
+        return CONST_UNKNOWN;
+    adjusted = constant_value();
+    adjusted.kind = constant_value_kind::pointer;
+    adjusted.count = 1;
+    adjusted.first = sub;
+    if (!(sub & element_place))
+        adjusted.stamp = state.objects[sub].serial;
+    g = found;
     return constness::constant;
 }
 
@@ -2438,6 +2550,12 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
     case semantic_kind::string_literal:
     case semantic_kind::bound_member_function:
     case semantic_kind::assignment:
+    /* [class.cdtor]/4: the virtual table pointer a constructor stores is
+       the object's dynamic type, which the evaluator finds from the class
+       of the object itself */
+    case semantic_kind::vtable_pointer_store:
+        v = constant_value();
+        return constness::constant;
     /* [class.dtor]/13: the destructor called on the object (a
        subobject's, after the body of a destructor; an explicit call) */
     case semantic_kind::destroy: {
@@ -2521,10 +2639,18 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         if (!self.count || (self.extent && self.offset >= self.extent))
             return constness::not_constant;
     }
+    entity_index function = semantics[callee].a;
+    if (x.c == 1 && x.b) {
+        /* [class.virtual]/16: the final overrider in the object's dynamic
+           class, called on its own subobject */
+        constness c = virtual_target(state, self, function, function, self);
+        if (c != constness::constant)
+            return c;
+    }
     bool returned = false;
     constant_value result;
-    constness c = evaluate_invocation(state, semantics[callee].a, self, x.first,
-                                      x.count, returned, result);
+    constness c = evaluate_invocation(state, function, self, x.first, x.count,
+                                      returned, result);
     if (c != constness::constant)
         return c;
     if (fundamental_of(x.type) == fundamental_type::void_) {
@@ -2761,7 +2887,7 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
         if (!x.count) {
             if (c_entity && !entity_table[c_entity].member_count)
                 return constness::constant;
-            if (!k.definition || !c_entity || entity_table[c_entity].dynamic)
+            if (!k.definition || !c_entity)
                 return CONST_UNKNOWN;
         } else {
             if (x.count != 1 || !c_entity ||

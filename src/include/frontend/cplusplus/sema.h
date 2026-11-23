@@ -3588,6 +3588,13 @@ class semantic_analysis
     bool pointer_offset_count(qualified_type type, const constant_value &i,
                               __int128 &n) const;
     void pin_objects(constant_evaluation &state) const;
+    uint32_t most_derived_place(const constant_evaluation &state,
+                                uint32_t place) const;
+    bool subobject_of_class(const constant_evaluation &state, uint32_t place,
+                            entity_index target, uint32_t &out) const;
+    constness virtual_target(const constant_evaluation &state,
+                             const constant_value &self, entity_index f,
+                             entity_index &g, constant_value &adjusted) const;
     uint32_t pointer_tree(const constant_evaluation &state, qualified_type t,
                           const constant_value &v, token_index at);
     constness permitted_result(const constant_evaluation &state,
