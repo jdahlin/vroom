@@ -534,6 +534,14 @@ it; none adds a second way to instantiate.
   Counts drop with those runs (unsupported -677, we reject -29).
 - Decision (2026-11-23, from the user): push the branch to the PR after
   each commit lands, not only at a step's end.
+- 7.5 (dropped): the propagation's we reject rise is +6 on the new
+  harness, +4 with a fix for the local-class case (scratchpad
+  b75-prop-independent.patch); its gain is only -46 unsupported now.
+  Marked hard (parked), revisit when nothing else is left.  Found: a
+  correctness bug, two entities for one specialization when an argument is
+  itself a new lazy specialization (p15-cxx0x.cpp:97; scratchpad mp5.cpp:
+  `ap<places<0>,places<0,0>>::type` resolves to a never-defined second
+  record): queue, its own step.
 - Decision (2026-11-23, from the user: low-hanging fruit, 2-3k): after 7.5,
   four cheap batches by the work list's extension groups (4691 declarations
   in all): (8.1) clang's type traits, ~770 (__has_unique_object_representations
