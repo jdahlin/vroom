@@ -922,7 +922,9 @@ semantic_analysis::using_enum_declaration(UsingEnumDeclaration n)
         return not_supported(n, "enum.udecl");
     entity_index enumeration = t.entity;
     bool any = false;
-    for (entity_index en = 1; en < entity_table.size(); en++) {
+    /* (the enumerators are made after their enumeration's entity, an
+       opaque declaration's too) */
+    for (entity_index en = enumeration + 1; en < entity_table.size(); en++) {
         const entity &x = entity_table[en];
         if (x.kind != entity_kind::enumerator || x.enclosing != enumeration)
             continue;
