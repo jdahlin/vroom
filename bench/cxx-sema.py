@@ -177,7 +177,7 @@ ANALYSIS_LINE = re.compile(r'^(\S+) (.*?):(\d+):(\d+) (.*?):(\d+):(\d+) '
 CLANG_ERROR = re.compile(r'^([^:\n]+):(\d+):\d+: (?:error|fatal error): .*?(?:\[([^\]]+)\])?$', re.M)
 SYNTAX_CATEGORIES = ('Parse Issue', 'Lexical or Preprocessor Issue')
 CLANG_DIAGNOSTIC = re.compile(r'^([^:\n]+):(\d+):\d+: (error|fatal error|warning|note): (.*)$', re.M)
-INSTANTIATION_NOTE = re.compile(r'^in instantiation of .* requested here')
+INSTANTIATION_NOTE = re.compile(r'^(?:in instantiation of .* requested here|while (?:substituting|checking|instantiating)\b.* (?:requested|required) here|while substituting explicitly-specified template arguments|while checking constraint satisfaction)')
 
 
 TYPES_FILE = 'cxx-type-claims'
