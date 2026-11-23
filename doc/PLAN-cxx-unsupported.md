@@ -492,6 +492,14 @@ it; none adds a second way to instantiate.
   classes still eager no metric moves (a pure refactor).  7.3b: template_type
   declares the specialization (lazy) unless the context needs it complete,
   and the uses complete it.  Then 7.1's propagation again.
+- 7.3a (edca5283c, no simplify: tried making require_complete non-const;
+  the const_cast it holds is the one that size_of_type and
+  class_member_lookup each had inline before, so one place is better):
+  require_complete(type or class) at ~45 sites that read a class's
+  completeness or size; metrics unchanged.  Not yet audited: reads of
+  members, bases, constructors, destructors or the vtable without a .size
+  check, and references into type_table or entity_table taken before a
+  call (a lazy completion may grow the tables): 7.3b re-checks them.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
