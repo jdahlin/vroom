@@ -450,14 +450,16 @@ void semantic_analysis::evaluator_stop_detail()
     last_unsupported_detail(text, strlen(text));
 }
 
-void semantic_analysis::evaluation_detail(uint32_t node, bool gave_up)
+void semantic_analysis::evaluation_detail(uint32_t node, bool gave_up,
+                                          const constant_value &v)
 {
     char text[128];
     if (!gave_up) {
         /* the evaluation was constant but its value is not one the
            analysis keeps (or an allocation was left) */
-        snprintf(text, sizeof text, "evaluator kept no value (%s)",
-                 semantic_kind_name(semantics[node].kind));
+        snprintf(text, sizeof text, "evaluator kept no value (%s, value %d)",
+                 semantic_kind_name(semantics[node].kind),
+                 static_cast<int>(v.kind));
     } else {
         snprintf(text, sizeof text, "evaluator met L%u (%s)", last_unknown_line,
                  semantic_kind_name(semantics[node].kind));
@@ -499,7 +501,7 @@ analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
            subclause; its detail is where the evaluator stopped: a "no
            rules" answer, or a value the analysis does not keep) */
         analysis_result refused = not_supported(at, expr_const_reason());
-        evaluation_detail(node, last_unknown_line != 0);
+        evaluation_detail(node, last_unknown_line != 0, v);
         return refused;
     }
     constant = c == constness::constant;

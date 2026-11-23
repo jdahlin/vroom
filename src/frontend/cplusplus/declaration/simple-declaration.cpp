@@ -1852,6 +1852,13 @@ analysis_result semantic_analysis::declare_with_initializer(
                     value.node = data;
                 if (c != constness::constant && s.constexpr_)
                     return not_supported(declaration, "dcl.init");
+                /* [expr.const]/3: a constexpr variable is usable in constant
+                   expressions; the evaluator reads the object's value from
+                   its definition, as for an initialized class object */
+                if (s.constexpr_) {
+                    entity_table[declared_entity].usable = constness::unknown;
+                    entity_table[declared_entity].constexpr_ = true;
+                }
             }
             entity_table[declared_entity].definition = value.node;
             default_constructed = true;

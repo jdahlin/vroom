@@ -13,3 +13,11 @@ struct D {
   D(int = 0) : i(1) {}
 };
 const D d;
+// the object's value is usable in constant expressions ([expr.const]/3)
+static_assert(q.a == 1 && q.b == 2, "");
+struct R {
+  int a = 2;
+  constexpr R() {}
+};
+constexpr R r;
+static_assert(r.a == 2, "");

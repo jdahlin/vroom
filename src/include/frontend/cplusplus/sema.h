@@ -1955,8 +1955,8 @@ class semantic_analysis
     /* why constant_expression answered no (1: analysis folded it as not
        constant, 2: no node), for evaluator_stop_detail */
     uint8_t constant_stop = 0;
-    __attribute__((noinline, cold)) void evaluation_detail(uint32_t node,
-                                                           bool gave_up);
+    __attribute__((noinline, cold)) void
+    evaluation_detail(uint32_t node, bool gave_up, const constant_value &v);
     analysis_result not_supported(SyntaxRef n, const char *subclause,
                                   call_site where = call_site());
     /* whether the parser gave up on a part of the declaration */
