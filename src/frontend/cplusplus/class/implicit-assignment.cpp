@@ -93,7 +93,8 @@ bool semantic_analysis::declared_deleted(entity_index f) const
  */
 semantic_analysis::assignment_use
 semantic_analysis::subobject_assignment(entity_index k, entity_index c,
-                                        bool move, bool &non_throwing)
+                                        bool move, bool &non_throwing,
+                                        bool &nonconst_form)
 {
     if (entity_table[k].kind != entity_kind::class_type)
         return assignment_use::unknown;
@@ -113,7 +114,7 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
         return assignment_use::unknown;
     /* the candidates for the source: a const lvalue binds to X, const X&;
        an xvalue also to X&& */
-    entity_index copy = 0, moving = 0;
+    entity_index copy = 0, moving = 0, nonconst_copy = 0;
     uint32_t copies = 0, movings = 0;
     bool defaulted_usable = false;
     for (entity_index f = found.entity; f; f = entity_table[f].next_overload) {
@@ -139,10 +140,16 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
             copy = f;
             copies++;
         } else if (r.kind == type_kind::lvalue_reference && of_k) {
-            if (!(r.operand.cv() & cv_const))
-                /* the X& form: not viable for the const source, and
-                   the class's implicit one is X& operator=(X&) then */
-                return assignment_use::unknown;
+            if (!(r.operand.cv() & cv_const)) {
+                /* [class.copy.assign]/7: the X& form: not viable for a
+                   const source, so the class's implicit one is X&
+                   operator=(X&) (nonconst_form), and an xvalue binds
+                   to it no more than to a const X& (below) */
+                if (r.operand.cv() & cv_volatile)
+                    return assignment_use::unknown;
+                nonconst_form = true;
+                nonconst_copy = f;
+            }
             copy = f;
             copies++;
         } else if (r.kind == type_kind::rvalue_reference && of_k) {
@@ -195,6 +202,9 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
     }
     if (count > 1)
         return assignment_use::unknown;
+    /* an xvalue does not bind to X&: no viable function */
+    if (chosen && chosen == nonconst_copy && move)
+        return assignment_use::deleted;
     if (!chosen && count && defaulted_usable)
         return assignment_use::usable;
     if (!chosen)
@@ -233,20 +243,24 @@ bool semantic_analysis::assignment_not_trivial(entity_index c)
    inline, deleted or to be defined at the class's end */
 void semantic_analysis::declare_implicit_assignment(entity_index c, bool move,
                                                     bool deleted,
-                                                    bool non_throwing)
+                                                    bool non_throwing,
+                                                    bool nonconst)
 {
     qualified_type self =
         qualified_type::make(entity_table[c].type.unqualified(), cv_none);
     qualified_type result =
         qualified_type::make(type_table.lvalue_reference_to(self), cv_none);
     qualified_type parameter;
+    uint32_t source_cv = cv_const;
+    if (nonconst)
+        source_cv = cv_none;
     if (move)
         parameter =
             qualified_type::make(type_table.rvalue_reference_to(self), cv_none);
     else
         parameter = qualified_type::make(
             type_table.lvalue_reference_to(qualified_type::make(
-                entity_table[c].type.unqualified(), cv_const)),
+                entity_table[c].type.unqualified(), source_cv)),
             cv_none);
     qualified_type type = qualified_type::make(
         type_table.function(result, &parameter, 1, false, non_throwing),
@@ -333,6 +347,7 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
     construction_order(c, order);
     bool copy_deleted = false, move_deleted = false;
     bool copy_non_throwing = true, move_non_throwing = true;
+    bool nonconst_form = false;
     for (entity_index e : order) {
         qualified_type t = entity_table[e].type;
         const struct type &r = type_table[t.unqualified()];
@@ -351,9 +366,9 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
             /* element by element: not analysed */
             return analysis_result::well_formed;
         assignment_use copying =
-            subobject_assignment(k, c, false, copy_non_throwing);
+            subobject_assignment(k, c, false, copy_non_throwing, nonconst_form);
         assignment_use moving =
-            subobject_assignment(k, c, true, move_non_throwing);
+            subobject_assignment(k, c, true, move_non_throwing, nonconst_form);
         if (copying == assignment_use::unknown ||
             moving == assignment_use::unknown)
             return analysis_result::well_formed;
@@ -367,7 +382,8 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
     if (!defaulted_copy &&
         (user_move_constructor || user_move || defaulted_move))
         copy_deleted = true;
-    declare_implicit_assignment(c, false, copy_deleted, copy_non_throwing);
+    declare_implicit_assignment(c, false, copy_deleted, copy_non_throwing,
+                                nonconst_form);
     /* /3: the move assignment operator; /7: "A defaulted move assignment
        operator that is defined as deleted is ignored by overload
        resolution" */

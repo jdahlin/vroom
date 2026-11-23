@@ -4389,10 +4389,11 @@ class semantic_analysis
     enum class assignment_use : uint8_t { usable, deleted, unknown };
     bool declared_deleted(entity_index f) const;
     assignment_use subobject_assignment(entity_index k, entity_index c,
-                                        bool move, bool &non_throwing);
+                                        bool move, bool &non_throwing,
+                                        bool &nonconst_form);
     bool assignment_not_trivial(entity_index c);
     void declare_implicit_assignment(entity_index c, bool move, bool deleted,
-                                     bool non_throwing);
+                                     bool non_throwing, bool nonconst = false);
     analysis_result implicit_assignments(entity_index c);
     analysis_result implicit_assignment_definitions(entity_index c,
                                                     SyntaxRef n);
