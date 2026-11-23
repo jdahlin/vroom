@@ -2188,6 +2188,9 @@ analysis_result semantic_analysis::designated_elements(
     owned_array<entity_index> members;
     uint64_t bound = 0;
     bool bound_known = true, is_union = false;
+    /* an empty base precedes the members (and the non-empty bases) as an
+       element, but is not in the element list here */
+    bool empty_base = false;
     if (is_array) {
         bound = target.bound;
         bound_known = target.bound_known;
@@ -2209,6 +2212,7 @@ analysis_result semantic_analysis::designated_elements(
                which no designator initializes: value-initialized (nothing
                to do when its special members are trivial) */
             if (e.empty_base) {
+                empty_base = true;
                 if (!trivial_special_members(
                         type_table[e.type.unqualified()].entity))
                     return not_supported(list, "dcl.init.aggr");
@@ -2264,6 +2268,12 @@ analysis_result semantic_analysis::designated_elements(
                 return not_supported(list, "dcl.init.aggr");
         } else {
             if (after_nested)
+                return not_supported(list, "dcl.init.aggr");
+            if (empty_base)
+                /* a clause without a designator mixed with designated
+                   ones (clang's -Wc99-designator) counts the empty
+                   bases' positions, which this element list leaves out:
+                   not modelled */
                 return not_supported(list, "dcl.init.aggr");
             if (pos >= room)
                 return ill_formed(list,
