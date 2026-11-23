@@ -303,6 +303,18 @@ it; none adds a second way to instantiate.
   unsupported 38958 -> 38802, we reject 660 -> 606.  We accept +10, all
   part.spec.cpp: a specialization's base-clause naming a private member is
   not checked, because that base-clause is not analysed (queue).
+- 2.4 (57121f77b fix, then simplify: not_supported_because): an explicit
+  specialization of a class template's static data member with an
+  initializer, and its explicit instantiation.  Unsupported 38802 -> 38797
+  only: named_specialization's refusals now name the shape: declarator
+  neither noptr nor ptr 322 (temp.explicit) + 204 (temp.expl.spec), no
+  declarator (`template<> struct N::B<int>;`) 195, no function template
+  for the declarator-id 139, a function with a named declarator-id 120.
+  The blocker the agent found: a class instantiation defines every member
+  at once (instantiation.cpp ~536), so an explicit specialization of a
+  member cannot be recorded before the template's definition runs.  That
+  is the design note's [temp.inst]/2 step: next.
+- Batch 2 done: 39155 -> 38797 (-358), we reject 660 -> 606.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
