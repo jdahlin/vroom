@@ -378,6 +378,10 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
         }
         return statement_expression(v, block(stmts));
     }
+    case builtin_lowering::refuse:
+        return fail("a C23 bit function (__builtin_stdc_*, "
+                    "__builtin_bitreverseg) outside a constant expression",
+                    n.at);
     case builtin_lowering::node:
         break;
     }

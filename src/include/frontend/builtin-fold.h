@@ -51,6 +51,8 @@ enum vfold_op {
     vfold_stdc_rotate_right,
     vfold_stdc_count_ones,
     vfold_stdc_trailing_zeros,
+    /* the rest of C23's stdc_* and bitreverseg (C++ front end) */
+    vfold_stdc_bits,
     /* the byte swap of any integer width */
     vfold_bswap_generic,
     /* the queries about the argument or its type */

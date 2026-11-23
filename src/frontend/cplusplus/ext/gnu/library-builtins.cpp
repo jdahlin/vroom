@@ -346,8 +346,8 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
         form == builtin_form::overflow || form == builtin_form::atomic ||
         form == builtin_form::bit_count || form == builtin_form::generic ||
         form == builtin_form::launder || form == builtin_form::clear_padding ||
-        form == builtin_form::bswapg || form == builtin_form::invoke ||
-        form == builtin_form::complex) {
+        form == builtin_form::bswapg || form == builtin_form::stdc_bits ||
+        form == builtin_form::invoke || form == builtin_form::complex) {
         qualified_type result = void_type;
         /* (the type-generic ones have the signature's result type) */
         if (form == builtin_form::generic || form == builtin_form::bit_count)
@@ -750,6 +750,8 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         return clear_padding_result(n, called, nodes, result);
     case builtin_form::bswapg:
         return bswapg_result(n, called, nodes, result);
+    case builtin_form::stdc_bits:
+        return stdc_bits_result(n, called, nodes, result);
     case builtin_form::atomic:
         break;
     default:
@@ -1050,6 +1052,207 @@ semantic_analysis::bswapg_result(SyntaxRef n, entity_index called,
                                      "width that is not a multiple of 8");
     result = qualified_type::make(t.unqualified(), cv_none);
     return analysis_result::well_formed;
+}
+
+/*
+ * [ext:gnu_library_builtins] C23's <stdbit.h> functions as clang's
+ * __builtin_stdc_* (C23 7.18) and __builtin_bitreverseg, one rule for the
+ * family: the first argument is a scalar unsigned integer (bitreverseg:
+ * any integer), not a bool except for the rotations and bitreverseg; a
+ * rotation's second argument is any integer.  The call has the unsigned int
+ * of the counts, the bool of has_single_bit, or the first argument's type
+ * (bit_ceil, bit_floor, the rotations, bitreverseg).
+ */
+analysis_result
+semantic_analysis::stdc_bits_result(SyntaxRef n, entity_index called,
+                                    const owned_array<uint32_t> &nodes,
+                                    qualified_type &result)
+{
+    const gnu_builtin &row =
+        gnu_builtin_at(entity_table[called].gnu_builtin_row);
+    builtin_stdc_op op = static_cast<builtin_stdc_op>(row.which);
+    bool rotation = op == builtin_stdc_op::rotate_left ||
+                    op == builtin_stdc_op::rotate_right;
+    bool reverse = op == builtin_stdc_op::bitreverse;
+    size_t wanted = 1;
+    if (rotation)
+        wanted = 2;
+    if (nodes.size() != wanted)
+        return ill_formed(n, "wrong number of arguments to a bit function",
+                          "ext.gnu");
+    qualified_type first = semantics[nodes[0]].type;
+    fundamental_type f = fundamental_of(first);
+    if (depends_on_template_parameter(first))
+        return not_supported(n, "temp.dep.constexpr");
+    if (f == fundamental_type::none)
+        return not_supported_builtin(n, "ext.gnu", called,
+                                     "of an operand that is not an integer");
+    if (!fundamental_type_is_integral(f))
+        return ill_formed(n, "1st argument must be a scalar integer type",
+                          "ext.gnu");
+    if (!reverse && fundamental_type_is_signed(tokens.files.behavior, f))
+        return ill_formed(n,
+                          "1st argument must be a scalar unsigned integer "
+                          "type",
+                          "ext.gnu");
+    if (!reverse && !rotation && f == fundamental_type::bool_)
+        return ill_formed(n,
+                          "1st argument must not be a boolean or "
+                          "enumeration type",
+                          "ext.gnu");
+    if (rotation) {
+        fundamental_type g = fundamental_of(semantics[nodes[1]].type);
+        if (g == fundamental_type::none)
+            return not_supported_builtin(
+                n, "ext.gnu", called,
+                "with a rotation count that is not an integer");
+        if (!fundamental_type_is_integral(g))
+            return ill_formed(n, "2nd argument must be a scalar integer type",
+                              "ext.gnu");
+    }
+    switch (op) {
+    case builtin_stdc_op::has_single_bit:
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::bool_), cv_none);
+        break;
+    case builtin_stdc_op::bit_ceil:
+    case builtin_stdc_op::bit_floor:
+    case builtin_stdc_op::rotate_left:
+    case builtin_stdc_op::rotate_right:
+    case builtin_stdc_op::bitreverse:
+        result = qualified_type::make(first.unqualified(), cv_none);
+        break;
+    default:
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::unsigned_int), cv_none);
+        break;
+    }
+    return analysis_result::well_formed;
+}
+
+/* the value of a stdc_bits call, on the first argument's width in bits (a
+   bool's rotation and reversal have one bit): C23 7.18.2-7.18.14 */
+constness semantic_analysis::evaluate_stdc_bits(constant_evaluation &state,
+                                                int which,
+                                                const semantic_node &call,
+                                                constant_value &v)
+{
+    const uint32_t *items = semantics.items(call.first);
+    constant_value x[2];
+    for (uint32_t i = 0; i < call.count && i < 2; i++) {
+        constness c = evaluate_node(state, items[i], x[i]);
+        if (c != constness::constant)
+            return c;
+        if (x[i].kind != constant_value_kind::integer)
+            return constness::unknown;
+    }
+    fundamental_type f = fundamental_of(semantics[items[0]].type);
+    unsigned width = fundamental_type_width(tokens.files.behavior, f);
+    if (f == fundamental_type::bool_)
+        width = 1;
+    unsigned __int128 bits = vfold_mask(x[0].integer, width);
+    unsigned __int128 inverse = vfold_mask(~bits, width);
+    /* the counts of zero bits from the most or the least significant end
+       (the width for a value with none) */
+    auto leading = [&](unsigned __int128 value) -> unsigned {
+        return vfold_leading_zeros(value, width);
+    };
+    auto trailing = [&](unsigned __int128 value) -> unsigned {
+        if (!value)
+            return width;
+        return vfold_trailing_zeros(value);
+    };
+    unsigned __int128 r = 0;
+    switch (static_cast<builtin_stdc_op>(which)) {
+    case builtin_stdc_op::leading_zeros:
+        r = leading(bits);
+        break;
+    case builtin_stdc_op::leading_ones:
+        r = leading(inverse);
+        break;
+    case builtin_stdc_op::trailing_ones:
+        r = trailing(inverse);
+        break;
+    case builtin_stdc_op::first_leading_zero:
+        if (inverse)
+            r = leading(inverse) + 1;
+        break;
+    case builtin_stdc_op::first_leading_one:
+        if (bits)
+            r = leading(bits) + 1;
+        break;
+    case builtin_stdc_op::first_trailing_zero:
+        if (inverse)
+            r = trailing(inverse) + 1;
+        break;
+    case builtin_stdc_op::first_trailing_one:
+        if (bits)
+            r = trailing(bits) + 1;
+        break;
+    case builtin_stdc_op::count_zeros:
+        r = width - vfold_count_ones(bits);
+        break;
+    case builtin_stdc_op::bit_width:
+        r = width - leading(bits);
+        break;
+    case builtin_stdc_op::has_single_bit:
+        r = vfold_count_ones(bits) == 1;
+        break;
+    case builtin_stdc_op::bit_ceil: {
+        /* 1 for 0 and 1; the power of two above x - 1, which wraps to 0
+           when the type has none (clang) */
+        r = 1;
+        if (bits > 1) {
+            unsigned shift = width - leading(bits - 1);
+            if (shift < width)
+                r = static_cast<unsigned __int128>(1) << shift;
+            else
+                r = 0;
+        }
+        break;
+    }
+    case builtin_stdc_op::bit_floor:
+        if (bits)
+            r = static_cast<unsigned __int128>(1)
+                << (width - 1 - leading(bits));
+        break;
+    case builtin_stdc_op::rotate_left:
+    case builtin_stdc_op::rotate_right: {
+        r = bits;
+        if (width > 1) {
+            /* a count of a signed type rotates the other way when
+               negative: its value modulo the width */
+            fundamental_type g = fundamental_of(semantics[items[1]].type);
+            __int128 count = static_cast<__int128>(x[1].integer);
+            bool negative =
+                fundamental_type_is_signed(tokens.files.behavior, g) &&
+                count < 0;
+            bool right =
+                which == static_cast<int>(builtin_stdc_op::rotate_right);
+            unsigned __int128 magnitude = x[1].integer;
+            if (negative) {
+                magnitude = static_cast<unsigned __int128>(-count);
+                right = !right;
+            }
+            r = vfold_rotate(bits, width, magnitude % width, right);
+        }
+        break;
+    }
+    case builtin_stdc_op::bitreverse:
+        r = bits;
+        if (width > 1 && !vfold_integer(vfold_bitreverse, bits, width, &r))
+            return constness::not_constant;
+        break;
+    }
+    /* (a 128-bit result that does not fit in 64 bits has no value kept) */
+    if (!integer_kept_exactly(tokens.files.behavior, fundamental_of(call.type),
+                              r))
+        return constness::unknown;
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer =
+        integer_wrap(tokens.files.behavior, fundamental_of(call.type), r);
+    return constness::constant;
 }
 
 int semantic_analysis::query_builtin(entity_index e) const

@@ -37,6 +37,9 @@ enum class builtin_form : uint8_t {
     clear_padding,
     /* T __builtin_bswapg(T), T an integer type of a multiple of 8 bits */
     bswapg,
+    /* C23's <stdbit.h> functions and __builtin_bitreverseg, type-generic over
+       the integer types (builtin_stdc_op): the result by the operation */
+    stdc_bits,
     /* __builtin_addc (x, y, carry_in, &carry_out) and the subtraction and the
        typed forms: the C table's signature with the carry out a pointer to
        the type */
@@ -80,6 +83,27 @@ enum class builtin_fold : uint8_t {
     /* the first argument's value */
     identity,
     bswap,
+    /* the stdc_bits family (builtin_stdc_op) */
+    stdc_bits,
+};
+
+/* the operations of the stdc_bits form, [stdbit.h.syn] (C23 7.18) */
+enum class builtin_stdc_op : uint8_t {
+    leading_zeros,
+    leading_ones,
+    trailing_ones,
+    first_leading_zero,
+    first_leading_one,
+    first_trailing_zero,
+    first_trailing_one,
+    count_zeros,
+    bit_width,
+    has_single_bit,
+    bit_ceil,
+    bit_floor,
+    rotate_left,
+    rotate_right,
+    bitreverse,
 };
 
 enum class builtin_integer_op : uint8_t {
@@ -143,6 +167,9 @@ enum class builtin_lowering : uint8_t {
     bswap,
     /* zero the padding bytes of the pointee object */
     clear_padding,
+    /* a call that analysis and constant evaluation know and lowering does
+       not: refused with the reason */
+    refuse,
 };
 
 struct gnu_builtin {

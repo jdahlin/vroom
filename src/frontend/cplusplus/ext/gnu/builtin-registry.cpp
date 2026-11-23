@@ -158,6 +158,32 @@ static const gnu_builtin builtin_registry[] = {
        result is the table's unsigned int, a zero value has no fallback */
     ROW("__builtin_stdc_count_ones", bit_count, 4, bit_count),
     ROW("__builtin_stdc_trailing_zeros", bit_count, 5, bit_count),
+/* C23's other <stdbit.h> functions, one rule for the family: the C front
+       end's table has no node for them (a call is refused when lowered);
+       the rotations are its nodes */
+#define STDC_BITS(name, op, lowering)                                          \
+    ROWL("__builtin_stdc_" name, stdc_bits,                                    \
+         static_cast<uint8_t>(builtin_stdc_op::op), stdc_bits, lowering,       \
+         nullptr, nullptr),
+    STDC_BITS("leading_zeros", leading_zeros,
+              refuse) STDC_BITS("leading_ones", leading_ones, refuse)
+        STDC_BITS("trailing_ones", trailing_ones, refuse) STDC_BITS(
+            "first_leading_zero", first_leading_zero,
+            refuse) STDC_BITS("first_leading_one", first_leading_one, refuse)
+            STDC_BITS("first_trailing_zero", first_trailing_zero, refuse)
+                STDC_BITS("first_trailing_one", first_trailing_one,
+                          refuse) STDC_BITS("count_zeros", count_zeros, refuse)
+                    STDC_BITS("bit_width", bit_width, refuse) STDC_BITS(
+                        "has_single_bit", has_single_bit,
+                        refuse) STDC_BITS("bit_ceil", bit_ceil, refuse)
+                        STDC_BITS("bit_floor", bit_floor, refuse)
+                            STDC_BITS("rotate_left", rotate_left, node)
+                                STDC_BITS("rotate_right", rotate_right, node)
+#undef STDC_BITS
+                                    ROWL("__builtin_bitreverseg", stdc_bits,
+                                         static_cast<uint8_t>(
+                                             builtin_stdc_op::bitreverse),
+                                         stdc_bits, refuse, nullptr, nullptr),
     /* the type-generic classifications and comparisons of <math.h> (C17
        7.12.3, 7.12.14): the arguments as they are, unpromoted */
     ROW("__builtin_fpclassify", generic, 6, floating),
@@ -236,6 +262,7 @@ bool gnu_builtin_untyped(uint16_t row)
     case builtin_form::launder:
     case builtin_form::clear_padding:
     case builtin_form::bswapg:
+    case builtin_form::stdc_bits:
     case builtin_form::invoke:
     case builtin_form::unsupported:
         return true;

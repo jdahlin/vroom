@@ -1,0 +1,43 @@
+// [ext:gnu_library_builtins] C23's <stdbit.h> functions as clang's
+// __builtin_stdc_* (C23 7.18) and __builtin_bitreverseg: values in constant
+// expressions and the verdicts of wrong arguments, each compared with clang's.
+template <class A, class B> struct same { static constexpr bool v = false; };
+template <class A> struct same<A, A> { static constexpr bool v = true; };
+static_assert((__builtin_stdc_bit_ceil(0u))==(1u));
+static_assert((__builtin_stdc_bit_ceil(5u))==(8u));
+static_assert((__builtin_stdc_bit_ceil((unsigned char)200))==(0));
+static_assert((__builtin_stdc_bit_floor(5u))==(4u));
+static_assert((__builtin_stdc_bit_floor(0u))==(0u));
+static_assert((__builtin_stdc_bit_width(5u))==(3u));
+static_assert((__builtin_stdc_has_single_bit(4u))==(true));
+static_assert((__builtin_stdc_first_leading_one((unsigned char)0x10))==(4u));
+static_assert((__builtin_stdc_first_trailing_zero(0xffu))==(9u));
+static_assert((__builtin_stdc_first_leading_zero(0xffu))==(1u));
+static_assert((__builtin_stdc_leading_ones(0xf0000000u))==(4u));
+static_assert((__builtin_stdc_count_zeros(1u))==(31u));
+static_assert((__builtin_stdc_rotate_left((unsigned char)0x81,1))==(3));
+static_assert((__builtin_stdc_rotate_left((unsigned char)0x81,-1))==(0xc0));
+static_assert((__builtin_stdc_rotate_right(1u,33))==(0x80000000u));
+static_assert((__builtin_bitreverseg((unsigned char)1))==(128));
+static_assert((__builtin_bitreverseg((short)1))==((short)-32768));
+static_assert(same<decltype(__builtin_stdc_bit_ceil((unsigned char)1)),unsigned char>::v);
+static_assert(same<decltype(__builtin_stdc_bit_width((unsigned char)1)),unsigned>::v);
+static_assert(same<decltype(__builtin_stdc_has_single_bit(1u)),bool>::v);
+static_assert(same<decltype(__builtin_stdc_rotate_left((unsigned char)1,1)),unsigned char>::v);
+static_assert(same<decltype(__builtin_bitreverseg(1)),int>::v);
+static_assert(__builtin_stdc_leading_zeros((unsigned char)1) == 7u);
+static_assert(__builtin_stdc_leading_ones((unsigned short)0xff00) == 8u);
+static_assert(__builtin_stdc_trailing_ones(7u) == 3u);
+static_assert(__builtin_stdc_first_trailing_one(8u) == 4u);
+static_assert(__builtin_stdc_first_trailing_one(0u) == 0u);
+static_assert(__builtin_stdc_bit_ceil(0x80000001u) == 0u);
+static_assert(__builtin_stdc_bit_width(0ull) == 0u);
+static_assert(__builtin_stdc_count_zeros(0ull) == 64u);
+static_assert(__builtin_stdc_has_single_bit(6u) == false);
+static_assert(__builtin_stdc_rotate_right((unsigned char)1, 1) == 0x80);
+static_assert(__builtin_bitreverseg(true) == true);
+constexpr auto bad_signed = __builtin_stdc_bit_width(1);
+constexpr auto bad_count = __builtin_stdc_rotate_left(1u, 1.0);
+constexpr auto bad_bool = __builtin_stdc_leading_zeros(true);
+constexpr auto bad_arity = __builtin_stdc_leading_zeros(1u, 2);
+constexpr auto bad_float = __builtin_bitreverseg(1.0);
