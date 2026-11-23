@@ -729,6 +729,27 @@ entity_index semantic_analysis::evaluated_class(qualified_type t) const
     return record.entity;
 }
 
+/* the value v of a class or array stored in the object at place: the
+   elements one by one into those the object has, when it has them (a
+   store is not a new object, whose elements would be above the
+   invocation's and go with it), else v as it is */
+void semantic_analysis::assign_value(constant_evaluation &state, uint32_t place,
+                                     const constant_value &v)
+{
+    const constant_value held = place_value(state, place);
+    if ((v.kind != constant_value_kind::array &&
+         v.kind != constant_value_kind::class_object) ||
+        held.kind != v.kind || held.count != v.count ||
+        held.designator != v.designator || held.first == v.first) {
+        place_value(state, place) = v;
+        return;
+    }
+    for (uint32_t i = 0; i < v.count; i++) {
+        const constant_value e = state.elements[v.first + i];
+        assign_value(state, element_place | (held.first + i), e);
+    }
+}
+
 constant_value semantic_analysis::copy_value(constant_evaluation &state,
                                              const constant_value &v,
                                              bool read_only)
@@ -1034,8 +1055,23 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             object = target;
             return constness::constant;
         }
-        if (t == fundamental_type::none)
-            return CONST_UNKNOWN;
+        if (t == fundamental_type::none) {
+            /* [class.copy.assign]/10: the implicit copy and move
+               assignment of a class assigns its members, an array's
+               elements, one by one */
+            type_kind tk = type_table[semantics[x.a].type.unqualified()].kind;
+            if (static_cast<preprocessing_op_or_punc>(x.op) !=
+                    preprocessing_op_or_punc::EQUAL ||
+                (tk != type_kind::class_type && tk != type_kind::array) ||
+                (y.kind != constant_value_kind::class_object &&
+                 y.kind != constant_value_kind::array))
+                return CONST_UNKNOWN;
+            if (!(target & element_place) && state.objects[target].opaque)
+                return CONST_UNKNOWN;
+            assign_value(state, target, y);
+            object = target;
+            return constness::constant;
+        }
         preprocessing_op_or_punc o =
             static_cast<preprocessing_op_or_punc>(x.op);
         if (o != preprocessing_op_or_punc::EQUAL) {
@@ -2236,8 +2272,7 @@ constness semantic_analysis::evaluate_invocation(
     bool implicit_constexpr =
         (e.enclosing && entity_table[e.enclosing].lambda &&
          entity_table[e.enclosing].call_operator == f) ||
-        (e.implicit && e.special == special_member::constructor && !count &&
-         e.definition);
+        (e.implicit && e.definition);
     if (!e.constexpr_ && !implicit_constexpr) {
         /* (a library builtin, declared with C language linkage, may be
            one the evaluator does not know clang evaluates) */
@@ -2245,7 +2280,10 @@ constness semantic_analysis::evaluate_invocation(
             return CONST_UNKNOWN;
         /* an implicitly declared special member is constexpr when its
            definition would satisfy [dcl.constexpr]'s rules
-           ([class.copy.ctor]/12), which is not decided yet */
+           ([class.copy.ctor]/12): its synthesized definition is run, and
+           one that calls what is not constexpr is no constant expression
+           itself, the same answer; one with no definition (not analysed)
+           is not known */
         if (e.implicit)
             return CONST_UNKNOWN;
         /* [expr.prim.lambda.closure]/4: a closure's function call operator

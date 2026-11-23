@@ -3539,6 +3539,8 @@ class semantic_analysis
        designates among state.objects; evaluate_read: the value a glvalue's
        lvalue-to-rvalue conversion reads; evaluate_statement: returned is set
        by a return statement, with its value in result */
+    void assign_value(constant_evaluation &state, uint32_t place,
+                      const constant_value &v);
     constness base_subobject_place(const constant_evaluation &state,
                                    uint32_t place, entity_index base,
                                    uint32_t &out) const;
