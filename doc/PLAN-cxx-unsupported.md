@@ -204,6 +204,16 @@ after step 0 the work list gives a better estimate, recorded here.
   refusals of a forced -std=c++98 sweep were 14 counted declarations: the
   harness counts its own RUN lines only.  Rule from here: size a cause with
   --why (counted declarations), never with a free sweep.
+- Batch 1.3 (dropped once, no commit): [dcl.fct] parameter-declaration-clause.cpp:474
+  is 446 dynamic-exception-specifications (`throw(T...)`), 39 attributes, 22
+  bare tokens.  The agent's patch (-374 unsupported) raised lowering refuted
+  +3 and we reject +1, so it reverted; the patch is kept for 1.3b.
+  Also f7af67627 (orchestrator): a redeclaration of a held name says why
+  ([basic.scope.declarative], 504 in one opaque key, now followed).
+- 1.3a (8e751f1a3, orchestrator): __is_array/__is_bounded_array false for
+  T[0]; __is_const/__is_volatile read an array's element cv.  We reject 679
+  -> 667, types +932, constants +928, unsupported +4 (wrong rejections now
+  honest refusals).  No simplify needed (element_type() reused).
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
