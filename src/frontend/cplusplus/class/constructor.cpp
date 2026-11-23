@@ -378,54 +378,6 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     return analysis_result::well_formed;
 }
 
-/*
- * [class.copy.ctor]/11: "A copy/move constructor for class X is trivial if
- * it is not user-provided and ... (11.4) for each non-static data member of
- * X that is of class type (or array thereof), the constructor selected to
- * copy/move that member is trivial"; [class.dtor]/8: "A destructor is
- * trivial if it is not user-provided and if: ... for all of the non-static
- * data members of its class that are of class type (or array thereof),
- * each such class has a trivial destructor."  A user-declared constructor
- * other than a copy constructor leaves the copy trivial.
- */
-bool semantic_analysis::trivial_class(entity_index c) const
-{
-    return copies_bytes(c) && !destroys(c);
-}
-
-/*
- * [class.union]/4 Note 3: "Absent default member initializers, if any
- * non-static data member of a union has a non-trivial default
- * constructor, copy constructor, move constructor,
- * copy assignment operator, move assignment operator, or destructor, the
- * corresponding member function of the union must be user-provided or it
- * will be implicitly deleted for the union."  Whether class c has none:
- * a non-trivial constructor is an entity (implicit_special_members), and
- * so is a destructor.
- */
-bool semantic_analysis::trivial_special_members(entity_index c) const
-{
-    const entity &x = entity_table[c];
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
-        if (!entity_table[k].implicit &&
-            (type_table[entity_table[k].type.unqualified()].parameter_count ==
-                 0 ||
-             is_copy_constructor(c, k)))
-            return false;
-    if (x.dynamic || x.destructor || x.user_copy_assignments)
-        return false;
-    for (uint32_t i = 0; i < x.member_count; i++)
-        if (entity_table[class_members[x.first_member + i]].default_initializer)
-            return false;
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (entity_index k : classes)
-        if (!trivial_special_members(k))
-            return false;
-    return true;
-}
-
 /* whether the copy constructor of class c is the implicit one and
    trivial: no subobject's class declares one either */
 /* whether constructor k of class c is a copy constructor X(cv X&)
@@ -472,34 +424,6 @@ bool semantic_analysis::declares_copy_constructor(entity_index c) const
             return true;
     }
     return false;
-}
-
-bool semantic_analysis::copies_bytes(entity_index c) const
-{
-    const entity &x = entity_table[c];
-    /* [class.copy.ctor]/11.1: not trivial when "class X has no virtual
-       functions" fails: the copy stores the virtual table pointer of X */
-    if (x.dynamic)
-        return false;
-    /* [class.copy.ctor]/6: a declared move constructor or move assignment
-       operator makes the implicit copy constructor deleted */
-    if ((x.defaulted_move_constructor || x.defaulted_move_assignment) &&
-        !x.defaulted_copy_constructor)
-        return false;
-    /* a user-declared copy or move constructor; an implicit one is an entity
-       for overload resolution (declared beside a constructor template,
-       [class.copy.ctor]/6) or because a subobject's is not trivial, which the
-       subobjects below say: it makes the class no less trivially copyable */
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
-        if (!entity_table[k].implicit && is_copy_constructor(c, k))
-            return false;
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (entity_index k : classes)
-        if (!copies_bytes(k))
-            return false;
-    return true;
 }
 
 /*
@@ -1963,18 +1887,6 @@ bool semantic_analysis::default_constructed(entity_index c,
     return false;
 }
 
-bool semantic_analysis::destroys(entity_index c) const
-{
-    if (entity_table[c].destructor)
-        return true;
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (entity_index k : classes)
-        if (destroys(k))
-            return true;
-    return false;
-}
-
 /*
  * [class.default.ctor]/1: "If there is no user-declared constructor for
  * class X, a non-explicit constructor having no parameters is implicitly
@@ -2599,22 +2511,6 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
                and a deleted function it would call does not delete this one */
             return true;
     return false;
-}
-
-/* [class.default.ctor]/3: X() = default beside other constructors, trivial
-   (implicit_special_members declares no entity for it): default-initialization
-   calls nothing */
-bool semantic_analysis::trivial_defaulted_default_constructor(
-    entity_index c) const
-{
-    const entity &x = entity_table[c];
-    if (!x.defaulted_default_constructor)
-        return false;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
-        if (!type_table[entity_table[k].type.unqualified()].parameter_count)
-            return false;
-    return true;
 }
 
 /* an implicitly-declared constructor (the copy constructor X(const X&)

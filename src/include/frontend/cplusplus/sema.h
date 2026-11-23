@@ -1762,7 +1762,12 @@ class semantic_analysis
        analysis cannot tell; basic/literal-types.cpp) */
     constness literal_type(qualified_type t) const;
     constness literal_class(entity_index c) const;
+    /* [special]: which special member functions are trivial
+       (class/triviality.cpp) */
     bool trivial_defaulted_default_constructor(entity_index c) const;
+    bool trivial_default_constructor(entity_index c, bool &known) const;
+    bool trivial_copy_constructor(entity_index c) const;
+    bool copy_constructor_deleted_by_move(entity_index c) const;
     bool copies_bytes(entity_index c) const;
     bool trivial_special_members(entity_index c) const;
     bool is_copy_constructor(entity_index c, entity_index k) const;
@@ -3112,10 +3117,8 @@ class semantic_analysis
     /* [meta.unary.prop] is_constructible and is_nothrow_constructible
        (ext/clang/constructible-traits.cpp): the analysis of T t(declval<
        Args>()...); */
-    bool trivial_default_constructor(entity_index c) const;
-    bool trivial_copy_constructor(entity_index c) const;
     bool trivially_constructed(qualified_type t, const qualified_type *types,
-                               uint32_t count) const;
+                               uint32_t count, bool &known) const;
     analysis_result clang_constructible_trait(SyntaxRef n, bool nothrow,
                                               bool trivial,
                                               expression_meaning &m);
@@ -3150,7 +3153,6 @@ class semantic_analysis
     bool relocatable_type(qualified_type t, bool cpp26, bool &known);
     bool class_head_names_trivial_abi(entity_index c);
     bool unique_representation(qualified_type t, bool &answer);
-    bool trivial_default_class(entity_index c, bool &known) const;
     void base_classes_of(entity_index c, owned_array<entity_index> &out) const;
     void layout_member_types(entity_index c, owned_array<type_index> &out);
     bool first_data_class(entity_index c, entity_index &owner) const;
