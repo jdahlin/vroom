@@ -1600,7 +1600,9 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         if (!entity_table[c].name)
             /* an unnamed class's members are initialized by no constructor
                of its own */
-            return not_supported(d.index(), "class.union");
+            return not_supported_because(
+                d.index(), "class.union",
+                "a default member initializer in an unnamed class");
         if (entity_table[c].union_) {
             /* [class.union]/2: "At most one variant member of a union may
                have a default member initializer" */

@@ -325,7 +325,10 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
         entity_index kd = entity_table[k].destructor;
         if (subobject_destructor_inaccessible(c, k) ||
             (kd && entity_table[kd].deleted))
-            return not_supported(n, "class.dtor");
+            return not_supported_because(
+                n, "class.dtor",
+                "a subobject's destructor is deleted or inaccessible (the "
+                "class's is defined as deleted)");
     }
     entity_index destructor = entity_table[c].destructor;
     if (destructor && entity_table[destructor].virtual_ &&

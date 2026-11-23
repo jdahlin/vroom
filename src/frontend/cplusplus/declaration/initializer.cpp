@@ -519,7 +519,10 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
           type_table[m.type.unqualified()].kind == type_kind::class_type &&
           type_table[r.operand.unqualified()].entity ==
               type_table[m.type.unqualified()].entity))
-        return not_supported(at, "class.temporary");
+        return not_supported_because(
+            at, "class.temporary",
+            "an aggregate prvalue bound to a reference at namespace scope "
+            "(static temporary) or to a reference to another class");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const lvalue or rvalue reference is bound to a
        temporary holding its value ([conv.lval]) */

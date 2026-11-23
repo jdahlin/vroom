@@ -869,10 +869,19 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
     in_member_declarator = false;
     if (r != analysis_result::well_formed)
         return r;
+    if (m.has_id && m.operator_function &&
+        m.implemented != preprocessing_op_or_punc::EQUAL)
+        return not_supported_because(
+            n, "dcl.fct.def.default",
+            "a defaulted operator that is no copy or move assignment "
+            "(a comparison operator, [class.compare.default])");
     if (!m.has_id || m.qualifier || function_cv || m.aligned ||
         !m.operator_function ||
         m.implemented != preprocessing_op_or_punc::EQUAL)
-        return not_supported(n, "dcl.fct.def.default");
+        return not_supported_because(
+            n, "dcl.fct.def.default",
+            "a defaulted function that is no operator, or is declared with "
+            "a qualifier, cv-qualifier or alignment");
     for (const parameter_meaning &parameter : function_parameters)
         if (parameter.default_argument)
             return not_supported(n, "dcl.fct.def.default");

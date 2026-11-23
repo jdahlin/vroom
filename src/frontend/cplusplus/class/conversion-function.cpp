@@ -563,7 +563,10 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
         (m.category == value_category::prvalue && entity_table[c].destructor))
         /* the temporary's destruction ([class.temporary]/4), an aggregate's
            temporary (aggregate_prvalue) */
-        return not_supported(at, "class.temporary");
+        return not_supported_because(
+            at, "class.temporary",
+            "a member function called on a prvalue that is an aggregate or "
+            "has a destructor (the temporary's destruction)");
     const entity &x = entity_table[f];
     expression_meaning address;
     address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);
