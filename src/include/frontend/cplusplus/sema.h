@@ -5991,6 +5991,12 @@ class semantic_analysis
        overload resolution chooses from ([over.call.func]); 0 elsewhere,
        where a name of an overload set is [over.over]'s */
     token_index overloaded_callee = 0;
+    /* the call overloaded_callee names has arguments: argument-dependent
+       lookup ([basic.lookup.argdep]/1) applies to its name */
+    bool callee_has_arguments = false;
+    /* a declaration of the translation unit was not parsed: the names it
+       declares are unknown, so no name is known to be undeclared */
+    bool declaration_not_parsed_seen = false;
     /* [expr.unary.op]/4: the qualified-id that is the operand of an
        explicit & (not in parentheses), whose non-static member is a
        pointer to member; 0 elsewhere */

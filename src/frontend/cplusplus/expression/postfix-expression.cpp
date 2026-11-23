@@ -1179,9 +1179,11 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             early.append(e);
     if (!looked_up) {
         overloaded_callee = callee_name(callee);
+        callee_has_arguments = !arguments.empty();
         member_template_name = 0;
         r = expression(callee, f);
         overloaded_callee = 0;
+        callee_has_arguments = false;
     }
     if (entity_index held = member_template_name) {
         member_template_name = 0;

@@ -295,9 +295,12 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
            declarations are the enclosing scope's: one of them not parsed
            does not stop the others (linkage_specification() checks each) */
         d.result = linkage_specification(n);
-    } else if (!parsed_completely(n))
+    } else if (!parsed_completely(n)) {
         d.result = analysis_result::not_parsed;
-    else
+        /* what it declares is not known (a name it declares is no name
+           "no scope has") */
+        declaration_not_parsed_seen = true;
+    } else
         d.result = declaration_by_kind(n);
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
