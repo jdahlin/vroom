@@ -169,6 +169,39 @@ def generate_stdc(reader):
     return '\n'.join(lines) + '\n'
 
 
+# clang's alignment builtins (custom type checking, prototype "T(void const*,
+# size_t)": the operand type decides).  Only the C++ front end has them
+# (analysis, constant evaluation); the operation number is its `align` form's
+# `which`.
+ALIGN_RECORDS = (
+    ('AlignUp', '__builtin_align_up', 0),
+    ('AlignDown', '__builtin_align_down', 1),
+    ('IsAligned', '__builtin_is_aligned', 2),
+)
+
+
+def generate_align(reader):
+    by_record = {}
+    for row in read_table(reader, 'Builtins.td'):
+        by_record.setdefault(row['record'], []).append(row)
+    lines = [
+        GENERATED,
+        '/* ALIGN_OP (spelling, operation): 0 up, 1 down, 2 is_aligned. */',
+    ]
+    for record, name, op in ALIGN_RECORDS:
+        rows = by_record.get(record, [])
+        if len(rows) != 1:
+            raise ValueError(f'{record}: expected one record, got {len(rows)}')
+        row, = rows
+        if row['spelling'] != name:
+            raise ValueError(f'{record}: expected spelling {name}, got {row["spelling"]}')
+        if (row['alias_of'] or row['features'] or row['header'] or row['languages'] or
+                set(row['attributes']) != {'NoThrow', 'Const', 'Constexpr', 'CustomTypeChecking'}):
+            raise ValueError(f'{name}: unexpected availability or attributes')
+        lines.append(f'ALIGN_OP("{name}", {op})')
+    return '\n'.join(lines) + '\n'
+
+
 def generate_targets(reader):
     # The compiler owns the dispatch IDs. The input owns the spellings,
     # prototypes and prerequisites. Only these wired operations are emitted.
@@ -275,6 +308,7 @@ def main():
         outputs = {
             args.output_root / 'frontend/integer-builtins.inc': generate_integer(args.reader),
             args.output_root / 'frontend/stdc-builtins.inc': generate_stdc(args.reader),
+            args.output_root / 'frontend/align-builtins.inc': generate_align(args.reader),
             args.output_root / 'frontend/c/target-builtins.inc': generate_targets(args.reader),
             args.output_root / 'frontend/c/builtin-stubs.inc': generate_stubs(args.reader),
         }

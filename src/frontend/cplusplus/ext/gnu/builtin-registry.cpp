@@ -69,9 +69,13 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_conjf", complex_conjugate, 0, none),
     ROW("__builtin_conjl", complex_conjugate, 0, none),
     ROWL("__builtin_invoke", invoke, 0, none, node, nullptr, nullptr),
-    ROWL("__builtin_align_up", align, 0, none, refuse, nullptr, nullptr),
-    ROWL("__builtin_align_down", align, 1, none, refuse, nullptr, nullptr),
-    ROWL("__builtin_is_aligned", align, 2, none, refuse, nullptr, nullptr),
+/* clang's alignment builtins, generated from its records
+       (align-builtins.inc); a call outside a constant expression is refused
+       when lowered */
+#define ALIGN_OP(name, op)                                                     \
+    ROWL(name, align, op, none, refuse, nullptr, nullptr),
+#include "frontend/align-builtins.inc"
+#undef ALIGN_OP
     ROWL("__builtin_bswapg", bswapg, 0, bswap, bswap, nullptr, nullptr),
 /* the builtins a constant expression folds: the integer operations,
        the floating ones, the string functions; a `library` row is a call
