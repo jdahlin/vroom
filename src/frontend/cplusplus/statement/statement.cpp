@@ -538,6 +538,7 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
         [&](UsingDirective d) { return declares_nothing(d); },
         [&](NamespaceAliasDefinition d) { return declares_nothing(d); },
         [&](UsingDeclaration d) { return declares_nothing(d); },
+        [&](UsingEnumDeclaration d) { return declares_nothing(d); },
         [&](Statement other) {
             if (other.is(syntax_kind::statement))
                 return attributed_statement(other, built);

@@ -903,6 +903,40 @@ semantic_analysis::elaborated_enum_specifier(ElaboratedEnumSpecifier n,
 }
 
 /*
+ * [enum.udecl]/1: "The enum-name in a using-enum-declaration shall name a
+ * non-dependent previously declared enumeration type", /2: the declaration
+ * "introduces the enumerator names of the named enumeration as if by a
+ * using-declaration for each enumerator".  A scoped enumeration's
+ * enumerators are the entities enclosed by it; a name the scope has already
+ * is not analysed.
+ */
+analysis_result
+semantic_analysis::using_enum_declaration(UsingEnumDeclaration n)
+{
+    if (n.size() != 3 || !n[1].is(syntax_kind::elaborated_enum_specifier))
+        return not_supported(n, "enum.udecl");
+    type_index type = 0;
+    VTRY(r, elaborated_enum_specifier(ElaboratedEnumSpecifier(n[1]), type));
+    const struct type &t = type_table[type];
+    if (t.kind != type_kind::enumeration || !t.entity)
+        return not_supported(n, "enum.udecl");
+    entity_index enumeration = t.entity;
+    bool any = false;
+    for (entity_index en = 1; en < entity_table.size(); en++) {
+        const entity &x = entity_table[en];
+        if (x.kind != entity_kind::enumerator || x.enclosing != enumeration)
+            continue;
+        if (entity_table.find(current_scope, x.name))
+            return not_supported(n, "enum.udecl");
+        entity_table.bind(current_scope, x.name, en, true);
+        any = true;
+    }
+    if (!any)
+        return not_supported(n, "enum.udecl");
+    return analysis_result::well_formed;
+}
+
+/*
  * [expr.prim.id.unqual]/2: an enumerator: "The expression is an lvalue if
  * the entity is a function, variable, structured binding, data member, or
  * template parameter object and a prvalue otherwise"; its value is a

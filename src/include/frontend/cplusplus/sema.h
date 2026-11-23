@@ -2525,6 +2525,9 @@ class semantic_analysis
     analysis_result using_directive(UsingDirective n);
     analysis_result namespace_alias_definition(NamespaceAliasDefinition n);
     analysis_result using_declaration(UsingDeclaration n);
+    /* [enum.udecl]/2: the enumerators of a scoped enumeration as if
+       declared in the current scope by using-declarations */
+    analysis_result using_enum_declaration(UsingEnumDeclaration n);
     analysis_result using_declarator(UsingDeclarator n, bool if_exists = false);
     /* [temp.variadic]/5: in a using-declaration the pattern is a
        using-declarator: one followed by an ellipsis, once for each element

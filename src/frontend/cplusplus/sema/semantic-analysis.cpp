@@ -365,6 +365,7 @@ analysis_result semantic_analysis::declaration_by_kind(SyntaxRef n)
             return namespace_alias_definition(a);
         },
         [&](UsingDeclaration u) { return using_declaration(u); },
+        [&](UsingEnumDeclaration u) { return using_enum_declaration(u); },
         [&](OpaqueEnumDeclaration e) {
             type_index type = 0;
             return enum_specifier(e, type);
