@@ -327,6 +327,20 @@ it; none adds a second way to instantiate.
   once, and an explicit specialization of the member recorded before
   instantiate_pending() replaces the template's definition
   ([temp.expl.spec]/7).  No second mechanism.
+- 3.1 (2785a3a2f fix, 7b0c3bdf9 simplify): out-of-class member definitions
+  of a class template specialization wait in postponed_bodies and are
+  defined by instantiate_pending() when a member they may define is needed
+  (or virtual, or explicitly instantiated); const/constexpr static members,
+  member templates and nested classes still with the class.  An explicit
+  specialization drops the waiting definition of that member.  Unsupported
+  38797 -> 38761, we reject and lowering unchanged; we accept +1
+  (p2-20.cpp:141: `static` on an out-of-class member definition was only
+  reported at the eager instantiation: needs a check at the definition).
+  Simplify: a waiting definition with no name token (an operator's) matched
+  any member name.  Queue: that storage-class check; the no-initializer
+  explicit specialization refusal (`template<> int C<int>::y;`) can be
+  lifted now; an overloaded member function's specialization does not drop
+  the waiting definition.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
