@@ -683,9 +683,18 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
     }
     if (prior) {
         entity &e = entity_table[prior];
-        /* declared by a declaration not analysed (hold_names) */
-        if (e.kind == entity_kind::none)
-            return not_supported(declaration, "basic.scope.declarative");
+        /* declared by a declaration not analysed (hold_names): the
+           detail names the reason, which --why follows to that declaration */
+        if (e.kind == entity_kind::none) {
+            analysis_result refused =
+                not_supported(declaration, "basic.scope.declarative");
+            if (e.held_by == held_cause::refused)
+                name_unsupported_detail(id, "is declared by a declaration "
+                                            "with no rules yet");
+            else
+                name_held_detail(id, e.held_by);
+            return refused;
+        }
         /* [basic.scope.declarative]/4: "Given a set of declarations in a
            single declarative region, each of which specifies the same
            unqualified name, they shall all refer to the same entity, or all
