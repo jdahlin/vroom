@@ -651,8 +651,8 @@ bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
  * such; a class, when it is trivially copyable, is no dynamic class, and its
  * bases and members all have, with no padding between or after them (their
  * bytes cover the class's size); a union, when each member has and fills
- * it.  false: not analysed (bit-fields, [[no_unique_address]], member
- * pointers).
+ * it; a bit-field counts its width.  false: not analysed (an array of
+ * unknown bound).
  */
 bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
 {
@@ -668,7 +668,15 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
     switch (record.kind) {
     case type_kind::enumeration:
     case type_kind::pointer:
+    case type_kind::pointer_to_member:
         answer = true;
+        return true;
+    /* [ext:clang_type_traits] an atomic, complex or vector type has not
+       (clang++) */
+    case type_kind::atomic:
+    case type_kind::complex:
+    case type_kind::vector:
+    case type_kind::ext_vector:
         return true;
     case type_kind::fundamental:
         if (is_integral(t)) {
@@ -704,7 +712,26 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
     default:
         return false;
     }
-    entity_index c = record.entity;
+    bool unique = false;
+    uint64_t extent = 0;
+    if (!unique_class_extent(record.entity, unique, extent))
+        return false;
+    answer = unique && extent == 8 * entity_table[record.entity].size;
+    return true;
+}
+
+/*
+ * clang's structHasUniqueObjectRepresentations: whether the class's bases
+ * and members all have unique representations and cover its bytes from
+ * the first with no gap; `extent` is the bits they cover (a base's or a
+ * [[no_unique_address]] member's tail padding is left to what follows it,
+ * the caller compares the whole).  false: not analysed.
+ */
+bool semantic_analysis::unique_class_extent(entity_index c, bool &unique,
+                                            uint64_t &extent)
+{
+    unique = false;
+    extent = 0;
     require_complete(c);
     const entity &x = entity_table[c];
     if (!x.size)
@@ -727,71 +754,93 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
         if (empty_class(bc))
             continue;
         bool sub = false;
-        if (!unique_representation(b.type, sub))
+        uint64_t covered = 0;
+        if (!unique_class_extent(bc, sub, covered))
             return false;
-        if (!sub) {
-            /* a derived class's own members may take the base's tail
-               padding (an Itanium ABI layout rule for a non-POD base): not
-               followed */
-            if (x.member_count)
-                return false;
-            answer = false;
+        /* clang: a base without unique representations has the class
+           without */
+        if (!sub)
             return true;
-        }
-        pieces.append(piece{b.offset, entity_table[bc].size});
+        pieces.append(piece{8 * b.offset, covered});
     }
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
         if (m.kind != entity_kind::variable || !m.nonstatic_member ||
             m.base_subobject)
             continue;
-        if (m.bit_field || m.no_unique_address)
-            return false;
+        /* an unnamed bit-field is padding */
+        if (m.bit_field && !m.name)
+            continue;
+        /* an empty [[no_unique_address]] member has no bytes */
+        if (m.no_unique_address &&
+            type_table[m.type.unqualified()].kind == type_kind::class_type &&
+            empty_class(type_table[m.type.unqualified()].entity))
+            continue;
         bool sub = false;
-        if (!unique_representation(m.type, sub))
+        uint64_t covered = 0;
+        bool overlapping =
+            m.no_unique_address &&
+            type_table[m.type.unqualified()].kind == type_kind::class_type;
+        if (overlapping) {
+            if (!unique_class_extent(type_table[m.type.unqualified()].entity,
+                                     sub, covered))
+                return false;
+        } else if (!unique_representation(m.type, sub))
             return false;
-        if (!sub) {
-            answer = false;
+        if (!sub)
             return true;
-        }
-        uint64_t size = size_of_type(m.type);
+        uint64_t size = 8 * size_of_type(m.type);
+        /* a [[no_unique_address]] class leaves its tail padding to the
+           next member */
+        if (overlapping)
+            size = covered;
+        /* [ext:clang_type_traits] a bit-field's bits are its width, a
+           union's the whole class (as clang++ answers) */
+        if (m.bit_field)
+            size = m.bit_width;
         /* a reference member's bytes are a pointer's */
         if (type_table[m.type.unqualified()].kind ==
                 type_kind::lvalue_reference ||
             type_table[m.type.unqualified()].kind ==
                 type_kind::rvalue_reference)
-            size = size_of_type(
-                qualified_type::make(type_table.pointer_to(m.type), cv_none));
+            size = 8 * size_of_type(qualified_type::make(
+                           type_table.pointer_to(m.type), cv_none));
         if (!size)
             continue;
         if (x.union_) {
-            if (size != x.size) {
-                answer = false;
+            if (!m.bit_field && size != 8 * x.size)
                 return true;
-            }
             pieces_in_union = true;
             continue;
         }
-        pieces.append(piece{m.offset, size});
+        if (m.bit_field)
+            pieces.append(piece{m.bit_offset, size});
+        else
+            pieces.append(piece{8 * m.offset, size});
     }
     if (x.union_) {
-        answer = pieces_in_union;
+        unique = pieces_in_union;
+        extent = 8 * x.size;
         return true;
     }
     uint64_t end = 0;
+    uint32_t taken = 0;
     for (;;) {
         /* the piece that starts at the end of those taken */
         bool found = false;
         for (const piece &p : pieces)
             if (p.offset == end && p.size) {
                 end += p.size;
+                taken++;
                 found = true;
                 break;
             }
         if (!found)
             break;
     }
-    answer = end == x.size;
+    /* a piece left over starts after a gap */
+    unique = taken == pieces.size();
+    extent = end;
     return true;
 }
 
