@@ -315,6 +315,18 @@ it; none adds a second way to instantiate.
   member cannot be recorded before the template's definition runs.  That
   is the design note's [temp.inst]/2 step: next.
 - Batch 2 done: 39155 -> 38797 (-358), we reject 660 -> 606.
+- Step design, [temp.inst]/2-4 for out-of-class member definitions (batch
+  3.1): define_class_instantiation defines each out-of-class member
+  definition of the template (template_member_definitions,
+  define_template_member) when the class is instantiated.  In-class member
+  bodies already wait: postponed_bodies, defined by instantiate_pending()
+  after the translation unit's declarations ([temp.point]/7) only when
+  member_definition_needed or explicitly instantiated.  The step records the
+  out-of-class ones the same way (one queue, the same condition; a static
+  data member needed by odr-use, [temp.inst]/4) instead of defining them at
+  once, and an explicit specialization of the member recorded before
+  instantiate_pending() replaces the template's definition
+  ([temp.expl.spec]/7).  No second mechanism.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
