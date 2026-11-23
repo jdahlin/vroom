@@ -346,6 +346,7 @@ static void vir_print_flags_append(vir_print_state *p, const vir_insn *in)
                                     1u << VIR_INSN_FLAG_SOURCE_ALIGN_LOG2(fl));
         break;
     case VIR_OP_CALL:
+    case VIR_OP_INVOKE:
         if (fl & VIR_INSN_FLAG_CALL_NORETURN)
             vir_print_append(p, " noreturn");
         if (fl & VIR_INSN_FLAG_CALL_PURE)
@@ -486,11 +487,13 @@ static void vir_print_insn_append(vir_print_state *p, const vir_insn *in,
         vir_print_append(p, ", ");
         vir_print_group_append(p, in->b);
         return;
-    case VIR_FORM_CALL: {
+    case VIR_FORM_CALL:
+    case VIR_FORM_INVOKE: {
         uint32_t si = vir_print_signature_index(p, in->b),
                  n = in->c < ne ? f->extra[in->c] : 0;
+        bool invoke = oi->form == VIR_FORM_INVOKE;
 
-        vir_print_append(p, "call ");
+        vir_print_append(p, invoke ? "invoke " : "call ");
         vir_print_operand_append(p, in, 0);
         if (si != VIR_BLOCK_NONE)
             vir_print_append_format(p, " %%s%u (", si);
@@ -500,9 +503,44 @@ static void vir_print_insn_append(vir_print_state *p, const vir_insn *in,
             n = 0;
         vir_print_list_values_append(p, in->c + 1, n, NULL);
         vir_print_append(p, ")");
+        if (invoke) {
+            if ((uint64_t)in->c + 3 + n <= ne)
+                vir_print_append_format(p, " -> b%u unwind b%u",
+                                        f->extra[in->c + 1 + n],
+                                        f->extra[in->c + 2 + n]);
+            else
+                vir_print_append(p, " -> b? unwind b?");
+        }
         vir_print_flags_append(p, in);
         return;
     }
+    case VIR_FORM_LANDINGPAD: {
+        /* extra[a]: flags (bit 0 cleanup), the clause count, then per clause its type's symbol + 1 (0: catch-all) */
+        uint32_t n = 0;
+
+        vir_print_append(p, "landingpad");
+        if ((uint64_t)in->a + 2 <= ne) {
+            n = f->extra[in->a + 1];
+            if (f->extra[in->a] & 1)
+                vir_print_append(p, " cleanup");
+            if ((uint64_t)in->a + 2 + n > ne)
+                n = 0;
+        }
+        for (uint32_t i = 0; i < n; i++) {
+            uint32_t t = f->extra[in->a + 2 + i];
+
+            if (t) {
+                vir_print_append(p, " catch ");
+                vir_print_symbol_append(p, t - 1, 0);
+            } else
+                vir_print_append(p, " catchall");
+        }
+        return;
+    }
+    case VIR_FORM_SYMBOL:
+        vir_print_append_format(p, "%s ", oi->name);
+        vir_print_symbol_append(p, in->a, 0);
+        return;
     case VIR_FORM_ASM:
     case VIR_FORM_ASMGOTO: {
         uint32_t no = 0, ni = 0, b = in->b;
@@ -674,6 +712,10 @@ static void vir_print_function_append(vir_print_state *p, const vir_function *f)
         vir_print_append(p, " local");
     if (f->flags & VIR_FUNCTION_FLAG_EXPOSURE)
         vir_print_append(p, " exposure");
+    if (f->flags & VIR_FUNCTION_FLAG_EH) {
+        vir_print_append(p, " personality ");
+        vir_print_symbol_append(p, f->personality, 0);
+    }
     vir_print_append(p, " {\n");
     (void)u;
     for (uint32_t i = 0; i < f->slot_count; i++) {
@@ -714,6 +756,8 @@ static void vir_print_function_append(vir_print_state *p, const vir_function *f)
             vir_print_append(p, " addr");
         if (k->flags & VIR_BLOCK_FLAG_COLD)
             vir_print_append(p, " cold");
+        if (k->flags & VIR_BLOCK_FLAG_LPAD)
+            vir_print_append(p, " lpad");
         vir_print_append(p, ":\n");
         {
             uint32_t skip = np;

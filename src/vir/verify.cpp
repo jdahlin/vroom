@@ -387,6 +387,16 @@ static bool vir_verify_lists_in_range_check(vir_verify_state *v, uint32_t b,
             in->c == 0 || in->c >= ne ||
             (uint64_t)in->c + 1 + f->extra[in->c] > ne;
         break;
+    case VIR_OP_INVOKE: /* the values, then the normal and the unwind block */
+        vir_alloc_check_failure_add =
+            in->c == 0 || in->c >= ne ||
+            (uint64_t)in->c + 3 + f->extra[in->c] > ne;
+        break;
+    case VIR_OP_LANDINGPAD: /* flags, the clause count, the clauses */
+        vir_alloc_check_failure_add =
+            in->a == 0 || (uint64_t)in->a + 2 > ne ||
+            (uint64_t)in->a + 2 + f->extra[in->a + 1] > ne;
+        break;
     case VIR_OP_ASM:
     case VIR_OP_ASMGOTO:
         vir_alloc_check_failure_add =
@@ -578,7 +588,23 @@ static void vir_verify_insn_check(vir_verify_state *v, uint32_t b, uint32_t i,
         uint32_t n = 0;
         uint8_t pt[8];
 
-        if (pr->op == VIR_OP_CALL) {
+        if (pr->op == VIR_OP_LANDINGPAD) {
+            /* the exception's address, then the selector (8.8) */
+            static const uint8_t lpad_types[2] = {VIR_TYPE_PTR, VIR_TYPE_I32};
+
+            if (in->b >= 2) {
+                vir_verify_fail(v, "T6", b, i,
+                                "proj: index %u, a landingpad has 2 pieces",
+                                in->b);
+                return;
+            }
+            if (in->type != lpad_types[in->b]) {
+                vir_verify_fail(v, "T6", b, i, "proj: the piece is %s, not %s",
+                                vir_verify_type_name(lpad_types[in->b]),
+                                vir_verify_type_name(in->type));
+                return;
+            }
+        } else if (pr->op == VIR_OP_CALL || pr->op == VIR_OP_INVOKE) {
             uint32_t off = pr->b;
             const char *e = vir_verify_signature_check(f, off);
 
@@ -615,9 +641,10 @@ static void vir_verify_insn_check(vir_verify_state *v, uint32_t b, uint32_t i,
                 return;
             }
         } else {
-            vir_verify_fail(v, "T6", b, i,
-                            "proj: the producer is %s, not a call or asm",
-                            vir_verify_opcode_name(pr));
+            vir_verify_fail(
+                v, "T6", b, i,
+                "proj: the producer is %s, not a call, asm or landingpad",
+                vir_verify_opcode_name(pr));
             return;
         }
     }
@@ -827,6 +854,113 @@ static void vir_verify_switch_check(vir_verify_state *v, uint32_t b, uint32_t i,
 }
 
 /* the dominance and use rules for one instruction */
+/* an invoke's normal (k 0) or unwind (k 1) block; VIR_BLOCK_NONE when its list is out of range */
+static uint32_t vir_verify_invoke_target(const vir_function *f,
+                                         const vir_insn *in, uint32_t k)
+{
+    if (in->c >= f->extra_count ||
+        (uint64_t)in->c + 3 + f->extra[in->c] > f->extra_count)
+        return VIR_BLOCK_NONE;
+    return f->extra[in->c + 1 + f->extra[in->c] + k];
+}
+
+/* E1-E4 (8.8): exceptions */
+static void vir_verify_exceptions_check(vir_verify_state *v)
+{
+    vir_function *f = v->function;
+    bool eh = (f->flags & VIR_FUNCTION_FLAG_EH) != 0;
+
+    for (uint32_t b = 0; b < f->block_count; b++) {
+        const vir_block *k = &f->blocks[b];
+        bool lpad = (k->flags & VIR_BLOCK_FLAG_LPAD) != 0, first = true;
+
+        if (lpad && !eh)
+            vir_verify_fail(v, "E1", b, VIR_BLOCK_NONE,
+                            "a landing pad in a function without a "
+                            "personality routine");
+        /* E3: a landing pad is reached by unwind edges only */
+        for (uint32_t j = 0; lpad && j < k->predecessor_count; j++) {
+            uint32_t p = f->extra[k->predecessor_first + j],
+                     t = vir_block_terminator(f, p);
+
+            if (f->insns[t].op != VIR_OP_INVOKE ||
+                vir_verify_invoke_target(f, &f->insns[t], 1) != b ||
+                vir_verify_invoke_target(f, &f->insns[t], 0) == b) {
+                vir_verify_fail(v, "E3", b, VIR_BLOCK_NONE,
+                                "a landing pad reached from b%u other than "
+                                "by an unwind edge",
+                                p);
+                break;
+            }
+        }
+        for (uint32_t i = 0; i < k->insn_count; i++) {
+            const vir_insn *x = &f->insns[k->first + i];
+            uint32_t op = x->op;
+
+            if (vir_opcode_is_constant(op))
+                continue;
+            if (!eh && (op == VIR_OP_INVOKE || op == VIR_OP_LANDINGPAD ||
+                        op == VIR_OP_RESUME || op == VIR_OP_EHTYPEID))
+                vir_verify_fail(v, "E1", b, i,
+                                "%s in a function without a personality "
+                                "routine",
+                                vir_verify_opcode_name(x));
+            if (op == VIR_OP_LANDINGPAD && !(lpad && first))
+                vir_verify_fail(v, "E3", b, i,
+                                "landingpad other than as the first "
+                                "instruction of a landing pad");
+            if (lpad && first && op != VIR_OP_LANDINGPAD)
+                vir_verify_fail(v, "E3", b, i,
+                                "a landing pad starts with %s, not landingpad",
+                                vir_verify_opcode_name(x));
+            first = false;
+            if (op == VIR_OP_INVOKE) { /* E2 */
+                uint32_t normal = vir_verify_invoke_target(f, x, 0),
+                         unwind = vir_verify_invoke_target(f, x, 1);
+
+                if (normal >= f->block_count || unwind >= f->block_count)
+                    continue;
+                if (!(f->blocks[unwind].flags & VIR_BLOCK_FLAG_LPAD))
+                    vir_verify_fail(v, "E2", b, i,
+                                    "invoke unwinds to b%u, which is not a "
+                                    "landing pad",
+                                    unwind);
+                if (f->blocks[normal].flags & VIR_BLOCK_FLAG_LPAD)
+                    vir_verify_fail(v, "E2", b, i,
+                                    "invoke continues normally in b%u, a "
+                                    "landing pad",
+                                    normal);
+                if (f->blocks[normal].predecessor_count != 1)
+                    vir_verify_fail(v, "E2", b, i,
+                                    "invoke's normal block b%u has another "
+                                    "predecessor",
+                                    normal);
+            }
+            if (op == VIR_OP_EHTYPEID) { /* E4: a type some clause catches */
+                bool found = false;
+
+                for (uint32_t j = f->constant_count;
+                     j < f->insn_count && !found; j++) {
+                    const vir_insn *l = &f->insns[j];
+
+                    if (l->op != VIR_OP_LANDINGPAD ||
+                        (uint64_t)l->a + 2 > f->extra_count)
+                        continue;
+                    for (uint32_t c = 0;
+                         c < f->extra[l->a + 1] &&
+                         (uint64_t)l->a + 2 + c < f->extra_count;
+                         c++)
+                        if (f->extra[l->a + 2 + c] == x->a + 1)
+                            found = true;
+                }
+                if (!found)
+                    vir_verify_fail(v, "E4", b, i,
+                                    "ehtypeid of a type no landingpad catches");
+            }
+        }
+    }
+}
+
 static void vir_verify_uses_check(vir_verify_state *v, uint32_t b, uint32_t i,
                                   uint32_t idx)
 {
@@ -848,7 +982,17 @@ static void vir_verify_uses_check(vir_verify_state *v, uint32_t b, uint32_t i,
         if (db == VIR_BLOCK_NONE ||
             f->blocks[db].immediate_dominator == VIR_BLOCK_NONE)
             continue;
-        if (f->insns[d].op ==
+        if (f->insns[d].op == VIR_OP_INVOKE) {
+            /* only where the normal block dominates: on the unwind edge there is no result */
+            uint32_t normal = vir_verify_invoke_target(f, &f->insns[d], 0);
+
+            if (normal >= f->block_count || !vir_block_dominates(f, normal, b))
+                vir_verify_fail(v, "D1", b, i,
+                                "%s uses the result of an invoke where its "
+                                "normal block does not dominate",
+                                vir_verify_opcode_name(&x));
+        } else if (
+            f->insns[d].op ==
             VIR_OP_ASMGOTO) { /* only blocks the terminator's block strictly dominates */
             if (db == b || !vir_block_dominates(f, db, b))
                 vir_verify_fail(v, "D1", b, i,
@@ -927,7 +1071,8 @@ static void vir_verify_graph_check(vir_verify_state *v)
             }
             /* C4, C5, C6, C7 */
             if (x.op == VIR_OP_BRIF || x.op == VIR_OP_SWITCH ||
-                x.op == VIR_OP_IBR || x.op == VIR_OP_ASMGOTO) {
+                x.op == VIR_OP_IBR || x.op == VIR_OP_ASMGOTO ||
+                x.op == VIR_OP_INVOKE) {
                 vir_operand_iterator_init(&it, f, &x, true);
                 while ((p = vir_operand_iterator_next(&it)))
                     if (*p < f->block_count && f->blocks[*p].parameter_count) {
@@ -990,7 +1135,18 @@ static void vir_verify_graph_check(vir_verify_state *v)
                 (i + 1 >= k->insn_count || f->insns[idx + 1].op != VIR_OP_TRAP))
                 vir_verify_fail(v, "A3", b, i,
                                 "a noreturn call is not followed by trap");
-            if (x.op == VIR_OP_CALL)
+            if (x.op == VIR_OP_INVOKE &&
+                (x.flags & VIR_INSN_FLAG_CALL_NORETURN)) {
+                uint32_t normal = vir_verify_invoke_target(f, &x, 0);
+
+                if (normal < f->block_count &&
+                    f->insns[vir_block_terminator(f, normal)].op != VIR_OP_TRAP)
+                    vir_verify_fail(v, "A3", b, i,
+                                    "a noreturn invoke's normal block b%u "
+                                    "does not end in trap",
+                                    normal);
+            }
+            if (x.op == VIR_OP_CALL || x.op == VIR_OP_INVOKE)
                 vir_verify_call_check(v, b, i, &x);
             if (x.op == VIR_OP_RET)
                 vir_verify_return_check(v, b, i, &x);
@@ -1000,6 +1156,7 @@ static void vir_verify_graph_check(vir_verify_state *v)
         }
     }
     /* C6 also: a labeladdr must name a VIR_BLOCK_FLAG_ADDR block (S2 reports that) */
+    vir_verify_exceptions_check(v);
 }
 
 static void vir_verify_misc_check(vir_verify_state *v)

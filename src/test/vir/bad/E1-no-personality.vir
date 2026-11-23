@@ -1,0 +1,23 @@
+; invoke in a function without a personality routine
+vir 1
+target arm64-linux
+extern @g
+extern @_ZTIi
+extern @__gxx_personality_v0
+sig %s = (int) -> int
+func @f %s {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = invoke @g %s (v0) -> b1 unwind b2
+b1:
+  ret v1
+b2 lpad:
+  v2:multi = landingpad cleanup
+  v3:ptr = proj v2, 0
+  resume v3
+}
+; ---
+@f b0.1: E1: invoke in a function without a personality routine
+@f b2: E1: a landing pad in a function without a personality routine
+@f b2.0: E1: landingpad in a function without a personality routine
+@f b2.2: E1: resume in a function without a personality routine

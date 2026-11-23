@@ -349,7 +349,8 @@ void vir_operand_iterator_init(vir_operand_iterator *it, vir_function *f,
         (blocks ? vir_field_masks[op] >> 3 : vir_field_masks[op]) & 7;
     /* extra lists: n words at base (each a pointer-sized group, stride apart) */
     if (!blocks) {
-        if ((op == VIR_OP_CALL || op == VIR_OP_RET) && in->c < ne) {
+        if ((op == VIR_OP_CALL || op == VIR_OP_RET || op == VIR_OP_INVOKE) &&
+            in->c < ne) {
             uint32_t n = f->extra[in->c];
 
             if ((uint64_t)in->c + 1 + n <= ne) {
@@ -397,6 +398,13 @@ void vir_operand_iterator_init(vir_operand_iterator *it, vir_function *f,
         if ((uint64_t)in->c + 2 + n <= ne) {
             it->base = in->c + 1;
             it->count = n + 1; /* the fallthrough block, then the labels */
+        }
+    } else if (op == VIR_OP_INVOKE && in->c < ne) {
+        uint32_t n = f->extra[in->c];
+
+        if ((uint64_t)in->c + 3 + n <= ne) {
+            it->base = in->c + 1 + n; /* after the values: normal, unwind */
+            it->count = 2;
         }
     }
 }
@@ -1000,6 +1008,7 @@ void vir_function_load(vir_function *f, const vir_unit *u, uint32_t i)
     vir_function_begin(f, s->target, s->symbol, s->flags);
     f->version = s->version;
     f->signature = s->signature;
+    f->personality = s->personality;
     memcpy(f->insns, s->insns, (size_t)s->insn_count * sizeof(vir_insn));
     memcpy(f->blocks, s->blocks, (size_t)s->block_count * sizeof(vir_block));
     memcpy(f->slot, s->slot, (size_t)s->slot_count * sizeof(vir_slot));
