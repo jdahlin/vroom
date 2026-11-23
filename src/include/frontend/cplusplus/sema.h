@@ -1584,6 +1584,15 @@ struct inherited_call {
 struct clause_designation {
     uint32_t first = 0, count = 0;
 };
+/* an element of an aggregate class ([dcl.init.aggr]/1) */
+struct aggregate_class_element {
+    qualified_type type;
+    SyntaxRef default_initializer;
+    /* the field: the data member, or a non-empty base's subobject */
+    entity_index member = 0;
+    /* a base class with no field ([class.derived]/4) */
+    bool empty_base = false;
+};
 struct designated_item {
     /* the clause, and its designators from pool[chain_first] on */
     uint32_t clause = 0, chain_first = 0, chain_count = 0;
@@ -3752,6 +3761,9 @@ class semantic_analysis
     analysis_result too_many_clauses(SyntaxRef list,
                                      const owned_array<SyntaxElement> &clauses,
                                      size_t next);
+    void
+    aggregate_class_elements(entity_index c,
+                             owned_array<aggregate_class_element> &out) const;
     analysis_result
     aggregate_elements(SyntaxRef list,
                        const owned_array<SyntaxElement> &clauses, size_t &next,
