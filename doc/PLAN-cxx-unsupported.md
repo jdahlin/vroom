@@ -198,6 +198,12 @@ after step 0 the work list gives a better estimate, recorded here.
   of decl-specifier.cpp:1617, measured: 488 refusals at -std=c++98 (clang
   takes `auto` there as a C++11 extension with a warning: batch 1.2), 248 at
   -std=c++20 (contexts), and 567 at placeholder-type-specifier.cpp:514.
+- Batch 1.2 (db25d4b23, no simplify: the scan for another type specifier has
+  no existing helper to reuse): C++98 `auto` alone is the placeholder, as
+  clang's extension.  Unsupported 39674 -> 39660; we accept +1.  The 488
+  refusals of a forced -std=c++98 sweep were 14 counted declarations: the
+  harness counts its own RUN lines only.  Rule from here: size a cause with
+  --why (counted declarations), never with a free sweep.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
