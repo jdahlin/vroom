@@ -2826,6 +2826,8 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
             return evaluate_bswap(state, x, v);
         case builtin_fold::stdc_bits:
             return evaluate_stdc_bits(state, b.which, x, v);
+        case builtin_fold::align:
+            return evaluate_align(state, b.which, x, v);
         default:
             return evaluate_builtin_fold(state, b, x, v);
         }

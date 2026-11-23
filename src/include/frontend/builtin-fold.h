@@ -55,6 +55,8 @@ enum vfold_op {
     vfold_stdc_bits,
     /* the byte swap of any integer width */
     vfold_bswap_generic,
+    /* clang's __builtin_align_up, _down and is_aligned (C++ front end) */
+    vfold_align,
     /* the queries about the argument or its type */
     vfold_constant_p,
     vfold_lock_free,

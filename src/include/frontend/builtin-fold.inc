@@ -23,6 +23,9 @@ BUILTIN_FOLD("__builtin_expect", expect, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_expect_with_probability", expect, VFOLD_BOTH)
 BUILTIN_FOLD("__builtin_bswapg", bswap_generic, VFOLD_CXX)
 BUILTIN_FOLD("__builtin_launder", identity, VFOLD_CXX)
+BUILTIN_FOLD("__builtin_align_up", align, VFOLD_CXX)
+BUILTIN_FOLD("__builtin_align_down", align, VFOLD_CXX)
+BUILTIN_FOLD("__builtin_is_aligned", align, VFOLD_CXX)
 
 /* the type-generic counts */
 BUILTIN_FOLD("__builtin_clzg", clz_generic, VFOLD_BOTH)

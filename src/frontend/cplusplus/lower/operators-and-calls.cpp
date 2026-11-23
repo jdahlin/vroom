@@ -383,6 +383,50 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
                     "__builtin_bitreverseg) or __builtin_align_* outside a "
                     "constant expression",
                     n.at);
+    case builtin_lowering::align: {
+        /* [ext:clang_builtin_functions] an integer operand and a constant
+           alignment a: in unsigned long long, (x + (a - 1)) & ~(a - 1),
+           x & ~(a - 1), or (x & (a - 1)) == 0, converted back */
+        uint32_t callee = n.a;
+        if (node(callee).kind == semantic_kind::conversion)
+            callee = node(callee).a;
+        const gnu_builtin &row = gnu_builtin_at(
+            analysis.entity_table[node(callee).a].gnu_builtin_row);
+        const uint32_t *items = analysis.semantics.items(n.first);
+        const struct type &operand = record(node(items[0]).type);
+        uint32_t alignment = items[1];
+        while (node(alignment).kind == semantic_kind::conversion)
+            alignment = node(alignment).a;
+        uint64_t av = node(alignment).value;
+        if (operand.kind == type_kind::pointer ||
+            node(alignment).kind != semantic_kind::constant || !av ||
+            (av & (av - 1)) || av > (1ull << 63))
+            return fail("__builtin_align_* of a pointer or of an alignment "
+                        "that is no constant",
+                        n.at);
+        int64_t low = static_cast<int64_t>(av - 1);
+        ast_qualified_type wide =
+            ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
+        ast_qualified_type narrow = ast_builder_type_basic(AST_TYPE_INT);
+        uint32_t x = cast(arguments[0], wide, AST_CAST_INTEGER);
+        auto binary = [&](uint32_t l, uint32_t r, int op,
+                          ast_qualified_type type_) {
+            return make(AST_NODE_BINARY, type_, l, r, 0,
+                        static_cast<uint16_t>(op), 0);
+        };
+        if (row.which == 2) {
+            uint32_t rest = binary(x, ast_builder_integer(c, wide, low),
+                                   LEX_TOKEN_AMPERSAND, wide);
+            return to_bool(binary(rest, ast_builder_integer(c, wide, 0),
+                                  LEX_TOKEN_EQUAL_EQUAL, narrow));
+        }
+        if (row.which == 0)
+            x = binary(x, ast_builder_integer(c, wide, low), LEX_TOKEN_PLUS,
+                       wide);
+        x = binary(x, ast_builder_integer(c, wide, ~low), LEX_TOKEN_AMPERSAND,
+                   wide);
+        return cast(x, t, AST_CAST_INTEGER);
+    }
     case builtin_lowering::node:
         break;
     }

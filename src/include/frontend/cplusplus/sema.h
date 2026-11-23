@@ -3859,6 +3859,8 @@ class semantic_analysis
                                         constant_value &v);
     constness evaluate_stdc_bits(constant_evaluation &state, int which,
                                  const semantic_node &call, constant_value &v);
+    constness evaluate_align(constant_evaluation &state, int which,
+                             const semantic_node &call, constant_value &v);
     constness evaluate_bswap(constant_evaluation &state,
                              const semantic_node &call, constant_value &v);
     constness evaluate_call(constant_evaluation &state, uint32_t node,

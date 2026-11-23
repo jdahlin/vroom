@@ -89,6 +89,9 @@ enum class builtin_fold : uint8_t {
     bswap,
     /* the stdc_bits family (builtin_stdc_op) */
     stdc_bits,
+    /* __builtin_align_up, _down, is_aligned of an integer (which as the
+       align form) */
+    align,
 };
 
 /* the operations of the stdc_bits form, [stdbit.h.syn] (C23 7.18) */
@@ -174,6 +177,9 @@ enum class builtin_lowering : uint8_t {
     /* a call that analysis and constant evaluation know and lowering does
        not: refused with the reason */
     refuse,
+    /* __builtin_align_up, _down, is_aligned of an integer by a constant
+       alignment, as arithmetic */
+    align,
 };
 
 struct gnu_builtin {

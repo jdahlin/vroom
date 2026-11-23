@@ -1315,6 +1315,66 @@ constness semantic_analysis::evaluate_stdc_bits(constant_evaluation &state,
     return constness::constant;
 }
 
+/*
+ * [ext:clang_builtin_functions] the value of __builtin_align_up,
+ * __builtin_align_down and __builtin_is_aligned of an integer: modulo the
+ * operand's type, (x + a - 1) & ~(a - 1), x & ~(a - 1), x & (a - 1) == 0,
+ * for a power of two a of at most 2^(width-1) (clang: other alignments are
+ * errors).  A pointer operand has no value kept here (unknown).
+ */
+constness semantic_analysis::evaluate_align(constant_evaluation &state,
+                                            int which,
+                                            const semantic_node &call,
+                                            constant_value &v)
+{
+    const uint32_t *items = semantics.items(call.first);
+    if (call.count != 2)
+        return constness::unknown;
+    fundamental_type f = fundamental_of(semantics[items[0]].type);
+    if (f == fundamental_type::none || !fundamental_type_is_integral(f))
+        return constness::unknown;
+    constant_value x[2];
+    for (uint32_t i = 0; i < 2; i++) {
+        constness c = evaluate_node(state, items[i], x[i]);
+        if (c != constness::constant)
+            return c;
+        if (x[i].kind != constant_value_kind::integer)
+            return constness::unknown;
+    }
+    unsigned width = fundamental_type_width(tokens.files.behavior, f);
+    fundamental_type g = fundamental_of(semantics[items[1]].type);
+    if (g == fundamental_type::none ||
+        (fundamental_type_is_signed(tokens.files.behavior, g) &&
+         static_cast<__int128>(x[1].integer) <= 0))
+        return constness::unknown;
+    unsigned __int128 a = x[1].integer;
+    if (!a || (a & (a - 1)) || width > 64 ||
+        a > (static_cast<unsigned __int128>(1) << (width - 1)))
+        return constness::unknown;
+    unsigned __int128 bits = vfold_mask(x[0].integer, width);
+    unsigned __int128 mask = vfold_mask(~(a - 1), width);
+    unsigned __int128 r = 0;
+    switch (which) {
+    case 0:
+        r = vfold_mask(bits + a - 1, width) & mask;
+        break;
+    case 1:
+        r = bits & mask;
+        break;
+    default:
+        r = (bits & (a - 1)) == 0;
+        break;
+    }
+    if (!integer_kept_exactly(tokens.files.behavior, fundamental_of(call.type),
+                              r))
+        return constness::unknown;
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer =
+        integer_wrap(tokens.files.behavior, fundamental_of(call.type), r);
+    return constness::constant;
+}
+
 int semantic_analysis::query_builtin(entity_index e) const
 {
     if (!entity_table[e].gnu_builtin_row)

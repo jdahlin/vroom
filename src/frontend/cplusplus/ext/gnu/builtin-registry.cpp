@@ -73,7 +73,7 @@ static const gnu_builtin builtin_registry[] = {
        (align-builtins.inc); a call outside a constant expression is refused
        when lowered */
 #define ALIGN_OP(name, op)                                                     \
-    ROWL(name, align, op, none, refuse, nullptr, nullptr),
+    ROWL(name, align, op, align, align, nullptr, nullptr),
 #include "frontend/align-builtins.inc"
 #undef ALIGN_OP
     ROWL("__builtin_bswapg", bswapg, 0, bswap, bswap, nullptr, nullptr),
