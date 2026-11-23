@@ -454,3 +454,13 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   __reference_*_temporary, __is_pointer_interconvertible_base_of,
   __array_extent; builtins __builtin_align_up/down/is_aligned,
   __builtin_get_vtable_pointer, __builtin_invoke (8.9).
+- 8.9 (e63007fbe, 4d81d1a6a, 95068b37c, f485ab10e, 9f000770a): GNU
+  __has_trivial_* / __has_nothrow_* for scalars and trivial classes, the
+  reference-from-temporary traits, __is_pointer_interconvertible_base_of,
+  __builtin_align_up/down/is_aligned (analysis), __array_extent.
+  Unsupported 36517 -> 36494, agree +223 (later refusals).  Review: the
+  align builtins were added as a hand-written row although they are
+  Builtins.td records the generator can read (as 8.7's stdc family): 8.10
+  moves them.  Gaps: int&& r(A{}) refused in reference_binding; direct
+  initialization of a reference ignores explicit conversion functions;
+  pre-C++17 prvalue copy/move not modelled.
