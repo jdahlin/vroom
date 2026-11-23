@@ -161,6 +161,12 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
     return analysis_result::well_formed;
 }
 
+/*
+ * [expr.pre]/1: "[expr] defines the syntax, order of evaluation, and
+ * meaning of expressions": one function per production of the grammar,
+ * [expr.prim] (literals, this, id-expressions, parentheses) to
+ * [expr.comma], chosen by the node's kind.
+ */
 analysis_result semantic_analysis::expression_kind(SyntaxElement e,
                                                    expression_meaning &m)
 {

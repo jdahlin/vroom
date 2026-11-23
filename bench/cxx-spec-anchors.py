@@ -32,8 +32,9 @@ BASELINE = os.path.join(ROOT, 'bench', 'cxx-spec-anchors.baseline')
 DIRS = ('basic', 'class', 'declaration', 'exception', 'expression', 'module',
         'overload', 'sema', 'statement', 'template')
 
-# a subclause's label; [ext...] and [impl...] mark choices, not citations
-CITATION = re.compile(r'\[(?!ext[.:]|impl[.:])[a-z][a-z0-9_.:-]*\]')
+# a subclause's label, or an extension's ([ext:NAME], a row of
+# ext/extensions.inc with its documentation); [impl...] marks a choice
+CITATION = re.compile(r'\[(?!impl[.:])[a-z][a-z0-9_.:-]*\]')
 MARKED = re.compile(r'\[(ext[.:]|impl[.:])')
 CLANG = re.compile(r"\b(as clang(?!::)|like clang(?!::)|clang(?:'s)? (?:does|accepts|rejects|"
                    r"answers|counts|keeps|treats|reports|gives|has it))\b",
