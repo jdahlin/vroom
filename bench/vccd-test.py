@@ -24,6 +24,13 @@ vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
 SHIM = f'{vd.BIN}/vcc'	# next to the vccd under test: the build ids match
 MAGIC = 0x326f6f72
+# how much slower a sanitizer build is (TSan ~15-20x, ASan ~3-5x): a test
+# that needs a job still running uses a smaller input and waits longer
+SLOWDOWN = 1
+if 'tsan' in vd.BIN:
+    SLOWDOWN = 20
+elif 'asan' in vd.BIN:
+    SLOWDOWN = 5
 
 def hdr(magic, argc, envc, plen, build=0):
     return struct.pack('<IIIIQII', magic, argc, envc, plen, build, 0, 0)
@@ -253,17 +260,19 @@ def sigterm_drains():
     v = Vccd()
     try:
         d = f'{v.dir}/w'
-        src = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000)))
+        # long enough to be still running 0.4 s in, at any build's speed
+        src = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000 // SLOWDOWN)))
         p = subprocess.Popen([SHIM] + TARGET + ['-c', '-o', 'big.o', src], cwd=d, env=dict(os.environ, VCC_SOCK=v.sock),
                              stderr=subprocess.PIPE)
         time.sleep(0.4)
+        check(p.poll() is None, 'the job ended before SIGTERM: nothing drained')
         v.p.send_signal(signal.SIGTERM)
-        rc = p.wait(timeout=60)
+        rc = p.wait(timeout=60 * SLOWDOWN)
         check(rc == 0, f'job interrupted: rc {rc} {p.stderr.read()[-300:]}')
         check(os.path.getsize(f'{d}/big.o') > 0, 'no object')
-        v.p.wait(timeout=10)
+        v.p.wait(timeout=10 * SLOWDOWN)
         check(not os.path.exists(v.sock), 'socket left behind')
-    finally: v.stop()
+    finally: v.stop(10 * SLOWDOWN)
 
 @test()
 def request_env_reaches_job():

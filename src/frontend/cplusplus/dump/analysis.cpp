@@ -649,10 +649,28 @@ static void dump_layout_claims(const semantic_analysis &analysis,
     }
 }
 
+/* -fcxx-dump-sections: whether output d was asked for, after its section
+   line when sections were */
+static bool section(const dump_request &r, dump_output d, vbuffer *out)
+{
+    static const char *const names[] = {
+#define X(identifier, name, phase, what) name,
+        CPLUSPLUS_DUMPS(X)
+#undef X
+    };
+    if (!r.has(d))
+        return false;
+    if (r.sections)
+        vbuffer_format_append(out, "#cxx-dump %s\n",
+                              names[static_cast<uint32_t>(d)]);
+    return true;
+}
+
 void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
                    const syntax_tree &tree, token_stream &tokens, vbuffer *out)
 {
     size_t by_result[4] = {};
+    section(r, dump_output::analysis, out);
     for (const analysed_declaration &d : analysis.declarations) {
         by_result[static_cast<size_t>(d.result)]++;
         if (!r.has(dump_output::analysis))
@@ -673,7 +691,7 @@ void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
                 analysis.unsupported[d.first_unsupported].subclause);
         vbuffer_string_append(out, "\n");
     }
-    if (r.has(dump_output::unsupported)) {
+    if (section(r, dump_output::unsupported, out)) {
         for (size_t i = 1; i < analysis.unsupported.size(); i++) {
             const unsupported_construct &u = analysis.unsupported[i];
             source_position at = tokens.position(tree[u.node].first_token);
@@ -689,21 +707,21 @@ void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
             vbuffer_string_append(out, "\n");
         }
     }
-    if (r.has(dump_output::declaration_claims))
+    if (section(r, dump_output::declaration_claims, out))
         dump_declaration_claims(analysis, tree, tokens, out);
-    if (r.has(dump_output::type_claims))
+    if (section(r, dump_output::type_claims, out))
         dump_type_claims(analysis, tree, tokens, out);
-    if (r.has(dump_output::lookup_claims))
+    if (section(r, dump_output::lookup_claims, out))
         dump_lookup_claims(analysis, tokens, out);
-    if (r.has(dump_output::check_tree))
+    if (section(r, dump_output::check_tree, out))
         check_tree(analysis, tree, tokens, out);
-    if (r.has(dump_output::tree))
+    if (section(r, dump_output::tree, out))
         dump_tree(analysis, tokens, out);
-    if (r.has(dump_output::symbols))
+    if (section(r, dump_output::symbols, out))
         dump_symbols(analysis, tokens, out);
-    if (r.has(dump_output::layout_claims))
+    if (section(r, dump_output::layout_claims, out))
         dump_layout_claims(analysis, tokens, out);
-    if (r.has(dump_output::stats)) {
+    if (section(r, dump_output::stats, out)) {
         vbuffer_format_append(
             out,
             "declarations %zu\nwell-formed %zu\nill-formed %zu\n"
