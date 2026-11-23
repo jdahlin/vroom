@@ -414,10 +414,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
  * functions defined in it are analysed with it (/4 would instantiate a
  * member's definition only when used).
  */
-analysis_result
-semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
-                                     const template_argument *arguments,
-                                     uint32_t count, entity_index &c)
+analysis_result semantic_analysis::instantiate_class(
+    SyntaxRef at, uint32_t class_template, const template_argument *arguments,
+    uint32_t count, entity_index &c, bool named_only)
 {
     c = 0;
     const function_template ft = function_templates[class_template - 1];
@@ -447,6 +446,11 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
        without bound through libc++'s expression templates (valarray). */
     bool lazy_return = member_return_type && !require_complete_class &&
                        !defining_argument && !declaring_specializations;
+    /* named_only: a template-id that needs no completely-defined type
+       ([temp.inst]/2); the uses that do call require_complete */
+    if (named_only && !require_complete_class && !defining_argument &&
+        !declaring_specializations)
+        lazy_return = true;
     if (lazy_return)
         incomplete_argument = true;
     if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
@@ -486,6 +490,10 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
             defined_by = function_templates[pattern - 1].definition;
         if (defined_by && !declaring_specializations && !incomplete_argument)
             return define_class_outside(at, k, c);
+        /* named again where no complete type is needed: the use that needs
+           it defines it (complete_instantiation) */
+        if (defined_by && lazy_return)
+            instantiations[k].lazy = true;
         return analysis_result::well_formed;
     }
     if (instantiation_depth >= 64)

@@ -681,6 +681,10 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
                                                 qualified_type parameter,
                                                 bool user_defined)
 {
+    /* [temp.inst]/2: the constructors and conversion functions a
+       conversion uses: a specialization named only is defined here */
+    require_complete(parameter);
+    require_complete(a.type);
     const struct type p = type_table[parameter.unqualified()];
     if (p.kind == type_kind::lvalue_reference ||
         p.kind == type_kind::rvalue_reference)

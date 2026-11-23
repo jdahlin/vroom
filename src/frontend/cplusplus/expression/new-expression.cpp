@@ -320,6 +320,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         known_count = a.bound;
         type = a.operand;
     }
+    /* [temp.inst]/2: a specialization named only is defined here (before
+       the reference into type_table: completing may grow it) */
+    require_complete(type);
     const struct type &allocated = type_table[type.unqualified()];
     bool object_type = allocated.kind != type_kind::lvalue_reference &&
                        allocated.kind != type_kind::rvalue_reference &&

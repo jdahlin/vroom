@@ -695,7 +695,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             if (arg.kind != template_argument::kind_t::type)
                 continue;
             const auto type = type_table[arg.type.unqualified()];
-            require_complete(type.entity);
+            /* no require_complete: an argument named only stays so
+               ([temp.inst]/2) */
             if (type.kind == type_kind::class_type &&
                 !entity_table[type.entity].size) {
                 incomplete_argument = true;

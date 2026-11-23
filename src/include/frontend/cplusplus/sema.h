@@ -5235,7 +5235,8 @@ class semantic_analysis
     /* [temp.inst]/2: the class template specialization, instantiated */
     analysis_result instantiate_class(SyntaxRef at, uint32_t class_template,
                                       const template_argument *arguments,
-                                      uint32_t count, entity_index &c);
+                                      uint32_t count, entity_index &c,
+                                      bool named_only = false);
     /* the instantiation whose class the class-specifier analysed now
        defines (its record's index plus one) */
     uint32_t class_instantiating = 0;

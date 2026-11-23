@@ -359,6 +359,7 @@ uint64_t semantic_analysis::atomic_layout(qualified_type value,
 
 uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
 {
+    require_complete(t);
     const struct type record = type_table[t.unqualified()];
     switch (record.kind) {
     case type_kind::atomic:
@@ -586,6 +587,8 @@ analysis_result semantic_analysis::sized_operand(SyntaxRef n, bool alignment,
             return ill_formed(n, incomplete, subclause);
         return analysis_result::well_formed;
     case type_kind::class_type: {
+        /* [temp.inst]/2: a specialization named only is defined here */
+        require_complete(record.entity);
         const entity &c = entity_table[record.entity];
         if (c.kind != entity_kind::class_type)
             /* a class whose definition was not analysed */

@@ -909,6 +909,10 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
                                         qualified_type type, bool direct,
                                         initialized_value &result)
 {
+    /* [temp.inst]/2: the constructors initialization uses: a specialization
+       named only is defined here */
+    require_complete(type);
+    require_complete(m.type);
     const struct type target = type_table[type.unqualified()];
     analysis_result r = analysis_result::well_formed;
     if (entity_table[target.entity].kind != entity_kind::class_type)

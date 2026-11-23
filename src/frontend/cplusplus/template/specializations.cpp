@@ -798,6 +798,8 @@ analysis_result semantic_analysis::class_explicit_instantiation(SyntaxRef n,
     if (ty.kind != type_kind::class_type)
         return not_supported(n, "temp.explicit");
     entity_index c = ty.entity;
+    /* [temp.explicit]/10: an explicit instantiation defines the class */
+    require_complete(c);
     const entity &k = entity_table[c];
     if (!k.instantiation || !k.defined || k.union_)
         return not_supported(n, "temp.explicit");

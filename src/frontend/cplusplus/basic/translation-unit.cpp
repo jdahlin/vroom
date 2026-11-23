@@ -439,7 +439,7 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
         !type_table[type.unqualified()].bound_known &&
         differ_in_major_bound(type_table, entity_table[prior].type, type))
         type = entity_table[prior].type;
-    const struct type &record = type_table[type.unqualified()];
+    const struct type record = type_table[type.unqualified()];
     bool is_reference = record.kind == type_kind::lvalue_reference ||
                         record.kind == type_kind::rvalue_reference;
     if (kind == entity_kind::variable) {
@@ -716,12 +716,24 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
             /* [dcl.typedef]/6: "In a given scope, a typedef specifier shall
                not be used to redeclare the name of any type declared in
                that scope to refer to a different type." */
-            if (!(e.type == type))
+            if (!(e.type == type)) {
+                /* a specialization whose definition failed (one named
+                   only is defined when used, [temp.inst]/2) is no known
+                   type to compare */
+                const struct type &was = type_table[e.type.unqualified()];
+                const struct type &now = type_table[type.unqualified()];
+                if ((was.kind == type_kind::class_type &&
+                     entity_table[was.entity].kind !=
+                         entity_kind::class_type) ||
+                    (now.kind == type_kind::class_type &&
+                     entity_table[now.entity].kind != entity_kind::class_type))
+                    return not_supported(declaration, "temp.inst");
                 return ill_formed_at_token(id,
                                            "a typedef specifier shall not be "
                                            "used to redeclare the name of a "
                                            "type to refer to a different type",
                                            "dcl.typedef");
+            }
         } else if (kind == entity_kind::function) {
             /* (a function of the same parameters: overloads above) */
             if (!(e.type == type) && differ_in_exceptions(e.type, type)) {

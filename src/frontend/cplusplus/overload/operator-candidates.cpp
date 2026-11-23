@@ -164,6 +164,10 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     if (!any_class && !any_enumeration)
         return analysis_result::well_formed;
+    /* [temp.inst]/2: the members the candidates come from: a specialization
+       named only is defined here */
+    for (const expression_meaning &e : operands)
+        require_complete(e.type);
     /* an operand of a class with conversion functions: built-in candidates
        ([over.built]) may be viable, which are not formed.  ! && || go on
        here only to find whether an operator function is a candidate:
