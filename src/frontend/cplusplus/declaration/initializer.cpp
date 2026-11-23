@@ -724,7 +724,7 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
     if (c1 != c2 && !entity_table[c2].size)
         return not_supported(at, "dcl.init.ref");
     bool ambiguous = false;
-    bool related = c1 == c2 || base_step(c2, c1, ambiguous);
+    bool related = reference_related(t1, t2, ambiguous);
     if (!related)
         return not_supported(at, "dcl.init.ref");
     if (t2.cv() & ~t1.cv()) {

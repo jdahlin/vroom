@@ -582,9 +582,9 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
             x.kind == type_kind::none || y.kind == type_kind::none)
             return of_form(sequence::form::unknown);
         bool ambiguous = false;
-        bool related = c1 && c2 &&
-                       (c1 == c2 || (entity_table[c2].size &&
-                                     base_step(c2, c1, ambiguous)));
+        /* a base needs the complete derived class */
+        bool related = c1 && c2 && (c1 == c2 || entity_table[c2].size) &&
+                       reference_related(t1, t2, ambiguous);
         if (ambiguous)
             return of_form(sequence::form::unknown);
         if (related) {
