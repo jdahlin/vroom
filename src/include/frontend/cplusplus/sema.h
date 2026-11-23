@@ -4206,7 +4206,7 @@ class semantic_analysis
     /* [class.access]: whether a member with this access can be named
        here */
     bool accessible(entity_index member, entity_index object_class = 0) const;
-    /* [temp.spec.general]/6 (explicit_declaration_access): set while the
+    /* [temp.spec.general]/6: set while the
        declaration of an explicit instantiation or explicit specialization is
        analysed; accessible() ignores access then, except in a function body or
        a class's member-specification (function_state.active, defining_class) */
