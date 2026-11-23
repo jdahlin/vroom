@@ -431,6 +431,14 @@ analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
     return analysis_result::well_formed;
 }
 
+/* [dcl.init.aggr]/4: whether an element of an initializer list is the
+   member's: all but an unnamed bit-field ([class.bit]/2) */
+bool semantic_analysis::initializer_member(entity_index member) const
+{
+    const entity &m = entity_table[member];
+    return !(m.bit_field && !m.name);
+}
+
 entity_index semantic_analysis::element_destructor(qualified_type type,
                                                    qualified_type &object) const
 {
@@ -564,11 +572,15 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
             return CONST_UNKNOWN;
         const entity &c = entity_table[c_entity];
         count = c.member_count;
-        /* [dcl.init]/8: a class with a trivial default constructor is
-           zero-initialized member by member. Base subobjects and
-           non-trivial default constructors need separate handling. */
-        if (zero &&
-            (c.base_count || (c.first_constructor && init != zero_fill)))
+        /* [dcl.init]/6: to zero-initialize an object of class type is to
+           zero-initialize each non-static data member and each base class
+           subobject, whatever its constructors (a base with data is a
+           member of the list: base-clause.cpp; an empty one has no
+           element).  A `zero` that stands for value-initialization of a
+           class with a constructor ([dcl.init]/8) runs that constructor,
+           which is not this */
+        if (zero && init != zero_fill && c.first_constructor &&
+            !trivial_defaulted_default_constructor(c_entity))
             return CONST_UNKNOWN;
     }
     if (init && !zero) {
@@ -605,7 +617,17 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
     }
     /* (a member a list does not give may have a default member
        initializer, which analysis does not keep in the tree) */
-    if (given > count || (c_entity && init && !zero && given != count))
+    /* [dcl.init.aggr]/4: the elements the list covers: an unnamed
+       bit-field has no initializer and is zero */
+    uint32_t listed = count;
+    if (c_entity) {
+        listed = 0;
+        const entity &x = entity_table[c_entity];
+        for (uint32_t i = 0; i < x.member_count; i++)
+            if (initializer_member(class_members[x.first_member + i]))
+                listed++;
+    }
+    if (given > listed || (c_entity && init && !zero && given != listed))
         return CONST_UNKNOWN;
     uint32_t first = static_cast<uint32_t>(state.elements.size());
     for (uint32_t i = 0; i < count; i++) {
@@ -621,10 +643,17 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
     v.first = first;
     v.count = count;
     place_value(state, place) = v;
+    uint32_t item = 0;
     for (uint32_t i = 0; i < count; i++) {
         uint32_t element = 0;
-        if (i < given)
-            element = items[i];
+        bool listed_member = true;
+        if (c_entity)
+            listed_member = initializer_member(
+                class_members[entity_table[c_entity].first_member + i]);
+        if (!listed_member)
+            element = zero_initializer;
+        else if (item < given)
+            element = items[item++];
         else if (init)
             element = zero_initializer;
         if (init == zero_fill)

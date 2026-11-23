@@ -1840,6 +1840,9 @@ class semantic_analysis
        element type */
     entity_index element_destructor(qualified_type type,
                                     qualified_type &object) const;
+    /* [dcl.init.aggr]/4: whether the member has an element in the
+       initializer list of its class (not an unnamed bit-field) */
+    bool initializer_member(entity_index member) const;
 
   private:
     /* the node needs rules that are not written: those of the subclause

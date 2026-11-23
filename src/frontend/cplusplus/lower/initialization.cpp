@@ -511,11 +511,10 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
             if (i >= x.member_count)
                 return fail("an initializer for no member", n.at);
             entity_index member = analysis.class_members[x.first_member + i];
-            const entity &m = analysis.entity_table[member];
             /* the padding fields before it (class_type) */
             while (values.size() < c_fields[member])
                 values.append(0);
-            if (m.bit_field && !m.name) {
+            if (!analysis.initializer_member(member)) {
                 values.append(0);
                 continue;
             }
