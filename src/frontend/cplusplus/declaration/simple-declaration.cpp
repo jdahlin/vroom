@@ -818,8 +818,42 @@ analysis_result semantic_analysis::simple_declaration(SyntaxRef n)
         break;
     }
     SyntaxTail tail(n, k);
-    if (k >= n.size() || !tail[0].is(syntax_kind::decl_specifier_seq))
-        return not_supported(n, "dcl.attr");
+    if (k >= n.size() || !tail[0].is(syntax_kind::decl_specifier_seq)) {
+        /* [dcl.attr.fallthrough]/1, [dcl.attr.likelihood]/1: these
+           attribute-tokens "may be applied to" a null statement, a label or
+           a statement; clang: "'fallthrough' attribute cannot be applied to
+           a declaration" */
+        token_index attributes_end = n.end_token();
+        for (uint32_t i = k; i < n.size(); i++)
+            if (n[i].is(syntax_kind::decl_specifier_seq)) {
+                attributes_end = n[i].first_token();
+                break;
+            }
+        for (token_index t = n.first_token(); t < attributes_end; t++) {
+            if (tokens[t].kind != token_kind::identifier)
+                continue;
+            owned_buffer spelling;
+            tokens.spelling(t, spelling.get());
+            bool statement_only =
+                (spelling.size() == 11 &&
+                 !memcmp(spelling.data(), "fallthrough", 11)) ||
+                (spelling.size() == 6 &&
+                 !memcmp(spelling.data(), "likely", 6)) ||
+                (spelling.size() == 8 &&
+                 !memcmp(spelling.data(), "unlikely", 8));
+            if (statement_only && t > n.first_token() &&
+                !is_operator(tokens[t - 1],
+                             preprocessing_op_or_punc::COLON_COLON) &&
+                !is_operator(tokens[t + 1],
+                             preprocessing_op_or_punc::COLON_COLON))
+                return ill_formed_at_token(
+                    t, "this attribute cannot be applied to a declaration",
+                    "dcl.attr");
+        }
+        return not_supported_because(
+            n, "dcl.attr",
+            "leading attributes that are not ones without effect");
+    }
     return init_declarators(n, tail[0], false);
 }
 

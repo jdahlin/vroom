@@ -375,7 +375,22 @@ analysis_result semantic_analysis::declaration_by_kind(SyntaxRef n)
                    meaning */
             return declaration_by_kind(e[1]);
         },
-        [&](Declaration d) { return not_supported(d); }});
+        [&](Declaration d) {
+            /* [dcl.pre]/4: "An attribute-declaration has no effect" unless
+               an attribute says otherwise: the ones that change nothing
+               vcc generates, and those clang does not know (it ignores them,
+               [dcl.attr.grammar]/6), are passed over */
+            SyntaxRef r = d;
+            if (r.is(syntax_kind::attribute_declaration)) {
+                bool ignored = true;
+                for (SyntaxElement c : r.elements())
+                    if (!c.is_token() && !attributes_without_effect(c))
+                        ignored = false;
+                if (ignored)
+                    return analysis_result::well_formed;
+            }
+            return not_supported(d);
+        }});
 }
 
 void semantic_analysis::translation_unit()

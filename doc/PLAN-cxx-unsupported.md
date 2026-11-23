@@ -594,3 +594,9 @@ it; none adds a second way to instantiate.
 - Queue: a specialization's base-clause not analysed (we accept +10, part.spec.cpp); default initialization of an instantiated static member without an initializer (the +6 of 2.2); the +11 of 1.3b and +2 of 1.1/1.2 (not yet named); vpp segfaults on two clang test files (found in the -std=gnu++20
   sweep); `semantic_kind_name` lacks complex_value, complex_part,
   statement_expression (wrong names in tree dumps).
+- 8.6a: attribute-declarations (`[[]];`, `[[unknown]];`) and attributes clang
+  does not know (`__has_cpp_attribute` 0) are ignored ([dcl.pre]/4,
+  [dcl.attr.grammar]/6); `[[fallthrough]]`/`[[likely]]` before a declaration
+  is ill-formed (clang's error); the refusal left at simple-declaration.cpp
+  has a detail.  Unsupported 36684 -> 36654, we reject 492, we accept 5423
+  unchanged.

@@ -600,6 +600,22 @@ token_index semantic_analysis::scoped_gnu_abi_tag(SyntaxElement n) const
 bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
                                           uint32_t &flags) const
 {
+    /* [dcl.attr.grammar]/6: "For an attribute-token (including an
+       attribute-scoped-token) not specified in this document, the behavior is
+       implementation-defined"; clang ignores one it does not know (a
+       warning), whose __has_cpp_attribute is 0 */
+    bool is_attribute_syntax =
+        !n.is_token() &&
+        n.is(syntax_kind::attribute_specifier_seq,
+             syntax_kind::attribute_specifier, syntax_kind::attribute_list,
+             syntax_kind::attribute);
+    auto ignorable = [&](const char *ns, size_t ns_length, const char *name,
+                         size_t length) {
+        return attribute_without_effect(ns, ns_length, name, length) ||
+               (is_attribute_syntax &&
+                cpp_attribute_value(tokens.files.behavior, ns, ns_length, name,
+                                    length) == 0);
+    };
     owned_array<SyntaxElement> work;
     work.append(n);
     while (!work.empty()) {
@@ -622,7 +638,7 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
                 flags |= gnu_no_unique_address;
                 continue;
             }
-            if (!attribute_without_effect(nullptr, 0, name, length))
+            if (!ignorable(nullptr, 0, name, length))
                 return false;
             continue;
         }
@@ -672,7 +688,7 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
                 if (name_is(ns, ns_length, "gnu") &&
                     name_is(name, length, "noreturn"))
                     flags |= gnu_noreturn;
-                else if (!attribute_without_effect(ns, ns_length, name, length))
+                else if (!ignorable(ns, ns_length, name, length))
                     return false;
             }
             continue;
@@ -708,7 +724,7 @@ bool semantic_analysis::attributes_as_gnu(SyntaxElement n,
             flags |= gnu_noreturn;
             continue;
         }
-        if (!attribute_without_effect(ns, ns_length, name, length))
+        if (!ignorable(ns, ns_length, name, length))
             return false;
     }
     return true;
