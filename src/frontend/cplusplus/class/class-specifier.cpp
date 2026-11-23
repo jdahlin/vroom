@@ -145,7 +145,32 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
     class_members.append(e);
     entity_table[c].member_count++;
     entity_table[u].anonymous_object = e;
+    if (entity_table[c].union_ && variant_initialized(e))
+        /* [class.union]/2: a variant member of an anonymous union within
+           the union counts among its variant members */
+        for (uint32_t i = 0; i + 1 < entity_table[c].member_count; i++)
+            if (variant_initialized(
+                    class_members[entity_table[c].first_member + i]))
+                return ill_formed(n, "initializing multiple members of union",
+                                  "class.union");
     return bind_anonymous_members(c, n, u);
+}
+
+/* whether member m has a default member initializer, or is an anonymous
+   union's (or struct's) object holding a member that has one */
+bool semantic_analysis::variant_initialized(entity_index m) const
+{
+    if (entity_table[m].default_initializer)
+        return true;
+    const struct type &t = type_table[entity_table[m].type.unqualified()];
+    if (t.kind != type_kind::class_type ||
+        entity_table[t.entity].anonymous_object != m)
+        return false;
+    const entity &x = entity_table[t.entity];
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (variant_initialized(class_members[x.first_member + i]))
+            return true;
+    return false;
 }
 
 /* the names of the members of anonymous union u, and of the anonymous
@@ -1597,19 +1622,13 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         if (!e || entity_table[e].kind != entity_kind::variable)
             /* a pure-specifier ([class.abstract]) */
             return not_supported(d.index(), "class.abstract");
-        if (!entity_table[c].name)
-            /* an unnamed class's members are initialized by no constructor
-               of its own */
-            return not_supported_because(
-                d.index(), "class.union",
-                "a default member initializer in an unnamed class");
         if (entity_table[c].union_) {
             /* [class.union]/2: "At most one variant member of a union may
                have a default member initializer" */
             const entity &x = entity_table[c];
             for (uint32_t i = 0; i < x.member_count; i++) {
                 entity_index o = class_members[x.first_member + i];
-                if (o != e && entity_table[o].default_initializer)
+                if (o != e && variant_initialized(o))
                     return ill_formed(declaration,
                                       "initializing multiple members of "
                                       "union",

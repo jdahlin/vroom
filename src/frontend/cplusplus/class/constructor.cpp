@@ -306,6 +306,41 @@ bool semantic_analysis::aggregate_value_stored(entity_index c,
     return trivial_class(c);
 }
 
+analysis_result semantic_analysis::anonymous_member_initializers(
+    token_index at, entity_index anonymous, uint32_t &statement)
+{
+    owned_array<uint32_t> statements;
+    uint32_t first = entity_table[anonymous].first_member;
+    uint32_t count = entity_table[anonymous].member_count;
+    for (uint32_t i = 0; i < count; i++) {
+        entity_index m = class_members[first + i];
+        if (entity_table[m].kind != entity_kind::variable ||
+            !entity_table[m].nonstatic_member)
+            continue;
+        const struct type record =
+            type_table[entity_table[m].type.unqualified()];
+        entity_index inner = 0;
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].anonymous_object == m)
+            inner = record.entity;
+        uint32_t made = 0;
+        if (entity_table[m].default_initializer) {
+            VTRY(r, default_member_initializer(at, m, made));
+        } else if (inner) {
+            VTRY(r, anonymous_member_initializers(at, inner, made));
+        } else if (record.kind == type_kind::class_type &&
+                   entity_table[record.entity].first_constructor &&
+                   !trivial_defaulted_default_constructor(record.entity) &&
+                   !entity_table[anonymous].union_) {
+            return not_supported(current_declaration, "class.base.init");
+        }
+        if (made)
+            statements.append(made);
+    }
+    statement = block_statement(at, statements);
+    return analysis_result::well_formed;
+}
+
 /*
  * [class.base.init]/9.1: member e initialized from its default member
  * initializer ([class.mem]/10), analysed in the constructor ([class.mem]/6:
@@ -1699,6 +1734,31 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 initialized[i] = block_statement(at, elem_stmts);
                 continue;
             }
+        }
+        if (record.kind == type_kind::class_type &&
+            entity_table[record.entity].anonymous_object == subobjects[i] &&
+            entity_table[record.entity].first_constructor) {
+            /* [class.union.anon]/1: an anonymous union's members belong to
+               the class: its default member initializers run here.
+               Before C++20 a constexpr constructor must initialize one
+               member of each such union ([dcl.constexpr]/4): another
+               anonymous union left alone is not analysed */
+            if (!tokens.files.behavior.has(
+                    language_feature::three_way_comparison_operator))
+                for (size_t j = 0; j < subobjects.size(); j++) {
+                    const struct type &other =
+                        type_table[entity_table[subobjects[j]]
+                                       .type.unqualified()];
+                    if (other.kind == type_kind::class_type &&
+                        entity_table[other.entity].anonymous_object ==
+                            subobjects[j] &&
+                        !variant_initialized(subobjects[j]))
+                        return not_supported(current_declaration,
+                                             "dcl.constexpr");
+                }
+            VTRY(r, anonymous_member_initializers(at, record.entity,
+                                                  initialized[i]));
+            continue;
         }
         /* [class.default.ctor]/3: default-initialized through a trivial
            X() = default, it is left as it is */

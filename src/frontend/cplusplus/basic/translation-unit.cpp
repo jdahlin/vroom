@@ -209,6 +209,16 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
            M of T has a default member initializer or ..." */
         if (m.default_initializer && !x.union_)
             continue;
+        entity_index member = class_members[x.first_member + i];
+        const struct type &own = type_table[m.type.unqualified()];
+        if (!x.union_ && own.kind == type_kind::class_type &&
+            entity_table[own.entity].anonymous_object == member &&
+            entity_table[own.entity].union_) {
+            /* (7.6): an anonymous union member has an initialized member */
+            if (variant_initialized(member))
+                continue;
+            return false;
+        }
         qualified_type t = m.type;
         while (type_table[t.unqualified()].kind == type_kind::array)
             t = type_table[t.unqualified()].operand;

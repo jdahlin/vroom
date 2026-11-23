@@ -4343,6 +4343,14 @@ class semantic_analysis
                                               SyntaxElement init,
                                               const specified &s);
     bool aggregate_value_stored(entity_index c, uint32_t value) const;
+    /* [class.union.anon]/1: the default member initializers of an anonymous
+       union's (or anonymous struct's) members, run in the constructor of the
+       enclosing class as clang does (the unnamed class has no constructor of
+       its own): a block of them, nested anonymous classes included */
+    bool variant_initialized(entity_index m) const;
+    analysis_result anonymous_member_initializers(token_index at,
+                                                  entity_index anonymous,
+                                                  uint32_t &statement);
     analysis_result default_member_initializer(token_index at, entity_index e,
                                                uint32_t &statement);
     /* the subobject e (a base or a non-static data member) of *this */

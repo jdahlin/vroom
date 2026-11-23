@@ -1763,6 +1763,27 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
             return true;
         }
     }
+    if (x.kind == entity_kind::class_type && !x.name && !x.linkage_name &&
+        !(as_type && analysis.number_closures) && x.enclosing &&
+        table[x.enclosing].kind == entity_kind::class_type) {
+        /* [abi:mangling.named]: an unnamed class of a class (clang's
+           _ZN1OUt0_C2Ev): Ut, the number of the unnamed classes and
+           enumerations of the class before it, less one, and _ */
+        uint64_t before = 0;
+        for (entity_index other = 1; other < e; other++) {
+            const entity &k = table[other];
+            if (k.enclosing == x.enclosing && !k.name && !k.linkage_name &&
+                !k.lambda &&
+                (k.kind == entity_kind::class_type ||
+                 k.kind == entity_kind::enumeration))
+                before++;
+        }
+        text("Ut");
+        if (before)
+            number(before - 1);
+        text("_");
+        return true;
+    }
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration)) {

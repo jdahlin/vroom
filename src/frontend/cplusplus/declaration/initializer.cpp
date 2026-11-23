@@ -659,13 +659,10 @@ analysis_result semantic_analysis::converted_temporary_binding(
     bool rvalue_reference = r.kind == type_kind::rvalue_reference;
     qualified_type t1 = r.operand;
     /* /5.2: an lvalue reference to a non-const (or volatile) type binds to
-       nothing converted */
-    if (!rvalue_reference && (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile)))
-        return ill_formed(at,
-                          "an lvalue reference to a type that is not "
-                          "const-qualified or is volatile-qualified binds "
-                          "only to a reference-compatible lvalue",
-                          "dcl.init.ref");
+       nothing converted, but to the lvalue a conversion function returns
+       (/5.1.2) */
+    bool lvalue_only =
+        !rvalue_reference && (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile));
     if (converting_binds >= 16)
         return not_supported(at, "dcl.init.ref");
     qualified_type made_type = qualified_type::make(t1.unqualified(), cv_none);
@@ -676,9 +673,17 @@ analysis_result semantic_analysis::converted_temporary_binding(
            type "cv3 T3"" by a conversion function ([over.match.ref]) */
         bool converted = false;
         VTRY(c, conversion_function_call(at, m, made_type, false, converted));
-        if (converted)
+        if (converted && (!lvalue_only || m.category == value_category::lvalue))
             return analysis_result::well_formed;
+        if (converted)
+            return not_supported(at, "dcl.init.ref");
     }
+    if (lvalue_only)
+        return ill_formed(at,
+                          "an lvalue reference to a type that is not "
+                          "const-qualified or is volatile-qualified binds "
+                          "only to a reference-compatible lvalue",
+                          "dcl.init.ref");
     converting_binds++;
     initialized_value value;
     analysis_result a = initialize_with(at, m, made_type, false, false, value);
