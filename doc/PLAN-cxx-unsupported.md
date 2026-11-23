@@ -365,6 +365,14 @@ it; none adds a second way to instantiate.
   per-declaration diff of the old and new vpp).  We accept +1
   (expr.prim.lambda/templates.cpp:77: a by-value Boom<T> parameter does not
   instantiate its ill-formed copy constructor: queue).
+- 4.3 (2d2f5a1a9, no simplify needed): a template declaration whose
+  declarator has a trailing return type (syntax kind `declarator`) is a
+  function template's; 2.1 had sent that kind to the variable-template path,
+  where no placeholder is allowed.  Unsupported 38765 -> 38679 (-86), agree
+  +80; we accept +6: substitution failures in a function template's
+  trailing return type are not analysed at the use (queue).  What is left
+  of the key: variable templates with a placeholder (~270, clang accepts:
+  deduce per instantiation).
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
