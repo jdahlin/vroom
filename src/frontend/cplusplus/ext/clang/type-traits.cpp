@@ -659,6 +659,45 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         if (spelled(name, written.size(), "__is_trivially_assignable"))
             return clang_assignable_trait(n, 2, m);
     }
+    /* [meta.unary.prop.query] extent: __array_extent(T, N), the number of
+       elements of the Nth dimension of the array type T (0: none, a
+       dimension of unknown bound or no array) as a size_t */
+    if (n.size() == 6 && spelled(name, written.size(), "__array_extent") &&
+        n[2].is(syntax_kind::type_id) && !n[4].is(syntax_kind::type_id)) {
+        qualified_type t;
+        VTRY(r, type_id(n[2], t));
+        if (depends_on_template_parameter(t) ||
+            names_dependent_entity(n[4].first_token(), n[4].end_token()))
+            return not_supported(n, "temp.dep.constexpr");
+        expression_meaning index;
+        VTRY_SET(r, expression(n[4], index));
+        VTRY_SET(r, operand_value(n, index));
+        bool constant = false;
+        if (is_integral(index.type))
+            VTRY_SET(r, integral_constant_expression(n, index, constant));
+        if (!constant)
+            return not_supported(n, "ext.clang");
+        __int128 dimension = integer_value(
+            tokens.files.behavior, fundamental_of(index.type), index.value);
+        if (dimension < 0)
+            return not_supported(n, "ext.clang");
+        uint64_t extent = 0;
+        qualified_type k = t;
+        for (__int128 i = 0;; i++) {
+            const struct type &at = type_table[k.unqualified()];
+            if (at.kind != type_kind::array)
+                break;
+            if (i == dimension) {
+                if (at.bound_known)
+                    extent = at.bound;
+                break;
+            }
+            k = at.operand;
+        }
+        m = integer_constant(fundamental_type::unsigned_long_int, extent,
+                             n.first_token());
+        return analysis_result::well_formed;
+    }
     /* [ext:clang_type_traits] __is_lvalue_expr(expression) and
        __is_rvalue_expr(expression): the expression's value category
        ([basic.lval]); clang's rvalue is a prvalue, so an xvalue is
