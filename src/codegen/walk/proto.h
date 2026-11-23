@@ -34,7 +34,8 @@ walk_symbol_constant_get(codegen_context *e, uint32_t s,
                          codegen_value *v); /* s is bound to the constant *v */
 VPRIV void walk_array_elements_clear(codegen_context *e,
                                      uint32_t s); /* UINT32_MAX: every array */
-VPRIV bool walk_parameter_constant_get(
+/* unused: only x86-64 inline asm calls it, so the VIR copy has no caller */
+__attribute__((unused)) VPRIV bool walk_parameter_constant_get(
     codegen_context *e, uint32_t s,
     codegen_value *v); /* a provisional constant of parameter s (wkst.pk) */
 VPRIV bool walk_symbol_address_may_be_zero(

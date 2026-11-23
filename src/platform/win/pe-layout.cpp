@@ -485,7 +485,7 @@ static void pe_runtime_pseudo_relocs(void)
                 pe_symbol *t = ix < f->nsyms ? f->syms[ix] : NULL;
                 if (!t || !t->runtime_pseudo_reloc || !pe_sym_is_defined(t) ||
                     !(t->kind == PE_SYM_IMPORT_DATA
-                          ? (t->file ? t->file->location : NULL)
+                          ? (t->file ? t->file->location : (pe_chunk *)NULL)
                           : t->chunk))
                     continue;
                 uint16_t type = pe_rd16(rel + 8);

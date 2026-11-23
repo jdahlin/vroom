@@ -8,6 +8,8 @@
  */
 #include "../codegen-internal.h"
 
+#ifdef VCC_WASM
+
 VPRIV bool em_cmpzero(codegen_context *e, uint32_t n, uint32_t *operand)
 {
     cc *c = e->compile_context;
@@ -48,3 +50,4 @@ VPRIV bool em_cmpzero(codegen_context *e, uint32_t n, uint32_t *operand)
     }
     return false;
 }
+#endif

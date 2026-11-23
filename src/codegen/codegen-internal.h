@@ -880,7 +880,9 @@ VPRIV void em_switch_values_reset(codegen_context *e);
 VPRIV void em_switch_values_emit(codegen_context *e);
 VPRIV bool a64_switch_values(codegen_context *e, uint32_t n);
 VPRIV bool walk_switch_values_emit(codegen_context *e, uint32_t n);
+#ifdef VCC_WASM
 VPRIV bool wswitch_values(codegen_context *e, uint32_t n);
+#endif
 /* tu.c */
 VPRIV void *codegen_memory_reserve(size_t n);
 VPRIV double codegen_clock_seconds(void);
@@ -969,7 +971,9 @@ VPRIV bool em_block_value_reuse(codegen_context *e, const node *block,
                                 uint32_t *to);
 VPRIV uint32_t em_double_unary(codegen_context *e, uint32_t n);
 
+#ifdef VCC_WASM /* only wasm's emitter calls it */
 VPRIV bool em_cmpzero(codegen_context *e, uint32_t n, uint32_t *operand);
+#endif
 VPRIV bool em_mulshift(cc *c, ast_qualified_type ty, int *op, i128 *rhs);
 VPRIV bool em_xor_not(cc *c, ast_qualified_type ty, int op, i128 rhs);
 /* opt/identity.c */
@@ -1409,8 +1413,14 @@ VPRIV void emit_function(codegen_context *e, uint32_t s);
 VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s);
 VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i);
 /* arch/wasm/codegen/ */
+#ifdef VCC_WASM
 VPRIV void wasm_emit_function(codegen_context *e, uint32_t s);
 VPRIV void wasm_ecx_free(codegen_context *e);
+#else /* not built: the callers' WASM(c) branches are dead */
+static inline void wasm_emit_function(codegen_context *e, uint32_t s)
+{
+}
+#endif
 VPRIV void walk_function_emit(codegen_context *e, uint32_t s);
 VPRIV void walk_context_free(codegen_context *e);
 VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t s,
@@ -1440,9 +1450,21 @@ VPRIV void virbuild_pass_switch_read(
     virbuild_pass_switch *w,
     const char *items); /* -fvir-passes=ITEMS (NULL: none) */
 VPRIV void virbuild_walk_context_free(codegen_context *e);
+#ifdef VCC_WASM
 VPRIV void wasm_data_ref(codegen_context *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, codegen_context *ctx, int nthr);
 VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
+#else
+static inline void wasm_data_ref(codegen_context *e, uint32_t ref)
+{
+}
+static inline void wasm_header(cc *c, tbuf *hdr, codegen_context *ctx, int nthr)
+{
+}
+static inline void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
+{
+}
+#endif
 /* prepass.c */
 VPRIV bool codegen_expression_is_constant_index(cc *c, uint32_t n);
 VPRIV uint32_t codegen_expression_constant_index(cc *c, uint32_t n);

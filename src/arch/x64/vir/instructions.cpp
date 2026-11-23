@@ -180,7 +180,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         if (next->op == VIR_OP_ICMP && (next->a == v || side)) {
             uint32_t other = side ? next->a : next->b;
             bool imm = x64_vir_value_immediate(L->function, other, &k);
-            if (width == x64_vir_type_size(i->type))
+            if (width == (unsigned)x64_vir_type_size(i->type))
                 ok = !imm || (!side && (width == 4 || k == (int32_t)k));
             else if (!side && imm && (next->flags & 15) < 2) {
                 int64_t lo = (i->flags & VIR_INSN_FLAG_MS)
@@ -594,7 +594,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     }
     case VIR_OP_SHL:
     case VIR_OP_LSHR:
-    case VIR_OP_ASHR:
+    case VIR_OP_ASHR: {
         int64_t count;
         if (x64_vir_value_immediate(L->function, i->b, &count) && count >= 0 &&
             count < (i->type == VIR_TYPE_I32 ? 32 : 64)) {
@@ -619,6 +619,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         x64_record_emit_three_registers(
             e, X64_OP_MOV, sz, d, L->general_temporary, X64_REGISTER_NONE);
         return;
+    }
     case VIR_OP_ICMP: {
         static const uint8_t cc[] = {X64_CONDITION_E, X64_CONDITION_NE,
                                      X64_CONDITION_L, X64_CONDITION_LE,

@@ -4883,7 +4883,7 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
             !codegen_type_is_record(c, x->ty) &&
             !codegen_type_is_array(c, x->ty))
             return walk_value_constant(c, 0, x->ty);
-        /* fall through */
+        __attribute__((fallthrough));
     case AST_NODE_INITIALIZER: {
         /* a braced initializer used as a value (a temporary, an argument, an
            assignment's source): built in a temporary object of its type,
