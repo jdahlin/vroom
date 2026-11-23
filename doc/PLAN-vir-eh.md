@@ -259,3 +259,28 @@ at E2 (needs clang++ and qemu, which CI has).
   macOS and the kernel corpus).  Not done: the passes' rules of 8.8 beyond
   what keeps the verifier green (nothing optimizes across an invoke yet),
   the allocator's rule for values live into a pad (E6, with the lowerings).
+- E6 (2026-11-23): done for cleanups, both targets.  An invoke is a call to
+  the allocator (`vir_op_is_call`: clobbers, values live across it) and a
+  terminator whose result it now assigns (step 5, then the block's end
+  state; a spilled result is stored by the lowering before its branch).
+  No moves on an unwind edge: those of values the pad does not read go
+  (exactly, by reachability: `livein` is by position), and one it reads
+  fails the allocation (the function falls back).  Lowerings: the call
+  between two labels (arm64) or marks (x86-64) with its site, the result
+  moved from x0/rax/xmm0, the normal edge as a branch's; a landing pad's
+  label or mark (the proj from x0, or rax/rdx by constraint); `resume` as
+  `_Unwind_Resume`; arm64 prints through E2's table (catch-all pads as
+  action 1), x86-64 through the walker's (`eh_sites`, `eh_pad`, `eh_term`).
+  Refused: an invoke with a two-register result (its projections are not
+  next to it).  Fixed on the way: slot promotion and block parameters
+  ignored an invoke's arguments (cleanup variables' stores went),
+  `x64_eh_wanted` read `eh_pad[UINT32_MAX]`.  Tests: `invoke_results`
+  (results across invokes, spilled, a float).  vcc-eh 32/32 (four tests, two
+  targets, -O0..-O3, VIR lowering every function but arm64's existing
+  refusals); vcc-ctests -O1/-O2/-O3 (verify, check) 2170/2170; vcc-x86 with
+  and without `-fexceptions` on every file: the one origin/main failure;
+  cxx-run 3196; vir-alloc 22/22, random 160 functions, mutate 3656/3784
+  caught.  Known, not E6: `gcc.dg-torture-matrix-2` fails with unwind
+  tables on origin/main too (E1 makes `-fexceptions` turn them on); no
+  nounwind inference, so landing pads are kept for calls clang proves
+  cannot throw.

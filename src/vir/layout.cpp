@@ -84,6 +84,7 @@ static bool vir_layout_block_is_plain(const vir_function *f, uint32_t b,
          i < k->first + k->insn_count; i++)
         switch (f->insns[i].op) {
         case VIR_OP_CALL:
+        case VIR_OP_INVOKE:
         case VIR_OP_ASM:
         case VIR_OP_ASMGOTO:
         case VIR_OP_MEMCPY:

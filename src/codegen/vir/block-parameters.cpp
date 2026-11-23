@@ -170,7 +170,7 @@ VPRIV void virbuild_parameters_dead_remove(codegen_context *e)
                     if (virbuild_operand_kind_is_value(oi->operand_kinds[k]) &&
                         !(in->op == VIR_OP_BRIF && k > 0))
                         virbuild_parameter_live_mark(V, stk, &n, (&in->a)[k]);
-                if (in->op == VIR_OP_CALL || in->op == VIR_OP_RET)
+                if (vir_op_is_call(in->op) || in->op == VIR_OP_RET)
                     for (uint32_t k = 0; k < V->extra[in->c]; k++)
                         virbuild_parameter_live_mark(V, stk, &n,
                                                      V->extra[in->c + 1 + k]);

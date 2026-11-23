@@ -110,7 +110,7 @@ static void vir_alloc_thread_arrays_init(void)
                      oi->operand_kinds[k] <= VIR_OPERAND_KIND_BITC) ||
                     oi->operand_kinds[k] == VIR_OPERAND_KIND_CONSTV)
                     m |= 1u << k;
-        if (op == VIR_OP_CALL || op == VIR_OP_RET || op == VIR_OP_BR ||
+        if (vir_op_is_call(op) || op == VIR_OP_RET || op == VIR_OP_BR ||
             op == VIR_OP_ASM || op == VIR_OP_ASMGOTO)
             m |= 8;
         vir_alloc_thread_arrays_instance.vfm[op] = m;
@@ -663,7 +663,7 @@ static bool vir_alloc_liveness_sweep(vir_allocator *a)
                 if (fx.result != VIR_REGISTER_NONE && !ax.hint[i])
                     ax.hint[i] = VIR_ALLOC_HINT_REGISTER | fx.result;
             }
-            if (in->op == VIR_OP_CALL && !cold) {
+            if (vir_op_is_call(in->op) && !cold) {
                 lastcall = i;
                 callloop = li != VIR_BLOCK_NONE;
                 if (callloop)
@@ -706,7 +706,7 @@ static bool vir_alloc_liveness_sweep(vir_allocator *a)
                 }
                 if (j < fx.operand_count &&
                     fx.operands[j] != VIR_REGISTER_NONE &&
-                    (in->op != VIR_OP_CALL || !live))
+                    (!vir_op_is_call(in->op) || !live))
                     ax.hint[v] = VIR_ALLOC_HINT_REGISTER | fx.operands[j];
                 else if (in->op == VIR_OP_BR &&
                          j < f->blocks[in->a].parameter_count)
@@ -1378,6 +1378,42 @@ static void vir_alloc_moves_sequence(vir_allocator *a, uint32_t n,
 #undef VIR_ALLOC_LIVE_COUNT
 }
 
+/* v is read in a block reachable from landing pad b (exactly: livein's answer is by position) */
+static bool vir_alloc_landing_pad_reads(vir_allocator *a, uint32_t v,
+                                        uint32_t b)
+{
+    vir_function *f = a->function;
+    uint32_t nb = f->block_count, top = 0, *stack;
+    uint8_t *seen;
+    bool hit = false;
+
+    stack = (uint32_t *)malloc((size_t)nb * sizeof *stack);
+    seen = (uint8_t *)calloc(nb, 1);
+    if (!stack || !seen) {
+        free(stack), free(seen);
+        return true; /* (as if it did: the function falls back) */
+    }
+    stack[top++] = b, seen[b] = 1;
+    while (top && !hit) {
+        uint32_t x = stack[--top];
+        const vir_block *k = &f->blocks[x];
+
+        for (uint32_t i = k->first; i < k->first + k->insn_count && !hit; i++) {
+            vir_operand_iterator it;
+            uint32_t *q;
+
+            vir_operand_iterator_init(&it, f, &f->insns[i], false);
+            while ((q = vir_operand_iterator_next(&it)) && !hit)
+                hit = *q == v;
+        }
+        for (uint32_t s = ax.soff[x]; s < ax.soff[x + 1]; s++)
+            if (!seen[ax.succ[s]])
+                seen[ax.succ[s]] = 1, stack[top++] = ax.succ[s];
+    }
+    free(stack), free(seen);
+    return hit;
+}
+
 /* the edge from p (its successor number k) to b: moves that turn p's end state into b's entry state */
 static void conform(vir_allocator *a, uint32_t p, uint32_t k, uint32_t b)
 {
@@ -1481,6 +1517,23 @@ static void conform(vir_allocator *a, uint32_t p, uint32_t k, uint32_t b)
                              VIR_EDIT_MOVE);
             n++;
         }
+    /* an unwind edge (into a landing pad, 8.8) has no place for moves: those of values the pad
+	   does not read go, and a value it reads must already be where the pad has it */
+    if (n && (t->flags & VIR_BLOCK_FLAG_LPAD)) {
+        uint32_t kept = 0;
+
+        for (uint32_t j = 0; j < n; j++)
+            if (vir_alloc_landing_pad_reads(a, ax.pm[j].value, b))
+                ax.pm[kept++] = ax.pm[j];
+        n = kept;
+        if (n) {
+            vir_alloc_failure_set(a,
+                                  "a value live into the landing pad b%u needs "
+                                  "a move on its unwind edge",
+                                  b);
+            return;
+        }
+    }
     if (n) {
         vir_alloc_moves_sequence(a, n, nmask);
         ax.eidx[ax.soff[p] + k] = a->edge_count;
@@ -1530,7 +1583,7 @@ static bool vir_alloc_value_is_read_next(vir_allocator *a, uint32_t b,
         bool hit = false;
 
         for (uint32_t i = k->first + k->parameter_count;
-             i < end && !hit && f->insns[i].op != VIR_OP_CALL; i++) {
+             i < end && !hit && !vir_op_is_call(f->insns[i].op); i++) {
             vir_operand_iterator it;
             uint32_t *p;
 
@@ -2136,21 +2189,26 @@ static bool vir_alloc_insn_assign(vir_allocator *a, uint32_t b, uint32_t i,
                 vir_alloc_register_clear(a, r);
         }
         vir_alloc_clobbers_apply(a, &fx, lock, fixm, i);
-        vir_alloc_state_save(a, ax.end_off, ax.end_n, b);
-        return true;
-    }
-    /* 3: the registers of operands that die here, and copies in fixed registers */
-    for (uint32_t j = 0; j < n; j++) {
-        uint32_t v = ops[j];
+        /* (an invoke's result: defined at the end of its block, on the normal edge; 5 below) */
+        if (in->op != VIR_OP_INVOKE || in->type == VIR_TYPE_VOID ||
+            in->type == VIR_TYPE_MULTI) {
+            vir_alloc_state_save(a, ax.end_off, ax.end_n, b);
+            return true;
+        }
+    } else {
+        /* 3: the registers of operands that die here, and copies in fixed registers */
+        for (uint32_t j = 0; j < n; j++) {
+            uint32_t v = ops[j];
 
-        if (byte[j] != VIR_REGISTER_NONE && ax.regval[byte[j]] == v &&
-            ax.reg[v] != byte[j])
-            vir_alloc_register_clear(a, byte[j]);
-        if (ax.dmark[v] == i && vir_alloc_value_is_in_register(a, v))
-            vir_alloc_register_clear(a, ax.reg[v]);
+            if (byte[j] != VIR_REGISTER_NONE && ax.regval[byte[j]] == v &&
+                ax.reg[v] != byte[j])
+                vir_alloc_register_clear(a, byte[j]);
+            if (ax.dmark[v] == i && vir_alloc_value_is_in_register(a, v))
+                vir_alloc_register_clear(a, ax.reg[v]);
+        }
+        /* 4: clobbers: live values leave the clobbered registers */
+        vir_alloc_clobbers_apply(a, &fx, lock, fixm, i);
     }
-    /* 4: clobbers: live values leave the clobbered registers */
-    vir_alloc_clobbers_apply(a, &fx, lock, fixm, i);
     /* 5: the result */
     if (in->type != VIR_TYPE_VOID && in->type != VIR_TYPE_MULTI) {
         uint32_t c = vir_alloc_value_class(f, i);
@@ -2266,6 +2324,8 @@ static bool vir_alloc_insn_assign(vir_allocator *a, uint32_t b, uint32_t i,
             }
         }
     }
+    if (term) /* (an invoke with a result: its block's end, with the result in place) */
+        vir_alloc_state_save(a, ax.end_off, ax.end_n, b);
     return true;
 }
 
@@ -2357,6 +2417,11 @@ static uint32_t vir_alloc_save_point_find(vir_allocator *a,
             switch (f->insns[i].op) {
             case VIR_OP_CALL:
                 need = !(opt->no_frame && opt->no_frame[i]);
+                break;
+            case VIR_OP_INVOKE:
+            case VIR_OP_LANDINGPAD:
+            case VIR_OP_RESUME:
+                need = true;
                 break;
             case VIR_OP_ASM:
             case VIR_OP_ASMGOTO:
@@ -2636,5 +2701,5 @@ bool vir_alloc(vir_function *f, const vir_loops *lp,
     out->statistics.callee =
         (uint32_t)(__builtin_popcountll(a->used_callee[0]) +
                    __builtin_popcountll(a->used_callee[1]));
-    return true;
+    return !a->failed; /* (conform: a move a landing pad's unwind edge cannot carry) */
 }

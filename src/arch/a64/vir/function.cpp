@@ -244,7 +244,7 @@ static bool a64_vir_vectors_cross_call(vir_function *f)
         for (uint32_t i = f->blocks[b].first;
              i < f->blocks[b].first + f->blocks[b].insn_count; i++) {
             nv += vir_type_is_vector(f->insns[i].type);
-            calls |= f->insns[i].op == VIR_OP_CALL ||
+            calls |= vir_op_is_call(f->insns[i].op) ||
                      ((f->insns[i].op == VIR_OP_MEMCPY ||
                        f->insns[i].op == VIR_OP_MEMSET) &&
                       a64_vir_insn_is_big_memory(f, &f->insns[i]));
@@ -287,7 +287,7 @@ static bool a64_vir_vectors_cross_call(vir_function *f)
 
                 if (ix[i] != UINT32_MAX)
                     live[ix[i] / 64] &= ~(1ull << (ix[i] & 63));
-                if (pass && (x.op == VIR_OP_CALL || x.op == VIR_OP_MEMCPY ||
+                if (pass && (vir_op_is_call(x.op) || x.op == VIR_OP_MEMCPY ||
                              x.op == VIR_OP_MEMSET))
                     for (uint32_t w = 0; w < W; w++)
                         hit |= live[w] != 0;
@@ -380,6 +380,13 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
             ao.shrink = true;
             ao.no_frame = a64_vir_thread_state_instance.needs_fallthrough;
         }
+        /* (an invoke's projections are in its normal block, not after it, as the allocator wants them) */
+        for (uint32_t i = f->constant_count; i < f->insn_count; i++)
+            if (f->insns[i].op == VIR_OP_INVOKE &&
+                f->insns[i].type == VIR_TYPE_MULTI) {
+                *why = VIRBUILD_FAILURE(exceptions_lowering);
+                return false;
+            }
         if (!vir_alloc(f, &V->loops, &regs, &ao, &V->allocation)) {
             *why = VIRBUILD_FAILURE(allocation_failed);
             snprintf(V->failure_detail, sizeof V->failure_detail, "%s",
@@ -495,6 +502,14 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
     e->temporaries_in_use = 0;
     e->callee_saved_used = 0;
     e->loop_count = e->cleanup_count = 0;
+    /* exceptions: the call sites and landing pads of the table (arch/a64/codegen/eh.cpp) */
+    e->eh_site_count = e->eh_node_count = e->eh_terminate_pad = 0;
+    e->eh_in_pads = false;
+    e->eh_cleanup_limit = INT32_MAX;
+    e->eh_function = (f->flags & VIR_FUNCTION_FLAG_EH) &&
+                     e->unit->options->cfi && !CODEGEN_IS_DARWIN(c);
+    if ((f->flags & VIR_FUNCTION_FLAG_EH) && !e->eh_function)
+        a64_vir_fail(&L, VIRBUILD_FAILURE(exceptions_lowering));
     e->case_count = 0;
     e->jump_table_count = e->jump_table_label_count = 0;
     e->is_reachable = true;
@@ -530,8 +545,12 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
         if (V->allocation.callee[1] >> r & 1)
             L.callee_saved_float_offsets[r - 8] =
                 a64_frame_slot_allocate(e, 8, 8);
-    for (uint32_t b = 0; b < f->block_count; b++)
+    for (uint32_t b = 0; b < f->block_count; b++) {
         L.labels[b] = a64_label_new(e);
+        /* a landing pad: entered by the unwinder, kept by the record passes */
+        if (f->blocks[b].flags & VIR_BLOCK_FLAG_LPAD)
+            e->label_reference_counts[L.labels[b]] |= CODEGEN_LABEL_EXTERNAL;
+    }
     L.return_label = a64_label_new(e);
     a64_vir_function_body_lower(&L);
     a64_label_define_forced(e, L.return_label);

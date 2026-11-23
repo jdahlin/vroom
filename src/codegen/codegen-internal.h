@@ -869,6 +869,8 @@ struct codegen_eh_site {
 };
 struct codegen_eh_node {
     uint32_t symbol, parent, pad;
+    bool
+        catch_all; /* VIR's landing pads: a catch (...) pad (action 1), not a cleanup */
 };
 
 typedef struct a64_call_argument {
@@ -1414,6 +1416,10 @@ VPRIV int a64_eh_cleanup_limit_set(codegen_context *e, int k);
 VPRIV void a64_eh_pads(codegen_context *e);
 VPRIV bool a64_eh_wanted(const codegen_context *e);
 VPRIV void a64_eh_table(const codegen_context *e, tbuf *b, uint32_t s);
+VPRIV uint32_t
+a64_eh_pad_node(codegen_context *e, uint32_t label,
+                bool catch_all); /* VIR: the node of a landing pad's label */
+VPRIV uint32_t a64_eh_site_begin(codegen_context *e, uint32_t node);
 VPRIV uint32_t user_label(codegen_context *e, uint32_t l);
 VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want);
 VPRIV codegen_value vla_bytes(codegen_context *e, ast_qualified_type t);

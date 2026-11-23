@@ -53,7 +53,18 @@ typedef struct x64_vir_context {
     int64_t test_immediate;
     virbuild_lowering
         drv; /* the shared driver's inputs (codegen/vir/lowering-driver.h) */
+    uint32_t
+        eh_catch_all_block; /* exceptions: the one catch-all landing pad (the walker's eh_term), or VIR_BLOCK_NONE */
 } x64_vir_context;
+
+/* the function cannot be lowered: back to x64_vir_function_lower's _setjmp with the reason */
+static inline __attribute__((noreturn, cold)) void
+x64_vir_fail(x64_vir_context *L, const char *why)
+{
+    L->context->vir_failure_reason =
+        why; /* (in ecx: L is not volatile across the jump) */
+    _longjmp(L->context->bail_jump, 3);
+}
 
 #include "common/vector.h"
 VPRIV int x64_vir_register_number(uint8_t r);

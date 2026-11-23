@@ -104,9 +104,16 @@ VPRIV bool x64_eh_wanted(codegen_context *e)
 
     if (!W || !W->eh_fn || W->eh_overflow)
         return false;
-    for (uint32_t k = 0; k < W->eh_nsites; k++)
-        if (W->eh_sites[k].node && W->eh_pad[W->eh_sites[k].node])
+    for (uint32_t k = 0; k < W->eh_nsites; k++) {
+        uint32_t m = W->eh_sites[k].node;
+
+        if (m ==
+            UINT32_MAX) { /* (a call in a landing pad: the terminate pad) */
+            if (W->eh_term)
+                return true;
+        } else if (m && W->eh_pad[m])
             return true;
+    }
     return false;
 }
 

@@ -117,8 +117,9 @@ VPRIV void virbuild_lower_block(const virbuild_lowering *d, uint32_t b)
             t->instruction(ctx, b, i, &o->operand_registers[pos], n, res);
             pos += n + result;
         }
+        /* (an invoke ends its block: its lowering stores the result, before the jump) */
         if (res != VIR_REGISTER_NONE && o->slot[i] != VIR_BLOCK_NONE &&
-            o->spill_defined[i])
+            o->spill_defined[i] && x.op != VIR_OP_INVOKE)
             t->result_spill(ctx, res, o->slot[i]);
     }
     if (t->edits_at_block_end)

@@ -93,7 +93,12 @@ static void a64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
         x->result = a[in->a].reg;
         return;
     }
-    case VIR_OP_CALL: {
+    case VIR_OP_LANDINGPAD: /* (the unwinder leaves only the callee-saved registers) */
+        x->clobbered[0] = A64_VIR_CALLER_SAVED_INTEGER;
+        x->clobbered[1] = A64_VIR_ALLOCATABLE_FLOAT;
+        return;
+    case VIR_OP_CALL:
+    case VIR_OP_INVOKE: {
         uint32_t n =
             a64_vir_arguments_assign(darwin, &f->extra[in->b], arg,
                                      VIR_REGISTER_CONSTRAINT_MAX - 1, &stk);
@@ -112,7 +117,9 @@ static void a64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
             x->mem |= 1;
         x->clobbered[0] = A64_VIR_CALLER_SAVED_INTEGER;
         x->clobbered[1] = A64_VIR_ALLOCATABLE_FLOAT;
-        if (in->type != VIR_TYPE_VOID && in->type != VIR_TYPE_MULTI)
+        /* (an invoke ends its block: its lowering moves the result where it goes, 8.8) */
+        if (in->type != VIR_TYPE_VOID && in->type != VIR_TYPE_MULTI &&
+            in->op == VIR_OP_CALL)
             x->result = a64_vir_return_register(in->type);
         return;
     }
@@ -210,15 +217,16 @@ static void a64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
    a constant table, since every lowering thread hands it to the allocator */
 static const uint8_t a64_vir_operand_fixes[256] = {
 #define A64_VIR_FIXES(op) [VIR_OP_##op] = 1,
-    A64_VIR_FIXES(PARAM) A64_VIR_FIXES(CALL) A64_VIR_FIXES(RET)
-        A64_VIR_FIXES(MEMCPY) A64_VIR_FIXES(MEMSET) A64_VIR_FIXES(LOAD)
-            A64_VIR_FIXES(STORE) A64_VIR_FIXES(ADD) A64_VIR_FIXES(SUB)
-                A64_VIR_FIXES(AND) A64_VIR_FIXES(OR) A64_VIR_FIXES(XOR)
-                    A64_VIR_FIXES(ICMP) A64_VIR_FIXES(PTRADD) A64_VIR_FIXES(SHL)
-                        A64_VIR_FIXES(LSHR) A64_VIR_FIXES(ASHR)
-                            A64_VIR_FIXES(MUL) A64_VIR_FIXES(I2P)
-                                A64_VIR_FIXES(P2I) A64_VIR_FIXES(TRUNC)
-                                    A64_VIR_FIXES(EXT) A64_VIR_FIXES(SELECT)
+    A64_VIR_FIXES(PARAM) A64_VIR_FIXES(CALL) A64_VIR_FIXES(INVOKE)
+        A64_VIR_FIXES(LANDINGPAD) A64_VIR_FIXES(RET) A64_VIR_FIXES(MEMCPY)
+            A64_VIR_FIXES(MEMSET) A64_VIR_FIXES(LOAD) A64_VIR_FIXES(STORE)
+                A64_VIR_FIXES(ADD) A64_VIR_FIXES(SUB) A64_VIR_FIXES(AND)
+                    A64_VIR_FIXES(OR) A64_VIR_FIXES(XOR) A64_VIR_FIXES(ICMP)
+                        A64_VIR_FIXES(PTRADD) A64_VIR_FIXES(SHL)
+                            A64_VIR_FIXES(LSHR) A64_VIR_FIXES(ASHR)
+                                A64_VIR_FIXES(MUL) A64_VIR_FIXES(I2P)
+                                    A64_VIR_FIXES(P2I) A64_VIR_FIXES(TRUNC)
+                                        A64_VIR_FIXES(EXT) A64_VIR_FIXES(SELECT)
 #undef A64_VIR_FIXES
 };
 

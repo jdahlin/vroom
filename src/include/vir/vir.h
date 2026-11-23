@@ -516,6 +516,11 @@ extern const char *const vir_integer_condition_names[10],
     *const vir_float_condition_names[8];
 bool vir_opcode_is_constant(uint32_t op);
 bool vir_opcode_is_terminator(uint32_t op);
+/* call and invoke (8.8): an invoke is a call that ends its block */
+static inline bool vir_op_is_call(uint32_t op)
+{
+    return op == VIR_OP_CALL || op == VIR_OP_INVOKE;
+}
 /* the type the operand position fixes, or VIR_TYPE_VOID when the text needs a `:type` suffix (11.5) */
 uint32_t vir_operand_type_fixed(uint32_t op, uint32_t ty, uint32_t k);
 uint32_t vir_type_size(uint32_t ty); /* bytes of a scalar type, 0 otherwise */

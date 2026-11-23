@@ -136,7 +136,12 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
         x->operands[2] = RCX;
         x->clobbered[0] = (1u << RDI) | (1u << RCX) |
                           (i->op == VIR_OP_MEMCPY ? 1u << RSI : 0);
-    } else if (i->op == VIR_OP_CALL) {
+    } else if (
+        i->op ==
+        VIR_OP_LANDINGPAD) { /* (the unwinder keeps only the callee-saved registers) */
+        x->clobbered[0] = UINT16_MAX;
+        x->clobbered[1] = (1u << 14) - 1;
+    } else if (vir_op_is_call(i->op)) {
         uint32_t n = f->extra[i->c];
         x->operand_count = n + 1;
         for (uint32_t k = 0; k < n; k++) {
@@ -166,9 +171,13 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
             x->clobbered[0] = UINT16_MAX;
             x->clobbered[1] = (1u << 14) - 1;
         }
-        if (i->type != VIR_TYPE_VOID && i->type != VIR_TYPE_MULTI)
+        /* (an invoke ends its block: its lowering moves the result, 8.8) */
+        if (i->type != VIR_TYPE_VOID && i->type != VIR_TYPE_MULTI &&
+            i->op == VIR_OP_CALL)
             x->result =
                 vir_register_class(i->type) ? VIR_REGISTER_MAKE(1, 0) : RAX;
+    } else if (i->op == VIR_OP_PROJ && f->insns[i->a].op == VIR_OP_LANDINGPAD) {
+        x->result = i->b ? RDX : RAX; /* the exception, the selector */
     } else if (i->op == VIR_OP_PROJ) {
         x->result =
             x64_vir_return_register(f->extra[f->insns[i->a].b + 1], i->b);
