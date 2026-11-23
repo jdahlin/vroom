@@ -232,3 +232,30 @@ at E2 (needs clang++ and qemu, which CI has).
   origin/main too (E1 and E2 called it intermittent: it is not).  Not done:
   the builder producing these (E5), the passes' rules of 8.8, the lowerings
   (E6); VIR's interpreter does not exist, so nothing runs a unit.
+- E5 (2026-11-23): done for cleanups.  `codegen/vir/exceptions.cpp`: in a
+  function where the walker keeps an exception table, `virbuild_call` ends
+  its block with an `invoke` when a cleanup is live (`walk_eh_call_node`,
+  now shared with x86-64's direct emitter), unwinding to the node's
+  landing pad, made on first use; `virbuild_eh_pads` builds the pads (the
+  exception in variable 256 to the `resume`), each node's cleanup in turn,
+  a catch-all terminate pad for a cleanup's call.  A node keeps the slot its
+  variable had at its first invoke, and a pad's cleanup finds that one (the
+  builder's slot for an offset may be another object's by then).  The
+  pre-IR: invoke's two successors (`cfg.cpp`), its values in
+  `VIRBUILD_FOR_EACH_OPERAND`, no block threading through an invoke, no
+  edge splitting into one (a refusal, `exceptions`, as a landing pad with
+  parameters is); `to-vir.cpp` converts invoke and landingpad,
+  `pipeline.cpp` sets `lpad` and the function's personality (a symbol now:
+  `cc.eh_personality_sym`).  The lowerings do not take such a function yet:
+  it is refused as `exceptions_lowering` and falls back to the direct
+  emitter, which is correct.  Checked: every function of `src/test/eh/`
+  (with the new `cleanup_shapes`) builds on both targets, except what
+  arm64's builder already refuses (a record argument or result, a
+  variadic definition), and verifies after every pass (`-fvir-verify
+  -fvir-passes=verify`), -O2 and -O3; vcc-eh 24/24; vcc-ctests -O1
+  (`-fno-vir`), -O2 (`-fvir-passes=verify`), -O3 (`-fvir-verify
+  -fvir-check`) 2170/2170; vcc-x86 the one failure of origin/main;
+  cxx-run 3196; vir-test 143/143.  Not measured: `vbench.py gate` (needs
+  macOS and the kernel corpus).  Not done: the passes' rules of 8.8 beyond
+  what keeps the verifier green (nothing optimizes across an invoke yet),
+  the allocator's rule for values live into a pad (E6, with the lowerings).

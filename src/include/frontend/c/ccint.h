@@ -80,6 +80,7 @@ struct cc {
         eh_terminate_sym; /* ... __cxa_begin_catch (C: 0), std::terminate (C: abort): a cleanup that throws terminates */
     const char *
         eh_personality; /* __gxx_personality_v0 or C's __gcc_personality_v0 (0: no exceptions in the TU) */
+    uint32_t eh_personality_sym; /* ... as a symbol (VIR's personality) */
     jmp_buf bail;
     int errors;
     struct cc_recovery_point *

@@ -56,6 +56,7 @@
 #define walk_division_signed_power_of_two_emit WALK_NAME(walk_division_signed_power_of_two_emit)
 #define walk_division_unsigned_constant_check WALK_NAME(walk_division_unsigned_constant_check)
 #define walk_division_unsigned_constant_emit WALK_NAME(walk_division_unsigned_constant_emit)
+#define walk_eh_call_node WALK_NAME(walk_eh_call_node)
 #define walk_expression_is_constant WALK_NAME(walk_expression_is_constant)
 #define walk_float_class_emit WALK_NAME(walk_float_class_emit)
 #define walk_float_class_test WALK_NAME(walk_float_class_test)

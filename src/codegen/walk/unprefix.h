@@ -54,6 +54,7 @@
 #undef walk_division_signed_power_of_two_emit
 #undef walk_division_unsigned_constant_check
 #undef walk_division_unsigned_constant_emit
+#undef walk_eh_call_node
 #undef walk_expression_is_constant
 #undef walk_float_class_emit
 #undef walk_float_class_test

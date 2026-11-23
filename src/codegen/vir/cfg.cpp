@@ -24,6 +24,8 @@ VPRIV uint32_t virbuild_block_successor_count(virbuild_context *V, uint32_t b)
         return V->extra[V->insns[t].insn.c];
     case VIR_OP_SWITCH:
         return 1 + V->extra[V->insns[t].insn.c];
+    case VIR_OP_INVOKE:
+        return 2;
     default:
         return 0;
     }
@@ -41,6 +43,8 @@ VPRIV uint32_t *virbuild_block_successor_pointer(virbuild_context *V,
         return &in->a;
     case VIR_OP_BRIF:
         return k ? &in->c : &in->b;
+    case VIR_OP_INVOKE: /* the normal block, the unwind block: after the values */
+        return &V->extra[in->c + 1 + V->extra[in->c] + k];
     default: {
         uint32_t st = vir_switch_stride(V->insns[in->a].insn.type);
 
@@ -58,6 +62,10 @@ VPRIV void virbuild_empty_blocks_thread(codegen_context *e)
         uint32_t n = virbuild_block_successor_count(V, b);
 
         if (b == V->indirect_dispatch)
+            continue;
+        /* (an invoke's normal block has it as its only predecessor; its unwind block is a pad) */
+        if (V->blocks[b].terminator &&
+            V->insns[V->blocks[b].terminator].insn.op == VIR_OP_INVOKE)
             continue;
         for (uint32_t k = 0; k < n; k++) {
             uint32_t *t = virbuild_block_successor_pointer(V, b, k);
@@ -245,6 +253,9 @@ VPRIV void virbuild_critical_edges_split(codegen_context *e)
                 live += V->forward[p] == p;
             if (!live)
                 continue;
+            /* (an invoke's targets take no parameters, 8.8, and its edges are not split) */
+            if (V->insns[V->blocks[b].terminator].insn.op == VIR_OP_INVOKE)
+                virbuild_fail(e, VIRBUILD_FAILURE(exceptions));
             /* one edge block per (b, t): t's predecessor b becomes it */
             for (uint32_t j = 0; j < V->blocks[t].predecessor_count; j++)
                 if (V->predecessors[V->blocks[t].predecessor_first + j] == b) {
