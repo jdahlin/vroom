@@ -333,6 +333,19 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        function uses: an optimization hint) and GCC's target("features")
        (<immintrin.h>'s intrinsics: the features the function's
        instructions need, which -m options of the compilation give) */
+    /* [ext:microsoft_declspec] __declspec's dllexport: on clang's target
+       (-triple aarch64-unknown-linux-gnu) "__declspec attribute
+       'dllexport' is not supported" (-Wignored-attributes), accepted with
+       no effect (dllimport is not: a variable it declares is not defined
+       where the test's own target is Windows, so it stays refused until
+       analysis knows the target); novtable (no vtable stores in an abstract
+       class's constructors), restrict and noalias (results or accesses
+       that do not alias) and allocator change no code vcc generates */
+    {"dllexport", 0},
+    {"novtable", 0},
+    {"restrict", 0},
+    {"noalias", 0},
+    {"allocator", 0},
     {"nodebug", 0},
     {"min_vector_width", 0},
     {"target", 0},
