@@ -419,6 +419,14 @@ it; none adds a second way to instantiate.
   cxx-pp.py VALUE_DROP), where clang ignores the attribute ("not
   supported") yet still makes `__declspec(dllimport) int x;` a declaration
   (`U x`); vcc must do the same (5.3).
+- 5.3 (dropped once: we reject +1) -> 64d6a8cd3 (orchestrator): a constexpr
+  static data member redeclared at namespace scope needs no initializer
+  (C++11/14 definition, C++17 redundant redeclaration; we reject -2), then
+  5462949be, the agent's dllimport: a variable declaration carrying it and
+  no initializer is no definition, as clang on its target.  Unsupported
+  39051 -> 38677, verified +505 in all.  Queue: clang emits a constexpr
+  static member's inline variable for its namespace-scope redeclaration,
+  vcc does not.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
