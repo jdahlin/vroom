@@ -1267,8 +1267,18 @@ analysis_result semantic_analysis::comma(SyntaxRef n, expression_meaning &m)
             /* the discarded left operand's temporary */
             return not_supported(n, "class.temporary");
         uint32_t previous = m.node;
-        if (any)
-            so_far = combined_constness(so_far, m.evaluation);
+        if (any) {
+            /* a discarded class prvalue is not "constant" as a value
+               (class_prvalue), though it may be evaluated in a constant
+               expression: the evaluator's */
+            constness left = m.evaluation;
+            if (m.category == value_category::prvalue && m.node &&
+                type_table[m.type.unqualified()].kind ==
+                    type_kind::class_type &&
+                left == constness::not_constant)
+                left = constness::unknown;
+            so_far = combined_constness(so_far, left);
+        }
         m = e;
         /* the left operand is evaluated first ([expr.comma]/1) */
         if (any)
