@@ -141,12 +141,24 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
     }
     /* [temp.fct]/1: a function template's declaration (template<class T>
        T f(T);), one declarator not in an init-declarator-list */
+    /* [temp.pre]/1: a variable template without an initializer
+       (template<class T> int v;), its one declarator not an
+       init-declarator; [basic.def]/2: a definition */
+    if (s.size() == 3 + lead && !lead &&
+        s.is(s[0], syntax_kind::decl_specifier_seq) &&
+        (s[1].is_identifier() || s.is(s[1], syntax_kind::declarator)))
+        return variable_template_definition(t, s);
     uint32_t gnu = leading_gnu_attributes(s);
     if (s.size() == 3 + gnu &&
         (s.is(s[1 + gnu], syntax_kind::noptr_declarator) ||
          s.is(s[1 + gnu], syntax_kind::ptr_declarator)))
         return function_template_definition(t, s);
-    return not_supported(t, "temp.class");
+    analysis_result refused = not_supported(t, "temp.class");
+    char shape[160];
+    snprintf(shape, sizeof shape, "%u parts, part 1 is %s", s.size(),
+             syntax_kind_name(s[1 + gnu].kind()));
+    last_unsupported_detail(shape, strlen(shape));
+    return refused;
 }
 
 /*
