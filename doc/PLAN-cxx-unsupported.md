@@ -1,132 +1,144 @@
 # Unsupported declarations to zero
 
-`bench/cxx-sema.py` over clang's test/CXX, SemaCXX and SemaTemplate ends a
-declaration it has no rule for as `unsupported: [subclause]`.  This plan takes
-that count to zero (or to a short, reasoned list), one Sonnet agent at a
-time, all on one branch and one PR.
+## Goal
 
-## Baseline (2026-11-23, main at 26d0cd7e8)
+vcc's C++ front end analyses every declaration in clang's C++ tests
+(test/CXX, SemaCXX, SemaTemplate, as `bench/cxx-sema.py` runs them) that
+it now refuses as `unsupported`.  Unsupported goes from 39709 to 0, apart
+from entries in `src/test/cxx/sema/unsupported-allowed.txt`, each with a
+reason the user approved.  The bar for correctness does not drop on the
+way: each step must keep refuted claims (declared types, types, constants,
+lookup, layout, symbols, lowering) and "we reject, clang accepts" at their
+current numbers or lower.
 
-4217 runs of 2650 tests.  Declarations: 83682 as clang, 687 we reject and
-clang accepts, 4260 we accept and clang rejects, **40598 unsupported**, 8824
-not parsed, 728 after a fatal error.
+All the work is on one branch, `cxx-unsupported-zero`, in one PR
+(jdahlin/vroom#549), one commit per step.  A Sonnet agent does each step,
+one agent at a time, and the orchestrator (an Opus session) checks it.
 
-Unsupported by subclause (184 subclauses; a declaration is counted under its
-*first* refusal only, so fixing one subclause uncovers the next):
-[expr.const] 3333, [temp.names] 3263, [basic.lookup.unqual] 2394,
-[ext.gnu] 2373, [basic.lookup.qual] 1435, [ext.clang] 1299,
-[temp.expl.spec] 1252, [temp.explicit] 1195, [dcl.spec.auto] 1105,
-[class.temporary] 791, [dcl.fct] 737, [temp.class] 699, [temp.inst] 653,
-[basic.scope.declarative] 601, [over.match.oper] 592,
-[dcl.fct.def.default] 572, [temp.arg.nontype] 564, [namespace.udecl] 540,
-[dcl.init] 524, [temp.mem] 510, ... 164 more below 510.
+### Milestones
 
-The top 20 hold about 26000 (64 %); the tail of 164 subclauses about 14600.
+| | unsupported | what gets it there |
+|---|---:|---|
+| M0 | 39709 | baseline, origin/main 2bb71984a |
+| M1 | < 32000 | the work list (step 0), then the largest roots: qualified lookup with no reason, `<compare>`, constant evaluation |
+| M2 | < 22000 | templates, after the design note (instantiation, explicit specialization and instantiation, template-ids) |
+| M3 | < 10000 | declarations: `auto`, defaulted functions, `using`, friends, temporaries |
+| M4 | < 2000 | the tail: 150+ subclauses, batched by file |
+| M5 | 0 + allowed list | the extensions the user decided on, the rest |
 
-## What "zero" means
+A milestone is reached when the count is below its number and the full
+gates are green.  After each milestone the branch merges main and the PR
+description gets the table.
 
-- `unsupported` goes to 0, except entries in
-  `src/test/cxx/sema/unsupported-allowed.txt` (new): a test file or
-  subclause, one reason per line (out of scope for vcc 1.0: modules, an
-  extension we decide not to implement, ...).  Each entry is a user
-  decision, not an agent's.
-- A declaration leaves `unsupported` for `as clang` or a failure we
-  understand.  It may land in `we accept, clang rejects` (a check not
-  written yet) — that is counted and is the next plan's list, but it must
-  not hide a wrong acceptance of well-formed code as the wrong type:
-  declared types, type claims, lookup and layout refuted must not rise.
-- `not parsed` (8824) is a separate list (the parser); out of scope here
-  unless a step needs it.
+## Why the subclause count is the wrong work list
 
-## The loop
+Step 1 showed it: it removed about 470 refusals in `<immintrin.h>` but
+only 9 counted declarations, because the harness counts a declaration
+**once**, under its **first** refusal, and only declarations in the test
+file itself (headers are not counted).  Many refusals are also
+consequences rather than causes: "X is declared by a declaration that is
+not parsed / has no rules yet" (more than 3000 in a `-std=gnu++20` sweep)
+points at another declaration, and the cause is that declaration's reason.
+Picking by subclause, or by counting constructs, aims at the wrong
+targets.
 
-The orchestrator (an Opus session on branch `cxx-unsupported-zero`, worktree
-`.claude/worktrees/cxx-unsupported`) repeats:
+## Step 0: the work list (the orchestrator, before any further agent)
 
-1. **Pick.**  Run `bench/cxx-sema.py -j 8 --unsupported 200`; take the
-   largest subclause not already tried twice without progress.  Find its
-   most frequent *reason* inside the subclause (`-v` on the subclause's
-   tests, or `vpp -fcxx-dump=analysis` on a few of them) and cut it to one
-   construct an agent can finish in one go: "[temp.names]: a template-id
-   naming a member template after `.template`", not "[temp.names]".
-2. **Brief** one Sonnet agent (`Agent`, `model: sonnet`, in the same
-   worktree, nothing else running) with the template below.
-3. **Verify** its commit independently: the diff (spec citations, no
-   ternaries, files by topic), `bench/cxx-sema.py --check`, the numbers
-   moved as the agent said.  Reject (`git reset --hard` to the previous
-   commit) if a gate fails or the change is half an implementation; retry
-   once with the reason, else mark the construct "hard" and move on.
-4. **Record** the commit and the numbers in the Status section below
-   (one line per step), commit that with the step.
-5. Every ~10 steps: merge `main` into the branch, rerun the full gates
-   (below), push, update the PR's description with the running totals.
+`bench/cxx-sema.py --why [N]` writes `work/cxx-sema-why.json` and prints the
+top N **root causes**, each with the number of counted declarations it
+blocks:
 
-One agent at a time: agents share the build tree, the bench caches and the
-metrics file; two would race on `clang-metrics.json`.
+1. For each counted unsupported declaration (`-fcxx-dump=analysis`, in the
+   test file), take the first `-fcxx-dump=unsupported` line inside its
+   range.
+2. Key it by (subclause, vcc source site `file:line`, detail with names
+   and numbers made generic).  Many details are empty; the site is what
+   tells causes apart.
+3. When the detail is "X is declared by a declaration that is not parsed /
+   with no rules yet", follow it to X's declaration and use *its* key.
+   Repeat until the key is a real cause or the declaration is not parsed;
+   "not parsed" becomes a parser key (its node, `-fcxx-debug-fallbacks`).
+4. Each key gets a count, three example `test:line -std=` cases, and the
+   subclauses it hides behind it, where they can be seen.
+
+The output is the queue.  It is regenerated after every step, and the
+step's commit message quotes its key's count before and after.
+
+## A step
+
+- **Pick** the top key of the work list that has not been tried twice.
+  Keys at the same site (one function, one missing rule) go to one agent.
+- **Size.**  A step should remove at least 100 counted declarations, or
+  remove a root that the work list shows hides at least that many.  A
+  smaller fix is batched with others in the same subclause.  A step that
+  needs a design (object model, instantiation, an ABI question) stops and
+  goes to the orchestrator.
+- **Brief** (template below): the key, its examples, the spec file, the
+  gates, one commit, report numbers.
+- **Check** (the orchestrator, every step): read the diff; rerun
+  `cplusplus-check` and `cxx-sema.py --check`; inspect any known-failures
+  line the step deletes, as in step 1 (removing a failure by skipping a
+  check needs a reason the plan accepts); compare the work list before and
+  after.  Throw the commit away and try once more with the reason, or mark
+  the key hard.
+- **Record** one line in Status: the commit, the key, the counts.
+
+Not parsed (8827) is in scope only where the work list shows a parse
+failure as a root of unsupported declarations; the rest is the parser's
+plan.
 
 ### Agent brief (template)
 
-> Goal: in vcc's C++ front end (`src/frontend/cplusplus/`), make the
-> declarations refused as `unsupported: [SUBCLAUSE]` for CONSTRUCT analysed
-> as the standard says.  Examples: FILE:LINE (-std=...), ...
+> Goal: in vcc's C++ front end (`src/frontend/cplusplus/`), remove the
+> root cause KEY (subclause, site FILE:LINE, detail) that blocks N
+> declarations in clang's tests.  Examples: TEST:LINE (-std=...), ...
 > Spec: `doc/cxx-spec/.../SUBCLAUSE.md`; cite `[label]/paragraph` in
 > comments.  Read AGENTS.md (working conventions) and
-> doc/PLAN-cxx-sema.md section 5 first.  Rules: no conditional operator;
-> nothing half done — what you do not finish stays `unsupported` with the
-> reason; clang is the reference (test a small file against it).
-> Tests: add a case to `src/test/cxx/` (sema or run) for the construct.
-> Done when, in worktree WT:
+> doc/PLAN-cxx-unsupported.md first.  Rules: no conditional operator;
+> nothing half done (what you do not finish stays `unsupported` with its
+> reason); clang is the reference (test a small file against it); no bare
+> `git stash`.
+> Tests: a case in `src/test/cxx/` (sema `gram/`/`spec/`, or run).
+> Done when, in the worktree:
 > `make -C src -j 8 vcc && make -C src -k -j 8 cplusplus-check`,
-> `bench/cxx-sema.py -j 8 SUBCLAUSE-TESTS` then `bench/cxx-sema.py --check`
-> (bless the metrics with `--bless` only when nothing got worse),
+> `bench/cxx-sema.py -j 8 --check` (bless only when nothing got worse;
+> commit the metrics), `bench/cxx-sema.py --why 30` before and after,
 > `bench/cxx-run.py -j 8`, `bench/cxx-fe-bench.py --against BASE` within
-> +0.5 %.  One commit, message: what changed and the numbers.  Do not push.
-> Report: the commit, unsupported before/after (total and SUBCLAUSE),
-> any failure count that moved, what is left in this construct.
+> +0.5 % (save BASE before changing anything).
+> One commit: what changed and the numbers.  Do not push.
+> Report: commit, KEY count before/after, total unsupported before/after,
+> any other metric that moved and why, the new top keys this exposed.
 
 ### Gates
 
-Per step (the agent, rechecked by the orchestrator): `cplusplus-check`;
-`cxx-sema.py --check` (no new failure, no metric worse; unsupported must
-fall); `cxx-run.py`; `cxx-fe-bench.py` budget.
-
-Every ~10 steps and before the PR leaves draft: also
-`bench/cxx-c-suites.py -j 8`, `bench/cxx-pp.py -j 8`,
+Per step: as in the brief.  At each milestone, and before the PR leaves
+draft: also `bench/cxx-c-suites.py -j 8`, `bench/cxx-pp.py -j 8`,
 `bench/cxx-syntax-conformance.py`, `bench/cxx-spec-refs.py`,
-`bench/vcc-ctests.py -j 8` (the C front end shares the lowering), and
-`bench/quality.py --check`.
+`bench/vcc-ctests.py -j 8`, `bench/quality.py --check`, and the asan build
+over `cxx-sema.py` (`--bin-dir build/linux/src-asan`).
 
-## Order
+### Decisions for the user
 
-Largest first, with three exceptions:
+- **Extensions** ([ext.gnu] 2373, [ext.clang] 1299 by subclause): at M1 the
+  orchestrator lists them by work-list count; each is implemented or
+  allowed.
+- **The template design note** before M2, written by the orchestrator and
+  reviewed by the user.
+- **Harness artifacts** such as step 1's `-mavx` case (clang is run
+  without the test's target flags): fix the harness or list the case in
+  known-differences.
 
-- **[ext.gnu], [ext.clang] (3672)**: which extensions to implement is the
-  user's call.  The orchestrator lists the extensions by count once and
-  asks; the answer goes into `unsupported-allowed.txt` or the queue.
-- **Lookup first** ([basic.lookup.unqual], [basic.lookup.qual],
-  [basic.scope.declarative]; 4430): everything else is counted behind them,
-  so they shrink the hidden work most.
-- **Templates as a group** ([temp.names], [temp.expl.spec],
-  [temp.explicit], [temp.class], [temp.inst], [temp.mem], ...; ~9000):
-  the instantiation model must be one design.  The orchestrator (not an
-  agent) writes a short design note in PLAN-cxx-sema.md before the first
-  template step; agents then fill it in.
+### Stop and ask
 
-## Size and pace
+When three steps in a row are thrown away, a key needs a design, a metric
+other than unsupported gets worse and the cause is not a known artifact,
+or merging main into the branch is more than mechanical.
 
-At 150-400 declarations per step on the large subclauses and 20-100 in the
-tail, expect 150-250 steps.  The count will fall slower than the steps
-suggest early on (first-refusal attribution uncovers the next refusal).
-The orchestrator stops and asks when: a step needs a design decision
-(object model, instantiation, an ABI question), three steps in a row are
-rejected, or the PR's diff conflicts with main beyond a mechanical merge.
+## Size
 
-## PR
-
-One draft PR against main, opened after the first step, title "cplusplus:
-unsupported declarations to zero".  Each step is its own commit; the
-description keeps the running totals table.  Leaves draft when the count
-is at the allowed list or the user says to land what is there.
+There are about 200 keys in total (184 subclauses, several sites each).
+At an average of 200 declarations per step, that is about 200 steps;
+after step 0 the work list gives a better estimate, recorded here.
 
 ## Status
 
