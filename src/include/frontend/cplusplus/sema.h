@@ -4399,6 +4399,7 @@ class semantic_analysis
        function uses may be declared later in the class, where a complete-
        class context would find it */
     bool noexcept_names_later_member(SyntaxRef n);
+    bool names_template_or_scope(token_index t) const;
     /* [ext:gnu_attributes] the alignment aligned attributes after a
        class-specifier's closing brace ask of the class the
        decl-specifier-seq defines (GCC: they apply to the type), 0 if none;

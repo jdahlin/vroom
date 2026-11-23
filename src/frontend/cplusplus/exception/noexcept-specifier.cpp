@@ -156,6 +156,20 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
  * template parameter's or another scope's that [temp.local]/6 keeps
  * members from redeclaring.
  */
+/* whether the identifier at t is followed by < or ::, a use of a name: a
+   member that declares the name has it followed by something else (a
+   primary template's declaration, an alias's =, a function's ( ...) */
+bool semantic_analysis::names_template_or_scope(token_index t) const
+{
+    if (t + 1 >= defining_members_end ||
+        tokens[t + 1].kind != token_kind::operator_or_punctuator)
+        return false;
+    preprocessing_op_or_punc op =
+        preprocessing_op_or_punc_primary(tokens[t + 1].op_or_punc);
+    return op == preprocessing_op_or_punc::LESS ||
+           op == preprocessing_op_or_punc::COLON_COLON;
+}
+
 bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
 {
     token_index first = n.first_token(), end = n.end_token();
@@ -175,7 +189,7 @@ bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
              !elsewhere && u < defining_members_end; u++)
             if ((u < first || u >= end) &&
                 tokens[u].kind == token_kind::identifier &&
-                tokens.identifier(u) == name)
+                tokens.identifier(u) == name && !names_template_or_scope(u))
                 elsewhere = true;
         if (!elsewhere)
             continue;
