@@ -293,7 +293,7 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"hot", 0},
     {"malloc", 0},
     {"returns_nonnull", 0},
-    {"nonnull", 0},
+    {"nonnull", gnu_nonnull},
     {"format", 0},
     {"format_arg", 0},
     {"alloc_size", 0},
@@ -668,7 +668,7 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
         }
         /* the others take no arguments analysis has rules for (format's
            and nonnull's say nothing to code generation) */
-        if (count > 1 && rule->flag)
+        if (count > 1 && rule->flag && rule->flag != gnu_nonnull)
             return not_supported(at, "ext.gnu");
         g.flags |= rule->flag;
     }

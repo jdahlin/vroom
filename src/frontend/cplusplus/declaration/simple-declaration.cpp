@@ -1835,6 +1835,7 @@ analysis_result semantic_analysis::declare_with_initializer(
            element, whatever the element type) */
         bool of_class =
             type_table[element.unqualified()].kind == type_kind::class_type ||
+            type_table[element.unqualified()].kind == type_kind::pointer ||
             !(element == type);
         if (!value.node) {
             if (s.constexpr_)

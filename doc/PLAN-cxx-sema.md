@@ -1890,6 +1890,79 @@ lines:
   clang 30185, 0 we reject and clang accepts, 0 refuted (types 39465,
   constants 15796); cxx-run 188/188 (constexpr-classes.cpp);
   cxx-c-suites 2214 pass, 0 wrong.
+  Pointers in the evaluator, on the evaluator above: assignment,
+  `p += n` and `p -= n` on a pointer object; a single object is an array of
+  one element ([basic.compound]/3.3), so `&x + 1` is a pointer one past it
+  (not dereferenceable, comparable with `&x`, `e - 1` back); `&a[i]` is a
+  pointer into its array, `a[i]` and `*p` as before; variables of static
+  storage duration are objects of the evaluation on first use (a usable
+  scalar with its value, a constexpr pointer or object evaluated from its
+  definition, any other with an address and no readable value:
+  [expr.const]/5.8; volatile, weak and thread-local ones too), so `&g`, a
+  reference to a global and a constexpr pointer variable
+  (`constexpr const int *p = a + 1;`, `constexpr const char *s = "abc";`)
+  are constant; a string literal is one object per literal for the whole
+  evaluation (it stays when the scope that evaluated it ends:
+  [lex.string]/9; what lies below it stays too), and the comparison of the
+  address of a literal with another pointer is not constant, as clang's.  A
+  pointer carries the serial of its object (`constant_value::stamp`), so
+  the slot a later block reuses is not taken for the object that went (two
+  dead locals' addresses compare unknown, not equal).  A constexpr
+  variable of pointer type is checked by `evaluate_variable`
+  (`permitted_result`, [expr.const]/13: static storage, a literal, null;
+  the address of a local constexpr variable is not), and lowering emits its
+  read as its initializer (clang folds it; the variable is not emitted for
+  a read).  Offsets of unsigned types above what a count holds are not
+  constant ([expr.add]/4), a member call on a null or one-past-the-end
+  pointer neither, and a null argument passed to a function with
+  `nonnull` is unknown (`gnu_nonnull`; clang: not constant).  Test
+  `constexpr-pointers.cpp`.  cxx-sema: declarations as clang 83682 ->
+  83899, unsupported 40598 -> 40383 ([expr.const] 3333 -> 3108), 0 refuted
+  more (constants 23); we accept and clang rejects 4260 -> 4256; the two
+  more "we reject and clang accepts" are clang's own crash on
+  SemaCXX/builtins.cpp (its verdicts after line 61 are none); verified
+  claims fall by the declarations now diagnosed (`static_assert(&x == &y)`
+  and the like); cxx-run 770/770 programs; cxx-c-suites unchanged (3023
+  pass, same as before).  Still unknown: `new` and `delete`, unions,
+  bit-fields, `goto`, base classes and derived-to-base pointers, arrays of
+  class type, destructors, member pointers, long double and 128-bit values,
+  pointer results lowered as data.
+
+  The evaluator and lowering, consolidated (a review found most of what
+  the evaluator refused was in the tree already, not missing from it):
+  `element_destructor` and `initializer_member` are semantic_analysis's, one
+  answer for lowering and the evaluator; zero-initialization of classes with
+  bases and `construct.op` ([dcl.init]/8.2); base subobjects (pointer and
+  glvalue conversions both ways are moves between element places, the
+  implicit constructors and copies run); an object made again at its place
+  keeps its elements (a copy after a constructor initialized the members was
+  corrupt: the members' storage was above the invocation and went with it);
+  implicit special members run their synthesized definitions, a class or
+  array assignment is member by member (`assign_value`); destructors (locals
+  and by-value parameters at scope end, last first, through break, continue
+  and return; temporaries at the end of the full-expression of an
+  expression statement, a return or a declaration; a destructor's members
+  and bases after its body; a temporary elsewhere stays unknown); unions (one
+  slot, the active member, activation by assignment or constructor, copies)
+  and bit-fields (modulo 2^width on every store); constant pointers as tree
+  data (`pointer_tree`: `&x`, array plus index, a literal decayed, null),
+  so a pointer a constexpr function returns is constant-initialized; virtual
+  calls (`virtual constexpr` is declared; the final overrider by the dynamic
+  class's table slots, `this` the overrider's subobject); `new` and
+  `delete` (a heap object until freed, the destructor run, a leak makes a
+  constexpr variable's initializer not constant; the allocation function is
+  not called).  `goto` is not constant, as clang's.
+  `-DVCC_TRACE_UNKNOWN` prints each refusal's line.
+  Not done: array `new` (analysis refuses it), virtual bases,
+  `dynamic_cast`/`typeid`, member
+  pointers, long double, arrays of unknown shape from brace elision (an
+  analysis bound bug it showed: `Y b[] = {1,2,3,4,5,6}` with a default
+  member initializer has bound 6).  cxx-sema (default suites): unsupported
+  40598 -> 39978, declarations as clang 83682 -> 84266, 0 refuted more;
+  `--suites all` adds CodeGenCXX, Parser and Sema (1890 runs, no crash: 42
+  more declarations as clang, nothing new refused or refuted); cxx-run
+  778/778; cxx-c-suites unchanged.
+
   S6b's first rules: function templates.  A namespace-scope
   function-definition after `template<class T, typename U>` (type
   parameters, no defaults, packs or constraints) is a `template_entity`

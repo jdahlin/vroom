@@ -88,11 +88,12 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
     uint32_t overrides = ~0u;
     if (!overridden && !specified)
         return analysis_result::well_formed;
-    if (entity_table[e].operator_function || entity_table[e].constexpr_ ||
-        entity_table[c].union_ || local_class_rule(c))
+    if (entity_table[e].operator_function || entity_table[c].union_ ||
+        local_class_rule(c))
         /* a virtual operator function's calls through operator expressions,
            [class.union]/2's "A union shall not have virtual functions",
-           a local class's virtual table: not analysed */
+           a local class's virtual table: not analysed (a constexpr
+           virtual function is an inline one, [dcl.constexpr]/1) */
         return not_supported(declaration, "class.virtual");
     if (!entity_table[e].nonstatic_member) {
         /* [class.static.mfct]/2: "A static member function shall not be

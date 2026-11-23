@@ -457,6 +457,7 @@ lower SemaTemplate/defaulted-destructor-in-temporary.cpp -std=c++11: vpp -S defi
 lower SemaTemplate/inject-templated-friend-post.cpp -std=c++98 -DINSTANTIATE: vpp -S defines [] clang -O0 does not, not ['_ZN8StreamerI3FooEC1ERKS0_', '_ZN8StreamerI3FooEC5ERKS0_']
 lower SemaTemplate/inject-templated-friend-post.cpp -std=c++98 -DPROTOTYPE -DINSTANTIATE: vpp -S defines [] clang -O0 does not, not ['_ZN8StreamerI3FooEC1ERKS0_', '_ZN8StreamerI3FooEC5ERKS0_']
 lower SemaTemplate/instantiate-deeply.cpp -std=gnu++17 -Wall: vpp -S defines [] clang -O0 does not, not ['_ZN3FooIiEC1Ev', '_ZN3FooIiEC2Ev', '_ZN3FooIiEC5Ev']
+lower SemaTemplate/instantiate-pure-virtual-function.cpp -std=gnu++17 -Wundefined-func-template: vpp -S defines [] clang -O0 does not, not ['_ZTIN25non_pure_virtual_function1BIiEE', '_ZTIN25non_pure_virtual_function1DIiEE', '_ZTIN39call_pure_virtual_function_from_virtual1BIiEE']
 symbols CXX/dcl.dcl/dcl.spec/dcl.type/dcl.type.decltype/p1.cpp -std=c++20: _ZN9ClassNTTP1fILi0EiiEEvv is not a symbol clang -O0 defines
 symbols SemaCXX/PR38913.cpp -std=gnu++17: _Z1av is not a symbol clang -O0 defines
 symbols SemaCXX/PR38913.cpp -std=gnu++17: _Z1bv is not a symbol clang -O0 defines
@@ -483,6 +484,7 @@ tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:213:3: do_state
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:228:3: do_statement: no substatement
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:245:5: do_statement: no substatement
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:252:5: do_statement: no substatement
+tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:58:5: do_statement: no substatement
 tree CXX/temp/temp.decls/temp.friend/p5.cpp -std=c++11: p5.cpp:180:5: declarations: no expression
 tree CXX/temp/temp.decls/temp.friend/p5.cpp -std=c++14: p5.cpp:180:5: declarations: no expression
 tree CXX/temp/temp.decls/temp.friend/p5.cpp -std=c++17: p5.cpp:180:5: declarations: no expression
@@ -1891,8 +1893,8 @@ verdict SemaCXX/builtin-object-size-cxx14.cpp -std=c++14: ill-formed for us, acc
 verdict SemaCXX/builtin-object-size-cxx14.cpp -std=c++2a: ill-formed for us, accepted by clang: line 110 (1 declarations)
 verdict SemaCXX/builtin-object-size-cxx14.cpp -std=c++2b: ill-formed for us, accepted by clang: line 110 (1 declarations)
 verdict SemaCXX/builtins-elementwise-math.cpp -std=c++17 -pedantic: ill-formed for us, accepted by clang: line 29 (6 declarations)
-verdict SemaCXX/builtins.cpp -std=c++11: ill-formed for us, accepted by clang: line 82 (4 declarations)
-verdict SemaCXX/builtins.cpp -std=c++1z: ill-formed for us, accepted by clang: line 82 (5 declarations)
+verdict SemaCXX/builtins.cpp -std=c++11: ill-formed for us, accepted by clang: line 82 (5 declarations)
+verdict SemaCXX/builtins.cpp -std=c++1z: ill-formed for us, accepted by clang: line 82 (6 declarations)
 verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: ill-formed for us, accepted by clang: line 661 (1 declarations)
 verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: ill-formed for us, accepted by clang: line 661 (1 declarations)
 verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: ill-formed for us, accepted by clang: line 661 (1 declarations)
@@ -1904,7 +1906,7 @@ verdict SemaCXX/constant-expression-cxx11.cpp -std=c++23 -isystem./Inputs -Wno-s
 verdict SemaCXX/constant-expression-cxx14.cpp -std=c++14 -Werror=return-type: ill-formed for us, accepted by clang: line 235 (3 declarations)
 verdict SemaCXX/constant-expression-cxx14.cpp -std=c++20 -Werror=return-type: ill-formed for us, accepted by clang: line 235 (3 declarations)
 verdict SemaCXX/constant-expression-cxx14.cpp -std=c++23 -Werror=return-type: ill-formed for us, accepted by clang: line 235 (3 declarations)
-verdict SemaCXX/constant-expression-cxx2a.cpp -std=c++2a -Wno-mismatched-new-delete: ill-formed for us, accepted by clang: line 42 (9 declarations)
+verdict SemaCXX/constant-expression-cxx2a.cpp -std=c++2a -Wno-mismatched-new-delete: ill-formed for us, accepted by clang: line 42 (13 declarations)
 verdict SemaCXX/constexpr-value-init.cpp -Wno-uninitialized -std=c++17: ill-formed for us, accepted by clang: line 28 (2 declarations)
 verdict SemaCXX/constexpr-vectors-access-elements.cpp -Wno-uninitialized -std=c++17: ill-formed for us, accepted by clang: line 48 (1 declarations)
 verdict SemaCXX/constexpr-vectors-access-elements.cpp -Wno-uninitialized -std=c++20: ill-formed for us, accepted by clang: line 48 (1 declarations)
@@ -1934,6 +1936,7 @@ verdict SemaCXX/cxx2a-initializer-aggregates.cpp -std=c++20 -Wno-c99-designator 
 verdict SemaCXX/cxx2a-initializer-aggregates.cpp -std=c++20 -Wno-c99-designator -Wno-reorder-init-list -Wno-initializer-overrides: ill-formed for us, accepted by clang: line 113 (1 declarations)
 verdict SemaCXX/cxx2b-consteval-propagate.cpp -std=c++2a -Wno-unused-value: ill-formed for us, accepted by clang: line 9 (4 declarations)
 verdict SemaCXX/cxx2b-consteval-propagate.cpp -std=c++2b -Wno-unused-value: ill-formed for us, accepted by clang: line 9 (4 declarations)
+verdict SemaCXX/cxx2c-constexpr-placement-new.cpp -std=c++2c: ill-formed for us, accepted by clang: line 111 (1 declarations)
 verdict SemaCXX/cxx98-compat.cpp -std=c++11 -Wc++98-compat: ill-formed for us, accepted by clang: line 307 (1 declarations)
 verdict SemaCXX/cxx98-compat.cpp -std=c++14 -Wc++98-compat -DCXX14COMPAT: ill-formed for us, accepted by clang: line 307 (1 declarations)
 verdict SemaCXX/cxx98-compat.cpp -std=c++17 -Wc++98-compat -DCXX14COMPAT -DCXX17COMPAT: ill-formed for us, accepted by clang: line 307 (1 declarations)
@@ -1950,7 +1953,6 @@ verdict SemaCXX/embed-init-list.cpp -std=gnu++17 -Wno-c++26-extensions: ill-form
 verdict SemaCXX/ext-int-vector.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 30 (6 declarations)
 verdict SemaCXX/ext-int.cpp -std=gnu++17 -Wimplicit-int-conversion -Wno-unused -Wunevaluated-expression: ill-formed for us, accepted by clang: line 266 (2 declarations)
 verdict SemaCXX/gh102293.cpp -std=c++23: ill-formed for us, accepted by clang: line 60 (1 declarations)
-verdict SemaCXX/gh139818.cpp -std=c++23: ill-formed for us, accepted by clang: line 20 (1 declarations)
 verdict SemaCXX/has_unique_object_reps_bitint.cpp -std=c++17 -Wno-bitfield-width: ill-formed for us, accepted by clang: line 50 (3 declarations)
 verdict SemaCXX/imaginary-constants.cpp -std=c++14 -DCXX14=1: ill-formed for us, accepted by clang: line 13 (3 declarations)
 verdict SemaCXX/libstdcxx_common_type_hack.cpp -std=c++11 -D__GLIBCXX__=20100000L: ill-formed for us, accepted by clang: line 28 (1 declarations)

@@ -391,6 +391,10 @@ enum gnu_attribute_flag : uint32_t {
     /* "cleanup (cleanup_function)": a local variable's function, called
        with its address when it goes out of scope (gnu_cleanup) */
     gnu_cleanup = 67108864,
+    /* nonnull, with or without argument positions: a null pointer passed
+       is not a constant expression (clang), which the evaluator does not
+       decide by position: it does not answer for a null argument */
+    gnu_nonnull = 1u << 31,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -520,6 +524,10 @@ struct entity {
        ([class.mem]/10: a brace-or-equal-initializer or braced-init-list
        node), 0 if none */
     SyntaxRef default_initializer = 0;
+    /* a member: its default member initializer holds a source location
+       builtin, folded for a defaulted constructor defined where it is used
+       and not where it is declared: the value is not clang's */
+    bool initializer_located = false;
     /* ... and whether it can throw ([except.spec]/7), once a constructor
        using it is defined (semantic_analysis::default_member_initializer) */
     initializer_exception initializer_throws = initializer_exception::unknown;
@@ -1058,6 +1066,11 @@ struct constant_value {
        index of the element pointed to (extent: one past the last), first
        its place; extent 0: a pointer to one object */
     uint32_t base = 0, extent = 0;
+    /* pointer to a single object: its serial (constant_evaluation::object),
+       0: none kept */
+    uint32_t stamp = 0;
+    /* pointer into a string literal's array ([lex.string]/9) */
+    bool literal = false;
 };
 
 /* [implimits]/2's quantities for constant evaluation, the bracketed
@@ -1843,6 +1856,19 @@ class semantic_analysis
        lowering) */
     mutable owned_array<entity_index> unnumbered_closures;
     mutable bool number_closures = false;
+
+    /* [stmt.dcl]/2, [class.temporary]/4: the destructor of the object of
+       type type, or of its elements when an array (0: none); object is the
+       element type */
+    entity_index element_destructor(qualified_type type,
+                                    qualified_type &object) const;
+    /* [dcl.init.aggr]/4: whether the member has an element in the
+       initializer list of its class (not an unnamed bit-field) */
+    bool initializer_member(entity_index member) const;
+    /* [class.mem]/10: whether a member or base of the class has a default
+       member initializer (value-initialization is more than zeros) */
+    bool has_default_member_initializer(entity_index c) const;
+    bool has_mutable_subobject(qualified_type type) const;
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -3244,6 +3270,10 @@ class semantic_analysis
        default member initializer: the constructor) */
     unsigned call_site_depth = 0;
     uint32_t call_site_nodes = 0;
+    /* the source location builtins analysed so far */
+    uint32_t source_location_uses = 0;
+    /* define_defaulted_special_member is analysing a definition */
+    bool defining_defaulted_member = false;
     token_index source_location_at = 0;
     uint32_t wrap_call_site(uint32_t node, token_index at,
                             uint32_t nodes_before);
@@ -3474,9 +3504,48 @@ class semantic_analysis
             /* a parameter whose value the check of a body for a potential
                constant expression does not know: a read of it is unknown */
             bool opaque = false;
+            /* a variable of static storage duration that is not usable in
+               constant expressions: its address is known, reading it is
+               not constant ([expr.const]/5.8) */
+            bool unusable = false;
+            /* made by a new-expression; deleted ([expr.new], [expr.delete]) */
+            bool heap = false, freed = false;
+            /* its number among the evaluation's objects: unlike its
+               place, never reused */
+            uint32_t serial = 0;
+            /* a string literal's array */
+            bool literal = false;
             constant_value value;
         };
         owned_array<object> objects;
+        /* the objects whose destructor runs when their scope ends, last
+           made last: the index of the object, its declared type */
+        struct destruction {
+            uint32_t object = 0;
+            qualified_type type;
+        };
+        owned_array<destruction> destructions;
+        /* inside a statement that ends its full-expressions: a temporary
+           with a destructor may be made */
+        uint32_t temporaries_ok = 0;
+        /* the new-expressions' objects not deleted yet, and the object
+           the allocated nodes being evaluated stand for (the innermost
+           last) */
+        uint32_t heap_live = 0;
+        owned_array<uint32_t> allocations;
+        /* evaluate_object for a store (an assignment's target, an object
+           constructed in place) or for a read: a union's member that is
+           not active is made so, or is not constant */
+        uint32_t writing = 0, reading = 0;
+        /* the string literals evaluated, one object each, which stay for
+           the whole evaluation: what lies below them stays too */
+        struct literal_object {
+            token_index at = 0;
+            uint32_t object = 0;
+        };
+        owned_array<literal_object> literals;
+        uint32_t object_floor = 0, element_floor = 0;
+        uint32_t serials = 0;
         uint32_t depth = 0;
         uint32_t full_expressions = 0;
         /* the frame of the invocation being evaluated (0: none) and the
@@ -3507,6 +3576,51 @@ class semantic_analysis
        designates among state.objects; evaluate_read: the value a glvalue's
        lvalue-to-rvalue conversion reads; evaluate_statement: returned is set
        by a return statement, with its value in result */
+    void add_destroyed(constant_evaluation &state, qualified_type type);
+    constness destroy_object(constant_evaluation &state, uint32_t place,
+                             qualified_type type);
+    constness end_full_expression(constant_evaluation &state, size_t keep,
+                                  constness c, constant_value &result);
+    constness leave_scope(constant_evaluation &state, size_t objects,
+                          size_t elements, bool &returned,
+                          constant_value &result, constness c);
+    constness evaluate_union_initialization(constant_evaluation &state,
+                                            uint32_t init, bool zero,
+                                            uint32_t given,
+                                            const uint32_t *items,
+                                            bool read_only, uint32_t place,
+                                            entity_index c_entity);
+    void assign_value(constant_evaluation &state, uint32_t place,
+                      const constant_value &v);
+    constness base_subobject_place(const constant_evaluation &state,
+                                   uint32_t place, entity_index base,
+                                   uint32_t &out) const;
+    constness derived_object_place(const constant_evaluation &state,
+                                   uint32_t place, entity_index base,
+                                   uint32_t &out) const;
+    constness convert_base_pointer(const constant_evaluation &state,
+                                   bool to_base, entity_index base,
+                                   const constant_value &p,
+                                   constant_value &v) const;
+    constness evaluate_subscript_pointer(constant_evaluation &state,
+                                         uint32_t node, constant_value &moved);
+    constant_value bit_field_stored(uint32_t target, constant_value v) const;
+    constant_value bit_field_member_stored(entity_index member,
+                                           constant_value v) const;
+    bool pointer_offset_count(qualified_type type, const constant_value &i,
+                              __int128 &n) const;
+    void pin_objects(constant_evaluation &state) const;
+    uint32_t most_derived_place(const constant_evaluation &state,
+                                uint32_t place) const;
+    bool subobject_of_class(const constant_evaluation &state, uint32_t place,
+                            entity_index target, uint32_t &out) const;
+    constness virtual_target(const constant_evaluation &state,
+                             const constant_value &self, entity_index f,
+                             entity_index &g, constant_value &adjusted) const;
+    uint32_t pointer_tree(const constant_evaluation &state, qualified_type t,
+                          const constant_value &v, token_index at);
+    constness permitted_result(const constant_evaluation &state,
+                               const constant_value &v) const;
     constness evaluate_node(constant_evaluation &state, uint32_t node,
                             constant_value &v);
     constness evaluate_statement(constant_evaluation &state, uint32_t node,
@@ -3622,6 +3736,8 @@ class semantic_analysis
        when element_place is set */
     static constexpr uint32_t element_place = 0x80000000u;
     constant_value &place_value(constant_evaluation &state, uint32_t place);
+    const constant_value &place_value(const constant_evaluation &state,
+                                      uint32_t place) const;
     bool place_read_only(const constant_evaluation &state,
                          uint32_t place) const;
     /* the index in state.objects of the entity's object in the current
