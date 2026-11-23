@@ -427,6 +427,12 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"lock_returned", 0},
     {"assert_exclusive_lock", 0},
     {"assert_shared_lock", 0},
+    /* [ext:gnu_attributes] x86's interrupt and no_caller_saved_registers:
+       on clang's target (-triple aarch64-unknown-linux-gnu) "unknown
+       attribute 'interrupt' ignored" (-Wunknown-attributes), accepted with
+       no effect */
+    {"interrupt", 0},
+    {"no_caller_saved_registers", 0},
     /* clang's enable_if(condition, message) (below) */
     {"enable_if", gnu_enable_if},
 };
