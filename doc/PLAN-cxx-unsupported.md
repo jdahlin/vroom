@@ -130,4 +130,15 @@ is at the allowed list or the user says to land what is there.
 
 ## Status
 
-- 2026-11-23: plan written; baseline above.
+- 2026-11-23: plan written; baseline above (on a stale main; origin/main
+  2bb71984a: 39709 unsupported, 2002 known failures).
+- Step 1 (7523417ef, x86 vector typedefs): a function-definition with an
+  unparsed body held its return type's typedef (`__m128` in <f16cintrin.h>),
+  refusing every later use; now it holds only its declarator-id.  Tree check
+  skips deferred system-header bodies (1129 `no expression` entries gone).
+  Unsupported 39709 -> 39700, known failures 2002 -> 873, types verified +441.
+  Next in those headers: `_Float16 _Complex`, `align_value`, `__fp16` bit
+  casts, `__builtin_ia32_*`/`__builtin_elementwise_*` builtins.
+- Queue: vpp segfaults on two clang test files (found in the -std=gnu++20
+  sweep); `semantic_kind_name` lacks complex_value, complex_part,
+  statement_expression (wrong names in tree dumps).
