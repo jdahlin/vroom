@@ -526,3 +526,8 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   (+3, p5-var.cpp:95), fixed by the next commit 4e4f4a73d; the tip is
   right, that one commit alone is not (left as is: pushed history).
   fe-bench per step +0.49 %: watched against an older base.
+- 9.4 (ec800bf08, 9ddf9d15b): a class prvalue bound to a namespace-scope
+  reference has static storage (_ZGR<name>_, destroyed at exit); a refused
+  static_assert or constexpr initializer says why.  Unsupported 36214 ->
+  36131.  Dropped once: C++11's implicitly const constexpr member function
+  (-189 unsupported, we reject +9; scratchpad cxx11-constexpr-const.patch).
