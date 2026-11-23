@@ -322,6 +322,11 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     case unary_trait_kind::has_unique_object_representations:
         if (unbounded)
             return false;
+        if (kind == type_kind::lvalue_reference ||
+            kind == type_kind::rvalue_reference) {
+            answer = false;
+            return true;
+        }
         return unique_representation(t, answer);
     /* [ext:clang_type_traits] __is_trivially_relocatable (clang's own
        rule) and __builtin_is_cpp_trivially_relocatable ([class.prop] of
@@ -671,7 +676,29 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
             return true;
         }
         /* a floating-point type has two representations of a zero */
-        return is_floating(t);
+        if (is_floating(t))
+            return true;
+        /* void and std::nullptr_t: no object representation of a value
+           ([ext:clang_type_traits]) */
+        return fundamental_of(t) == fundamental_type::void_ ||
+               fundamental_of(t) == fundamental_type::std_nullptr_t;
+    case type_kind::bit_int:
+        /* [ext:clang_type_traits] _BitInt(N): unique when its bits fill
+           its bytes, as clang's isUniqueObjRep: N == 8 * the size */
+        if (!record.bound)
+            return false;
+        answer = record.bound == 8 * bit_int_layout(record.bound, false);
+        return true;
+    case type_kind::function:
+        /* no object of the type */
+        return true;
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+        /* a reference member is as a pointer ("References are still
+           unique", clang's test); the trait of a reference type is false,
+           where the trait's case answers it */
+        answer = true;
+        return true;
     case type_kind::class_type:
         break;
     default:
@@ -703,6 +730,11 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
         if (!unique_representation(b.type, sub))
             return false;
         if (!sub) {
+            /* a derived class's own members may take the base's tail
+               padding (an Itanium ABI layout rule for a non-POD base): not
+               followed */
+            if (x.member_count)
+                return false;
             answer = false;
             return true;
         }
@@ -723,6 +755,13 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
             return true;
         }
         uint64_t size = size_of_type(m.type);
+        /* a reference member's bytes are a pointer's */
+        if (type_table[m.type.unqualified()].kind ==
+                type_kind::lvalue_reference ||
+            type_table[m.type.unqualified()].kind ==
+                type_kind::rvalue_reference)
+            size = size_of_type(
+                qualified_type::make(type_table.pointer_to(m.type), cv_none));
         if (!size)
             continue;
         if (x.union_) {
