@@ -477,3 +477,9 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   constant pointer value keeps no union member, and no lifetime of other
   objects: needs the evaluator's pointer to carry the designated subobject's
   type), now refused with that reason.
+- 9.1 (dropped once): [class.copy.ctor]/7, the implicit copy constructor
+  X(X&) when a subobject's copy takes a non-const reference: -141, but we
+  reject +38 from __is_trivially_constructible choosing A(A&) over B's
+  implicit B(const B&) (cwg6xx.cpp:1160, class.copy/p12-0x.cpp:76).
+- Decision (rule change): a small bug a fix exposes is fixed first by the
+  same agent, as its own commit (the drops kept costing a whole agent).

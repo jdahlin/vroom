@@ -194,9 +194,10 @@ design note and this section, and the log entries the brief names
   source change; rerun the gates after any edit before committing.
 - Time: `date` at the start; stop coding at 20 minutes, run the gates; you
   are stopped at 25.  Use the time: after a commit go on to the next item.
-- A newly analysed declaration that exposes an unrelated bug: report cause
-  and file:line, do not fix it in the same commit.  One commit per fix,
-  each gated on its own.
+- A fix that exposes an unrelated bug in newly analysed declarations: if
+  that bug is small (about 30 lines), fix it first as its own commit, gated
+  alone, then re-apply the fix; if not, save the fix as a patch and report
+  the bug's cause and file:line.  One commit per fix, each gated alone.
 - clang is the reference; bench/cxx-sema.py runs it as `-cc1 -triple
   aarch64-unknown-linux-gnu` (the test's -triple is dropped).
 - Leave no background processes.
