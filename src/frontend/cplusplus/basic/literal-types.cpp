@@ -110,6 +110,21 @@ constness semantic_analysis::literal_class(entity_index c) const
     /* (a union without members is literal for clang, which the rule's
        "at least one" does not say) */
     constness members = constness::constant;
+    /* before C++20 the destructor must be trivial: a union with a variant
+       member of a class with a non-trivial one has it deleted, and is
+       not literal (clang's __is_literal, llvm-project issue 85550) */
+    if (x.union_ &&
+        !tokens.files.behavior.has(language_feature::constexpr_destructors)) {
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            qualified_type m =
+                entity_table[class_members[x.first_member + i]].type;
+            while (type_table[m.unqualified()].kind == type_kind::array)
+                m = type_table[m.unqualified()].operand;
+            const struct type &mk = type_table[m.unqualified()];
+            if (mk.kind == type_kind::class_type && destroys(mk.entity))
+                return constness::not_constant;
+        }
+    }
     if (x.union_ && x.member_count)
         members = constness::not_constant;
     for (uint32_t i = 0; i < x.member_count; i++) {

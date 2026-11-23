@@ -265,9 +265,6 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     }
     /* [basic.types]/10 (literal_type), "unknown" is not answered */
     case unary_trait_kind::is_literal: {
-        /* a union's: its rule differs between editions */
-        if (is_class && entity_table[c].union_)
-            return false;
         constness literal = literal_type(t);
         if (literal == constness::unknown)
             return false;
