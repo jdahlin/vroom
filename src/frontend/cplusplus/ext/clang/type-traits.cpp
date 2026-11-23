@@ -285,6 +285,15 @@ static int unary_trait_named(const char *s, size_t n)
     return -1;
 }
 
+namespace
+{
+/* an array type T[0] ([ext:gnu_zero_length_array]) */
+bool zero_length_array(const type &a)
+{
+    return a.bound_known && a.bound == 0 && !a.entity && !a.variable_bound;
+}
+} // namespace
+
 bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
 {
     const struct type *record = &type_table[t.unqualified()];
@@ -322,11 +331,15 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     case unary_trait_kind::is_arithmetic:
         answer = is_arithmetic(t);
         break;
+    /* [ext:gnu_zero_length_array]: clang answers false for T[0], which is
+       no array of [dcl.array]/1 (its bound is greater than zero); a bound
+       that is a template-parameter's (entity) is not 0 */
     case unary_trait_kind::is_array:
-        answer = kind == type_kind::array;
+        answer = kind == type_kind::array && !zero_length_array(*record);
         break;
     case unary_trait_kind::is_bounded_array:
-        answer = kind == type_kind::array && record->bound_known;
+        answer = kind == type_kind::array && record->bound_known &&
+                 !zero_length_array(*record);
         break;
     case unary_trait_kind::is_unbounded_array:
         answer = kind == type_kind::array && !record->bound_known;
@@ -390,11 +403,12 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
     case unary_trait_kind::is_object:
         answer = kind != type_kind::function && !reference && !is_void;
         break;
+    /* an array's cv-qualifiers are its elements' ([basic.type.qualifier]/3) */
     case unary_trait_kind::is_const:
-        answer = (t.cv() & cv_const) != 0;
+        answer = (element_type(t).cv() & cv_const) != 0;
         break;
     case unary_trait_kind::is_volatile:
-        answer = (t.cv() & cv_volatile) != 0;
+        answer = (element_type(t).cv() & cv_volatile) != 0;
         break;
     /* [meta.unary.prop] is_signed: "If is_arithmetic_v<T> is true, the
        same result as T(-1) < T(0); otherwise, false" */
