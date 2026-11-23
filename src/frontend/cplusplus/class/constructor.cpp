@@ -2093,8 +2093,21 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
     /* entity_table[c], not x: declare_implicit may have moved it */
     for (entity_index k = entity_table[c].first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (copy_or_move_constructor(c, k))
+        if (copy_or_move_constructor(c, k)) {
+            /* X(const X&) = default beside a user-declared X(X&): the
+               defaulted one is an overload candidate too
+               ([over.match.ctor]), declared as the implicit one */
+            const struct type &p = type_table
+                [type_table.parameters(entity_table[k].type.unqualified())[0]
+                     .unqualified()];
+            if (entity_table[c].defaulted_copy_constructor &&
+                p.kind == type_kind::lvalue_reference &&
+                !(p.operand.cv() & cv_const)) {
+                copy = true;
+                continue;
+            }
             user_copy = true;
+        }
     /* [class.copy.ctor]/11: X(X&&) = default is trivial when each
        subobject's move is (the analysed case: each copies its bytes);
        /6: it makes the implicit copy constructor deleted */

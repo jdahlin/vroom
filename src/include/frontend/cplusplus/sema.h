@@ -1834,6 +1834,8 @@ class semantic_analysis
     bool trivial_defaulted_default_constructor(entity_index c) const;
     bool trivial_default_constructor(entity_index c, bool &known) const;
     bool trivial_copy_constructor(entity_index c) const;
+    bool trivial_copy_selected(entity_index c, bool rvalue, bool source_const,
+                               bool &known) const;
     bool copies_bytes(entity_index c) const;
     /* [dcl.fct.def.delete]: which defaulted special member functions are
        defined as deleted (class/deleted-special-members.cpp) */

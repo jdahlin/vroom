@@ -418,8 +418,16 @@ bool semantic_analysis::trivially_constructed(qualified_type t,
             object = type_table[object.unqualified()].operand;
         const struct type a = type_table[object.unqualified()];
         if (count == 1 && a.kind == type_kind::class_type &&
-            a.entity == k.entity)
+            a.entity == k.entity) {
+            /* the argument: an lvalue for T&, an rvalue otherwise */
+            bool rvalue = object_kind != type_kind::lvalue_reference;
+            bool trivial = trivial_copy_selected(
+                k.entity, rvalue, (object.cv() & cv_const) != 0, known);
+            if (known)
+                return trivial;
+            known = true;
             return trivial_copy_constructor(k.entity);
+        }
         return false;
     }
     for (uint32_t i = 0; i < count; i++) {

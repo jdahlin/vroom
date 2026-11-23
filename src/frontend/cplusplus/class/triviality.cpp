@@ -136,6 +136,92 @@ bool semantic_analysis::trivial_copy_constructor(entity_index c) const
     return true;
 }
 
+/*
+ * Whether the constructor that [over.match.ctor] selects to construct a
+ * class c object from one object of its own class is trivial
+ * ([class.copy.ctor]/11), for a source of the given value category and
+ * constness.  A user-declared copy or move constructor is user-provided;
+ * the implicit one (and X(const X&) = default, an entity beside another
+ * copy constructor) is trivial when the constructor each subobject's copy
+ * selects is: from a const source for X(const X&), from a non-const one
+ * for X(X&) ([class.copy.ctor]/7).  known is false when analysis cannot
+ * tell (a constructor template, a mutable subobject, an ambiguity).
+ */
+bool semantic_analysis::trivial_copy_selected(entity_index c, bool rvalue,
+                                              bool source_const,
+                                              bool &known) const
+{
+    const entity &x = entity_table[c];
+    if (x.dynamic)
+        return false;
+    if (x.constructor_template || x.constructor_templates) {
+        known = false;
+        return false;
+    }
+    entity_index best = 0;
+    bool best_rvalue = false;
+    uint8_t best_cv = 0;
+    bool have_best = false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        if (!copy_or_move_constructor(c, k))
+            continue;
+        const struct type &p =
+            type_table[type_table
+                           .parameters(entity_table[k].type.unqualified())[0]
+                           .unqualified()];
+        bool is_rvalue = p.kind == type_kind::rvalue_reference;
+        uint8_t cv = p.operand.cv() & (cv_const | cv_volatile);
+        /* [dcl.init.ref]/5: the reference is at least as cv-qualified */
+        if (source_const && !(cv & cv_const))
+            continue;
+        /* [over.ics.rank]/3.2.3: an rvalue binds to an rvalue reference
+           in preference; an lvalue does not bind to one */
+        if (is_rvalue && !rvalue)
+            continue;
+        bool better = !have_best;
+        if (have_best) {
+            if (is_rvalue != best_rvalue)
+                better = rvalue && is_rvalue;
+            else if (cv != best_cv)
+                better = (cv & best_cv) == cv;
+            else {
+                known = false;
+                return false;
+            }
+        }
+        if (better) {
+            best = k;
+            best_rvalue = is_rvalue;
+            best_cv = cv;
+            have_best = true;
+        }
+    }
+    /* no user-declared copy or move constructor selected: X(const X&),
+       defaulted or implicit ([class.copy.ctor]/6, /7) */
+    if (have_best && !entity_table[best].implicit)
+        return false;
+    /* implicit: X(const X&), whose subobjects are copied from const
+       objects; X(X&&) from rvalues */
+    bool sub_const = true;
+    bool sub_rvalue = false;
+    if (have_best && best_rvalue) {
+        sub_const = false;
+        sub_rvalue = true;
+    }
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (entity_table[class_members[x.first_member + i]].mutable_member) {
+            known = false;
+            return false;
+        }
+    for (entity_index k : classes)
+        if (!trivial_copy_selected(k, sub_rvalue, sub_const, known))
+            return false;
+    return true;
+}
+
 /* whether a copy of a class c object copies its bytes: its copy constructor
    is not deleted ([class.copy.ctor]/6, /10) and is trivial (/11) */
 bool semantic_analysis::copies_bytes(entity_index c) const
