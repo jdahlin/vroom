@@ -5847,6 +5847,19 @@ class semantic_analysis
     analysis_result initialize_with(SyntaxRef at, expression_meaning &m,
                                     qualified_type type, bool direct, bool list,
                                     initialized_value &result);
+    analysis_result same_type_copy(SyntaxRef at, expression_meaning &m,
+                                   qualified_type type, constness evaluation,
+                                   initialized_value &result);
+    analysis_result reference_initialization(SyntaxRef at,
+                                             expression_meaning &m,
+                                             qualified_type type,
+                                             initialized_value &result);
+    analysis_result class_initialization(SyntaxRef at, expression_meaning &m,
+                                         qualified_type type, bool direct,
+                                         initialized_value &result);
+    analysis_result scalar_initialization(SyntaxRef at, expression_meaning &m,
+                                          qualified_type type, bool direct,
+                                          bool list, initialized_value &result);
     /* the same where failure is no error: ok false, what it issued taken
        back ([temp.deduct]/8) */
     analysis_result try_initialization(SyntaxRef n, expression_meaning &a,
