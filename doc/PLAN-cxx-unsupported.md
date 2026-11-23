@@ -565,6 +565,11 @@ it; none adds a second way to instantiate.
   lowering with a reason.  Unsupported 37047 -> 36738 (-309).  Left:
   __builtin_is_within_lifetime (evaluator), the synthesizes_from_spaceship
   traits (rewritten candidates), 128-bit results (integer_wrap keeps 64).
+- 8.4 (afbedae83): a namespace head's attributes that change nothing
+  (-41).  The agent stopped after 3 minutes; the big sites go to 8.5.
+- 96ccf613f (orchestrator): an object of a lazily declared specialization
+  whose definition failed carries its instantiation's refusal ([class.pre]
+  509 -> 120 in --why).
 - Decision (2026-11-23, from the user: low-hanging fruit, 2-3k): after 7.5,
   four cheap batches by the work list's extension groups (4691 declarations
   in all): (8.1) clang's type traits, ~770 (__has_unique_object_representations
