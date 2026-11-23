@@ -268,7 +268,7 @@ $(BUILTIN_GENERATED) &: $(OUT)/clang-builtin-reader tools/gen-builtin-registrati
 
 builtin-registrations: $(BUILTIN_GENERATED)
 
-$(OBJ)/unity/cc.o $(call o,$(cc_SRC)) $(OBJ)/unity/cplusplus.o $(call o,$(cplusplus_SRC) $(cxxlower_SRC)): $(BUILTIN_GENERATED)
+$(OBJ)/unity/pp.o $(call o,$(pp_SRC)) $(OBJ)/unity/cc.o $(call o,$(cc_SRC)) $(OBJ)/unity/cplusplus.o $(call o,$(cplusplus_SRC) $(cxxlower_SRC)): $(BUILTIN_GENERATED)
 
 # viralloc: VIR register allocation with a synthetic target (PLAN-vir.md V4)
 VIRALLOC_SRC = $(VIRA_SRC) vir/synthetic-target.cpp
@@ -411,10 +411,10 @@ $(FUZZ_OUT):
 $(FUZZ_OUT)/fuzz-lex: test/fuzz/fuzz-lex.c test/fuzz/lexref.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-lex.c test/fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_ASM) -x c $(LEX_SRC) $(LIB_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+$(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) $(BUILTIN_GENERATED) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(LEX_ASM) -x c $(pp_SRC) frontend/pp/dircache.cpp $(LEX_SRC) $(LIB_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+$(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) $(BUILTIN_GENERATED) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(LEX_ASM) -x c $(pp_SRC) frontend/pp/dircache.cpp $(LEX_SRC) $(LIB_SRC) -o $@
 
 # replay the regression inputs (test/fuzz/regress/{lex,pp}/): every one must pass

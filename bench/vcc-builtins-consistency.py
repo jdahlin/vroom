@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Cross-check the facts vcc keeps about each builtin (doc/PLAN-builtins.md).
 
-For every builtin spelling in vcc's C table (frontend/c/builtin-table.cpp,
-target-builtins.inc, integer-builtins.inc, libbuiltins.inc; not the stub
+For every builtin spelling in vcc's C table (frontend/c/builtins-registry.cpp,
+the generated target-builtins.inc, integer-builtins.inc, libbuiltins.inc; not the stub
 catalog) run vpp, with no clang, and observe per language (C, C++) and target
 (aarch64-linux-gnu, x86_64-linux-gnu):
 
@@ -50,11 +50,11 @@ LEVELS = (0, 1, 2)
 SYNC_SIZES = re.compile(r'CC_BUILTIN_SYNC_SIZES\(\s*"([^"]+)"')
 
 
-def table_rows():
+def table_rows(vpp):
     """(name, flags, signature, encoding) of every row; encoding 'v' is vcc's
     letters, 'c' clang's Builtins encoding."""
     rows = {}
-    text = (FRONT / 'builtin-table.cpp').read_text()
+    text = (FRONT / 'builtins-registry.cpp').read_text()
     start = text.index('cc_builtin_table[] = {')
     end = text.index('{NULL, 0, 0, NULL}')
     body = text[start:end]
@@ -65,8 +65,8 @@ def table_rows():
     for match in re.finditer(r'\{\s*"([A-Za-z_0-9]+)"\s*,\s*[A-Z_0-9]+\s*,'
                              r'\s*([^"]*?)\s*,\s*"([^"]*)"\s*\}', body):
         rows[match.group(1)] = (match.group(2), match.group(3), 'v')
-    for path in (FRONT / 'target-builtins.inc',
-                 ROOT / 'src/include/frontend/integer-builtins.inc'):
+    generated = vpp.resolve().parent / 'generated/include/frontend'
+    for path in (generated / 'c/target-builtins.inc', generated / 'integer-builtins.inc'):
         for match in re.finditer(r'"([A-Za-z_0-9]+)"\s*,\s*[A-Z_0-9]+\s*,\s*(\d+)\s*,'
                                  r'\s*"([^"]*)"', path.read_text()):
             rows[match.group(1)] = (match.group(2), match.group(3), 'v')
@@ -576,7 +576,7 @@ def main():
         vpp = base / 'vpp'
     vpp = vpp.resolve()
     start = time.time()
-    rows = table_rows()
+    rows = table_rows(vpp)
     if args.names:
         for n in args.names:
             if n not in rows:
