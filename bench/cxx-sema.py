@@ -1183,6 +1183,15 @@ def main():
         print(f'unsupported by subclause ({len(unsupported)}): {top}')
     if a.why is not None:
         why_report(results, a.why)
+    if not a.patterns:
+        # every declaration we accept and clang rejects, one line each:
+        # a step's new ones are the diff against the previous run's file
+        path = os.path.join(R, 'work', 'cxx-sema-accepted.txt')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            for line in sorted(f'{relative(r["test"])}:{first} {" ".join(r["opts"])}'
+                               for r in results for first in r.get('accepted', [])):
+                f.write(line + '\n')
     if missing:
         print(f'not fetched: clang/test/{", clang/test/".join(missing)} (bench/fetch-testsuites.sh llvm)')
     metrics = {
