@@ -1074,8 +1074,13 @@ analysis_result semantic_analysis::conditional_operands(
         fundamental_of(e3.type) == fundamental_type::void_)
         return conditional_void_operand(n, c, e2, e3, m);
     if (e2.type.unqualified() != e3.type.unqualified() &&
-        (is_class_type(e2.type) || is_class_type(e3.type)))
+        (is_class_type(e2.type) || is_class_type(e3.type))) {
+        /* [expr.cond]/4: the conversions look at the class's members:
+           a class only named is completed ([temp.inst]/2) */
+        require_complete(e2.type);
+        require_complete(e3.type);
         VTRY_SET(r, conditional_class_operands(n, e2, e3));
+    }
     bool chosen_known = c.evaluation == constness::constant;
     expression_meaning *chosen_operand = &e3;
     if (c.value)
