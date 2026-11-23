@@ -1786,14 +1786,48 @@ bool semantic_analysis::initializer_names_nothing(SyntaxRef init) const
 }
 
 /*
+ * [dcl.init.aggr]/1: "The elements of an aggregate are: ... for a class,
+ * the direct base classes in declaration order, followed by the direct
+ * non-static data members ([class.mem]) that are not members of an
+ * anonymous union, in declaration order"; [class.bit]/2: "Unnamed
+ * bit-fields are not members".  A base class that is no field (an empty
+ * one, [class.derived]/4) is an element with no place in the object's
+ * fields (empty_base); a non-empty one is the field it is.
+ */
+void semantic_analysis::aggregate_class_elements(
+    entity_index c, owned_array<aggregate_class_element> &out) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        aggregate_class_element e;
+        e.type = b.type;
+        e.empty_base = b.field == UINT32_MAX;
+        if (!e.empty_base) {
+            e.member = class_members[x.first_member + b.field];
+            e.type = entity_table[e.member].type;
+        }
+        out.append(e);
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        entity_index k = class_members[x.first_member + i];
+        const entity &m = entity_table[k];
+        if (m.base_subobject || (m.bit_field && !m.name))
+            continue;
+        aggregate_class_element e;
+        e.type = m.type;
+        e.default_initializer = m.default_initializer;
+        e.member = k;
+        out.append(e);
+    }
+}
+
+/*
  * The elements of the aggregate type (an array or an aggregate class),
  * initialized from clauses[next ..], next moved past the clauses used.
  * [dcl.init.aggr]/1: "The elements of an aggregate are: for an array, the
- * array elements in increasing subscript order, or for a class, the direct
- * base classes in declaration order, followed by the direct non-static data
- * members ([class.mem]) that are not members of an anonymous union, in
- * declaration order"; [class.bit]/2: "Unnamed bit-fields are not members".
- * /3.2: "the explicitly initialized elements of the aggregate are the first
+ * array elements in increasing subscript order", for a class
+ * aggregate_class_elements.  /3.2: "the explicitly initialized elements of the aggregate are the first
  * n elements"; /5: the others are value-initialized (zero here: the
  * elements analysis has).  /16: "When a union is initialized with an
  * initializer list, there shall not be more than one explicitly initialized
@@ -1807,11 +1841,7 @@ analysis_result semantic_analysis::aggregate_elements(
     /* [ext:gnu_vector_size] a vector's elements are listed as an array's */
     bool arraylike =
         target.kind == type_kind::array || target.kind == type_kind::vector;
-    owned_array<qualified_type> types;
-    owned_array<SyntaxRef> defaults;
-    /* a base class that is no field (an empty one): an element that has
-       no place in the object's fields */
-    owned_array<bool> empty_bases;
+    owned_array<aggregate_class_element> members;
     uint64_t count = 0;
     bool unknown_bound = false;
     if (arraylike) {
@@ -1819,40 +1849,16 @@ analysis_result semantic_analysis::aggregate_elements(
         unknown_bound = target.kind == type_kind::array && !target.bound_known;
     } else {
         const entity &x = entity_table[target.entity];
-        /* the direct base classes in declaration order (a non-empty one is
-           the field it is), then the other members */
-        for (uint32_t i = 0; i < x.base_count; i++) {
-            const entity &b = entity_table[class_bases[x.first_base + i]];
-            if (b.field == UINT32_MAX) {
-                types.append(b.type);
-                defaults.append(0);
-                empty_bases.append(true);
-            } else {
-                types.append(
-                    entity_table[class_members[x.first_member + b.field]].type);
-                defaults.append(0);
-                empty_bases.append(false);
-            }
-        }
-        for (uint32_t i = 0; i < x.member_count; i++) {
-            const entity &m = entity_table[class_members[x.first_member + i]];
-            if (m.base_subobject)
-                continue;
-            if (!m.bit_field || m.name) {
-                types.append(m.type);
-                defaults.append(m.default_initializer);
-                empty_bases.append(false);
-            }
-        }
-        count = types.size();
+        aggregate_class_elements(target.entity, members);
+        count = members.size();
         if (x.union_ && count > 1)
             count = 1;
         /* [dcl.init.aggr]/5.4.2 (C++20 /5.4): an empty list initializes a
            union's member that has a default member initializer, not its
            first member: not analysed */
         if (x.union_ && next >= clauses.size())
-            for (size_t i = 1; i < defaults.size(); i++)
-                if (defaults[i])
+            for (size_t i = 1; i < members.size(); i++)
+                if (members[i].default_initializer)
                     return not_supported(list, "dcl.init.aggr");
     }
     owned_array<uint32_t> elements;
@@ -1862,10 +1868,10 @@ analysis_result semantic_analysis::aggregate_elements(
             break;
         qualified_type element = target.operand;
         if (!arraylike)
-            element = types[i];
+            element = members[i].type;
         initialized_value one;
-        bool has_default = !arraylike && defaults[i];
-        if (!arraylike && empty_bases[i]) {
+        bool has_default = !arraylike && members[i].default_initializer;
+        if (!arraylike && members[i].empty_base) {
             VTRY(r, empty_base_element(list, clauses, next, element));
             continue;
         }
@@ -1887,7 +1893,7 @@ analysis_result semantic_analysis::aggregate_elements(
         } else {
             SyntaxRef default_initializer;
             if (!arraylike)
-                default_initializer = defaults[i];
+                default_initializer = members[i].default_initializer;
             VTRY(r, omitted_element_value(list, element, default_initializer,
                                           one));
         }
@@ -2196,24 +2202,21 @@ analysis_result semantic_analysis::designated_elements(
                               "dcl.init.aggr");
         const entity &x = entity_table[target.entity];
         is_union = x.union_;
-        /* [dcl.init.aggr]/5.2: an empty base class is an element too,
-           which no designator initializes: value-initialized (nothing to
-           do when its special members are trivial) */
-        for (uint32_t i = 0; i < x.base_count; i++) {
-            const entity &b = entity_table[class_bases[x.first_base + i]];
-            if (b.field == UINT32_MAX &&
-                !trivial_special_members(
-                    type_table[b.type.unqualified()].entity))
-                return not_supported(list, "dcl.init.aggr");
-        }
-        for (uint32_t i = 0; i < x.member_count; i++) {
-            entity_index e = class_members[x.first_member + i];
-            const entity &m = entity_table[e];
-            if (!m.bit_field || m.name) {
-                types.append(m.type);
-                defaults.append(m.default_initializer);
-                members.append(e);
+        owned_array<aggregate_class_element> elements;
+        aggregate_class_elements(target.entity, elements);
+        for (const aggregate_class_element &e : elements) {
+            /* [dcl.init.aggr]/5.2: an empty base class is an element too,
+               which no designator initializes: value-initialized (nothing
+               to do when its special members are trivial) */
+            if (e.empty_base) {
+                if (!trivial_special_members(
+                        type_table[e.type.unqualified()].entity))
+                    return not_supported(list, "dcl.init.aggr");
+                continue;
             }
+            types.append(e.type);
+            defaults.append(e.default_initializer);
+            members.append(e.member);
         }
         bound = members.size();
     } else if (target.kind == type_kind::lvalue_reference ||
