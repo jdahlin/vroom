@@ -709,7 +709,9 @@ void semantic_analysis::define_waiting_members(entity_index scope,
             continue;
         token_index n = member_definition_name(
             template_member_definitions[b.member_definition - 1]);
-        if (n && tokens.identifier(n) != tokens.identifier(name))
+        /* (only the definitions of that member: one whose name is not a
+           token, an operator's or a conversion's, is no member so named) */
+        if (!n || tokens.identifier(n) != tokens.identifier(name))
             continue;
         postponed_bodies[i].c = 0;
         if (define)
