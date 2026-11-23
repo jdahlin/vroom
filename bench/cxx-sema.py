@@ -262,7 +262,7 @@ def check_type_claims(test, opts, clang, claims, cache=True):
 # set (-fcxx-dump-sections tells them apart): parsing and analysing the test
 # once instead of once per output
 OUTPUTS = ('analysis', 'check-tree', 'declaration-claims', 'type-claims',
-           'lookup-claims', 'layout-claims')
+           'lookup-claims', 'layout-claims', 'symbols')
 RUNS = threading.local()
 
 
@@ -727,14 +727,14 @@ def check_symbols(test, opts, clang, vpp):
     a Counter, and the refuted"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
     counts, refuted = collections.Counter(), []
-    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'symbols', opts, name), cwd)
-    if ours[0] not in (0, 1) or not ours[1].strip():
+    said = ours(vpp, 'symbols', opts, test)
+    if said[0] not in (0, 1) or not said[1].strip():
         return counts, refuted
     defined = clang_defined(test, opts, clang)
     if defined is None:
         return counts, refuted
     defined = set(defined)
-    for line in ours[1].splitlines():
+    for line in said[1].splitlines():
         fields = line.split('\t')
         if fields[0] == 'unsupported':
             counts['unsupported'] += 1
@@ -786,19 +786,31 @@ def check_lowering(test, opts, clang, vpp):
     defined = clang_defined(test, opts, clang)
     if defined is None:
         return counts, refuted
-    with tempfile.TemporaryDirectory() as d:
-        asm, obj = os.path.join(d, 'out.s'), os.path.join(d, 'out.o')
-        with open(asm, 'w') as f:
-            f.write(ours[1])
-        r = cxxparse.run([clang, '-cc1as', '-triple', 'aarch64-unknown-linux-gnu', '-filetype', 'obj',
-                          '-o', obj, asm], d, timeout=60)
-        if r[0] != 0:
-            counts['refuted'] += 1
-            refuted.append(f'the assembly of vpp -S does not assemble: {r[2].strip().splitlines()[:1]}')
-            return counts, refuted
-        made = object_symbols(os.path.join(os.path.dirname(clang), 'llvm-nm'), obj, d)
+
+    def assemble():
+        """[error or None, the symbols the object defines or None]: a
+        function of the assembly's bytes and clang, kept by cached()"""
+        with tempfile.TemporaryDirectory() as d:
+            asm, obj = os.path.join(d, 'out.s'), os.path.join(d, 'out.o')
+            with open(asm, 'w') as f:
+                f.write(ours[1])
+            r = cxxparse.run([clang, '-cc1as', '-triple', 'aarch64-unknown-linux-gnu', '-filetype', 'obj',
+                              '-o', obj, asm], d, timeout=60)
+            if r[0] != 0:
+                return [f'the assembly of vpp -S does not assemble: {r[2].strip().splitlines()[:1]}', None]
+            made = object_symbols(os.path.join(os.path.dirname(clang), 'llvm-nm'), obj, d)
+            if made is None:
+                return [None, None]
+            return [None, sorted(made)]
+    digest = hashlib.sha256(ours[1].encode()).hexdigest()
+    why, made = cxxparse.cached('assembled-symbols:' + digest, clang, test, opts, assemble)
+    if why:
+        counts['refuted'] += 1
+        refuted.append(why)
+        return counts, refuted
     if made is None:
         return counts, refuted
+    made = set(made)
     expected = {s for s in defined if not s.startswith(('$', '.L'))}
     if made != expected:
         counts['refuted'] += 1
@@ -961,8 +973,11 @@ def main():
             extra = ['-isystem', resource_include]
         for opts in sets:
             jobs.append((t, opts + extra))
-    with concurrent.futures.ThreadPoolExecutor(a.j) as ex:
-        results = list(ex.map(lambda j: check(j[0], j[1], clang, vpp), jobs))
+    # processes, not threads: the claims' checks are Python, which threads
+    # do not run in parallel
+    with concurrent.futures.ProcessPoolExecutor(a.j) as ex:
+        results = list(ex.map(check, [j[0] for j in jobs], [j[1] for j in jobs],
+                              [clang] * len(jobs), [vpp] * len(jobs), chunksize=8))
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
     declared, symbols, lowering = collections.Counter(), collections.Counter(), collections.Counter()
     lookup, layout = collections.Counter(), collections.Counter()
