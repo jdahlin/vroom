@@ -130,6 +130,7 @@ typedef struct walk_state {
     uint32_t cleanups
         [WALK_CLEANUP_MAX]; /* variables with __attribute__((cleanup)) in scope, innermost last */
     int cleanup_count;
+    int eh_cleanup_limit; /* while cleanup k runs on the normal path: k (its calls are covered by those below) */
     uint32_t vla
         [WALK_CLEANUP_MAX]; /* active VLA restore points, lowered by explicit alloca */
     int vla_count;

@@ -115,7 +115,7 @@ static void codegen_string_quote_append(tbuf *b, const char *s)
     vtext_char_append(b, '"');
 }
 
-static vjob_region_pool codegen_context_pool = VJOB_REGION_POOL_INIT(16);
+static vjob_region_pool codegen_context_pool = VJOB_REGION_POOL_INIT(17);
 
 static void codegen_context_init(codegen_context *e, codegen_unit *E,
                                  vjob_region *r)
@@ -168,6 +168,16 @@ static void codegen_context_init(codegen_context *e, codegen_unit *E,
             (sizeof(codegen_loop) + sizeof(uint32_t)),
         "emit.loops"));
     e->cleanups = (uint32_t *)(e->loops + CODEGEN_NESTING_CAPACITY);
+    /* exceptions (arm64): call sites (at most one per two labels) and cleanup nodes (at most one
+       per declaration of a cleanup variable: by node, as reached, so nsym) */
+    e->eh_node_capacity = c->nsym + 64;
+    e->eh_sites = (struct codegen_eh_site *)(vjob_region_acquire(
+        &r[16],
+        (size_t)(e->label_capacity / 2) * sizeof(struct codegen_eh_site) +
+            (size_t)e->eh_node_capacity * sizeof(struct codegen_eh_node),
+        "emit.eh"));
+    e->eh_nodes =
+        (struct codegen_eh_node *)(e->eh_sites + e->label_capacity / 2);
 }
 
 /* (after the stitch: the chunks point into e->out) */
@@ -198,6 +208,7 @@ static void ecx_free(codegen_context *e, vjob_region *r)
         VJOB_REGION_SCRATCH); /* (copied by codegen_keep_make before this) */
     vjob_region_release(&r[14], VJOB_REGION_SCRATCH);
     vjob_region_release(&r[15], VJOB_REGION_SCRATCH);
+    vjob_region_release(&r[16], VJOB_REGION_SCRATCH);
     vjob_region_pool_give(&codegen_context_pool, r);
 #ifdef VCC_WASM
     wasm_ecx_free(e);

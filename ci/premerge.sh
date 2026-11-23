@@ -157,6 +157,8 @@ arm64)
 	step common-test  env CC="${LLVM:-/usr/lib/llvm-23}/bin/clang" python3 bench/common-test.py -j "$J"
 	step vccd         python3 bench/vccd-test.py
 	step abi          python3 bench/vcc-abi.py
+	# exceptions through vcc's C frames (doc/PLAN-vir-eh.md): hosted glibc, a target without clang++'s C++ run time is skipped
+	step eh           python3 bench/vcc-eh.py -j "$J" --target aarch64
 	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
 	step bitint-ops   python3 bench/vcc-bitint.py --target aarch64 --bin-dir "$BUILD" --output "$LOGS/bitint-ops" -j "$J"
 	step bitint-abi   python3 bench/vcc-bitint-abi.py --target aarch64 --bin-dir "$BUILD" --output "$LOGS/bitint-abi" -j "$J"
@@ -187,6 +189,7 @@ x86)
 	step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
 	step vlink-dyn python3 bench/vlink-dyn.py
 	step x86-direct-objects python3 bench/vcc-x86.py --suite vcc --objcmp -j "$J"
+	step x86-eh       python3 bench/vcc-eh.py -j "$J" --target x86_64
 	step interrupt python3 bench/vcc-interrupt.py
 	step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
 	step bitint-float-x86 python3 bench/vcc-bitint-float.py --bin-dir "$BUILD" --output "$LOGS/bitint-float-x86" --cflag=-O3

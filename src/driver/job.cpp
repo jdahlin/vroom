@@ -338,8 +338,8 @@ static void driver_job_compile(struct driver_job *job, pp *p,
         .debug = job->debug,
         .dbg_version = job->dwarf_version,
         .cfi = job->cfi > 0,
-        .eh = driver_exceptions(job) && job->target_x64 && !job->target_win64 &&
-              job->cfi > 0,
+        .eh = driver_exceptions(job) && !job->darwin && !job->target_win64 &&
+              !job->wasm_bits && job->cfi > 0,
         .no_seh = job->no_seh,
         .dbg_name = job->main_file,
         .tlsmodel = job->tls_model,

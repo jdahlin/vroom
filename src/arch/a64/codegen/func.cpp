@@ -638,8 +638,15 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
     /* prologue; with unwind tables the CFA is x29 + 16 once the frame is set up (as clang) */
     bool cfi = e->unit->options->cfi && !CODEGEN_IS_DARWIN(c);
 
+    bool eh = cfi && a64_eh_wanted(e);
+
     if (cfi)
         vtext_string_append(b, "\t.cfi_startproc\n");
+    if (eh) /* (its exception table, the personality routine's) */
+        vtext_format_append(b,
+                            "\t.cfi_personality 155, .Lvcc_personality\n"
+                            "\t.cfi_lsda 27, .Lvcclsda%u\n",
+                            s);
     /* text has no relaxation (the object writer's a64_commit_relax): in a function that
 	 * may pass b.cond/cbz's +-1 MB, every one is the inverted branch over a b */
     bool far = e->record_count > (1u << 17);
@@ -832,6 +839,8 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
     vtext_char_append(b, '-');
     codegen_symbol_name_append(c, b, s);
     vtext_char_append(b, '\n');
+    if (eh)
+        a64_eh_table(e, b, s);
     if (a->constructor) {
         codegen_constructor_entry_append(c, b, s, false);
     }
@@ -899,6 +908,7 @@ static bool emit_function1(codegen_context *e, uint32_t s, int nlreg)
     e->temporaries_in_use = 0;
     e->callee_saved_used = 0;
     e->loop_count = e->cleanup_count = 0;
+    a64_eh_function_begin(e);
     e->case_count = 0;
     e->jump_table_count = e->jump_table_label_count = 0;
     e->is_reachable = true;
@@ -1108,6 +1118,7 @@ static bool emit_function1(codegen_context *e, uint32_t s, int nlreg)
     /* falling off the end of main returns 0 */
     if (e->is_reachable && CODEGEN_IDENTIFIER_IS(y->name, "main"))
         a64_record_emit_move_immediate(e, 0, 0, 0);
+    a64_eh_pads(e); /* (exceptions: the landing pads, jumped over) */
     deflabel(e, F.return_label);
     e->function_instance = NULL;
     if (unlikely(e->unit->stats)) {

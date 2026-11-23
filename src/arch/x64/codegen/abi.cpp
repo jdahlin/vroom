@@ -680,13 +680,18 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         uint32_t k = EW->eh_nsites++;
 
         EW->eh_sites[k].begin = ++EW->eh_marks;
+        int live = EW->cleanup_count;
+
+        if (EW->eh_cleanup_limit < live)
+            live = EW->eh_cleanup_limit;
         /* (in a landing pad: a cleanup's call terminates if it throws, eh_in_pads 2; _Unwind_Resume has none) */
-        EW->eh_sites[k].node =
-            EW->eh_in_pads == 2 ? UINT32_MAX
-            : EW->eh_in_pads    ? 0
-            : EW->cleanup_count
-                ? EW->cleanup_symbol_nodes[EW->cleanups[EW->cleanup_count - 1]]
-                : 0;
+        if (EW->eh_in_pads == 2)
+            EW->eh_sites[k].node = UINT32_MAX;
+        else if (EW->eh_in_pads || !live)
+            EW->eh_sites[k].node = 0;
+        else
+            EW->eh_sites[k].node =
+                EW->cleanup_symbol_nodes[EW->cleanups[live - 1]];
         x64_record_emit(e, X64_OP_EHMARK)->label = EW->eh_sites[k].begin;
     }
     if (fn) {

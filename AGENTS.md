@@ -345,6 +345,7 @@ bench/vcc-ctests.py -j 6 -O3 --vflags '-fvir-verify -fvir-check'   # ... with fl
 bench/vcc-ctests.py -j 6 --cpu cortex-a53   # vcc's binaries on a CPU without LSE (atomics as LL/SC)
 VCC_LDCMP=1 bench/vcc-ctests.py -j 6 --no-cache  # also link with vlink: loaded image byte-identical to lld's (VCC_LD=vlink: run vlink's)
                                     # VCC_CFLAGS=-fasynchronous-unwind-tables: extra flags for both compilers (.eh_frame)
+bench/vcc-eh.py -j 6 [-O 0123] [--target aarch64|x86_64]   # src/test/eh: exceptions through vcc's C frames (cleanup variables, -fexceptions), C++ halves by clang++; glibc, arm64 under qemu-aarch64 (<30 s)
 bench/vcc-stress.py [--vccd]        # pathological inputs fail cleanly, vccd survives (~2 s)
 bench/vcc-abi.py                    # cross-compiler calls, clang/vcc x caller/callee, qemu (src/test/abi; C++: src/test/cxx/abi, listed as cxx/NAME; ~3 s)
 bench/vcc-abi.py --host             # the same for the Apple arm64 ABI, run natively

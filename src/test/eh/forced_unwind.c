@@ -1,11 +1,8 @@
-/* vcc-flags: -fexceptions */
 /* __attribute__((cleanup)) under -fexceptions: the cleanups run when an exception unwinds their
    scope, innermost first, through a function with no cleanups of its own, and not for a variable
    whose scope was not entered yet.  The exception is a forced unwind (_Unwind_ForcedUnwind, as
    pthread_cancel's), so the test needs no C++ run time; its stop function longjmps back to main at
-   the end of the stack.  Only on x86-64 Linux (doc/PLAN-vir-eh.md E1; arm64 is E2): the arm64
-   suite's bare-metal run time has no unwinder. */
-#if defined(__x86_64__) && defined(__linux__)
+   the end of the stack.  Run by bench/vcc-eh.py (hosted: glibc's unwinder). */
 #include <setjmp.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -69,6 +66,3 @@ int main(void)
         return 2;
     return 0;
 }
-#else
-int main(void) { return 0; }
-#endif
