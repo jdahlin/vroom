@@ -2247,6 +2247,8 @@ class semantic_analysis
        held by a declaration ill-formed or not parsed, in a scope with
        names analysis did not follow, or in no scope */
     void name_lookup_detail(token_index t, const lookup_result &found);
+    void template_name_detail(token_index t, const lookup_result &found,
+                              entity_index named);
     void name_held_detail(token_index t, held_cause by);
     const char *unknown_scope_subclause(entity_index s) const;
     lookup_result lookup_unqualified(uint32_t name, lookup_filter filter) const;

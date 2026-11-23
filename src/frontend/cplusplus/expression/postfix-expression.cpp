@@ -1505,8 +1505,11 @@ analysis_result semantic_analysis::template_callee_parts(
     if (!function_template) {
         /* a template-id of no function template analysis knows: what it
            was before */
-        if (!written.empty() || !qualified)
-            return not_supported(id.index(), "temp.names");
+        if (!written.empty() || !qualified) {
+            analysis_result refused = not_supported(id.index(), "temp.names");
+            template_name_detail(name, x, x.entity);
+            return refused;
+        }
         return analysis_result::well_formed;
     }
     if (!written.empty()) {

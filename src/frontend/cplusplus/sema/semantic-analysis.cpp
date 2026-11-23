@@ -107,6 +107,53 @@ void semantic_analysis::name_held_detail(token_index t, held_cause by)
             t, "is declared by a declaration that is not parsed");
 }
 
+namespace
+{
+/* what a template-id's name is when it is no template of the kind used
+   ([temp.names]/1), for the detail of the refusal */
+const char *template_name_names(const entity &e)
+{
+    switch (e.kind) {
+    case entity_kind::template_entity:
+        return "names a template of another kind than the use needs";
+    case entity_kind::template_specialization:
+        return "names a template specialization";
+    case entity_kind::class_type:
+        return "names a class that is not a template";
+    case entity_kind::function:
+        return "names a function";
+    case entity_kind::variable:
+        return "names a variable";
+    case entity_kind::typedef_name:
+        return "names a typedef-name";
+    case entity_kind::enumeration:
+        return "names an enumeration";
+    case entity_kind::enumerator:
+        return "names an enumerator";
+    case entity_kind::namespace_entity:
+        return "names a namespace";
+    case entity_kind::pack:
+        return "names a pack";
+    default:
+        break;
+    }
+    return "names something that is not a template";
+}
+} // namespace
+
+/* the last refusal of a template-id whose template-name at t is no
+   template the use wants: why lookup found nothing, or what it found */
+void semantic_analysis::template_name_detail(token_index t,
+                                             const lookup_result &found,
+                                             entity_index named)
+{
+    if (!found.entity) {
+        name_lookup_detail(t, found);
+        return;
+    }
+    name_unsupported_detail(t, template_name_names(entity_table[named]));
+}
+
 /* the last refusal recorded names the identifier at t: "NAME what" */
 void semantic_analysis::name_unsupported_detail(token_index t, const char *what)
 {
