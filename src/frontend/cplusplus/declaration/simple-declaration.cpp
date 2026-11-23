@@ -1065,6 +1065,9 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
             }
         }
     }
+    /* [ext:clang_ext_vector_type] a typedef's, applied by
+       declare_with_initializer */
+    s.ext_vector_allowed = true;
     if (!ctad_done && r == analysis_result::well_formed)
         r = decl_specifier_seq(specifiers, s, false);
     sole_elaborated = 0;
@@ -1202,6 +1205,7 @@ analysis_result semantic_analysis::declare_with_initializer(
     last_declared = 0;
     qualified_type type = s.type;
     declarator_meaning m;
+    m.ext_vector_allowed = s.ext_vector_allowed;
     function_cv = 0;
     /* the parameters of this declarator's function declarator, if it has
        one (function sets them) */
@@ -1269,6 +1273,22 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (m.qualifier || m.qualified_namespace)
             return not_supported(declaration, "ext.gnu");
         r = gnu_vector_type(declaration, m.vector_bytes, type);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (m.ext_vector || m.ext_vector_parameter || s.ext_vector ||
+        s.ext_vector_parameter) {
+        /* [ext:clang_ext_vector_type] only a typedef-name's */
+        if (!s.typedef_ || m.qualifier || m.qualified_namespace)
+            return not_supported(declaration, "ext.clang");
+        gnu_attributes g;
+        g.ext_vector = m.ext_vector;
+        g.ext_vector_parameter = m.ext_vector_parameter;
+        if (!g.ext_vector && !g.ext_vector_parameter) {
+            g.ext_vector = s.ext_vector;
+            g.ext_vector_parameter = s.ext_vector_parameter;
+        }
+        r = clang_ext_vector_type(declaration, g, type);
         if (r != analysis_result::well_formed)
             return r;
     }

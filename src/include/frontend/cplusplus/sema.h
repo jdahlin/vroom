@@ -2003,6 +2003,11 @@ class semantic_analysis
         bool has_type = false;
         bool typedef_ = false, static_ = false, extern_ = false,
              inline_ = false, constexpr_ = false, virtual_ = false;
+        /* [ext:clang_ext_vector_type] ext_vector_type(N) among the specifiers
+           (only where the declaration applies it: ext_vector_allowed) */
+        bool ext_vector_allowed = false;
+        uint64_t ext_vector = 0;
+        entity_index ext_vector_parameter = 0;
         /* [dcl.constexpr]/2: consteval (constexpr_ too) */
         bool consteval_ = false;
         /* [class.friend]: the friend specifier (only where friend_allowed) */
@@ -2095,6 +2100,11 @@ class semantic_analysis
         token_index mode = 0;
         /* vector_size's N, in bytes (gnu_vector_size), 0: none */
         uint64_t vector_bytes = 0;
+        /* [ext:clang_ext_vector_type] a typedef's ext_vector_type(N): N, or
+           the template parameter */
+        bool ext_vector_allowed = false;
+        uint64_t ext_vector = 0;
+        entity_index ext_vector_parameter = 0;
         /* [ext:gnu_asm_labels] the asm label's string-literal, 0 if none */
         token_index asm_label = 0;
         /* the declarator-id is ~ class-name: a destructor ([class.dtor]/1) */

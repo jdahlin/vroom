@@ -878,6 +878,11 @@ semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
     g.abi_tag = m.abi_tag;
     g.mode = m.mode;
     g.vector_bytes = m.vector_bytes;
+    g.ext_vector_allowed =
+        m.ext_vector_allowed &&
+        tokens.files.behavior.has(extension::clang_ext_vector_type);
+    g.ext_vector = m.ext_vector;
+    g.ext_vector_parameter = m.ext_vector_parameter;
     g.priority = m.gnu_priority;
     g.cleanup = m.gnu_cleanup;
     analysis_result r = gnu_attribute_specifier(n, g);
@@ -885,6 +890,8 @@ semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
     m.gnu_cleanup = g.cleanup;
     m.mode = g.mode;
     m.vector_bytes = g.vector_bytes;
+    m.ext_vector = g.ext_vector;
+    m.ext_vector_parameter = g.ext_vector_parameter;
     m.aligned = g.aligned;
     m.gnu_flags = g.flags;
     m.section = g.section;
@@ -902,7 +909,14 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     g.abi_tag = s.abi_tag;
     g.priority = s.gnu_priority;
     g.cleanup = s.gnu_cleanup;
+    g.ext_vector_allowed =
+        s.ext_vector_allowed &&
+        tokens.files.behavior.has(extension::clang_ext_vector_type);
+    g.ext_vector = s.ext_vector;
+    g.ext_vector_parameter = s.ext_vector_parameter;
     analysis_result r = gnu_attribute_specifier(n, g);
+    s.ext_vector = g.ext_vector;
+    s.ext_vector_parameter = g.ext_vector_parameter;
     s.gnu_priority = g.priority;
     s.gnu_cleanup = g.cleanup;
     if (g.mode || g.vector_bytes)
