@@ -96,6 +96,11 @@ bool semantic_analysis::declares_unnamed_class(SyntaxRef seq) const
         auto head = c.class_specifier().class_head();
         if (head && head.size() == 1)
             return true;
+        /* (GNU attributes after the class-key: struct __attribute__((packed))
+           { ... };) */
+        if (head && head.size() == 2 &&
+            head[1].is(syntax_kind::gnu_attribute_specifier))
+            return true;
     }
     return false;
 }

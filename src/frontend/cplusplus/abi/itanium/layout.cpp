@@ -227,6 +227,7 @@ class class_layout
     }
     const char *base(entity &b);
     void bit_field(entity &m);
+    void packed_bit_field(entity &m);
     const char *data_member(entity &m);
     void potentially_overlapping_member(entity &m, entity_index of,
                                         uint64_t member_alignment);
@@ -447,6 +448,31 @@ void class_layout::bit_field(entity &m)
 }
 
 /*
+ * [ext:gnu_attributes] a packed bit-field (the field's or its class's
+ * attribute): at the next bit whatever its type's alignment, raising the
+ * class's alignment to one byte only (clang's FieldPacked: FieldAlign 1).
+ */
+void class_layout::packed_bit_field(entity &m)
+{
+    if (table[c].union_) {
+        m.offset = 0;
+        m.bit_offset = 0;
+        uint64_t bits = align_up(m.bit_width, 8);
+        if (bits > data_bits)
+            data_bits = bits;
+        raise_size(data_size());
+        raise_alignment(1);
+        return;
+    }
+    uint64_t at = data_bits;
+    m.offset = at / 8;
+    m.bit_offset = at;
+    data_bits = at + m.bit_width;
+    raise_size(data_size());
+    raise_alignment(1);
+}
+
+/*
  * [impl.clang] [abi:class-types] II, a member of class type `of` declared
  * [[no_unique_address]] ([dcl.attr.nouniqueaddr]): an empty class's takes
  * no bytes, so it starts at offset 0, moving (as an empty base does) to
@@ -582,8 +608,13 @@ const char *class_layout::allocation_of_members()
         if (m.bit_field) {
             /* a packed bit-field starts at the next bit whatever its
                type's alignment */
-            if ((m.gnu_flags | x.gnu_flags) & gnu_packed)
-                return "ext.gnu";
+            if ((m.gnu_flags | x.gnu_flags) & gnu_packed) {
+                /* (a zero-width one aligns to its type: not followed) */
+                if (!m.bit_width)
+                    return "ext.gnu";
+                packed_bit_field(m);
+                continue;
+            }
             bit_field(m);
             continue;
         }
