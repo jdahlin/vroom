@@ -599,10 +599,22 @@ bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
             return true;
     }
     if (x.base_count) {
-        /* an empty base after a bit-field: clang's own rule */
-        for (uint32_t i = 0; i < x.member_count; i++)
-            if (entity_table[class_members[x.first_member + i]].bit_field)
-                return false;
+        /* clang's own rule for an empty class as a member after a
+           bit-field (HasEmptyIndirectBaseAfterBitfield): not followed */
+        bool bit_fields = false, class_members_seen = false;
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            const entity &m = entity_table[class_members[x.first_member + i]];
+            if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+                m.base_subobject)
+                continue;
+            if (m.bit_field)
+                bit_fields = true;
+            else if (type_table[m.type.unqualified()].kind ==
+                     type_kind::class_type)
+                class_members_seen = true;
+        }
+        if (bit_fields && class_members_seen)
+            return false;
         entity_index owner = 0;
         if (!first_data_class(c, owner))
             return true;
