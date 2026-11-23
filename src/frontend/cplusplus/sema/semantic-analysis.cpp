@@ -114,13 +114,12 @@ void semantic_analysis::name_unsupported_detail(token_index t, const char *what)
     tokens.spelling(t, text.get());
     vbuffer_string_append(text.get(), " ");
     vbuffer_string_append(text.get(), what);
-    owned_string &detail = detail_texts.make(text.data(), text.size());
-    unsupported[unsupported.size() - 1].detail = detail.c_str();
+    last_unsupported_detail(text.data(), text.size());
 }
 
-void semantic_analysis::last_unsupported_detail(const char *text)
+void semantic_analysis::last_unsupported_detail(const char *text, size_t size)
 {
-    owned_string &detail = detail_texts.make(text, strlen(text));
+    owned_string &detail = detail_texts.make(text, size);
     unsupported[unsupported.size() - 1].detail = detail.c_str();
 }
 
@@ -129,7 +128,7 @@ void semantic_analysis::instantiation_detail(const unsupported_construct &in)
     char text[512];
     snprintf(text, sizeof text, "instantiation refused: [%s] %s:%u %s",
              in.subclause, in.file, static_cast<unsigned>(in.line), in.detail);
-    last_unsupported_detail(text);
+    last_unsupported_detail(text, strlen(text));
 }
 
 analysis_result semantic_analysis::not_supported_builtin(SyntaxRef n,

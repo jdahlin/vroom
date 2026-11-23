@@ -1912,7 +1912,7 @@ class semantic_analysis
     void name_unsupported_detail(token_index t, const char *what);
     /* the last refusal recorded gets this text as its detail (a copy) */
     __attribute__((noinline, cold)) void
-    last_unsupported_detail(const char *text);
+    last_unsupported_detail(const char *text, size_t size);
     /* the last refusal of an instantiation: the failure of the
        specialization's own analysis, "instantiation refused: [SUBCLAUSE]
        FILE:LINE DETAIL" */

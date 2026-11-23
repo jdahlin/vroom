@@ -447,7 +447,7 @@ void semantic_analysis::evaluation_detail(uint32_t node, bool gave_up)
         snprintf(text, sizeof text, "evaluator met L%u (%s)", last_unknown_line,
                  semantic_kind_name(semantics[node].kind));
     }
-    last_unsupported_detail(text);
+    last_unsupported_detail(text, strlen(text));
 }
 
 constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
