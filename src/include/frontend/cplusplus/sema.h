@@ -4020,6 +4020,12 @@ class semantic_analysis
                                  owned_array<SyntaxElement> &clauses,
                                  owned_array<uint32_t> *packs = nullptr,
                                  designation_set *designated = nullptr);
+    /* [over.ics.list]/5 and /8: whether the braced-init-list list can
+       convert to the parameter type target (a class, an array): for
+       std::initializer_list<X> and arrays of X with X an array, each
+       element is a braced-init-list or string-literal that converts to X;
+       no brace elision (the initialization's own) */
+    bool list_sequence_possible(SyntaxRef list, qualified_type target);
     bool initializer_names_nothing(SyntaxRef init) const;
     analysis_result gather_clauses(SyntaxRef list, SyntaxRef node,
                                    owned_array<SyntaxElement> &clauses,
