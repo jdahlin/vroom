@@ -109,6 +109,10 @@ analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type,
     if (expansion && count == 2 && n[1].is(preprocessing_op_or_punc::ELLIPSIS))
         count = 1;
     specified s;
+    /* [dcl.spec.auto.general]/3 and [dcl.fct]/2: auto before a declarator
+       with a trailing-return-type, in a type-id too (auto(*)() -> void) */
+    if (count == 2 && n[1].is(syntax_kind::abstract_declarator))
+        placeholder_allowed = true;
     VTRY(r, decl_specifier_seq(n.type_specifier_seq(), s, false));
     if (!s.has_type)
         return not_supported(n, "dcl.name");

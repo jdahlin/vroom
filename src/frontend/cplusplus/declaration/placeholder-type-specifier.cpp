@@ -547,7 +547,13 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
         return not_supported(n, "dcl.fct");
     VTRY(r, declarator(declaration, n[0], type, m));
     const struct type f = type_table[type.unqualified()];
-    if (f.kind != type_kind::function || !(f.operand == auto_type))
+    /* (a type-id's abstract declarator has a derived-declarator-type-list:
+       auto(*)() -> void is "pointer to function returning auto") */
+    bool abstract = n.is(syntax_kind::abstract_declarator);
+    if (abstract && !contains_placeholder(type))
+        return not_supported(n, "dcl.fct");
+    if (!abstract &&
+        (f.kind != type_kind::function || !(f.operand == auto_type)))
         return not_supported(n, "dcl.fct");
     auto trailing = n[1];
     if (trailing.size() != 2 || !trailing[1].is(syntax_kind::type_id))

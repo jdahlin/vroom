@@ -1040,6 +1040,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         m.id = q.identifier().token();
         return analysis_result::well_formed;
     }
+    case syntax_kind::abstract_declarator:
     case syntax_kind::declarator:
         return trailing_return(declaration, n, type, m);
     case syntax_kind::gnu_declarator: {
