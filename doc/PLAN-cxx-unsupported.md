@@ -151,6 +151,27 @@ after step 0 the work list gives a better estimate, recorded here.
   Unsupported 39709 -> 39700, known failures 2002 -> 873, types verified +441.
   Next in those headers: `_Float16 _Complex`, `align_value`, `__fp16` bit
   casts, `__builtin_ia32_*`/`__builtin_elementwise_*` builtins.
+- Step 0 (`bench/cxx-sema.py --why [N]`, done): 39700 declarations in 1618
+  root-cause keys.  Top 10 keys 25 %, top 50 48 %, top 100 61 %, top 200
+  75 %; 81 keys of 100 or more hold 22724; 1082 keys under 10 hold 3221 (the
+  tail, batched by file).  1020 declarations stay on a "declared by" detail
+  the text search could not follow.  The holder is found by searching the
+  source text for the name, which is good enough to rank; a front-end field
+  would make it exact.
+  Top keys: [expr.const] constant-evaluation.cpp:444 1977; [temp.names]
+  declared-templates.cpp:820 1781; [temp.inst] instantiation.cpp:557 1663;
+  [basic.lookup.qual] name-lookup.cpp:897 1183; [temp.names]
+  postfix-expression.cpp:1490 681; [dcl.spec.auto] decl-specifier.cpp:1617
+  579; [temp.class] declared-templates.cpp:149 530;
+  [basic.scope.declarative] translation-unit.cpp:688 504; [ext.gnu]
+  `align_value`-style attributes 458; [dcl.fct]
+  parameter-declaration-clause.cpp:474 449.
+  The first four (6604) are catch-all sites with no detail: constant
+  evaluation that does not know, an instantiation that failed (its reason
+  is in `instantiations[].failure` but not reported), a qualified name not
+  found, a template-id that names no class or alias template.  Next step
+  (1b): make them say why, in their detail text, so that `--why` splits
+  them into real causes.  Then work down the list.
 - Queue: vpp segfaults on two clang test files (found in the -std=gnu++20
   sweep); `semantic_kind_name` lacks complex_value, complex_part,
   statement_expression (wrong names in tree dumps).

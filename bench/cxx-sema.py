@@ -880,6 +880,7 @@ def check(test, opts, clang, vpp):
         elif result == 'unsupported':
             res['verdict']['unsupported'] += 1
             res['unsupported'][m.group(9)] += 1
+            res.setdefault('counted', []).append((first, int(m.group(4))))
         else:
             clang_rejects = any(n in error_lines for n in lines)
             if (result == 'ill-formed') == clang_rejects:
@@ -923,6 +924,125 @@ def check(test, opts, clang, vpp):
     return res
 
 
+# --why: the root causes of the unsupported declarations, by how many
+# counted declarations each blocks (doc/PLAN-cxx-unsupported.md, step 0)
+UNSUPPORTED_LINE = re.compile(r'^\[([^\]]*)\] (\S+) (.*?):(\d+):(\d+)\t(.*?)\t(.*)$')
+HELD = re.compile(r'^(\S+) is declared by a declaration (that is not parsed|that is ill-formed|with no rules yet)$')
+WHY_DEPTH = 8
+
+
+def why_key(sub, detail, site):
+    """(subclause, vcc's site, the detail with the name generic unless it is
+    a builtin's)"""
+    site = os.path.relpath(site, R) if os.path.isabs(site) else site
+    m = re.match(r'^(\S+) (.*)$', detail)
+    if m and not m.group(2).startswith('is a compiler builtin'):
+        detail = 'NAME ' + m.group(2)
+    detail = re.sub(r'\d+', 'N', detail)
+    return f'[{sub}] {site} {detail}'.rstrip()
+
+
+def source_lines(path, cache={}):
+    if path not in cache:
+        try:
+            cache[path] = open(path, errors='replace').read().split('\n')
+        except OSError:
+            cache[path] = []
+    return cache[path]
+
+
+def declaration_text(cwd, d):
+    lines = source_lines(os.path.join(cwd, d['path']))
+    return '\n'.join(lines[d['l1'] - 1:d['l2']])
+
+
+def root_causes(test, opts, vpp, counted):
+    """{root key: [count, example]} for the counted unsupported declarations
+    of one run"""
+    cwd, name = os.path.dirname(test), os.path.basename(test)
+    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'analysis,unsupported', opts, name), cwd)
+    decls, refusals = [], []
+    for line in ours[1].splitlines():
+        u = UNSUPPORTED_LINE.match(line)
+        if u:
+            refusals.append({'sub': u.group(1), 'node': u.group(2), 'path': u.group(3),
+                             'pos': (int(u.group(4)), int(u.group(5))),
+                             'detail': u.group(6), 'site': u.group(7)})
+            continue
+        m = ANALYSIS_LINE.match(line)
+        if m:
+            decls.append({'kind': m.group(1), 'path': m.group(2), 'l1': int(m.group(3)),
+                          'c1': int(m.group(4)), 'l2': int(m.group(6)), 'c2': int(m.group(7)),
+                          'result': m.group(8), 'sub': m.group(9)})
+
+    def first_refusal(d):
+        lo, hi = (d['l1'], d['c1']), (d['l2'], d['c2'])
+        inside = [r for r in refusals if r['path'] == d['path'] and lo <= r['pos'] <= hi]
+        same = [r for r in inside if r['sub'] == d['sub']]
+        if same:
+            return same[0]
+        if inside:
+            return inside[0]
+        return None
+
+    def holder(i, held):
+        """the last declaration before decls[i] that is not well-formed and
+        has the name"""
+        word = re.compile(r'\b' + re.escape(held) + r'\b')
+        for j in range(i - 1, -1, -1):
+            if decls[j]['result'] != 'well-formed' and word.search(declaration_text(cwd, decls[j])):
+                return j
+        return None
+
+    def root(i, depth):
+        d = decls[i]
+        if d['result'] != 'unsupported':
+            return f'{d["result"]}: {d["kind"]}', d
+        r = first_refusal(d)
+        if r is None:
+            return f'[{d["sub"]}] (no refusal line in the declaration)', d
+        h = HELD.match(r['detail'])
+        if h and depth < WHY_DEPTH:
+            j = holder(i, h.group(1))
+            if j is not None:
+                return root(j, depth + 1)
+        return why_key(r['sub'], r['detail'], r['site']), d
+
+    out = {}
+    index = {(d['l1'], d['c1']): i for i, d in enumerate(decls) if d['path'] == name}
+    for pos in counted:
+        i = index.get(pos)
+        if i is None:
+            key, d = '(declaration not in the dump)', None
+        else:
+            key, d = root(i, 0)
+        e = out.setdefault(key, [0, None])
+        e[0] += 1
+        if e[1] is None and d is not None:
+            e[1] = f'{relative(test)}:{pos[0]} {" ".join(opts[:2])} (root {os.path.basename(d["path"])}:{d["l1"]})'
+    return out
+
+
+def why_report(results, n):
+    total, examples = collections.Counter(), collections.defaultdict(list)
+    for r in results:
+        for key, (count, example) in r.get('why', {}).items():
+            total[key] += count
+            test = (example or '').split(':')[0]
+            if example and len(examples[key]) < 3 and all(not e.startswith(test + ':') for e in examples[key]):
+                examples[key].append(example)
+    path = os.path.join(R, 'work', 'cxx-sema-why.json')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump([{'key': k, 'declarations': c, 'examples': examples[k]}
+                   for k, c in total.most_common()], f, indent=1)
+    print(f'root causes ({len(total)} keys, {sum(total.values())} declarations; {relative(path)}):')
+    for k, c in total.most_common(n):
+        print(f'{c:7d}  {k}')
+        for e in examples[k]:
+            print(f'           {e}')
+
+
 def main():
     if sys.argv[1:] == ['selftest']:
         return selftest(cxxpp.find_clang()) | layout_selftest(cxxpp.find_clang())
@@ -941,6 +1061,9 @@ def main():
                     help='clang test directories to run (default CXX,SemaCXX,'
                          'SemaTemplate; "all": also CodeGenCXX, Parser, Sema; '
                          '--check and --bless are of the default only)')
+    ap.add_argument('--why', type=int, nargs='?', const=40, metavar='N',
+                    help='also the root causes of the unsupported declarations, top N '
+                         '(work/cxx-sema-why.json; doc/PLAN-cxx-unsupported.md)')
     ap.add_argument('patterns', nargs='*')
     a = ap.parse_args()
     if a.suites:
@@ -978,6 +1101,12 @@ def main():
     with concurrent.futures.ProcessPoolExecutor(a.j) as ex:
         results = list(ex.map(check, [j[0] for j in jobs], [j[1] for j in jobs],
                               [clang] * len(jobs), [vpp] * len(jobs), chunksize=8))
+        if a.why is not None:
+            counted = [r for r in results if r.get('counted')]
+            whys = ex.map(root_causes, [r['test'] for r in counted], [r['opts'] for r in counted],
+                          [vpp] * len(counted), [r['counted'] for r in counted], chunksize=8)
+            for r, w in zip(counted, whys):
+                r['why'] = w
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
     declared, symbols, lowering = collections.Counter(), collections.Counter(), collections.Counter()
     lookup, layout = collections.Counter(), collections.Counter()
@@ -1034,6 +1163,8 @@ def main():
     if unsupported and a.unsupported:
         top = ', '.join(f'[{label}] {n}' for label, n in unsupported.most_common(a.unsupported))
         print(f'unsupported by subclause ({len(unsupported)}): {top}')
+    if a.why is not None:
+        why_report(results, a.why)
     if missing:
         print(f'not fetched: clang/test/{", clang/test/".join(missing)} (bench/fetch-testsuites.sh llvm)')
     metrics = {
