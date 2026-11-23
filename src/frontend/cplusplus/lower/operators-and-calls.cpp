@@ -383,6 +383,14 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
                     "__builtin_bitreverseg) or __builtin_align_* outside a "
                     "constant expression",
                     n.at);
+    case builtin_lowering::vtable_pointer: {
+        /* the virtual table pointer is the first word of the object
+           ([abi:vtable]): loaded through a pointer to a const void * */
+        ast_qualified_type word = t;
+        uint32_t slot =
+            cast(arguments[0], pointer_to(word), AST_CAST_POINTER_TO_POINTER);
+        return dereference(slot, word);
+    }
     case builtin_lowering::align: {
         /* [ext:clang_builtin_functions] an integer operand and a constant
            alignment a: in unsigned long long, (x + (a - 1)) & ~(a - 1),

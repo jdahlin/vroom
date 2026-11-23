@@ -41,6 +41,8 @@ enum class builtin_form : uint8_t {
        1), bool __builtin_is_aligned(T, alignment) (2), T an integer or
        pointer type */
     align,
+    /* const void *__builtin_get_vtable_pointer(T *), T a polymorphic class */
+    vtable_pointer,
     /* C23's <stdbit.h> functions and __builtin_bitreverseg, type-generic over
        the integer types (builtin_stdc_op): the result by the operation */
     stdc_bits,
@@ -180,6 +182,8 @@ enum class builtin_lowering : uint8_t {
     /* __builtin_align_up, _down, is_aligned of an integer by a constant
        alignment, as arithmetic */
     align,
+    /* the object's virtual table pointer: the pointer stored at its start */
+    vtable_pointer,
 };
 
 struct gnu_builtin {

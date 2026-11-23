@@ -347,8 +347,8 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
         form == builtin_form::bit_count || form == builtin_form::generic ||
         form == builtin_form::launder || form == builtin_form::clear_padding ||
         form == builtin_form::bswapg || form == builtin_form::stdc_bits ||
-        form == builtin_form::align || form == builtin_form::invoke ||
-        form == builtin_form::complex) {
+        form == builtin_form::align || form == builtin_form::vtable_pointer ||
+        form == builtin_form::invoke || form == builtin_form::complex) {
         qualified_type result = void_type;
         /* (the type-generic ones have the signature's result type) */
         if (form == builtin_form::generic || form == builtin_form::bit_count)
@@ -753,6 +753,8 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         return bswapg_result(n, called, nodes, result);
     case builtin_form::align:
         return align_result(n, called, nodes, result);
+    case builtin_form::vtable_pointer:
+        return vtable_pointer_result(n, called, nodes, result);
     case builtin_form::stdc_bits:
         return stdc_bits_result(n, called, nodes, result);
     case builtin_form::atomic:
@@ -1111,6 +1113,55 @@ semantic_analysis::align_result(SyntaxRef n, entity_index called,
         return analysis_result::well_formed;
     }
     result = qualified_type::make(t.unqualified(), cv_none);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [ext:clang_builtin_functions] const void *__builtin_get_vtable_pointer(p)
+ * (clang's Builtins.td, custom type checking, C++): p a pointer (or an array,
+ * which decays) to a complete polymorphic class; the result is the virtual
+ * table pointer stored in the object, a `const void *`.
+ */
+analysis_result
+semantic_analysis::vtable_pointer_result(SyntaxRef n, entity_index called,
+                                         const owned_array<uint32_t> &nodes,
+                                         qualified_type &result)
+{
+    (void)called;
+    if (nodes.size() != 1)
+        return ill_formed(n, "__builtin_get_vtable_pointer takes one argument",
+                          "ext.clang");
+    qualified_type t = semantics[nodes[0]].type;
+    if (depends_on_template_parameter(t))
+        return not_supported(n, "temp.dep.constexpr");
+    const struct type &tk = type_table[t.unqualified()];
+    qualified_type pointee;
+    if (tk.kind == type_kind::pointer || tk.kind == type_kind::array)
+        pointee = tk.operand;
+    else
+        return ill_formed(n,
+                          "__builtin_get_vtable_pointer requires an argument "
+                          "of class pointer type",
+                          "ext.clang");
+    if (type_table[pointee.unqualified()].kind != type_kind::class_type)
+        return ill_formed(n,
+                          "__builtin_get_vtable_pointer requires an argument "
+                          "of class pointer type",
+                          "ext.clang");
+    if (!require_complete(pointee))
+        return ill_formed(n,
+                          "__builtin_get_vtable_pointer requires an argument "
+                          "with a complete type",
+                          "ext.clang");
+    if (!polymorphic_class(type_table[pointee.unqualified()].entity))
+        return ill_formed(n,
+                          "__builtin_get_vtable_pointer requires an argument "
+                          "of polymorphic class pointer type",
+                          "ext.clang");
+    result = qualified_type::make(
+        type_table.pointer_to(qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_const)),
+        cv_none);
     return analysis_result::well_formed;
 }
 

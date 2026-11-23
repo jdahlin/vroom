@@ -169,36 +169,45 @@ def generate_stdc(reader):
     return '\n'.join(lines) + '\n'
 
 
-# clang's alignment builtins (custom type checking, prototype "T(void const*,
-# size_t)": the operand type decides).  Only the C++ front end has them
-# (analysis, constant evaluation); the operation number is its `align` form's
-# `which`.
-ALIGN_RECORDS = (
-    ('AlignUp', '__builtin_align_up', 0),
-    ('AlignDown', '__builtin_align_down', 1),
-    ('IsAligned', '__builtin_is_aligned', 2),
+# Builtins whose type checking is custom (clang's CustomTypeChecking) and that
+# only the C++ front end has: the alignment builtins (prototype "T(void
+# const*, size_t)": the operand type decides), __builtin_get_vtable_pointer
+# and __builtin_invoke.  Columns: record, spelling, languages, attributes,
+# then the C++ front end's builtin_form, the form's own number, builtin_fold
+# and builtin_lowering.
+_CONST = {'NoThrow', 'Const', 'Constexpr', 'CustomTypeChecking'}
+CXX_RECORDS = (
+    ('AlignUp', '__builtin_align_up', '', _CONST, 'align', 0, 'align', 'align'),
+    ('AlignDown', '__builtin_align_down', '', _CONST, 'align', 1, 'align', 'align'),
+    ('IsAligned', '__builtin_is_aligned', '', _CONST, 'align', 2, 'align', 'align'),
+    ('GetVtablePointer', '__builtin_get_vtable_pointer', 'CXX_LANG',
+     {'NoThrow', 'Const', 'CustomTypeChecking'}, 'vtable_pointer', 0, 'none',
+     'vtable_pointer'),
+    ('Invoke', '__builtin_invoke', '', {'CustomTypeChecking', 'Constexpr'},
+     'invoke', 0, 'none', 'node'),
 )
 
 
-def generate_align(reader):
+def generate_cxx(reader):
     by_record = {}
     for row in read_table(reader, 'Builtins.td'):
         by_record.setdefault(row['record'], []).append(row)
     lines = [
         GENERATED,
-        '/* ALIGN_OP (spelling, operation): 0 up, 1 down, 2 is_aligned. */',
+        '/* CXX_BUILTIN (spelling, form, which, fold, lowering): the C++ front',
+        '   end\'s builtin_form, the form\'s number, builtin_fold, builtin_lowering. */',
     ]
-    for record, name, op in ALIGN_RECORDS:
+    for record, name, languages, attributes, form, which, fold, lowering in CXX_RECORDS:
         rows = by_record.get(record, [])
         if len(rows) != 1:
             raise ValueError(f'{record}: expected one record, got {len(rows)}')
         row, = rows
         if row['spelling'] != name:
             raise ValueError(f'{record}: expected spelling {name}, got {row["spelling"]}')
-        if (row['alias_of'] or row['features'] or row['header'] or row['languages'] or
-                set(row['attributes']) != {'NoThrow', 'Const', 'Constexpr', 'CustomTypeChecking'}):
+        if (row['alias_of'] or row['features'] or row['header'] or
+                row['languages'] != languages or set(row['attributes']) != attributes):
             raise ValueError(f'{name}: unexpected availability or attributes')
-        lines.append(f'ALIGN_OP("{name}", {op})')
+        lines.append(f'CXX_BUILTIN("{name}", {form}, {which}, {fold}, {lowering})')
     return '\n'.join(lines) + '\n'
 
 
@@ -308,7 +317,7 @@ def main():
         outputs = {
             args.output_root / 'frontend/integer-builtins.inc': generate_integer(args.reader),
             args.output_root / 'frontend/stdc-builtins.inc': generate_stdc(args.reader),
-            args.output_root / 'frontend/align-builtins.inc': generate_align(args.reader),
+            args.output_root / 'frontend/cxx-builtins.inc': generate_cxx(args.reader),
             args.output_root / 'frontend/c/target-builtins.inc': generate_targets(args.reader),
             args.output_root / 'frontend/c/builtin-stubs.inc': generate_stubs(args.reader),
         }
