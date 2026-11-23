@@ -374,10 +374,6 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
         answer = !array && is_class && polymorphic_class(c);
         return true;
     case unary_trait_kind::is_aggregate:
-        /* is_aggregate does not take a base class that is empty yet
-           ([dcl.init.aggr]/1.4's public bases) */
-        if (is_class && entity_table[c].base_count)
-            return false;
         answer = array || (is_class && is_aggregate(c));
         return true;
     case unary_trait_kind::is_empty:
