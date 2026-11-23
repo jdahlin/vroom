@@ -149,6 +149,11 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                 }
                 if (match) {
                     entity_table[match].member_body_deferred = false;
+                    /* the template's body, queued with the class, is no
+                       longer this function's */
+                    for (size_t k = 0; k < postponed_bodies.size(); k++)
+                        if (postponed_bodies[k].function == match)
+                            postponed_bodies[k].c = 0;
                     if (!defines) {
                         VTRY(cr, constexpr_redeclaration(m.id, match,
                                                          ms.constexpr_));

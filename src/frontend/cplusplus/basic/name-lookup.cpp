@@ -891,6 +891,7 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             if (dt.kind != type_kind::class_type &&
                 dt.kind != type_kind::enumeration)
                 return not_supported(n, "basic.lookup.qual");
+            complete_instantiation(dt.entity);
             const entity &dx = entity_table[dt.entity];
             if (!dx.size && dt.entity != defining_class && !dx.defined)
                 return not_supported(n, "basic.lookup.qual");

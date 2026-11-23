@@ -701,8 +701,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             }
         }
     }
+    /* [temp.inst]/4: a member function of a class template's specialization
+       is instantiated when it is used, not with the class (every one of
+       libc++'s valarray expression templates, otherwise) */
     auto queue_incomplete_body = [&](SyntaxRef body) {
-        if (!incomplete_argument ||
+        if (!(incomplete_argument || specialization) ||
             body.function_definition().function_body().deleted())
             return false;
         for (entity_index f = first_member_entity; f < entity_table.size();
@@ -1409,7 +1412,9 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
        incomplete specialization as its return type. */
     bool saved_member_return = member_return_type;
     member_return_type = false;
-    if (node.is(syntax_kind::member_declaration) && count == 3) {
+    if (node.is(syntax_kind::member_declaration,
+                syntax_kind::function_definition) &&
+        count == 3) {
         SyntaxElement d = node[lead + 1];
         if (d.is(syntax_kind::member_declarator_list) && d.size() == 1)
             d = d[0];

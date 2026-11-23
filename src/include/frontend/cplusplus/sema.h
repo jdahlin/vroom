@@ -4552,6 +4552,10 @@ class semantic_analysis
            construct it could not analyse, for the uses that follow */
         bool has_failure = false;
         unsupported_construct failure;
+        /* a class named only as a member function's return type
+           ([temp.inst]/2: no completely-defined type is needed there):
+           declared, defined by complete_instantiation when a use needs it */
+        bool lazy = false;
     };
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,
@@ -4680,6 +4684,11 @@ class semantic_analysis
                                                    entity_index f);
     /* the definitions pending_definitions waits for */
     void instantiate_pending();
+    /* a lazily named specialization (instantiation_record::lazy) defined
+       now: a use that needs the class complete (a call's result, a member
+       lookup, its size); nothing for any other class */
+    void complete_instantiation(entity_index c);
+    void complete_class_type(qualified_type t);
     /* in an instantiation, the template's first token: a namespace's
        name declared after it is not the template's to find
        (lookup_unqualified) */
