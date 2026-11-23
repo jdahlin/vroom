@@ -378,22 +378,40 @@ VPRIV void as_cfi_frame_emit(as_context *a)
     as_byte_span b = {(uint8_t *)as_region_alloc(&a->definitions, cap), 0};
     size_t *pcbs = (size_t *)(as_region_alloc(
         &a->definitions, sizeof(size_t) * a->frame_description_count));
-    /* MC stable-sorts the FDEs by CIE key (signal frame, simple, RA column, B key) */
+    /* MC stable-sorts the FDEs by CIE key: personality (none first), its
+       encoding, the LSDA's encoding, signal frame, simple, RA column, B key.
+       MC orders two personalities by symbol address; here they keep the
+       order they first appear in */
     uint32_t *ord = (uint32_t *)(as_region_alloc(
         &a->definitions, sizeof(uint32_t) * a->frame_description_count));
+    uint64_t *rank = (uint64_t *)(as_region_alloc(
+        &a->definitions, sizeof(uint64_t) * a->frame_description_count));
+    __typeof__(a->frame_descriptions[0].personality.add) personalities[8];
+    uint32_t npersonalities = 0;
     for (uint32_t i = 0; i < a->frame_description_count; i++) {
         struct as_frame_description *f = &a->frame_descriptions[i];
+        /* 0 none, else 1 + the personality's index among the distinct ones
+           (at most 8: one CIE each) */
+        uint64_t personality = 0;
+        if (f->has_personality) {
+            uint32_t j = 0;
+            while (j < npersonalities && personalities[j] != f->personality.add)
+                j++;
+            if (j == npersonalities && npersonalities < 8)
+                personalities[npersonalities++] = f->personality.add;
+            personality = (uint64_t)j + 1;
+        }
+        uint64_t encodings = 0;
+        if (f->has_personality)
+            encodings |= (uint64_t)f->personality_encoding << 8;
+        if (f->has_lsda)
+            encodings |= f->lsda_encoding;
         uint32_t key = (uint32_t)f->is_signal << 30 |
                        (uint32_t)f->is_simple << 29 | f->return_register << 1 |
                        f->uses_b_key;
+        rank[i] = personality << 47 | encodings << 31 | key;
         uint32_t k = i;
-        while (k > 0) {
-            struct as_frame_description *g = &a->frame_descriptions[ord[k - 1]];
-            uint32_t gk = (uint32_t)g->is_signal << 30 |
-                          (uint32_t)g->is_simple << 29 |
-                          g->return_register << 1 | g->uses_b_key;
-            if (gk <= key)
-                break;
+        while (k > 0 && rank[ord[k - 1]] > rank[i]) {
             ord[k] = ord[k - 1];
             k--;
         }
