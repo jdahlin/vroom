@@ -249,6 +249,8 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
 analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
                                                standard_keyword key)
 {
+    /* [temp.spec.general]/6: a base-clause is checked */
+    flag_set checked(explicit_declaration_names, false);
     /* [temp.variadic]/5.3: "In a base-specifier-list; the pattern is a
        base-specifier": a base-specifier followed by an ellipsis is one
        base per element of the packs it names (an instantiation's; in a

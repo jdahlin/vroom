@@ -1132,6 +1132,14 @@ bool semantic_analysis::accessible(entity_index member,
     const entity &x = entity_table[member];
     if (!x.access)
         return true;
+    /* [temp.spec.general]/6: "The usual access checking rules do not apply
+       to names in a declaration of an explicit instantiation or explicit
+       specialization, with the exception of names appearing in a function
+       body, default argument, base-clause, member-specification,
+       enumerator-list, or static data member or variable template
+       initializer." */
+    if (explicit_declaration_names && !function_state.active && !defining_class)
+        return true;
     /* the classes the name is used in a member of: the class of the
        function analysed, the class whose member-specification is
        analysed, the class of a static data member's definition

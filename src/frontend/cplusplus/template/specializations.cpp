@@ -15,6 +15,7 @@ namespace cplusplus
 analysis_result
 semantic_analysis::explicit_specialization(ExplicitSpecialization n)
 {
+    flag_set exempt(explicit_declaration_names, true);
     /* template < > declaration: a class's definition, its class-head
        a simple-template-id */
     if (n.size() == 4 && n[3].is(syntax_kind::simple_declaration)) {
@@ -199,6 +200,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
 analysis_result
 semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
 {
+    flag_set exempt(explicit_declaration_names, true);
     /* [extern] template declaration */
     bool extern_ = n.size() == 3;
     if ((n.size() != 2 && n.size() != 3) || n[n.size() - 1].is_token())
