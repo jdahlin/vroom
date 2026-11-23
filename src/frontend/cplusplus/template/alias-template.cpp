@@ -177,16 +177,19 @@ analysis_result semantic_analysis::alias_template_specialization(
     lookup_horizon = ft.declaration.first_token();
     expanding = false;
     qualified_type t;
+    size_t entities_before = entity_table.size();
     r = alias_type(ft.definition, t);
     current_scope = saved_scope;
     lookup_horizon = saved_horizon;
     expanding = saved_expanding;
     /* [impl.clang] a closure type created by substituting an alias template
-       belongs to the function that substituted it */
+       belongs to the function that substituted it; a closure type the
+       alias only names (an argument, as __decay_t<_Poll>) keeps its
+       scope */
     if (r == analysis_result::well_formed &&
         type_table[t.unqualified()].kind == type_kind::class_type) {
         entity_index c = type_table[t.unqualified()].entity;
-        if (entity_table[c].lambda) {
+        if (entity_table[c].lambda && c >= entities_before) {
             entity_index fn = saved_scope;
             while (fn && entity_table[fn].kind != entity_kind::function)
                 fn = entity_table[fn].enclosing;
