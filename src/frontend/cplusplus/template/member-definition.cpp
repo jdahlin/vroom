@@ -421,11 +421,14 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         out_of_class_member(o.definition, &name);
         defined = defined_special_member(x.specialization, o, name);
         if (!defined) {
-            entity_index f =
-                entity_table.find(x.specialization, tokens.identifier(name));
-            if (f && entity_table[f].kind == entity_kind::function &&
-                (declared_by(f, o.definition) || declared_by(f, o.declaration)))
-                defined = f;
+            /* (the overload this definition is the member's) */
+            for (entity_index f = entity_table.find(x.specialization,
+                                                    tokens.identifier(name));
+                 f && !defined && entity_table[f].kind == entity_kind::function;
+                 f = entity_table[f].next_overload)
+                if (declared_by(f, o.definition) ||
+                    declared_by(f, o.declaration))
+                    defined = f;
         }
         if (!defined)
             r = analysis_result::unsupported;

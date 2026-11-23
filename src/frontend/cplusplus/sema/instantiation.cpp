@@ -440,6 +440,14 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
             defining_argument |= self;
         }
     }
+    /* [temp.inst]/2: a member function's return type needs no complete
+       class: the specialization is declared and defined where a use needs
+       it (complete_instantiation).  Defining each as it is named recurses
+       without bound through libc++'s expression templates (valarray). */
+    bool lazy_return = member_return_type && !require_complete_class &&
+                       !defining_argument && !declaring_specializations;
+    if (lazy_return)
+        incomplete_argument = true;
     if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
         uint32_t k = prior - 1;
         const instantiation_record x = instantiations[k];
@@ -520,12 +528,34 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
             type_table.of_entity(type_kind::class_type, c), cv_none);
         entity_table[c].instantiation = index + 1;
         instantiations[index].specialization = c;
+        if (lazy_return && defined_by)
+            instantiations[index].lazy = true;
         if (defining_argument && defined_by && !declaring_specializations)
             deferred_class_instantiations.append(
                 deferred_class_instantiation{defining_class, at, index, c});
         return analysis_result::well_formed;
     }
     return define_class_outside(at, index, c);
+}
+
+void semantic_analysis::complete_instantiation(entity_index c)
+{
+    if (!c || entity_table[c].kind != entity_kind::class_type)
+        return;
+    const entity &x = entity_table[c];
+    if (!x.instantiation || x.defined || x.size)
+        return;
+    uint32_t index = x.instantiation - 1;
+    if (!instantiations[index].lazy || instantiations[index].defining)
+        return;
+    instantiations[index].lazy = false;
+    entity_index done = 0;
+    define_class_outside(SyntaxRef(), index, done);
+}
+
+void semantic_analysis::complete_class_type(qualified_type t)
+{
+    complete_instantiation(element_class(referenced_type(t)));
 }
 
 /* [temp.deduct]/8: "Only invalid types and expressions in the immediate

@@ -284,8 +284,10 @@ analysis_result semantic_analysis::named_cast(PostfixOperationNamedCast cast,
  * imported or included prior to a use of typeid, the program is
  * ill-formed."  A type-id operand (/4) and an unevaluated expression
  * operand that is not a glvalue of polymorphic class type (/3) name the
- * static type; /2's dynamic type, and the std::type_info objects, have no
- * lowering: the node is not lowered.
+ * static type, which std::type_info object (a variable of the ABI's name,
+ * typeid_object) is the glvalue; /2's dynamic type has no rules.  The
+ * object's address is a constant; the run-time library defines the objects
+ * of the fundamental types, and a class's has no lowering yet.
  */
 analysis_result
 semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
@@ -334,14 +336,31 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
                           "the header <typeinfo> shall be included before a "
                           "use of typeid",
                           "expr.typeid");
+    /* /5: "the top-level cv-qualifiers of the glvalue ... are ignored" */
+    entity_index object = typeid_object(operand, info);
     m = expression_meaning();
-    m.type =
-        qualified_type::make(entity_table[info].type.unqualified(), cv_const);
+    m.type = entity_table[object].type;
     m.category = value_category::lvalue;
-    m.evaluation = constness::not_constant;
-    m.node =
-        expression_node(semantic_kind::type_identification, m, n.first_token());
+    m.entity = object;
+    m.evaluation = constness::constant;
+    m.node = expression_node(semantic_kind::entity, m, n.first_token(), object);
     return analysis_result::well_formed;
+}
+
+entity_index semantic_analysis::typeid_object(qualified_type type,
+                                              entity_index info)
+{
+    type_index named = type.unqualified();
+    for (entity_index e : typeid_objects)
+        if (entity_table[e].typeinfo_of == named)
+            return e;
+    entity_index e = entity_table.make(entity_kind::variable, 0, 0);
+    entity_table[e].type =
+        qualified_type::make(entity_table[info].type.unqualified(), cv_const);
+    entity_table[e].typeinfo_of = named;
+    entity_table[e].linkage_of_name = linkage::external;
+    typeid_objects.append(e);
+    return e;
 }
 
 analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)

@@ -778,6 +778,41 @@ SyntaxRef semantic_analysis::sole_decl_specifier(SyntaxRef declaration) const
 bool semantic_analysis::depends_on_parameter_from(qualified_type t,
                                                   uint64_t from) const
 {
+    /* a dependent alias template-id (void_t<typename U::type>, kept by
+       alias_template_specialization): it depends on what its arguments
+       do, the template-parameters at from or after */
+    qualified_type inner = t;
+    while (type_table[inner.unqualified()].kind == type_kind::pointer ||
+           type_table[inner.unqualified()].kind ==
+               type_kind::lvalue_reference ||
+           type_table[inner.unqualified()].kind == type_kind::rvalue_reference)
+        inner = type_table[inner.unqualified()].operand;
+    const struct type &r = type_table[inner.unqualified()];
+    if (r.kind == type_kind::dependent && r.entity &&
+        entity_table[r.entity].kind == entity_kind::template_specialization &&
+        entity_table[r.entity].instantiation) {
+        const instantiation_record &x =
+            instantiations[entity_table[r.entity].instantiation - 1];
+        auto depends_on = [&](const template_argument &a) {
+            return a.kind != template_argument::kind_t::type ||
+                   made_of_template_parameter(type_table, a.type, &entity_table,
+                                              from);
+        };
+        for (uint32_t i = 0; i < x.argument_count; i++) {
+            const template_argument &a =
+                template_arguments[x.first_argument + i];
+            if (a.kind != template_argument::kind_t::pack) {
+                if (depends_on(a))
+                    return true;
+                continue;
+            }
+            /* (a pack's elements: void_t's) */
+            for (uint32_t k = 0; k < a.count; k++)
+                if (depends_on(pack_arguments[a.value + k]))
+                    return true;
+        }
+        return false;
+    }
     return made_of_template_parameter(type_table, t, &entity_table, from);
 }
 

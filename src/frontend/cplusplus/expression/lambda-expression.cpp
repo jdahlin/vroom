@@ -84,7 +84,9 @@ node_index parser::lambda_expression()
     declarative_region template_parameters(names,
                                            scope_kind::template_parameter);
     if (at(preprocessing_op_or_punc::LESS)) {
-        if (!b.has(language_feature::lambda_template_parameters))
+        /* [ext:clang_lambda_template_parameters] */
+        if (!b.has(language_feature::lambda_template_parameters) &&
+            !b.has(extension::clang_lambda_template_parameters))
             return beyond_this_step();
         add_token();
         {

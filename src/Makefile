@@ -64,11 +64,18 @@ VCC_LANG ?= c++
 ifeq ($(VCC_LANG),c++)
 VCC_CC = $(CCACHE) $(HOST_CXX)
 VCC_DIALECT = $(VCC_CXX_DIALECT)
+# The sources are C that also compiles as C++: {0} and partial designated
+# initializers, array designators, VLAs, string literals as char *, mixed
+# anonymous enums.  Those idioms are deliberate; keep C++ from warning on them.
+VCC_DIALECT_WARN = -Wno-missing-field-initializers -Wno-missing-braces \
+	-Wno-c99-designator -Wno-vla-cxx-extension -Wno-writable-strings \
+	-Wno-deprecated-anon-enum-enum-conversion
 # The host tools use the C runtime. Let the C driver select the link libraries.
 VCC_LINK = $(CCACHE) $(HOST_CC)
 else ifeq ($(VCC_LANG),c)
 VCC_CC = $(CCACHE) $(HOST_CC)
 VCC_DIALECT = -x c -std=c11
+VCC_DIALECT_WARN = -Wno-missing-field-initializers -Wno-missing-braces
 VCC_LINK = $(VCC_CC)
 else
 $(error VCC_LANG must be c or c++)
@@ -79,7 +86,9 @@ VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
 # include/: the headers other modules include (common/region.h, frontend/pp/pp.h, ...)
 VCC_INC    = -I$(abspath include) -I$(abspath $(OUT)/generated/include)
-VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
+# Warnings are errors; `make VCC_WERROR=` for another compiler or version.
+VCC_WERROR ?= -Werror
+VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(VCC_DIALECT_WARN) $(VCC_WERROR) $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
 # emit -2.5 % instructions, -c as a whole the same).

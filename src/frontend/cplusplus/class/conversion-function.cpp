@@ -199,6 +199,32 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
 
 /* [class.conv.fct]/1: the declarator-id is found in the declarator, not
    in the decl-specifier-seq, the parameters or the body */
+/* [basic.lookup.unqual]/8: the names of the conversion-type-id of a
+   qualified declaration (X<T>::operator valarray<X::result>) are looked up
+   in the scope of X as well, where X is the injected-class-name.  The scope
+   here is the template-parameters' of the member (a conversion function
+   template's own T is found first, [temp.local]/7), so the class's scope is
+   tried only when the names do not resolve without it */
+analysis_result semantic_analysis::qualified_conversion_type(
+    SyntaxRef declaration, SyntaxRef conversion, qualified_type &type)
+{
+    size_t unsupported_before = unsupported.size();
+    analysis_result r = conversion_type(conversion, type);
+    SyntaxElement q = DeclaratorParts::of_declaration(declaration).qualifier();
+    if (r == analysis_result::well_formed || !q)
+        return r;
+    nominated_scope ns;
+    VTRY(nr, nested_name_specifier(q.index(), ns));
+    if (!is_class_entity(ns.entity))
+        return r;
+    unsupported.resize(unsupported_before);
+    entity_index saved = current_scope;
+    current_scope = ns.entity;
+    r = conversion_type(conversion, type);
+    current_scope = saved;
+    return r;
+}
+
 SyntaxRef semantic_analysis::conversion_function_id_of(SyntaxRef n) const
 {
     SyntaxElement id = DeclaratorParts::of_declaration(n).unqualified();

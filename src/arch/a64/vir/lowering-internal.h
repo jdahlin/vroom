@@ -305,7 +305,6 @@ VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in,
                                 uint8_t res);
 VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
                               uint8_t res);
-VPRIV void a64_vir_blocks_order(a64_vir_context *L);
 VPRIV void a64_vir_function_body_lower(a64_vir_context *L);
 
 #endif

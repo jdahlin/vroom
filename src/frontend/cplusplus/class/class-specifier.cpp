@@ -96,6 +96,11 @@ bool semantic_analysis::declares_unnamed_class(SyntaxRef seq) const
         auto head = c.class_specifier().class_head();
         if (head && head.size() == 1)
             return true;
+        /* (GNU attributes after the class-key: struct __attribute__((packed))
+           { ... };) */
+        if (head && head.size() == 2 &&
+            head[1].is(syntax_kind::gnu_attribute_specifier))
+            return true;
     }
     return false;
 }
@@ -696,8 +701,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             }
         }
     }
-    auto queue_incomplete_body = [&](SyntaxRef body) {
-        if (!incomplete_argument ||
+    /* [temp.inst]/4: a member function of a class template's specialization
+       is instantiated when it is used, not with the class (every one of
+       libc++'s valarray expression templates, otherwise) */
+    auto queue_body_until_used = [&](SyntaxRef body) {
+        if (!(incomplete_argument || specialization) ||
             body.function_definition().function_body().deleted())
             return false;
         for (entity_index f = first_member_entity; f < entity_table.size();
@@ -731,7 +739,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            }; struct d : base<d>) is complete only after it: the bodies
            wait for the end of the translation unit (instantiate_pending) */
         for (SyntaxRef body : bodies)
-            if (!queue_incomplete_body(body))
+            if (!queue_body_until_used(body))
                 postponed_bodies.append(postponed_body{c, body, postponed_scope,
                                                        postponed_declaration});
         for (size_t i = nested_start; i < nested_bodies.size(); i++)
@@ -743,7 +751,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         size_t nested_end = nested_bodies.size();
         bool quiet = entity_table[c].instantiation != 0;
         for (SyntaxRef body : bodies) {
-            if (queue_incomplete_body(body))
+            if (queue_body_until_used(body))
                 continue;
             if (quiet)
                 instantiated_member_body(c, body);
@@ -1404,7 +1412,9 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
        incomplete specialization as its return type. */
     bool saved_member_return = member_return_type;
     member_return_type = false;
-    if (node.is(syntax_kind::member_declaration) && count == 3) {
+    if (node.is(syntax_kind::member_declaration,
+                syntax_kind::function_definition) &&
+        count == 3) {
         SyntaxElement d = node[lead + 1];
         if (d.is(syntax_kind::member_declarator_list) && d.size() == 1)
             d = d[0];
@@ -2337,13 +2347,8 @@ analysis_result semantic_analysis::member_redeclaration(
     if (e && entity_table[e].kind == entity_kind::none)
         return not_supported(declaration, "over");
     /* [dcl.meaning]/1: the member function of the set it declares again */
-    for (entity_index o = e; o && entity_table[o].kind == entity_kind::function;
-         o = entity_table[o].next_overload)
-        if (entity_table[o].type == type &&
-            entity_table[o].member_cv == function_cv) {
-            e = o;
-            break;
-        }
+    if (entity_index o = overload_of_type(e, type, function_cv))
+        e = o;
     if (!e || entity_table[e].kind != entity_kind::function ||
         !(entity_table[e].type == type) ||
         entity_table[e].member_cv != function_cv)

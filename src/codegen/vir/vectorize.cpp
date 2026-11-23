@@ -193,7 +193,7 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
     uint32_t w[3] = {in.a, in.b, in.c};
     virbuild_vectorize_info *o[3] = {NULL, NULL, NULL}, r = {0};
     bool allinv = true;
-    int no = 0;
+    uint32_t no = 0;
 
     for (int k = 0; k < 3; k++)
         if (virbuild_operand_kind_is_value(oi->operand_kinds[k])) {
@@ -1534,11 +1534,11 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
         if (virbuild_vectorize_step_chain_find(S, p, nx, &K, &kb)) {
             r.kind = VIRBUILD_VECTORIZE_KIND_LIN;
         } else if ((ty == S->fty &&
-                    ((N.op == VIR_OP_FADD || N.op == VIR_OP_FMUL) &&
-                         (virbuild_value_resolve(V, N.a) == p ||
-                          virbuild_value_resolve(V, N.b) == p) ||
-                     (N.op == VIR_OP_FSUB || N.op == VIR_OP_FDIV) &&
-                         virbuild_value_resolve(V, N.a) == p)) ||
+                    (((N.op == VIR_OP_FADD || N.op == VIR_OP_FMUL) &&
+                      (virbuild_value_resolve(V, N.a) == p ||
+                       virbuild_value_resolve(V, N.b) == p)) ||
+                     ((N.op == VIR_OP_FSUB || N.op == VIR_OP_FDIV) &&
+                      virbuild_value_resolve(V, N.a) == p))) ||
                    (ty == S->ity && ((N.op == VIR_OP_ADD &&
                                       (virbuild_value_resolve(V, N.a) == p ||
                                        virbuild_value_resolve(V, N.b) == p)) ||

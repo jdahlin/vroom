@@ -41,7 +41,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
     case VIR_OP_ACAS:
     case VIR_OP_AXADD:
     case VIR_OP_AXCHG: /* (narrower: the instruction at its width, then an extension) */
-        return (1u << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) <=
+        return (1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) <=
                x64_vir_type_size(i->type);
     case VIR_OP_POPCNT:
         return true; /* (the target's POPCNT: x64_vir_function_lower checks it) */

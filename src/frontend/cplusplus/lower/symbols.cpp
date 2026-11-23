@@ -68,6 +68,21 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
     }
 }
 
+/* [abi:rtti]: the std::type_info objects of the fundamental types and of
+   pointers to them are in the C++ run-time library (libc++abi, libsupc++);
+   a class's, an enumeration's or a function's is the compiler's to emit */
+bool c_lowering::typeinfo_in_runtime(type_index t) const
+{
+    for (;;) {
+        const struct type &r = analysis.type_table[t];
+        if (r.kind == type_kind::fundamental)
+            return true;
+        if (r.kind != type_kind::pointer)
+            return false;
+        t = r.operand.unqualified();
+    }
+}
+
 /* the C symbol of a function or variable, made at its first use: named by
    its symbol (itanium_symbol_name) if it has one, by its identifier if it
    is automatic */
@@ -143,6 +158,10 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         gnu_attributes(e, s);
         return s;
     }
+    if (x.typeinfo_of && !typeinfo_in_runtime(x.typeinfo_of))
+        return fail("a typeid of a type whose type_info the run-time library "
+                    "does not define (no RTTI objects yet)",
+                    at);
     if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), variant))
         return fail("an entity whose symbol is not mangled", at);
     int kind = AST_SYMBOL_VARIABLE;

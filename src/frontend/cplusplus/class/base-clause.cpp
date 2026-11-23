@@ -633,6 +633,7 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
                                                     uint32_t name,
                                                     bool &ambiguous) const
 {
+    const_cast<semantic_analysis *>(this)->complete_instantiation(c);
     entity_index e = entity_table.find(c, name);
     if (e)
         return e;

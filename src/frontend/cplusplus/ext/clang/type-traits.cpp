@@ -543,6 +543,10 @@ bool semantic_analysis::convertible_types(qualified_type from,
        inaccessible base ([conv.ptr]/3, [conv.mem]/2) */
     if (s.function && entity_table[s.function].deleted)
         return false;
+    /* [meta.rel]/5: "Access checking is performed in a context unrelated
+       to To and From": a converting function that is not public */
+    if (s.function && entity_table[s.function].access)
+        return false;
     if (s.base_from && s.base_to) {
         owned_array<entity_index> steps;
         if (nonvirtual_path(s.base_from, s.base_to, steps)) {

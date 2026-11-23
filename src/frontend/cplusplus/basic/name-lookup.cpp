@@ -831,22 +831,35 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                 scope.dependent, tokens.identifier(part.name.token()));
             continue;
         }
-        if (part.name.is(syntax_kind::simple_template_id) && part.scoped) {
-            /* [temp.names]/1: a simple-template-id naming a class template
-               names the specialization ([temp.spec]/4), a class; its
-               members are looked up there ([class.qual]/1) */
+        bool template_id =
+            part.name.is(syntax_kind::simple_template_id) && part.scoped;
+        bool decltype_specifier =
+            part.name.is(syntax_kind::decltype_specifier) && part.scoped &&
+            !part.has_template;
+        if (template_id || decltype_specifier) {
             type_index named = 0;
-            /* (its class is looked into: defined, even in a
-               specialization's head) */
-            uint32_t declaring = declaring_specializations;
-            declaring_specializations = 0;
-            require_complete_class++;
-            analysis_result r =
-                template_type(part.name, scope.entity, qualified, named);
-            require_complete_class--;
-            declaring_specializations = declaring;
-            if (r != analysis_result::well_formed)
-                return r;
+            if (template_id) {
+                /* [temp.names]/1: a simple-template-id naming a class
+                   template names the specialization ([temp.spec]/4), a
+                   class; its members are looked up there ([class.qual]/1)
+                   (its class is looked into: defined, even in a
+                   specialization's head) */
+                uint32_t declaring = declaring_specializations;
+                declaring_specializations = 0;
+                require_complete_class++;
+                analysis_result r =
+                    template_type(part.name, scope.entity, qualified, named);
+                require_complete_class--;
+                declaring_specializations = declaring;
+                if (r != analysis_result::well_formed)
+                    return r;
+            } else {
+                /* [expr.prim.id.qual]/1: decltype-specifier ::
+                   ([basic.lookup.qual]/1: not looked up as a name) */
+                qualified_type decltype_named;
+                VTRY(dr, decltype_type(part.name, decltype_named));
+                named = decltype_named.unqualified();
+            }
             const struct type &st = type_table[named];
             if (st.kind == type_kind::dependent && dependent_allowed) {
                 scope.entity = 0;
@@ -864,6 +877,7 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                       "basic.lookup.qual");
                 return not_supported(n, "temp.res");
             }
+            complete_instantiation(st.entity);
             const entity &x = entity_table[st.entity];
             if (!x.size && st.entity != defining_class && !x.defined)
                 return not_supported(n, "basic.lookup.qual");

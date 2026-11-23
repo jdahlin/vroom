@@ -169,6 +169,9 @@ EXTENSION(clang_vla, clang,
 EXTENSION(clang_convertvector, clang,
           "clang Language Extensions, Vector Operations: __builtin_convertvector (vector, type), "
           "each element converted to the vector type's element type")
+EXTENSION(clang_lambda_template_parameters, clang,
+          "clang: a template-parameter-list after the lambda-introducer (P0428R2) is "
+          "accepted before C++20 (libc++'s <__algorithm/simd_utils.h> uses it in C++17)")
 
 /* Microsoft (-fms-extensions) */
 EXTENSION(microsoft_pragma_operator, microsoft, "MSVC: __pragma(pp-tokens), the #pragma operator")

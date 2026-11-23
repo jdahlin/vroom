@@ -67,7 +67,7 @@ analysis_result semantic_analysis::function_template_declarator(
                            "conversion function",
                            "class.conv.fct");
         else if (conversion)
-            r = conversion_type(conversion, type);
+            r = qualified_conversion_type(definition, conversion, type);
     }
     if (r == analysis_result::well_formed) {
         if (member_of)

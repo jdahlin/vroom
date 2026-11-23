@@ -1,18 +1,29 @@
-template <class T> class box {
-    T v;
+/* [temp.friend]/1: template <class> friend class X; makes every
+   specialization of X a friend (libc++'s slice_array befriends valarray) */
+template <class T> class valarray;
+template <class T> class slice_array {
+  template <class U> friend class valarray;
+  int size_;
+
 public:
-    box(T x) : v(x) {}
-    friend bool operator==(const box &a, const box &b) { return a.v == b.v; }
-    friend T get(const box &b) { return b.v; }
-    friend int peek(const box &b);
+  slice_array() : size_(3) {}
 };
-int peek(const box<int> &b) { return b.v + 1; }
+template <class T> class valarray {
+public:
+  valarray(const slice_array<T> &sa);
+  int n;
+};
+template <class T> valarray<T>::valarray(const slice_array<T> &sa) : n(sa.size_) {}
+
 int main()
 {
-    box<int> a(3), b(3);
-    box<long> c(4);
-    if (!(a == b)) return 1;
-    if (get(c) != 4) return 2;
-    if (peek(a) != 4) return 3;
-    return get(a) - 3;
+  slice_array<int> s;
+  valarray<int> v(s);
+  slice_array<long> t;
+  valarray<long> w(t);
+  if (w.n != 3)
+    return 2;
+  if (v.n != 3)
+    return 1;
+  return 0;
 }
