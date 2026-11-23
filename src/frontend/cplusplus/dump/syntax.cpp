@@ -300,8 +300,11 @@ static void dump_expression_claims(const syntax_tree &tree,
    the tree as the grammar has it), and a list in a list of its kind (a
    list's range takes its children as the elements) */
 static void dump_syntax_conformance(const syntax_tree &tree,
-                                    token_stream &tokens, vbuffer *out)
+                                    token_stream &tokens, const parser &p,
+                                    vbuffer *out)
 {
+    SyntaxContext context(tree, tokens, p);
+    SyntaxScope scope(context);
     owned_array<node_index> work;
     if (tree.root)
         work.append(tree.root);
@@ -309,6 +312,13 @@ static void dump_syntax_conformance(const syntax_tree &tree,
         node_index n = work.back();
         work.resize(work.size() - 1);
         syntax_kind parent = tree[n].kind;
+        /* a node no alternative view of its kind reads */
+        if (!syntax_alternative_matches(SyntaxRef(n))) {
+            source_position at = tokens.position(tree[n].first_token);
+            vbuffer_format_append(out, "no-alternative %s - %s:%u:%u\n",
+                                  syntax_kind_name(parent), at.file_name,
+                                  at.line, at.column);
+        }
         const uint64_t *allowed =
             syntax_allowed_children[static_cast<uint32_t>(parent)];
         for (uint32_t i = 0; i < tree[n].child_count; i++) {
@@ -417,7 +427,7 @@ void dump_parsing(const dump_request &r, const syntax_tree &tree,
         }
     }
     if (r.has(dump_output::syntax_conformance))
-        dump_syntax_conformance(tree, tokens, out);
+        dump_syntax_conformance(tree, tokens, p, out);
     if (r.has(dump_output::parser_stats)) {
         parser_statistics s = p.statistics();
         vbuffer_format_append(

@@ -258,10 +258,11 @@ bool parser::parenthesized_expression_list(const char *what,
  * (cast-expression.cpp) with that cast alone.  dynamic_cast needs the run-time
  * type information, not analysed.
  */
-analysis_result semantic_analysis::named_cast(SyntaxRef n,
-                                              standard_keyword keyword,
+analysis_result semantic_analysis::named_cast(PostfixOperationNamedCast cast,
                                               expression_meaning &m)
 {
+    SyntaxRef n = cast.node;
+    standard_keyword keyword = cast.keyword().keyword();
     uint8_t kinds = cast_static;
     if (keyword == standard_keyword::const_cast_)
         kinds = cast_const;
@@ -270,10 +271,10 @@ analysis_result semantic_analysis::named_cast(SyntaxRef n,
     else if (keyword != standard_keyword::static_cast_)
         return not_supported(n, "expr.dynamic.cast");
     qualified_type to;
-    analysis_result r = type_id(n[2], to);
+    analysis_result r = type_id(cast.type_id(), to);
     /* [over.over]/1: "an explicit type conversion" */
     if (r == analysis_result::well_formed)
-        VTRY_SET(r, target_expression(n[5], to, m));
+        VTRY_SET(r, target_expression(cast.operand(), to, m));
     return explicit_conversion(n, to, m, kinds);
 }
 
@@ -286,18 +287,19 @@ analysis_result semantic_analysis::named_cast(SyntaxRef n,
  * static type; /2's dynamic type, and the std::type_info objects, have no
  * lowering: the node is not lowered.
  */
-analysis_result semantic_analysis::type_identification(SyntaxRef n,
-                                                       expression_meaning &m)
+analysis_result
+semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
+                                       expression_meaning &m)
 {
-    if (n.size() != 4)
-        return not_supported(n, "expr.typeid");
+    SyntaxRef n = syntax.node;
+    SyntaxElement written = syntax.operand();
     qualified_type operand;
-    if (n[2].is(syntax_kind::type_id)) {
-        VTRY(r, type_id(n[2], operand));
+    if (written.is(syntax_kind::type_id)) {
+        VTRY(r, type_id(written, operand));
     } else {
         expression_meaning e;
         unevaluated++;
-        analysis_result r = expression(n[2], e);
+        analysis_result r = expression(written, e);
         unevaluated--;
         if (r != analysis_result::well_formed)
             return r;
@@ -344,31 +346,18 @@ analysis_result semantic_analysis::type_identification(SyntaxRef n,
 
 analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
 {
-    if (n[0].is_token() && n[0].keyword() == standard_keyword::typeid_)
-        return type_identification(n, m);
-    if (n.size() == 2 && n[1].is_token()) {
-        preprocessing_op_or_punc op =
-            preprocessing_op_or_punc_primary(tokens[n[1].token()].op_or_punc);
-        if (op == preprocessing_op_or_punc::PLUS_PLUS ||
-            op == preprocessing_op_or_punc::MINUS_MINUS)
-            return increment(
-                n, n[0], op == preprocessing_op_or_punc::MINUS_MINUS, true, m);
-        return not_supported(n, "expr.post");
-    }
+    PostfixOperation post = n.postfix_operation();
+    if (PostfixOperationTypeidOperation id = post.typeid_operation())
+        return type_identification(id, m);
+    if (PostfixOperationIncrement inc = post.increment())
+        return increment(n, inc.operand(),
+                         inc.op().is(preprocessing_op_or_punc::MINUS_MINUS),
+                         true, m);
     if (n.size() < 2)
         return not_supported(n, "expr.post");
-    if (n.size() == 7 && n[0].is_token() && n[2].is(syntax_kind::type_id)) {
-        standard_keyword k = n[0].keyword();
-        if (k == standard_keyword::static_cast_ ||
-            k == standard_keyword::const_cast_ ||
-            k == standard_keyword::reinterpret_cast_ ||
-            k == standard_keyword::dynamic_cast_)
-            return named_cast(n, k, m);
-    }
-    if ((n.size() == 3 ||
-         (n.size() == 4 && n[2].is(standard_keyword::template_))) &&
-        (n[1].is(preprocessing_op_or_punc::DOT,
-                 preprocessing_op_or_punc::ARROW)))
+    if (PostfixOperationNamedCast cast = post.named_cast())
+        return named_cast(cast, m);
+    if (post.member_access())
         return member_reference(n, m);
     /* [expr.type.conv]/1: "A simple-type-specifier or typename-specifier
        followed by a parenthesized optional expression-list or by a
@@ -605,7 +594,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
     }
     if (parenthesized)
         return call(n, m);
-    if (n.size() == 4 && n[1].is(preprocessing_op_or_punc::LEFT_BRACKET)) {
+    if (PostfixOperationSubscript sub = post.subscript()) {
         /* [expr.sub]/1: "One of the expressions shall be a glvalue of type
            "array of T" or a prvalue of type "pointer to T" and the other
            shall be a prvalue of unscoped enumeration or integral type.  The
@@ -613,19 +602,19 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
            definition) to *((E1)+(E2)), except that in the case of an array
            operand, the result is an lvalue if that operand is an lvalue and
            an xvalue otherwise." */
-        if (n[2].is(syntax_kind::braced_init_list,
-                    syntax_kind::initializer_list))
+        if (!sub.index() || sub.index().is(syntax_kind::braced_init_list,
+                                           syntax_kind::initializer_list))
             return not_supported(n, "expr.sub");
         expression_meaning a, i;
-        analysis_result r = expression(n[0], a);
+        analysis_result r = expression(sub.operand(), a);
         if (r == analysis_result::well_formed)
-            VTRY_SET(r, expression(n[2], i));
+            VTRY_SET(r, expression(sub.index(), i));
         /* [over.sub]/1: "the operator function is selected by overload
            resolution ([over.match.oper])" */
         bool handled = false;
-        r = binary_operator_function(n, n[1].token(),
-                                     preprocessing_op_or_punc::LEFT_BRACKET,
-                                     n[0], a, n[2], i, handled, m);
+        r = binary_operator_function(
+            n, sub.bracket().token(), preprocessing_op_or_punc::LEFT_BRACKET,
+            sub.operand(), a, sub.index(), i, handled, m);
         if (r != analysis_result::well_formed || handled)
             return r;
         expression_meaning *base = &a, *index = &i;
@@ -888,6 +877,21 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
  */
 analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
 {
+    /* postfix-expression ( expression-list_opt ); a functional cast's
+       simple-type-specifier ( expression-list_opt ) is none */
+    PostfixOperationCall syntax = n.postfix_operation().call();
+    SyntaxElement callee = syntax.callee();
+    SyntaxElement arguments_written = syntax.arguments();
+    SyntaxElement parenthesis = syntax.parenthesis();
+    if (!syntax) {
+        PostfixOperationTypeConversion conversion =
+            n.postfix_operation().type_conversion();
+        callee = conversion.type();
+        arguments_written = conversion.arguments();
+        parenthesis = conversion.parenthesis();
+        if (!parenthesis)
+            return not_supported(n, "expr.call");
+    }
     if (builtin_addressof_call(n))
         return builtin_addressof(n, m);
     if (builtin_shufflevector_call(n))
@@ -895,20 +899,19 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
     if (builtin_complex_call(n))
         return builtin_complex(n, m);
     /* [expr.prim.id.dtor]/2: a destructor's name is a call's callee alone */
-    if ((n.size() == 3 || n.size() == 4) &&
-        n[0].is(syntax_kind::postfix_expression) && n[0].size() == 3 &&
-        n[0][1].is(preprocessing_op_or_punc::DOT,
-                   preprocessing_op_or_punc::ARROW) &&
-        destructor_id(n[0][2]))
+    PostfixOperationMemberAccess access =
+        callee.postfix_operation().member_access();
+    if (access && !access.template_keyword() && destructor_id(access.member()))
         return destructor_call(n, m);
     /* [class.copy.assign]/12: B::operator=(x) on an empty base class with an
        implicit trivial copy/move assignment operator writes no bytes */
-    if (n.size() == 4 && n[0].is(syntax_kind::qualified_id) &&
-        n[0].size() == 2 && n[0][0].is(syntax_kind::nested_name_specifier) &&
-        n[0][1].operator_function_id() && n[0][1].size() == 2 &&
-        n[0][1][1].is(preprocessing_op_or_punc::EQUAL) && current_class()) {
+    if (arguments_written && callee.is(syntax_kind::qualified_id) &&
+        callee.size() == 2 &&
+        callee[0].is(syntax_kind::nested_name_specifier) &&
+        callee[1].operator_function_id() && callee[1].size() == 2 &&
+        callee[1][1].is(preprocessing_op_or_punc::EQUAL) && current_class()) {
         nominated_scope qscope;
-        if (nested_name_specifier(n[0][0], qscope, false) ==
+        if (nested_name_specifier(callee[0], qscope, false) ==
                 analysis_result::well_formed &&
             !qscope.global && !qscope.dependent && qscope.entity &&
             entity_table[qscope.entity].kind == entity_kind::class_type &&
@@ -919,7 +922,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 qscope.entity,
                 operator_name(preprocessing_op_or_punc::EQUAL))) {
             expression_meaning arg;
-            VTRY(ar, expression(n[2], arg));
+            VTRY(ar, expression(arguments_written, arg));
             expression_meaning ptr;
             VTRY(tr, this_pointer(n.first_token(), ptr));
             expression_meaning self;
@@ -939,8 +942,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
     /* [temp.variadic]/5: the arguments, pack expansions instantiated: each
        analysed now, one per element of the packs its pattern names */
     owned_array<expression_meaning> expanded;
-    if (n.size() == 4) {
-        SyntaxElement c = n[2];
+    if (SyntaxElement c = arguments_written) {
         if (c.is(syntax_kind::initializer_list)) {
             owned_array<SyntaxElement> written;
             owned_array<bool> expansion;
@@ -980,8 +982,6 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         } else {
             arguments.append(c);
         }
-    } else if (n.size() != 3) {
-        return not_supported(n, "expr.call");
     }
     expression_meaning f;
     analysis_result r = analysis_result::well_formed;
@@ -1002,7 +1002,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         entity_index named_in = 0;
         owned_array<SyntaxElement> written;
         SyntaxRef written_at = 0;
-        VTRY_SET(r, member_callee(n[0], held, named_in, written, written_at));
+        VTRY_SET(r, member_callee(callee, held, named_in, written, written_at));
         if (held) {
             bool ambiguous = false;
             entity_index from = current_class();
@@ -1033,7 +1033,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             return member_template_call(n, held, implied, arguments, early,
                                         as_written, written_at, m);
         }
-        VTRY_SET(r, template_callee(n[0], name, ft, specified, qualified));
+        VTRY_SET(r, template_callee(callee, name, ft, specified, qualified));
         if (ft) {
             owned_array<expression_meaning> early;
             for (const expression_meaning &e : expanded)
@@ -1053,10 +1053,10 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
     bool looked_up = false;
     token_index adl_token = 0;
     uint32_t adl_name = 0;
-    if (n[0].is_token() && n[0].is_identifier()) {
-        adl_token = n[0].token();
+    if (callee.is_token() && callee.is_identifier()) {
+        adl_token = callee.token();
         adl_name = tokens.identifier(adl_token);
-    } else if (auto op = n[0].operator_function_id()) {
+    } else if (auto op = callee.operator_function_id()) {
         declarator_meaning dm;
         VTRY_SET(r, operator_function_id(op, dm));
         adl_token = dm.id;
@@ -1157,9 +1157,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         for (const expression_meaning &e : expanded)
             early.append(e);
     if (!looked_up) {
-        overloaded_callee = callee_name(n[0]);
+        overloaded_callee = callee_name(callee);
         member_template_name = 0;
-        r = expression(n[0], f);
+        r = expression(callee, f);
         overloaded_callee = 0;
     }
     if (entity_index held = member_template_name) {
@@ -1210,7 +1210,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             return not_supported(n, "temp.variadic");
         owned_array<SyntaxElement> operand_syntax;
         owned_array<expression_meaning> operands;
-        operand_syntax.append(n[0]);
+        operand_syntax.append(callee);
         operands.append(f);
         for (SyntaxElement a : arguments) {
             if (a.is(syntax_kind::braced_init_list))
@@ -1221,7 +1221,7 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             operands.append(e);
         }
         bool handled = false;
-        r = overloaded_operator(n, n[1].token(),
+        r = overloaded_operator(n, parenthesis.token(),
                                 preprocessing_op_or_punc::LEFT_PARENTHESIS,
                                 false, operand_syntax, operands, handled, m);
         if (r != analysis_result::well_formed || handled)

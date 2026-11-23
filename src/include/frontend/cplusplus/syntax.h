@@ -804,6 +804,147 @@ template <> struct SyntaxExtra<FunctionDefinition> : SyntaxExtraBase {
 };
 
 /*
+ * One alternative of a production, as gen-syntax-views.py writes it for an
+ * alternative view (a node's children read by the alternative they match,
+ * where the kinds alone do not tell positions apart: postfix-expression [
+ * expr-or-braced-init-list ] against postfix-expression ( expression-list_opt
+ * )).  Each item is a token of the alternative, or a nonterminal: a node of
+ * a kind its view accepts, or a token where the parser lets one stand for
+ * it (an identifier, a literal, this).
+ */
+struct syntax_pattern_item {
+    enum what_t : uint8_t {
+        punctuator, /* value: preprocessing_op_or_punc */
+        keyword,    /* value: standard_keyword */
+        identifier,
+        string_literal,
+        nonterminal, /* accepts; token: what token may stand for it */
+    };
+    what_t what;
+    bool optional;
+    /* nonterminal: a token other than a punctuator may stand for it */
+    bool token;
+    uint8_t value;
+    /* the slot of the view the item fills, or -1 */
+    int8_t slot;
+    bool (*accepts)(syntax_kind);
+};
+
+inline bool syntax_pattern_item_matches(const syntax_pattern_item &p,
+                                        SyntaxElement c)
+{
+    switch (p.what) {
+    case syntax_pattern_item::punctuator:
+        /* the > that closes a template-argument-list may be half of a >>
+           ([temp.names]/4) */
+        if (static_cast<preprocessing_op_or_punc>(p.value) ==
+                preprocessing_op_or_punc::GREATER &&
+            c.is(preprocessing_op_or_punc::GREATER_GREATER))
+            return true;
+        return c.is(static_cast<preprocessing_op_or_punc>(p.value));
+    case syntax_pattern_item::keyword:
+        return c.is(static_cast<standard_keyword>(p.value));
+    case syntax_pattern_item::identifier:
+        return c.is_identifier();
+    case syntax_pattern_item::string_literal:
+        return c.is_token() &&
+               syntax_ambient->tokens[c.token()].kind == token_kind::literal;
+    case syntax_pattern_item::nonterminal:
+        if (c.is_token())
+            return p.token && syntax_ambient->tokens[c.token()].kind !=
+                                  token_kind::operator_or_punctuator;
+        return p.accepts && p.accepts(c.kind());
+    }
+    return false;
+}
+
+/* whether children[at..size) match items[i..count), filling slots; an
+   optional item is tried present first */
+inline bool syntax_pattern_match(const syntax_child *children, uint32_t size,
+                                 uint32_t at, const syntax_pattern_item *items,
+                                 uint32_t i, uint32_t count,
+                                 SyntaxElement *slots)
+{
+    if (i == count)
+        return at == size;
+    const syntax_pattern_item &p = items[i];
+    if (at < size) {
+        SyntaxElement c(children[at]);
+        if (syntax_pattern_item_matches(p, c) &&
+            syntax_pattern_match(children, size, at + 1, items, i + 1, count,
+                                 slots)) {
+            if (p.slot >= 0)
+                slots[p.slot] = c;
+            return true;
+        }
+        /* [ext:gnu_attributes]: GCC's attributes where the grammar has none */
+        if (c.is(syntax_kind::gnu_attribute_specifier) &&
+            syntax_pattern_match(children, size, at + 1, items, i, count,
+                                 slots))
+            return true;
+    }
+    if (!p.optional)
+        return false;
+    if (p.slot >= 0)
+        slots[p.slot] = {};
+    return syntax_pattern_match(children, size, at, items, i + 1, count, slots);
+}
+
+/* an alternative view's state: the node, if it matched one of the view's
+   alternatives, and what each slot holds */
+template <uint32_t Slots> struct SyntaxAlternative {
+    SyntaxRef node;
+    SyntaxElement slots[Slots] = {};
+    explicit operator bool() const
+    {
+        return static_cast<bool>(node);
+    }
+    /* n as the first of alternatives that matches; anchors[a]: the item of
+       alternative a at a child position fixed by the items before it (all
+       required, one child each), tried first, or -1 */
+    void match(SyntaxRef n, const syntax_pattern_item *const *alternatives,
+               const uint32_t *counts, const int8_t *anchors,
+               uint32_t alternative_count)
+    {
+        if (!n)
+            return;
+        const syntax_node &record = syntax_ambient->nodes[n.index().index()];
+        const syntax_child *children =
+            syntax_ambient->child_lists + record.first_child;
+        uint32_t size = record.child_count;
+        bool attributes = false, attributes_known = false;
+        for (uint32_t a = 0; a < alternative_count; a++) {
+            int8_t at = anchors[a];
+            if (at >= 0 &&
+                (static_cast<uint32_t>(at) >= size ||
+                 !syntax_pattern_item_matches(alternatives[a][at],
+                                              SyntaxElement(children[at])))) {
+                /* (GCC's attributes before it move it) */
+                if (!attributes_known) {
+                    for (uint32_t i = 0; i < size; i++)
+                        attributes =
+                            attributes ||
+                            SyntaxElement(children[i])
+                                .is(syntax_kind::gnu_attribute_specifier);
+                    attributes_known = true;
+                }
+                if (!attributes)
+                    continue;
+            }
+            for (SyntaxElement &s : slots)
+                s = {};
+            if (syntax_pattern_match(children, size, 0, alternatives[a], 0,
+                                     counts[a], slots)) {
+                node = n;
+                return;
+            }
+        }
+        for (SyntaxElement &s : slots)
+            s = {};
+    }
+};
+
+/*
  * [temp.names]/1:
  *
  *     simple-template-id:

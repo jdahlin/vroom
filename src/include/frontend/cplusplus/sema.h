@@ -3285,8 +3285,9 @@ class semantic_analysis
                                      expression_meaning &m);
     /* [expr.static.cast], [expr.const.cast], [expr.reinterpret.cast] */
     /* [expr.typeid] */
-    analysis_result type_identification(SyntaxRef n, expression_meaning &m);
-    analysis_result named_cast(SyntaxRef n, standard_keyword keyword,
+    analysis_result type_identification(PostfixOperationTypeidOperation n,
+                                        expression_meaning &m);
+    analysis_result named_cast(PostfixOperationNamedCast cast,
                                expression_meaning &m);
     /* [expr.comma] */
     analysis_result comma(SyntaxRef n, expression_meaning &m);
