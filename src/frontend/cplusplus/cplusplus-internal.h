@@ -155,7 +155,7 @@ VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
 VPRIV const char *keyword_clang_name(int keyword);
 /* the keyword table: its size, and an entry's spelling */
 VPRIV int keyword_table_size();
-VPRIV const char *keyword_spelling(int keyword);
+VPRIV int keyword_of_spelling(const char *spelling);
 /* [lex.key]/2: and, or, ...: the operator they stand for */
 VPRIV bool keyword_is_alternative_representation(int keyword,
                                                  preprocessing_op_or_punc *op);

@@ -193,6 +193,24 @@ VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
     }
 }
 
+/* the entry of the keyword table spelled so, whatever the edition and
+   extensions (the parser's table of what each entry is: parser::parser) */
+VPRIV int keyword_of_spelling(const char *spelling)
+{
+    size_t length = strlen(spelling);
+    size_t slot = keyword_hash(spelling, length) & (keyword_slot_count - 1);
+    for (;;) {
+        uint16_t entry = keyword_slots.slots[slot];
+        if (!entry)
+            return -1;
+        int index = entry - 1;
+        if (keywords[index].length == length &&
+            !memcmp(keywords[index].spelling, spelling, length))
+            return index;
+        slot = (slot + 1) & (keyword_slot_count - 1);
+    }
+}
+
 VPRIV const char *keyword_clang_name(int keyword)
 {
     return keywords[keyword].clang_name;
@@ -201,11 +219,6 @@ VPRIV const char *keyword_clang_name(int keyword)
 VPRIV int keyword_table_size()
 {
     return keyword_count;
-}
-
-VPRIV const char *keyword_spelling(int keyword)
-{
-    return keywords[keyword].spelling;
 }
 
 VPRIV bool keyword_is_alternative_representation(int keyword,
