@@ -1132,7 +1132,7 @@ bool semantic_analysis::accessible(entity_index member,
     const entity &x = entity_table[member];
     if (!x.access)
         return true;
-    /* [temp.spec.general]/6: "The usual access checking rules do not apply
+    /* [temp.spec]/6: "The usual access checking rules do not apply
        to names in a declaration of an explicit instantiation or explicit
        specialization, with the exception of names appearing in a function
        body, default argument, base-clause, member-specification,
@@ -1720,7 +1720,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             return not_supported(declaration, "dcl.spec.auto");
     }
     if (!is_function && contains_placeholder(type)) {
-        /* [dcl.spec.auto.general]/5 lists where a placeholder type may
+        /* [dcl.spec.auto]/6: the subclause lists where a placeholder type may
            appear: a non-static data member is none of them
            ("'auto' not allowed in non-static struct member") */
         if (!s.static_)

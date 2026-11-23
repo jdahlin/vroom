@@ -668,7 +668,7 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                 (at(standard_keyword::auto_, length) ||
                  at(standard_keyword::decltype_, length))) {
                 /* placeholder-type-specifier: type-constraint auto,
-                   type-constraint decltype(auto) ([dcl.spec.auto.general]) */
+                   type-constraint decltype(auto) ([dcl.spec.auto]) */
                 size_t placeholder_mark = begin_node();
                 token_index placeholder_first = position;
                 type_constraint();
