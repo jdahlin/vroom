@@ -160,16 +160,16 @@ analysis_result semantic_analysis::qualified_friend_class_template(
  * produces a declaration that would be a valid redeclaration of the member
  * of the specialization."
  *
- * template<class T, class U> friend class-key A<T, U>::B;  C is id, the
- * member's name at token name.  Analysed when C's arguments are the
- * friend's type-parameters, each once, in order, and all of A's
- * parameters: deduction from any specialization of A succeeds, so the
- * friend is the class B of every specialization of A, implicitly
- * instantiated or explicitly specialized ("grants friendship to A<int>::B
- * even though it is not a specialization of A<T>::B").
+ * The deduction is analysed for one form of C: its arguments are the
+ * friend's type-parameters, each once, in order, and all of the class
+ * template's parameters (A<T>, A<T, U>).  Deduction from any specialization
+ * of A then succeeds, with S's arguments as the deduced ones (explicit
+ * specializations included: "grants friendship to A<int>::B even though it
+ * is not a specialization of A<T>::B").  deducible_member_template checks
+ * the form and gives A's template entity.
  */
-analysis_result semantic_analysis::dependent_member_friend_class(
-    entity_index c, TemplateDeclaration n, SyntaxElement id, token_index name)
+analysis_result semantic_analysis::deducible_member_template(
+    TemplateDeclaration n, SyntaxElement id, entity_index &template_entity)
 {
     owned_array<SyntaxRef> parameters;
     if (!template_head_list(n.template_head(), parameters) ||
@@ -185,7 +185,8 @@ analysis_result semantic_analysis::dependent_member_friend_class(
         names.append(tokens.identifier(parameter[1].token()));
     }
     /* C's arguments: a type-id each, the name of one parameter */
-    if (id.size() < 4 || !id[0].is_identifier())
+    if (!id.is(syntax_kind::simple_template_id) || id.size() < 4 ||
+        !id[0].is_identifier())
         return not_supported(n, "temp.friend");
     owned_array<SyntaxElement> arguments;
     for (uint32_t i = 2; i + 1 < id.size(); i++) {
@@ -216,12 +217,161 @@ analysis_result semantic_analysis::dependent_member_friend_class(
     uint32_t k = class_template_of(named);
     if (!k || function_templates[k - 1].parameter_count != names.size())
         return not_supported(n, "temp.friend");
+    template_entity = function_templates[k - 1].entity;
+    return analysis_result::well_formed;
+}
+
+/* template<class T> friend class-key A<T>::B;  C is id, the member's name
+   at token name: the class B of every specialization of A (friend_names) */
+analysis_result semantic_analysis::dependent_member_friend_class(
+    entity_index c, TemplateDeclaration n, SyntaxElement id, token_index name)
+{
+    entity_index template_entity = 0;
+    VTRY(r, deducible_member_template(n, id, template_entity));
     friend_record f;
     f.granting = c;
-    f.member_of_template = function_templates[k - 1].entity;
+    f.member_of_template = template_entity;
     f.name = tokens.identifier(name);
     friends.append(f);
     return analysis_result::well_formed;
+}
+
+/*
+ * [temp.friend]/4 for a function: template<class T> friend R A<T>::f(P);
+ * (a constructor or destructor too, friend A<T>::A(P);).  inner is the
+ * member-declaration, id is C.  The member of a specialization S is a friend
+ * if the friend declaration with S's arguments for the template parameters
+ * "would be a valid redeclaration of the member": the declaration is
+ * analysed again per specialization (member_function_friends_of, when S is
+ * complete), naming S's member by name, parameter-type-list, cv-qualifiers
+ * and return type.
+ */
+analysis_result semantic_analysis::dependent_member_friend_function(
+    entity_index c, TemplateDeclaration n, SyntaxRef inner, SyntaxElement id)
+{
+    entity_index template_entity = 0;
+    VTRY(r, deducible_member_template(n, id, template_entity));
+    member_function_friends.append({c, template_entity, n, inner});
+    /* the specializations complete already */
+    for (uint32_t i = 0; i < instantiations.size(); i++) {
+        const instantiation_record &x = instantiations[i];
+        if (x.template_entity == template_entity && x.specialization &&
+            entity_table[x.specialization].kind == entity_kind::class_type &&
+            entity_table[x.specialization].defined)
+            befriend_member_function(member_function_friends.back(),
+                                     x.specialization);
+    }
+    return analysis_result::well_formed;
+}
+
+/* class s, a specialization of a class template, is complete: its members
+   that /4 friend declarations name become friends */
+void semantic_analysis::member_function_friends_of(entity_index s)
+{
+    uint32_t i = entity_table[s].instantiation;
+    if (!i || member_function_friends.empty())
+        return;
+    entity_index t = instantiations[i - 1].template_entity;
+    for (size_t k = 0; k < member_function_friends.size(); k++)
+        if (member_function_friends[k].template_entity == t)
+            befriend_member_function(member_function_friends[k], s);
+}
+
+/*
+ * The friend declaration f with the arguments of specialization s for its
+ * template parameters: analysed in a scope where each parameter's name is
+ * a typedef-name of its argument, as an instantiation binds them
+ * (record_instantiation).  A declaration that does not analyse (T::type
+ * with T = int) or names no member of s is no redeclaration, and makes
+ * nothing a friend: its diagnostics are taken back.
+ */
+void semantic_analysis::befriend_member_function(
+    const member_function_friend &f, entity_index s)
+{
+    const instantiation_record &x =
+        instantiations[entity_table[s].instantiation - 1];
+    owned_array<SyntaxRef> parameters;
+    if (!template_head_list(f.declaration.template_head(), parameters) ||
+        parameters.size() != x.argument_count)
+        return;
+    entity_index scope = entity_table.make(entity_kind::block_scope, 0,
+                                           enclosing_namespace(f.granting));
+    for (uint32_t i = 0; i < x.argument_count; i++) {
+        const template_argument &a = template_arguments[x.first_argument + i];
+        if (a.kind != template_argument::kind_t::type)
+            return;
+        uint32_t name = tokens.identifier(parameters[i][1].token());
+        entity_index e =
+            entity_table.make(entity_kind::typedef_name, name, scope);
+        entity_table[e].type = a.type;
+        entity_table[e].defined = true;
+        entity_table.bind(scope, name, e);
+    }
+    size_t issued = diagnostics.messages.size();
+    size_t refused = unsupported.size();
+    entity_index saved_scope = current_scope, saved_class = defining_class;
+    SyntaxRef saved_declaration = current_declaration;
+    uint32_t saved_cv = function_cv;
+    bool saved_friend = friend_allowed;
+    current_scope = scope;
+    defining_class = 0;
+    friend_allowed = true;
+    /* the parameters' scope stands for the namespace around the granting
+       class, as define_template_member's does for a class template's */
+    scoped_value<entity_index> member_scope(template_member_scope, scope);
+    SyntaxRef inner = f.inner;
+    uint32_t lead = leading_gnu_attributes(inner);
+    specified sp;
+    analysis_result r = decl_specifier_seq(inner[lead], sp, false);
+    declarator_meaning m;
+    qualified_type type = sp.type;
+    bool no_type = !sp.has_type;
+    if (no_type)
+        type = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+    if (r == analysis_result::well_formed) {
+        function_cv = 0;
+        function_parameters.clear();
+        friend_declarator = true;
+        r = declarator(inner, inner[lead + 1], type, m);
+        friend_declarator = false;
+    }
+    uint32_t cv = function_cv;
+    current_scope = saved_scope;
+    defining_class = saved_class;
+    current_declaration = saved_declaration;
+    function_cv = saved_cv;
+    friend_allowed = saved_friend;
+    diagnostics.discard_since(issued);
+    unsupported.resize(refused);
+    if (r != analysis_result::well_formed || m.qualifier != s || !m.has_id ||
+        type_table[type.unqualified()].kind != type_kind::function)
+        return;
+    /* the member it would redeclare: same name, parameter-type-list,
+       cv-qualifiers and (but for a constructor or destructor) return type
+       ([over.load]/2, [class.mem]/5) */
+    entity_index member = 0;
+    if (m.destructor) {
+        member = entity_table[s].destructor;
+    } else if (no_type) {
+        for (entity_index o = entity_table[s].first_constructor; o;
+             o = entity_table[o].next_constructor)
+            if (same_parameters(type_table, entity_table[o].type.unqualified(),
+                                type.unqualified()))
+                member = o;
+    } else {
+        for (entity_index o = entity_table.find(s, tokens.identifier(m.id));
+             o && entity_table[o].kind == entity_kind::function;
+             o = entity_table[o].next_overload)
+            if (same_parameters(type_table, entity_table[o].type.unqualified(),
+                                type.unqualified()) &&
+                entity_table[o].member_cv == cv &&
+                type_table[entity_table[o].type.unqualified()].operand ==
+                    type_table[type.unqualified()].operand)
+                member = o;
+    }
+    if (member)
+        befriend(f.granting, member);
 }
 
 analysis_result semantic_analysis::friend_function_template(
@@ -248,6 +398,11 @@ analysis_result semantic_analysis::friend_function_template(
     if (inner.is(syntax_kind::member_declaration) &&
         !inner[lead + 1].is_token()) {
         DeclaratorParts d(inner[lead + 1]);
+        /* /4: a member function of a dependent type, A<T>::f */
+        if (d.noptr && d.qualifier() && d.qualifier().size() == 2 &&
+            d.qualifier()[0].is(syntax_kind::simple_template_id))
+            return dependent_member_friend_function(c, n, inner,
+                                                    d.qualifier()[0]);
         if (d.noptr && d.qualifier()) {
             nominated_scope ns;
             VTRY(nr, nested_name_specifier(d.qualifier().index(), ns));

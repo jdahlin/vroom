@@ -696,12 +696,117 @@ semantic_analysis::local_friend_function(entity_index c, SyntaxRef n,
     return analysis_result::well_formed;
 }
 
+/* what a member of class k whose type is function declares by its
+   parameter-type-list ([class.copy.ctor]/1, /2, [class.copy.assign]/1): a
+   copy (one parameter k&, const k&, volatile k& or const volatile k&), a
+   move (k&& and its cv forms) or neither */
+semantic_analysis::copy_kind
+semantic_analysis::copy_parameter(entity_index k, qualified_type function) const
+{
+    const struct type &f = type_table[function.unqualified()];
+    if (f.kind != type_kind::function || f.parameter_count != 1 || f.variadic)
+        return copy_kind::none;
+    qualified_type p = type_table.parameters(function.unqualified())[0];
+    const struct type &r = type_table[p.unqualified()];
+    if (r.kind != type_kind::lvalue_reference &&
+        r.kind != type_kind::rvalue_reference)
+        return copy_kind::none;
+    const struct type &object = type_table[r.operand.unqualified()];
+    if (object.kind != type_kind::class_type || object.entity != k)
+        return copy_kind::none;
+    if (r.kind == type_kind::rvalue_reference)
+        return copy_kind::move;
+    return copy_kind::copy;
+}
+
+/*
+ * [class.friend]/5's member of another class when it is a special member
+ * function class k declares implicitly and analysis has not declared yet
+ * (declared when a use needs it): whether k has the member the friend
+ * declaration of type `type` names.  An implicitly-declared member is a
+ * declared member ([dcl.meaning]/1 is met), public and inline
+ * ([class.default.ctor]/1, [class.dtor]/2, [class.copy.ctor]/6, /8,
+ * [class.copy.assign]/2, /4):
+ *   ~K()                when K has no user-declared destructor (/4);
+ *   K()                 when K has no user-declared constructor;
+ *   K(const K&)         when K has no user-declared copy constructor;
+ *   K(K&&), K& operator=(K&&)   when K has no user-declared copy
+ *                       constructor, copy assignment operator, move
+ *                       constructor, move assignment operator or
+ *                       destructor;
+ *   K& operator=(const K&)      when K has no user-declared copy
+ *                       assignment operator.
+ * (The parameter's cv-qualification, const K& or K&, follows the
+ * subobjects' members: the const form is taken, as for every class
+ * analysis declares one for.)
+ */
+bool semantic_analysis::implicitly_declares(entity_index k, bool destructor,
+                                            bool assignment,
+                                            qualified_type type)
+{
+    const entity &x = entity_table[k];
+    bool user_destructor = x.destructor && !entity_table[x.destructor].implicit;
+    if (destructor)
+        return !user_destructor &&
+               !type_table[type.unqualified()].parameter_count;
+    bool user_constructor = false, user_copy = false, user_move = false;
+    for (entity_index o = x.first_constructor; o;
+         o = entity_table[o].next_constructor) {
+        if (entity_table[o].implicit)
+            continue;
+        user_constructor = true;
+        copy_kind kind = copy_parameter(k, entity_table[o].type);
+        if (kind == copy_kind::copy)
+            user_copy = true;
+        else if (kind == copy_kind::move)
+            user_move = true;
+    }
+    bool user_copy_assign = false, user_move_assign = false;
+    uint32_t name = operator_name(preprocessing_op_or_punc::EQUAL);
+    entity_index first = entity_table.find(k, name);
+    for (entity_index o = first;
+         o && entity_table[o].kind == entity_kind::function;
+         o = entity_table[o].next_overload) {
+        if (entity_table[o].implicit)
+            continue;
+        copy_kind kind = copy_parameter(k, entity_table[o].type);
+        if (kind == copy_kind::copy)
+            user_copy_assign = true;
+        else if (kind == copy_kind::move)
+            user_move_assign = true;
+    }
+    if (first && entity_table[first].kind != entity_kind::function)
+        return false;
+    copy_kind kind = copy_parameter(k, type);
+    bool any_user = user_copy || user_copy_assign || user_move ||
+                    user_move_assign || user_destructor;
+    if (assignment) {
+        if (kind == copy_kind::copy)
+            return !user_copy_assign;
+        if (kind == copy_kind::move)
+            return !any_user && tokens.files.behavior.has(
+                                    language_feature::rvalue_references);
+        return false;
+    }
+    if (!type_table[type.unqualified()].parameter_count)
+        return !user_constructor;
+    if (kind == copy_kind::copy)
+        return !user_copy;
+    if (kind == copy_kind::move)
+        return !any_user &&
+               tokens.files.behavior.has(language_feature::rvalue_references);
+    return false;
+}
+
 /*
  * [class.friend]/5: "A member function of a class X can be a friend of a
- * class Y": friend R A::f(P); friend A::A(P); friend A::~A();  The
- * declaration "shall refer to a previously declared member of the class
- * to which the qualifier refers" ([dcl.meaning]/1), by name and type.  It
- * is that member that is the friend, so its body is in a friend of c.
+ * class Y": friend R A::f(P); friend A::A(P); friend A::~A();
+ * friend R A::operator@(P);  The declaration "shall refer to a previously
+ * declared member of the class to which the qualifier refers"
+ * ([dcl.meaning]/1), by name, parameter-type-list and cv-qualifiers
+ * ([over.load]/2, [class.mfct.non.static]); an implicitly-declared special
+ * member is one (implicitly_declares).  It is that member that is the
+ * friend, so its body is in a friend of c.
  */
 analysis_result semantic_analysis::friend_member_function(
     entity_index c, SyntaxRef n, const declarator_meaning &m,
@@ -709,22 +814,29 @@ analysis_result semantic_analysis::friend_member_function(
 {
     entity_index k = m.qualifier;
     uint32_t name = tokens.identifier(m.id);
-    if (m.operator_function || m.literal_operator || m.conversion_function ||
-        m.aligned || m.gnu_flags || function_cv || c_language ||
+    if ((m.operator_function && m.allocation != allocation_function::none) ||
+        m.literal_operator || m.conversion_function || m.aligned ||
+        m.gnu_flags || c_language ||
         entity_table[k].kind != entity_kind::class_type ||
         type_table[type.unqualified()].kind != type_kind::function)
         return not_supported(n, "class.friend");
     entity_index befriended = 0;
     bool special = m.destructor || no_type;
+    bool assignment =
+        m.operator_function && m.implemented == preprocessing_op_or_punc::EQUAL;
     if (special) {
-        if (name != entity_table[k].name)
+        if (name != entity_table[k].name || function_cv)
             return not_supported(n, "class.friend");
         if (m.destructor) {
             befriended = entity_table[k].destructor;
         } else {
+            /* a constructor: by its parameters (an exception specification
+               is not part of the match, [except.spec]/5 checks it) */
             for (entity_index o = entity_table[k].first_constructor; o;
                  o = entity_table[o].next_constructor)
-                if (entity_table[o].type == type)
+                if (same_parameters(type_table,
+                                    entity_table[o].type.unqualified(),
+                                    type.unqualified()))
                     befriended = o;
         }
     } else {
@@ -734,20 +846,79 @@ analysis_result semantic_analysis::friend_member_function(
         for (entity_index o = first;
              o && entity_table[o].kind == entity_kind::function;
              o = entity_table[o].next_overload)
-            if (entity_table[o].type == type)
+            if (same_parameters(type_table, entity_table[o].type.unqualified(),
+                                type.unqualified()) &&
+                entity_table[o].member_cv == function_cv)
                 befriended = o;
+        /* [over.load]/2: "Function declarations that differ only in the
+           return type ... cannot be overloaded": the member of these
+           parameters with another return type is no match */
+        if (befriended &&
+            !(type_table[entity_table[befriended].type.unqualified()].operand ==
+              type_table[type.unqualified()].operand))
+            return not_supported(n, "class.friend");
     }
-    /* (an implicit special member is declared lazily: not analysed) */
-    if (special && (!befriended || entity_table[befriended].implicit))
-        return not_supported(n, "class.friend");
+    if (!befriended && (special || assignment) && entity_table[k].defined &&
+        implicitly_declares(k, m.destructor, assignment, type)) {
+        /* the implicitly-declared member analysis has not declared yet: it
+           is public, so the friendship changes no access.  This declaration
+           must agree with the implicit one: [dcl.constexpr]/1 "If any
+           declaration of a function or function template has a constexpr
+           ... specifier, then all its declarations shall contain the same
+           specifier"; [except.spec]/4 the same for a non-throwing exception
+           specification.  Known for a class whose special members are all
+           trivial ([class.default.ctor]/3, [class.copy.ctor]/12,
+           [class.copy.assign]/10, [class.dtor]/9: constexpr when they
+           would satisfy the constexpr rules of the edition; [except.spec]/8
+           non-throwing): its constructors constexpr from C++11 (the
+           default constructor of a class with a data member only from
+           C++20, which drops the rule that every member be initialized),
+           its assignment operators from C++14, its destructor from C++20;
+           all non-throwing (part of the type from C++17). */
+        if (!trivial_special_members(k))
+            return not_supported(n, "class.friend");
+        standard_edition edition = tokens.files.behavior.edition;
+        bool constructor = !m.destructor && !assignment;
+        bool constexpr_implicit = false;
+        if (m.destructor)
+            constexpr_implicit = edition >= standard_edition::cplusplus_20;
+        else if (assignment)
+            constexpr_implicit = edition >= standard_edition::cplusplus_14;
+        else
+            constexpr_implicit =
+                tokens.files.behavior.has(language_feature::rvalue_references);
+        if (constructor && !type_table[type.unqualified()].parameter_count &&
+            entity_table[k].member_count &&
+            edition < standard_edition::cplusplus_20)
+            return not_supported(n, "class.friend");
+        if (is_constexpr != constexpr_implicit)
+            return ill_formed_at_token(
+                m.id,
+                "every declaration of a function has the constexpr "
+                "specifier if one does (the implicit declaration of the "
+                "special member)",
+                "dcl.constexpr");
+        bool non_throwing = type_table[type.unqualified()].non_throwing;
+        if (edition >= standard_edition::cplusplus_17 && !m.destructor &&
+            !non_throwing)
+            return ill_formed_at_token(
+                m.id,
+                "every declaration of a function has a non-throwing "
+                "exception specification if one does (the implicit "
+                "declaration of the special member)",
+                "except.spec");
+        return analysis_result::well_formed;
+    }
     if (!befriended)
         return ill_formed_at_token(m.id,
                                    "when the declarator-id is qualified, the "
                                    "declaration shall refer to a previously "
                                    "declared member of the class",
                                    "dcl.meaning");
-    VTRY(cr, constexpr_redeclaration(m.id, befriended, is_constexpr));
-    entity_table.add_declaration(befriended, n);
+    if (!entity_table[befriended].implicit) {
+        VTRY(cr, constexpr_redeclaration(m.id, befriended, is_constexpr));
+        entity_table.add_declaration(befriended, n);
+    }
     befriend(c, befriended);
     return analysis_result::well_formed;
 }

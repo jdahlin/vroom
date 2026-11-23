@@ -2285,6 +2285,10 @@ class semantic_analysis
     /* function_template_definition: the function_templates index plus one
        of the template its last declaration declared or redeclared */
     uint32_t last_function_template = 0;
+    enum class copy_kind : uint8_t { none, copy, move };
+    copy_kind copy_parameter(entity_index k, qualified_type function) const;
+    bool implicitly_declares(entity_index k, bool destructor, bool assignment,
+                             qualified_type type);
     analysis_result friend_member_function(entity_index c, SyntaxRef n,
                                            const declarator_meaning &m,
                                            qualified_type type, bool no_type,
@@ -2294,6 +2298,24 @@ class semantic_analysis
                                              SyntaxRef inner);
     analysis_result friend_class_template(entity_index c, TemplateDeclaration n,
                                           SyntaxElement seq);
+    /* [temp.friend]/4: a friend declaration of a member function of a
+       dependent type, resolved per specialization of the class template */
+    struct member_function_friend {
+        entity_index granting = 0, template_entity = 0;
+        TemplateDeclaration declaration;
+        SyntaxRef inner;
+    };
+    owned_array<member_function_friend> member_function_friends;
+    analysis_result deducible_member_template(TemplateDeclaration n,
+                                              SyntaxElement id,
+                                              entity_index &template_entity);
+    analysis_result dependent_member_friend_function(entity_index c,
+                                                     TemplateDeclaration n,
+                                                     SyntaxRef inner,
+                                                     SyntaxElement id);
+    void member_function_friends_of(entity_index s);
+    void befriend_member_function(const member_function_friend &f,
+                                  entity_index s);
     analysis_result dependent_member_friend_class(entity_index c,
                                                   TemplateDeclaration n,
                                                   SyntaxElement id,

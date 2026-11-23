@@ -636,6 +636,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         entity_table[c].size = 0;
         return result;
     }
+    /* [temp.friend]/4: the members of a specialization that friend
+       declarations of a dependent type's member name */
+    member_function_friends_of(c);
     /* [temp.inst]/2: complete class template specializations that named c
        while c was being defined, now that c's layout is complete */
     {

@@ -200,3 +200,51 @@ class D {
 template <class T, class U> struct P<T, U>::Q { int v[T::a]; };
 P<D, int>::Q pq;
 }
+
+// /5: members of another class, special members implicitly declared
+namespace p5 {
+struct A {};
+struct B {
+  friend constexpr A::A() noexcept;
+  friend constexpr A::A(const A &) noexcept;
+  friend constexpr A::A(A &&) noexcept;
+  friend constexpr A::~A();
+  friend constexpr A &A::operator=(const A &) noexcept;
+  friend constexpr A &A::operator=(A &&) noexcept;
+};
+struct B1 { friend A::A() noexcept; };        // error: not constexpr
+struct B2 { friend constexpr A::A(); };       // error: not noexcept
+struct U { U(int); ~U(); U &operator=(const U &); };
+struct V {
+  friend U::U(int);
+  friend U::~U();
+  friend U &U::operator=(const U &);
+};
+struct W1 { friend U::U(); };                // error: U has a constructor
+struct W2 { friend U &U::operator=(U &&); }; // error: no move assignment
+template <class T> struct X { int f(const T &) const; void g(); };
+class Y {
+  friend int X<Y>::f(const Y &) const;
+  friend void X<Y>::g();
+  static const int v = 2;
+};
+struct W3 { friend void X<Y>::g() const; };  // error: g is not const
+}
+
+// [temp.friend]/4: a member function of a dependent type
+namespace temp4f {
+template <class T> struct A;
+class C {
+  static void foo();
+  template <class T> friend void A<T>::f();
+  template <class T> friend int A<T>::h(T) const;
+};
+template <class T> struct A {
+  void f() { C::foo(); }
+  int h(T) const;
+  void g();
+};
+template <class T> int A<T>::h(T) const { C::foo(); return 0; }
+template <> struct A<char> { void f() { C::foo(); } };
+template <class T> void A<T>::g() { C::foo(); }    // error: g is no friend
+}
