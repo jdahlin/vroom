@@ -614,8 +614,19 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             result = worse(result, not_supported(member));
             continue;
         }
-        result =
-            worse(result, member_declaration(c, declaration, access, bodies));
+        entity_index before_member = entity_table.size();
+        analysis_result declared =
+            member_declaration(c, declaration, access, bodies);
+        /* [temp.inst]/3: a specialization's member class is declared, not
+           defined, until its definition is needed: a nested class whose
+           definition is ill-formed does not make the specialization so */
+        if (declared == analysis_result::ill_formed &&
+            entity_table[c].instantiation)
+            for (entity_index e = before_member; e < entity_table.size(); e++)
+                if (entity_table[e].enclosing == c &&
+                    entity_table[e].kind == entity_kind::none)
+                    declared = not_supported(declaration, "temp.inst");
+        result = worse(result, declared);
     }
     defining_members_first = outer_members_first;
     defining_members_end = outer_members_end;
