@@ -531,3 +531,20 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   static_assert or constexpr initializer says why.  Unsupported 36214 ->
   36131.  Dropped once: C++11's implicitly const constexpr member function
   (-189 unsupported, we reject +9; scratchpad cxx11-constexpr-const.patch).
+- 9.5 (0d20ac46c, ffe9aac47, 6cd4ecc3f, f39b66655): `x = {...}` of a class
+  whose operator= is not its copy assignment is refused (was: temporary of the
+  class); value-initialization keeps its zeros for an implicit default
+  constructor's base and member constructions (evaluator `zeroed`); a
+  discarded class prvalue in a comma is the evaluator's; before C++20 a call
+  of a virtual function is not constant.  Unsupported 36131 -> 36126, we
+  reject 479 -> 475, we accept 5423 -> 5419.  C++11's implicitly const
+  constexpr member function still not applied: scratchpad
+  cxx11-constexpr-const-v3.patch (also out-of-class definitions, member
+  templates, `&S::tm` deduction against a const target) gives unsupported
+  -186, we reject +3, we accept +1; what blocks it: SemaCXX/cxx0x-initializer-
+  stdinitializerlist.cpp:237 (f({{1,2},{3,4}}) for initializer_list<int[2]>
+  vs <int[2][2]> is ambiguous for us, a C++14 bug too), its PR12436::X layout
+  (dsize 1, clang 0), and five we-accept lines (p2-0x.cpp:315, constant-
+  expression-cxx11.cpp:1333 and :2539 need "constexpr function never produces
+  a constant expression" for B().x with a non-literal B; stdinitializerlist
+  :176 and :262 backing-array / deleted-constructor diagnostics).
