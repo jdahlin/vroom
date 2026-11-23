@@ -14,7 +14,12 @@ local, weak).  A program of several translation units names the others in
 their headers too); each compiler compiles them as the program and links
 them with it.
 
-    bench/cxx-run.py [-j N] [-O LEVELS] [-v] [PATTERN]
+    bench/cxx-run.py [-j N] [-O LEVELS] [--no-cache] [-v] [PATTERN]
+
+Clang's answers are kept per program under a hash of the sources, flags,
+run time and clang (OUT/oracle); a level whose vcc objects are byte for
+byte ones that passed against that oracle passes without a link or a run
+(OUT/pass).  vpp always compiles; --no-cache recomputes everything.
 
 -O takes the levels as one argument (default 0123).  A program that vcc
 does not compile is a failure with its reason.  A program named in
@@ -23,7 +28,7 @@ fail at some level: it is counted, not a failure, and passing at every level
 is an error (XPASS), so the fix removes its line.  old-*.cpp are the first
 C++ front end's run programs (removed in 7283c431), most of them listed there.
 """
-import importlib.util, os, re, shlex, subprocess, sys
+import hashlib, importlib.util, json, os, re, shlex, subprocess, sys
 from multiprocessing import Pool
 
 B = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +86,32 @@ def macro_parameters():
             f'int main() {{\n    return (M({arguments})) & 255;\n}}\n')
 
 
+ORACLE = ''   # what clang's answers depend on besides the program: set in main
+NOCACHE = False
+
+
+def passed_key(objs, key):
+    """an -O level passes again when vcc's objects are byte for byte those
+    that passed against the same oracle, run time and qemu CPU: the link and
+    the run (most of the time) are left out, vpp always runs"""
+    h = hashlib.sha1(('cxx-run-pass-v1 ' + key + ORACLE + os.environ.get('VCC_QEMU_CPU', 'max')).encode())
+    for path in objs:
+        with open(path, 'rb') as f:
+            h.update(f.read())
+    return h.hexdigest()
+
+
+def oracle_key(src, units, cxx):
+    """clang's answers (output, exit status, -O0 symbols) are a function of
+    the sources, the flags, the C run time and clang itself"""
+    h = hashlib.sha1(('cxx-run-oracle-v1 ' + ' '.join(cxx) + ORACLE).encode())
+    for path in [src] + units:
+        h.update(path.encode() + b'\0')
+        with open(path, 'rb') as f:
+            h.update(f.read())
+    return h.hexdigest()[:16]
+
+
 GENERATED = {'generated-macro-parameters': macro_parameters}
 
 
@@ -114,15 +145,29 @@ def one(job):
             objs.append(o)
         return objs, None
 
-    rc, _, err = ct.sh([ct.CL] + cxx + ['-O2', '-c', src, '-o', f'{wd}/ref.o'])
-    objs, why = others(ct.CL, ['-O2'], 'ref')
-    if rc or why:
-        return name, [('ref', 'oracle: ' + (why or ct.first_err(err.decode())))]
-    expected, why = run([f'{wd}/ref.o'] + objs, f'{wd}/ref.elf')
-    if why:
-        return name, [('ref', 'oracle ' + why)]
-    rc, _, err = ct.sh([ct.CL] + cxx + ['-O0', '-c', src, '-o', f'{wd}/ref0.o'])
-    symbols = defined(f'{wd}/ref0.o') if not rc else None
+    key = oracle_key(src, units, cxx)
+    cache = f'{OUT}/oracle/{name}.json'
+    expected = symbols = None
+    try:
+        with open(cache) as f:
+            hit = json.load(f)
+        if hit['key'] == key and not NOCACHE:
+            expected, symbols = tuple(hit['expected']), hit['symbols']
+    except (OSError, ValueError, KeyError):
+        pass
+    if expected is None:
+        rc, _, err = ct.sh([ct.CL] + cxx + ['-O2', '-c', src, '-o', f'{wd}/ref.o'])
+        objs, why = others(ct.CL, ['-O2'], 'ref')
+        if rc or why:
+            return name, [('ref', 'oracle: ' + (why or ct.first_err(err.decode())))]
+        expected, why = run([f'{wd}/ref.o'] + objs, f'{wd}/ref.elf')
+        if why:
+            return name, [('ref', 'oracle ' + why)]
+        rc, _, err = ct.sh([ct.CL] + cxx + ['-O0', '-c', src, '-o', f'{wd}/ref0.o'])
+        symbols = defined(f'{wd}/ref0.o') if not rc else None
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        with open(cache, 'w') as f:
+            json.dump({'key': key, 'expected': list(expected), 'symbols': symbols}, f)
     for level in levels:
         o, elf = f'{wd}/O{level}.o', f'{wd}/O{level}.elf'
         rc, _, err = ct.sh([VPP] + cxx + [f'-O{level}', '-c', src, '-o', o])
@@ -141,17 +186,31 @@ def one(job):
             bound = sorted(k for k in ours if k in symbols and ours[k] != symbols[k])
             results.append((level, f'symbols: missing {missing} extra {extra} binding {bound}'))
             continue
+        pk = passed_key([o] + objs, key)
+        pf = f'{OUT}/pass/{name}-O{level}'
+        if not NOCACHE:
+            try:
+                with open(pf) as f:
+                    if f.read() == pk:
+                        results.append((level, None))
+                        continue
+            except OSError:
+                pass
         got, why = run([o] + objs, elf)
         if why:
             results.append((level, why))
         elif got != expected:
             results.append((level, f'ran {got!r}, clang {expected!r}'))
         else:
+            os.makedirs(os.path.dirname(pf), exist_ok=True)
+            with open(pf, 'w') as f:
+                f.write(pk)
             results.append((level, None))
     return name, results
 
 
 def main():
+    global ORACLE, NOCACHE
     av = sys.argv[1:]
     jobs, levels, verbose, pattern = 6, '0123', False, ''
     while av:
@@ -162,13 +221,16 @@ def main():
             jobs = int(a[2:])
         elif a == '-O':
             levels = av.pop(0)
+        elif a == '--no-cache':
+            NOCACHE = True
         elif a == '-v':
             verbose = True
         else:
             pattern = a
     if not os.path.exists(VPP):
         sys.exit(f'cxx-run: no {VPP} (make -C src vcc)')
-    ct.build_rt()
+    clang = subprocess.run([ct.CL, '--version'], capture_output=True, text=True).stdout
+    ORACLE = ct.build_rt() + clang
     names = sorted([f[:-4] for f in os.listdir(TESTS)
                     if f.endswith('.cpp') and re.search(pattern, f)] +
                    [n for n in GENERATED if re.search(pattern, n + '.cpp')])

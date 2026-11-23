@@ -151,9 +151,10 @@ def tests():
 OUTPUT_LIMIT = 256 << 20
 
 
-def run(cmd, cwd, timeout=TIMEOUT, limit=OUTPUT_LIMIT):
+def run(cmd, cwd, timeout=TIMEOUT, limit=OUTPUT_LIMIT, raw=False):
     """(returncode, stdout, stderr); ('timeout', '', '') past the timeout,
-    ('too large', '', '') when stdout passes limit bytes"""
+    ('too large', '', '') when stdout passes limit bytes; raw: stdout as
+    bytes"""
     with tempfile.TemporaryFile() as err:
         p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=err)
         expired = threading.Event()
@@ -180,6 +181,8 @@ def run(cmd, cwd, timeout=TIMEOUT, limit=OUTPUT_LIMIT):
         if size > limit:
             return 'too large', '', ''
         err.seek(0)
+        if raw:
+            return p.returncode, b''.join(chunks), err.read().decode('utf-8', 'replace')
         return (p.returncode, b''.join(chunks).decode('utf-8', 'replace'),
                 err.read().decode('utf-8', 'replace'))
 
@@ -494,19 +497,29 @@ template <class F> using function = F;
 """
 
 
+# None, or a function (vpp, output, opts, test) -> (returncode, stdout
+# bytes) that claim_lines asks instead of running vpp (cxx-sema.py: one
+# run's outputs)
+VPP_OUTPUT = None
+
+
 def claim_lines(vpp, output, opts, test, fields):
     """the lines of vpp -fcxx-dump=OUTPUT about the test file itself, split
     at tabs; bytes as characters, as the test file is read"""
     cwd = os.path.dirname(test)
-    try:
-        out = subprocess.run(cxxpp.vpp_command(vpp, output, opts, os.path.basename(test)), cwd=cwd,
-                             capture_output=True, timeout=TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return []
-    if out.returncode not in (0, 1):
+    if VPP_OUTPUT:
+        returncode, stdout = VPP_OUTPUT(vpp, output, opts, test)
+    else:
+        try:
+            out = subprocess.run(cxxpp.vpp_command(vpp, output, opts, os.path.basename(test)), cwd=cwd,
+                                 capture_output=True, timeout=TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return []
+        returncode, stdout = out.returncode, out.stdout
+    if returncode not in (0, 1):
         return []
     found = []
-    for line in out.stdout.decode('latin-1').split('\n'):
+    for line in stdout.decode('latin-1').split('\n'):
         parts = line.split('\t')
         if len(parts) == fields and os.path.normpath(os.path.join(cwd, parts[0])) == os.path.normpath(test):
             found.append(parts[1:])
