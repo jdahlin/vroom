@@ -100,15 +100,25 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
 bool c_lowering::function_definition_or_drop(entity_index e)
 {
     const entity &x = analysis.entity_table[e];
-    bool droppable = x.kind == entity_kind::function &&
-                     (x.inline_ || x.linkage_of_name == linkage::internal) &&
-                     x.definition &&
-                     analysis.token_in_system_header(node(x.definition).at);
+    bool instantiated_member =
+        x.enclosing &&
+        analysis.entity_table[x.enclosing].kind == entity_kind::class_type &&
+        analysis.entity_table[x.enclosing].instantiation;
+    /* ([abi:vague-inline]: an inline function is emitted where used, so
+       one that nothing uses has no code, as clang makes none; an
+       implicitly declared special member is inline, [class.default.ctor]/1,
+       [class.copy.ctor]/10, [class.dtor]/8) */
+    bool droppable = x.kind == entity_kind::function && x.definition &&
+                     (x.inline_ || x.implicit || instantiated_member ||
+                      (x.linkage_of_name == linkage::internal &&
+                       analysis.token_in_system_header(node(x.definition).at)));
     if (!droppable)
         return function_definition(e);
+    /* (a use lowered before this definition: its symbol is called) */
+    bool used = used_symbols[e];
     if (function_definition(e))
         return true;
-    if (!failure.what)
+    if (!failure.what || used)
         return false;
     dropped_function d;
     d.entity = e;
@@ -361,7 +371,7 @@ bool c_lowering::translation_unit()
         if (analysis.explicitly_instantiated(d.entity) ==
             instantiation_kind::declaration)
             continue;
-        if (!function_definition(d.entity))
+        if (!function_definition_or_drop(d.entity))
             return false;
     }
     if (!complete_variants())

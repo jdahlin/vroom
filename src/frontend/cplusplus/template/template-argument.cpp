@@ -137,6 +137,28 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     entity_table.bind(scope, name, e);
 }
 
+/* a dependent_value's code for a relational or equality operator
+   (dependent_value_entity): 10 >, 15 <, 16 <=, 17 >=, 18 ==, 19 !=; 0 for
+   another */
+static uint64_t dependent_comparison_value(SyntaxElement op)
+{
+    static const struct {
+        preprocessing_op_or_punc token;
+        uint64_t value;
+    } table[] = {
+        {preprocessing_op_or_punc::GREATER, 10},
+        {preprocessing_op_or_punc::LESS, 15},
+        {preprocessing_op_or_punc::LESS_EQUAL, 16},
+        {preprocessing_op_or_punc::GREATER_EQUAL, 17},
+        {preprocessing_op_or_punc::EQUAL_EQUAL, 18},
+        {preprocessing_op_or_punc::EXCLAMATION_EQUAL, 19},
+    };
+    for (const auto &x : table)
+        if (op.is(x.token))
+            return x.value;
+    return 0;
+}
+
 /* what [abi:mangle.template-arg] spells of a value-dependent argument
    (entity_kind::dependent_value): [!] Q<args>::name, Q unqualified as
    written (clang mangles the qualifier as written) */
@@ -147,27 +169,28 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
            written[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
         written = written[1];
     entity_index e = entity_table.make(entity_kind::dependent_value, 0, 0);
-    if (written.size() == 3 &&
-        (written.is(syntax_kind::logical_and_expression) ||
-         written.is(syntax_kind::logical_or_expression) ||
-         (written.is(syntax_kind::relational_expression) &&
-          written[1].is(preprocessing_op_or_punc::GREATER)))) {
+    uint64_t binary = 0;
+    if (written.size() == 3) {
+        if (written.is(syntax_kind::logical_and_expression))
+            binary = 8;
+        else if (written.is(syntax_kind::logical_or_expression))
+            binary = 9;
+        else if (written.is(syntax_kind::relational_expression) ||
+                 written.is(syntax_kind::equality_expression))
+            binary = dependent_comparison_value(written[1]);
+    }
+    if (binary) {
         entity_index lhs = dependent_value_entity(written[0]);
         entity_index rhs = dependent_value_entity(written[2]);
         if (!entity_table[lhs].value || !entity_table[rhs].value)
             return e;
-        uint64_t value = 10;
-        if (written.is(syntax_kind::logical_and_expression))
-            value = 8;
-        else if (written.is(syntax_kind::logical_or_expression))
-            value = 9;
         for (entity_index d : dependent_values)
-            if (entity_table[d].value == value &&
+            if (entity_table[d].value == binary &&
                 entity_table[d].enclosing == lhs && entity_table[d].name == rhs)
                 return d;
         entity_table[e].enclosing = lhs;
         entity_table[e].name = rhs;
-        entity_table[e].value = value;
+        entity_table[e].value = binary;
         dependent_values.append(e);
         return e;
     }
@@ -317,6 +340,11 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     type_index q = 0;
     analysis_result r = template_type(spec_node, ns_scope, ns_scope != 0, q);
     unsupported.resize(unsupported_before);
+    if (r == analysis_result::well_formed &&
+        type_table[q].kind == type_kind::class_type)
+        return static_member_value_entity(type_table[q].entity,
+                                          tokens.identifier(member.token()), e,
+                                          negated);
     if (r != analysis_result::well_formed ||
         type_table[q].kind != type_kind::dependent ||
         entity_table[type_table[q].entity].kind !=
@@ -340,6 +368,45 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     entity_table[e].enclosing = ns_scope;
     dependent_values.append(e);
     return e;
+}
+
+/* an operand of a value-dependent argument that is not dependent itself:
+   C<args>::name of a class known once the enclosing class template's
+   arguments are (fp<R>::value in a member of D<long>), a static data
+   member, which [abi:mangle.template-arg] spells as an external name,
+   L_Z <encoding> E (value 20, name the member; 14 [!] around it); e if it
+   is not one */
+entity_index semantic_analysis::static_member_value_entity(entity_index c,
+                                                           uint32_t name,
+                                                           entity_index e,
+                                                           bool negated)
+{
+    size_t unsupported_before = unsupported.size();
+    lookup_result x = lookup_qualified(c, name, lookup_filter::any);
+    unsupported.resize(unsupported_before);
+    if (!x.entity || entity_table[x.entity].kind != entity_kind::variable ||
+        entity_table[x.entity].nonstatic_member)
+        return e;
+    entity_index member = 0;
+    for (entity_index d : dependent_values)
+        if (entity_table[d].value == 20 && entity_table[d].name == x.entity)
+            member = d;
+    if (!member) {
+        member = e;
+        entity_table[member].name = x.entity;
+        entity_table[member].value = 20;
+        dependent_values.append(member);
+    }
+    if (!negated)
+        return member;
+    for (entity_index d : dependent_values)
+        if (entity_table[d].value == 14 && entity_table[d].enclosing == member)
+            return d;
+    entity_index n = entity_table.make(entity_kind::dependent_value, 0, 0);
+    entity_table[n].enclosing = member;
+    entity_table[n].value = 14;
+    dependent_values.append(n);
+    return n;
 }
 
 /* [temp.dep.constexpr]/2: a variable template's specialization v<args>

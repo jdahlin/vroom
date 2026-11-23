@@ -279,7 +279,12 @@ enum class entity_kind : uint8_t {
        What mangling knows of it: for [!] Q<args>::name written so, type
        the dependent Q<args>, name the member's identifier, value 1 (3 if
        negated), one entity for the same three ([temp.over.link]); else
-       value 0, an entity of its own */
+       value 0, an entity of its own.  An operator's operands are entities of
+       this kind too (template-argument.cpp, dependent_value_entity): value
+       8 &&, 9 ||, 10 >, 15 <, 16 <=, 17 >=, 18 == and 19 != with the
+       operands enclosing and name; 11 sizeof(type); 12 a literal; 13
+       Q::f(); 14 ! of enclosing; 20 a static data member no longer
+       dependent (name the member) */
     dependent_value,
     /* not an entity: a dependent type in a template's own declaration
        known only by how it is written: [temp.dep.type]/10.3
@@ -4152,6 +4157,11 @@ class semantic_analysis
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, SyntaxRef definition);
     void instantiated_member_body(entity_index c, SyntaxRef definition);
+    /* [temp.inst]/4: inside instantiated_member_body, a body of an
+       implicit instantiation's member not known to be used, or a
+       definition only such a body wanted (instantiation_record::quiet):
+       what it instantiates is as quiet */
+    uint32_t quiet_member_bodies = 0;
     analysis_result member_function_definition(entity_index c,
                                                FunctionDefinition definition);
     /* [expr.ref]: the member e of the object m (a glvalue of class type) */
@@ -4580,6 +4590,10 @@ class semantic_analysis
            analysed */
         entity_index scope = 0;
         bool defined = false, pending = false, defining = false;
+        /* a function template's: its definition is wanted only by member
+           bodies analysed quietly (quiet_member_bodies), no use of the
+           specialization known: instantiated quietly too */
+        bool quiet = false;
         /* a class's: the partial or explicit specialization whose
            class-specifier defines it (function_templates' index plus one;
            0 the primary template's) and its parameters' arguments
@@ -4976,6 +4990,8 @@ class semantic_analysis
     /* [temp.param]/4: a non-type parameter's dependent type
        (typename enable_if<B, int>::type) with the arguments before it */
     entity_index dependent_value_entity(SyntaxElement written);
+    entity_index static_member_value_entity(entity_index c, uint32_t name,
+                                            entity_index e, bool negated);
     entity_index dependent_variable_specialization(SyntaxRef id, entity_index e,
                                                    bool negated,
                                                    entity_index scope = 0);
@@ -5281,6 +5297,9 @@ class semantic_analysis
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
     owned_array<instantiation_record> instantiations;
+    void want_definition(instantiation_record &x, uint32_t index);
+    analysis_result quiet_definition_failed(SyntaxRef at, uint32_t index,
+                                            analysis_result r);
     /* the instantiation record of the template's specialization for the
        arguments, plus one; 0 if there is none yet */
     uint32_t find_instantiation(entity_index t, const template_argument *a,
@@ -5518,6 +5537,15 @@ class semantic_analysis
     entity_index constraint_template(entity_index scope, token_index i) const;
     /* the class token i names, looked up from scope outward (0: none) */
     entity_index constraint_class(entity_index scope, token_index i) const;
+    /* the class template token i names, looked up from scope outward (0:
+       none): Q of Q<args>::name in a requires-clause */
+    entity_index constraint_class_template(entity_index scope,
+                                           token_index i) const;
+    /* the concept or variable template token i names in namespace ns, as
+       ns::v<args> in a requires-clause ([basic.lookup.qual], its inline
+       namespaces too; 0: none) */
+    entity_index constraint_namespace_template(entity_index ns,
+                                               token_index i) const;
     /* [abi:mangle.function-param]: the position plus one of function
        template t's parameter named by token i (0: none) */
     uint32_t function_parameter_position(entity_index t, token_index i) const;

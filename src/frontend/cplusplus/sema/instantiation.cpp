@@ -195,15 +195,17 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
        its definition there, in an unevaluated operand too */
     bool deducing = contains_placeholder(
         type_table[entity_table[specialization].type.unqualified()].operand);
+    if (needed && x.pending && !quiet_member_bodies)
+        x.quiet = false;
     if (x.defined || x.defining || (!deducing && (!needed || x.pending)))
         return analysis_result::well_formed;
     /* (a template declared, not yet defined: its definition may come
        later, [temp.point]/7) */
     if ((!t.constexpr_ && !deducing) || !ft.definition) {
-        x.pending = true;
-        pending_definitions.append(index);
+        want_definition(x, index);
         return analysis_result::well_formed;
     }
+    x.quiet = quiet_member_bodies != 0;
     return instantiate_definition(at, index);
 }
 
@@ -218,14 +220,62 @@ semantic_analysis::need_specialization_definition(SyntaxRef at, entity_index f)
     instantiation_record &rec = instantiations[idx];
     const entity tmpl = entity_table[rec.template_entity];
     const function_template ft = function_templates[tmpl.instantiation - 1];
+    if (rec.pending && !quiet_member_bodies)
+        rec.quiet = false;
     if (rec.defined || rec.defining || rec.pending)
         return analysis_result::well_formed;
     if (!tmpl.constexpr_ || !ft.definition) {
-        rec.pending = true;
-        pending_definitions.append(idx);
+        want_definition(rec, idx);
         return analysis_result::well_formed;
     }
+    rec.quiet = quiet_member_bodies != 0;
     return instantiate_definition(at, idx);
+}
+
+/* [temp.point]/7: the definition of specialization index waits for the end
+   of the translation unit; quiet while only quiet member bodies want it */
+void semantic_analysis::want_definition(instantiation_record &x, uint32_t index)
+{
+    x.pending = true;
+    x.quiet = quiet_member_bodies != 0;
+    pending_definitions.append(index);
+}
+
+/*
+ * [temp.inst]/4: a definition that only a member body analysed quietly
+ * wanted (instantiated_member_body) is no use of the specialization: its
+ * being ill-formed, or needing rules not written yet, is not the
+ * template's.  The specialization is left as if never instantiated, so a
+ * use found later instantiates it again, with its diagnostics; the result
+ * goes back to the quiet body, which fails with it.
+ */
+analysis_result semantic_analysis::quiet_definition_failed(SyntaxRef at,
+                                                           uint32_t index,
+                                                           analysis_result r)
+{
+    instantiation_record &x = instantiations[index];
+    x.defined = false;
+    x.quiet = false;
+    entity_table[x.specialization].defined = false;
+    /* (no definition: what the failed analysis made of its body is not
+       its semantic tree) */
+    entity_table[x.specialization].definition = 0;
+    size_t kept = 0;
+    for (size_t i = 0; i < definitions.size(); i++)
+        if (definitions[i].entity != x.specialization)
+            definitions[kept++] = definitions[i];
+    definitions.resize(kept);
+    /* (and code that calls it, analysed before it failed, is refused
+       when lowered, as a member's body that failed) */
+    size_t before = unsupported.size();
+    not_supported(at, "temp.inst");
+    body_failures.append(unsupported[before]);
+    unsupported.resize(before);
+    entity_table[x.specialization].unsupported_body =
+        static_cast<uint32_t>(body_failures.size());
+    /* (the quiet body that wanted it fails too, and is left undefined:
+       no code calls a specialization that has none) */
+    return r;
 }
 
 /*
@@ -250,6 +300,10 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     const function_template ft =
         function_templates[entity_table[template_entity].instantiation - 1];
     size_t unsupported_before = unsupported.size();
+    bool quiet = instantiations[index].quiet;
+    diagnostics_suppressed_if hush(diagnostics, quiet);
+    /* (what a quiet definition wants is as quiet) */
+    quiet_member_bodies += quiet;
     /* (leave_instantiation drops the claims of the template's expressions:
        they are about one specialization, which clang makes none of) */
     instantiation_context context;
@@ -314,8 +368,13 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     leave_instantiation(context);
     instantiations[index].defined = true;
     entity_table[instantiations[index].specialization].defined = true;
+    quiet_member_bodies -= quiet;
     if (r == analysis_result::well_formed)
         return r;
+    if (quiet) {
+        unsupported.resize(unsupported_before);
+        return quiet_definition_failed(at, index, r);
+    }
     if (r == analysis_result::unsupported &&
         unsupported.size() > unsupported_before) {
         /* a use of the specialization is refused when lowered (as an

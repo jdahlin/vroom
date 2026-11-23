@@ -113,6 +113,8 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
                 failure = d.failure;
                 return 0;
             }
+    if (!declaring_symbols)
+        used_symbols[e] = 1;
     uint32_t *slot = &symbols[e];
     if (x.special != special_member::none && variant == 1)
         slot = &complete_symbols[e];

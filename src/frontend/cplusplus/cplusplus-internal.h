@@ -46,6 +46,23 @@ struct diagnostics_suppressed {
     }
 };
 
+/* RAII: diagnostics_suppressed when on is true */
+struct diagnostics_suppressed_if {
+    diagnostic_consumer &consumer;
+    bool on;
+    diagnostics_suppressed_if(diagnostic_consumer &c, bool quiet)
+        : consumer(c), on(quiet)
+    {
+        if (on)
+            consumer.suppressed++;
+    }
+    ~diagnostics_suppressed_if()
+    {
+        if (on)
+            consumer.suppressed--;
+    }
+};
+
 /* ---- [lex.ppnumber] --------------------------------------------------- */
 
 /* a pp-number read by the grammars of [lex.icon] and [lex.fcon] */
