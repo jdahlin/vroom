@@ -98,6 +98,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location('cxxparse', os.path.join(HERE, 'cxx-parse.py'))
@@ -257,10 +258,60 @@ def check_type_claims(test, opts, clang, claims, cache=True):
     return counts, refuted
 
 
+# the outputs check() reads, asked for in one vpp run per test and option
+# set (-fcxx-dump-sections tells them apart): parsing and analysing the test
+# once instead of once per output
+OUTPUTS = ('analysis', 'check-tree', 'declaration-claims', 'type-claims',
+           'lookup-claims', 'layout-claims')
+RUNS = threading.local()
+
+
+def ours(vpp, outputs, opts, test, raw=False):
+    """(returncode, stdout, stderr) of vpp -fcxx-dump=OUTPUTS (a comma
+    list of OUTPUTS) on test, from the one run of all of OUTPUTS"""
+    key = (vpp, tuple(opts), test)
+    if getattr(RUNS, 'key', None) != key:
+        rc, out, err = cxxparse.run(cxxpp.vpp_command(vpp, ','.join(OUTPUTS), opts, os.path.basename(test),
+                                                      ['-fcxx-dump-sections']),
+                                    os.path.dirname(test), raw=True)
+        sections = {}
+        if isinstance(out, bytes):
+            name = None
+            for line in out.split(b'\n')[:-1]:
+                if line.startswith(b'#cxx-dump '):
+                    name = line[10:].decode()
+                    sections[name] = []
+                elif name is not None:
+                    sections[name].append(line + b'\n')
+        RUNS.key, RUNS.result = key, (rc, {k: b''.join(v) for k, v in sections.items()}, err)
+    rc, sections, err = RUNS.result
+    if not isinstance(rc, int):
+        empty = b''
+        if not raw:
+            empty = ''
+        return rc, empty, ''
+    out = b''.join(sections.get(o, b'') for o in outputs.split(','))
+    if raw:
+        return rc, out, err
+    return rc, out.decode('utf-8', 'replace'), err
+
+
+def claim_output(vpp, output, opts, test):
+    """cxx-parse.py's claim_lines through ours() (VPP_OUTPUT)"""
+    if output not in OUTPUTS:
+        out = subprocess.run(cxxpp.vpp_command(vpp, output, opts, os.path.basename(test)),
+                             cwd=os.path.dirname(test), capture_output=True, timeout=cxxparse.TIMEOUT)
+        return out.returncode, out.stdout
+    return ours(vpp, output, opts, test, raw=True)[:2]
+
+
+cxxparse.VPP_OUTPUT = claim_output
+
+
 def type_claims(vpp, opts, test):
     """-fcxx-dump=type-claims: the claims about the test file itself"""
     cwd = os.path.dirname(test)
-    r = cxxparse.run(cxxpp.vpp_command(vpp, 'type-claims', opts, os.path.basename(test)), cwd)
+    r = ours(vpp, 'type-claims', opts, test)
     if r[0] not in (0, 1):
         return []
     found = []
@@ -449,10 +500,10 @@ def check_layout_claims(test, opts, clang, vpp, unchecked_lines):
     and the refuted.  A class at one of unchecked_lines (a declaration clang
     has an error in) is not checkable"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
-    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'layout-claims', opts, name), cwd)
-    if ours[0] not in (0, 1):
+    r = ours(vpp, 'layout-claims', opts, test)
+    if r[0] not in (0, 1):
         return collections.Counter(), []
-    claims = layout_claims(ours[1], test)
+    claims = layout_claims(r[1], test)
     if not claims:
         return collections.Counter(), []
     theirs = clang_record_layouts(test, opts, clang)
@@ -632,7 +683,7 @@ def check_lookup_claims(test, opts, clang, vpp, error_lines, unanalysed_lines):
     later declaration of clang's chain is not checkable"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
     counts, refuted = collections.Counter(), []
-    r = cxxparse.run(cxxpp.vpp_command(vpp, 'lookup-claims', opts, name), cwd)
+    r = ours(vpp, 'lookup-claims', opts, test)
     if r[0] not in (0, 1):
         return counts, refuted
     claims = []
@@ -763,12 +814,12 @@ def check(test, opts, clang, vpp):
     name = os.path.basename(test)
     res = {'test': test, 'opts': opts, 'fail': [], 'verdict': collections.Counter(),
            'unsupported': collections.Counter(), 'types': collections.Counter()}
-    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'analysis,check-tree', opts, name), cwd)
-    if cxxpp.unsupported_edition(ours[0], ours[2]):
-        res['skip'] = ours[2].strip()
+    analysed = ours(vpp, 'analysis,check-tree', opts, test)
+    if cxxpp.unsupported_edition(analysed[0], analysed[2]):
+        res['skip'] = analysed[2].strip()
         return res
-    if ours[0] not in (0, 1):
-        res['fail'].append(('crash', f'status {ours[0]}: {ours[2].strip().splitlines()[-1:]}'))
+    if analysed[0] not in (0, 1):
+        res['fail'].append(('crash', f'status {analysed[0]}: {analysed[2].strip().splitlines()[-1:]}'))
         return res
     c = cxxparse.cached('diagnostics' + ''.join(TARGET), clang, test, opts, lambda: list(
         cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
@@ -794,7 +845,7 @@ def check(test, opts, clang, vpp):
     unanalysed_lines = set()
     # the lines of the declarations clang has an error in
     rejected_lines = set()
-    for line in ours[1].splitlines():
+    for line in analysed[1].splitlines():
         if line.startswith('tree '):
             res['fail'].append(('tree', line[5:]))
             continue
