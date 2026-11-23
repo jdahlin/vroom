@@ -399,6 +399,19 @@ it; none adds a second way to instantiate.
   the old branch: tag backup/cxx-unsupported-zero-pre-rebase (local).
 - Next (from the --why of a1abbbf94): the parser's later-step grammar:
   __declspec 320, a ( in a noptr-declarator 297, calling conventions 65.
+- 5.1: the agent's __declspec parser patch cost +0.83 % in fe-bench from one
+  extension-table row.  Cause (orchestrator, perf): parser::parser matched
+  every lexer keyword entry against every keyword row by strcmp, per TU,
+  half of a small TU's instructions.  2628a6774: a hash lookup instead,
+  fe-bench -36.9 % against main.  Then f61c9c9d5, __declspec parsed
+  (grammar.inc: microsoft-declspec, as cxx-spec-refs wants): not parsed
+  -1223, unsupported +994, together -229.  Decision: a parser step is
+  measured by unsupported + not parsed.  We accept +5 -2 (named in the
+  commit).  Also: cxx-spec-refs found six later-draft labels from earlier
+  steps ([temp.spec.general], [dcl.spec.auto.general]): fixed; cxx-spec-refs
+  joins the per-step gates (under 1 s).  Next: __declspec's attributes in
+  the analysis (dllimport/dllexport, selectany, thread, uuid, align,
+  property).
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
