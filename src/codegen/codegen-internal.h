@@ -880,7 +880,9 @@ VPRIV void em_switch_values_reset(codegen_context *e);
 VPRIV void em_switch_values_emit(codegen_context *e);
 VPRIV bool a64_switch_values(codegen_context *e, uint32_t n);
 VPRIV bool walk_switch_values_emit(codegen_context *e, uint32_t n);
+#ifdef VCC_WASM
 VPRIV bool wswitch_values(codegen_context *e, uint32_t n);
+#endif
 /* tu.c */
 VPRIV void *codegen_memory_reserve(size_t n);
 VPRIV double codegen_clock_seconds(void);
@@ -891,6 +893,12 @@ static inline bool codegen_type_is_integer(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_pointer(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_float(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_record(cc *c, ast_qualified_type t);
+/* a C++ class returned and passed by address whatever its size */
+static inline bool codegen_type_is_in_memory(cc *c, ast_qualified_type t)
+{
+    return codegen_type_is_record(c, t) &&
+           (c->tags[T(c, t)->aux].flags & AST_RECORD_FLAG_CALLS_IN_MEMORY);
+}
 static inline bool codegen_type_is_array(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_function(cc *c, ast_qualified_type t);
 static inline bool codegen_type_is_void(cc *c, ast_qualified_type t);
@@ -963,7 +971,9 @@ VPRIV bool em_block_value_reuse(codegen_context *e, const node *block,
                                 uint32_t *to);
 VPRIV uint32_t em_double_unary(codegen_context *e, uint32_t n);
 
+#ifdef VCC_WASM /* only wasm's emitter calls it */
 VPRIV bool em_cmpzero(codegen_context *e, uint32_t n, uint32_t *operand);
+#endif
 VPRIV bool em_mulshift(cc *c, ast_qualified_type ty, int *op, i128 *rhs);
 VPRIV bool em_xor_not(cc *c, ast_qualified_type ty, int op, i128 rhs);
 /* opt/identity.c */
@@ -1278,7 +1288,6 @@ VPRIV codegen_lvalue bind_lreg(codegen_context *e, uint32_t s);
 VPRIV codegen_value fold_int_bin(codegen_context *e, int op,
                                  ast_qualified_type ot, ast_qualified_type rt,
                                  i128 l, i128 r, bool *ok);
-VPRIV bool codegen_operator_is_comparison(int op);
 /* Pure control proofs: bounded shared walk, no committed target instructions. */
 VPRIV bool em_const_strcmp(cc *c, uint32_t n, i128 *value);
 VPRIV int em_const_truth(codegen_context *e, uint32_t n,
@@ -1404,8 +1413,14 @@ VPRIV void emit_function(codegen_context *e, uint32_t s);
 VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s);
 VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i);
 /* arch/wasm/codegen/ */
+#ifdef VCC_WASM
 VPRIV void wasm_emit_function(codegen_context *e, uint32_t s);
 VPRIV void wasm_ecx_free(codegen_context *e);
+#else /* not built: the callers' WASM(c) branches are dead */
+static inline void wasm_emit_function(codegen_context *e, uint32_t s)
+{
+}
+#endif
 VPRIV void walk_function_emit(codegen_context *e, uint32_t s);
 VPRIV void walk_context_free(codegen_context *e);
 VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t s,
@@ -1435,9 +1450,21 @@ VPRIV void virbuild_pass_switch_read(
     virbuild_pass_switch *w,
     const char *items); /* -fvir-passes=ITEMS (NULL: none) */
 VPRIV void virbuild_walk_context_free(codegen_context *e);
+#ifdef VCC_WASM
 VPRIV void wasm_data_ref(codegen_context *e, uint32_t ref);
 VPRIV void wasm_header(cc *c, tbuf *hdr, codegen_context *ctx, int nthr);
 VPRIV void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed);
+#else
+static inline void wasm_data_ref(codegen_context *e, uint32_t ref)
+{
+}
+static inline void wasm_header(cc *c, tbuf *hdr, codegen_context *ctx, int nthr)
+{
+}
+static inline void wasm_tail(cc *c, tbuf *t, _Atomic uint8_t *claimed)
+{
+}
+#endif
 /* prepass.c */
 VPRIV bool codegen_expression_is_constant_index(cc *c, uint32_t n);
 VPRIV uint32_t codegen_expression_constant_index(cc *c, uint32_t n);
@@ -1470,6 +1497,7 @@ VPRIV uint32_t codegen_recursion_group(
 VPRIV bool codegen_inline_has_constant_argument(const codegen_unit *E, cc *c,
                                                 uint32_t callee, uint32_t call);
 VPRIV bool virbuild_asm_is_crc32q(cc *c, const ast_asm_statement *a);
+VPRIV bool codegen_statement_is_tiny(cc *c, uint32_t n, bool vir);
 VPRIV bool codegen_inline_is_candidate(codegen_unit *E, cc *c, uint32_t s);
 /* VIR could inline a call to s (size aside) */ /* per function: 1 when its one reference in the TU is a direct call */
 VPRIV int codegen_u32_compare(const void *a, const void *b);

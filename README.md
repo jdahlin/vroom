@@ -17,13 +17,20 @@ For an end-to-end build, the smaller arm64 configuration took **9.9 s** on an M1
 
 ## 🔧 Build and try it
 
-Build with clang on Apple Silicon or Linux (arm64 or x86-64). The tools land in `build/src/`. To try the standalone driver on one file:
+Build with clang on Apple Silicon or Linux (arm64 or x86-64). To compile and run a native C program:
 
 ```sh
 make -C src -j 6 vcc
-echo 'int square(int x) { return x * x; }' > /tmp/vroom-square.c
-build/src/vpp --target=aarch64-linux-gnu -c /tmp/vroom-square.c -o /tmp/vroom-square.o
+case "$(uname -s)" in
+  Linux) export PATH="$PWD/build/linux/src:$PATH" ;;
+  Darwin) export PATH="$PWD/build/src:$PATH" ;;
+esac
+echo 'int main(void) { return 0; }' > foo.c
+vcc -o main foo.c
+./main
 ```
+
+The driver starts its server on first use. Native Linux linking uses the host glibc development files and, on arm64 Linux, the system linker. Run `vcc --help` for compiler options.
 
 For the kernel benchmark, set up the kernel tree under `work/linux` using the [build environment](env/), then build and boot the image:
 
@@ -31,6 +38,8 @@ For the kernel benchmark, set up the kernel tree under `work/linux` using the [b
 bench/vccd-kbuild.sh work/build-X -j 6
 python3 bench/boot-test.py --kernel work/build-X/arch/arm64/boot/Image --timeout 60
 ```
+
+Build the C and C++ source refactoring tool separately with `make -C src -j 6 vref`. It previews local renames, signature changes and statement extraction as unified diffs. [vref commands and supported forms](doc/vref.md)
 
 ## Compiler status
 

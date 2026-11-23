@@ -2,7 +2,7 @@
  * A function through VIR (PLAN-vir.md): the VIR walker builds it
  * (codegen/vir/preir.h); what it cannot build is emitted as before (X8).
  *
- * VIR is -O2's code generator: cc_options.optimize.vir (driver/optimization.cpp,
+ * VIR is the default code generator: cc_options.optimize.vir (driver/optimization.cpp,
  * doc/OPTIMIZATION.md).  The developer's aids, cc_options.vir_aid:
  *   -fno-vir-lower         build VIR, then emit the function as before
  *   -fvir-verify           run the verifier on it (failures to stderr)
@@ -223,7 +223,7 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
         virbuild_pass_note(e->unit, VIRBUILD_PASS_ROW_BUILD(npass),
                            vperformance_subtract(vperformance_now(), t0).ins);
     e->vir_try = false;
-    if (m & VIRBUILD_MODE_REPORT)
+    if (m & (VIRBUILD_MODE_REPORT | VIRBUILD_MODE_DUMP))
         virbuild_function_name_get(e, s, nm, sizeof nm);
     c1 =
         e->unit->vir_statistics ? vperformance_now() : VCC_LITERAL(vperf, 0, 0);
@@ -255,7 +255,8 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
         }
         if (m & VIRBUILD_MODE_DUMP) {
             vir_print_function(&b, NULL, &V->f);
-            fprintf(stderr, "%.*s", (int)b.n, b.p ? (char *)b.p : "");
+            fprintf(stderr, "; %s\n%.*s", nm[0] ? nm : "?", (int)b.n,
+                    b.p ? (char *)b.p : "");
         }
         if (m & VIRBUILD_MODE_REPORT)
             fprintf(stderr, "vir: %s: built, %u instructions, %u blocks%s\n",

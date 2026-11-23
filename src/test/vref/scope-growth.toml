@@ -1,0 +1,6 @@
+within = "VPRIV cxx_entity * cxx_declare ( cxx * c , cxx_scope * s , uint32_t name , int kind ) {"
+
+[outline_if]
+match = "if ( @s -> nnames * 2 >= @s -> nslots ) {"
+name = "cxx_scope_grow"
+parameters = ["s"]

@@ -685,10 +685,6 @@ typedef struct {
     bool is_global;
 } ld_relocation_target;
 
-struct ld_response_memory {
-    struct ld_response_memory *next;
-};
-
 enum {
     LD_SECTION_ORDER_NAME,
     LD_SECTION_ORDER_ALIGNMENT_DESCENDING,
@@ -1011,9 +1007,6 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv);
 VPRIV int ld_relocatable_link(struct ld_context *ctx);
 /* macho-probe.c */
 VPRIV bool ld_first_input_is_macho(int argc, char **argv, int dirfd);
-/* response-files.c */
-VPRIV bool ld_response_files_expand(int *pargc, char ***pargv, int dirfd,
-                                    struct ld_response_memory **keep);
 
 /* ---- small helpers every part inlines ---- */
 

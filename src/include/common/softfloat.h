@@ -25,6 +25,45 @@ typedef unsigned __int128 f128_u;
 #define Q_M112 (((u128)1 << 112) - 1)
 #define Q_SIGN ((u128)1 << 127)
 
+/* Encode a NaN payload from the string argument of a compiler builtin.
+   The destination format has p fraction bits. */
+F128_UNUSED static bool vsoftfloat_nan_payload(const char *text, int p,
+                                               bool signaling, u128 *bits)
+{
+    u128 payload = 0;
+    unsigned base = 10;
+    bool valid = true;
+    if (text[0] == '0') {
+        base = 8;
+        if (text[1] == 'x' || text[1] == 'X')
+            base = 16, text += 2;
+        if (base == 16 && !*text)
+            valid = false;
+    }
+    for (; *text; text++) {
+        unsigned digit =
+            *text >= '0' && *text <= '9'   ? (unsigned)(*text - '0')
+            : *text >= 'a' && *text <= 'f' ? (unsigned)(*text - 'a' + 10)
+            : *text >= 'A' && *text <= 'F' ? (unsigned)(*text - 'A' + 10)
+                                           : base;
+        if (digit >= base || payload > (UINT64_MAX - digit) / base) {
+            valid = false;
+            break;
+        }
+        payload = payload * base + digit;
+    }
+    if (!valid)
+        return false;
+    payload &= (((u128)1 << (p - 1)) - 1);
+    if (signaling) {
+        if (!payload)
+            payload = (u128)1 << (p - 2);
+    } else
+        payload |= (u128)1 << (p - 1);
+    *bits = (u128)0x7fff << 112 | payload << (112 - p);
+    return true;
+}
+
 F128_UNUSED static bool vsoftfloat_is_nan(u128 u)
 {
     return (u << 1) > ((u128)0x7fff << 113);

@@ -1,0 +1,5 @@
+# C.1.12 [[algorithms]](../lib/algorithms/algorithms.md): algorithms library [diff.cpp17.alg.reqs]
+
+[Contents](../README.md) · up: [C.1 C++ and ISO C++ 2017 \[diff.cpp17\]](diff.cpp17.md) · prev: [C.1.11 [[iterators]](../lib/iterators/iterators.md): iterators library \[diff.cpp17.iterators\]](diff.cpp17.iterators.md) · next: [C.1.13 [[input.output]](../lib/io/input.output.md): input/output library \[diff.cpp17.input.output\]](diff.cpp17.input.output.md)
+
+**1** **Affected subclause:** [[algorithms.requirements]](../lib/algorithms/algorithms.requirements.md) <br>**Change:** The number and order of deducible template parameters for algorithm declarations is now unspecified, instead of being as-declared. <br>**Rationale:** Increase implementor freedom and allow some function templates to be implemented as function objects with templated call operators. <br>**Effect on original feature:** A valid C++ 2017 program that passes explicit template arguments to algorithms not explicitly specified to allow such in this version of C++ may fail to compile or have undefined behavior.

@@ -17,6 +17,48 @@ static void x64_vir_load_address(x64_vir_context *L, uint32_t value, int reg)
     L->memory_shift = 0;
 }
 
+/* The instruction behind the add or sub v is the compare that asks for its carry or borrow
+ * (the builder's carry placement puts it there): v is emitted as add or sub, not lea, and the
+ * compare reads CF, set by a carry and by a borrow alike. */
+static bool x64_vir_carry_follows(x64_vir_context *L, uint32_t b, uint32_t v)
+{
+    const vir_function *f = L->function;
+    const vir_insn *i = &f->insns[v], *k;
+    int kind;
+
+    if (!L->context->unit->options->optimize.carry_flags ||
+        v + 1 >= f->blocks[b].first + f->blocks[b].insn_count ||
+        (i->type != VIR_TYPE_I32 && i->type != VIR_TYPE_I64))
+        return false;
+    k = &f->insns[v + 1];
+    if (k->op != VIR_OP_ICMP || L->compare_memory_value == v + 1)
+        return false;
+    kind =
+        vir_carry_compare_kind(i->op, v, i->a, i->b, k->flags & 15, k->a, k->b);
+    if (kind == VIR_CARRY_NONE)
+        return false;
+    L->carry_value = v + 1;
+    L->carry_is_set = kind == VIR_CARRY_SET;
+    return true;
+}
+
+/* the carry compare v finds the flags of its add or sub: nothing emitted since wrote them */
+static bool x64_vir_carry_flags_hold(x64_vir_context *L, uint32_t v)
+{
+    codegen_context *e = L->context;
+
+    if (L->carry_value != v)
+        return false;
+    L->carry_value = 0;
+    for (uint32_t k = L->carry_record + 1; k < e->x64_context->record_count;
+         k++)
+        if (x64_record_effects(e, &e->x64_context->records[k]).flags &
+            (RECORD_EFFECT_WRITES_FLAGS | RECORD_EFFECT_BARRIER |
+             RECORD_EFFECT_CALL))
+            return false;
+    return true;
+}
+
 VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                               const uint8_t *p, uint32_t n, uint8_t res)
 {
@@ -134,10 +176,11 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         unsigned width = 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
         int64_t k = 0;
         bool side = next->b == v, ok = false;
+        bool narrow_unsigned = false;
         if (next->op == VIR_OP_ICMP && (next->a == v || side)) {
             uint32_t other = side ? next->a : next->b;
             bool imm = x64_vir_value_immediate(L->function, other, &k);
-            if (width == x64_vir_type_size(i->type))
+            if (width == (unsigned)x64_vir_type_size(i->type))
                 ok = !imm || (!side && (width == 4 || k == (int32_t)k));
             else if (!side && imm && (next->flags & 15) < 2) {
                 int64_t lo = (i->flags & VIR_INSN_FLAG_MS)
@@ -147,10 +190,20 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                                              !!(i->flags & VIR_INSN_FLAG_MS))) -
                              1;
                 ok = k >= lo && k <= hi;
+            } else if (!(i->flags & VIR_INSN_FLAG_MS) && width < 4 &&
+                       (imm ? !side && k >= 0 && k < (INT64_C(1) << (width * 8))
+                            : x64_vir_value_fits_unsigned(L->function, other,
+                                                          width))) {
+                /* a zero-extended byte or word against another such value or an
+				 * immediate in its range: the compare of the narrow bytes, with the
+				 * unsigned condition (the signed one on non-negative values is the same) */
+                ok = true;
+                narrow_unsigned = true;
             }
         }
         if (ok) {
             L->compare_memory_value = v + 1;
+            L->compare_memory_unsigned = narrow_unsigned;
             L->compare_memory_size = width;
             L->compare_memory_side = side;
             x64_vir_load_address(L, i->a, a);
@@ -264,7 +317,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             return;
         }
     }
-    if (i->op == VIR_OP_PTRADD && x64_vir_memory_next_fold(L, b, v)) {
+    if (i->op == VIR_OP_PTRADD && x64_vir_memory_address_fold(L, b, v, a, c)) {
         L->memory_value = v;
         L->memory_base = a;
         L->memory_offset = 0;
@@ -319,6 +372,10 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                     ? (i->type == VIR_TYPE_F32X4 ? "mulps" : "mulpd")
                     : (i->type == VIR_TYPE_F32X4 ? "divps" : "divpd");
             x64_vir_simd_emit(L, op, d, a, c);
+        } else if ((i->op == VIR_OP_ADD || i->op == VIR_OP_SUB) &&
+                   x64_vir_carry_follows(L, b, v)) {
+            L->carry_record = e->x64_context->record_count;
+            x64_record_emit_three_registers(e, alu[i->op], sz, d, a, c);
         } else if (i->op == VIR_OP_ADD || i->op == VIR_OP_PTRADD)
             x64_record_emit_three_registers(e, X64_OP_LEASCALE, sz, d, a, c)
                 ->shift = 0;
@@ -537,7 +594,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     }
     case VIR_OP_SHL:
     case VIR_OP_LSHR:
-    case VIR_OP_ASHR:
+    case VIR_OP_ASHR: {
         int64_t count;
         if (x64_vir_value_immediate(L->function, i->b, &count) && count >= 0 &&
             count < (i->type == VIR_TYPE_I32 ? 32 : 64)) {
@@ -562,14 +619,30 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         x64_record_emit_three_registers(
             e, X64_OP_MOV, sz, d, L->general_temporary, X64_REGISTER_NONE);
         return;
+    }
     case VIR_OP_ICMP: {
         static const uint8_t cc[] = {X64_CONDITION_E, X64_CONDITION_NE,
                                      X64_CONDITION_L, X64_CONDITION_LE,
                                      X64_CONDITION_G, X64_CONDITION_GE,
                                      X64_CONDITION_B, X64_CONDITION_BE,
                                      X64_CONDITION_A, X64_CONDITION_AE};
+        bool narrow_unsigned = false;
+        if (x64_vir_carry_flags_hold(L, v)) {
+            uint8_t carry = X64_CONDITION_AE;
+
+            if (L->carry_is_set)
+                carry = X64_CONDITION_B;
+            L->compare_condition = v;
+            L->compare_block = b;
+            L->setcc_record = e->x64_context->record_count;
+            x64_record_emit_three_registers(
+                e, X64_OP_SETCC, 4, d, X64_REGISTER_NONE, X64_REGISTER_NONE)
+                ->condition = carry;
+            return;
+        }
         if (L->compare_memory_value == v) {
             int other = L->compare_memory_side ? a : c;
+            narrow_unsigned = L->compare_memory_unsigned;
             record *r = x64_record_emit_three_registers(
                 e, X64_OP_CMPM, L->compare_memory_size, X64_REGISTER_NONE,
                 L->memory_base, other);
@@ -598,9 +671,12 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         L->compare_condition = v;
         L->compare_block = b;
         L->setcc_record = e->x64_context->record_count;
+        unsigned condition = i->flags & 15;
+        if (narrow_unsigned && condition >= 2 && condition <= 5)
+            condition += 4; /* slt, sle, sgt, sge -> ult, ule, ugt, uge */
         x64_record_emit_three_registers(e, X64_OP_SETCC, 4, d,
                                         X64_REGISTER_NONE, X64_REGISTER_NONE)
-            ->condition = cc[i->flags & 15];
+            ->condition = cc[condition];
         return;
     }
     case VIR_OP_FCMP: {

@@ -1,0 +1,57 @@
+# Lines of clang's tests where a declaration of ours is none of clang's
+# top-level declarations and the reason is clang's, not a boundary of ours
+# (bench/cxx-parse.py, "decls").  PATH:LINE reason; PATH relative to
+# clang/test.
+CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p2-1z.cpp:47 clang leaves out the static_assert: it names `e`, whose declaration on line 44 was invalid
+# ... and lines where clang's accept/reject (bench/cxx-parse.py, "syntax")
+# is not the standard's.  [implimits]: the quantities are minimums, and
+# exceeding clang's own limits is no syntax error.
+Parser/function-parameter-limit.cpp:11 [implimits] clang's limit of 65535 parameters
+Parser/function-parameter-limit.cpp:21 [implimits] clang's limit of 65535 parameters
+Parser/nested_function_prototype_overflow.cpp:4 [implimits] clang's limit on nested declarators
+Parser/max-tokens.cpp:5 clang's -fmax-tokens (a limit of its own, a warning made an error)
+# #pragma clang attribute: a pragma clang handles in its parser, not the
+# standard's grammar ([cpp.pragma]/1: implementation-defined)
+Parser/pragma-attribute.cpp:5 #pragma clang attribute push without a pop
+Parser/pragma-attribute.cpp:119 #pragma clang attribute pop without a push
+Parser/pragma-attribute.cpp:143 _Pragma("clang attribute pop") without a push
+Parser/pragma-attribute.cpp:221 #pragma clang attribute errors, reported at the next declaration
+Parser/pragma-attribute-declspec.cpp:5 #pragma clang attribute errors, reported at the next declaration
+# clang's error recovery: where it resumes after an erroneous declaration
+Parser/cxx-template-decl.cpp:248 }; after an erroneous template-declaration
+Parser/cxx-template-decl.cpp:252 }; after an erroneous template-declaration
+Parser/cxx-attributes-missing-closing.cpp:5 ;; after an unclosed [[
+Parser/cxx0x-attributes.cpp:123 class D final alignas ([l) {}]{}); recovered as clang does not
+# the standard followed where clang applies a later paper to every edition
+CXX/dcl.dcl/p4-0x.cpp:21 n4861 [dcl.pre] allows any string-literal in static_assert; clang applies P2361R6 (unevaluated strings, no encoding prefix) as a DR
+# a semantic rule clang reports from its parser
+CXX/drs/cwg30xx.cpp:12 [basic.scope.param]: a parameter declared twice is a redeclaration error, not a syntax error
+# P2, attributes: where clang accepts an attribute-specifier-seq the
+# standard's grammar has no place for (its extension, a warning), or rejects
+# one the grammar has
+Parser/cxx0x-attributes.cpp:158 [dcl.asm] allows attribute-specifier-seq_opt before asm; clang rejects it
+Parser/cxx0x-attributes.cpp:160 [namespace.udecl]: a using-declaration has no attribute-specifier-seq; clang's extension
+Parser/using-if-exists-attr.cpp:11 [namespace.udecl]: a using-declarator has no attribute-specifier-seq; clang's extension
+Parser/using-if-exists-attr.cpp:13 [namespace.udecl]: a using-declaration has no attribute-specifier-seq; clang's extension
+Parser/using-if-exists-attr.cpp:20 [namespace.udecl]: a using-declaration has no attribute-specifier-seq; clang's extension
+Parser/cxx0x-attributes.cpp:227 [dcl.enum]/2, [dcl.type.elab]/1: enum E; is ill-formed; clang accepts it as a redeclaration of an enumeration declared before
+Parser/cxx0x-attributes.cpp:406 #pragma pack inside an attribute-specifier: clang makes the pragma a token there ([cpp.pragma]/1: implementation-defined)
+Parser/cxx0x-attributes.cpp:454 [[__clang__::annotate]]: __clang__ is a predefined macro, [[1::annotate]] after phase 4; clang recovers as _Clang
+# P3, expressions: n4861's grammar followed where clang's parser decides by
+# what a declaration turns out to be
+Parser/cxx2c-delete-with-message.cpp:45 [dcl.init], [expr.delete]: T a = delete ("hello"); is an initializer whose initializer-clause is a delete-expression; clang's parser takes = delete for a deleted definition (the tests of CWG2876)
+Parser/cxx2c-delete-with-message.cpp:46 as line 45
+# [basic.lookup.qual]/6 (n4861): which declarations `N::~T` finds is
+# lookup, not syntax; clang's parser checks it
+CXX/drs/cwg17xx.cpp:147 n.cwg1753::~T(): the qualified-id is the grammar's, the lookup fails
+# an attribute-specifier-seq before a compound-statement is the grammar's
+# ([stmt.pre]/1); clang's error is about the #pragma clang attribute
+# between them
+Parser/gh137861.cpp:22 [[nodiscard]] before #pragma clang attribute push and a compound-statement
+# [cpp.pragma]/1: a pragma's effect is implementation-defined; clang's
+# error is about a _Pragma from a macro inside a class
+Parser/pragma-attribute-context.cpp:32 #pragma clang attribute (BEGIN_PRAGMA's _Pragma) inside a struct
+# [dcl.fct.default]: the default argument b < c ends at the ',' and a
+# second parameter follows; clang's parser ends it early (its FIXME:
+# "We should ideally disambiguate this as two parameters")
+Parser/cxx-ambig-init-templ.cpp:66 int k = b < c, unsigned int (missing_default): two parameters

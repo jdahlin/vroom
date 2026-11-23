@@ -1,0 +1,2 @@
+enum-partial-definition.cpp:4:25: error: the rules of [expr.prim.lambda] are not implemented yet
+enum-partial-definition.cpp:4:25: note: refused by vcc's frontend/cplusplus/expression/expression.cpp:N (expression_kind)

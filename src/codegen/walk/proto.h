@@ -34,7 +34,8 @@ walk_symbol_constant_get(codegen_context *e, uint32_t s,
                          codegen_value *v); /* s is bound to the constant *v */
 VPRIV void walk_array_elements_clear(codegen_context *e,
                                      uint32_t s); /* UINT32_MAX: every array */
-VPRIV bool walk_parameter_constant_get(
+/* unused: only x86-64 inline asm calls it, so the VIR copy has no caller */
+__attribute__((unused)) VPRIV bool walk_parameter_constant_get(
     codegen_context *e, uint32_t s,
     codegen_value *v); /* a provisional constant of parameter s (wkst.pk) */
 VPRIV bool walk_symbol_address_may_be_zero(
@@ -64,6 +65,12 @@ VPRIV int64_t walk_local_slot(
     uint32_t
         s); /* a local's slot, made on first use (a goto may reach a use first) */
 VPRIV uint32_t walk_label_new(codegen_context *e);
+VPRIV void walk_call_slot_argument(codegen_context *e, uint32_t fn,
+                                   int64_t slot);
+VPRIV void walk_cleanup_call(codegen_context *e, uint32_t s);
+VPRIV void x64_eh_pads(
+    codegen_context *
+        e); /* arch/x64/codegen/eh.cpp: the landing pads of the function's exception table */
 VPRIV codegen_value walk_value_emit(codegen_context *e, uint32_t n);
 VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n);
 VPRIV codegen_value walk_division_signed_power_of_two_emit(
@@ -85,6 +92,7 @@ VPRIV void walk_initializer_emit(codegen_context *e, const codegen_lvalue *dst,
 VPRIV void walk_bitfield_initialize(codegen_context *e, const codegen_lvalue *l,
                                     ast_qualified_type t, uint32_t init);
 /* a bit-field initialized */ /* an object initialized by init (0: none) */
+VPRIV bool walk_type_is_wide(cc *c, ast_qualified_type t);
 VPRIV int walk_type_size(cc *c, ast_qualified_type t);
 VPRIV bool walk_type_is_in_memory(
     codegen_context *e,
@@ -112,7 +120,6 @@ VPRIV codegen_value walk_vla_bytes(
     codegen_context *e, ast_qualified_type t); /* sizeof t (a VLA: computed) */
 VPRIV void walk_vla_declare(codegen_context *e, uint32_t s,
                             bool zero); /* a VLA's storage below sp */
-VPRIV uint32_t walk_user_label_get(codegen_context *e, uint32_t l);
 VPRIV void walk_lvalue_store_register(codegen_context *e,
                                       const codegen_lvalue *l,
                                       ast_qualified_type t, int r);

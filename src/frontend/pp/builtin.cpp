@@ -1,6 +1,7 @@
 /* vcc preprocessor: builtin macros and the __has_* queries */
 #include "pp-internal.h"
 #include <sys/stat.h>
+#include "frontend/builtin-fold.h"
 #include "ppdata.inc"
 #include "ppdata-cxx-has.inc"
 #define PPDATA_X86_HAS
@@ -157,6 +158,26 @@ static bool pp_feature_argument_read(pp *p, char *buf, size_t cap, uint32_t loc)
     return true;
 }
 
+/*
+ * __has_constexpr_builtin for a builtin vcc implements: whether the language
+ * folds it, as the fold table says (frontend/builtin-fold.h), so that the
+ * answer is the evaluators' own and clang's table, which says what clang
+ * folds, is left to the builtins vcc does not implement.  -1: not one of
+ * those.
+ */
+static int pp_constexpr_builtin_answer(pp *p, const char *name)
+{
+    size_t length = strlen(name);
+    int claim;
+
+    claim = vfold_claim(name, length, p->options->cxx != 0);
+    if (claim >= 0)
+        return claim;
+    if (pp_builtin_known && pp_builtin_known(name))
+        return 0;
+    return -1;
+}
+
 static int pp_feature_query_answer(pp *p, int b, const char *name, uint32_t loc)
 {
     static const char *const q[] = {
@@ -183,6 +204,12 @@ static int pp_feature_query_answer(pp *p, int b, const char *name, uint32_t loc)
 
     if (b == PP_BUILTIN_BUILDING_MODULE)
         return 0; /* no modules */
+    if (b == PP_BUILTIN_HAS_CONSTEXPR_BUILTIN) {
+        int answer = pp_constexpr_builtin_answer(p, name);
+
+        if (answer >= 0)
+            return answer;
+    }
     if (p->options->cxx && (p->options->target == PP_LINUX_X86_64 ||
                             p->options->target == PP_LINUX_AARCH64)) {
         /* C++: clang++'s answers for what libc++, json and doctest ask (gen-cxxpredef.py) */
@@ -258,10 +285,16 @@ static int pp_feature_query_answer(pp *p, int b, const char *name, uint32_t loc)
              k <= PP_BUILTIN_IS_TARGET_VARIANT_ENVIRONMENT; k++)
             if (!strcmp(name, q[k]))
                 return 1;
-    /* the table is what the kernel and SDK headers asked clang; the front end knows more */
-    if (b == PP_BUILTIN_HAS_BUILTIN && pp_builtin_known &&
-        pp_builtin_known(name))
-        return 1;
+    /* The frontend also knows target builtins absent from the reference tables. */
+    if (b == PP_BUILTIN_HAS_BUILTIN && pp_builtin_known) {
+        const int target = p->options->target;
+        if ((!strncmp(name, "__builtin_ia32_", 15) && !PP_IS_X86_64(target)) ||
+            (!strncmp(name, "__builtin_arm_", 14) &&
+             target != PP_LINUX_AARCH64 && target != PP_DARWIN))
+            return 0;
+        if (pp_builtin_known(name))
+            return 1;
+    }
     return 0;
 }
 

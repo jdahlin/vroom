@@ -108,7 +108,8 @@ VPRIV const lex_file *pp_path_try(const pp_opts *o, const char *path,
         f = lex_file_c89_convert(f);
     if (f && o->no_digraphs)
         f = lex_file_without_digraphs(f);
-    return f && o->c23 ? lex_file_digit_separators_remove(f) : f;
+    return f && pp_digit_separators(o) ? lex_file_digit_separators_remove(f)
+                                       : f;
 }
 
 static const lex_file *pp_include_find_inner(pp *p, const pp_context *from,

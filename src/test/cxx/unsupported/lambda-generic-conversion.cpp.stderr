@@ -1,0 +1,2 @@
+lambda-generic-conversion.cpp:7:20: error: the rules of [expr.prim.lambda.closure] are not implemented yet
+lambda-generic-conversion.cpp:7:20: note: refused by vcc's frontend/cplusplus/expression/standard-conversions.cpp:N (implicit_conversion)

@@ -26,7 +26,7 @@ FILES = ['Diagnostic.td', 'DiagnosticASTKinds.td', 'DiagnosticCategories.td', 'D
          'DiagnosticCommonKinds.td', 'DiagnosticCrossTUKinds.td', 'DiagnosticDocs.td', 'DiagnosticDriverKinds.td',
          'DiagnosticFrontendKinds.td', 'DiagnosticGroups.td', 'DiagnosticInstallAPIKinds.td', 'DiagnosticLexKinds.td',
          'DiagnosticParseKinds.td', 'DiagnosticRefactoringKinds.td', 'DiagnosticSemaKinds.td',
-         'DiagnosticSerializationKinds.td', 'DiagnosticTrapKinds.td']
+         'DiagnosticSerializationKinds.td', 'DiagnosticTrapKinds.td', 'TokenKinds.def']
 CLASSES = {'Error': 'error', 'Warning': 'warning', 'Extension': 'extension', 'ExtWarn': 'extension',
            'Note': 'note', 'Remark': 'remark', 'Trap': 'trap'}
 
@@ -176,7 +176,7 @@ def load(d=None):
     diags, groups, subst = {}, {}, {}
     inline_groups = {}
     for f in FILES:
-        if f in ('Diagnostic.td', 'DiagnosticDocs.td', 'DiagnosticCategories.td'):
+        if f in ('Diagnostic.td', 'DiagnosticDocs.td', 'DiagnosticCategories.td', 'TokenKinds.def'):
             continue
         text = _strip_comments(open(f'{d}/{f}', encoding='utf-8').read())
         lets = []
@@ -192,10 +192,14 @@ def load(d=None):
             if kind not in ('def',):
                 continue
             body = st[1].strip().rstrip(';')
-            m = re.match(r'(\w+)\s*:\s*(.*)', body, re.S)
+            m = re.match(r'(\w*)\s*:\s*(.*)', body, re.S)
             if not m:
                 continue
             name, rest = m.group(1), m.group(2)
+            if not name:
+                # an anonymous def: a group alias (def : DiagGroup<"narrowing", [CXX11Narrowing]>)
+                name = f':anonymous:{len(groups)}:{len(diags)}'
+
             parents = _split_top(rest)
             head = parents[0]
             hm = re.match(r'(\w+)\s*<(.*)>\s*$', head, re.S)
@@ -216,7 +220,7 @@ def load(d=None):
                 ctx.update(kv)
             r = {'name': name, 'class': CLASSES.get(cls, 'warning'), 'text': _strings(hm.group(2)) if hm else '',
                  'file': f, 'component': _strings(ctx.get('Component', '')),
-                 'category': _strings(ctx.get('CategoryName', '')), 'group': None, 'default': None}
+                 'category': _strings(ctx.get('CategoryName', '')), 'group': None, 'default': None, 'extwarn': cls == 'ExtWarn'}
             for p in parents[1:]:
                 gm = re.match(r'InGroup\s*<\s*(.*)>\s*$', p, re.S)
                 if gm:
@@ -231,7 +235,13 @@ def load(d=None):
                     r['default'] = p[7:].lower()
                 elif p.startswith('CatBackend') or p == 'BackendInfo':
                     r['category'] = r['category'] or 'Backend Issue'
+            sm = hm and re.match(r'\s*(\w+)\.Summary\s*$', hm.group(2))
+            if sm:
+                r['summary_of'] = sm.group(1)  # the text of another diagnostic
             diags[name] = r
+    for r in diags.values():
+        if r.get('summary_of') in diags:
+            r['text'] = diags[r['summary_of']]['text']
     for r in diags.values():
         g = r['group']
         if g and g in groups:

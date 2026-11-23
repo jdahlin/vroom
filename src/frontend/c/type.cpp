@@ -1,4 +1,5 @@
 /* vcc front end: types: interning, predicates, compatibility (C11 6.2.7) */
+#include "frontend/vector-layout.h"
 #include "cc-internal.h"
 
 const cc_basic_type_layout cc_basic_types[AST_TYPE_POINTER] = {
@@ -430,11 +431,9 @@ CC_PRIVATE ast_qualified_type cc_type_vector(cc *c, ast_qualified_type elem,
                                              uint32_t size)
 {
     const ctype *e = AST_TYPE(c, elem);
-    /* ARM64 caps vector alignment at 16; x86 and wasm use its full size. */
     ctype t = {.kind = AST_TYPE_VECTOR,
-               .align = size > 16 && !PP_IS_WASM(c->o->target) && !CC_X86_64(c)
-                            ? 16
-                            : size,
+               .align = vector_alignment(size, PP_IS_WASM(c->o->target) ||
+                                                   CC_X86_64(c)),
                .size = size,
                .base = AST_QUALIFIED_TYPE_UNQUALIFIED(elem)};
 

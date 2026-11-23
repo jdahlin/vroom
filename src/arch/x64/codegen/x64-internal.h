@@ -111,8 +111,9 @@ enum {
     X64_OP_LEAL,    /* r0 = the address of local label `label` */
     X64_OP_BLENDVB, /* SSE4.1: xmm1 = select(xmm1, xmm2, high bits of xmm0) */
     X64_OP_PCMPSTR, /* SSE4.2: xmm0/xmm1, eax/edx lengths; cond selects opcode, imm control */
-    X64_OP_RAW,   /* inline asm: e->raw's text at off, ref bytes */
-    X64_OP_NAMED, /* ref's name as a label here */
+    X64_OP_RAW,    /* inline asm: e->raw's text at off, ref bytes */
+    X64_OP_NAMED,  /* ref's name as a label here */
+    X64_OP_EHMARK, /* .Lvcceh<label>: a call site's bounds or a landing pad, for the exception table (no effect) */
     X64_OP_BSF,
     X64_OP_BSR,   /* r0 = index of the lowest / highest set bit of r1 */
     X64_OP_BSWAP, /* r0 = r0 byte-reversed (sz 4, 8) */
@@ -260,6 +261,7 @@ VPRIV bool x64_framefree_record(codegen_context *e, const record *i);
 VPRIV bool x64_copy_forward_at(codegen_context *e, uint32_t k);
 VPRIV bool x64_last_u32(const codegen_context *e, int r);
 VPRIV void x64_dead(codegen_context *e);
+VPRIV void x64_zero_idioms(codegen_context *e);
 VPRIV void
 x64_dead_budget(codegen_context *e,
                 uint32_t budget); /* internal bounded-fallback contracts */
@@ -289,6 +291,10 @@ VPRIV void
 x64_call_xmms(codegen_context *e,
               const walk_argument *
                   r); /* abi.c, both conventions: a result in xmm0, xmm1, ... */
+VPRIV void x64_temporaries_save(codegen_context *e, uint32_t saved,
+                                uint32_t fsaved);
+VPRIV void x64_temporaries_restore(codegen_context *e, uint32_t saved,
+                                   uint32_t fsaved);
 VPRIV void x64_call_park(
     codegen_context *e,
     ast_qualified_type
@@ -317,5 +323,9 @@ static inline bool x64w_helpers(const codegen_context *e)
 {
     return CODEGEN_IS_WIN64(e->compile_context);
 }
+
+/* eh.cpp: C++ exceptions' landing pads and table */
+VPRIV bool x64_eh_wanted(codegen_context *e);
+VPRIV void x64_eh_table(codegen_context *e, tbuf *b, uint32_t s);
 
 #endif

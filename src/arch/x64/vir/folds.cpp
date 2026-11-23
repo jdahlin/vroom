@@ -41,7 +41,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
     case VIR_OP_ACAS:
     case VIR_OP_AXADD:
     case VIR_OP_AXCHG: /* (narrower: the instruction at its width, then an extension) */
-        return (1u << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) <=
+        return (1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) <=
                x64_vir_type_size(i->type);
     case VIR_OP_POPCNT:
         return true; /* (the target's POPCNT: x64_vir_function_lower checks it) */
@@ -159,6 +159,50 @@ VPRIV bool x64_vir_fold_edits_check(x64_vir_context *L, uint32_t b,
     return true;
 }
 
+/* The edits before instruction pos leave registers base and index alone: reloads and
+ * rematerializations into other registers (a store's constant or spilled value) cannot change
+ * an address that the consumer at pos reads from them. */
+static bool x64_vir_edits_spare(x64_vir_context *L, uint32_t b, uint32_t pos,
+                                int base, int index)
+{
+    uint32_t lo =
+                 L->allocation->block_offsets[L->function->block_count + 1 + b],
+             hi =
+                 L->allocation->block_offsets[L->function->block_count + 2 + b],
+             end = hi;
+    while (lo < hi) {
+        uint32_t m = lo + (hi - lo) / 2;
+        if (L->allocation->edit[m].pos < pos)
+            lo = m + 1;
+        else
+            hi = m;
+    }
+    for (uint32_t k = lo; k < end && L->allocation->edit[k].pos == pos; k++) {
+        const vir_edit *edit = &L->allocation->edit[k];
+        int dst = x64_vir_register_number(edit->dst);
+
+        if ((edit->kind != VIR_EDIT_REMATERIALIZE &&
+             edit->kind != VIR_EDIT_RELOAD) ||
+            dst == base || dst == index)
+            return false;
+    }
+    return true;
+}
+
+/* A pointer addition with one use, the next instruction's load or store address: it becomes
+ * that instruction's memory operand, base register and index as the lowering has them */
+VPRIV bool x64_vir_memory_address_fold(x64_vir_context *L, uint32_t b,
+                                       uint32_t v, int base, int index)
+{
+    return v + 1 < L->function->blocks[b].first +
+                       L->function->blocks[b].insn_count &&
+           L->uses[v] == 1 && L->allocation->slot[v] == VIR_BLOCK_NONE &&
+           L->function->insns[v + 1].a == v &&
+           (L->function->insns[v + 1].op == VIR_OP_LOAD ||
+            L->function->insns[v + 1].op == VIR_OP_STORE) &&
+           x64_vir_edits_spare(L, b, v + 1, base, index);
+}
+
 VPRIV bool x64_vir_memory_next_fold(x64_vir_context *L, uint32_t b, uint32_t v)
 {
     return v + 1 < L->function->blocks[b].first +
@@ -235,6 +279,25 @@ VPRIV bool x64_vir_address_memory_fold(x64_vir_context *L, uint32_t b,
             x64_vir_memory_next_fold(L, b, v)) ||
            x64_vir_memory_cast_fold(L, b, v) ||
            x64_vir_big_endian_address_match(L, b, v, &end);
+}
+
+/* v is a non-negative value of at most `width` bytes: a zero-extended load of no more bytes, or
+ * an `and` with a mask that small.  The low `width` bytes of its register are then the value
+ * whatever the upper bits of that register are. */
+VPRIV bool x64_vir_value_fits_unsigned(const vir_function *f, uint32_t v,
+                                       unsigned width)
+{
+    const vir_insn *i = &f->insns[v];
+    int64_t mask;
+
+    if (i->op == VIR_OP_LOAD)
+        return !(i->flags & (VIR_INSN_FLAG_MS | VIR_INSN_FLAG_VOL)) &&
+               (1u << VIR_INSN_FLAG_WIDTH_LOG2(i->flags)) <= width &&
+               (i->type == VIR_TYPE_I32 || i->type == VIR_TYPE_I64);
+    if (i->op == VIR_OP_AND && (x64_vir_value_immediate(f, i->b, &mask) ||
+                                x64_vir_value_immediate(f, i->a, &mask)))
+        return mask >= 0 && mask < (INT64_C(1) << (width * 8));
+    return false;
 }
 
 /* An IR i32 does not itself guarantee zero upper bits: parameters, calls,

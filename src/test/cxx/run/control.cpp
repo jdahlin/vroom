@@ -1,27 +1,79 @@
-/* if/else chains, while with break and continue, logical operators, recursion, overloads */
-int fib(int n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); }
-int collatz(long n) { int steps = 0; while (n != 1) { if (n % 2 == 0) n = n / 2; else n = 3 * n + 1; steps += 1; } return steps; }
-int first_multiple(int of, int above) { int i = above; while (true) { i += 1; if (i % of != 0) continue; break; } return i; }
-bool between(int x, int lo, int hi) { return lo <= x && x <= hi; }
-bool outside(int x, int lo, int hi) { return x < lo || x > hi; }
-int pick(int x) { return 1; }
-int pick(long x) { return 2; }
-int pick(double x) { return 3; }
-double half(double x) { return x / 2; }
-unsigned mask(unsigned x, int bits) { return x & ((1u << bits) - 1); }
-int sign(int x) { if (x > 0) { return 1; } else if (x < 0) { return 0 - 1; } else { return 0; } }
+// statements: [stmt.select], [stmt.iter], [stmt.jump], [stmt.label]
+int collatz(int n) {
+    int steps = 0;
+    while (n != 1) {
+        if (n % 2 == 0)
+            n /= 2;
+        else
+            n = 3 * n + 1;
+        ++steps;
+    }
+    return steps;
+}
+
+int classify(int x) {
+    switch (x) {
+    case 0:
+        return 10;
+    case 1:
+    case 2:
+        x += 5;
+        break;
+    case 7: {
+        int y = x * 2;
+        return y;
+    }
+    default:
+        x = -x;
+    }
+    return x;
+}
+
+int with_goto(int n) {
+    int total = 0;
+again:
+    total += n;
+    if (--n > 0)
+        goto again;
+    return total;
+}
+
+int conditions(int n) {
+    int sum = 0;
+    if (int d = n - 3)
+        sum += d;
+    else
+        sum += 100;
+    if (int k = n; k > 2)
+        sum += k;
+    int i = n;
+    while (int j = i--)
+        sum += j;
+    for (int a = 0, b = 10; a < b; a += 2, --b) {
+        if (a == 4)
+            continue;
+        sum += a * b;
+    }
+    switch (int s = n & 3; s) {
+    case 1:
+        sum += 7;
+        break;
+    default:
+        sum += s;
+    }
+    do
+        sum -= 3;
+    while (sum > 200);
+    for (;;) {
+        if (sum > 50)
+            break;
+        sum += 11;
+    }
+    return sum;
+}
+
 int main() {
-	if (fib(15) != 610) return 1;
-	if (collatz(27) != 111) return 2;
-	if (first_multiple(7, 50) != 56) return 3;
-	if (!between(5, 1, 9)) return 4;
-	if (between(10, 1, 9)) return 5;
-	if (!outside(10, 1, 9)) return 6;
-	if (pick(1) != 1) return 7;
-	if (pick(1L) != 2) return 8;
-	if (pick(1.5) != 3) return 9;
-	if (half(5) != 2.5) return 10;
-	if (mask(0xabcdu, 8) != 0xcdu) return 11;
-	if (sign(5) + sign(0 - 7) + sign(0) != 0) return 12;
-	return 0;
+    int r = collatz(27) + classify(0) + classify(2) + classify(7) +
+            classify(-4) + with_goto(5) + conditions(5) + conditions(3);
+    return r & 255;
 }

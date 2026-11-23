@@ -4,3 +4,20 @@ repos:
     hooks:
       - id: clang-format
         files: ^src/.*\.(c|cpp|h)$
+  - repo: local
+    hooks:
+      # The C++ front end holds memory in owners (src/include/frontend/cplusplus/owned.h,
+      # the one file that calls these): no free() or raw allocation anywhere else.
+      - id: no-raw-allocation
+        name: C++ front end allocates through owned.h (no free/malloc/realloc/strdup)
+        language: pygrep
+        entry: '(^|[^_a-zA-Z0-9.>])(free|malloc|calloc|realloc|strdup|strndup)\s*\('
+        files: ^src/(frontend/cplusplus|include/frontend/cplusplus)/.*\.(cpp|h|inc)$
+        exclude: ^src/include/frontend/cplusplus/owned\.h$
+      # ... and writes no conditional operator (?:): if/else, a switch, a table
+      # or a named helper instead (doc/PLAN-cxx-spec.md, Conventions).
+      - id: no-conditional-operator
+        name: C++ front end uses no conditional operator (?:)
+        language: python
+        entry: src/tools/check-no-conditional-operator.py
+        files: ^src/(frontend/cplusplus|include/frontend/cplusplus)/.*\.(cpp|h)$

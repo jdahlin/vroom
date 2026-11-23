@@ -44,8 +44,9 @@ typedef struct counts {
 
 static void spin(unsigned k)
 {
-	for (volatile unsigned i = 0; i < k; i++)
-		;
+	volatile unsigned i = 0;
+	while (i < k)
+		i = i + 1;
 }
 
 static void count_item(void *arg, size_t i)

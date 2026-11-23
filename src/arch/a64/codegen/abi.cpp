@@ -217,6 +217,8 @@ VPRIV bool a64_abi_result_is_indirect(cc *c, ast_qualified_type t)
 
     if (codegen_type_is_bool_vector(c, t))
         return T(c, t)->n > 8 && T(c, t)->n != 16;
+    if (codegen_type_is_in_memory(c, t))
+        return true;
     return codegen_type_is_record_like(c, t) && codegen_type_size(c, t) > 16 &&
            !a64_abi_hfa_classify(c, t, &n);
 }

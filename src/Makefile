@@ -59,24 +59,36 @@ else
 HOST_CPU  ?= $(HOST_CPU_A64)
 endif
 endif
+VCC_CXX_DIALECT = -x c++ -std=gnu++20 -fno-exceptions
 VCC_LANG ?= c++
 ifeq ($(VCC_LANG),c++)
 VCC_CC = $(CCACHE) $(HOST_CXX)
-VCC_DIALECT = -x c++ -std=gnu++20
+VCC_DIALECT = $(VCC_CXX_DIALECT)
+# The sources are C that also compiles as C++: {0} and partial designated
+# initializers, array designators, VLAs, string literals as char *, mixed
+# anonymous enums.  Those idioms are deliberate; keep C++ from warning on them.
+VCC_DIALECT_WARN = -Wno-missing-field-initializers -Wno-missing-braces \
+	-Wno-c99-designator -Wno-vla-cxx-extension -Wno-writable-strings \
+	-Wno-deprecated-anon-enum-enum-conversion
+# The host tools use the C runtime. Let the C driver select the link libraries.
+VCC_LINK = $(CCACHE) $(HOST_CC)
 else ifeq ($(VCC_LANG),c)
 VCC_CC = $(CCACHE) $(HOST_CC)
 VCC_DIALECT = -x c -std=c11
+VCC_DIALECT_WARN = -Wno-missing-field-initializers -Wno-missing-braces
+VCC_LINK = $(VCC_CC)
 else
 $(error VCC_LANG must be c or c++)
 endif
-VCC_LINK   = $(VCC_CC)
 # VCC_SAN/VCC_OPT: set by the sanitizer variants (vcc-asan, vcc-tsan below)
 VCC_SAN   ?=
 VCC_SANLD ?=
 VCC_OPT   ?= -O3 $(HOST_CPU)
 # include/: the headers other modules include (common/region.h, frontend/pp/pp.h, ...)
-VCC_INC    = -I$(abspath include)
-VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
+VCC_INC    = -I$(abspath include) -I$(abspath $(OUT)/generated/include)
+# Warnings are errors; `make VCC_WERROR=` for another compiler or version.
+VCC_WERROR ?= -Werror
+VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(VCC_DIALECT_WARN) $(VCC_WERROR) $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
 # emit -2.5 % instructions, -c as a whole the same).
@@ -96,6 +108,16 @@ VCC_FAST   = $(VCC_CFLAGS) $(VCC_OPT) $(VCC_PGO) -pthread
 VCC_LDFLAGS = -O3 $(VCC_SAN) $(VCC_SANLD) $(VCC_PGO) $(VCC_LTO) $(if $(VCC_LTO),$(LTO_LINK))
 OBJ        = $(OUT)/obj
 
+# Build the query frontend from the compiler sources with occurrence recording.
+# A separate object directory keeps production layouts and hot paths identical.
+.PHONY: vref
+vref: $(OUT)/vref
+	$(MAKE) OUT=$(OUT)/vref-lib VCC_OPT='$(VCC_OPT) -DVCC_REFACTOR' $(OUT)/vref-lib/vpp
+
+$(OUT)/vref: bin/vref/vref.py | $(OUT)
+	cp $< $@
+	chmod +x $@
+
 vcc: $(OUT)/vcc $(OUT)/vsh/sh $(OUT)/vld $(OUT)/vas $(OUT)/var $(OUT)/vcc-nm $(OUT)/vcc-objcopy $(OUT)/vccd $(OUT)/lextest $(OUT)/vpp $(OUT)/vlink $(OUT)/vasm $(OUT)/virtest $(OUT)/viralloc $(OUT)/task-test
 
 o = $(patsubst %.cpp,$(OBJ)/%.o,$(1))
@@ -108,7 +130,7 @@ as_SRC   = as/as.cpp as/symbol.cpp as/expression.cpp as/section.cpp as/data-dire
            arch/x64/as/x87.cpp arch/x64/as/sse.cpp arch/x64/as/avx.cpp
 # the shared library (doc/quality/WORK-common.md): every tool links all of both lists,
 # so a file moves between them and the tools without touching a tool's rule
-common_SRC = common/archive-reader.cpp common/fail.cpp common/intern.cpp common/digest-xxh3.cpp common/digest-blake3.cpp common/digest-sha256.cpp
+common_SRC = common/archive-reader.cpp common/fail.cpp common/response-files.cpp common/intern.cpp common/digest-xxh3.cpp common/digest-blake3.cpp common/digest-sha256.cpp
 port_SRC   = port/crc32c.cpp port/stack-guard.cpp port/job-regions.cpp port/task.cpp
 LIB_SRC    = $(common_SRC) $(port_SRC)
 LEX_ASM = $(if $(filter x86_64,$(HOST_ARCH)),frontend/lex/x86-simd.S)
@@ -130,8 +152,7 @@ SPLIT_MODS = cc pp codegen driver
 vir_SRC  = vir/opcode-table.cpp vir/vir.cpp vir/print.cpp vir/parse.cpp vir/verify.cpp vir/facts.cpp vir/layout.cpp vir/compact.cpp vir/pass-list.cpp $(wildcard vir/pass/*.cpp)
 VIRA_SRC = vir/loops.cpp vir/register-allocation.cpp vir/register-allocation-check.cpp vir/register-allocation-print.cpp	# (not in the unity TU: own statics)
 obj_SRC  = obj/obj.cpp arch/a64/obj/fixup.cpp arch/x64/obj/fixup.cpp platform/linux/elf.cpp platform/win/coff.cpp platform/win/unwind.cpp
-# with the C++ front end (PLAN-cxx.md): it builds the same AST, with the same type, layout and constant code
-cc_SRC   = $(filter-out frontend/c/keywords.cpp frontend/c/replay.cpp,$(wildcard frontend/c/*.cpp)) frontend/c/replay.cpp $(wildcard frontend/cxx/*.cpp) $(wildcard frontend/cxx/codegen/*.cpp) $(wildcard frontend/cxx/declaration/*.cpp) $(wildcard frontend/cxx/expression/*.cpp) $(wildcard frontend/cxx/instantiate/*.cpp)
+cc_SRC   = $(filter-out frontend/c/keywords.cpp frontend/c/replay.cpp,$(wildcard frontend/c/*.cpp)) frontend/c/replay.cpp
 # the compile job (driver_job_run); declaration-cache.cpp stays a TU of its own
 driver_SRC = $(filter-out driver/declaration-cache.cpp,$(wildcard driver/*.cpp))
 # pp: the preprocessor and, for now, the diagnostics engine (it uses pp-internal.h)
@@ -140,7 +161,20 @@ codegen_SRC = $(wildcard codegen/*.cpp codegen/opt/*.cpp codegen/rec/*.cpp codeg
 VCC_UNITY ?= y
 SPLIT_SRC = $(foreach m,$(SPLIT_MODS),$($(m)_SRC))
 SPLIT_OBJ = $(if $(VCC_UNITY),$(patsubst %,$(OBJ)/unity/%.o,$(SPLIT_MODS)),$(call o,$(SPLIT_SRC)))
-PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC))
+PP_OBJ  = $(call o,$(PP_SRC)) $(SPLIT_OBJ) $(call mod,vir) $(call o,$(VIRA_SRC)) $(CXX_OBJ)
+# the C++ front end written against the standard (src/frontend/cplusplus,
+# doc/PLAN-cxx-spec.md) and its lowering, which the driver calls for C++:
+# C++20 code, so only a C++-hosted vcc (VCC_LANG=c++) has them
+# (the lowering to C's AST needs C's front end and code generator: apart
+# from the cplusplus module; dump/ is the developer outputs, -fcxx-dump=)
+cxxlower_SRC = $(wildcard frontend/cplusplus/lower/*.cpp)
+cplusplus_SRC = $(filter-out $(cxxlower_SRC),$(wildcard frontend/cplusplus/*/*.cpp frontend/cplusplus/ext/*/*.cpp frontend/cplusplus/abi/*/*.cpp))
+CXX_OBJ = $(if $(filter c++,$(VCC_LANG)),$(call mod,cplusplus) $(call o,$(cxxlower_SRC)))
+# its subset of C++ (doc/PLAN-cxx-spec.md, Conventions), held by the compiler:
+# no RTTI, no C++ library header (C headers only), no object with a static
+# constructor or destructor, and no warning
+CPLUSPLUS_FLAGS = -fno-rtti -nostdinc++ -Wglobal-constructors -Wexit-time-destructors -Werror
+$(OBJ)/unity/cplusplus.o $(call o,$(cplusplus_SRC) $(cxxlower_SRC)): XFLAGS = $(CPLUSPLUS_FLAGS)
 # one module's objects: its unity TU, or its files
 mod = $(if $(VCC_UNITY),$(OBJ)/unity/$(1).o,$(call o,$($(1)_SRC)))
 AS_SRC  = $(AS_FILES) $(as_SRC) $(obj_SRC)
@@ -166,14 +200,14 @@ $(OBJ)/%.o: %.cpp Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER) | $(OBJ)
 	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
 
 # rewritten only when the list of files changes
-UNITY_C = $(patsubst %,$(OBJ)/unity/%.cpp,$(SPLIT_MODS) as obj vir server)
+UNITY_C = $(patsubst %,$(OBJ)/unity/%.cpp,$(SPLIT_MODS) as obj vir server cplusplus)
 $(UNITY_C): $(OBJ)/unity/%.cpp: FORCE
 	@mkdir -p $(dir $@)
 	@(echo '#define VCC_UNITY 1'; for f in $(abspath $($*_SRC)); do echo "#include \"$$f\""; done) > $@.tmp
 	@if cmp -s $@.tmp $@; then rm $@.tmp; else mv $@.tmp $@; fi
 
 $(UNITY_C:.cpp=.o): %.o: %.cpp Makefile $(LANG_STAMP) $(BOOTSTRAP_COMPILER)
-	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
+	$(VCC_CC) $(VCC_DIALECT) $(VCC_FAST) $(VCC_LTO) $(XFLAGS) -MMD -MP -MF $(@:.o=.dep) -c $< -o $@
 
 FORCE:
 .PHONY: FORCE
@@ -217,6 +251,33 @@ $(OUT)/vasm: $(call o,bin/vasm/vasm.cpp $(LIB_SRC)) $(AS_OBJ)
 # virtest: VIR's parser, verifier and printer (SPEC-vir.md 16); depends on nothing else
 $(OUT)/virtest: $(call o,bin/virtest/virtest.cpp $(LIB_SRC)) $(call mod,vir)
 	$(VCC_LINK) $(VCC_LDFLAGS) $^ -o $@
+
+# The offline reader exercises C++20 and the host standard library.
+CLANG_BUILTIN_READER_CXX ?= $(HOST_CXX)
+CLANG_BUILTIN_READER_SRC = tools/clang-builtins/main.cpp tools/clang-builtins/reader.cpp tools/clang-builtins/arm.cpp
+
+$(OUT)/clang-builtin-reader: $(CLANG_BUILTIN_READER_SRC) tools/clang-builtins/reader.h | $(OUT)
+	$(CLANG_BUILTIN_READER_CXX) -std=c++20 -O2 -Wall -Wextra -Werror $(CLANG_BUILTIN_READER_SRC) -o $@
+
+.PHONY: clang-builtin-reader clang-builtin-reader-check builtin-registrations
+clang-builtin-reader: $(OUT)/clang-builtin-reader
+
+clang-builtin-reader-check: clang-builtin-reader $(BUILTIN_GENERATED)
+	python3 ../bench/vcc-builtins.py --check-clang-reader --clang-reader $(OUT)/clang-builtin-reader
+	python3 tools/gen-builtin-registrations.py --check --reader $(OUT)/clang-builtin-reader \
+		--output-root $(OUT)/generated/include
+
+BUILTIN_TD = $(wildcard ../contrib/clang-builtins/clang/include/clang/Basic/*.td)
+BUILTIN_GENERATED = $(OUT)/generated/include/frontend/integer-builtins.inc \
+	$(OUT)/generated/include/frontend/c/target-builtins.inc \
+	$(OUT)/generated/include/frontend/c/builtin-stubs.inc
+$(BUILTIN_GENERATED) &: $(OUT)/clang-builtin-reader tools/gen-builtin-registrations.py $(BUILTIN_TD)
+	python3 tools/gen-builtin-registrations.py --reader $(OUT)/clang-builtin-reader \
+		--output-root $(OUT)/generated/include
+
+builtin-registrations: $(BUILTIN_GENERATED)
+
+$(OBJ)/unity/pp.o $(call o,$(pp_SRC)) $(OBJ)/unity/cc.o $(call o,$(cc_SRC)) $(OBJ)/unity/cplusplus.o $(call o,$(cplusplus_SRC) $(cxxlower_SRC)): $(BUILTIN_GENERATED)
 
 # viralloc: VIR register allocation with a synthetic target (PLAN-vir.md V4)
 VIRALLOC_SRC = $(VIRA_SRC) vir/synthetic-target.cpp
@@ -287,6 +348,7 @@ vccrt: $(OUT)/vpp $(if $(filter environment command line,$(origin AR)),,$(OUT)/v
 # can schedule independent compilation jobs across the recursive invocation.
 SELF ?= $(if $(filter Darwin,$(HOST_OS)),../build/self,$(OUT)-self)
 SELF_CC ?= $(abspath $(OUT))/vpp
+SELF_LANG ?= c
 SELF_TARGET = $(if $(filter Darwin,$(HOST_OS)),arm64-apple-darwin,$(HOST_ARCH)-linux-gnu)
 SELF_FLAGS ?= --target=$(SELF_TARGET) -I$(abspath headers)
 ifeq ($(HOST_OS),Linux)
@@ -297,7 +359,7 @@ endif
 SELF_LINK ?= $(HOST_CC) $(if $(filter Linux,$(HOST_OS)),-no-pie)
 
 self: $(OUT)/vpp
-	$(MAKE) vcc OUT=$(SELF) VCC_LANG=c VCC_PGO= VCC_LTO= VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
+	$(MAKE) vcc OUT=$(SELF) VCC_LANG=$(SELF_LANG) VCC_PGO= VCC_LTO= VCC_CC="$(SELF_CC) $(SELF_FLAGS)" VCC_LINK="$(SELF_LINK)" BOOTSTRAP_COMPILER="$(SELF_CC)"
 
 self-check: self
 	$(MAKE) self SELF=$(SELF)3 SELF_CC=$(abspath $(SELF))/vpp
@@ -320,7 +382,15 @@ vcc-cxx-check: $(C_COMPAT_CHECK) $(CXX_CHECK)
 $(C_COMPAT_CHECK): check-c-compat/%: %
 	$(HOST_CC) -x c -std=c11 $(VCC_FAST) -Wc++-compat $(CXX_CHECK_FLAGS) $<
 $(CXX_CHECK): check-cxx/%: %
-	$(HOST_CXX) $(VCC_FAST) -x c++ -std=gnu++20 $(CXX_CHECK_FLAGS) $<
+	$(HOST_CXX) $(VCC_FAST) $(VCC_CXX_DIALECT) $(CXX_CHECK_FLAGS) $<
+
+# Every file of the C++ front end compiles alone (the default build compiles
+# them as one TU), with the front end's flags: make -k -j 6 cplusplus-check
+CPLUSPLUS_CHECK = $(addprefix check-cplusplus/,$(cplusplus_SRC) $(cxxlower_SRC))
+.PHONY: cplusplus-check $(CPLUSPLUS_CHECK)
+cplusplus-check: $(CPLUSPLUS_CHECK)
+$(CPLUSPLUS_CHECK): check-cplusplus/%: %
+	$(HOST_CXX) $(VCC_CXX_DIALECT) $(VCC_FAST) $(CPLUSPLUS_FLAGS) -fsyntax-only $<
 
 # ---- fuzzing (test/fuzz/; see AGENTS.md) ----
 # libFuzzer from Homebrew LLVM when it has one, else the standalone driver
@@ -350,10 +420,10 @@ $(FUZZ_OUT):
 $(FUZZ_OUT)/fuzz-lex: test/fuzz/fuzz-lex.c test/fuzz/lexref.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-lex.c test/fuzz/lexref.c $(FUZZ_DRIVER) $(LEX_ASM) -x c $(LEX_SRC) $(LIB_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+$(FUZZ_OUT)/fuzz-pp: test/fuzz/fuzz-pp.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) $(BUILTIN_GENERATED) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-pp.c $(FUZZ_DRIVER) $(LEX_ASM) -x c $(pp_SRC) frontend/pp/dircache.cpp $(LEX_SRC) $(LIB_SRC) -o $@
 
-$(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) | $(FUZZ_OUT)
+$(FUZZ_OUT)/fuzz-diag: test/fuzz/fuzz-diag.c test/fuzz/fuzz.h $(FUZZ_DRIVER) $(wildcard frontend/pp/*.cpp frontend/pp/*.h diag/*.cpp) $(LEX_ASM) $(LEX_SRC) $(FUZZ_HDR) $(BUILTIN_GENERATED) | $(FUZZ_OUT)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) $(FUZZ_ENGINE) test/fuzz/fuzz-diag.c $(FUZZ_DRIVER) $(LEX_ASM) -x c $(pp_SRC) frontend/pp/dircache.cpp $(LEX_SRC) $(LIB_SRC) -o $@
 
 # replay the regression inputs (test/fuzz/regress/{lex,pp}/): every one must pass

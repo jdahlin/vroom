@@ -70,15 +70,50 @@ build() {	# build MAKE-TARGET [VAR=VALUE]: a build failure ends the job
 case $JOB in
 arm64)
 	build vcc
+	build vref
+	step vref python3 bench/vref-test.py --bin-dir "$BUILD"
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
+	step builtin-tests-generated python3 src/tools/gen-builtin-tests.py --check \
+		--registry "$BUILD/generated/include/frontend/integer-builtins.inc"
+	step builtin-integer-arity python3 bench/vcc-builtins.py --check-integer-arity --vpp "$BUILD/vpp"
+	step builtin-stubs python3 bench/vcc-builtins.py --check-stubs --vpp "$BUILD/vpp"
+	# __has_builtin, typed calls, -c and constant folding per language and target against the known list
+	step builtin-consistency python3 bench/vcc-builtins.py --check-consistency --vpp "$BUILD/vpp"
+	# builtins with a C body leave no helper call at any level
+	step builtin-bodies python3 bench/vcc-builtin-bodies.py --vpp "$BUILD/vpp"
+	step clang-builtin-reader make -C src -j "$J" OUT="$BUILD" clang-builtin-reader-check
+	step builtin-typed-samples python3 bench/vcc-builtins.py --clang-vendored --sample-calls \
+		--clang-reader "$BUILD/clang-builtin-reader" --vpp "$BUILD/vpp"
 	step memory-cells-generated python3 src/tools/gen-memory-cells.py --check
-	step cxx-builtins-generated python3 src/tools/gen-cxx-builtins.py --check
-	# the suites at each code generator (doc/OPTIMIZATION.md): -O2 VIR (the default), -O1 the
-	# direct emitter, -O3 VIR with the vectorizer and its checks (verifier, allocation check)
+	# the C++ front end's citations and quoted grammar against docs/cxx-spec
+	step cxx-spec-refs python3 bench/cxx-spec-refs.py
+	# no new analysis function without a citation, no unmarked "as clang"
+	step cxx-spec-anchors python3 bench/cxx-spec-anchors.py --check
+	# the syntax views generated from the grammar (syntax-views.inc)
+	step cxx-syntax-views python3 src/tools/gen-syntax-views.py --check
+	step cxx-syntax-conformance python3 bench/cxx-syntax-conformance.py -j "$J" --bin-dir "$BUILD"
+	# each file of the C++ front end alone, with its flags (no RTTI, no C++ library, -Werror)
+	step cxx-files-alone make -C src -k -j "$J" cplusplus-check
+	# the C++ front end's tables and the claims' encoding (-fcxx-dump=selftest, dump/dump.h)
+	: >"$BUILD/empty.cpp"
+	step cxx-selftest "$BUILD/vpp" -x c++ -fsyntax-only -fcxx-dump=selftest "$BUILD/empty.cpp"
+	# the type claims' path through clang, on claims written by hand (doc/PLAN-cxx-sema.md C4)
+	step cxx-sema-claims env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py selftest
+	# the multiple-include guard skip: text and diagnostics as clang -E -P (src/test/cxx/include-guard)
+	step cxx-include-guard env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-include-guard.py --bin-dir "$BUILD"
+	# semantic analysis vs clang on clang's own C++ tests (CXX, SemaCXX, SemaTemplate; fetched, pinned):
+	# no failure beyond src/test/cxx/sema/clang-failures.txt, and none of its lines that passes now
+	step cxx-sema-clang sh -c 'sh bench/fetch-testsuites.sh llvm && env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py -j "$1" --bin-dir "$2" --check' sh "$J" "$BUILD"
+	# C++ programs lowered to C's AST (vpp -c, -O0..-O3) run as clang++'s under qemu
+	step cxx-run      python3 bench/cxx-run.py -j "$J"
+	# programs using libc++ headers: OK or a clean refusal, never a crash (needs libc++ headers; skipped without)
+	[ -d "${LIBCXX_INC:-/usr/lib/llvm-23/include/c++/v1}" ] && step cxx-libcxx-apps python3 bench/cxx-libcxx-apps.py -j "$J" --bin-dir "$BUILD"
+	# Cover VIR at -O0, -O2 and -O3, and the direct emitter at -O1.
 	step ctests       python3 bench/vcc-ctests.py -j "$J"
-	step ctests-O1    python3 bench/vcc-ctests.py -j "$J" -O1
+	step ctests-O0    python3 bench/vcc-ctests.py -j "$J" --suite vcc -O0 --vflags "-fvir-verify -fvir-check"
+	step ctests-O1    python3 bench/vcc-ctests.py -j "$J" -O1 --vflags "-fno-vir"
 	step ctests-O3    python3 bench/vcc-ctests.py -j "$J" -O3 --vflags "-fvir-verify -fvir-check"
 	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
 	step udivconst python3 bench/vcc-udivconst.py --sanitize
@@ -165,7 +200,7 @@ asan)
 	# Explicit vcc-timeout limits measure the normal compiler. ASan/UBSan
 	# makes init_large about 7x slower; allow sanitizer overhead as for TSan.
 	step ctests-vcc   env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc
-	step ctests-vcc-O1 env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc -O1
+	step ctests-vcc-O1 env VCC_BIN="$B" VCC_TIMEOUT_SCALE=6 python3 bench/vcc-ctests.py -j "$J" --suite vcc -O1 --vflags "-fno-vir"
 	step vir-tests-asan python3 bench/vir-test.py -j "$J" --bin-dir "$B"
 	step vir-exposure-asan python3 bench/vir-exposure.py --bin-dir "$B"
 	# Hosted atomics use the runner's native libc/libatomic; arm64 is covered above.
@@ -174,6 +209,8 @@ asan)
 	step bitint-replay python3 bench/vcc-bitint-replay.py --bin-dir "$B" --output "$LOGS/bitint-replay-asan"
 	step diag         python3 bench/vcc-diag.py -j "$J" --bin-dir "$B"
 	step field-uses   python3 bench/vcc-field-uses.py -j "$J" --bin-dir "$B"
+	# the C++ front end compiling its run tests: its own memory errors
+	step cxx-run      env VCC_BIN="$B" python3 bench/cxx-run.py -j "$J"
 	step stress       python3 bench/vcc-stress.py --bin-dir "$B"
 	step vccd         python3 bench/vccd-test.py --bin-dir "$B"
 	step vlink-bad    python3 bench/vlink-bad.py --bin-dir "$B"

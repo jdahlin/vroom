@@ -48,6 +48,7 @@
  * libLLVM.dylib), and Kbuild runs it once per directory (~420 times).
  */
 #include "common/literal.h"
+#include "common/response-files.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -334,7 +335,7 @@ static bool ar_member_file_add(ar_request *q, const char *path,
     } else {
         ar_member m = {ar_path_relative(q->directory, abs),
                        abs,
-                       st.st_mode & 07777,
+                       (uint32_t)(st.st_mode & 07777),
                        (uint64_t)st.st_size,
                        NULL,
                        (int64_t)st.st_mtime,
@@ -1485,6 +1486,11 @@ static int ar_regular_archive_operate(ar_request *q, const vfile_mapping *d,
 
 /* ---------------- operations ---------------- */
 
+static void ar_response_free(struct vresponse_memory ***keep)
+{
+    vresponse_files_free(**keep);
+}
+
 int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 {
     VCLEANUP(ar_request_finish)
@@ -1503,6 +1509,17 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
     ar_old_format format = {0};
     ar_kind kind = AR_KIND_GNU;
 
+    /* ar rcs lib.a @lib.a.rsp (GN's archives): the file's words, as llvm-ar reads them */
+    struct vresponse_memory *rsp = NULL;
+    VCLEANUP(ar_response_free) struct vresponse_memory **rsp_keep = &rsp;
+    {
+        int dfd = open(cwd ? cwd : ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+
+        if (dfd >= 0) {
+            vresponse_files_expand(&argc, &argv, dfd, &rsp);
+            close(dfd);
+        }
+    }
     if (!(files = (char **)(calloc(argc, sizeof(*files)))))
         return 1;
     for (i = 1; i < argc; i++) {

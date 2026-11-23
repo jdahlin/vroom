@@ -1,0 +1,5 @@
+# 16.5.5.6 Friend functions [hidden.friends]
+
+[Contents](../../README.md) · up: [16.5.5 Conforming implementations \[conforming\]](conforming.md) · prev: [16.5.5.5 Member functions \[member.functions\]](member.functions.md) · next: [16.5.5.7 Constexpr functions and constructors \[constexpr.functions\]](constexpr.functions.md)
+
+**1** Whenever this document specifies a friend declaration of a function or function template within a class or class template definition, that declaration shall be the only declaration of that function or function template provided by an implementation. [*Note 1*: In particular, an implementation is not allowed to provide an additional declaration of that function or function template at namespace scope. — *end note*] [*Note 2*: Such a friend function or function template declaration is known as a hidden friend, as it is visible neither to ordinary unqualified lookup ([[basic.lookup.unqual]](../../basic/basic.lookup.unqual.md)) nor to qualified lookup ([[basic.lookup.qual]](../../basic/basic.lookup.qual.md)). — *end note*]

@@ -317,6 +317,11 @@ VPRIV void x64_abi_classify_named(codegen_context *e, ast_qualified_type t,
     a->is_wide_record = x64_abi_type_is_wide_record(c, t);
     a->align =
         codegen_type_alignment(c, t) > 8 ? codegen_type_alignment(c, t) : 8;
+    if (codegen_type_is_in_memory(c, t)) {
+        /* [abi:calls]: a C++ class non-trivial for calls */
+        a->is_in_memory = true;
+        return;
+    }
     /* SysV classifies _BitInt wider than 128 bits as MEMORY, including
 	 * unnamed variadic arguments. Returns use the ordinary hidden pointer. */
     if (codegen_type_is_bitint_big(c, t)) {
@@ -410,6 +415,50 @@ static codegen_lvalue x64_fr(int64_t off)
 {
     return VCC_LITERAL(codegen_lvalue, .kind = CODEGEN_LVALUE_FRAME, .align = 8,
                        .offset = off);
+}
+
+/* push the live temporaries a call clobbers (general registers in `saved`, xmm8-xmm14 in
+   `fsaved`) before it, and pop them after, in reverse */
+VPRIV void x64_temporaries_save(codegen_context *e, uint32_t saved,
+                                uint32_t fsaved)
+{
+    x64_lowering_context *X = e->x64_context;
+    codegen_lvalue d = {.kind = CODEGEN_LVALUE_REGISTER,
+                        .register_number = RSP};
+
+    for (int q = 0; q < 16; q++)
+        if (saved & (1u << q)) {
+            x64_record_emit_three_registers(
+                e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
+            X->outstanding_pushes++;
+        }
+    for (int q = XMM8; q < XMM15; q++)
+        if (fsaved & (1u << q)) {
+            x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
+            x64_record_emit_memory(e, X64_OP_ST, 8, q, &d, false);
+            X->outstanding_pushes++;
+        }
+}
+
+VPRIV void x64_temporaries_restore(codegen_context *e, uint32_t saved,
+                                   uint32_t fsaved)
+{
+    x64_lowering_context *X = e->x64_context;
+    codegen_lvalue s = {.kind = CODEGEN_LVALUE_REGISTER,
+                        .register_number = RSP};
+
+    for (int q = XMM15 - 1; q >= XMM8; q--)
+        if (fsaved & (1u << q)) {
+            x64_record_emit_memory(e, X64_OP_LD, 8, q, &s, false);
+            x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
+            X->outstanding_pushes--;
+        }
+    for (int q = 15; q >= 0; q--)
+        if (saved & (1u << q)) {
+            x64_record_emit_three_registers(
+                e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
+            X->outstanding_pushes--;
+        }
 }
 
 VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
@@ -506,21 +555,7 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         place[k] = total;
         total += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
     }
-    for (int q = 0; q < 16; q++)
-        if (saved & (1u << q)) {
-            x64_record_emit_three_registers(
-                e, X64_OP_PUSH, 8, X64_REGISTER_NONE, q, X64_REGISTER_NONE);
-            X->outstanding_pushes++;
-        }
-    for (int q = XMM8; q < XMM15; q++)
-        if (fsaved & (1u << q)) {
-            codegen_lvalue d = {.kind = CODEGEN_LVALUE_REGISTER,
-                                .register_number = RSP};
-
-            x64_record_emit(e, X64_OP_ADJSP)->immediate = -8;
-            x64_record_emit_memory(e, X64_OP_ST, 8, q, &d, false);
-            X->outstanding_pushes++;
-        }
+    x64_temporaries_save(e, saved, fsaved);
     if (stackalign > 16) {
         codegen_lvalue slot = x64_fr(savedsp = walk_slot_temporary(e, 8, 8));
 
@@ -633,6 +668,27 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         x64_record_emit_three_registers(e, X64_OP_MOVI, 4, RAX,
                                         X64_REGISTER_NONE, X64_REGISTER_NONE)
             ->immediate = fp; /* al: vector registers used */
+    /* C++ exceptions: the call's bounds for the exception table, with the cleanup it unwinds into */
+    walk_state *EW = e->walk_state;
+    bool eh =
+        EW &&
+        EW->eh_fn; /* (a landing pad's calls too, no pad of their own: an address the table lacks terminates) */
+
+    if (eh && EW->eh_nsites == WALK_EH_SITES)
+        EW->eh_overflow = 1, eh = false;
+    if (eh) {
+        uint32_t k = EW->eh_nsites++;
+
+        EW->eh_sites[k].begin = ++EW->eh_marks;
+        /* (in a landing pad: a cleanup's call terminates if it throws, eh_in_pads 2; _Unwind_Resume has none) */
+        EW->eh_sites[k].node =
+            EW->eh_in_pads == 2 ? UINT32_MAX
+            : EW->eh_in_pads    ? 0
+            : EW->cleanup_count
+                ? EW->cleanup_symbol_nodes[EW->cleanups[EW->cleanup_count - 1]]
+                : 0;
+        x64_record_emit(e, X64_OP_EHMARK)->label = EW->eh_sites[k].begin;
+    }
     if (fn) {
         x64_record_emit_three_registers(e, X64_OP_CALLR, 8, X64_REGISTER_NONE,
                                         R11, X64_REGISTER_NONE);
@@ -640,6 +696,10 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         i = x64_record_emit(e, X64_OP_CALL);
         i->reference = ref;
         i->condition = variadic;
+    }
+    if (eh) {
+        EW->eh_sites[EW->eh_nsites - 1].end = ++EW->eh_marks;
+        x64_record_emit(e, X64_OP_EHMARK)->label = EW->eh_marks;
     }
     if (savedsp) {
         codegen_lvalue slot = x64_fr(savedsp);
@@ -678,21 +738,7 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
     } else if (!r) {
         x64_call_park(e, rt);
     }
-    for (int q = XMM15 - 1; q >= XMM8; q--)
-        if (fsaved & (1u << q)) {
-            codegen_lvalue s = {.kind = CODEGEN_LVALUE_REGISTER,
-                                .register_number = RSP};
-
-            x64_record_emit_memory(e, X64_OP_LD, 8, q, &s, false);
-            x64_record_emit(e, X64_OP_ADJSP)->immediate = 8;
-            X->outstanding_pushes--;
-        }
-    for (int q = 15; q >= 0; q--)
-        if (saved & (1u << q)) {
-            x64_record_emit_three_registers(
-                e, X64_OP_POP, 8, q, X64_REGISTER_NONE, X64_REGISTER_NONE);
-            X->outstanding_pushes--;
-        }
+    x64_temporaries_restore(e, saved, fsaved);
     return x64_call_value(e, fn, rt, r);
 }
 

@@ -51,9 +51,6 @@ CC_PRIVATE bool cc_lowering_is_pure(cc *c, uint32_t n, int d)
 /* n, or a temporary holding it (*pre: the assignment to run first) */
 CC_PRIVATE uint32_t cc_lowering_once(cc *c, uint32_t n, uint32_t *pre)
 {
-    ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(n)->ty);
-    uint32_t s, v;
-
     *pre = 0;
     /* A constant conditional must not acquire an automatic temporary merely
 	   because its selected complex value will be used twice. */
@@ -74,6 +71,14 @@ CC_PRIVATE uint32_t cc_lowering_once(cc *c, uint32_t n, uint32_t *pre)
     }
     if (cc_lowering_is_pure(c, n, 0))
         return n;
+    return cc_lowering_save(c, n, pre);
+}
+
+CC_PRIVATE uint32_t cc_lowering_save(cc *c, uint32_t n, uint32_t *pre)
+{
+    ast_qualified_type t = AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(n)->ty);
+    uint32_t s, v;
+
     s = cc_symbol_new(c, AST_SYMBOL_VARIABLE, 0, t, AST_NODE(n)->loc);
     c->syms[s].sc = AST_STORAGE_AUTO;
     v = cc_node_new(c, AST_NODE_VARIABLE, t, AST_NODE(n)->loc);

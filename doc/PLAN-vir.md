@@ -256,6 +256,10 @@ equivalence testing remain. Generated programs use no external calls.
 
 ## Status
 
+VIR is the default backend from `-O0` on arm64 and x86-64. At `-O0` and
+`-O1` it runs the required construction passes by default. The direct emitter
+still covers functions VIR cannot lower and is selectable with `-fno-vir`.
+
 ### V7 switch: optimization levels instead of environment variables (2026-11-13)
 
 `-O2` is VIR, `-O3` adds the loop vectorizer and loop-constant hoisting,

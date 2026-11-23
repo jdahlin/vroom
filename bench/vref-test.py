@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Run each vref command in C, apply its patch and execute the result.
+
+C only since frontend/cxx was removed (7283c431): vref has no C++ front end
+until frontend/cplusplus has the semantics it needs."""
+
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+from hostenv import BUILD
+
+SOURCE = """#include "local.h"
+static int mix(int left, int right, int unused) { return 10 * left + right; }
+static int run(int input) {
+    int first;
+    int second;
+    first = input;
+    first += 2;
+    return mix(first, 3, 9);
+}
+int main(void) { return run(2) != 43; }
+"""
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--bin-dir", type=Path, default=BUILD)
+args = parser.parse_args()
+tool = (Path(args.bin_dir) / "vref").resolve()
+count = 0
+
+
+def run(directory, file, source, op, where, *params, fail=False):
+    global count
+    (directory / file).write_text(source)
+    result = subprocess.run(
+        [tool, op, file, where, *params, "--", "-DTEST=1"], cwd=directory, capture_output=True
+    )
+    assert (result.returncode != 0) == fail, (file, op, result.stderr)
+    assert (directory / file).read_text() == source
+    count += 1
+    if fail:
+        assert not result.stdout and b"Traceback" not in result.stderr
+        return
+    if op == "refs":
+        return result.stdout.decode().splitlines()
+    assert result.stdout.startswith(b"--- a/"), (op, result.stdout)
+    subprocess.run(["git", "apply", "-"], cwd=directory, input=result.stdout, check=True)
+    return (directory / file).read_text()
+
+
+with tempfile.TemporaryDirectory() as td:
+    directory = Path(td)
+    (directory / "local.h").write_text("#if TEST != 1\n#error missing flag\n#endif\n")
+    for file in ("sample.c",):
+        for op, where, params, expected in [
+            ("rename", "6:5", ["total"], "return mix(total, 3, 9);"),
+            ("change-type", "4:9", ["long"], "long first;"),
+            ("delete-var", "5:9", [], "int first;\n    first = input;"),
+            ("move-up", "5:9", [], "int second;\n    int first;"),
+            ("move-down", "4:9", [], "int second;\n    int first;"),
+            ("add-param", "8:12", ["int", "extra", "7"], "mix(first, 3, 9, 7)"),
+            ("swap-param", "2:12", ["1", "2"], "mix(3, first, 9)"),
+            ("remove-param", "2:12", ["3"], "mix(first, 3)"),
+            ("change-param-type", "2:12", ["2", "long"], "long right"),
+            ("extract", "6:5", ["7:15", "advance"], "advance(&first, &input);"),
+        ]:
+            changed = run(directory, file, SOURCE, op, where, *params)
+            assert expected in changed, (op, changed)
+            subprocess.run(
+                [os.environ.get("CLANG", "clang"), "-DTEST=1", file, "-o", "check"],
+                cwd=directory,
+                check=True,
+            )
+            subprocess.run([directory / "check"], cwd=directory, check=True)
+        shadow = "int n;\nint f(int n) {\n    { int n = 4; n++; }\n    return n;\n}\n"
+        assert run(directory, file, shadow, "refs", "2:11") == [f"{file}:2:11", f"{file}:4:12"]
+        for op, where, source, params in [
+            ("rename", "3:20", SOURCE, ["first"]),
+            ("rename", "3:20", SOURCE, ["while"]),
+            ("delete-var", "4:9", SOURCE, []),
+            ("remove-param", "2:12", SOURCE, ["1"]),
+            ("remove-param", "2:12", SOURCE.replace("3, 9);", "3, first++);"), ["3"]),
+            ("swap-param", "2:12", SOURCE + "void *addr = (void *)&mix;\n", ["1", "2"]),
+            ("extract", "6:5", SOURCE, ["8:28", "helper"]),
+            (
+                "rename",
+                "2:11",
+                "#define BOTH(x) (#x, x)\nint f(int p) { return BOTH(p); }\n",
+                ["x2"],
+            ),
+        ]:
+            run(directory, file, source, op, where, *params, fail=True)
+    fixtures = Path(__file__).resolve().parents[1] / "src/test/vref"
+    source = (fixtures / "pair-columns.c").read_text()
+    recipe = fixtures / "pair-columns.toml"
+    for file in ("columns.c",):
+        changed = run(directory, file, source, "recipe", recipe)
+        assert "right[row] = pairs[row].second;" in changed
+        subprocess.run(
+            [os.environ.get("CLANG", "clang"), file, "-o", "check"], cwd=directory, check=True
+        )
+        subprocess.run([directory / "check"], cwd=directory, check=True)
+        run(directory, file, source.replace("limit * 2", "limit * 3"), "recipe", recipe, fail=True)
+        run(
+            directory,
+            file,
+            source.replace("xs[used]", "xs /* keep */ [used]"),
+            "recipe",
+            recipe,
+            fail=True,
+        )
+        run(
+            directory,
+            file,
+            source.replace("free(xs);", "int old = xs[0]; free(xs);"),
+            "recipe",
+            recipe,
+            fail=True,
+        )
+    rule_file = directory / "bad.toml"
+    header = 'within = "int f ( int p ) {"\n'
+    for source, rules in [
+        ("int f(int p) { return p; }", "[ [rule] ]"),  # invalid TOML
+        ("int f(int p) { return p; }", '[[rule]]\nmatch="return @p"\nreplace="return p"\n' * 2),
+        (
+            "int f(int p) { { int p=1; } return p; }",
+            '[[rule]]\nmatch="return @p"\nreplace="return 0"',
+        ),
+        (
+            "#define F(x) (x)\nint f(int p) { return F(p); }",
+            '[[rule]]\nmatch="( p )"\nreplace="(1)"',
+        ),
+    ]:
+        rule_file.write_text(header + rules)
+        run(directory, "guard.c", source, "recipe", rule_file, fail=True)
+    outline = directory / "outline.toml"
+    outline.write_text(
+        'within = "static int fill ( Box * p ) {"\n[outline_if]\n'
+        'match = "if ( @p -> n ) {"\nname = "increment"\nparameters = ["p"]\n'
+    )
+    source = """typedef struct { int n; } Box;
+static int fill(Box *p)
+{
+    if (p->n) {
+        int prior = p->n;
+        for (int i = 0; i < 2; ++i)
+            p->n += prior;
+    }
+    return p->n;
+}
+int main(void) { Box b = {2}; return fill(&b) != 6; }
+"""
+    for file in ("outline.c",):
+        changed = run(directory, file, source, "recipe", outline)
+        assert (
+            "static void increment(Box *p)" in changed
+            and "if (p->n)\n        increment(p);" in changed
+        )
+        subprocess.run(
+            [os.environ.get("CLANG", "clang"), file, "-o", "check"], cwd=directory, check=True
+        )
+        subprocess.run([directory / "check"], cwd=directory, check=True)
+        for blocked in ["return 1;", "p = 0;", "goto out;"]:
+            bad = source.replace("int prior =", blocked + "\n        int prior =").replace(
+                "    return p->n;", "out: return p->n;"
+            )
+            run(directory, file, bad, "recipe", outline, fail=True)
+        bad = source.replace("    if (p->n)", "    int extra = 1;\n    if (p->n)").replace(
+            "+= prior", "+= extra"
+        )
+        run(directory, file, bad, "recipe", outline, fail=True)
+    outline.write_text(
+        'within = "int f ( int n ) {"\n[outline_if]\n'
+        'match = "if ( @count ) {"\nname = "status"\nparameters = ["count", "p"]\n'
+        "return_status = true\n"
+    )
+    source = """int f(int n) {
+    int count = n;
+    int *p = &n;
+    if (count) {
+        if (*p < 0)
+            return 1;
+        return 0;
+    }
+    return 2;
+}
+int main(void) { return f(-1) != 1 || f(1) != 0 || f(0) != 2; }
+"""
+    changed = run(directory, "status.c", source, "recipe", outline)
+    assert "return status(count, p);" in changed
+    subprocess.run(
+        [os.environ.get("CLANG", "clang"), "status.c", "-o", "check"], cwd=directory, check=True
+    )
+    subprocess.run([directory / "check"], cwd=directory, check=True)
+    for replacement in ("if (*p) return 0;", "count++; return 0;"):
+        run(
+            directory,
+            "status.c",
+            source.replace("return 0;", replacement, 1),
+            "recipe",
+            outline,
+            fail=True,
+        )
+print(f"vref: {count} cases passed")

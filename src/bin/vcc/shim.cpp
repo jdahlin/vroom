@@ -4,7 +4,7 @@
  * (SCM_RIGHTS), then it blocks on a 4-byte exit status.  Which tool is meant
  * is taken from argv[0] by the server.
  *
- * No stdio, no malloc: the request is assembled in a static buffer (BSS
+ * For forwarded requests, no stdio or malloc: the request is assembled in a static buffer (BSS
  * pages are only touched as far as the request reaches).
  *
  *   VCC_SOCK   server socket (default: protocol.h vccd_socket_default)
@@ -15,6 +15,9 @@
  * (shell.c); anything vccd declines, any other argv, and a missing vccd run
  * the real shell, $VSH_REAL (default /bin/sh), with the same arguments.
  */
+#include "driver/options-help.h"
+#include "ld/options-help.h"
+#include "common/cmdlib.h"
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <fcntl.h>
@@ -157,6 +160,36 @@ static int shim_vccd_start(const char *dir, const struct sockaddr_un *sa)
 
 int main(int argc, char **argv)
 {
+    if (cmdlib_wants_help(argc, argv)) {
+        const char *base = strrchr(argv[0], '/');
+        const char *tool = base ? base + 1 : argv[0];
+        printf("Usage: %s [OPTIONS]\n  --help  Show available options.\n",
+               tool);
+#ifdef VSH
+        puts("  -c SCRIPT   Run a recipe.\n  -ec SCRIPT  Stop at the first "
+             "failing command.");
+#else
+        if (!strcmp(tool, "var") || !strcmp(tool, "ar") ||
+            !strcmp(tool, "llvm-ar"))
+            puts("  [--thin] OP[MODIFIERS] [POSITION] ARCHIVE [MEMBERS...]\n"
+                 "  Operations: r m t p x d q s\n  Modifiers: c P D U u s S T "
+                 "i b a");
+        else if (!strcmp(tool, "vld") || !strcmp(tool, "ld"))
+            linker_options_print();
+        else if (!strcmp(tool, "vcc-nm"))
+            nm_options_print();
+        else if (!strcmp(tool, "vcc-objcopy"))
+            objcopy_options_print();
+        else {
+            puts("  -o FILE INPUT.c    Compile and link an executable.\n"
+                 "  -c INPUT.c         Compile to an object.\n"
+                 "  --version  -dumpmachine  -print-file-name=NAME\n"
+                 "  --vccd-diagnostics[=summary|json]");
+            compiler_options_print();
+        }
+#endif
+        return 0;
+    }
     const char *path = getenv("VCC_SOCK");
     struct sockaddr_un sa = {.sun_family = AF_UNIX};
     struct vccd_request_header *h =

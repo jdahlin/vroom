@@ -58,6 +58,9 @@ typedef struct a64_vir_context {
         chain_high; /* [cclo, cchi]: compares joined by and/or into one condition (cmp, ccmp ...); cchi 0 none */
     int chain_condition; /* ... the condition the flags hold so far */
     uint32_t
+        carry_value; /* the icmp whose answer the flags of the add or sub in front of it hold (a64_vir_carry_follows); VIR_BLOCK_NONE none */
+    int carry_condition; /* ... the condition under which it is true */
+    uint32_t
         pointer_value; /* a ptradd the next load or store addresses through (0 none) */
     int pointer_base;       /* ... its base register */
     int64_t pointer_offset; /* ... and offset */
@@ -237,7 +240,7 @@ extern const uint8_t a64_vir_condition_swapped[10];
 
 VPRIV __attribute__((noreturn, cold)) void a64_vir_fail(a64_vir_context *L,
                                                         const char *why);
-VPRIV void *a64_vir_array_grow(void *p, uint32_t *cap, uint32_t n, size_t sz);
+#include "common/vector.h"
 VPRIV uint32_t a64_vir_arguments_assign(bool darwin, const uint32_t *w,
                                         a64_vir_argument *out, uint32_t max,
                                         int32_t *stk);
@@ -302,7 +305,6 @@ VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in,
                                 uint8_t res);
 VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
                               uint8_t res);
-VPRIV void a64_vir_blocks_order(a64_vir_context *L);
 VPRIV void a64_vir_function_body_lower(a64_vir_context *L);
 
 #endif

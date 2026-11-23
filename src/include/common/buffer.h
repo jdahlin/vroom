@@ -21,6 +21,11 @@
  *   VBUFFER_FD       the storage is the caller's and is written to fd when the
  *                    next append does not fit, and by vbuffer_flush
  *                    (vbuffer_fd); a write error fails
+ *   VBUFFER_INLINE   the storage is the caller's until an append does not fit
+ *                    (vbuffer_inline): the bytes then move to the heap and the
+ *                    flag is cleared.  For a buffer that is usually short and
+ *                    made often: no allocation until it outgrows its owner's
+ *                    bytes.  Its owner frees b.p only when the flag is clear
  *
  * Fields keep short names (p, n, cap): they are read at about 500 sites.
  *
@@ -42,7 +47,12 @@
 #include "common/attributes.h"
 #include "common/fail.h"
 
-enum { VBUFFER_STICKY = 1, VBUFFER_FIXED = 2, VBUFFER_FD = 4 };
+enum {
+    VBUFFER_STICKY = 1,
+    VBUFFER_FIXED = 2,
+    VBUFFER_FD = 4,
+    VBUFFER_INLINE = 8
+};
 #define VBUFFER_STICKY_INIT {.flags = VBUFFER_STICKY}
 
 typedef struct vbuffer {
@@ -63,6 +73,19 @@ static inline VNONNULL(1, 2) void vbuffer_fixed(vbuffer *b, char *storage,
     b->cap = size;
     b->fd = -1;
     b->flags = VBUFFER_FIXED;
+    b->failed = false;
+    storage[0] = 0;
+}
+
+/* a buffer that starts in `size` bytes of the caller's storage and moves to the heap when more is appended */
+static inline VNONNULL(1, 2) void vbuffer_inline(vbuffer *b, char *storage,
+                                                 size_t size)
+{
+    b->p = storage;
+    b->n = 0;
+    b->cap = size;
+    b->fd = -1;
+    b->flags = VBUFFER_INLINE;
     b->failed = false;
     storage[0] = 0;
 }
@@ -130,10 +153,18 @@ __attribute__((noinline)) static inline bool vbuffer_make_room(vbuffer *b,
         vbuffer_fail(b, "text too long for a fixed buffer", false);
         return false;
     }
-    cap = b->cap ? b->cap * 2 : 4096;
+    cap = 4096;
+    if (b->cap && !(b->flags & VBUFFER_INLINE))
+        cap = b->cap * 2;
     while (cap < b->n + extra + 1)
         cap *= 2;
-    p = (char *)realloc(b->p, cap);
+    /* the caller's bytes are copied, not given to realloc */
+    if (b->flags & VBUFFER_INLINE) {
+        p = (char *)malloc(cap);
+        if (p)
+            memcpy(p, b->p, b->n + 1);
+    } else
+        p = (char *)realloc(b->p, cap);
     if (!p) {
         b->failed = true;
         if (!(b->flags & VBUFFER_STICKY))
@@ -142,6 +173,7 @@ __attribute__((noinline)) static inline bool vbuffer_make_room(vbuffer *b,
     }
     b->p = p;
     b->cap = cap;
+    b->flags &= (unsigned char)~VBUFFER_INLINE;
     return true;
 }
 

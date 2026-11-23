@@ -74,6 +74,10 @@ struct cc {
     struct cc_type_name *
         tyb; /* tyname/tyname_sugar: 8 buffers in rotation (allocated at the first) */
     unsigned tyk;
+    uint32_t
+        eh_resume_sym; /* C++ with exceptions: _Unwind_Resume, what a landing pad ends with (0: none yet) */
+    uint32_t eh_begin_catch_sym,
+        eh_terminate_sym; /* ... __cxa_begin_catch, std::terminate: a cleanup that throws terminates */
     jmp_buf bail;
     int errors;
     struct cc_recovery_point *
@@ -177,7 +181,8 @@ struct cc {
     uint32_t *
         switch_cases; /* AST_NODE_CASE/AST_NODE_DEFAULT nodes of the innermost switch */
     int in_loop, in_switch, in_stmtexpr;
-    bool sw_default;              /* the innermost switch has a default label */
+    int in_body;     /* parsing a builtin's C body (builtin-body.cpp) */
+    bool sw_default; /* the innermost switch has a default label */
     struct cc_switch_case *cases; /* the open switches' case labels */
     uint32_t ncase, capcase, case_base;
     ast_qualified_type switch_ty;
@@ -295,8 +300,6 @@ enum {
     CC_BUILTIN_CLZG,
     CC_BUILTIN_CTZG,
     CC_BUILTIN_POPCOUNTG,
-    CC_BUILTIN_STDC_COUNT_ONES,
-    CC_BUILTIN_STDC_TRAILING_ZEROS,
     CC_BUILTIN_SHUFFLEVECTOR,
     CC_BUILTIN_CONVERTVECTOR,
     CC_BUILTIN_BSWAP16,
@@ -416,13 +419,19 @@ enum {
     CC_BUILTIN_NANS,
     CC_BUILTIN_ISSIGNALING,
     CC_BUILTIN_ISFPCLASS,
-    CC_BUILTIN_ISSUBNORMAL,
-    CC_BUILTIN_ISZERO,
+    CC_BUILTIN_BODY, /* has a C body (builtin-body.cpp): substituted at the call, never reaches a code generator */
     CC_BUILTIN_X86_SIMD,
     CC_BUILTIN_X86_PCMPSTR,
     CC_BUILTIN_X86_BLENDVB,
     CC_BUILTIN_X86_CRC32,
+    CC_BUILTIN_X86_ADDCARRY,
+    CC_BUILTIN_ARM_FP16_ADD,
+    CC_BUILTIN_ARM_FP16_SUB,
     CC_BUILTIN_ELEMENTWISE_ABS,
+    CC_BUILTIN_ELEMENTWISE_MIN,
+    CC_BUILTIN_ELEMENTWISE_MAX,
+    CC_BUILTIN_ELEMENTWISE_ADD_SAT,
+    CC_BUILTIN_ELEMENTWISE_SUB_SAT,
     CC_BUILTIN_STDC_ROTL,
     CC_BUILTIN_STDC_ROTR,
     CC_BUILTIN_FAST_SQRT, /* internal hardware sqrt, full fast-math only */

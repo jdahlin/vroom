@@ -53,7 +53,7 @@ mkdir -p "$DST"
 
 # name | url | pinned commit | sparse paths (empty: whole repo)
 SUITES='
-llvm|https://github.com/llvm/llvm-project.git|bb04dac04a0f9e9b99ffc2e28b4806d4f98e7966|clang/test/C clang/test/Sema clang/test/Preprocessor clang/test/Lexer clang/test/Parser clang/utils/ABITest clang/LICENSE.TXT
+llvm|https://github.com/llvm/llvm-project.git|bb04dac04a0f9e9b99ffc2e28b4806d4f98e7966|clang/test/C clang/test/Sema clang/test/Preprocessor clang/test/Lexer clang/test/CXX clang/test/Parser clang/test/SemaCXX clang/test/SemaTemplate clang/test/CodeGenCXX libcxx/test/std libcxx/test/support libcxx/LICENSE.TXT clang/lib/Lex clang/include/clang/Lex clang/utils/ABITest clang/LICENSE.TXT
 gcc|https://github.com/gcc-mirror/gcc.git|917da9c6e019407c9d469455ad4c50c062470d6c|gcc/testsuite/gcc.c-torture gcc/testsuite/gcc.dg gcc/testsuite/c-c++-common gcc/testsuite/gcc.target/aarch64 gcc/testsuite/lib COPYING3
 c-testsuite|https://github.com/c-testsuite/c-testsuite.git|5c7275656d751de0e68b2d340a95b5681858ed07|
 llvm-test-suite|https://github.com/llvm/llvm-test-suite.git|2ecf20c22c4c25051026fa450e0b0beb7d922209|SingleSource LICENSE.TXT
@@ -64,6 +64,7 @@ chibicc|https://github.com/rui314/chibicc.git|90d1f7f199cc55b13c7fdb5839d1409806
 cproc|https://github.com/michaelforney/cproc.git|d1c53ddf56571573a7025324c8dd5c6d547a4d1f|
 kefir|https://git:public@git.protopopov.lv/kefir.git|7c59547068eaa0723b4db83d3fb70f448b0f0cb1|
 TSVC_2|https://github.com/UoB-HPC/TSVC_2.git|911fc639b933df38a7728477ce4b2e68e9c8eeff|
+itanium-abi|https://github.com/itanium-cxx-abi/cxx-abi.git|fae5e46c86147a457a057c6372fa95ec38209fe8|abi.html abi-eh.html
 '
 
 pin() {  # the pinned commit, or HEAD
@@ -77,11 +78,12 @@ fetch() {  # name url rev paths
     rm -rf "$d"
     if [ -n "$paths" ]; then
       git clone -q --filter=blob:none --no-checkout --depth 1 "$url" "$d"
-      git -C "$d" sparse-checkout set --no-cone $(for p in $paths; do printf '/%s ' "$p"; done)
     else
       git clone -q --no-checkout --depth 1 "$url" "$d"
     fi
   fi
+  # set on every run, so that a path added to the list reaches an existing clone
+  [ -z "$paths" ] || git -C "$d" sparse-checkout set --no-cone $(for p in $paths; do printf '/%s ' "$p"; done)
   if [ "$rev" != HEAD ]; then
     git -C "$d" fetch -q --depth 1 origin "$rev"
     git -C "$d" checkout -q --detach "$rev"

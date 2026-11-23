@@ -50,9 +50,12 @@ void vjob_region_debug_release(vjob_region *r, size_t used)
     char *vec = (char *)malloc(np);
     int i;
 
-    mincore(r->p, lim,
-            (unsigned char *)((
-                void *)vec)); /* char * on Darwin, unsigned char * on Linux */
+    /* the residency vector is char * on Darwin, unsigned char * on Linux */
+#ifdef __APPLE__
+    mincore(r->p, lim, vec);
+#else
+    mincore(r->p, lim, (unsigned char *)(void *)vec);
+#endif
     for (size_t k = 0; k < np; k++) {
         char *pp = r->p + k * pg;
 

@@ -1,3 +1,7 @@
+/*
+ * literal.h: VCC_LITERAL, a compound literal that compiles as C and as C++:
+ * the aggregate values the shared library builds in expressions.
+ */
 #ifndef VCC_LITERAL_H
 #define VCC_LITERAL_H
 

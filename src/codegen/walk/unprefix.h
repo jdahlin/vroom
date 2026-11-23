@@ -35,9 +35,11 @@
 #undef walk_call_can_inline
 #undef walk_call_emit
 #undef walk_call_inline
+#undef walk_call_slot_argument
 #undef walk_case_label_get
 #undef walk_cases_collect
 #undef walk_cast_emit
+#undef walk_cleanup_call
 #undef walk_cleanups_run
 #undef walk_comparison_fold
 #undef walk_comparison_value
@@ -60,10 +62,10 @@
 #undef walk_float_pattern
 #undef walk_function_emit
 #undef walk_function_is_main
-#undef walk_function_is_tiny
 #undef walk_global_constant_value
 #undef walk_goto_emit
 #undef walk_increment_emit
+#undef walk_increment_emit_kept
 #undef walk_increment_value
 #undef walk_initializer_elements_store
 #undef walk_initializer_emit
@@ -73,6 +75,7 @@
 #undef walk_integer_value_evaluate
 #undef walk_label_new
 #undef walk_label_place
+#undef walk_label_slot_get
 #undef walk_library_call_shrink
 #undef walk_local_slot
 #undef walk_loop_push
@@ -86,6 +89,7 @@
 #undef walk_lvalue_store_memory
 #undef walk_lvalue_store_register
 #undef walk_memory_call_inline
+#undef walk_node_kind_name
 #undef walk_operation_type
 #undef walk_operation_width
 #undef walk_operator_is_comparison
@@ -124,7 +128,6 @@
 #undef walk_unary_emit
 #undef walk_unsupported_fail
 #undef walk_user_label_find
-#undef walk_user_label_get
 #undef walk_valist_emit
 #undef walk_value_constant
 #undef walk_value_convert

@@ -10,34 +10,11 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b,
     const vir_function *f = L->function;
     int x = a64_vir_value_is_64_bit(f, in->a),
         r = a64_vir_operand_general_register(L, 0, R_X16);
-    uint32_t n = f->extra[in->c], stride = x ? 5 : 3;
-    const uint32_t *cw = &f->extra[in->c + 1];
+    uint32_t n = vir_switch_count(f, in);
     uint32_t dl = a64_vir_successor_label(L, b, 0, in->b);
-    uint64_t span = 0, lo = 0, cnt = 0;
+    uint64_t span, lo;
 
-    if (n) {
-        lo = x ? (uint64_t)cw[1] << 32 | cw[0] : cw[0];
-        uint64_t hi = x ? (uint64_t)cw[stride * (n - 1) + 3] << 32 |
-                              cw[stride * (n - 1) + 2]
-                        : cw[stride * (n - 1) + 1];
-
-        span = hi - lo;
-        for (uint32_t k = 0; k < n; k++) {
-            uint64_t a = x ? (uint64_t)cw[stride * k + 1] << 32 | cw[stride * k]
-                           : cw[stride * k];
-            uint64_t h =
-                x ? (uint64_t)cw[stride * k + 3] << 32 | cw[stride * k + 2]
-                  : cw[stride * k + 1];
-
-            cnt +=
-                h - a >= 64
-                    ? 64
-                    : h - a +
-                          1; /* (h - a + 1 wraps to 0 for a range of all 2^64 values) */
-        }
-    }
-    if (n >= 6 && span < 4096 && span + 1 <= 4 * cnt &&
-        !e->unit->cleanups_disabled) {
+    if (vir_switch_is_dense(f, in, &lo, &span) && !e->unit->cleanups_disabled) {
         uint32_t tab = a64_label_new(e), off = e->jump_table_label_count;
         int ix = r;
 
@@ -50,42 +27,24 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b,
             a64_record_emit_three_registers(e, A64_OP_MOV, x, ix = R_X17, r, 0);
         a64_record_emit_immediate(e, A64_OP_SUBSI, x, ZR, ix, (int64_t)span);
         a64_branch_condition_emit(e, A64_CONDITION_HI, dl);
-        if (e->jump_table_label_count + (uint32_t)span + 1 >
-            e->jump_table_label_capacity) {
-            e->jump_table_label_capacity =
-                (e->jump_table_label_count + (uint32_t)span + 1) * 2;
-            e->jump_table_labels = (uint32_t *)(realloc(
-                e->jump_table_labels, (size_t)e->jump_table_label_capacity *
-                                          sizeof *e->jump_table_labels));
-        }
-        if (e->jump_table_count == e->jump_table_capacity) {
-            e->jump_table_capacity =
-                e->jump_table_capacity ? e->jump_table_capacity * 2 : 4;
-            e->jump_tables = (struct codegen_jump_table *)(realloc(
-                e->jump_tables,
-                (size_t)e->jump_table_capacity * sizeof *e->jump_tables));
-        }
-        if (!e->jump_table_labels || !e->jump_tables)
-            abort();
+        e->jump_table_labels = (uint32_t *)vvector_reserve(
+            e->jump_table_labels, &e->jump_table_label_capacity,
+            (size_t)e->jump_table_label_count + span + 1,
+            sizeof *e->jump_table_labels);
+        e->jump_tables = (struct codegen_jump_table *)vvector_reserve(
+            e->jump_tables, &e->jump_table_capacity,
+            (size_t)e->jump_table_count + 1, sizeof *e->jump_tables);
         uint32_t k = 0, l = 0;
 
         for (uint64_t v = lo; v <= lo + span; v++) {
-            uint64_t h;
-
-            while (k < n && (h = x ? (uint64_t)cw[stride * k + 3] << 32 |
-                                         cw[stride * k + 2]
-                                   : cw[stride * k + 1]) < v)
+            while (k < n && vir_switch_case_get(f, in, k).hi < v)
                 k++, l = 0;
-            uint64_t a =
-                k < n ? (x ? (uint64_t)cw[stride * k + 1] << 32 | cw[stride * k]
-                           : cw[stride * k])
-                      : 0;
             uint32_t t;
 
-            if (k < n && a <= v) {
+            if (k < n && vir_switch_case_get(f, in, k).lo <= v) {
                 if (!l)
-                    l = a64_vir_successor_label(L, b, 1 + k,
-                                                cw[stride * k + stride - 1]);
+                    l = a64_vir_successor_label(
+                        L, b, 1 + k, vir_switch_case_get(f, in, k).block);
                 t = l;
             } else {
                 t = dl;
@@ -106,12 +65,9 @@ VPRIV void a64_vir_switch_lower(a64_vir_context *L, uint32_t b,
         return;
     }
     for (uint32_t k = 0; k < n; k++) {
-        uint64_t a = x ? (uint64_t)cw[stride * k + 1] << 32 | cw[stride * k]
-                       : cw[stride * k];
-        uint64_t h = x ? (uint64_t)cw[stride * k + 3] << 32 | cw[stride * k + 2]
-                       : cw[stride * k + 1];
-        uint32_t t =
-            a64_vir_successor_label(L, b, 1 + k, cw[stride * k + stride - 1]);
+        vir_switch_case c = vir_switch_case_get(f, in, k);
+        uint64_t a = c.lo, h = c.hi;
+        uint32_t t = a64_vir_successor_label(L, b, 1 + k, c.block);
 
         if (a == h) {
             a64_record_emit_immediate(e, A64_OP_SUBSI, x, ZR, r,

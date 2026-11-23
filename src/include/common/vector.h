@@ -51,6 +51,22 @@ static inline size_t vvector_capacity(size_t cap, size_t need, size_t size)
     return cap;
 }
 
+/* p (realloc'ed) holding at least `need` elements of `size` bytes, *cap updated: VVECTOR_NEED as a
+   function, for arrays reused from one job to the next (the lowerings' per-function tables) */
+static inline void *vvector_reserve(void *p, uint32_t *cap, size_t need,
+                                    size_t size)
+{
+    size_t c;
+
+    if (need <= *cap)
+        return p;
+    c = vvector_capacity(*cap, need, size);
+    if (!c || c > UINT32_MAX || !(p = realloc(p, c * size)))
+        vout_of_memory();
+    *cap = (uint32_t)c;
+    return p;
+}
+
 /* does `cap` (any unsigned type: the macro passes its own width as `max`) hold the capacity */
 #define VVECTOR_CAPACITY_(cap, newcap)                                         \
     ((size_t)(__typeof__(cap))(newcap) == (newcap))

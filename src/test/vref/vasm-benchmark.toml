@@ -1,0 +1,6 @@
+within = "int main ( int argc , char * * argv ) {"
+[outline_if]
+match = "if ( @repetitions ) {"
+name = "vasm_run_benchmark"
+parameters = ["repetitions", "file_count", "files", "errors"]
+return_status = true

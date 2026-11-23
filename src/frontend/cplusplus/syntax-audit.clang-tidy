@@ -1,0 +1,9 @@
+Checks: '-*,custom-*'
+CustomChecks:
+  - Name: vcc-syntax-index-as-condition
+    Query: |
+      match cxxMemberCallExpr(callee(cxxConversionDecl(hasName("operator bool"))), on(ignoringImpCasts(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("index"), ofClass(cxxRecordDecl(hasName("SyntaxElement"))))))))).bind("root")
+    Diagnostic:
+      - BindName: root
+        Message: "an element's index() is 0 for a token: to ask whether there is a child, test the element itself (if (x))"
+        Level: Warning

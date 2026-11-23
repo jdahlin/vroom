@@ -1,0 +1,2 @@
+typeid-polymorphic.cpp:12:40: error: the rules of [expr.typeid] are not implemented yet
+typeid-polymorphic.cpp:12:40: note: refused by vcc's frontend/cplusplus/expression/postfix-expression.cpp:N (type_identification)

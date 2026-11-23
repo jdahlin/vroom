@@ -186,6 +186,9 @@ static void codegen_prepass_written_mark(codegen_prepass_state *P, uint32_t n,
 
         if (x->op == AST_NODE_COMMA) {
             n = x->b; /* match the emitters' comma-lvalue addressing */
+        } else if (addr && (x->op == AST_NODE_PRE_INCREMENT ||
+                            x->op == AST_NODE_PRE_DECREMENT)) {
+            n = x->a; /* &++x (C++: ++x an lvalue): x's address */
         } else if (x->op == AST_NODE_MEMBER ||
                    (x->op == AST_NODE_CAST &&
                     (x->aux == AST_CAST_NOP ||
@@ -1037,4 +1040,43 @@ VPRIV bool codegen_inline_object_size(codegen_context *e, uint32_t fn,
                cc_builtin_object_size(c, arg, (unsigned)cv.i, size);
     }
     return false;
+}
+
+/* Is the statement `n` small enough to inline a plain static function with it as its body: no
+   inline asm (with `vir`, VIR's builder turns crc32q's template into an operation: that one is
+   fine) and no local over-aligned past 16 bytes. */
+VPRIV bool codegen_statement_is_tiny(cc *c, uint32_t n, bool vir)
+{
+    const node *x;
+
+    if (!n)
+        return true;
+    x = N(n);
+    switch (x->op) {
+    case AST_NODE_ASM:
+        return vir && virbuild_asm_is_crc32q(c, &c->asms[x->a]);
+    case AST_NODE_DECLARATION:
+        return c->syms[x->a].kind != AST_SYMBOL_VARIABLE ||
+               codegen_symbol_alignment(c, x->a) <= 16;
+    case AST_NODE_BLOCK:
+        for (uint32_t i = 0; i < x->c; i++)
+            if (!codegen_statement_is_tiny(c, c->lists[x->b + i], vir))
+                return false;
+        return true;
+    case AST_NODE_IF:
+        return codegen_statement_is_tiny(c, x->b, vir) &&
+               codegen_statement_is_tiny(c, x->c, vir);
+    case AST_NODE_WHILE:
+    case AST_NODE_DO:
+    case AST_NODE_SWITCH:
+        return codegen_statement_is_tiny(c, x->b, vir);
+    case AST_NODE_LABEL:
+    case AST_NODE_CASE:
+    case AST_NODE_DEFAULT:
+        return codegen_statement_is_tiny(c, x->c, vir);
+    case AST_NODE_FOR:
+        return codegen_statement_is_tiny(c, c->lists[x->c + 1], vir);
+    default:
+        return true;
+    }
 }

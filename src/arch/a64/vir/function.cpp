@@ -33,6 +33,7 @@ static void vl_target_block_begin(void *ctx, uint32_t b)
 
     L->flag_condition = -1, L->zero_test_register = -1, L->test_bit = -1;
     L->chain_high = 0;
+    L->carry_value = VIR_BLOCK_NONE;
     L->folded_low = L->folded_high = 0;
     L->pointer_value = 0, L->index_value = 0,
     L->chain_consumer = VIR_BLOCK_NONE;
@@ -318,9 +319,11 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
     const ctype *ft = T(c, c->syms[s].ty);
 
     *why = NULL;
-    /* (unwind tables would have to describe the d registers' slots: not written) */
+    /* Keep the allocation policy the same with and without CFI at -O0 and
+     * -O1. The unwinder cannot yet describe saved d registers. */
     a64_vir_registers_describe(&regs, CODEGEN_IS_DARWIN(c),
-                               !e->unit->options->cfi &&
+                               e->unit->options->opt >= 2 &&
+                                   !e->unit->options->cfi &&
                                    !a64_vir_vectors_cross_call(f));
     if (!vir_loops_build(f, &V->loops)) {
         *why = VIRBUILD_FAILURE(loop_analysis);
@@ -347,12 +350,12 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
         vir_alloc_options ao = {0};
 
         L.context = e, L.function = f;
-        a64_vir_thread_state_instance.low32 = (uint8_t *)a64_vir_array_grow(
+        a64_vir_thread_state_instance.low32 = (uint8_t *)vvector_reserve(
             a64_vir_thread_state_instance.low32,
             &a64_vir_thread_state_instance.low32_capacity, f->insn_count + 1,
             1);
         a64_vir_thread_state_instance.needs_fallthrough =
-            (uint8_t *)a64_vir_array_grow(
+            (uint8_t *)vvector_reserve(
                 a64_vir_thread_state_instance.needs_fallthrough,
                 &a64_vir_thread_state_instance.fallthrough_capacity,
                 f->insn_count + 1, 1);
@@ -399,30 +402,29 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
         free(msg.p);
     }
     L.context = e, L.function = f, L.allocation = &V->allocation;
-    a64_vir_thread_state_instance.slot_offsets = (int64_t *)(a64_vir_array_grow(
+    a64_vir_thread_state_instance.slot_offsets = (int64_t *)(vvector_reserve(
         a64_vir_thread_state_instance.slot_offsets,
         &a64_vir_thread_state_instance.slot_offset_capacity, f->slot_count + 1,
         sizeof(int64_t)));
-    a64_vir_thread_state_instance.spill_offsets =
-        (int64_t *)(a64_vir_array_grow(
-            a64_vir_thread_state_instance.spill_offsets,
-            &a64_vir_thread_state_instance.spill_offset_capacity,
-            V->allocation.spill_count + 1, sizeof(int64_t)));
-    a64_vir_thread_state_instance.labels = (uint32_t *)(a64_vir_array_grow(
+    a64_vir_thread_state_instance.spill_offsets = (int64_t *)(vvector_reserve(
+        a64_vir_thread_state_instance.spill_offsets,
+        &a64_vir_thread_state_instance.spill_offset_capacity,
+        V->allocation.spill_count + 1, sizeof(int64_t)));
+    a64_vir_thread_state_instance.labels = (uint32_t *)(vvector_reserve(
         a64_vir_thread_state_instance.labels,
         &a64_vir_thread_state_instance.label_capacity, f->block_count + 1,
         sizeof(uint32_t)));
-    a64_vir_thread_state_instance.uses = (uint8_t *)a64_vir_array_grow(
+    a64_vir_thread_state_instance.uses = (uint8_t *)vvector_reserve(
         a64_vir_thread_state_instance.uses,
         &a64_vir_thread_state_instance.uses_capacity, f->insn_count + 1, 1);
-    a64_vir_thread_state_instance.low32 = (uint8_t *)a64_vir_array_grow(
+    a64_vir_thread_state_instance.low32 = (uint8_t *)vvector_reserve(
         a64_vir_thread_state_instance.low32,
         &a64_vir_thread_state_instance.low32_capacity, f->insn_count + 1, 1);
-    a64_vir_thread_state_instance.chases = (uint32_t *)(a64_vir_array_grow(
+    a64_vir_thread_state_instance.chases = (uint32_t *)(vvector_reserve(
         a64_vir_thread_state_instance.chases,
         &a64_vir_thread_state_instance.chase_capacity, f->block_count + 1,
         sizeof(uint32_t)));
-    a64_vir_thread_state_instance.path = (uint32_t *)(a64_vir_array_grow(
+    a64_vir_thread_state_instance.path = (uint32_t *)(vvector_reserve(
         a64_vir_thread_state_instance.path,
         &a64_vir_thread_state_instance.path_capacity, f->block_count + 1,
         sizeof(uint32_t)));
@@ -432,21 +434,21 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
     L.uses = a64_vir_thread_state_instance.uses,
     L.low32 = a64_vir_thread_state_instance.low32;
     L.chases = a64_vir_thread_state_instance.chases;
-    a64_vir_thread_state_instance.order = (uint32_t *)(a64_vir_array_grow(
+    a64_vir_thread_state_instance.order = (uint32_t *)(vvector_reserve(
         a64_vir_thread_state_instance.order,
         &a64_vir_thread_state_instance.order_capacity, f->block_count + 1,
         sizeof(uint32_t)));
     a64_vir_thread_state_instance.order_positions =
-        (uint32_t *)(a64_vir_array_grow(
+        (uint32_t *)(vvector_reserve(
             a64_vir_thread_state_instance.order_positions,
             &a64_vir_thread_state_instance.order_position_capacity,
             f->block_count + 1, sizeof(uint32_t)));
-    a64_vir_thread_state_instance.head_labels = (uint32_t *)(a64_vir_array_grow(
+    a64_vir_thread_state_instance.head_labels = (uint32_t *)(vvector_reserve(
         a64_vir_thread_state_instance.head_labels,
         &a64_vir_thread_state_instance.head_label_capacity, f->block_count + 1,
         sizeof(uint32_t)));
     a64_vir_thread_state_instance.epilogue_labels =
-        (uint32_t *)(a64_vir_array_grow(
+        (uint32_t *)(vvector_reserve(
             a64_vir_thread_state_instance.epilogue_labels,
             &a64_vir_thread_state_instance.epilogue_label_capacity,
             f->block_count + 1, sizeof(uint32_t)));

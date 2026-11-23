@@ -6,13 +6,6 @@
 
 /* ---------------- expressions: operators ---------------- */
 
-CC_PRIVATE bool cc_operator_is_comparison(int op)
-{
-    return op == LEX_TOKEN_LESS || op == LEX_TOKEN_LESS_EQUAL ||
-           op == LEX_TOKEN_GREATER || op == LEX_TOKEN_GREATER_EQUAL ||
-           op == LEX_TOKEN_EQUAL_EQUAL || op == LEX_TOKEN_EXCLAMATION_EQUAL;
-}
-
 /* clang -pedantic: arithmetic on void * (GNU: element size 1) */
 static inline void cc_pointer_void_arithmetic_check(cc *c,
                                                     ast_qualified_type pt,
@@ -253,7 +246,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
 
         if (cc_type_is_bool_vector(c, vt) &&
             !(op == LEX_TOKEN_AMPERSAND || op == LEX_TOKEN_PIPE ||
-              op == LEX_TOKEN_CARET || cc_operator_is_comparison(op)))
+              op == LEX_TOKEN_CARET || lex_token_is_comparison(op)))
             cc_operands_invalid_report(c, op, l, r, loc);
 
         if ((both && AST_TYPE(c, lt)->size != AST_TYPE(c, rt)->size) ||
@@ -268,7 +261,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
                                          vt, loc))
             return cc_node_binary_new(
                 c, op,
-                cc_operator_is_comparison(op) ? cc_type_vector_mask(c, vt) : vt,
+                lex_token_is_comparison(op) ? cc_type_vector_mask(c, vt) : vt,
                 l, l, loc); /* (stands in; diagnosed) */
         if (both) {
             l = cc_conversion_apply(c, l, vt);
@@ -279,7 +272,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
         } else {
             l = cc_conversion_apply(c, l, et);
         }
-        if (cc_operator_is_comparison(op))
+        if (lex_token_is_comparison(op))
             res = cc_type_vector_mask(c, vt);
         return cc_node_binary_new(c, op, res, l, r, loc);
     }
@@ -299,7 +292,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
         l = cc_conversion_apply(c, l, ct), r = cc_conversion_apply(c, r, ct);
         return cc_node_binary_new(
             c, op,
-            cc_operator_is_comparison(op) ? cc_type_basic(AST_TYPE_INT) : ct, l,
+            lex_token_is_comparison(op) ? cc_type_basic(AST_TYPE_INT) : ct, l,
             r, loc);
     }
     if (op == LEX_TOKEN_PLUS && cc_type_is_pointer(c, rt) &&
@@ -320,7 +313,7 @@ CC_PRIVATE uint32_t cc_binary_build(cc *c, int op, uint32_t l, uint32_t r,
         cc_pointer_void_arithmetic_check(c, lt, loc, true);
         return cc_node_binary_new(c, op, c->t_ptrdiff, l, r, loc);
     }
-    if (cc_operator_is_comparison(op) &&
+    if (lex_token_is_comparison(op) &&
         (cc_type_is_pointer(c, lt) || cc_type_is_pointer(c, rt))) {
         ast_qualified_type ot = cc_type_is_pointer(c, lt) ? rt : lt;
 
@@ -840,6 +833,13 @@ cc_primary_symbol_build(cc *c, uint32_t s, uint32_t id, uint32_t loc)
             AST_NODE(n)->aux |= AST_NUMBER_ENUMERATOR;
         return n;
     }
+    if (unlikely(y->kind == AST_SYMBOL_BODY_ARGUMENT)) {
+        /* a builtin body's parameter: a copy of the argument's node */
+        uint32_t n = cc_node_new(c, AST_NODE_NONE, y->ty, loc);
+
+        *AST_NODE(n) = *AST_NODE(y->body);
+        return n;
+    }
     if (unlikely(y->kind == AST_SYMBOL_TYPEDEF))
         cc_report_fatal(c, loc,
                         "unexpected type name '%.*s': expected expression",
@@ -993,6 +993,13 @@ static __attribute__((noinline)) uint32_t cc_primary_unbound_parse(cc *c,
             c->syms[ls].flags |= AST_SYMBOL_FLAG_USED;
             return n;
         }
+        if (cc_builtin_stub_known(c, id)) {
+            cc_id_list args;
+            cc_report_error(c, loc, "builtin '%.*s' is not implemented",
+                            CC_IDENTIFIER(id));
+            cc_builtin_arguments_parse(c, &args);
+            return cc_node_error_new(c, loc);
+        }
         lt = cc_library_implicit_type(c, id);
         if (!c->o->implicit_fn && lt)
             cc_report_error(
@@ -1076,7 +1083,9 @@ CC_PRIVATE uint32_t cc_parenthesized_parse(cc *c, uint32_t loc)
                                         "pedantic", NULL};
         bool mac = tok(c)->flags & PP_TOKEN_FLAG_FROM_MACRO;
 
-        if (!(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO))
+        if (unlikely(c->in_body)) {
+            /* (a builtin's body is vcc's own text: no extension to report) */
+        } else if (!(c->prevflags & PP_TOKEN_FLAG_FROM_MACRO))
             CC_REPORT_EXTENSION(c, "gnu-statement-expression",
                                 cc_warning_group_gnu, tok(c)->loc,
                                 "use of GNU statement expression extension");
@@ -1157,6 +1166,11 @@ static uint32_t cc_primary_parse(cc *c)
             }
         }
         s = cc_symbol_lookup(c, id);
+#ifdef VCC_REFACTOR
+        if (unlikely(c->o->refactor) && s)
+            pp_refactor_binding(c->p, c->o->outfd, 'R', loc, c->syms[s].loc, id,
+                                t->flags & PP_TOKEN_FLAG_FROM_MACRO);
+#endif
         next(c);
         if (likely(s))
             return cc_primary_symbol_build(c, s, id, loc);

@@ -118,6 +118,9 @@ pp *pp_open(const pp_opts *o)
 
     vintern_init();
     p->options = o;
+#ifdef VCC_REFACTOR
+    p->refactor_fd = -1;
+#endif
     p->warning_cache_options = NULL; /* (the region may be a previous TU's) */
     p->keep_macro_text = false;
     {
@@ -180,7 +183,7 @@ pp *pp_open(const pp_opts *o)
             mf = lex_file_c89_convert(mf);
         if (o->no_digraphs)
             mf = lex_file_without_digraphs(mf);
-        if (o->c23)
+        if (pp_digit_separators(o))
             mf = lex_file_digit_separators_remove(mf);
     } else {
         /* the caller's string is unpadded; lex_file_get hashes by words (ASan) */

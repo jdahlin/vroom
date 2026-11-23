@@ -20,6 +20,7 @@
  * --bless rewrites the part after `; ---` with what was printed.
  * --equiv (interpreter, step V1's second half) is not implemented.
  */
+#include "common/cmdlib.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -516,8 +517,23 @@ static void report_after(vbuffer *dst, const char *pass, const vbuffer *rep)
     }
 }
 
+enum { OPT_NO_VERIFY = 1, OPT_BLESS, OPT_SELFTEST, OPT_PASSES, OPT_EQUIV };
+static const cmdlib_option virtest_options[] = {
+    {OPT_NO_VERIFY, "--no-verify", NULL, "Skip verification.", false},
+    {OPT_BLESS, "--bless", NULL, "Update the expected output.", false},
+    {OPT_SELFTEST, "--selftest", NULL, "Run the builder self-test.", false},
+    {OPT_PASSES, "--passes", "A,B,...", "Run the listed passes.", false},
+    {OPT_EQUIV, "--equiv", NULL, "Reserved for interpreter equivalence checks.",
+     false},
+    {0, NULL, NULL, NULL, false}};
+
 int main(int argc, char **argv)
 {
+    if (cmdlib_wants_help(argc, argv)) {
+        cmdlib_print_help("Usage: virtest [OPTIONS] FILE", virtest_options);
+        return 0;
+    }
+
     bool verify = true, bless = false, dom = false, changes = false;
     const char *path = NULL, *cli_passes = NULL;
     step steps[MAX_STEPS];
@@ -534,15 +550,16 @@ int main(int argc, char **argv)
     int rc = 1;
 
     for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--no-verify"))
+        int option = cmdlib_match(virtest_options, argc - i, argv + i, NULL);
+        if (option == OPT_NO_VERIFY)
             verify = false;
-        else if (!strcmp(argv[i], "--bless"))
+        else if (option == OPT_BLESS)
             bless = true;
-        else if (!strcmp(argv[i], "--selftest"))
+        else if (option == OPT_SELFTEST)
             return virtest_selftest();
-        else if (!strcmp(argv[i], "--passes") && i + 1 < argc)
+        else if (option == OPT_PASSES)
             cli_passes = argv[++i];
-        else if (!strcmp(argv[i], "--equiv")) {
+        else if (option == OPT_EQUIV) {
             fprintf(stderr, "virtest: --equiv needs the interpreter (virrun), "
                             "which is not implemented yet\n");
             return 2;

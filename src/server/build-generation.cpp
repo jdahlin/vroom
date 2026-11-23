@@ -152,6 +152,23 @@ VPRIV void vccd_generation_restart(void)
     }
 }
 
+/* A shim of another build sent a request.  A server with nothing running
+   starts over from its binary on disk (the new build, after a rebuild) and the
+   shim sends the request again: no stale socket to clean up by hand.  1: the
+   restart is under way; 2: answer RETRY, then restart; 0: busy or not
+   restartable, answer VCCD_STATUS_MISMATCH. */
+VPRIV int vccd_generation_mismatch_enter(void)
+{
+    VLOCK(vccd_generation_lock);
+    if (atomic_load(&vccd_generation_restart_pending))
+        return 1;
+    if (vccd_generation_running_count || vccd_listen_fd < 0 ||
+        !vccd_self_executable[0])
+        return 0;
+    atomic_store(&vccd_generation_restart_pending, 1);
+    return 2;
+}
+
 /* 1: answer VCCD_STATUS_RETRY (the server is restarting); 2: the same, and
    then restart (vccd_generation_restart) */
 VPRIV int vccd_generation_enter(uint32_t pgrp)

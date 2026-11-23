@@ -1,0 +1,181 @@
+# The Itanium C++ ABI's sections: bench/itanium-abi.py from the files
+# bench/fetch-testsuites.sh itanium-abi fetches.  LABEL FILE NUMBER TITLE
+acknowledgements	abi.html		Acknowledgements
+intro	abi.html		Chapter 1: Introduction
+definitions	abi.html	1.1	Definitions
+limits	abi.html	1.2	Limits
+namespace	abi.html	1.3	Namespace and Header
+scope	abi.html	1.4	Scope of This ABI
+scope-library	abi.html	1.4.1	Runtime Libraries
+scope-templates	abi.html	1.4.2	Export Templates
+docs	abi.html	1.5	Base Documents
+layout	abi.html		Chapter 2: Data Layout
+general	abi.html	2.1	General
+pod	abi.html	2.2	POD Data Types
+member-pointers	abi.html	2.3	Member Pointers
+data-member-pointers	abi.html	2.3.1	Data Member Pointers
+member-function-pointers	abi.html	2.3.2	Member Function Pointers
+class-types	abi.html	2.4	Non-POD Class Types
+vtable	abi.html	2.5	Virtual Table Layout
+vtable-general	abi.html	2.5.1	General
+vtable-components	abi.html	2.5.2	Virtual Table Components and Order
+vtable-construction	abi.html	2.5.3	Virtual Table Construction
+vtable-ctor	abi.html	2.6	Virtual tables During Object Construction
+vtable-ctor-general	abi.html	2.6.1	General
+vtable-ctor-vtt	abi.html	2.6.2	VTT Order
+vtable-ctor-layout	abi.html	2.6.3	Construction Virtual Table Layout
+vtable-ctor-entries	abi.html	2.6.4	Construction Virtual Table entries
+array-cookies	abi.html	2.7	Array Operator new Cookies
+guards	abi.html	2.8	Initialization Guard Variables
+rtti	abi.html	2.9	Run-Time Type Information (RTTI)
+rtti-general	abi.html	2.9.1	General
+rtti-emission	abi.html	2.9.2	Place of Emission
+typeid	abi.html	2.9.3	The typeid Operator
+rtti-layout	abi.html	2.9.4	RTTI Layout
+rtti-name	abi.html	2.9.5	std::type_info::name()
+dynamic_cast	abi.html	2.9.6	The dynamic_cast Operator
+dynamic_cast-algorithm	abi.html	2.9.7	The dynamic_cast Algorithm
+exception-matching-algorithm	abi.html	2.9.8	The Exception Handler Matching Algorithm
+calls	abi.html		Chapter 3: Code Emission and APIs
+functions	abi.html	3.1	Functions
+function-defs	abi.html	3.1.1	Function Definitions
+parameters	abi.html	3.1.2	Parameters
+this-parameters	abi.html	3.1.2.1	this Parameters
+vtt-parameters	abi.html	3.1.2.2	VTT Parameters
+non-trivial-parameters	abi.html	3.1.2.3	Non-Trivial Parameters
+special-class-parameters	abi.html	3.1.2.4	Parameters of Special Class Type
+reference-parameters	abi.html	3.1.2.5	Reference Parameters
+empty-parameters	abi.html	3.1.2.6	Empty Parameters
+return-values	abi.html	3.1.3	Return Values
+non-trivial-return-values	abi.html	3.1.3.1	Non-trivial Return Values
+special-class-return-values	abi.html	3.1.3.2	Return Values of Special Class Type
+reference-return-values	abi.html	3.1.3.3	Reference Return Values
+emptty-return-values	abi.html	3.1.3.4	Empty Return Values
+return-value-ctor	abi.html	3.1.3.5	Constructor Return Values
+return-value-dtor	abi.html	3.1.3.6	Destructor Return Values
+vcall	abi.html	3.2	Virtual Calls
+vcall-general	abi.html	3.2.1	General
+vcall.vtable	abi.html	3.2.2	Virtual Table Components
+vcall.callee	abi.html	3.2.3	Callee
+vcall.caller	abi.html	3.2.4	Caller
+vcall.implementation	abi.html	3.2.5	Implementation
+pure-virtual	abi.html	3.2.6	Pure Virtual Function API
+deleted-virtual	abi.html	3.2.7	Deleted Virtual Function API
+obj-ctor	abi.html	3.3	Construction and Destruction APIs
+subobj-ctor	abi.html	3.3.1	Subobject Construction and Destruction
+inh-ctor	abi.html	3.3.2	Construction by Inherited Constructor
+once-ctor	abi.html	3.3.3	One-time Construction API
+array-ctor	abi.html	3.3.4	Array Construction and Destruction API
+ctor-order	abi.html	3.3.5	Controlling Object Construction Order
+ctor-order-motivation	abi.html	3.3.5.1	Motivation
+ctor-order-pragma	abi.html	3.3.5.2	Source Code API
+ctor-order-object-file	abi.html	3.3.5.3	Object File Representation
+ctor-order-runtime	abi.html	3.3.5.4	Runtime Library Support
+ctor-order-linker	abi.html	3.3.5.5	Linker Processing
+dso-dtor	abi.html	3.3.6	DSO Object Destruction API
+dso-dtor-motivation	abi.html	3.3.6.1	Motivation
+dso-dtor-runtime-data	abi.html	3.3.6.2	Runtime Data Structure
+dso-dtor-runtime-api	abi.html	3.3.6.3	Runtime API
+demangler	abi.html	3.4	Demangler API
+exceptions	abi.html		Chapter 4: Exception Handling
+mangling	abi.html	5.1	External Names (a.k.a. Mangling)
+mangling-general	abi.html	5.1.1	General
+mangling-structure	abi.html	5.1.2	General Structure
+mangling.dependent	abi.html		Dependent constructs in templates
+mangling.anonymous	abi.html		Anonymous entities
+mangle.name	abi.html		Names
+mangle.abi-tag	abi.html		ABI tags
+mangle.number	abi.html		Numbers
+mangle.seq-id	abi.html		Sequence numbers
+mangling-operator	abi.html	5.1.3	Operator Encodings
+mangling-special	abi.html	5.1.4	Other Special Functions and Entities
+mangling-special-vtables	abi.html	5.1.4.1	Virtual Tables and RTTI
+mangling-special-thunks	abi.html	5.1.4.2	Virtual Override Thunks
+mangling-special-ctor-dtor	abi.html	5.1.4.3	Constructors and Destructors
+mangling-special-guards	abi.html	5.1.4.4	Guard Variables
+mangling-special-temporaries	abi.html	5.1.4.5	Lifetime-Extended Temporaries
+mangling-transaction-safe	abi.html	5.1.4.6	Transaction-Safe Function
+mangling-type	abi.html	5.1.5	Type encodings
+mangle.qualified-type	abi.html	5.1.5.1	Qualified types
+mangling-builtin	abi.html	5.1.5.2	Builtin types
+mangle.function-type	abi.html	5.1.5.3	Function types
+mangle.decltype	abi.html	5.1.5.4	C++11 decltype
+mangling.named	abi.html	5.1.5.5	Class, union, and enum types
+mangle.array-type	abi.html	5.1.5.6	Array types
+mangle.pointer-to-member-type	abi.html	5.1.5.7	Pointer-to-member types
+mangle.template-param	abi.html	5.1.5.8	Template parameters
+mangle.function-param	abi.html	5.1.5.9	Function parameter references
+mangle.template-arg	abi.html	5.1.5.10	Template Arguments
+expressions	abi.html	5.1.6	Expressions
+mangling.literal	abi.html	5.1.6.1	Literals
+mangling.declaration-reference	abi.html	5.1.6.2	References to declared entities
+mangling-scope	abi.html	5.1.7	Scope Encoding
+closure-types	abi.html	5.1.8	Closure Types (Lambdas)
+lexical-ordering	abi.html	5.1.9	Lexical ordering
+mangling-compression	abi.html	5.1.10	Compression
+vague	abi.html	5.2	Vague Linkage
+vague-inline	abi.html	5.2.1	Out-of-line Functions
+vague-static	abi.html	5.2.2	Static Data
+vague-vtable	abi.html	5.2.3	Virtual Tables
+vague-rtti	abi.html	5.2.4	std::type_info
+vague-ctor	abi.html	5.2.5	Constructors and Destructors
+vague-itemplate	abi.html	5.2.6	Instantiated Templates
+unwind	abi.html	5.3	Unwind Table Location
+eh-itanium-c-abi-exception-handling-revision-1-22	abi-eh.html		Itanium C++ ABI: Exception Handling ($Revision: 1.22 $)
+eh-contents	abi-eh.html		Contents
+eh-introduction	abi-eh.html		Introduction
+eh-definitions	abi-eh.html		Definitions
+eh-base-documents	abi-eh.html		Base Documents
+eh-open-issues	abi-eh.html		Open Issues
+eh-level-i-base-abi	abi-eh.html		Level I. Base ABI
+eh-1.1	abi-eh.html	1.1	Exception Handler Framework
+eh-reasons-for-unwinding	abi-eh.html		Reasons for Unwinding
+eh-the-unwind-process	abi-eh.html		The Unwind Process
+eh-1.2	abi-eh.html	1.2	Data Structures
+eh-1.3	abi-eh.html	1.3	Throwing an Exception
+eh-unwind-raiseexception	abi-eh.html		_Unwind_RaiseException
+eh-unwind-forcedunwind	abi-eh.html		_Unwind_ForcedUnwind
+eh-unwind-resume	abi-eh.html		_Unwind_Resume
+eh-1.4	abi-eh.html	1.4	Exception Object Management
+eh-unwind-deleteexception	abi-eh.html		_Unwind_DeleteException
+eh-1.5	abi-eh.html	1.5	Context Management
+eh-unwind-getgr	abi-eh.html		_Unwind_GetGR
+eh-unwind-setgr	abi-eh.html		_Unwind_SetGR
+eh-unwind-getip	abi-eh.html		_Unwind_GetIP
+eh-unwind-setip	abi-eh.html		_Unwind_SetIP
+eh-unwind-getlanguagespecificdata	abi-eh.html		_Unwind_GetLanguageSpecificData
+eh-unwind-getregionstart	abi-eh.html		_Unwind_GetRegionStart
+eh-1.6	abi-eh.html	1.6	Personality Routine
+eh-1.6.1	abi-eh.html	1.6.1	Parameters
+eh-1.6.2	abi-eh.html	1.6.2	Personality Routine Actions
+eh-1.6.3	abi-eh.html	1.6.3	Transferring Control to a Landing Pad
+eh-1.6.4	abi-eh.html	1.6.4	Rules for Correct Inter-Language Operation
+eh-level-ii-c-abi	abi-eh.html		Level II: C++ ABI
+eh-2.1	abi-eh.html	2.1	Introduction
+eh-2.2	abi-eh.html	2.2	Data Structures
+eh-2.2.1	abi-eh.html	2.2.1	C++ Exception Objects
+eh-2.2.2	abi-eh.html	2.2.2	Caught Exception Stack
+eh-2.3	abi-eh.html	2.3	Standard Runtime Initialization
+eh-2.4	abi-eh.html	2.4	Throwing an Exception
+eh-2.4.1	abi-eh.html	2.4.1	Overview of Throw Processing
+eh-2.4.2	abi-eh.html	2.4.2	Allocating the Exception Object
+eh-2.4.3	abi-eh.html	2.4.3	Throwing the Exception Object
+eh-2.5	abi-eh.html	2.5	Catching an Exception
+eh-2.5.1	abi-eh.html	2.5.1	Overview of Catch Processing
+eh-2.5.2	abi-eh.html	2.5.2	The Personality Routine
+eh-2.5.3	abi-eh.html	2.5.3	Exception Handlers
+eh-2.5.4	abi-eh.html	2.5.4	Rethrowing Exceptions
+eh-2.5.5	abi-eh.html	2.5.5	Finishing and Destroying the Exception
+eh-2.6	abi-eh.html	2.6	Auxiliary Runtime APIs
+eh-level-iii-suggested-implementation	abi-eh.html		Level III. Suggested Implementation
+eh-3.1	abi-eh.html	3.1	Introduction
+eh-3.2	abi-eh.html	3.2	Data Structures
+eh-3.3	abi-eh.html	3.3	Standard Runtime Initialization
+eh-3.3.1	abi-eh.html	3.3.1	Exception Storage
+eh-3.4	abi-eh.html	3.4	Throwing an Exception
+eh-3.4.1	abi-eh.html	3.4.1	Allocating the Exception Object
+eh-3.5	abi-eh.html	3.5	Catching an Exception
+eh-3.5.1	abi-eh.html	3.5.1	Overview of Catch Processing
+eh-3.5.2	abi-eh.html	3.5.2	The Personality Routine
+eh-3.5.3	abi-eh.html	3.5.3	Exception Handlers
+eh-appendix-r-revisions	abi-eh.html		Appendix R: Revisions

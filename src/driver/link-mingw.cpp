@@ -212,8 +212,8 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env,
     char **cav = (char **)(malloc(((size_t)argc + 8) * sizeof(char *))),
          **lav = (char **)(malloc(cap * sizeof(char *)));
     char (*tmp)[PATH_MAX + 32] =
-        (char (*)[4128])(nsrc ? malloc((size_t)nsrc * sizeof(*tmp)) : NULL);
-    char (*own)[PATH_MAX + 64] = (char (*)[4160])(malloc(
+        (decltype(tmp))(nsrc ? malloc((size_t)nsrc * sizeof(*tmp)) : NULL);
+    char (*own)[PATH_MAX + 64] = (decltype(own))(malloc(
         ((size_t)argc + 16) * sizeof(*own))); /* paths and -lX made here */
     char **wl = (char **)(malloc(((size_t)argc + 1) *
                                  sizeof(char *))); /* the -Wl, copies */

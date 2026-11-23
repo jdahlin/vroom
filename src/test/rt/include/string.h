@@ -1,5 +1,8 @@
 #ifndef _RT_STRING_H
 #define _RT_STRING_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stddef.h>
 void *memcpy(void *, const void *, size_t);
 void *memmove(void *, const void *, size_t);
@@ -26,4 +29,7 @@ char *strpbrk(const char *, const char *);
 char *strerror(int);
 void bzero(void *, size_t);
 int bcmp(const void *, const void *, size_t);
+#ifdef __cplusplus
+}
+#endif
 #endif

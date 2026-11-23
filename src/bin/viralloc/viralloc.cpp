@@ -22,6 +22,7 @@
  * with the number of configurations checked.  Exit 0 when everything checks and
  * the output equals the expected part (when there is one), else 1.
  */
+#include "common/cmdlib.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -127,8 +128,34 @@ static uint32_t viralloc_function_allocate(vir_function *f, const vir_unit *u,
     return nbad;
 }
 
+enum {
+    OPT_REGS = 1,
+    OPT_X86,
+    OPT_SWEEP,
+    OPT_BLESS,
+    OPT_QUIET,
+    OPT_POOL,
+    OPT_MUTATE,
+    OPT_TIME
+};
+static const cmdlib_option viralloc_options[] = {
+    {OPT_REGS, "--regs", "N,M[,C,D]", "Set register counts.", false},
+    {OPT_X86, "--x86", NULL, "Use the x86 register set.", false},
+    {OPT_SWEEP, "--sweep", NULL, "Check each register count.", false},
+    {OPT_BLESS, "--bless", NULL, "Update the expected dump.", false},
+    {OPT_QUIET, "--quiet", NULL, "Suppress the allocation dump.", false},
+    {OPT_POOL, "--pool", "W", "Set the allocation pool size.", false},
+    {OPT_MUTATE, "--mutate", "N", "Run checker mutations.", false},
+    {OPT_TIME, "--time", "N", "Time repeated allocations.", false},
+    {0, NULL, NULL, NULL, false}};
+
 int main(int argc, char **argv)
 {
+    if (cmdlib_wants_help(argc, argv)) {
+        cmdlib_print_help("Usage: viralloc [OPTIONS] FILE", viralloc_options);
+        return 0;
+    }
+
     uint32_t regs[4] = {6, 4, 2, 1}, nbad = 0, rep = 0, mut = 0;
     bool x86 = false, sweep = false, bless = false, quiet = false;
     uint64_t pool = 0;
@@ -141,22 +168,23 @@ int main(int argc, char **argv)
     int rc = 1;
 
     for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--regs") && i + 1 < argc) {
+        int option = cmdlib_match(viralloc_options, argc - i, argv + i, NULL);
+        if (option == OPT_REGS) {
             if (!viralloc_registers_parse(argv[++i], regs))
                 goto usage;
-        } else if (!strcmp(argv[i], "--x86")) {
+        } else if (option == OPT_X86) {
             x86 = true;
-        } else if (!strcmp(argv[i], "--sweep")) {
+        } else if (option == OPT_SWEEP) {
             sweep = true;
-        } else if (!strcmp(argv[i], "--bless")) {
+        } else if (option == OPT_BLESS) {
             bless = true;
-        } else if (!strcmp(argv[i], "--quiet")) {
+        } else if (option == OPT_QUIET) {
             quiet = true;
-        } else if (!strcmp(argv[i], "--pool") && i + 1 < argc) {
+        } else if (option == OPT_POOL) {
             pool = strtoull(argv[++i], NULL, 0);
-        } else if (!strcmp(argv[i], "--mutate") && i + 1 < argc) {
+        } else if (option == OPT_MUTATE) {
             mut = (uint32_t)atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--time") && i + 1 < argc) {
+        } else if (option == OPT_TIME) {
             rep = (uint32_t)atoi(argv[++i]);
         } else if (argv[i][0] == '-' || path) {
             goto usage;

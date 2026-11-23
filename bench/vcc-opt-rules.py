@@ -980,7 +980,8 @@ def execute(args, directory, assembly, arch, source, level):
         run([args.node, *args.node_flags, script, exe])
     else:
         if getattr(args, 'tail_obj', False):
-            run([args.vpp, f'--target={args.target}', f'-O{level}', '-ffreestanding',
+            run([args.vpp, f'--target={args.target}', f'-O{level}',
+                 *(['-fno-vir'] if level in DIRECT_LEVELS else []), '-ffreestanding',
                  '-fno-stack-protector',
                  '-fasynchronous-unwind-tables' if args.cfi else '-fno-asynchronous-unwind-tables',
                  *(['-foptimize-sibling-calls'] if args.sibling_calls == 'on' else
@@ -1085,6 +1086,7 @@ def main():
             for level in range(4):
                 assembly = directory / f'{rule}-O{level}.s'
                 run([args.vpp, f'--target={args.target}', f'-O{level}',
+                     *(['-fno-vir'] if level in DIRECT_LEVELS else []),
                      '-ffreestanding', '-fno-stack-protector',
                      *(['-fasynchronous-unwind-tables'] if args.cfi else []),
                      *(['-foptimize-sibling-calls'] if args.sibling_calls == 'on' else
@@ -1111,7 +1113,7 @@ def main():
             if rule in ['sdivconst', 'unusedinit', 'switchvalues']:
                 # Check the debugging escape hatch independently of O0.
                 assembly = directory / (rule + '-noopt.s')
-                run([args.vpp, f'--target={args.target}', '-O1',
+                run([args.vpp, f'--target={args.target}', '-O1', '-fno-vir',
                      '-ffreestanding', '-fno-stack-protector', '-S', source, '-o', assembly],
                     env={**os.environ, 'VCC_NOOPT': '1'})
                 check(assembly.read_text(), arch, optimized=False)

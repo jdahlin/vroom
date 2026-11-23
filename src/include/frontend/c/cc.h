@@ -154,6 +154,13 @@ enum {
         64, /* _Complex T: struct { T re, im; } (AAPCS64 passes it like that) */
     AST_RECORD_FLAG_GCC_STRUCT =
         2048, /* gcc_struct: not the Microsoft layout, whatever -mms-bitfields and #pragma ms_struct say */
+    AST_RECORD_FLAG_MEMBER_POINTER =
+        4096, /* C++'s T C::*: a struct of one or two longs (for C++) */
+    AST_RECORD_FLAG_ENUM_SCOPED =
+        8192, /* C++'s enum class: no implicit conversion to an integer */
+    AST_RECORD_FLAG_CALLS_IN_MEMORY =
+        16384, /* C++'s class non-trivial for the purposes of calls: passed
+                  and returned by address ([abi:calls]), whatever its size */
 };
 
 typedef struct tag {
@@ -181,7 +188,8 @@ enum {
     AST_SYMBOL_FUNCTION,
     AST_SYMBOL_TYPEDEF,
     AST_SYMBOL_ENUMERATOR,
-    AST_SYMBOL_BUILTIN
+    AST_SYMBOL_BUILTIN,
+    AST_SYMBOL_BODY_ARGUMENT /* a builtin body's parameter: body is the node it stands for */
 };
 enum {
     AST_STORAGE_NONE,
@@ -402,10 +410,10 @@ enum { CC_DISABLED_BUILTIN_WORDS = 6 }; /* generated libbuiltins.inc indices */
  * -fNAME and -fno-NAME, on by default at -O<LEVEL> and above.  The driver resolves the level
  * and the options into cc_options.optimize (driver/optimization.cpp); doc/OPTIMIZATION.md says
  * what each row does and what else a level contains.  Every row runs on VIR, so none has an
- * effect without `vir`, and VIR itself needs -O2: below it the rows are all off.
+ * effect without `vir`. VIR is enabled at every optimization level.
  */
 #define CC_OPTIMIZATIONS(X)                                                    \
-    X(vir, "vir", 2) /* functions go through VIR (codegen/vir/) */             \
+    X(vir, "vir", 0) /* functions go through VIR (codegen/vir/) */             \
     X(rotate_loops, "rotate-loops",                                            \
       2) /* the lowering puts a loop's test at its end */                      \
     X(shrink_wrap, "shrink-wrap",                                              \
@@ -413,7 +421,11 @@ enum { CC_DISABLED_BUILTIN_WORDS = 6 }; /* generated libbuiltins.inc indices */
     X(vectorize, "vectorize",                                                  \
       3) /* the loop vectorizer (codegen/vir/vectorize.cpp) */                 \
     X(hoist_loop_constants, "hoist-loop-constants",                            \
-      3) /* a loop's constants are made once in front of it */
+      3) /* a loop's constants are made once in front of it */                 \
+    X(address_clone, "address-clone",                                          \
+      2) /* x86-64: a constant offset several accesses use is added at each */ \
+    X(carry_flags, "carry-flags",                                              \
+      2) /* an unsigned carry or borrow test reads the addition's flags */
 
 typedef struct cc_optimizations {
 #define X(field, name, level) bool field;
@@ -494,6 +506,9 @@ typedef struct
     int omit_frame_pointer; /* x86: permit frame-free leaf omission; explicit flags win */
     int sibling_calls; /* 0: optimization-level default, 1: explicit enable, -1: explicit disable */
     int outfd;
+#ifdef VCC_REFACTOR
+    int refactor; /* vref syntax query: emit physical tokens and resolved occurrences */
+#endif
     const char *
         field_uses; /* VCC_FIELD_USES: the selection file (test aid; after outfd: not in the cache key) */
     int lint; /* vpp --lint: the style checks (frontend/c/naming-lint.cpp); not in the decl cache key */
@@ -508,6 +523,8 @@ typedef struct
     int debug;    /* -g: DWARF line tables (ELF, COFF) */
     int dbg_version; /* -gdwarf-N: 2..5; 0 the target's default (Windows 4, else 5) */
     int cfi; /* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */
+    int eh; /* C++ with exceptions (x86-64 ELF, cfi): cleanup variables run when an exception unwinds
+				   their scope (landing pads, .gcc_except_table) */
     int no_seh; /* Windows: -fno-asynchronous-unwind-tables without -funwind-tables: no .seh_* (no .pdata/.xdata) */
     const char *dbg_dir,
         *dbg_name; /* the compilation directory and the main file, as named */

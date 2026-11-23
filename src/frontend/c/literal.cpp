@@ -516,7 +516,7 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
 {
     uint32_t loc = tok(c)->loc;
     int kind = LEX_TOKEN_STRING;
-    size_t n = 0, count = 0, cap = 8;
+    size_t count = 0, cap = 8;
     ptok local[8], *tokens = local;
 
     /* The final prefix applies to every token, even a narrow escape before
@@ -546,6 +546,25 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
         }
         next(c);
     }
+    uint32_t r = cc_literal_string_build(c, tokens, count, loc);
+
+    pp_temporary_hold(c->p, 0);
+    if (tokens != local)
+        free(tokens);
+    return r;
+}
+
+/* the string literal of these pieces, concatenated (the last prefix the kind of every piece): a
+   STRING node, an lvalue of its array type; a raw piece (R"delim(...)delim") is taken as written */
+CC_PRIVATE uint32_t cc_literal_string_build(cc *c, const ptok *tokens,
+                                            size_t count, uint32_t loc)
+{
+    int kind = LEX_TOKEN_STRING;
+    size_t n = 0;
+
+    for (size_t i = 0; i < count; i++)
+        if (tokens[i].kind != LEX_TOKEN_STRING)
+            kind = tokens[i].kind;
     int esz = cc_literal_element_size(kind, c->o->short_wchar);
     char *buf = c->hp; /* decoding does not fetch tokens or allocate AST data */
     for (size_t i = 0; i < count; i++) {
@@ -565,6 +584,44 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
 
         while (*s != '"')
             s++;
+        if (s > t->s && s[-1] == 'R') {
+            /* a raw string: R"delim( chars )delim", no escapes; each byte as it is (narrow) or as
+               UTF-8's code point (wide) */
+            const char *open = (const char *)memchr(s, '(', (size_t)(e - s));
+            size_t dl = open ? (size_t)(open - s - 1) : 0;
+            const char *b = open ? open + 1 : e, *end = e - dl - 1;
+
+            for (const char *p = b; p < end;) {
+                uint32_t v = (unsigned char)*p++;
+
+                if (esz > 1 && v >= 0x80) {
+                    int more = v >= 0xF0   ? 3
+                               : v >= 0xE0 ? 2
+                               : v >= 0xC0 ? 1
+                                           : 0;
+
+                    v &= more == 3 ? 7 : more == 2 ? 15 : more == 1 ? 31 : 0xff;
+                    for (int k = 0; k < more && p < end; k++, p++)
+                        v = v << 6 | ((unsigned char)*p & 63);
+                }
+                if (esz == 1)
+                    buf[n++] = (char)v;
+                else if (esz == 2 && v >= 0x10000) {
+                    uint16_t hi = (uint16_t)(0xD800 + ((v - 0x10000) >> 10)),
+                             lo = (uint16_t)(0xDC00 + ((v - 0x10000) & 0x3ff));
+
+                    memcpy(buf + n, &hi, 2), n += 2;
+                    memcpy(buf + n, &lo, 2), n += 2;
+                } else if (esz == 2) {
+                    uint16_t w = (uint16_t)v;
+
+                    memcpy(buf + n, &w, 2), n += 2;
+                } else
+                    memcpy(buf + n, &v, 4), n += 4;
+            }
+            free(tmp);
+            continue;
+        }
         s++;
         while (s < e) {
             bool ok;
@@ -625,9 +682,6 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
         }
         free(tmp);
     }
-    pp_temporary_hold(c->p, 0);
-    if (tokens != local)
-        free(tokens);
     memset(buf + n, 0, (size_t)esz);
     n += (size_t)esz;
     {
@@ -657,9 +711,10 @@ CC_PRIVATE uint32_t cc_literal_string_parse(cc *c)
     }
 }
 
-CC_PRIVATE uint32_t cc_literal_character_build(cc *c)
+/* a character literal's value and type (*ty), from its token (C's, C++'s) */
+CC_PRIVATE i128 cc_literal_character_value(cc *c, const ptok *t,
+                                           ast_qualified_type *out_ty)
 {
-    ptok *t = tok(c);
     char tmp[t->len + 1];
     size_t sl;
     const char *s = pp_token_spell(t, tmp, &sl), *e = s + sl - 1;
@@ -667,7 +722,6 @@ CC_PRIVATE uint32_t cc_literal_character_build(cc *c)
     i128 v = 0;
     int nch = 0;
     ast_qualified_type ty = cc_type_basic(AST_TYPE_INT);
-    uint32_t loc;
 
     while (*s != '\'')
         s++;
@@ -741,7 +795,17 @@ CC_PRIVATE uint32_t cc_literal_character_build(cc *c)
                                  : cc_type_basic(AST_TYPE_CHAR);
         ty = cc_type_basic(AST_TYPE_UNSIGNED_CHAR);
     }
-    loc = t->loc; /* (t is the next token after next()) */
+    *out_ty = ty;
+    return v;
+}
+
+CC_PRIVATE uint32_t cc_literal_character_build(cc *c)
+{
+    ptok *t = tok(c);
+    ast_qualified_type ty;
+    i128 v = cc_literal_character_value(c, t, &ty);
+    uint32_t loc = t->loc; /* (t is the next token after next()) */
+
     next(c);
     return cc_node_integer_new(c, v, ty, loc);
 }

@@ -48,6 +48,67 @@ walk_unsupported_fail(codegen_context *e, uint32_t n, const char *what)
         e, N(n)->loc, "x86-64: %s is not supported yet (PLAN-x86.md X3)", what);
 }
 
+/* what a node kind is called in a refusal (a statement kind reaching an
+   expression is a bug in the producer of the AST, not a missing feature) */
+static const char *walk_node_kind_name(unsigned op)
+{
+    static const char *const nm[AST_NODE_KIND_COUNT] = {
+        [AST_NODE_NONE] = "an empty expression",
+        [AST_NODE_NUMBER] = "an integer constant",
+        [AST_NODE_FLOAT_NUMBER] = "a floating constant",
+        [AST_NODE_BITINT_NUMBER] = "a _BitInt constant",
+        [AST_NODE_STRING] = "a string literal",
+        [AST_NODE_VARIABLE] = "a variable",
+        [AST_NODE_MEMBER] = "a member",
+        [AST_NODE_INDEX] = "an index",
+        [AST_NODE_CALL] = "a call",
+        [AST_NODE_BUILTIN] = "a builtin",
+        [AST_NODE_CAST] = "a cast",
+        [AST_NODE_UNARY] = "a unary operation",
+        [AST_NODE_ADDRESS] = "an address-of",
+        [AST_NODE_DEREFERENCE] = "a dereference",
+        [AST_NODE_PRE_INCREMENT] = "a pre-increment",
+        [AST_NODE_PRE_DECREMENT] = "a pre-decrement",
+        [AST_NODE_POST_INCREMENT] = "a post-increment",
+        [AST_NODE_POST_DECREMENT] = "a post-decrement",
+        [AST_NODE_BINARY] = "a binary operation",
+        [AST_NODE_LOGICAL_AND] = "a logical and",
+        [AST_NODE_LOGICAL_OR] = "a logical or",
+        [AST_NODE_ASSIGN] = "an assignment",
+        [AST_NODE_CONDITIONAL] = "a conditional",
+        [AST_NODE_COMMA] = "a comma expression",
+        [AST_NODE_SIZEOF_VLA] = "sizeof of a VLA",
+        [AST_NODE_STATEMENT_EXPRESSION] = "a statement expression",
+        [AST_NODE_COMPOUND_LITERAL] = "a compound literal",
+        [AST_NODE_INITIALIZER] = "an initializer list",
+        [AST_NODE_DESIGNATOR] = "a designator outside an initializer",
+        [AST_NODE_LABEL_ADDRESS] = "a label address",
+        [AST_NODE_VA_ARG] = "va_arg",
+        [AST_NODE_ZERO] = "an implicit zero value",
+        [AST_NODE_COMPLEX] = "a complex value",
+        [AST_NODE_BLOCK] = "a block statement in an expression",
+        [AST_NODE_EXPRESSION] = "an expression statement in an expression",
+        [AST_NODE_DECLARATION] = "a declaration in an expression",
+        [AST_NODE_IF] = "an if statement in an expression",
+        [AST_NODE_WHILE] = "a while statement in an expression",
+        [AST_NODE_DO] = "a do statement in an expression",
+        [AST_NODE_FOR] = "a for statement in an expression",
+        [AST_NODE_SWITCH] = "a switch statement in an expression",
+        [AST_NODE_CASE] = "a case label in an expression",
+        [AST_NODE_DEFAULT] = "a default label in an expression",
+        [AST_NODE_LABEL] = "a label in an expression",
+        [AST_NODE_GOTO] = "a goto in an expression",
+        [AST_NODE_GOTO_INDIRECT] = "a computed goto in an expression",
+        [AST_NODE_BREAK] = "a break in an expression",
+        [AST_NODE_CONTINUE] = "a continue in an expression",
+        [AST_NODE_RETURN] = "a return in an expression",
+        [AST_NODE_ASM] = "an asm statement in an expression"};
+
+    if (op < AST_NODE_KIND_COUNT && nm[op])
+        return nm[op];
+    return "this expression";
+}
+
 static void walk_scalar_check(codegen_context *e, uint32_t n,
                               ast_qualified_type t)
 {
@@ -59,7 +120,7 @@ static void walk_scalar_check(codegen_context *e, uint32_t n,
         walk_unsupported_fail(e, n, "__int128");
 }
 
-static bool walk_type_is_wide(cc *c, ast_qualified_type t)
+VPRIV bool walk_type_is_wide(cc *c, ast_qualified_type t)
 {
     return KIND(c, t) == AST_TYPE_INT128 || KIND(c, t) == AST_TYPE_UINT128;
 }
@@ -258,6 +319,8 @@ static codegen_value walk_pointer_add_vla(codegen_context *e, codegen_value p,
                                           ast_qualified_type pt, bool sub);
 static codegen_value walk_atomic_read_modify_write(codegen_context *e,
                                                    uint32_t n);
+static codegen_value walk_increment_emit_kept(codegen_context *e, uint32_t n,
+                                              codegen_lvalue *kept);
 VPRIV codegen_value walk_lvalue_reload(codegen_context *e,
                                        const codegen_lvalue *l,
                                        ast_qualified_type t);
@@ -599,6 +662,23 @@ VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n)
         walk_value_free(e, &v);
         return walk_lvalue_emit(e, x->b);
     }
+    case AST_NODE_PRE_INCREMENT:
+    case AST_NODE_PRE_DECREMENT:
+        /* ++x, --x as an lvalue (C++: f(--it) with a reference parameter): x, after the update */
+        if (!walk_type_is_in_memory(e, N(x->a)->ty) &&
+            !(T(c, N(x->a)->ty)->flags & AST_TYPE_FLAG_ATOMIC)) {
+            codegen_lvalue kl;
+            codegen_value v;
+
+            memset(&kl, 0, sizeof kl);
+            kl.offset = INT64_MIN; /* (not kept: left so) */
+            v = walk_increment_emit_kept(e, n, &kl);
+            if (kl.offset != INT64_MIN)
+                return kl;
+            walk_value_free(e, &v);
+            walk_unsupported_fail(e, n, "this lvalue");
+        }
+        break;
     case AST_NODE_COMPOUND_LITERAL: {
         /* (T){ ... }: an unnamed object (b), initialized where it is reached */
         uint32_t s = x->b;
@@ -2522,6 +2602,14 @@ static codegen_value walk_atomic_read_modify_write(codegen_context *e,
 /* ++x, x++, --x, x-- */
 static codegen_value walk_increment_emit(codegen_context *e, uint32_t n)
 {
+    return walk_increment_emit_kept(e, n, NULL);
+}
+
+/* ++x, --x (and x++, x--); kept: for ++x and --x of a scalar in a register, x's lvalue, kept for the caller
+   (C++: ++x is x, an lvalue; 0 kind when it is not kept), the value none */
+static codegen_value walk_increment_emit_kept(codegen_context *e, uint32_t n,
+                                              codegen_lvalue *kept)
+{
     cc *c = e->compile_context;
     const node *x = N(n);
     ast_qualified_type t = N(x->a)->ty;
@@ -2577,6 +2665,11 @@ static codegen_value walk_increment_emit(codegen_context *e, uint32_t n)
     }
     r = walk_value_to_register(e, &nv);
     walk_lvalue_store_register(e, &l, t, r);
+    if (kept && !post && !l.is_bitfield) {
+        WALK_LOWER(tfree)(e, r);
+        *kept = l;
+        return codegen_value_constant(0);
+    }
     if (l.is_bitfield && !post) {
         WALK_LOWER(tfree)(e, r);
         nv = walk_bitfield_load(e, &l, t);
@@ -3773,8 +3866,23 @@ static int walk_builtin_constant_p(codegen_context *e, uint32_t arg)
          (cv.kind == CC_VALUE_ADDRESS && cv.str && cv.i == 0 && !cv.sym &&
           !cv.label)))
         return 1;
-    return !codegen_expression_has_side_effects(c, arg) &&
-           walk_expression_is_constant(e, arg);
+    if (codegen_expression_has_side_effects(c, arg))
+        return 0;
+    {
+        /* a local whose initializer generated to a constant (float a = move(1)), through conversions */
+        uint32_t r = arg;
+
+        while (N(r)->op == AST_NODE_CAST && N(r)->aux != AST_CAST_ARRAY_DECAY &&
+               N(r)->aux != AST_CAST_FUNCTION_DECAY &&
+               N(r)->aux != AST_CAST_VECTOR_ADDRESS)
+            r = N(r)->a;
+        if (N(r)->op == AST_NODE_VARIABLE &&
+            e->walk_state->constant_p_generations[N(r)->a] ==
+                e->walk_state->generation &&
+            e->walk_state->generation)
+            return 1;
+    }
+    return walk_expression_is_constant(e, arg);
 }
 
 static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
@@ -4020,6 +4128,45 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
                             codegen_value_constant(1));
         return WALK_LOWER(bitop)(e, sz == 8 ? CC_BUILTIN_CLZLL : CC_BUILTIN_CLZ,
                                  sz, v);
+    }
+    case CC_BUILTIN_ROTL8:
+    case CC_BUILTIN_ROTL16:
+    case CC_BUILTIN_ROTL32:
+    case CC_BUILTIN_ROTL64:
+    case CC_BUILTIN_ROTR8:
+    case CC_BUILTIN_ROTR16:
+    case CC_BUILTIN_ROTR32:
+    case CC_BUILTIN_ROTR64: {
+        int bits = 8 << ((x->aux - CC_BUILTIN_ROTL8) & 3);
+        int size = bits == 64 ? 8 : 4;
+        bool left = x->aux < CC_BUILTIN_ROTR8;
+        codegen_value mask = codegen_value_constant(bits - 1);
+        codegen_value value = walk_value_emit(e, arg[0]);
+        codegen_value count = walk_value_emit(e, arg[1]);
+        int r = walk_value_to_register(e, &value);
+        if (bits < 32)
+            WALK_LOWER(ext)(e, r, bits / 8, false);
+        count =
+            WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, size, false, count, mask);
+        int s = walk_value_to_register(e, &count);
+        codegen_value reverse = WALK_LOWER(bin)(
+            e, LEX_TOKEN_MINUS, size, false, codegen_value_constant(0),
+            walk_value_from_register(walk_register_duplicate(e, s)));
+        reverse =
+            WALK_LOWER(bin)(e, LEX_TOKEN_AMPERSAND, size, false, reverse, mask);
+        codegen_value part1 = WALK_LOWER(bin)(
+            e, left ? LEX_TOKEN_LESS_LESS : LEX_TOKEN_GREATER_GREATER, size,
+            false, walk_value_from_register(walk_register_duplicate(e, r)),
+            walk_value_from_register(s));
+        codegen_value part2 = WALK_LOWER(bin)(
+            e, left ? LEX_TOKEN_GREATER_GREATER : LEX_TOKEN_LESS_LESS, size,
+            false, walk_value_from_register(r), reverse);
+        codegen_value result =
+            WALK_LOWER(bin)(e, LEX_TOKEN_PIPE, size, false, part1, part2);
+        if (bits < 32)
+            WALK_LOWER(ext)(e, walk_value_to_register(e, &result), bits / 8,
+                            false);
+        return result;
     }
     case CC_BUILTIN_BITREVERSE8:
     case CC_BUILTIN_BITREVERSE16:
@@ -4726,18 +4873,33 @@ static codegen_value walk_value_emit_inner(codegen_context *e, uint32_t n)
         d.offset -= 2 * es;
         return walk_value_from_register(WALK_LOWER(laddr)(e, &d));
     }
-    default: {
-        static const char *const nm[AST_NODE_KIND_COUNT] = {
-            [AST_NODE_SIZEOF_VLA] = "sizeof of a VLA",
-            [AST_NODE_COMPOUND_LITERAL] = "a compound literal",
-            [AST_NODE_INITIALIZER] = "an initializer list",
-            [AST_NODE_LABEL_ADDRESS] = "a label address",
-            [AST_NODE_VA_ARG] = "va_arg",
-            [AST_NODE_COMPLEX] = "a complex value",
-            [AST_NODE_MEMBER] = "a member"};
+    case AST_NODE_ZERO:
+        /* a zero value of its type: a scalar's constant, else a zeroed temporary object */
+        if (codegen_type_is_float(c, x->ty))
+            return walk_float_constant(e, x->ty, 0.0, 0);
+        if (codegen_type_is_bitint_big(c, x->ty))
+            walk_unsupported_fail(e, n, "a zero _BitInt wider than 64 bits");
+        if (!walk_type_is_in_memory(e, x->ty) &&
+            !codegen_type_is_record(c, x->ty) &&
+            !codegen_type_is_array(c, x->ty))
+            return walk_value_constant(c, 0, x->ty);
+        __attribute__((fallthrough));
+    case AST_NODE_INITIALIZER: {
+        /* a braced initializer used as a value (a temporary, an argument, an
+           assignment's source): built in a temporary object of its type,
+           and the value is that object, as a compound literal's */
+        uint64_t size = codegen_type_size(c, x->ty);
+        uint32_t align = codegen_type_alignment(c, x->ty);
+        codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
+                            .align = align,
+                            .offset =
+                                walk_slot_temporary(e, size ? size : 1, align)};
 
-        walk_unsupported_fail(e, n, nm[x->op] ? nm[x->op] : "this expression");
+        walk_initializer_emit(e, &l, x->ty, n);
+        return walk_lvalue_load(e, &l, x->ty);
     }
+    default:
+        walk_unsupported_fail(e, n, walk_node_kind_name(x->op));
     }
 }
 

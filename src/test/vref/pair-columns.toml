@@ -1,0 +1,30 @@
+within = "static void fill ( int * left , long * right ) {"
+
+[storage]
+count = "used"
+capacity = "limit"
+initial_capacity = 2
+growth_sites = 1
+items = "pairs"
+index = "row"
+index_type = "unsigned"
+columns = [
+    {array="xs", type="int", field="first", output="left"},
+    {array="ys", type="long", field="second", output="right"},
+]
+
+[[rule]]
+match = "int * @xs = 0 ; long * @ys = 0 ;"
+replace = "struct { int first; long second; } pairs[4];"
+
+[[rule]]
+match = "unsigned @used = 0 , @limit = 0 ;"
+replace = "unsigned used = 0;"
+
+[[rule]]
+match = "@xs [ @used ] ="
+replace = "pairs[used].first ="
+
+[[rule]]
+match = "@ys [ @used ++ ] ="
+replace = "pairs[used++].second ="

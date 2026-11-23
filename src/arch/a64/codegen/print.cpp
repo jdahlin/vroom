@@ -166,7 +166,9 @@ static void a64_print_add_immediate(tbuf *b, const a64_record *i)
     bool flags = op == A64_OP_ADDSI || op == A64_OP_SUBSI;
     bool sub = op == A64_OP_SUBI || op == A64_OP_SUBSI;
 
-    if (v < 0 && v != INT64_MIN) {
+    /* Flipping ADD/SUB at signed minimum changes the overflow flag. */
+    if (v < 0 && v != INT64_MIN &&
+        (i->size || !flags || (uint32_t)v != UINT32_C(0x80000000))) {
         v = -v;
         sub = !sub;
     }

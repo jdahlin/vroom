@@ -18,6 +18,7 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
     L->compare_condition = UINT32_MAX;
     L->memory_value = L->memory_skip = L->scaled_value = L->scaled_skip =
         L->big_endian_value = L->test_value = L->compare_memory_value = 0;
+    L->carry_value = 0;
 }
 
 static void vx_target_block_enter(void *ctx, uint32_t b)
@@ -190,7 +191,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         *why = VIRBUILD_FAILURE(x64_frame_size);
         return false;
     }
-    L.uses = V->lowering_uses = (uint8_t *)x64_vir_array_grow(
+    L.uses = V->lowering_uses = (uint8_t *)vvector_reserve(
         V->lowering_uses, &V->lowering_uses_capacity, f->insn_count + 1, 1);
     vir_uses_count(f, L.uses);
     L.scratch_register10 = r10;
@@ -252,6 +253,12 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
                         V->allocation.slot[v], V->allocation.spill_defined[v]);
     }
     free(entries.p);
+    if (L.map && allocated) {
+        vbuffer pb = {0};
+        vir_alloc_print(&pb, NULL, f, &V->loops, &V->allocation);
+        fprintf(stderr, "%.*s", (int)pb.n, pb.p ? (char *)pb.p : "");
+        free(pb.p);
+    }
     L.general_temporary = r10 ? R11 : R10;
     if (!allocated) {
         *why = VIRBUILD_FAILURE(x64_allocation_failed);
@@ -272,17 +279,17 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         }
     }
     /* No partial function is published before x64_finish; a failed lowering retries the walker. */
-    L.edge_labels = V->lowering_edge_labels = (uint32_t *)(x64_vir_array_grow(
+    L.edge_labels = V->lowering_edge_labels = (uint32_t *)(vvector_reserve(
         V->lowering_edge_labels, &V->lowering_edge_label_capacity,
         V->allocation.edge_count + 1, sizeof(uint32_t)));
     memset(L.edge_labels, 0, V->allocation.edge_count * sizeof(uint32_t));
-    L.slot = V->lowering_slots = (int64_t *)x64_vir_array_grow(
+    L.slot = V->lowering_slots = (int64_t *)vvector_reserve(
         V->lowering_slots, &V->lowering_slot_capacity, f->slot_count + 1,
         sizeof *L.slot);
-    L.spill = V->lowering_spills = (int64_t *)x64_vir_array_grow(
+    L.spill = V->lowering_spills = (int64_t *)vvector_reserve(
         V->lowering_spills, &V->lowering_spill_capacity,
         V->allocation.spill_count + 1, sizeof *L.spill);
-    L.label = V->lowering_labels = (uint32_t *)x64_vir_array_grow(
+    L.label = V->lowering_labels = (uint32_t *)vvector_reserve(
         V->lowering_labels, &V->lowering_label_capacity, f->block_count + 1,
         sizeof *L.label);
     e->vir_try = true;
@@ -320,7 +327,7 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
     for (uint32_t b = 0; b < f->block_count; b++)
         L.label[b] = walk_label_new(e);
     L.ret = walk_label_new(e);
-    uint32_t *layout = V->lowering_layout = (uint32_t *)(x64_vir_array_grow(
+    uint32_t *layout = V->lowering_layout = (uint32_t *)(vvector_reserve(
         V->lowering_layout, &V->lowering_layout_capacity, 5 * f->block_count,
         sizeof(uint32_t)));
     L.order = layout;

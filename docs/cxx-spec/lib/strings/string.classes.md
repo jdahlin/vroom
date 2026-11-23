@@ -1,0 +1,40 @@
+# 21.3 String classes [string.classes]
+
+[Contents](../../README.md) · up: [21 Strings library \[strings\]](strings.md) · prev: [21.2.3.5 `struct char_traits<wchar_t>` \[char.traits.specializations.wchar.t\]](char.traits.specializations.wchar.t.md) · next: [21.3.1 Header `<string>` synopsis \[string.syn\]](string.syn.md)
+
+**1** The header `<string>` defines the `basic_string` class template for manipulating varying-length sequences of char-like objects and five *typedef-name*s, `string`, `u8string`, `u16string`, `u32string`, and `wstring`, that name the specializations `basic_string<char>`, `basic_string<char8_t>`, `basic_string<char16_t>`, `basic_string<char32_t>`, and `basic_string<wchar_t>`, respectively.
+
+## Subclauses
+
+- [21.3.1 Header `<string>` synopsis \[string.syn\]](string.syn.md)
+- [21.3.2 Class template `basic_string` \[basic.string\]](basic.string.md)
+  - [21.3.2.1 General requirements \[string.require\]](string.require.md)
+  - [21.3.2.2 Constructors and assignment operators \[string.cons\]](string.cons.md)
+  - [21.3.2.3 Iterator support \[string.iterators\]](string.iterators.md)
+  - [21.3.2.4 Capacity \[string.capacity\]](string.capacity.md)
+  - [21.3.2.5 Element access \[string.access\]](string.access.md)
+  - [21.3.2.6 Modifiers \[string.modifiers\]](string.modifiers.md)
+    - [21.3.2.6.1 `basic_string::operator+=` \[string.op.append\]](string.op.append.md)
+    - [21.3.2.6.2 `basic_string::append` \[string.append\]](string.append.md)
+    - [21.3.2.6.3 `basic_string::assign` \[string.assign\]](string.assign.md)
+    - [21.3.2.6.4 `basic_string::insert` \[string.insert\]](string.insert.md)
+    - [21.3.2.6.5 `basic_string::erase` \[string.erase\]](string.erase.md)
+    - [21.3.2.6.6 `basic_string::replace` \[string.replace\]](string.replace.md)
+    - [21.3.2.6.7 `basic_string::copy` \[string.copy\]](string.copy.md)
+    - [21.3.2.6.8 `basic_string::swap` \[string.swap\]](string.swap.md)
+  - [21.3.2.7 String operations \[string.ops\]](string.ops.md)
+    - [21.3.2.7.1 Accessors \[string.accessors\]](string.accessors.md)
+    - [21.3.2.7.2 Searching \[string.find\]](string.find.md)
+    - [21.3.2.7.3 `basic_string::substr` \[string.substr\]](string.substr.md)
+    - [21.3.2.7.4 `basic_string::compare` \[string.compare\]](string.compare.md)
+    - [21.3.2.7.5 `basic_string::starts_with` \[string.starts.with\]](string.starts.with.md)
+    - [21.3.2.7.6 `basic_string::ends_with` \[string.ends.with\]](string.ends.with.md)
+- [21.3.3 Non-member functions \[string.nonmembers\]](string.nonmembers.md)
+  - [21.3.3.1 `operator+` \[string.op.plus\]](string.op.plus.md)
+  - [21.3.3.2 Non-member comparison functions \[string.cmp\]](string.cmp.md)
+  - [21.3.3.3 `swap` \[string.special\]](string.special.md)
+  - [21.3.3.4 Inserters and extractors \[string.io\]](string.io.md)
+  - [21.3.3.5 Erasure \[string.erasure\]](string.erasure.md)
+- [21.3.4 Numeric conversions \[string.conversions\]](string.conversions.md)
+- [21.3.5 Hash support \[basic.string.hash\]](basic.string.hash.md)
+- [21.3.6 Suffix for `basic_string` literals \[basic.string.literals\]](basic.string.literals.md)

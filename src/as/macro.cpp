@@ -14,7 +14,7 @@
 
 VPRIV as_macro *as_macro_find(as_context *a, const char *s, size_t n)
 {
-    uint32_t h = as_text_hash(s, n) & a->macro_mask;
+    uint32_t h = vhash_bytes(s, n) & a->macro_mask;
     for (as_macro *m = a->macro_table[h]; m; m = m->next)
         if (m->name.length == n && !memcmp(m->name.text, s, n))
             return m;
@@ -554,14 +554,14 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
         for (uint32_t i = 0; i <= a->macro_mask; i++)
             for (as_macro *x = a->macro_table[i], *nx; x; x = nx) {
                 nx = x->next;
-                uint32_t h = as_text_hash(x->name.text, x->name.length) & nm;
+                uint32_t h = vhash_bytes(x->name.text, x->name.length) & nm;
                 x->next = t[h];
                 t[h] = x;
             }
         a->macro_table = t;
         a->macro_mask = nm;
     }
-    uint32_t h = as_text_hash(name.text, name.length) & a->macro_mask;
+    uint32_t h = vhash_bytes(name.text, name.length) & a->macro_mask;
     for (as_macro *x = a->macro_table[h]; x; x = x->next)
         if (x->name.length == name.length &&
             !memcmp(x->name.text, name.text, name.length))
@@ -576,7 +576,7 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
 VPRIV int as_directive_purgem(as_context *a, const char *p, const char *e)
 {
     as_text n = as_text_first_word(p, e);
-    uint32_t h = as_text_hash(n.text, n.length) & a->macro_mask;
+    uint32_t h = vhash_bytes(n.text, n.length) & a->macro_mask;
     for (as_macro **pm = &a->macro_table[h]; *pm; pm = &(*pm)->next)
         if ((*pm)->name.length == n.length &&
             !memcmp((*pm)->name.text, n.text, n.length)) {

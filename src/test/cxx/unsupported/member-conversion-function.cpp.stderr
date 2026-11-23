@@ -1,0 +1,2 @@
+member-conversion-function.cpp:6:7: error: the rules of [class.temporary] are not implemented yet
+member-conversion-function.cpp:6:7: note: refused by vcc's frontend/cplusplus/class/conversion-function.cpp:N (conversion_function_call)

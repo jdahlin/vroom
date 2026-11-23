@@ -400,6 +400,9 @@ struct pp {
     uint32_t line_mark_count;
     int warning_count;
     int in_directive; /* evaluating a directive's tokens (#if, #include, #line) */
+#ifdef VCC_REFACTOR
+    int refactor_fd;
+#endif
     int collecting_arguments; /* in pp_macro_arguments_collect(): directives are inside macro arguments */
     uint32_t collecting_location,
         collecting_name; /* the outermost macro collecting: its name token, id */

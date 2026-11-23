@@ -24,6 +24,13 @@ vd = importlib.util.module_from_spec(spec); spec.loader.exec_module(vd)
 
 SHIM = f'{vd.BIN}/vcc'	# next to the vccd under test: the build ids match
 MAGIC = 0x326f6f72
+# how much slower a sanitizer build is (TSan ~15-20x, ASan ~3-5x): a test
+# that needs a job still running uses a smaller input and waits longer
+SLOWDOWN = 1
+if 'tsan' in vd.BIN:
+    SLOWDOWN = 20
+elif 'asan' in vd.BIN:
+    SLOWDOWN = 5
 
 def hdr(magic, argc, envc, plen, build=0):
     return struct.pack('<IIIIQII', magic, argc, envc, plen, build, 0, 0)
@@ -98,6 +105,33 @@ def obj(d, name='a.o'):
 def check(cond, msg):
     if not cond: raise AssertionError(msg)
 
+@test()
+def native_compile_and_link():
+    """An ordinary vcc command produces a runnable program in the client's cwd."""
+    v = Vccd()
+    try:
+        d = f'{v.dir}/native'
+        tu(d, 'foo.c', '#include <stdio.h>\nint main(void) { puts("native"); return 7; }\n')
+        r = subprocess.run([SHIM, '-o', 'main', 'foo.c'], cwd=d, capture_output=True,
+                           env=dict(os.environ, VCC_SOCK=v.sock), timeout=30)
+        check(r.returncode == 0, r.stderr)
+        r = subprocess.run(['./main'], cwd=d, capture_output=True, timeout=10)
+        check((r.returncode, r.stdout) == (7, b'native\n'), (r.returncode, r.stdout, r.stderr))
+    finally: v.stop()
+
+@test()
+def command_help():
+    """Standalone programs and forwarding shims expose their own options without a server."""
+    for tool, option in [('vcc', '-fsyntax-only'), ('vas', '-c'), ('vld', '--entry'),
+                         ('var', '--thin'), ('vsh/sh', '-ec'), ('vcc-nm', '--numeric-sort'),
+                         ('vcc-objcopy', '--rename-section'), ('vlink', '--entry'),
+                         ('vnm', '--defined-only'), ('vobjcopy', '--add-section'),
+                         ('vasm', '-gdwarf-N'), ('vccd', '--listen-fd'), ('vpp', '--batch'),
+                         ('lextest', 'idcheck'), ('virtest', '--no-verify'), ('viralloc', '--sweep')]:
+        r = subprocess.run([f'{vd.BIN}/{tool}', '--help'], capture_output=True, text=True,
+                           env=dict(os.environ, VCC_SOCK='/no-such-vccd.sock'), timeout=5)
+        check(r.returncode == 0 and not r.stderr and option in r.stdout, (tool, r.stderr, r.stdout))
+
 # ---------------- access ----------------
 
 @test()
@@ -154,6 +188,26 @@ def wrong_fd_count():
     finally: v.stop()
 
 @test()
+def ar_response_file():
+    """var rcs lib.a @lib.a.rsp (GN's archives): the response file's words are the members"""
+    d = tempfile.mkdtemp(prefix='vccd-ar-')
+    v = Vccd()
+    try:
+        for n in ('a', 'b c'):
+            tu(d, f'{n}.c', f'int {n.replace(" ", "_")}(void) {{ return 1; }}\n')
+            st, err = v.cc(d, f'{n}.c', out=f'{n}.o')
+            check(st == 0, f'cc {n}.c: {st} {err[-300:]}')
+        open(f'{d}/lib.a.rsp', 'w').write('a.o "b c.o"\n')
+        env = dict(os.environ, VCC_SOCK=v.sock)
+        p = subprocess.run([f'{os.path.dirname(SHIM)}/var', 'rcs', 'lib.a', '@lib.a.rsp'], cwd=d, env=env,
+                           capture_output=True, text=True, timeout=30)
+        check(p.returncode == 0, f'var rcs: {p.returncode} {p.stderr[-300:]}')
+        p = subprocess.run([f'{os.path.dirname(SHIM)}/var', 't', 'lib.a'], cwd=d, env=env, capture_output=True,
+                           text=True, timeout=30)
+        check(p.stdout.split('\n')[:2] == ['a.o', 'b c.o'], f'members {p.stdout!r}')
+    finally: v.stop()
+
+@test()
 def spawned_tool_env_clean():
     """a link spawned for a request gets the request's env minus the dynamic loader's variables"""
     d0 = tempfile.mkdtemp(prefix='vccd-ld-')
@@ -206,17 +260,19 @@ def sigterm_drains():
     v = Vccd()
     try:
         d = f'{v.dir}/w'
-        src = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000)))
+        # long enough to be still running 0.4 s in, at any build's speed
+        src = tu(d, 'big.c', ''.join(f'int f{i}(int x) {{ return x * {i} + (x >> 3) - {i}; }}\n' for i in range(600000 // SLOWDOWN)))
         p = subprocess.Popen([SHIM] + TARGET + ['-c', '-o', 'big.o', src], cwd=d, env=dict(os.environ, VCC_SOCK=v.sock),
                              stderr=subprocess.PIPE)
         time.sleep(0.4)
+        check(p.poll() is None, 'the job ended before SIGTERM: nothing drained')
         v.p.send_signal(signal.SIGTERM)
-        rc = p.wait(timeout=60)
+        rc = p.wait(timeout=60 * SLOWDOWN)
         check(rc == 0, f'job interrupted: rc {rc} {p.stderr.read()[-300:]}')
         check(os.path.getsize(f'{d}/big.o') > 0, 'no object')
-        v.p.wait(timeout=10)
+        v.p.wait(timeout=10 * SLOWDOWN)
         check(not os.path.exists(v.sock), 'socket left behind')
-    finally: v.stop()
+    finally: v.stop(10 * SLOWDOWN)
 
 @test()
 def request_env_reaches_job():
@@ -325,14 +381,17 @@ def memory_restart_between_builds():
 
 @test()
 def other_build_refused():
-    """a request from another build of the shim gets the mismatch status, not service"""
+    """a request from another build of the shim is not served: an idle server restarts itself (status RETRY, the
+    binary on disk may be the new build) and then serves the real shim"""
     v = Vccd()
     try:
         d = f'{v.dir}/w'; src = tu(d)
         argv = [SHIM] + TARGET + ['-c', src]
         good = b''.join(s.encode() + b'\0' for s in [d] + argv)
         st = raw_request(v.sock, d, argv, header=hdr(MAGIC, len(argv), 0, len(good), build=12345), payload=good)
-        check(st == 0x7fff0001, f'status {st} for a foreign build id (want VCCD_STATUS_MISMATCH)')
+        check(st == 0x7fff0002, f'status {st} for a foreign build id (want VCCD_STATUS_RETRY)')
+        time.sleep(0.5)
+        check('restarting' in open(v.logf).read(), 'the idle server did not restart')
         st, err = v.cc(d, src)
         check(st == 0, f'the real shim (same build) is served: {st} {err[-300:]}')
     finally: v.stop()

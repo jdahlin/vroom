@@ -1,5 +1,7 @@
 /* main() of the standalone tools (VLD_MAIN): vlink, vobjcopy, vnm, wasm-ld by argv[0]. */
 
+#include "ld/options-help.h"
+#include "common/cmdlib.h"
 #include "ld-internal.h"
 
 #ifdef VLD_MAIN
@@ -16,6 +18,22 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-mwasm64"))
             is_wasm = 1;
+    if (cmdlib_wants_help(argc, argv) ||
+        (is_wasm && argc == 3 && !strcmp(argv[1], "-mwasm64") &&
+         !strcmp(argv[2], "--help"))) {
+        printf(
+            "Usage: %s [OPTIONS] INPUT...\n  --help  Show available options.\n",
+            b);
+        if (is_wasm)
+            wasm_linker_options_print();
+        else if (strstr(b, "objcopy"))
+            objcopy_options_print();
+        else if (strstr(b, "nm") && !strstr(b, "link"))
+            nm_options_print();
+        else
+            linker_options_print();
+        return 0;
+    }
     if (is_wasm) {
 #ifdef VCC_WASM
         return wasm_ld_main(argc, argv);

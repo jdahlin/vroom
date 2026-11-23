@@ -1,0 +1,294 @@
+# The Itanium C++ ABI's mangling grammar: bench/itanium-abi.py from the
+# files bench/fetch-testsuites.sh itanium-abi fetches.  LABEL NONTERMINAL ALTERNATIVE
+mangling-structure	<mangled-name>	_Z <encoding>
+mangling-structure	<mangled-name>	_Z <encoding> . <vendor-specific suffix>
+mangling-structure	<encoding>	<function name> <bare-function-type>
+mangling-structure	<encoding>	<data name>
+mangling-structure	<encoding>	<special-name>
+mangle.name	<name>	<nested-name>
+mangle.name	<name>	<unscoped-name>
+mangle.name	<name>	<unscoped-template-name> <template-args>
+mangle.name	<name>	<local-name>
+mangle.name	<unscoped-name>	<unqualified-name>
+mangle.name	<unscoped-name>	St <unqualified-name>
+mangle.name	<unscoped-template-name>	<unscoped-name>
+mangle.name	<unscoped-template-name>	<substitution>
+mangle.name	<nested-name>	N [<CV-qualifiers>] [<ref-qualifier>] <prefix> <unqualified-name> E
+mangle.name	<nested-name>	N [<CV-qualifiers>] [<ref-qualifier>] <template-prefix> <template-args> E
+mangle.name	<prefix>	<unqualified-name>
+mangle.name	<prefix>	<prefix> <unqualified-name>
+mangle.name	<prefix>	<template-prefix> <template-args>
+mangle.name	<prefix>	<closure-prefix>
+mangle.name	<prefix>	<template-param>
+mangle.name	<prefix>	<decltype>
+mangle.name	<prefix>	<substitution>
+mangle.name	<template-prefix>	<template unqualified-name>
+mangle.name	<template-prefix>	<prefix> <template unqualified-name>
+mangle.name	<template-prefix>	<template-param>
+mangle.name	<template-prefix>	<substitution>
+mangle.name	<unqualified-name>	<operator-name> [<abi-tags>]
+mangle.name	<unqualified-name>	<ctor-dtor-name>
+mangle.name	<unqualified-name>	<source-name>
+mangle.name	<unqualified-name>	<unnamed-type-name>
+mangle.name	<unqualified-name>	DC <source-name>+ E
+mangle.name	<source-name>	<positive length number> <identifier>
+mangle.name	<identifier>	<unqualified source code identifier>
+mangle.abi-tag	<abi-tags>	<abi-tag> [<abi-tags>]
+mangle.abi-tag	<abi-tag>	B <source-name>
+mangle.number	<number>	[n] <non-negative decimal integer>
+mangle.seq-id	<seq-id>	<0-9A-Z>+
+mangling-operator	<operator-name>	nw
+mangling-operator	<operator-name>	na
+mangling-operator	<operator-name>	dl
+mangling-operator	<operator-name>	da
+mangling-operator	<operator-name>	aw
+mangling-operator	<operator-name>	ps
+mangling-operator	<operator-name>	ng
+mangling-operator	<operator-name>	ad
+mangling-operator	<operator-name>	de
+mangling-operator	<operator-name>	co
+mangling-operator	<operator-name>	pl
+mangling-operator	<operator-name>	mi
+mangling-operator	<operator-name>	ml
+mangling-operator	<operator-name>	dv
+mangling-operator	<operator-name>	rm
+mangling-operator	<operator-name>	an
+mangling-operator	<operator-name>	or
+mangling-operator	<operator-name>	eo
+mangling-operator	<operator-name>	aS
+mangling-operator	<operator-name>	pL
+mangling-operator	<operator-name>	mI
+mangling-operator	<operator-name>	mL
+mangling-operator	<operator-name>	dV
+mangling-operator	<operator-name>	rM
+mangling-operator	<operator-name>	aN
+mangling-operator	<operator-name>	oR
+mangling-operator	<operator-name>	eO
+mangling-operator	<operator-name>	ls
+mangling-operator	<operator-name>	lS
+mangling-operator	<operator-name>	eq
+mangling-operator	<operator-name>	ne
+mangling-operator	<operator-name>	lt
+mangling-operator	<operator-name>	le
+mangling-operator	<operator-name>	ss
+mangling-operator	<operator-name>	nt
+mangling-operator	<operator-name>	aa
+mangling-operator	<operator-name>	oo
+mangling-operator	<operator-name>	pp
+mangling-operator	<operator-name>	mm
+mangling-operator	<operator-name>	cm
+mangling-operator	<operator-name>	pm
+mangling-operator	<operator-name>	pt
+mangling-operator	<operator-name>	cl
+mangling-operator	<operator-name>	ix
+mangling-operator	<operator-name>	qu
+mangling-operator	<operator-name>	cv <type>
+mangling-operator	<operator-name>	li <source-name>
+mangling-operator	<operator-name>	v <digit> <source-name>
+mangling-special-vtables	<special-name>	TV <type>
+mangling-special-vtables	<special-name>	TT <type>
+mangling-special-vtables	<special-name>	TI <type>
+mangling-special-vtables	<special-name>	TS <type>
+mangling-special-thunks	<special-name>	T <call-offset> <base encoding>
+mangling-special-thunks	<call-offset>	h <nv-offset> _
+mangling-special-thunks	<call-offset>	v <v-offset> _
+mangling-special-thunks	<nv-offset>	<offset number>
+mangling-special-thunks	<v-offset>	<offset number> _ <virtual offset number>
+mangling-special-thunks	<special-name>	Tc <call-offset> <call-offset> <base encoding>
+mangling-special-ctor-dtor	<ctor-dtor-name>	C1
+mangling-special-ctor-dtor	<ctor-dtor-name>	C2
+mangling-special-ctor-dtor	<ctor-dtor-name>	C3
+mangling-special-ctor-dtor	<ctor-dtor-name>	CI1 <base class type>
+mangling-special-ctor-dtor	<ctor-dtor-name>	CI2 <base class type>
+mangling-special-ctor-dtor	<ctor-dtor-name>	D0
+mangling-special-ctor-dtor	<ctor-dtor-name>	D1
+mangling-special-ctor-dtor	<ctor-dtor-name>	D2
+mangling-special-guards	<special-name>	GV <object name>
+mangling-special-temporaries	<special-name>	GR <object name> _
+mangling-special-temporaries	<special-name>	GR <object name> <seq-id> _
+mangling-transaction-safe	<special-name>	GTt <encoding>
+mangling-type	<type>	<builtin-type>
+mangling-type	<type>	<qualified-type>
+mangling-type	<type>	<function-type>
+mangling-type	<type>	<class-enum-type>
+mangling-type	<type>	<array-type>
+mangling-type	<type>	<pointer-to-member-type>
+mangling-type	<type>	<template-param>
+mangling-type	<type>	<template-template-param> <template-args>
+mangling-type	<type>	<decltype>
+mangling-type	<type>	P <type>
+mangling-type	<type>	R <type>
+mangling-type	<type>	O <type>
+mangling-type	<type>	C <type>
+mangling-type	<type>	G <type>
+mangling-type	<type>	<substitution>
+mangle.qualified-type	<qualified-type>	<qualifiers> <type>
+mangle.qualified-type	<qualifiers>	<extended-qualifier>* <CV-qualifiers>
+mangle.qualified-type	<extended-qualifier>	U <source-name> [<template-args>]
+mangle.qualified-type	<CV-qualifiers>	[r] [V] [K]
+mangle.qualified-type	<ref-qualifier>	R
+mangle.qualified-type	<ref-qualifier>	O
+mangling-builtin	<builtin-type>	v
+mangling-builtin	<builtin-type>	w
+mangling-builtin	<builtin-type>	b
+mangling-builtin	<builtin-type>	c
+mangling-builtin	<builtin-type>	a
+mangling-builtin	<builtin-type>	h
+mangling-builtin	<builtin-type>	s
+mangling-builtin	<builtin-type>	t
+mangling-builtin	<builtin-type>	i
+mangling-builtin	<builtin-type>	j
+mangling-builtin	<builtin-type>	l
+mangling-builtin	<builtin-type>	m
+mangling-builtin	<builtin-type>	x
+mangling-builtin	<builtin-type>	y
+mangling-builtin	<builtin-type>	n
+mangling-builtin	<builtin-type>	o
+mangling-builtin	<builtin-type>	f
+mangling-builtin	<builtin-type>	d
+mangling-builtin	<builtin-type>	e
+mangling-builtin	<builtin-type>	g
+mangling-builtin	<builtin-type>	z
+mangling-builtin	<builtin-type>	Dd
+mangling-builtin	<builtin-type>	De
+mangling-builtin	<builtin-type>	Df
+mangling-builtin	<builtin-type>	Dh
+mangling-builtin	<builtin-type>	DF <number> _
+mangling-builtin	<builtin-type>	DF <number> x
+mangling-builtin	<builtin-type>	DF16b
+mangling-builtin	<builtin-type>	DB <number> _
+mangling-builtin	<builtin-type>	DB <instantiation-dependent expression> _
+mangling-builtin	<builtin-type>	DU <number> _
+mangling-builtin	<builtin-type>	DU <instantiation-dependent expression> _
+mangling-builtin	<builtin-type>	Di
+mangling-builtin	<builtin-type>	Ds
+mangling-builtin	<builtin-type>	Du
+mangling-builtin	<builtin-type>	Da
+mangling-builtin	<builtin-type>	Dc
+mangling-builtin	<builtin-type>	Dn
+mangling-builtin	<builtin-type>	[DS] DA
+mangling-builtin	<builtin-type>	[DS] DR
+mangling-builtin	<builtin-type>	u <source-name> [<template-args>]
+mangle.function-type	<function-type>	[<CV-qualifiers>] [<exception-spec>] [Dx] F [Y] <bare-function-type> [<ref-qualifier>] E
+mangle.function-type	<bare-function-type>	<signature type>+
+mangle.function-type	<exception-spec>	Do
+mangle.function-type	<exception-spec>	DO <expression> E
+mangle.function-type	<exception-spec>	Dw <type>+ E
+mangle.function-type	<type>	Dp <type>
+mangle.decltype	<decltype>	Dt <expression> E
+mangle.decltype	<decltype>	DT <expression> E
+mangling.named	<class-enum-type>	<name>
+mangling.named	<class-enum-type>	Ts <name>
+mangling.named	<class-enum-type>	Tu <name>
+mangling.named	<class-enum-type>	Te <name>
+mangling.named	<unnamed-type-name>	Ut [ <nonnegative number> ] _
+mangle.array-type	<array-type>	A [<array bound number>] _ <element type>
+mangle.array-type	<array-type>	A <instantiation-dependent array bound expression> _ <element type>
+mangle.pointer-to-member-type	<pointer-to-member-type>	M <class type> <member type>
+mangle.template-param	<template-param>	T_
+mangle.template-param	<template-param>	T <parameter-2 non-negative number> _
+mangle.template-param	<template-template-param>	<template-param>
+mangle.template-param	<template-template-param>	<substitution>
+mangle.function-param	<function-param>	fp <top-level CV-qualifiers> _
+mangle.function-param	<function-param>	fp <top-level CV-qualifiers> <parameter-2 non-negative number> _
+mangle.function-param	<function-param>	fL <L-1 non-negative number> p <top-level CV-qualifiers> _
+mangle.function-param	<function-param>	fL <L-1 non-negative number> p <top-level CV-qualifiers>
+mangle.function-param	<function-param>	fpT
+mangle.template-arg	<template-args>	I <template-arg>+ E
+mangle.template-arg	<template-arg>	<type>
+mangle.template-arg	<template-arg>	X <expression> E
+mangle.template-arg	<template-arg>	<expr-primary>
+mangle.template-arg	<template-arg>	J <template-arg>* E
+expressions	<expression>	<unary operator-name> <expression>
+expressions	<expression>	<binary operator-name> <expression> <expression>
+expressions	<expression>	<ternary operator-name> <expression> <expression> <expression>
+expressions	<expression>	pp_ <expression>
+expressions	<expression>	mm_ <expression>
+expressions	<expression>	cl <expression>+ E
+expressions	<expression>	cp <base-unresolved-name> <expression>* E
+expressions	<expression>	cv <type> <expression>
+expressions	<expression>	cv <type> _ <expression>* E
+expressions	<expression>	tl <type> <braced-expression>* E
+expressions	<expression>	il <braced-expression>* E
+expressions	<expression>	[gs] nw <expression>* _ <type> E
+expressions	<expression>	[gs] nw <expression>* _ <type> <initializer>
+expressions	<expression>	[gs] na <expression>* _ <type> E
+expressions	<expression>	[gs] na <expression>* _ <type> <initializer>
+expressions	<expression>	[gs] dl <expression>
+expressions	<expression>	[gs] da <expression>
+expressions	<expression>	dc <type> <expression>
+expressions	<expression>	sc <type> <expression>
+expressions	<expression>	cc <type> <expression>
+expressions	<expression>	rc <type> <expression>
+expressions	<expression>	ti <type>
+expressions	<expression>	te <expression>
+expressions	<expression>	st <type>
+expressions	<expression>	sz <expression>
+expressions	<expression>	at <type>
+expressions	<expression>	az <expression>
+expressions	<expression>	nx <expression>
+expressions	<expression>	<template-param>
+expressions	<expression>	<function-param>
+expressions	<expression>	dt <expression> <unresolved-name>
+expressions	<expression>	pt <expression> <unresolved-name>
+expressions	<expression>	ds <expression> <expression>
+expressions	<expression>	sZ <template-param>
+expressions	<expression>	sZ <function-param>
+expressions	<expression>	sP <template-arg>* E
+expressions	<expression>	sp <expression>
+expressions	<expression>	fl <binary operator-name> <expression>
+expressions	<expression>	fr <binary operator-name> <expression>
+expressions	<expression>	fL <binary operator-name> <expression> <expression>
+expressions	<expression>	fR <binary operator-name> <expression> <expression>
+expressions	<expression>	tw <expression>
+expressions	<expression>	tr
+expressions	<expression>	u <source-name> <template-arg>* E
+expressions	<expression>	<unresolved-name>
+expressions	<expression>	<expr-primary>
+expressions	<unresolved-name>	[gs] <base-unresolved-name>
+expressions	<unresolved-name>	sr <unresolved-type> <base-unresolved-name>
+expressions	<unresolved-name>	srN <unresolved-type> <unresolved-qualifier-level>+ E <base-unresolved-name>
+expressions	<unresolved-name>	[gs] sr <unresolved-qualifier-level>+ E <base-unresolved-name>
+expressions	<unresolved-type>	<template-param> [ <template-args> ]
+expressions	<unresolved-type>	<decltype>
+expressions	<unresolved-type>	<substitution>
+expressions	<unresolved-qualifier-level>	<simple-id>
+expressions	<simple-id>	<source-name> [ <template-args> ]
+expressions	<base-unresolved-name>	<simple-id>
+expressions	<base-unresolved-name>	on <operator-name>
+expressions	<base-unresolved-name>	on <operator-name> <template-args>
+expressions	<base-unresolved-name>	dn <destructor-name>
+expressions	<destructor-name>	<unresolved-type>
+expressions	<destructor-name>	<simple-id>
+expressions	<expr-primary>	L <type> <value number> E
+expressions	<expr-primary>	L <type> <value float> E
+expressions	<expr-primary>	L <string type> E
+expressions	<expr-primary>	L <nullptr type> E
+expressions	<expr-primary>	L <pointer type> 0 E
+expressions	<expr-primary>	L <type> <real-part float> _ <imag-part float> E
+expressions	<expr-primary>	L _Z <encoding> E
+expressions	<braced-expression>	<expression>
+expressions	<braced-expression>	di <field source-name> <braced-expression>
+expressions	<braced-expression>	dx <index expression> <braced-expression>
+expressions	<braced-expression>	dX <range begin expression> <range end expression> <braced-expression>
+expressions	<initializer>	pi <expression>* E
+mangling.literal	<float>	<0-9a-f>+
+mangling-scope	<local-name>	Z <function encoding> E <entity name> [<discriminator>]
+mangling-scope	<local-name>	Z <function encoding> E s [<discriminator>]
+mangling-scope	<discriminator>	_ <non-negative number>
+mangling-scope	<unnamed-type-name>	Ut [<nonnegative number> ] _
+closure-types	<unnamed-type-name>	<closure-type-name>
+closure-types	<closure-type-name>	Ul <lambda-sig> E [ <nonnegative number> ] _
+closure-types	<lambda-sig>	<parameter type>+
+closure-types	<local-name>	Z <function encoding> Ed [ <parameter number> ] _ <entity name>
+closure-types	<closure-prefix>	[ <prefix> ] <variable or member unqualified-name> M
+closure-types	<closure-prefix>	<variable template template-prefix> <template-args> M
+mangling-compression	<substitution>	S <seq-id> _
+mangling-compression	<substitution>	S_
+mangling-compression	<substitution>	St
+mangling-compression	<substitution>	Sa
+mangling-compression	<substitution>	Sb
+mangling-compression	<substitution>	Ss
+mangling-compression	<substitution>	Si
+mangling-compression	<substitution>	So
+mangling-compression	<substitution>	Sd

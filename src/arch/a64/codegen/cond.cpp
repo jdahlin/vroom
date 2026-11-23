@@ -49,7 +49,7 @@ VPRIV void gen_cond(codegen_context *e, uint32_t n, bool jump_if, uint32_t l)
         }
         break;
     case AST_NODE_BINARY:
-        if (codegen_operator_is_comparison(x->aux) &&
+        if (lex_token_is_comparison(x->aux) &&
             !codegen_type_is_wide(c, N(x->a)->ty) &&
             !codegen_type_is_float(c, N(x->a)->ty)) {
             codegen_value v = gen(e, n);

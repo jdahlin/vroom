@@ -1,25 +1,102 @@
-// overloaded operators (members, at namespace scope, templates) and conversion functions
-struct V { int v; V(int x) : v(x) {} 
-  V operator+(const V &o) const { return V(v + o.v); }
-  bool operator==(const V &o) const { return v == o.v; }
-  V &operator+=(int d) { v += d; return *this; }
-  int operator[](int i) const { return v + i; }
-  int operator()(int a, int b) const { return v + a + b; }
-  explicit operator bool() const { return v != 0; }
-  V operator-() const { return V(-v); }
-  V &operator++() { ++v; return *this; }
+// operator functions: [over.oper], [over.match.oper], [over.unary],
+// [over.binary], [over.inc]
+#include <stdio.h>
+
+struct V {
+    int x, y;
+    V &operator+=(V o)
+    {
+        x += o.x;
+        y += o.y;
+        return *this;
+    }
+    V operator-() const { return V{-x, -y}; }
+    bool operator==(V o) const { return x == o.x && y == o.y; }
+    V &operator++()
+    {
+        ++x;
+        return *this;
+    }
+    V operator++(int)
+    {
+        V old = *this;
+        ++y;
+        return V{old.x, old.y};
+    }
 };
-static V operator*(const V &a, const V &b) { return V(a.v * b.v); }
-template <class T> struct L { T x; template <class R> bool operator==(const R &r) const { return x == r; } };
-struct D { template <class T> L<T> operator<<(const T &t) { L<T> l; l.x = t; return l; } };
-static int f1() { V a(1), b(2); V c = a + b; return c.v; }
-static int f2() { V a(1), b(2); return a == b; }
-static int f3() { V a(1); a += 4; return a.v; }
-static int f4() { V a(1); return a[3]; }
-static int f5() { V a(1); return a(2, 3); }
-static int f6() { V a(1); if (a) return 1; return 0; }
-static int f7() { V a(3), b(2); V c = a * b; return c.v; }
-static int f8() { V a(3); V c = -a; ++c; return c.v; }
-static int f9() { return (D() << 5) == 5; }
-static int f10() { V a(1); return !a; }
-int main() { return f1() + f2() + f3() + f4() + f5() + f6() + f7() + f8() + f9() + f10() == 24 ? 0 : 1; }
+
+// non-member, by value and by reference
+V operator+(V a, V b) { return V{a.x + b.x, a.y + b.y}; }
+V operator*(const V &a, int k) { return V{a.x * k, a.y * k}; }
+V operator*(int k, const V &a) { return a * k; }
+int operator*(const V &a, const V &b) { return a.x * b.x + a.y * b.y; }
+bool operator<(const V &a, const V &b) { return a.x < b.x; }
+bool operator!(V a) { return !a.x && !a.y; }
+V &operator--(V &a)
+{
+    --a.x;
+    return a;
+}
+V operator--(V &a, int)
+{
+    V old = a;
+    --a.y;
+    return V{old.x, old.y};
+}
+
+namespace geo {
+struct P {
+    int v;
+};
+// found by argument-dependent lookup
+int operator%(P a, P b) { return a.v % b.v; }
+P operator<<(P a, int s) { return P{a.v << s}; }
+} // namespace geo
+
+enum Color { red, green, blue };
+Color operator+(Color c, int k) { return static_cast<Color>((int(c) + k) % 3); }
+int operator~(Color c) { return 10 + int(c); }
+
+struct Flag {
+    bool on;
+};
+bool operator&&(Flag a, Flag b) { return a.on && b.on; }
+int operator|(Flag a, int b) { return int(a.on) | b; }
+
+static int sum(V v) { return v.x * 10 + v.y; }
+
+int main()
+{
+    V a{1, 2}, b{3, 4};
+    int total = sum(a + b);         // 46
+    total += sum(a * 2) + sum(3 * a); // 24 + 36
+    total += a * b;                 // 11
+    V c = a;
+    c += b;
+    c += V{1, 1};
+    total += sum(c);                // 57
+    total += sum(-a);               // -12
+    total += (a == V{1, 2}) + (a == b) * 100; // 1
+    bool less = a < b, more = b < a;
+    total += less + more * 100;     // 1
+    total += !V{0, 0} + !a * 100;   // 1
+    V d{5, 5};
+    ++d;
+    V e = d++;
+    total += sum(d) + sum(e);       // 66 + 65
+    --d;
+    V f = d--;
+    total += sum(d) + sum(f);       // 55 + 56
+    total += sum(a + b + c);        // 4*10+6 + 57 = 103
+    geo::P p{17}, q{5};
+    total += p % q + (p << 2).v;    // 2 + 68
+    Color k = blue + 2;             // green
+    total += int(k) + ~k + ~red;    // 1 + 11 + 10
+    total += int(red + 1) * 1000;   // 1000
+    int plain = 2 + 3;              // built-in
+    total += plain;
+    Flag on{true}, off{false};
+    total += (on && on) + (on && off) * 100 + (off | 4); // 1 + 4
+    printf("%d\n", total);
+    return total & 255;
+}

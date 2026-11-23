@@ -1,5 +1,8 @@
 #ifndef _RT_STDLIB_H
 #define _RT_STDLIB_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stddef.h>
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
@@ -35,5 +38,8 @@ int rand(void);
 void srand(unsigned);
 #ifndef alloca
 #define alloca __builtin_alloca
+#endif
+#ifdef __cplusplus
+}
 #endif
 #endif

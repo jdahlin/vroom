@@ -18,6 +18,7 @@
  *   VPP_TIME=1   report the preprocessing time on the error fd
  */
 #include "driver-internal.h"
+#include "frontend/cplusplus/compile.h"
 
 /* -g's compilation directory: the client's (vccd) or the process' (into buf) */
 static const char *driver_debug_directory(const driver_environment *env,
@@ -172,6 +173,15 @@ static void driver_job_pp_options_finish(struct driver_job *job,
     job->pp_options.main = job->stdin_src ? "<stdin>" : job->main_file;
     job->pp_options.main_src = job->stdin_src,
     job->pp_options.main_len = job->stdin_len;
+    if (job->cxx && job->syntax_only) {
+        /* a C++ compile: the C++ front end reads the file and the
+           predefines itself (driver_job_compile_cplusplus); C's
+           preprocessor only reports the code generator's diagnostics, so it
+           reads neither (a C rule must not end the C++ job) */
+        job->pp_options.predef = "";
+        job->pp_options.main_src = "";
+        job->pp_options.main_len = 0;
+    }
     job->pp_options.unsigned_char =
         job->unsigned_char >= 0 ? job->unsigned_char : job->target_linux;
     job->pp_options.cwd = env->cwd;
@@ -204,7 +214,53 @@ static void driver_job_pp_options_finish(struct driver_job *job,
     }
 }
 
-/* -fsyntax-only, -S, -c of C: the front end and code generator, then the output files */
+/* a C++ translation unit (frontend/cplusplus, doc/PLAN-cxx-sema.md S1e):
+   the predefines and search path the driver resolved, the code generator's
+   options C has; the C preprocessor p only reports the code generator's
+   diagnostics */
+static int driver_job_compile_cplusplus(struct driver_job *job, pp *p,
+                                        const driver_environment *env,
+                                        const cc_options *co)
+{
+#ifdef __cplusplus
+    char path[4096];
+    const char *main = job->main_file;
+
+    if (job->stdin_src) {
+        dprintf(job->errfd, "vcc: error: C++ from standard input is not "
+                            "compiled yet\n");
+        return 1;
+    }
+    if (main[0] != '/' && env->cwd) {
+        snprintf(path, sizeof path, "%s/%s", env->cwd, main);
+        main = path;
+    }
+    struct cplusplus_compile_options o = {};
+    o.path = main;
+    o.edition = job->cxx;
+    o.gnu = !job->strict_standard;
+    o.predefines = job->predefines.data;
+    o.predefines_length = job->predefines.length - 1; /* (its '\0') */
+    o.search = &job->pp_options;
+    o.errfd = job->errfd;
+    o.arguments = job->cxx_arguments;
+    o.argument_count = job->cxx_argument_count;
+    o.embed_directories = job->embed_directories;
+    o.embed_directory_count = job->embed_count;
+    {
+        size_t l = strlen(main);
+        o.preprocessed_input = (l > 2 && !strcmp(main + l - 2, ".i")) ||
+                               (l > 3 && !strcmp(main + l - 3, ".ii"));
+    }
+    return cplusplus_compile(&o, p, co) || pp_error_count(p) ? 1 : 0;
+#else
+    (void)job, (void)p, (void)env, (void)co;
+    return 1;
+#endif
+}
+
+/* -fsyntax-only, -S, -c of C and C++: the front end and code generator,
+   then the output files */
 static void driver_job_compile(struct driver_job *job, pp *p,
                                const driver_environment *env)
 {
@@ -226,12 +282,13 @@ static void driver_job_compile(struct driver_job *job, pp *p,
             return;
         }
     }
-    if (job->cxx && !job->syntax_only) {
-        dprintf(job->errfd,
-                "vcc: error: C++ code generation is not implemented yet\n");
+#ifndef __cplusplus
+    if (job->cxx) { /* the C++ front end is C++: a C-hosted vcc has none */
+        dprintf(job->errfd, "vcc: error: C++ needs a C++-hosted vcc\n");
         job->status = 1;
         return;
     }
+#endif
     cc_options co = {
         .target = job->pp_options.target,
         .unsigned_char = job->pp_options.unsigned_char,
@@ -281,6 +338,8 @@ static void driver_job_compile(struct driver_job *job, pp *p,
         .debug = job->debug,
         .dbg_version = job->dwarf_version,
         .cfi = job->cfi > 0,
+        .eh = job->cxx && !job->no_exceptions && job->target_x64 &&
+              !job->target_win64 && job->cfi > 0,
         .no_seh = job->no_seh,
         .dbg_name = job->main_file,
         .tlsmodel = job->tls_model,
@@ -303,6 +362,14 @@ static void driver_job_compile(struct driver_job *job, pp *p,
            sizeof job->disabled_builtins);
     co.emit = job->emit_assembly;
     co.field_uses = field_uses;
+#ifdef VCC_REFACTOR
+    co.refactor =
+        job->syntax_only && driver_environment_get(env, "VCC_REF_QUERY");
+    if (co.refactor) {
+        pp_refactor_tokens(p, co.outfd);
+        dprintf(co.outfd, "L 0 0 %s\n", job->cxx ? "c++" : "c");
+    }
+#endif
     char dbgdir[4096];
     if (job->debug)
         co.dbg_dir = env->cwd ? env->cwd : getcwd(dbgdir, sizeof dbgdir);
@@ -335,19 +402,9 @@ static void driver_job_compile(struct driver_job *job, pp *p,
         unsigned long long t1 = driver_clock_nanoseconds();
         vperf v1 = vperformance_now();
 
-        if (job->cxx) { /* C++ (PLAN-cxx.md): the same options and AST */
-            cxx_options xo = {.standard = job->cxx,
-                              .errfd = job->errfd,
-                              .progress = driver_environment_get(
-                                              env, "VCC_CXX_PROGRESS") != NULL};
-
-            extern const char *cxx_fork_output;
-
-            job->status = cxx_run(p, &co, &xo) || pp_error_count(p) ? 1 : 0;
-            if (cxx_fork_output)
-                job->output_file =
-                    cxx_fork_output; /* (a TU forked after a shared prefix: its own object) */
-        } else
+        if (job->cxx)
+            job->status = driver_job_compile_cplusplus(job, p, env, &co);
+        else
             job->status =
                 cc_translation_unit_run(p, &co) || pp_error_count(p) ? 1 : 0;
         driver_compile_nanoseconds += driver_clock_nanoseconds() - t1;
@@ -509,7 +566,9 @@ driver_job_run_one(int argc, char **argv, const driver_environment *env)
                               .command_line_defines = {.region = &br[1]},
                               .include_text = {.region = &br[2]},
                               .include_macros_text = {.region = &br[3]},
+#if defined(__x86_64__) && !defined(__APPLE__)
                               .target_x64 = 1,
+#endif
                               .ms_bitfields = -1,
                               .hosted = 1,
                               .raw_assembler = -1,

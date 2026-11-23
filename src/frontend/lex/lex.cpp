@@ -1802,6 +1802,13 @@ static bool lex_source_read(const char *path, const char **src, size_t *size,
     struct stat st;
     int fd;
 
+#ifdef VCC_REFACTOR
+    /* Validate the proposed bytes under the original main file's include path. */
+    const char *original = getenv("VREF_MAIN"),
+               *overlay = getenv("VREF_OVERLAY");
+    if (original && overlay && !strcmp(path, original))
+        path = overlay;
+#endif
     do
         fd = open(path, O_RDONLY | O_CLOEXEC);
     while (fd < 0 && errno == EINTR);
@@ -2131,8 +2138,19 @@ const lex_file *lex_file_digit_separators_remove(const lex_file *f)
          q = (const char *)(memchr(q + 1, '\'', (size_t)(s + n - q - 1))))
         if (q > s && q + 1 < s + n && lex_character_is_alphanumeric(q[-1]) &&
             lex_character_is_alphanumeric(q[1])) {
-            any = true;
-            break;
+            /* only inside a pp-number: the run of [A-Za-z0-9_.'] before it starts with a
+               digit (0x8000'0000), not a letter (the don't of a comment: C++ headers are
+               full of them, and a copy is lexed twice) */
+            const char *r = q;
+
+            while (r > s && (lex_character_is_alphanumeric(r[-1]) ||
+                             r[-1] == '.' || r[-1] == '\''))
+                r--;
+            if ((*r >= '0' && *r <= '9') ||
+                (*r == '.' && r + 1 < q && r[1] >= '0' && r[1] <= '9')) {
+                any = true;
+                break;
+            }
         }
     if (!any)
         return f;

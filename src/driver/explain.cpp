@@ -1,7 +1,7 @@
 /*
  * explain.c: `vcc --explain [ID]`: print a diagnostic's page, or the list of ids.
  *
- * The pages are doc/diag/*.md compiled into explain.inc by src/tools/gen-explain.py (`--check` says
+ * The pages are the Markdown files in doc/diag/, compiled into explain.inc by src/tools/gen-explain.py (`--check` says
  * whether it is current); the table is read only, so any thread can call explain.  driver_job_run tries it
  * first, and -1 means the command line had no --explain and the job goes on.  The id may be given as
  * -fdiagnostics-show-id prints it, `[id]`.  Output goes to env->outfd, an unknown id's error to

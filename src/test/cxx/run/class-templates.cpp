@@ -1,38 +1,75 @@
-/* member functions of class template instances */
-template <class T> struct Box {
-	T v;
-	void set(T x) { v = x; }
-	T get() const { return v; }
-	T twice() const { return get() + get(); }
-	static int tag() { return 7; }
+/* Class templates of namespace scope with type parameters: members of a
+   parameter's type, member functions using it, constructors, the
+   injected-class-name, a specialization as another's argument, a
+   template of a namespace named with its qualifier, a function template
+   over a class template's specializations ([temp.class], [temp.names],
+   [temp.inst], [temp.local]). */
+#include <stdio.h>
+
+template <class T> struct box {
+    T value;
+    T get() const { return value; }
+    void set(T v) { value = v; }
+    box with(T v) const
+    {
+        box copy = *this;
+        copy.value = v;
+        return copy;
+    }
 };
-template <class A, class B> struct Pair2 {
-	A a; B b;
-	Pair2(A x, B y) : a(x), b(y) { }
-	A first() const { return a; }
-	B second() const { return b; }
-	long sum() const { return (long)a + (long)b; }
+
+template <class K, class V> struct pair {
+    K key;
+    V value;
+    pair(K k, V v) : key(k), value(v) {}
+    int key_size() const { return sizeof(K); }
 };
-template <class T> struct Stack {
-	T items[8];
-	int n;
-	Stack() : n(0) { }
-	void push(T x) { items[n] = x; n++; }
-	T pop() { n--; return items[n]; }
-	bool empty() const { return n == 0; }
-	int size() const { return n; }
+
+template <class T> struct node {
+    T item;
+    node<T> *next;
+    int length() const
+    {
+        int n = 1;
+        for (const node *p = next; p; p = p->next)
+            n++;
+        return n;
+    }
 };
-namespace lib { template <class T> struct Wrap { T x; T &ref() { return x; } const T &cref() const { return x; } }; }
-int main() {
-	Box<int> bi; bi.set(21); if (bi.twice() != 42) return 1;
-	Box<long> bl; bl.set(1L << 40); if (bl.get() != (1L << 40)) return 2;
-	Box<double> bd; bd.set(1.25); if (bd.twice() != 2.5) return 3;
-	if (Box<char>::tag() != 7) return 4;
-	Pair2<int, long> p(3, 4L); if (p.first() != 3 || p.second() != 4 || p.sum() != 7) return 5;
-	Pair2<char, short> q('a', 2); if (q.sum() != 99) return 6;
-	Stack<int> s; if (!s.empty()) return 7;
-	s.push(1); s.push(2); s.push(3);
-	if (s.size() != 3 || s.pop() != 3 || s.pop() != 2 || s.size() != 1) return 8;
-	lib::Wrap<int> w; w.ref() = 5; if (w.cref() != 5) return 9;
-	return 0;
+
+namespace geometry {
+template <class T> struct point {
+    T x, y;
+    T dot(point other) const { return x * other.x + y * other.y; }
+};
+} // namespace geometry
+
+template <class T> T unbox(box<T> b) { return b.get(); }
+
+int main()
+{
+    int failures = 0;
+    box<int> b;
+    b.set(3);
+    box<double> d = {1.5};
+    if (b.get() != 3 || d.get() != 1.5 || sizeof(box<char>) != 1)
+        failures |= 1;
+    if (b.with(9).get() != 9 || b.get() != 3)
+        failures |= 2;
+    pair<char, long> p('k', 7);
+    if (p.key != 'k' || p.value != 7 || p.key_size() != 1 ||
+        sizeof(pair<char, long>) != 16)
+        failures |= 4;
+    node<int> c = {3, 0};
+    node<int> a = {1, &c};
+    if (a.length() != 2 || a.next->item != 3)
+        failures |= 8;
+    geometry::point<int> u = {1, 2}, v = {3, 4};
+    if (u.dot(v) != 11)
+        failures |= 16;
+    box<box<int>> nested = {{5}};
+    if (nested.get().get() != 5 || unbox(b) != 3 || unbox(d) != 1.5)
+        failures |= 32;
+    printf("%d\n", failures);
+    return failures;
 }

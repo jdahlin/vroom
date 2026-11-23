@@ -24,6 +24,8 @@
  *                  (tab separated, last column the main file); vbench.py
  *   VPP_WARM=N   N untimed passes first (fills the token cache; profiling)
  */
+#include "driver/options-help.h"
+#include "common/cmdlib.h"
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -277,12 +279,41 @@ static int vpp_vlink_spawn(int argc, char **argv, void *ctx)
     return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
 }
 
+enum {
+    OPT_CMP_FILES = 1,
+    OPT_BATCH,
+    OPT_J,
+    OPT_C,
+    OPT_CMP,
+    OPT_WARM,
+    OPT_STATS
+};
+static const cmdlib_option vpp_options[] = {
+    {OPT_CMP_FILES, "--cmp-files", "FILE",
+     "Compare tokens with the second file.", false},
+    {OPT_BATCH, "--batch", "LIST", "Run the listed compiler jobs.", false},
+    {OPT_J, "-j", "N", "Batch worker count.", false},
+    {OPT_C, "-C", "DIR", "Batch working directory.", false},
+    {OPT_CMP, "--cmp", NULL, "Compare batch outputs.", false},
+    {OPT_WARM, "--warm", "N", "Set batch warmup count.", false},
+    {OPT_STATS, "--stats", "FILE", "Write batch statistics.", false},
+    {0, NULL, NULL, NULL, false}};
+
 int main(int argc, char **argv)
 {
+    if (cmdlib_wants_help(argc, argv)) {
+        cmdlib_print_help(
+            "Usage: vpp [compiler options] INPUT | --batch LIST [OPTIONS]",
+            vpp_options);
+        compiler_options_print();
+        return 0;
+    }
+
     driver_environment e = {.outfd = 1, .errfd = 2};
     const char *w = getenv("VPP_WARM");
 
-    if (argc == 4 && !strcmp(argv[1], "--cmp-files")) {
+    int command = cmdlib_match(vpp_options, argc - 1, argv + 1, NULL);
+    if (argc == 4 && command == OPT_CMP_FILES) {
         int fd = open(argv[2], O_RDONLY);
         struct stat st;
 
@@ -293,20 +324,21 @@ int main(int argc, char **argv)
                                 MAP_PRIVATE, fd, 0)),
             (size_t)st.st_size, argv[3]);
     }
-    if (argc >= 3 && !strcmp(argv[1], "--batch")) {
+    if (argc >= 3 && command == OPT_BATCH) {
         int nthr = vtask_jobs_from_environment(6);
         const char *statsf = NULL;
 
         for (int i = 3; i < argc; i++) {
-            if (!strcmp(argv[i], "-j") && i + 1 < argc)
+            int option = cmdlib_match(vpp_options, argc - i, argv + i, NULL);
+            if (option == OPT_J)
                 nthr = atoi(argv[++i]);
-            else if (!strcmp(argv[i], "-C") && i + 1 < argc)
+            else if (option == OPT_C)
                 vpp_batch_directory = argv[++i];
-            else if (!strcmp(argv[i], "--cmp"))
+            else if (option == OPT_CMP)
                 vpp_compare_mode = 1;
-            else if (!strcmp(argv[i], "--warm") && i + 1 < argc)
+            else if (option == OPT_WARM)
                 vpp_warmup = atoi(argv[++i]);
-            else if (!strcmp(argv[i], "--stats") && i + 1 < argc)
+            else if (option == OPT_STATS)
                 statsf = argv[++i];
         }
         return vpp_batch_run(argv[2], nthr, statsf);

@@ -467,7 +467,7 @@ static codegen_value gen_vlanes(codegen_context *e, int op,
                                  codegen_value_constant(-1))
                         : arith(e, LEX_TOKEN_CARET, et, x,
                                 codegen_value_constant(-1));
-        } else if (codegen_operator_is_comparison(op)) {
+        } else if (lex_token_is_comparison(op)) {
             if (codegen_type_is_float(c, et)) {
                 r = f_compare(e, op, et, x, y);
             } else {
@@ -546,8 +546,7 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
     const node *x = N(n);
     int op = x->aux;
     ast_qualified_type lt = N(x->a)->ty, rt = N(x->b)->ty, ty = x->ty;
-    int known =
-        codegen_operator_is_comparison(op) ? codegen_condition_fold(e, n) : -1;
+    int known = lex_token_is_comparison(op) ? codegen_condition_fold(e, n) : -1;
     codegen_value a, b;
     uint32_t operand;
     int bound = em_cmpbounds(e, n, &operand);
@@ -630,11 +629,11 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
         b = cast(e, b, rt, codegen_type_primitive(AST_TYPE_INT),
                  AST_CAST_INTEGER);
     if (codegen_type_is_bitint_big(c, lt))
-        return codegen_operator_is_comparison(op) ? a64_bigcmp(e, op, lt, a, b)
-                                                  : a64_bigbin(e, op, ty, a, b);
+        return lex_token_is_comparison(op) ? a64_bigcmp(e, op, lt, a, b)
+                                           : a64_bigbin(e, op, ty, a, b);
     if (codegen_type_is_float(c, lt) || codegen_type_is_float(c, ty))
-        return codegen_operator_is_comparison(op) ? f_compare(e, op, lt, a, b)
-                                                  : f_arith(e, op, ty, a, b);
+        return lex_token_is_comparison(op) ? f_compare(e, op, lt, a, b)
+                                           : f_arith(e, op, ty, a, b);
     /* pointer arithmetic */
     if (codegen_type_is_pointer(c, ty) &&
         (op == LEX_TOKEN_PLUS || op == LEX_TOKEN_MINUS) &&
@@ -682,7 +681,7 @@ static codegen_value gen_binary(codegen_context *e, uint32_t n)
             return a;
         }
     }
-    if (codegen_operator_is_comparison(op)) {
+    if (lex_token_is_comparison(op)) {
         bool sg =
             !codegen_type_is_pointer(c, lt) && codegen_type_is_signed(c, lt);
         int cond, r;
@@ -1601,9 +1600,23 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
     case AST_NODE_VA_ARG:
         return va_arg_(e, x);
     case AST_NODE_ZERO:
-        return codegen_type_is_bitint_big(c, x->ty)
-                   ? a64_bigconst(e, x->ty, NULL, 0)
-                   : codegen_value_constant(0);
+        if (!codegen_type_is_aggregate(c, x->ty))
+            return codegen_type_is_bitint_big(c, x->ty)
+                       ? a64_bigconst(e, x->ty, NULL, 0)
+                       : codegen_value_constant(0);
+        __attribute__((fallthrough));
+    case AST_NODE_INITIALIZER: {
+        /* a braced initializer (or an aggregate's zero) used as a value: built
+           in a temporary object of its type, which is the value (its address) */
+        codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
+                            .align = codegen_type_alignment(c, x->ty),
+                            .offset = a64_frame_slot_allocate(
+                                e, codegen_type_size(c, x->ty),
+                                codegen_type_alignment(c, x->ty))};
+
+        gen_init_local(e, &d, x->ty, n);
+        return load_free(e, &d, x->ty);
+    }
     case AST_NODE_COMPLEX: { /* a _Complex value: both parts into a temporary, its address */
         ast_qualified_type et = c->tags[T(c, x->ty)->aux].f[0].ty;
         uint64_t es = codegen_type_size(c, et);

@@ -1,0 +1,629 @@
+/*
+ * iteration-statement.cpp: [stmt.iter] Iteration statements, with [stmt.while],
+ * [stmt.do], [stmt.for] and [stmt.ranged].
+ *
+ *     iteration-statement:
+ *         while ( condition ) statement
+ *         do statement while ( expression ) ;
+ *         for ( init-statement condition_opt ; expression_opt ) statement
+ *         for ( init-statement_opt for-range-declaration : for-range-initializer ) statement
+ *
+ *     for-range-declaration:
+ *         attribute-specifier-seq_opt decl-specifier-seq declarator
+ *         attribute-specifier-seq_opt decl-specifier-seq ref-qualifier_opt [ identifier-list ]
+ *
+ *     for-range-initializer:
+ *         expr-or-braced-init-list
+ *
+ * Which for statement it is: the range-based one has a ':' after its last
+ * ';' (scan_parenthesized).  The range-based for statement is N2930's
+ * (C++11), its init-statement P0614R1's (C++20); before them they are
+ * [ext.clang] clang's extensions, P9's.  The structured binding of the
+ * second for-range-declaration is P5's (structured-binding.cpp analyses it);
+ * for-range-initializer passes its operand on.
+ */
+#include "frontend/cplusplus/sema.h"
+#include "ambiguity-resolution.h"
+
+namespace cplusplus
+{
+
+node_index parser::iteration_statement()
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    standard_keyword k = keyword_of(peek());
+    add_token();
+    if (k == standard_keyword::do_) {
+        substatement();
+        if (failed())
+            return 0;
+        if (!accept(standard_keyword::while_))
+            return expected("while after the substatement of do", "stmt.do");
+        if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+            return expected("'(' after while", "stmt.do");
+        expression();
+        if (failed())
+            return 0;
+        if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            return expected("')' after the expression", "stmt.do");
+        if (!accept(preprocessing_op_or_punc::SEMICOLON))
+            return expected("';' after the do statement", "stmt.do");
+        return finish_node(syntax_kind::iteration_statement, mark, first);
+    }
+    if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        return expected("'('", "stmt.iter");
+    declarative_region statement_scope(names, scope_kind::block);
+    if (k == standard_keyword::while_) {
+        condition(preprocessing_op_or_punc::RIGHT_PARENTHESIS);
+        if (failed())
+            return 0;
+    } else {
+        parenthesized_parts parts = scan_parenthesized(*this);
+        if (parts.range_colon) {
+            if (!b.has(language_feature::range_based_for))
+                return beyond_this_step();
+            if (parts.semicolons) {
+                if (!b.has(language_feature::range_for_init_statement))
+                    return beyond_this_step();
+                init_statement();
+                if (failed())
+                    return 0;
+            }
+            for_range_declaration();
+            if (failed())
+                return 0;
+            if (!accept(preprocessing_op_or_punc::COLON))
+                return expected("':' after the for-range-declaration",
+                                "stmt.ranged");
+            if (at(preprocessing_op_or_punc::LEFT_BRACE)) {
+                if (list_initialization_missing())
+                    return 0;
+                braced_init_list();
+            } else {
+                expression();
+            }
+            if (failed())
+                return 0;
+        } else {
+            init_statement();
+            if (failed())
+                return 0;
+            if (!at(preprocessing_op_or_punc::SEMICOLON)) {
+                condition(preprocessing_op_or_punc::SEMICOLON);
+                if (failed())
+                    return 0;
+            }
+            if (!accept(preprocessing_op_or_punc::SEMICOLON))
+                return expected("';' after the condition", "stmt.for");
+            if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+                expression();
+                if (failed())
+                    return 0;
+            }
+        }
+    }
+    if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+        return expected("')'", "stmt.iter");
+    substatement();
+    if (failed())
+        return 0;
+    return finish_node(syntax_kind::iteration_statement, mark, first);
+}
+
+/* the name is declared in the for statement's scope ([basic.scope.block]/3) */
+node_index parser::for_range_declaration()
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    attribute_specifier_seq();
+    if (failed())
+        return 0;
+    decl_specifier_facts specifiers;
+    decl_specifier_seq(specifiers, false);
+    if (failed())
+        return 0;
+    if (!specifiers.node)
+        return expected("a decl-specifier-seq", "stmt.iter");
+    if (structured_binding_follows()) {
+        /* [dcl.struct.bind] */
+        structured_binding_identifiers();
+        if (failed())
+            return 0;
+        return finish_node(syntax_kind::for_range_declaration, mark, first);
+    }
+    declarator_facts facts;
+    declarator(declarator_form::concrete, facts);
+    if (failed())
+        return 0;
+    if (facts.name && !facts.qualified_id)
+        names.declare(facts.name, name_kind::other);
+    return finish_node(syntax_kind::for_range_declaration, mark, first);
+}
+
+/* ---- semantic analysis ---------------------------------------------- */
+
+/*
+ * [stmt.iter]/1:
+ *
+ *     iteration-statement:
+ *         while ( condition ) statement
+ *         do statement while ( expression ) ;
+ *         for ( init-statement condition_opt ; expression_opt ) statement
+ *         for ( init-statement_opt for-range-declaration : for-range-initializer ) statement
+ *
+ * The range-based for is range_based_for's.
+ */
+analysis_result semantic_analysis::iteration_statement(IterationStatement n,
+                                                       uint32_t &built)
+{
+    standard_keyword k = leading_keyword(n);
+    if (k == standard_keyword::none)
+        return not_supported(n, "stmt.iter");
+    entity_index outer = current_scope, statement_scope = 0;
+    analysis_result result = analysis_result::well_formed;
+    expression_meaning m;
+    token_index at = n[0].token();
+    uint32_t body = 0, init = 0, step_node = 0;
+    if (k == standard_keyword::do_) {
+        /* do statement while ( expression ) ; */
+        if (n.size() != 7)
+            return not_supported(n, "stmt.do");
+        function_state.loops++;
+        function_state.breakable++;
+        result = substatement(n.body(), 0, body);
+        function_state.loops--;
+        function_state.breakable--;
+        /* [stmt.do]/1: "The expression is contextually converted to bool;
+           if that conversion is ill-formed, the program is ill-formed." */
+        analysis_result r = expression(n.do_expression(), m);
+        if (r == analysis_result::well_formed)
+            r = contextual_bool(n, m);
+        built = statement_node(semantic_kind::do_statement, at, body, m.node);
+        return worse(result, r);
+    }
+    if (k == standard_keyword::while_) {
+        if (n.size() != 5)
+            return not_supported(n, "stmt.while");
+        if (n.while_condition().is(syntax_kind::condition))
+            statement_scope = open_scope(0, false);
+        result = condition(n.while_condition(), false, m);
+    } else if (k == standard_keyword::for_) {
+        if (n.size() < 6)
+            return not_supported(n, "stmt.for");
+        for (uint32_t i = 0; i < n.size(); i++)
+            if (n[i].is(syntax_kind::for_range_declaration))
+                return range_based_for(n, i, built);
+        /* for ( init-statement condition_opt ; expression_opt ) statement:
+           the init-statement ends with its own ; */
+        if (!n.for_shaped())
+            return not_supported(n, "stmt.for");
+        SyntaxElement init_syntax = n.for_init_statement();
+        SyntaxElement cond = n.for_condition(), step = n.for_expression();
+        bool has_cond = static_cast<bool>(cond),
+             has_step = static_cast<bool>(step);
+        if (!init_syntax.is(syntax_kind::expression_statement) ||
+            (has_cond && cond.is(syntax_kind::condition)))
+            statement_scope = open_scope(0, false);
+        bool claimable = declarations_claimable;
+        declarations_claimable = false;
+        result = statement(init_syntax, init);
+        declarations_claimable = claimable;
+        if (has_cond)
+            result = worse(result, condition(cond, false, m));
+        if (has_step) {
+            expression_meaning e;
+            result = worse(result, expression(step, e));
+            step_node = e.node;
+        }
+    } else {
+        return not_supported(n, "stmt.iter");
+    }
+    function_state.loops++;
+    function_state.breakable++;
+    result = worse(result, substatement(n.body(), statement_scope, body));
+    function_state.loops--;
+    function_state.breakable--;
+    current_scope = outer;
+    if (k == standard_keyword::while_)
+        built =
+            statement_node(semantic_kind::while_statement, at, m.node, body);
+    else
+        built = statement_node(semantic_kind::for_statement, at, init, m.node,
+                               step_node, body);
+    return result;
+}
+
+/* a variable [stmt.ranged]/1 defines for exposition only (unnamed, in
+   the current scope) of type type, initialized by m: its declaration
+   statement, and the variable named (an lvalue) in named */
+analysis_result semantic_analysis::exposition_variable(
+    SyntaxRef n, token_index at, expression_meaning &m, qualified_type type,
+    bool named, uint32_t &declaration, expression_meaning &variable)
+{
+    entity_index v = entity_table.make(entity_kind::variable, 0, current_scope);
+    entity_table[v].defined = true;
+    entity_table[v].automatic = true;
+    initialized_value value;
+    scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
+    VTRY(r, deduced_initialization(n, m, named, false, false, v, type, value));
+    entity_table[v].definition = value.node;
+    declaration =
+        statement_node(semantic_kind::declaration_statement, at, v, value.node);
+    variable = expression_meaning();
+    return named_entity(at, v, variable, false);
+}
+
+/* [stmt.ranged]/1: begin-expr or end-expr (name begin or end) for range,
+   the variable range named: range.name() (member, of class type) or
+   name(range) */
+analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
+                                              const expression_meaning &range,
+                                              uint32_t name, bool member,
+                                              expression_meaning &m)
+{
+    owned_array<SyntaxElement> arguments;
+    owned_array<expression_meaning> early;
+    owned_array<entity_index> set;
+    expression_meaning f = range;
+    uint32_t object = 0;
+    entity_index chosen = 0;
+    analysis_result r = analysis_result::well_formed;
+    if (member) {
+        bool ambiguous = false;
+        entity_index c = type_table[range.type.unqualified()].entity;
+        entity_index e = class_member_lookup(c, name, ambiguous);
+        if (ambiguous || entity_table[e].kind != entity_kind::function)
+            /* a member template, a data member, a type */
+            return not_supported(n, "stmt.ranged");
+        overloaded_callee = at;
+        r = member_access(at, e, f);
+        overloaded_callee = 0;
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!f.node ||
+            semantics[f.node].kind != semantic_kind::bound_member_function)
+            return not_supported(n, "stmt.ranged");
+        object = semantics[f.node].a;
+        chosen = semantics[f.node].b;
+        overload_set(chosen, set);
+    } else {
+        /* "where begin and end are looked up in the associated namespaces
+           ([basic.lookup.argdep]).  [Note 1: Ordinary unqualified lookup
+           ([basic.lookup.unqual]) is not performed. -- end note]" */
+        owned_array<qualified_type> types;
+        types.append(range.type);
+        owned_array<entity_index> found;
+        if (!argument_dependent_lookup(name, types, found))
+            return not_supported(n, "basic.lookup.argdep");
+        for (entity_index e : found)
+            overload_set(e, set);
+        if (set.empty())
+            return ill_formed(n,
+                              "begin-expr and end-expr are begin(range) and "
+                              "end(range), where begin and end are looked up "
+                              "in the associated namespaces",
+                              "stmt.ranged");
+        arguments.append(SyntaxElement());
+        early.append(range);
+        f = expression_meaning();
+        overloaded_callee = at;
+        r = named_entity(at, set[0], f, false);
+        overloaded_callee = 0;
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (set.size() > 1) {
+        VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
+        if (member)
+            chosen = semantics[f.node].b;
+    }
+    return call_with(n, f, f.type, object, chosen, arguments, early, m);
+}
+
+/*
+ * [stmt.ranged]/1: "The range-based for statement
+ *
+ *     for ( init-statement_opt for-range-declaration : for-range-initializer ) statement
+ *
+ * is equivalent to
+ *
+ *     {
+ *         init-statement_opt
+ *         auto &&range = for-range-initializer ;
+ *         auto begin = begin-expr ;
+ *         auto end = end-expr ;
+ *         for ( ; begin != end; ++begin ) {
+ *             for-range-declaration = * begin ;
+ *             statement
+ *         }
+ *     }"
+ *
+ * built as that: the block, its declarations and the for statement, of
+ * the variables range, begin and end unnamed.  declaration is the index
+ * of the for-range-declaration among n's children.
+ */
+analysis_result semantic_analysis::range_based_for(SyntaxRef n,
+                                                   uint32_t declaration,
+                                                   uint32_t &built)
+{
+    if (declaration + 5 != n.size())
+        return not_supported(n, "stmt.ranged");
+    SyntaxElement range_declaration = n[declaration];
+    SyntaxElement initializer = n[declaration + 2];
+    token_index at = n[declaration + 1].token();
+    entity_index outer = current_scope;
+    entity_index statement_scope = open_scope(0, false);
+    owned_array<uint32_t> items;
+    analysis_result result = analysis_result::well_formed;
+    /* the init-statement */
+    if (declaration == 3) {
+        bool claimable = declarations_claimable;
+        declarations_claimable = false;
+        uint32_t init = 0;
+        result = statement(n[2], init);
+        declarations_claimable = claimable;
+        if (result != analysis_result::well_formed) {
+            current_scope = outer;
+            return result;
+        }
+        items.append(init);
+    } else if (declaration != 2) {
+        current_scope = outer;
+        return not_supported(n, "stmt.ranged");
+    }
+    auto failed = [&](analysis_result r) {
+        current_scope = outer;
+        return r;
+    };
+    expression_meaning m;
+    analysis_result r = analysis_result::well_formed;
+    if (initializer.is(syntax_kind::braced_init_list)) {
+        /* [stmt.ranged]/1, [dcl.type.auto.deduct]/4: a braced-init-list
+           range deduces an array of the common element type */
+        owned_array<SyntaxElement> clauses;
+        for (SyntaxElement e : initializer.elements()) {
+            if (e.is(syntax_kind::initializer_list)) {
+                for (SyntaxElement item : e.elements()) {
+                    if (!item.is(preprocessing_op_or_punc::COMMA))
+                        clauses.append(item);
+                }
+            }
+        }
+        if (clauses.empty())
+            return failed(not_supported(n, "stmt.ranged"));
+        qualified_type elem;
+        for (size_t i = 0; i < clauses.size(); i++) {
+            expression_meaning item;
+            r = expression(clauses[i], item);
+            if (r != analysis_result::well_formed)
+                return failed(r);
+            qualified_type t = item.type;
+            const struct type &tr = type_table[t.unqualified()];
+            if (tr.kind == type_kind::array)
+                t = qualified_type::make(type_table.pointer_to(tr.operand),
+                                         cv_none);
+            else if (tr.kind == type_kind::function)
+                t = qualified_type::make(type_table.pointer_to(t), cv_none);
+            else
+                t = qualified_type::make(t.unqualified(), cv_none);
+            if (i == 0)
+                elem = t;
+            else if (t != elem)
+                return failed(not_supported(n, "stmt.ranged"));
+        }
+        entity_index std_ns =
+            entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
+        entity_index ilist_tmpl = 0;
+        if (std_ns)
+            ilist_tmpl = entity_table.find(
+                std_ns, tokens.pp.identifier("initializer_list", 16) + 1);
+        uint32_t ct = 0;
+        if (ilist_tmpl)
+            ct = class_template_of(ilist_tmpl);
+        if (!ct)
+            return failed(not_supported(n, "stmt.ranged"));
+        template_argument targ;
+        targ.kind = template_argument::kind_t::type;
+        targ.type = elem;
+        entity_index ilist_class = 0;
+        require_complete_class++;
+        r = instantiate_class(initializer.index(), ct, &targ, 1, ilist_class);
+        require_complete_class--;
+        if (r != analysis_result::well_formed || !ilist_class)
+            return failed(r);
+        qualified_type ilist_type = entity_table[ilist_class].type;
+        initialized_value ilist_val;
+        r = class_list_initialization(initializer.index(), clauses, ilist_type,
+                                      false, ilist_val);
+        if (r != analysis_result::well_formed)
+            return failed(r);
+        m.type = ilist_type;
+        m.category = value_category::prvalue;
+        m.evaluation = ilist_val.evaluation;
+        m.node = ilist_val.node;
+    } else {
+        /* auto &&range = for-range-initializer ; "if the for-range-initializer
+           is an expression, it is regarded as if it were surrounded by
+           parentheses" */
+        r = expression(initializer, m);
+        if (r != analysis_result::well_formed)
+            return failed(r);
+    }
+    qualified_type forwarding = reference_to(placeholder_type(false), true);
+    uint32_t declared = 0;
+    expression_meaning range;
+    r = exposition_variable(n, at, m, forwarding, false, declared, range);
+    if (r != analysis_result::well_formed)
+        return failed(r);
+    items.append(declared);
+    /* begin-expr and end-expr */
+    expression_meaning first = range, last = range;
+    const struct type record = type_table[range.type.unqualified()];
+    if (record.kind == type_kind::array) {
+        /* "if the for-range-initializer is an expression of array type R,
+           begin-expr and end-expr are range and range + N, respectively,
+           where N is the array bound.  If R is an array of unknown bound
+           or an array of incomplete type, the program is ill-formed" */
+        if (!record.bound_known || !size_of_type(record.operand))
+            return failed(ill_formed(n,
+                                     "if R is an array of unknown bound or an "
+                                     "array of incomplete type, the program "
+                                     "is ill-formed",
+                                     "stmt.ranged"));
+        expression_meaning bound = integer_constant(
+            fundamental_type::unsigned_long_int, record.bound, at);
+        expression_meaning base = range;
+        r = builtin_binary(n, at, preprocessing_op_or_punc::PLUS, base, bound,
+                           last);
+    } else {
+        uint32_t begin_name = tokens.pp.identifier("begin", 5) + 1;
+        uint32_t end_name = tokens.pp.identifier("end", 3) + 1;
+        bool member = false;
+        if (record.kind == type_kind::class_type) {
+            /* /1.2: "if the for-range-initializer is an expression of class
+               type C, the unqualified-ids begin and end are looked up in
+               the scope of C as if by class member access lookup
+               ([basic.lookup.classref]), and if both find at least one
+               declaration, begin-expr and end-expr are range.begin() and
+               range.end(), respectively;" */
+            entity_index c = record.entity;
+            if (entity_table[c].kind != entity_kind::class_type ||
+                !entity_table[c].size)
+                return failed(not_supported(n, "stmt.ranged"));
+            bool ambiguous = false;
+            member = class_member_lookup(c, begin_name, ambiguous) &&
+                     class_member_lookup(c, end_name, ambiguous);
+            if (ambiguous)
+                return failed(not_supported(n, "class.member.lookup"));
+        }
+        /* /1.3: "otherwise, begin-expr and end-expr are begin(range) and
+           end(range), respectively, where begin and end are looked up in
+           the associated namespaces ([basic.lookup.argdep])." (range_call:
+           of a type with none, int *, nothing is found) */
+        r = range_call(n, at, range, begin_name, member, first);
+        if (r == analysis_result::well_formed)
+            r = range_call(n, at, range, end_name, member, last);
+    }
+    if (r != analysis_result::well_formed)
+        return failed(r);
+    /* auto begin = begin-expr ; auto end = end-expr ; */
+    expression_meaning begin, end;
+    r = exposition_variable(n, at, first, placeholder_type(false), false,
+                            declared, begin);
+    if (r != analysis_result::well_formed)
+        return failed(r);
+    items.append(declared);
+    r = exposition_variable(n, at, last, placeholder_type(false), false,
+                            declared, end);
+    if (r != analysis_result::well_formed)
+        return failed(r);
+    items.append(declared);
+    /* begin != end */
+    expression_meaning left = begin, right = end, condition;
+    r = binary_of(n, at, preprocessing_op_or_punc::EXCLAMATION_EQUAL,
+                  SyntaxElement(), left, SyntaxElement(), right, condition);
+    if (r == analysis_result::well_formed)
+        r = contextual_bool(n, condition);
+    if (r != analysis_result::well_formed)
+        return failed(r);
+    /* ++begin */
+    expression_meaning step = begin;
+    r = increment_of(n, at, SyntaxElement(), false, false, step);
+    if (r != analysis_result::well_formed)
+        return failed(r);
+    /* for-range-declaration = * begin ; */
+    expression_meaning element = begin;
+    r = indirection_of(n, at, SyntaxElement(), element);
+    if (r != analysis_result::well_formed)
+        return failed(r);
+    uint32_t variable = 0;
+    r = for_range_declaration(range_declaration, element, variable);
+    if (r != analysis_result::well_formed)
+        return failed(r);
+    uint32_t body = 0;
+    function_state.loops++;
+    function_state.breakable++;
+    result = substatement(n[n.size() - 1], statement_scope, body);
+    function_state.loops--;
+    function_state.breakable--;
+    current_scope = outer;
+    uint32_t pair[2] = {variable, body};
+    uint32_t loop_body = statement_node(semantic_kind::block, at);
+    semantics.set_list(loop_body, pair, 2);
+    items.append(statement_node(semantic_kind::for_statement, at, 0,
+                                condition.node, step.node, loop_body));
+    built = statement_node(semantic_kind::block, first_token(n[0]));
+    semantics.set_list(built, items.data(), items.size());
+    return result;
+}
+
+/*
+ * [stmt.ranged]/1: "for-range-declaration = * begin ;", the element
+ * analysed as element; the declaration statement built.
+ *
+ *     for-range-declaration:
+ *         attribute-specifier-seq_opt decl-specifier-seq declarator
+ *         attribute-specifier-seq_opt decl-specifier-seq ref-qualifier_opt [ identifier-list ]
+ */
+analysis_result semantic_analysis::for_range_declaration(
+    SyntaxElement d, const expression_meaning &element, uint32_t &built)
+{
+    SyntaxRef at = node_of(d);
+    /* the second form: a structured binding ([dcl.struct.bind]) */
+    bool binding = at.size() > 2 &&
+                   (at[1].is(preprocessing_op_or_punc::LEFT_BRACKET,
+                             preprocessing_op_or_punc::AMPERSAND,
+                             preprocessing_op_or_punc::AMPERSAND_AMPERSAND));
+    if ((at.size() != 2 && !binding) ||
+        !at[0].is(syntax_kind::decl_specifier_seq) ||
+        at.first_token() != first_token(at[0]))
+        /* an attribute-specifier-seq */
+        return not_supported(at, "stmt.ranged");
+    specified s;
+    placeholder_allowed = true;
+    scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
+    scoped_value<bool> group(placeholder_group, false);
+    VTRY(r, decl_specifier_seq(at[0], s, false));
+    /* [stmt.ranged]/2: "In the decl-specifier-seq of a for-range-declaration,
+       each decl-specifier shall be either a type-specifier or constexpr.
+       The decl-specifier-seq shall not define a class or enumeration." */
+    if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.virtual_ ||
+        s.friend_ || s.explicit_)
+        return ill_formed(at,
+                          "in the decl-specifier-seq of a "
+                          "for-range-declaration, each decl-specifier shall "
+                          "be either a type-specifier or constexpr",
+                          "stmt.ranged");
+    {
+        /* "The decl-specifier-seq shall not define a class or
+           enumeration." */
+        auto seq = at[0];
+        for (SyntaxElement c : seq.elements()) {
+            if (c.is(syntax_kind::class_specifier, syntax_kind::enum_specifier))
+                return ill_formed(at,
+                                  "the decl-specifier-seq shall not define a "
+                                  "class or enumeration",
+                                  "stmt.ranged");
+        }
+    }
+    size_t first = block_variables.size();
+    bool claimable = declarations_claimable;
+    declarations_claimable = false;
+    if (binding)
+        r = structured_binding_declaration(at, 1, s, &element);
+    else
+        r = declare_with_initializer(at, at[1], SyntaxElement(), true, s, false,
+                                     &element);
+    declarations_claimable = claimable;
+    if (r != analysis_result::well_formed) {
+        block_variables.resize(first);
+        hold_names(at);
+        return r;
+    }
+    built = declaration_statements(first, first_token(d));
+    return analysis_result::well_formed;
+}
+
+} // namespace cplusplus

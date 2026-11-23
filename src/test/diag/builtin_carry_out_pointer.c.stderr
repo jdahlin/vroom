@@ -1,0 +1,19 @@
+builtin_carry_out_pointer.c:4:41: error: incompatible pointer types passing 'unsigned long *' to parameter of type 'unsigned int *' [-Wincompatible-pointer-types]
+    4 |   unsigned r1 = __builtin_addc(a, b, 0, &wide);
+      |                                         ^~~~~
+builtin_carry_out_pointer.c:5:41: warning: passing 'const unsigned int *' to parameter of type 'unsigned int *' discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+    5 |   unsigned r2 = __builtin_addc(a, b, 0, &ro);
+      |                                         ^~~
+builtin_carry_out_pointer.c:6:53: error: incompatible pointer types passing 'unsigned char *' to parameter of type 'unsigned long long *' [-Wincompatible-pointer-types]
+    6 |   unsigned long long r3 = __builtin_addcll(a, b, 0, &small);
+      |                                                     ^~~~~~
+builtin_carry_out_pointer.c:7:72: warning: passing 'int *' to parameter of type 'unsigned int *' converts between pointers to integer types with different sign [-Wpointer-sign]
+    7 |   unsigned r4 = __builtin_subc(a, b, 0, &ok) + __builtin_subc(a, b, 0, &sgn);
+      |                                                                        ^~~~
+builtin_carry_out_pointer.c:8:41: error: incompatible integer to pointer conversion passing 'int' to parameter of type 'unsigned int *' [-Wint-conversion]
+    8 |   unsigned r5 = __builtin_addc(a, b, 0, 5);
+      |                                         ^
+builtin_carry_out_pointer.c:9:41: error: passing 'double' to parameter of incompatible type 'unsigned int *'
+    9 |   unsigned r6 = __builtin_addc(a, b, 0, 1.5);
+      |                                         ^~~
+2 warnings and 4 errors generated.

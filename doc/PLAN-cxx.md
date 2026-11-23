@@ -1,5 +1,15 @@
 # C++ front end, first plan: validate the cache structure
 
+**Status (2026-11-16):** the front end this plan built (`src/frontend/cxx/`:
+parser, sema, instantiation, mangling, code generation) has been removed,
+with its harnesses (`cxx-json`, `cxx-llvm`, `cxx-layout`, `cxx-mangle`,
+`cxx-parse-tests`, `cxx-run-tests`, `cxx-coverage`, `cxx-strict`,
+`cxx-skia`, `bench/skia/`) and tests (`src/test/cxx/{mangle,run}`, the
+`ok-`/`bad-` cases of `src/test/cxx/parse`).  It is being redone from
+scratch against the standard in `src/frontend/cplusplus/` (PLAN-cxx-spec.md).
+The goals and measurements below still apply; step statuses describe the
+removed code.
+
 **Goal:** find out, with as little C++ as possible, whether vroom's design
 (one resident vccd, state shared between TUs, a direct emitter at -O0) wins
 for C++ where C++ spends its time: **template instantiation and the code it
@@ -300,6 +310,33 @@ against clang (layout, mangled names, which overload, constexpr value, run
 output), as `vcc-ctests.py` does for C.  Mangling has its own harness: every
 symbol of every clang-built object of the targets demangled and re-mangled
 by vcc.
+
+Operator names (§5.1.3 of the Itanium C++ ABI): literal suffixes (both token
+spellings) and `co_await` now retain their declaration names through object
+emission. The five symbols in `operator-names.cpp` match Clang 23, including
+an ordinary identifier beginning with `operator`.
+
+The type encoder distinguishes unknown, zero, 64-bit constant and direct
+template-parameter array bounds. References to arrays of unknown or zero
+bound can pass through code generation. `__fp16`, `_Float16` and `__bf16`
+have distinct encodings. The six definitions in `mangle/types.cpp` have
+identical symbol names to Clang 23 on x86-64 and AArch64 Linux.
+
+Remaining conformance work against [Itanium §5.1](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling)
+crosses the parser, type system and emitter. Concrete probes on x86-64:
+
+| Declaration or entity | Clang 23 | Frontend gap |
+| --- | --- | --- |
+| `void fp(void (*)() noexcept)` | `_Z2fpPDoFvvE` | Function-pointer type loses the exception specification and produces `_Z2fpPFvvE`. |
+| `void owner(int R::*)` | `_Z5ownerM1Ri` | No mangled symbol; the owner and member must form a distinct type. |
+| `void lanes(V,V)` with a four-int GNU vector | `_Z5lanesDv4_iS_` | C++ declaration processing drops the vector attribute, producing `_Z5lanesii`. |
+| Lambda call operator | Enclosing encoding and closure identity | Code generation assigns a TU-local serial name. |
+
+For conformance, compare defined and undefined symbols in object files from
+separate translation units. The syntax-only dump also includes unused inline
+definitions and cannot detect definitions dropped during code generation.
+Dependent template expressions, local discriminators, special names and
+substitution numbering need independent fixtures before claiming full coverage.
 
 ### X4 Templates, with instantiation as a recorded unit
 
@@ -2487,3 +2524,20 @@ och ett senare försök som valde (jsons dolda `operator<<`) ärvde det: doctest
 `has_insertion_operator<json>` blev okänd i instanser och `toString(json)`
 saknade kod.  Varje ADL-försök börjar nu med ingångens värde.  Sviter gröna
 (113/113, 38/38, mangle, 350/350).
+
+### Scope table growth (2026-11-15)
+
+Extracting `cxx_scope_grow` from `cxx_declare` changed median retired user
+instructions by +0.0011% compiling the nlohmann/json object workload and
++0.0004% compiling 160 namespaces of 96 declarations each. Baseline
+`2df8ed5a`, normal x86-64 Linux vpp, 11 alternating pairs pinned to one CPU
+after warmup. Both object files matched their respective baselines byte for byte.
+
+### Parameter-list storage (2026-11-15)
+
+Normal x86-64 Linux vpp, baseline `2df8ed5a`, Clang 23 host build. Median
+user instructions over 11 alternating pairs on one pinned CPU after warmup.
+Compiling a TU that calls nlohmann/json's `is_null()` and `is_array()` to an
+object went from 4,431,528,953 to 4,418,098,670 instructions (−0.30%), with
+identical object bytes. Parsing 6,000 declarations with 0–16 parameters went
+from 208,216,939 to 194,229,447 instructions (−6.72%).

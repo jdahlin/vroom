@@ -3,6 +3,51 @@
 #include "common/literal.h"
 #include "lowering-internal.h"
 
+/* The instruction behind the add or sub i is the compare that asks for its carry or borrow
+ * (the builder's carry placement puts it there): adds or subs, and the compare reads the flags.
+ * Between the two the allocator's edits are moves, loads, stores and constants, none of which
+ * writes the flags.  Register operands only: an immediate may be emitted as the other operation
+ * with the negated constant, whose carry is another. */
+static bool a64_vir_carry_follows(a64_vir_context *L, uint32_t b, uint32_t i)
+{
+    const vir_function *f = L->function;
+    const vir_insn *in = &f->insns[i], *k;
+    int kind;
+
+    if (!L->context->unit->options->optimize.carry_flags ||
+        i + 1 >= f->blocks[b].first + f->blocks[b].insn_count ||
+        L->operand_registers[1] == VIR_REGISTER_NONE ||
+        (in->type != VIR_TYPE_I32 && in->type != VIR_TYPE_I64))
+        return false;
+    k = &f->insns[i + 1];
+    if (k->op != VIR_OP_ICMP)
+        return false;
+    kind = vir_carry_compare_kind(in->op, i, in->a, in->b, k->flags & 15, k->a,
+                                  k->b);
+    if (kind == VIR_CARRY_NONE)
+        return false;
+    /* adds: C is the carry; subs: C is "no borrow" */
+    if ((in->op == VIR_OP_ADD) == (kind == VIR_CARRY_SET))
+        L->carry_condition = A64_CONDITION_HS;
+    else
+        L->carry_condition = A64_CONDITION_LO;
+    L->carry_value = i + 1;
+    return true;
+}
+
+/* the flags for the icmp i and the condition under which it holds: those of the add or sub in
+   front of it when it asks for the carry, else a compare */
+static int a64_vir_integer_compare_flags(a64_vir_context *L, const vir_insn *in,
+                                         uint32_t i)
+{
+    if (L->carry_value == i) {
+        L->carry_value = VIR_BLOCK_NONE;
+        return L->carry_condition;
+    }
+    return a64_vir_integer_condition_codes[a64_vir_integer_compare_lower(L,
+                                                                         in)];
+}
+
 VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
                               uint8_t res)
 {
@@ -69,10 +114,19 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
                     ? (int64_t)a64_vir_constant_logical_immediate(
                           &f->insns[in->b])
                     : a64_vir_constant_integer(&f->insns[in->b]));
-        else
+        else {
+            int operation = rr[in->op];
+
+            if ((in->op == VIR_OP_ADD || in->op == VIR_OP_SUB) &&
+                a64_vir_carry_follows(L, b, i)) {
+                operation = A64_OP_ADDS;
+                if (in->op == VIR_OP_SUB)
+                    operation = A64_OP_SUBS;
+            }
             a64_record_emit_three_registers(
-                e, rr[in->op], x, rd, a,
+                e, operation, x, rd, a,
                 a64_vir_operand_general_register(L, 1, R_X17));
+        }
         return;
     }
     case VIR_OP_PSUB:
@@ -233,9 +287,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
         }
         if (in->op == VIR_OP_ICMP && !L->chain_high &&
             a64_vir_compare_chain_lower(L, b, i)) {
-            L->chain_condition =
-                a64_vir_integer_condition_codes[a64_vir_integer_compare_lower(
-                    L, in)];
+            L->chain_condition = a64_vir_integer_compare_flags(L, in, i);
             return;
         }
         bool fuse = L->uses[i] == 1 &&
@@ -276,8 +328,7 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
             }
         }
         if (in->op == VIR_OP_ICMP) {
-            cc = a64_vir_integer_condition_codes[a64_vir_integer_compare_lower(
-                L, in)];
+            cc = a64_vir_integer_compare_flags(L, in, i);
         } else {
             a64_vir_float_compare_lower(L, in);
             cc = a64_vir_float_condition_codes[in->flags & 7];
