@@ -192,11 +192,10 @@ analysis_result semantic_analysis::friend_member_declaration(
  * cv-qualified) class type, that class is declared as a friend; otherwise,
  * the friend declaration is ignored."  seq is the decl-specifier-seq, the
  * declaration's only part before the semicolon.  The forms put friend
- * first and allow no cv-qualifier (clang: "'friend' must appear first in a
- * non-function declaration", "'const' is invalid in friend declarations");
- * a simple-type-specifier of several keywords (friend unsigned int;) is
- * one type, as clang takes it.  Before C++11 only the first form was
- * allowed; clang accepts the others there as an extension, and so do we.
+ * first and allow no cv-qualifier.  [impl.clang] A simple-type-specifier of
+ * several keywords (friend unsigned int;) is one type, as clang takes it;
+ * before C++11 only the first form was allowed, and the others are accepted
+ * there as clang's extension is.
  */
 analysis_result semantic_analysis::friend_type(entity_index c, SyntaxRef n,
                                                SyntaxElement seq)
