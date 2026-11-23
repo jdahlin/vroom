@@ -953,7 +953,8 @@ def why_key(sub, detail, site):
         # "evaluator met L1234 (KIND)": the line is the cause
         return f'[{sub}] {site} {detail}'
     m = re.match(r'^(\S+) (.*)$', detail)
-    if m and not m.group(2).startswith('is a compiler builtin'):
+    # (an extension's name, an attribute's or a builtin's, is the cause itself)
+    if m and not m.group(2).startswith('is a compiler builtin') and not sub.startswith('ext.'):
         detail = 'NAME ' + m.group(2)
     detail = re.sub(r'\d+', 'N', detail)
     return f'[{sub}] {site} {detail}'.rstrip()
