@@ -1781,6 +1781,9 @@ class semantic_analysis
     /* [namespace.std]: whether scope is ::std, the namespace std of the
        global namespace */
     bool std_namespace(entity_index scope) const;
+    /* class c declares a constructor template not deleted on its first
+       declaration (a user-declared constructor, [impl.clang]) */
+    bool has_user_constructor_template(entity_index c) const;
     /* whether entity e has a name and it is spelled text */
     bool named(entity_index e, const char *text) const;
     bool is_class_entity(entity_index k) const
@@ -4026,6 +4029,8 @@ class semantic_analysis
        element is a braced-init-list or string-literal that converts to X;
        no brace elision (the initialization's own) */
     bool list_sequence_possible(SyntaxRef list, qualified_type target);
+    /* a specialization of std::initializer_list */
+    bool list_initializer_list(qualified_type t) const;
     bool initializer_names_nothing(SyntaxRef init) const;
     analysis_result gather_clauses(SyntaxRef list, SyntaxRef node,
                                    owned_array<SyntaxElement> &clauses,
@@ -4058,6 +4063,11 @@ class semantic_analysis
         qualified_type type, bool direct, initialized_value &result);
     /* [dcl.init.list]/3 for a class: an aggregate's elements, each from
        its clause or from an empty list */
+    /* [dcl.init.list]/3.5: whether {} of class c, which has constructors,
+       is not value-initialization: it has no default constructor, and
+       [over.match.list]/1.1 considers its initializer-list constructors
+       with the empty list */
+    bool empty_list_uses_constructors(entity_index c) const;
     analysis_result class_list_initialization(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type type, bool direct, initialized_value &result);
@@ -5843,6 +5853,10 @@ class semantic_analysis
         bool identity = true;
         /* [conv.bool] from a pointer ([over.ics.rank]/4.1) */
         bool pointer_to_bool = false;
+        /* [over.ics.rank]/3.1: a list-initialization sequence, and whether
+           it converts to std::initializer_list<X> */
+        bool from_list = false;
+        bool to_initializer_list = false;
         /* [diff.lex]/3: a string literal to char* (clang's extension since
            C++11): a function that needs one is worse than any viable
            function that needs none ([impl.clang]) */

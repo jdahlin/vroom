@@ -111,6 +111,11 @@ analysis_result semantic_analysis::member_function_template(
                                    "declared const, volatile, or const "
                                    "volatile",
                                    "class.static.mfct");
+    /* C++11 [dcl.constexpr]/8: a constexpr non-static member function that
+       is not a constructor is const (C++14 dropped it) */
+    if (s.constexpr_ && !s.static_ && !constructor &&
+        tokens.files.behavior.edition < standard_edition::cplusplus_14)
+        function_cv |= cv_const;
     uint32_t gnu_flags = 0;
     token_index abi_tag = 0;
     VTRY_SET(r, function_template_attributes(n, s, m, gnu_inline_flags,

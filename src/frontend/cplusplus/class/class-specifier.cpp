@@ -1668,6 +1668,13 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         r = misplaced_function_qualifiers(declaration, type, true);
     if (r != analysis_result::well_formed)
         return r;
+    /* C++11 [dcl.constexpr]/8: "A constexpr specifier for a non-static
+       member function that is not a constructor declares that member
+       function to be const" (C++14 dropped it) */
+    if (s.constexpr_ && !s.static_ &&
+        tokens.files.behavior.edition < standard_edition::cplusplus_14 &&
+        type_table[type.unqualified()].kind == type_kind::function)
+        function_cv |= cv_const;
     /* [dcl.fct.default]: a member function's default arguments are a
        complete-class context ([class.mem]/6): analysed with the class
        complete (member_default_arguments) */
@@ -1935,11 +1942,6 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         /* [class.mfct]/1: "A member function may be defined in its class
            definition, in which case it is an inline member function
            ([dcl.inline])" */
-        /* C++11's [dcl.constexpr]/8 made a constexpr non-static member
-           function const, which C++14 dropped: not analysed */
-        if (s.constexpr_ && !s.static_ &&
-            tokens.files.behavior.edition < standard_edition::cplusplus_14)
-            return not_supported(declaration, "dcl.constexpr");
         /* [dcl.constexpr]/3 (and clang before C++20 for any non-static
            member function): not in a class with virtual bases */
         if (s.constexpr_ && !s.static_ && entity_table[c].virtual_base_count)
@@ -2401,7 +2403,21 @@ analysis_result semantic_analysis::member_redeclaration(
     if (e && entity_table[e].kind == entity_kind::none)
         return not_supported(declaration, "over");
     /* [dcl.meaning]/1: the member function of the set it declares again */
-    if (entity_index o = overload_of_type(e, type, function_cv))
+    entity_index o = 0;
+    if (s.constexpr_ &&
+        tokens.files.behavior.edition < standard_edition::cplusplus_14) {
+        /* C++11 [dcl.constexpr]/8: the in-class declaration's constexpr
+           made it const; the definition's own constexpr does as well (a
+           static member function is not) */
+        o = overload_of_type(e, type, function_cv | cv_const);
+        if (o && entity_table[o].nonstatic_member)
+            function_cv |= cv_const;
+        else
+            o = 0;
+    }
+    if (!o)
+        o = overload_of_type(e, type, function_cv);
+    if (o)
         e = o;
     if (!e || entity_table[e].kind != entity_kind::function ||
         !(entity_table[e].type == type) ||

@@ -114,6 +114,10 @@ bool pod_for_layout(const semantic_analysis &a, entity_index c)
         return false;
     /* [impl.clang] a constructor deleted on its first declaration is no
        user-declared one here (C++11's aggregates allow it) */
+    /* a constructor template is a user-declared constructor (unless deleted
+       on its first declaration, as the constructors) */
+    if (a.has_user_constructor_template(c))
+        return false;
     for (entity_index k = x.first_constructor; k;
          k = a.entity_table[k].next_constructor)
         if (!a.entity_table[k].deleted)

@@ -1463,6 +1463,53 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
     return not_supported(init, "dcl.init");
 }
 
+bool semantic_analysis::has_user_constructor_template(entity_index c) const
+{
+    entity_index held = entity_table[c].constructor_templates;
+    if (!held)
+        return false;
+    for (const function_template &t : function_templates)
+        if (t.name == held && !entity_table[t.entity].deleted &&
+            !(t.definition && t.definition.size() &&
+              deleted_body(t.definition[t.definition.size() - 1])))
+            return true;
+    return false;
+}
+
+/*
+ * [dcl.init.list]/3.5: "if the initializer list has no elements and T is a
+ * class type with a default constructor, the object is value-initialized";
+ * without one, /3.7 and [over.match.list]/1.1: the constructors taking a
+ * std::initializer_list are candidates with the empty list.
+ */
+bool semantic_analysis::empty_list_uses_constructors(entity_index c) const
+{
+    /* std::initializer_list<E> itself: [dcl.init.list]/3.6 */
+    if (named(c, "initializer_list") &&
+        std_namespace(entity_table[c].enclosing))
+        return true;
+    bool initializer_list_constructor = false;
+    for (entity_index k = entity_table[c].first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        const entity &x = entity_table[k];
+        if (x.deleted)
+            continue;
+        const struct type &ft = type_table[x.type.unqualified()];
+        if (ft.parameter_count == x.default_arguments)
+            return false;
+        qualified_type first = type_table.parameters(x.type.unqualified())[0];
+        const struct type *p = &type_table[first.unqualified()];
+        if (p->kind == type_kind::lvalue_reference ||
+            p->kind == type_kind::rvalue_reference)
+            p = &type_table[p->operand.unqualified()];
+        if (p->kind == type_kind::class_type &&
+            named(p->entity, "initializer_list") &&
+            std_namespace(entity_table[p->entity].enclosing))
+            initializer_list_constructor = true;
+    }
+    return initializer_list_constructor;
+}
+
 /*
  * [dcl.init.list]/3 for a class T: "(3.4) Otherwise, if T is an aggregate,
  * aggregate initialization is performed ([dcl.init.aggr])"; "(3.5)
@@ -1589,6 +1636,10 @@ analysis_result semantic_analysis::class_list_initialization(
            value-initialized"; [dcl.init]/8.1: "if T is a (possibly
            cv-qualified) class type with ... a user-provided ... default
            constructor, then the object is default-initialized" */
+        if (clauses.empty() && entity_table[c].first_constructor &&
+            empty_list_uses_constructors(c))
+            return constructor_list_initialization(list, clauses, type, direct,
+                                                   result);
         if (clauses.empty() && entity_table[c].first_constructor) {
             owned_array<expression_meaning> none;
             analysis_result r = construct(list, type, none, 0, result);
@@ -2053,6 +2104,11 @@ semantic_analysis::omitted_element_value(SyntaxRef list, qualified_type element,
         entity_table[of_element.entity].kind == entity_kind::class_type &&
         entity_table[of_element.entity].first_constructor) {
         owned_array<expression_meaning> none;
+        if (empty_list_uses_constructors(of_element.entity)) {
+            owned_array<SyntaxElement> no_clauses;
+            return class_list_initialization(list, no_clauses, element, false,
+                                             one);
+        }
         return construct(list, element, none, 0, one);
     }
     expression_meaning zero;

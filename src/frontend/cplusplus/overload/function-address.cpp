@@ -250,7 +250,19 @@ analysis_result semantic_analysis::select_for_target(
         }
         owned_array<template_argument> arguments;
         bool failed = false;
-        VTRY(r, deduce_from_function_type(at, t, ft, arguments, failed));
+        qualified_type target = ft;
+        const struct type &tf = type_table[ft.unqualified()];
+        if (member_class && tf.function_cv && !tf.function_ref) {
+            /* [over.over]/3 (a pointer to member function): the template's
+               member function has the target's cv-qualifier-seq, kept in
+               the entity, not in its type */
+            if ((te.member_cv & (cv_const | cv_volatile)) != tf.function_cv)
+                continue;
+            target = qualified_type::make(
+                type_table.function_qualified(ft.unqualified(), 0, 0), ft.cv());
+        } else if (member_class && (te.member_cv & (cv_const | cv_volatile)))
+            continue;
+        VTRY(r, deduce_from_function_type(at, t, target, arguments, failed));
         if (failed)
             continue;
         if (template_index) {

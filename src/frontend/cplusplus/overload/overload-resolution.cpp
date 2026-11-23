@@ -31,6 +31,14 @@
 namespace cplusplus
 {
 
+bool semantic_analysis::list_initializer_list(qualified_type t) const
+{
+    const struct type &x = type_table[t.unqualified()];
+    return x.kind == type_kind::class_type &&
+           named(x.entity, "initializer_list") &&
+           std_namespace(entity_table[x.entity].enclosing);
+}
+
 /*
  * [over.ics.list]/5: "if the parameter type is std::initializer_list<X> and
  * all the elements of the initializer list can be implicitly converted to
@@ -230,6 +238,9 @@ analysis_result semantic_analysis::best_viable_function(
                         } else if (r == analysis_result::well_formed) {
                             a.kind = sequence::form::user_defined;
                             a.target = list_target;
+                            a.from_list = true;
+                            a.to_initializer_list =
+                                list_initializer_list(list_target);
                             if (semantics[value.node].kind ==
                                 semantic_kind::construct)
                                 a.function = semantics[value.node].b;
