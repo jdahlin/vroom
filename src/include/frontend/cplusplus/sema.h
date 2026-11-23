@@ -2277,6 +2277,9 @@ class semantic_analysis
         /* [temp.friend]/1: a function template (its entity) all of whose
            specializations are friends */
         entity_index template_entity = 0;
+        /* [temp.friend]/4: a class template (its entity) the class `name`
+           of each of whose specializations is a friend */
+        entity_index member_of_template = 0;
     };
     owned_array<friend_record> friends;
     /* function_template_definition: the function_templates index plus one
@@ -2289,13 +2292,38 @@ class semantic_analysis
     analysis_result friend_function_template(entity_index c,
                                              TemplateDeclaration n,
                                              SyntaxRef inner);
+    analysis_result friend_class_template(entity_index c, TemplateDeclaration n,
+                                          SyntaxElement seq);
+    analysis_result dependent_member_friend_class(entity_index c,
+                                                  TemplateDeclaration n,
+                                                  SyntaxElement id,
+                                                  token_index name);
+    analysis_result qualified_friend_class_template(entity_index c,
+                                                    TemplateDeclaration n,
+                                                    SyntaxElement elaborated);
     analysis_result friend_member_declaration(entity_index c,
                                               MemberSimpleDeclaration d,
                                               owned_array<SyntaxRef> &bodies);
     analysis_result friend_declaration(entity_index c, SyntaxRef n,
                                        owned_array<SyntaxRef> &bodies);
-    analysis_result friend_class(entity_index c, SyntaxRef n,
-                                 SyntaxElement type);
+    analysis_result friend_type(entity_index c, SyntaxRef n, SyntaxElement seq);
+    analysis_result friend_elaborated_class(entity_index c, SyntaxRef n,
+                                            SyntaxElement type);
+    void befriend(entity_index c, entity_index e);
+    void befriend_by_name(entity_index c, entity_index scope, uint32_t name);
+    void befriend_template(entity_index c, entity_index t);
+    /* [class.local]: the block scope around class c, 0 if it is not a
+       local class or nested in one */
+    entity_index local_scope_of(entity_index c) const;
+    entity_index overload_with_parameters(entity_index first,
+                                          qualified_type type) const;
+    analysis_result befriend_function(entity_index c, SyntaxRef n,
+                                      entity_index f, const specified &s,
+                                      const declarator_meaning &m, bool defines,
+                                      owned_array<SyntaxRef> &bodies);
+    analysis_result local_friend_function(entity_index c, SyntaxRef n,
+                                          const declarator_meaning &m,
+                                          qualified_type type);
     analysis_result qualified_friend_function(entity_index c, SyntaxRef n,
                                               const declarator_meaning &m,
                                               qualified_type type);

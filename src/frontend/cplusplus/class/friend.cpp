@@ -2,16 +2,39 @@
  * friend.cpp: [class.friend] friends (doc/PLAN-cxx-sema.md R10).
  *
  * [class.friend]/1: "A friend of a class is a function or class that is
- * given permission to name the private and protected members of the
- * class."  What is analysed: in a class that is not local, a friend class
- * named by class-key identifier, by a qualified elaborated-type-specifier
- * or by class-key and simple-template-id ([temp.friend]/1: a
- * specialization) or (C++11, [class.friend]/3) by a type-name; a friend function declared
- * (not defined) by an unqualified identifier, of the innermost enclosing
- * namespace ([namespace.memdef]/3).  Friend definitions, operator
- * functions, members of other classes and templates are not.  A class
- * template's friends are declared per specialization (instantiate_class),
- * each granting only that specialization ([temp.friend]).
+ * given permission to use the private and protected member names from the
+ * class.  A class specifies its friends, if any, by way of friend
+ * declarations.  Such declarations give special access rights to the
+ * friends, but they do not make the nominated friends members of the
+ * befriending class."
+ *
+ * The paragraphs and where they are:
+ *
+ *   /1, /2, /10  the relation: befriend, friend_names, grants, in_friend_of;
+ *                class-specifier.cpp's accessible() asks it.  Friendship
+ *                is a pair (granting class, befriended entity): it is
+ *                neither inherited nor transitive (/10) because nothing
+ *                follows a base or another friend record from it.
+ *   /2           "A class shall not be defined in a friend declaration":
+ *                decl-specifier.cpp, where the class-specifier is.
+ *   /3           the three forms of a friend declaration that declares no
+ *                function: friend_type, friend_elaborated_class.
+ *   /4, /5       a friend function, its linkage and the one function of an
+ *                overload set it names: friend_function,
+ *                friend_member_function, qualified_friend_function.
+ *   /6, /7       a function defined in a friend declaration:
+ *                friend_function, friend_function_body, lexical_parent.
+ *   /8           no storage-class-specifier: friend_function.
+ *   /9           access to the name nominated: the lookups here check it as
+ *                any use of a name.
+ *   /11          a friend declaration in a local class: local_scope_of,
+ *                friend_elaborated_class, local_friend_function.
+ *
+ * [temp.friend] (friend templates) is template/friend-template.cpp;
+ * [class.compare.default] (a defaulted friend operator==) is
+ * class/defaulted-comparison.cpp.  A class template's friends are declared
+ * per specialization (instantiate_class), each granting only that
+ * specialization ([temp.friend]/1).
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -19,13 +42,48 @@
 namespace cplusplus
 {
 
+/* ---- the friend relation: [class.friend]/1, /2, /10 ---------------------- */
+
+/* [class.friend]/1: c grants friendship to e.  Every friend declaration
+   that names its friend ends here, in befriend_by_name or in
+   befriend_template. */
+void semantic_analysis::befriend(entity_index c, entity_index e)
+{
+    friend_record f;
+    f.granting = c;
+    f.befriended = e;
+    friends.append(f);
+}
+
+/* [class.friend]/3, [namespace.memdef]/3: a friend class not declared yet:
+   the class of this name in scope, when it is declared */
+void semantic_analysis::befriend_by_name(entity_index c, entity_index scope,
+                                         uint32_t name)
+{
+    friend_record f;
+    f.granting = c;
+    f.scope = scope;
+    f.name = name;
+    friends.append(f);
+}
+
+/* [temp.friend]/1, /3: every specialization of template t (a template's
+   entity) is a friend of c */
+void semantic_analysis::befriend_template(entity_index c, entity_index t)
+{
+    friend_record f;
+    f.granting = c;
+    f.template_entity = t;
+    friends.append(f);
+}
+
 /* whether the friend declaration f names e */
 bool semantic_analysis::friend_names(const friend_record &f,
                                      entity_index e) const
 {
     if (f.template_entity) {
-        /* [temp.friend]/1: "all specializations of the function template
-           are friends" */
+        /* [temp.friend]/3: "A template friend declaration specifies that
+           all specializations of that template ... are friends" */
         if (e == f.template_entity)
             return true;
         uint32_t i = entity_table[e].instantiation;
@@ -34,11 +92,23 @@ bool semantic_analysis::friend_names(const friend_record &f,
     if (f.befriended)
         return f.befriended == e;
     const entity &x = entity_table[e];
+    if (f.member_of_template) {
+        /* [temp.friend]/4: the class of that name of each specialization of
+           the class template */
+        if (x.kind != entity_kind::class_type || x.name != f.name ||
+            !x.enclosing)
+            return false;
+        uint32_t i = entity_table[x.enclosing].instantiation;
+        return entity_table[x.enclosing].kind == entity_kind::class_type && i &&
+               instantiations[i - 1].template_entity == f.member_of_template;
+    }
     return x.kind == entity_kind::class_type && x.enclosing == f.scope &&
            x.name == f.name;
 }
 
-/* whether class k declares e its friend */
+/* whether class k declares e its friend.  [class.friend]/10: "Friendship is
+   neither inherited nor transitive": only k's own friend declarations
+   count, never those of k's bases or of k's friends. */
 bool semantic_analysis::grants(entity_index k, entity_index e) const
 {
     for (const friend_record &f : friends)
@@ -49,8 +119,10 @@ bool semantic_analysis::grants(entity_index k, entity_index e) const
 
 /* whether the name used now is in a friend of class k: the function
    analysed, the class whose member-specification is, or a class or
-   function around them ([class.access.nest]/1, [class.local]/1), as
-   accessible() walks them */
+   function around them.  [class.friend]/2: a befriended class's
+   base-specifiers and member declarations, nested classes' among them
+   ([class.access.nest]/1), may use k's private and protected names;
+   [class.local]/1 gives a local class its function's access. */
 bool semantic_analysis::in_friend_of(entity_index k) const
 {
     entity_index starts[4] = {0, defining_class, 0, access_class};
@@ -66,60 +138,152 @@ bool semantic_analysis::in_friend_of(entity_index k) const
     return false;
 }
 
-entity_index semantic_analysis::declared_unbound(entity_index scope,
-                                                 uint32_t name,
-                                                 qualified_type type) const
+/* ---- a friend declaration ------------------------------------------------ */
+
+/*
+ * [class.local]: the innermost enclosing non-class scope of class c when
+ * that is a block scope (c is a local class, or a class nested in one), 0
+ * when it is a namespace.  [class.friend]/11 restricts the lookups of a
+ * friend declaration in such a class to that scope.
+ */
+entity_index semantic_analysis::local_scope_of(entity_index c) const
 {
-    for (entity_index e : block_declared) {
-        const entity &x = entity_table[e];
-        if (x.enclosing == scope && x.name == name &&
-            x.kind == entity_kind::function &&
-            same_parameters(type_table, x.type.unqualified(),
-                            type.unqualified()))
-            return e;
+    entity_index k = c;
+    while (!is_namespace(k) && entity_table[k].kind == entity_kind::class_type)
+        k = entity_table[k].enclosing;
+    if (is_namespace(k))
+        return 0;
+    return k;
+}
+
+/* a member-declaration whose decl-specifier-seq has friend */
+analysis_result
+semantic_analysis::friend_declaration(entity_index c, SyntaxRef n,
+                                      owned_array<SyntaxRef> &bodies)
+{
+    return n.member_declaration().visit(Overloaded{
+        [&](FunctionDefinition f) { return friend_function(c, f, bodies); },
+        [&](MemberSimpleDeclaration d) {
+            return friend_member_declaration(c, d, bodies);
+        },
+        [&](MemberDeclaration) { return not_supported(n, "class.friend"); }});
+}
+
+/* a friend member-declaration that is not a function-definition: with no
+   declarator it declares a type a friend ([class.friend]/3), with one a
+   function */
+analysis_result semantic_analysis::friend_member_declaration(
+    entity_index c, MemberSimpleDeclaration d, owned_array<SyntaxRef> &bodies)
+{
+    SyntaxRef n = d;
+    uint32_t leading = leading_gnu_attributes(n);
+    SyntaxTail tail(n, leading);
+    if (tail.size() < 2)
+        return not_supported(n, "class.friend");
+    if (tail.size() == 2)
+        return friend_type(c, n, tail[0]);
+    return friend_function(c, n, bodies);
+}
+
+/* ---- a friend type: [class.friend]/2, /3 --------------------------------- */
+
+/*
+ * [class.friend]/3: "A friend declaration that does not declare a function
+ * shall have one of the following forms:
+ *
+ *     friend elaborated-type-specifier ;
+ *     friend simple-type-specifier ;
+ *     friend typename-specifier ;
+ *
+ * ... If the type specifier in a friend declaration designates a (possibly
+ * cv-qualified) class type, that class is declared as a friend; otherwise,
+ * the friend declaration is ignored."  seq is the decl-specifier-seq, the
+ * declaration's only part before the semicolon.  The forms put friend
+ * first and allow no cv-qualifier (clang: "'friend' must appear first in a
+ * non-function declaration", "'const' is invalid in friend declarations");
+ * a simple-type-specifier of several keywords (friend unsigned int;) is
+ * one type, as clang takes it.  Before C++11 only the first form was
+ * allowed; clang accepts the others there as an extension, and so do we.
+ */
+analysis_result semantic_analysis::friend_type(entity_index c, SyntaxRef n,
+                                               SyntaxElement seq)
+{
+    SyntaxElement elaborated = {};
+    bool first = true;
+    for (SyntaxElement x : seq.elements()) {
+        if (x.is(syntax_kind::gnu_attribute_specifier) ||
+            attributes_without_effect(x))
+            continue;
+        if (first && !is_keyword(x, standard_keyword::friend_))
+            return ill_formed(n,
+                              "a friend declaration that does not declare a "
+                              "function begins with friend",
+                              "class.friend");
+        first = false;
+        if (x.is_token()) {
+            token_index t = x.token();
+            if (is_keyword(x, standard_keyword::const_) ||
+                is_keyword(x, standard_keyword::volatile_) ||
+                p.extension_keyword_of(tokens[t]) ==
+                    extension_keyword::restrict ||
+                p.extension_keyword_of(tokens[t]) == extension_keyword::atomic)
+                return ill_formed_at_token(
+                    t,
+                    "a friend declaration that does not declare a function "
+                    "has no cv-qualifier",
+                    "class.friend");
+            /* [class.friend]/8 (and [dcl.stc]/1's storage-class-specifiers,
+               typedef, inline, constexpr: no form of /3 has them) */
+            standard_keyword k = p.keyword_of(tokens[t]);
+            if (k != standard_keyword::none && k != standard_keyword::friend_ &&
+                k != standard_keyword::typename_ && !is_simple_type_keyword(k))
+                return ill_formed_at_token(
+                    t,
+                    "a friend declaration that does not declare a function "
+                    "has only friend and a type specifier",
+                    "class.friend");
+        } else if (x.is(syntax_kind::elaborated_type_specifier)) {
+            elaborated = x;
+        }
     }
-    return 0;
+    if (elaborated)
+        return friend_elaborated_class(c, n, elaborated);
+    /* friend simple-type-specifier ; or friend typename-specifier ;: the
+       type is analysed as any decl-specifier-seq's */
+    specified s;
+    bool outer = friend_allowed;
+    friend_allowed = true;
+    analysis_result r = decl_specifier_seq(seq, s, false);
+    friend_allowed = outer;
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!s.friend_ || !s.has_type || s.declares_class || s.declares_enumeration)
+        return not_supported(n, "class.friend");
+    const struct type &t = type_table[s.type.unqualified()];
+    /* "otherwise, the friend declaration is ignored" (friend int;, a
+       template's friend T; with T = int) */
+    if (t.kind != type_kind::class_type ||
+        entity_table[t.entity].kind != entity_kind::class_type)
+        return analysis_result::well_formed;
+    befriend(c, t.entity);
+    return analysis_result::well_formed;
 }
 
 /*
- * [class.friend]/2, /3: a friend class.  type is the elaborated-type-specifier,
- * or the type-name ([class.friend]/3: "friend simple-type-specifier ;").
- * [namespace.memdef]/3: "If the name in a friend declaration is neither
+ * friend class-key ... ;  [class.friend]/2, /3 with an
+ * elaborated-type-specifier.  [namespace.memdef]/3 (C++20 [namespace.memdef]
+ * /3, [dcl.meaning]): "If the name in a friend declaration is neither
  * qualified nor a template-id and the declaration is a function or an
  * elaborated-type-specifier, the lookup to determine whether the entity
  * has been previously declared shall not consider any scopes outside the
- * innermost enclosing namespace."
+ * innermost enclosing namespace."  /11: in a local class, not outside the
+ * innermost enclosing non-class scope; with no prior declaration "the class
+ * that is specified belongs to the innermost enclosing non-class scope".
  */
-analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
-                                                SyntaxElement type)
+analysis_result semantic_analysis::friend_elaborated_class(entity_index c,
+                                                           SyntaxRef n,
+                                                           SyntaxElement type)
 {
-    entity_index space = enclosing_namespace(c);
-    if (type.is_token()) {
-        /* [class.friend]/3 (C++11): friend simple-type-specifier ; */
-        if (!tokens.files.behavior.has(language_feature::rvalue_references) ||
-            tokens[type.token()].kind != token_kind::identifier)
-            return not_supported(n, "class.friend");
-        lookup_result found = lookup_unqualified(
-            tokens.identifier(type.token()), lookup_filter::types);
-        if (found.unknown || found.ambiguous || !found.entity)
-            return not_supported(n, "class.friend");
-        entity_index e = found.entity;
-        if (entity_table[e].kind == entity_kind::typedef_name) {
-            qualified_type t = entity_table[e].type;
-            if (type_table[t.unqualified()].kind != type_kind::class_type)
-                return not_supported(n, "class.friend");
-            e = type_table[t.unqualified()].entity;
-        }
-        if (entity_table[e].kind != entity_kind::class_type)
-            return not_supported(n, "class.friend");
-        friend_record f;
-        f.granting = c;
-        f.befriended = e;
-        friends.append(f);
-        return analysis_result::well_formed;
-    }
-    if (!type.is(syntax_kind::elaborated_type_specifier))
-        return not_supported(n, "class.friend");
     standard_keyword key = leading_keyword(type);
     if (!is_class_key(key))
         return not_supported(n, "class.friend");
@@ -132,10 +296,7 @@ analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
         if (record.kind != type_kind::class_type ||
             entity_table[record.entity].kind != entity_kind::class_type)
             return not_supported(n, "class.friend");
-        friend_record f;
-        f.granting = c;
-        f.befriended = record.entity;
-        friends.append(f);
+        befriend(c, record.entity);
         return analysis_result::well_formed;
     }
     if (type.size() == 2 && type[1].is(syntax_kind::simple_template_id)) {
@@ -155,64 +316,137 @@ analysis_result semantic_analysis::friend_class(entity_index c, SyntaxRef n,
             entity_table[record.entity].union_ !=
                 (key == standard_keyword::union_))
             return not_supported(n, "class.friend");
-        friend_record f;
-        f.granting = c;
-        f.befriended = record.entity;
-        friends.append(f);
+        befriend(c, record.entity);
         return analysis_result::well_formed;
     }
     if (type.size() != 2 || !type[1].is_identifier())
         return not_supported(n, "class.friend");
     uint32_t name = tokens.identifier(type[1].token());
-    if (entity_table[space].unknown_names)
+    entity_index local = local_scope_of(c);
+    /* the scope the prior declaration is looked for in, and the one a
+       class first declared here belongs to */
+    entity_index space = local;
+    if (!space)
+        space = enclosing_namespace(c);
+    if (!local && entity_table[space].unknown_names)
         return not_supported(n, "class.friend");
     lookup_result found = lookup_unqualified(name, lookup_filter::types);
     if (found.unknown || found.ambiguous)
         return not_supported(n, "class.friend");
-    friend_record f;
-    f.granting = c;
-    f.scope = space;
-    f.name = name;
+    if (local && found.entity && is_namespace(found.found_in))
+        /* /11: "a prior declaration is looked up without considering
+           scopes that are outside the innermost enclosing non-class
+           scope" (friend class X; in a local class is a local X, not ::X) */
+        found.entity = 0;
     if (found.entity) {
         const entity &x = entity_table[found.entity];
+        /* [dcl.type.elab]/2: "If the identifier ... resolves to a
+           typedef-name ..., the elaborated-type-specifier is ill-formed";
+           a template-name is no class-name either */
+        if (x.kind == entity_kind::typedef_name ||
+            x.kind == entity_kind::template_entity)
+            return ill_formed(type,
+                              "the identifier of an elaborated-type-specifier "
+                              "resolves to a class-name",
+                              "dcl.type.elab");
         bool outside = is_namespace(found.found_in) &&
                        found.found_in != space &&
                        namespace_encloses(found.found_in, space);
-        if (x.kind == entity_kind::class_type && x.enclosing == space &&
-            found.found_in == space &&
-            !entity_table.bound_by_using(space, name)) {
-            /* the class declared before (its key is [dcl.type.elab]/3's,
-               which is not checked) */
+        /* the scopes lookup considers: the innermost enclosing namespace
+           (or block, /11) and the classes inside it, c and those around
+           c (friend class Nested; names c's own member class) */
+        bool considered = !is_namespace(found.found_in) ||
+                          (x.enclosing == space && found.found_in == space &&
+                           !entity_table.bound_by_using(space, name));
+        if (x.kind == entity_kind::class_type && considered) {
+            /* [dcl.type.elab]/3: "the union class-key shall be used to
+               refer to a union, and either the class or struct class-key
+               shall be used to refer to a non-union class" */
             if (x.union_ != (key == standard_keyword::union_))
-                return not_supported(n, "dcl.type.elab");
-            f.befriended = found.entity;
-        } else if (!outside || tokens.files.behavior.microsoft_extensions) {
-            /* a member of a class around, a typedef-name, a name brought
-               by a using-declaration or directive */
-            return not_supported(n, "class.friend");
+                return ill_formed(type,
+                                  "the class-key of an elaborated-type-"
+                                  "specifier agrees in kind with the class",
+                                  "dcl.type.elab");
+            befriend(c, found.entity);
+            return analysis_result::well_formed;
         }
+        /* a name brought by a using-declaration or directive, an entity
+           that is no class */
+        if (!outside || local || tokens.files.behavior.microsoft_extensions)
+            return not_supported(n, "class.friend");
     }
     /* [ext.microsoft] an unqualified friend class's name is looked up
        outside the innermost enclosing namespace */
-    if (!f.befriended && tokens.files.behavior.microsoft_extensions)
+    if (tokens.files.behavior.microsoft_extensions)
         return not_supported(n, "class.friend");
-    friends.append(f);
+    /* no prior declaration in the scope: the class of that name the scope
+       declares later ([namespace.memdef]/3, /11: lookup does not find it
+       until then) */
+    befriend_by_name(c, space, name);
     return analysis_result::well_formed;
 }
 
+/* ---- a friend function: [class.friend]/4 to /8 --------------------------- */
+
+/* [class.friend]/5: "When a friend declaration refers to an overloaded name
+   or operator, only the function specified by the parameter types becomes a
+   friend": the function of the overload set starting at first whose
+   parameter-type-list is type's, 0 if none */
+entity_index
+semantic_analysis::overload_with_parameters(entity_index first,
+                                            qualified_type type) const
+{
+    for (entity_index o = first;
+         o && entity_table[o].kind == entity_kind::function;
+         o = entity_table[o].next_overload)
+        if (same_parameters(type_table, entity_table[o].type.unqualified(),
+                            type.unqualified()))
+            return o;
+    return 0;
+}
+
+/* a function of block_declared whose name and parameter-type-list are
+   these, in namespace scope, 0 if none: one declared by an earlier friend
+   declaration or block-scope declaration, not bound in its namespace */
+entity_index semantic_analysis::declared_unbound(entity_index scope,
+                                                 uint32_t name,
+                                                 qualified_type type) const
+{
+    for (entity_index e : block_declared) {
+        const entity &x = entity_table[e];
+        if (x.enclosing == scope && x.name == name &&
+            x.kind == entity_kind::function &&
+            same_parameters(type_table, x.type.unqualified(),
+                            type.unqualified()))
+            return e;
+    }
+    return 0;
+}
+
 /*
- * [class.friend]/6: "No storage-class-specifier shall appear in the
- * decl-specifier-seq of a friend declaration."  [namespace.memdef]/3: a
- * function first declared by the friend declaration is a member of the
- * innermost enclosing namespace, not found by ordinary lookup until
- * declared there (argument-dependent lookup finds it, [basic.lookup.argdep]
- * /4.3).  /6: "A function can be defined in a friend declaration of a class
- * if and only if the class is a non-local class and the function name is
- * unqualified"; /7: "Such a function is implicitly an inline function.  A
- * friend function defined in a class is in the (lexical) scope of the class
- * in which it is defined": its body is analysed with the class's members
- * (friend_function_body), after the class is complete as a member
- * function's (bodies).
+ * A friend function declaration or definition in class c:
+ *
+ *   /8: "No storage-class-specifier shall appear in the decl-specifier-seq
+ *   of a friend declaration."
+ *   /6: "A function can be defined in a friend declaration of a class if
+ *   and only if the class is a non-local class, the function name is
+ *   unqualified, and the function has namespace scope."
+ *   /4: "A function first declared in a friend declaration has the linkage
+ *   of the namespace of which it is a member ...  Otherwise, the function
+ *   retains its previous linkage."  [namespace.memdef]/3: it is a member of
+ *   the innermost enclosing namespace, not found by ordinary lookup until
+ *   declared there (argument-dependent lookup finds it,
+ *   [basic.lookup.argdep]/4.3).
+ *   /5: of an overload set, the function with these parameter types.
+ *   /7: "Such a function is implicitly an inline function if it is
+ *   attached to the global module.  A friend function defined in a class is
+ *   in the (lexical) scope of the class in which it is defined": its body
+ *   is analysed with the class's members (friend_function_body) after the
+ *   class is complete, as a member function's (bodies).
+ *   /11: in a local class, local_friend_function.
+ *
+ * The declarator chooses: a qualified name is a member of another class
+ * (friend_member_function) or of a namespace (qualified_friend_function).
  */
 analysis_result
 semantic_analysis::friend_function(entity_index c, SyntaxRef n,
@@ -225,6 +459,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     SyntaxTail tail(n, leading);
     uint32_t count = n.size() - leading;
     bool defines = n.is(syntax_kind::function_definition);
+    entity_index local = local_scope_of(c);
     if (defines) {
         auto body = n.function_definition().function_body();
         if (count != 3 || !tail[0].is(syntax_kind::decl_specifier_seq) ||
@@ -232,10 +467,27 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
             return not_supported(n, "class.friend");
         if (!body.defaulted() && !body.plain())
             return not_supported(n, "dcl.fct.def.general");
+        /* /6: "if and only if the class is a non-local class" */
+        if (local)
+            return ill_formed(n,
+                              "a function cannot be defined in a friend "
+                              "declaration of a local class",
+                              "class.friend");
     } else if (!n.is(syntax_kind::member_declaration) || count != 3 ||
-               !tail[2].is(preprocessing_op_or_punc::SEMICOLON) ||
-               tail[1].is(syntax_kind::member_declarator,
+               !tail[2].is(preprocessing_op_or_punc::SEMICOLON)) {
+        return not_supported(n, "class.friend");
+    } else if (tail[1].is(syntax_kind::member_declarator,
                           syntax_kind::member_declarator_list)) {
+        /* [temp.friend]/9: "A non-template friend declaration with a
+           requires-clause shall be a definition." (the other parts of a
+           member-declarator, an initializer or a bit-field width, no
+           friend function has either) */
+        for (SyntaxElement x : tail[1].elements())
+            if (x.is(syntax_kind::requires_clause))
+                return ill_formed(x,
+                                  "a non-template friend declaration with a "
+                                  "requires-clause shall be a definition",
+                                  "temp.friend");
         return not_supported(n, "class.friend");
     }
     specified s;
@@ -245,9 +497,23 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     friend_allowed = outer;
     if (r != analysis_result::well_formed)
         return r;
-    if (!s.friend_ || s.typedef_ || s.static_ || s.extern_ || s.virtual_ ||
-        s.declares_class || s.declares_enumeration)
+    if (!s.friend_ || s.typedef_ || s.declares_class || s.declares_enumeration)
         return not_supported(n, "class.friend");
+    /* /8 */
+    if (s.static_ || s.extern_ || s.mutable_ || s.c11_thread_local ||
+        s.cxx_thread_local)
+        return ill_formed(tail[0],
+                          "no storage-class-specifier shall appear in the "
+                          "decl-specifier-seq of a friend declaration",
+                          "class.friend");
+    /* [dcl.fct.spec]/2: "The virtual specifier shall be used only in the
+       initial declaration of a non-static member function" (a friend is
+       not a member, /1) */
+    if (s.virtual_)
+        return ill_formed(tail[0],
+                          "virtual only in the declaration of a member "
+                          "function",
+                          "dcl.fct.spec");
     /* a constructor or destructor of another class (friend A::A();) has no
        type in its decl-specifier-seq */
     bool no_type = !s.has_type;
@@ -266,15 +532,21 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     if (r != analysis_result::well_formed)
         return r;
     VTRY_SET(r, misplaced_function_qualifiers(n, type, false));
+    /* /6: "the function name is unqualified" */
+    if (defines && (m.qualifier || m.qualified_namespace))
+        return ill_formed_at_token(m.id,
+                                   "a function defined in a friend "
+                                   "declaration has an unqualified name",
+                                   "class.friend");
     if (m.qualified_namespace && !m.qualifier) {
-        if (defines || !m.has_id || m.operator_function || m.destructor ||
+        if (!m.has_id || m.operator_function || m.destructor ||
             m.conversion_function || m.literal_operator || m.aligned ||
             m.gnu_flags || function_cv || c_language ||
             type_table[type.unqualified()].kind != type_kind::function)
             return not_supported(n, "class.friend");
         return qualified_friend_function(c, n, m, type);
     }
-    if (m.qualifier && m.has_id && !defines)
+    if (m.qualifier && m.has_id)
         return friend_member_function(c, n, m, type, no_type, s.constexpr_);
     if (no_type)
         return not_supported(n, "class.friend");
@@ -293,6 +565,8 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     if (defines && explicit_body(tail[2], standard_keyword::default_) &&
         !defaulted_equality_declared(c, name, type))
         return not_supported(n, "class.compare.default");
+    if (local)
+        return local_friend_function(c, n, m, type);
     entity_index space = enclosing_namespace(c);
     if (entity_table[space].unknown_names ||
         entity_table.bound_by_using(space, name))
@@ -314,17 +588,14 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         } else if (entity_table[prior].kind != entity_kind::function) {
             return not_supported(n, "class.friend");
         }
-        for (entity_index o = prior;
-             o && !befriended && entity_table[o].kind == entity_kind::function;
-             o = entity_table[o].next_overload)
-            if (same_parameters(type_table, entity_table[o].type.unqualified(),
-                                type.unqualified()))
-                befriended = o;
+        if (!befriended)
+            befriended = overload_with_parameters(prior, type);
     }
     if (!befriended)
         befriended = declared_unbound(space, name, type);
     if (befriended) {
-        /* [over.load]/2, [dcl.link]: a return type or language linkage of
+        /* /4: "Otherwise, the function retains its previous linkage";
+           [over.load]/2, [dcl.link]: a return type or language linkage of
            its own is not analysed */
         if (!(entity_table[befriended].type == type) ||
             entity_table[befriended].c_language_linkage)
@@ -333,6 +604,7 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
         if (type_without_external_linkage(type) ||
             tokens.files.behavior.microsoft_extensions)
             return not_supported(n, "class.friend");
+        /* /4: first declared here, it has the linkage of its namespace */
         befriended = entity_table.make(entity_kind::function, name, space);
         entity &made = entity_table[befriended];
         made.type = type;
@@ -344,41 +616,89 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
             made.linkage_of_name = linkage::internal;
         block_declared.append(befriended);
     }
+    return befriend_function(c, n, befriended, s, m, defines, bodies);
+}
+
+/*
+ * What every friend declaration of a non-member function f in class c
+ * does once f is known: its definition (/6, /7), the specifiers that
+ * accumulate over its declarations, the declaration itself, and the
+ * friendship.
+ */
+analysis_result semantic_analysis::befriend_function(
+    entity_index c, SyntaxRef n, entity_index f, const specified &s,
+    const declarator_meaning &m, bool defines, owned_array<SyntaxRef> &bodies)
+{
     if (defines) {
         /* [basic.def.odr]/1: one definition */
-        if (entity_table[befriended].defined)
+        if (entity_table[f].defined)
             return not_supported(n, "basic.def.odr");
-        entity_table[befriended].inline_ = true;
+        /* /7: "implicitly an inline function" (no modules: every function
+           is attached to the global module) */
+        entity_table[f].inline_ = true;
         bodies.append(n);
-        friend_definitions.append({n, befriended, c});
+        friend_definitions.append({n, f, c});
     }
     /* [dcl.inline]: a function is inline once a declaration says so;
        [dcl.constexpr]/1: constexpr implies inline, and every declaration
        of the function must have it */
     if (s.inline_)
-        entity_table[befriended].inline_ = true;
-    if (entity_table[befriended].first_declaration) {
-        VTRY(c1, constexpr_redeclaration(m.id, befriended, s.constexpr_));
+        entity_table[f].inline_ = true;
+    if (entity_table[f].first_declaration) {
+        VTRY(c1, constexpr_redeclaration(m.id, f, s.constexpr_));
     }
     if (s.constexpr_) {
-        entity_table[befriended].inline_ = true;
-        entity_table[befriended].constexpr_ = true;
-        entity_table[befriended].immediate = s.consteval_;
+        entity_table[f].inline_ = true;
+        entity_table[f].constexpr_ = true;
+        entity_table[f].immediate = s.consteval_;
     }
     if (m.operator_function) {
-        VTRY(o, operator_function_declaration(n, befriended));
+        VTRY(o, operator_function_declaration(n, f));
     }
-    entity_table.add_declaration(befriended, n);
-    friend_record f;
-    f.granting = c;
-    f.befriended = befriended;
-    friends.append(f);
+    entity_table.add_declaration(f, n);
+    befriend(c, f);
     return analysis_result::well_formed;
 }
 
 /*
- * [class.friend]/1: "A friend of a class can be a member function of
- * another class": friend R A::f(P); friend A::A(P); friend A::~A();  The
+ * [class.friend]/11: "If a friend declaration appears in a local class and
+ * the name specified is an unqualified name, a prior declaration is looked
+ * up without considering scopes that are outside the innermost enclosing
+ * non-class scope.  For a friend function declaration, if there is no
+ * prior declaration, the program is ill-formed."  The prior declaration is
+ * a block-scope function declaration (void b(); in the function), which
+ * declares a function of the namespace ([basic.link]/7): that function is
+ * the friend.  (Not a definition: /6 refused it.)
+ */
+analysis_result
+semantic_analysis::local_friend_function(entity_index c, SyntaxRef n,
+                                         const declarator_meaning &m,
+                                         qualified_type type)
+{
+    uint32_t name = tokens.identifier(m.id);
+    lookup_result found = lookup_unqualified(name, lookup_filter::any);
+    if (found.unknown || found.ambiguous)
+        return not_supported(n, "class.friend");
+    entity_index befriended = 0;
+    if (found.entity && !is_namespace(found.found_in) &&
+        entity_table[found.entity].kind == entity_kind::function)
+        befriended = overload_with_parameters(found.entity, type);
+    if (!befriended)
+        return ill_formed_at_token(m.id,
+                                   "a friend function declared in a local "
+                                   "class shall have a prior declaration in "
+                                   "the innermost enclosing block",
+                                   "class.friend");
+    if (!(entity_table[befriended].type == type))
+        return not_supported(n, "class.friend");
+    entity_table.add_declaration(befriended, n);
+    befriend(c, befriended);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.friend]/5: "A member function of a class X can be a friend of a
+ * class Y": friend R A::f(P); friend A::A(P); friend A::~A();  The
  * declaration "shall refer to a previously declared member of the class
  * to which the qualifier refers" ([dcl.meaning]/1), by name and type.  It
  * is that member that is the friend, so its body is in a friend of c.
@@ -428,10 +748,7 @@ analysis_result semantic_analysis::friend_member_function(
                                    "dcl.meaning");
     VTRY(cr, constexpr_redeclaration(m.id, befriended, is_constexpr));
     entity_table.add_declaration(befriended, n);
-    friend_record f;
-    f.granting = c;
-    f.befriended = befriended;
-    friends.append(f);
+    befriend(c, befriended);
     return analysis_result::well_formed;
 }
 
@@ -468,13 +785,7 @@ semantic_analysis::qualified_friend_function(entity_index c, SyntaxRef n,
     for (entity_index y = in; y != scope; y = entity_table[y].enclosing)
         if (!y || !entity_table[y].inline_)
             return not_supported(n, "dcl.meaning");
-    entity_index befriended = 0;
-    for (entity_index o = prior;
-         o && !befriended && entity_table[o].kind == entity_kind::function;
-         o = entity_table[o].next_overload)
-        if (same_parameters(type_table, entity_table[o].type.unqualified(),
-                            type.unqualified()))
-            befriended = o;
+    entity_index befriended = overload_with_parameters(prior, type);
     if (!befriended)
         return ill_formed_at_token(m.id,
                                    "a qualified friend declaration shall "
@@ -485,141 +796,15 @@ semantic_analysis::qualified_friend_function(entity_index c, SyntaxRef n,
         entity_table[befriended].c_language_linkage)
         return not_supported(n, "class.friend");
     entity_table.add_declaration(befriended, n);
-    friend_record f;
-    f.granting = c;
-    f.befriended = befriended;
-    friends.append(f);
+    befriend(c, befriended);
     return analysis_result::well_formed;
 }
 
-/*
- * [temp.friend]/1: "A friend of a class or class template can be a function
- * template or class template, a specialization of a function template or
- * class template, or a non-template function or class": template<...>
- * friend R f(P); in class c.  The template is declared (or redeclared) in
- * the innermost enclosing namespace of c ([namespace.memdef]/3) as by a
- * template-declaration there, and all its specializations are friends.  (The
- * name is then visible to ordinary lookup there, which [namespace.memdef]/3
- * hides until a declaration in the namespace. A definition in the class
- * ([temp.friend]/2) is instantiated in that class's lexical scope. Friend
- * class templates and qualified names are not analysed.
- */
-analysis_result semantic_analysis::friend_function_template(
-    entity_index c, TemplateDeclaration n, SyntaxRef inner)
-{
-    uint32_t lead = leading_gnu_attributes(inner);
-    if (inner.is(syntax_kind::member_declaration) && inner.size() == lead + 2 &&
-        inner[lead].is(syntax_kind::decl_specifier_seq) &&
-        inner[lead + 1].is(preprocessing_op_or_punc::SEMICOLON)) {
-        /* [temp.friend]/1: template<...> friend class S; */
-        bool has_friend = false, has_elaborated = false;
-        for (SyntaxElement spec : inner[lead].elements()) {
-            if (spec.is(standard_keyword::friend_))
-                has_friend = true;
-            else if (spec.is(syntax_kind::elaborated_type_specifier))
-                has_elaborated = true;
-            else if (!spec.is(syntax_kind::gnu_attribute_specifier) &&
-                     !attributes_without_effect(spec))
-                return not_supported(n, "temp.friend");
-        }
-        if (has_friend && has_elaborated)
-            return analysis_result::well_formed;
-    }
-    if (!inner.is(syntax_kind::member_declaration,
-                  syntax_kind::function_definition) ||
-        inner.size() != lead + 3)
-        return not_supported(n, "temp.friend");
-    /* [temp.friend]/1: a member function template of another class befriended:
-       template <class T> friend R G::f(P); */
-    if (inner.is(syntax_kind::member_declaration) &&
-        !inner[lead + 1].is_token()) {
-        DeclaratorParts d(inner[lead + 1]);
-        if (d.noptr && d.qualifier()) {
-            nominated_scope ns;
-            VTRY(nr, nested_name_specifier(d.qualifier().index(), ns));
-            if (is_class_entity(ns.entity)) {
-                entity_index target = ns.entity;
-                owned_array<SyntaxRef> parameters;
-                entity_index saved_class = defining_class;
-                defining_class = 0;
-                analysis_result hr = template_head_parameters(
-                    n, parameters, true, true, true, true);
-                defining_class = saved_class;
-                if (hr != analysis_result::well_formed)
-                    return hr;
-                uint32_t number = 0, first = 0;
-                entity_index scope = 0;
-                VTRY(tr, template_parameter_scope(n, parameters, target, 0,
-                                                  number, scope, first));
-                specified s;
-                declarator_meaning m;
-                qualified_type type;
-                entity_index saved_scope = current_scope;
-                uint32_t saved_cv = function_cv;
-                bool saved_friend = friend_allowed;
-                scoped_value<entity_index> member_scope(template_member_scope,
-                                                        scope);
-                defining_class = 0;
-                friend_allowed = true;
-                analysis_result dr = function_template_declarator(
-                    inner, lead, target, scope, s, m, type);
-                uint32_t cv = function_cv;
-                current_scope = saved_scope;
-                defining_class = saved_class;
-                function_cv = saved_cv;
-                friend_allowed = saved_friend;
-                if (dr != analysis_result::well_formed)
-                    return dr;
-                if (!m.has_id || m.qualifier != target)
-                    return not_supported(n, "temp.friend");
-                entity_index held =
-                    entity_table.find(target, tokens.identifier(m.id));
-                if (held)
-                    held = member_templates_of(held);
-                if (!held)
-                    return not_supported(n, "temp.friend");
-                owned_array<uint32_t> group;
-                function_template_overloads(held, group);
-                for (uint32_t g : group) {
-                    const function_template f = function_templates[g - 1];
-                    const entity old = entity_table[f.entity];
-                    if (old.enclosing != target || old.member_cv != cv)
-                        continue;
-                    if (!equivalent_template(
-                            f, n, first,
-                            static_cast<uint32_t>(parameters.size()), type))
-                        continue;
-                    friend_record rec;
-                    rec.granting = c;
-                    rec.template_entity = f.entity;
-                    friends.append(rec);
-                    return analysis_result::well_formed;
-                }
-                return not_supported(n, "temp.friend");
-            }
-        }
-    }
-    entity_index saved_scope = current_scope, saved_class = defining_class;
-    bool saved_friend = friend_allowed;
-    current_scope = enclosing_namespace(c);
-    defining_class = c;
-    friend_allowed = true;
-    last_function_template = 0;
-    analysis_result r = function_template_definition(n, inner);
-    current_scope = saved_scope;
-    defining_class = saved_class;
-    friend_allowed = saved_friend;
-    if (r != analysis_result::well_formed)
-        return r;
-    if (inner.is(syntax_kind::function_definition))
-        function_templates[last_function_template - 1].friend_class = c;
-    friend_record f;
-    f.granting = c;
-    f.template_entity = function_templates[last_function_template - 1].entity;
-    friends.append(f);
-    return analysis_result::well_formed;
-}
+/* ---- a function defined in a friend declaration: [class.friend]/6, /7 ---- */
 
+/* the scope unqualified lookup goes to after s: its enclosing one, or for
+   a friend function defined in a class, the class (/7: "in the (lexical)
+   scope of the class in which it is defined") */
 entity_index semantic_analysis::lexical_parent(entity_index s) const
 {
     if (entity_table[s].kind == entity_kind::function &&
@@ -650,8 +835,8 @@ entity_index semantic_analysis::friend_defined_by(SyntaxRef n,
     return 0;
 }
 
-/* [class.friend]/7: the body of a friend defined in class c, in the
-   class's scope: its declarator again for the parameters, then the body */
+/* /7: the body of a friend defined in class c, in the class's scope: its
+   declarator again for the parameters, then the body */
 analysis_result semantic_analysis::friend_function_body(
     entity_index c, FunctionDefinition definition, entity_index f)
 {
@@ -685,131 +870,6 @@ analysis_result semantic_analysis::friend_function_body(
     }
     current_scope = scope;
     return r;
-}
-
-/*
- * [class.compare.default]/1: "A defaulted comparison operator function
- * ([over.binary]) for some class C shall be a non-template function that
- * is ... a friend of C having either two parameters of type const C& or
- * two parameters of type C."  [class.eq]/1: "A defaulted equality
- * operator function shall have a declared return type bool."  Only the
- * friend operator== of a class without base classes is analysed.
- */
-bool semantic_analysis::defaulted_equality_declared(entity_index c,
-                                                    uint32_t name,
-                                                    qualified_type type)
-{
-    const struct type &f = type_table[type.unqualified()];
-    if (name != operator_name(preprocessing_op_or_punc::EQUAL_EQUAL) ||
-        f.kind != type_kind::function || f.variadic || f.parameter_count != 2 ||
-        entity_table[c].base_count ||
-        fundamental_of(f.operand) != fundamental_type::bool_)
-        return false;
-    const qualified_type *parameters =
-        type_table.parameters(type.unqualified());
-    qualified_type object =
-        qualified_type::make(entity_table[c].type.unqualified(), cv_none);
-    qualified_type reference = qualified_type::make(
-        type_table.lvalue_reference_to(
-            qualified_type::make(object.unqualified(), cv_const)),
-        cv_none);
-    return parameters[0] == parameters[1] &&
-           (parameters[0] == object || parameters[0] == reference);
-}
-
-/*
- * [class.eq]/3: "The return value V of a defaulted == operator function
- * with parameters x and y is determined by comparing corresponding
- * elements x_i and y_i in the expanded lists of subobjects for x and y
- * (in increasing index order) until the first index i where x_i == y_i
- * yields a result value which, when contextually converted to bool,
- * yields false.  If no such index exists, V is true.  Otherwise, V is
- * false."  The body: return x.m0 == y.m0 && x.m1 == y.m1 ...; for the
- * class's non-static data members, at least one, none an array.
- */
-analysis_result semantic_analysis::defaulted_equality(
-    token_index at, const owned_array<uint32_t> &parameters, uint32_t &block)
-{
-    const entity &x = entity_table[defaulted_comparison];
-    if (!x.member_count || parameters.size() != 2)
-        return not_supported(current_declaration, "class.compare.default");
-    expression_meaning all;
-    for (uint32_t i = 0; i < x.member_count; i++) {
-        entity_index member = class_members[x.first_member + i];
-        if (type_table[entity_table[member].type.unqualified()].kind ==
-            type_kind::array)
-            return not_supported(current_declaration, "class.compare.default");
-        expression_meaning sides[2], equal;
-        for (int k = 0; k < 2; k++) {
-            analysis_result r =
-                named_entity(at, parameters[k], sides[k], false);
-            if (r == analysis_result::well_formed)
-                VTRY_SET(r, member_access(at, member, sides[k]));
-        }
-        VTRY(r,
-             binary_of(current_declaration, at,
-                       preprocessing_op_or_punc::EQUAL_EQUAL, SyntaxElement(),
-                       sides[0], SyntaxElement(), sides[1], equal));
-        /* a bool prvalue each ([class.eq]/2), joined by && ([expr.log.and]) */
-        if (i) {
-            if (all.evaluation == constness::not_constant)
-                equal.evaluation = constness::not_constant;
-            equal.node = expression_node(semantic_kind::logical_and, equal, at,
-                                         all.node, equal.node);
-        }
-        all = equal;
-    }
-    owned_array<uint32_t> statements;
-    statements.append(
-        statement_node(semantic_kind::return_statement, at, all.node));
-    block = block_statement(at, statements);
-    return analysis_result::well_formed;
-}
-
-/* a member-declaration whose decl-specifier-seq has friend */
-analysis_result
-semantic_analysis::friend_declaration(entity_index c, SyntaxRef n,
-                                      owned_array<SyntaxRef> &bodies)
-{
-    /* [class.friend]/11: a friend declaration in a local class */
-    for (entity_index k = c; !is_namespace(k); k = entity_table[k].enclosing)
-        if (entity_table[k].kind != entity_kind::class_type)
-            return not_supported(n, "class.friend");
-    return n.member_declaration().visit(Overloaded{
-        [&](FunctionDefinition f) { return friend_function(c, f, bodies); },
-        [&](MemberSimpleDeclaration d) {
-            return friend_member_declaration(c, d, bodies);
-        },
-        [&](MemberDeclaration) { return not_supported(n, "class.friend"); }});
-}
-
-/* a friend member-declaration that is not a function-definition */
-analysis_result semantic_analysis::friend_member_declaration(
-    entity_index c, MemberSimpleDeclaration d, owned_array<SyntaxRef> &bodies)
-{
-    SyntaxRef n = d;
-    uint32_t leading = leading_gnu_attributes(n);
-    SyntaxTail tail(n, leading);
-    if (tail.size() < 2)
-        return not_supported(n, "class.friend");
-    if (tail.size() == 2) {
-        /* friend class-key identifier ; friend type-name ; */
-        auto seq = tail[0];
-        SyntaxElement type = {};
-        unsigned friends_seen = 0, others = 0;
-        for (SyntaxElement x : seq.elements()) {
-            if (is_keyword(x, standard_keyword::friend_)) {
-                friends_seen++;
-                continue;
-            }
-            type = x;
-            others++;
-        }
-        if (friends_seen != 1 || others != 1)
-            return not_supported(n, "class.friend");
-        return friend_class(c, n, type);
-    }
-    return friend_function(c, n, bodies);
 }
 
 } // namespace cplusplus

@@ -1,0 +1,1 @@
+CXX/temp/temp.decls/temp.friend/p6.cpp:22 [temp.friend]/6 "A friend template shall not be declared in a local class": template<class T> friend void B<T>::f(); in a local class; the test expects clang's error at line 24, which clang 23 does not give for a member of a class template
