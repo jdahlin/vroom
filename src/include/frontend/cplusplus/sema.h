@@ -1767,17 +1767,21 @@ class semantic_analysis
     bool trivial_defaulted_default_constructor(entity_index c) const;
     bool trivial_default_constructor(entity_index c, bool &known) const;
     bool trivial_copy_constructor(entity_index c) const;
-    bool copy_constructor_deleted_by_move(entity_index c) const;
     bool copies_bytes(entity_index c) const;
+    /* [dcl.fct.def.delete]: which defaulted special member functions are
+       defined as deleted (class/deleted-special-members.cpp) */
+    bool default_constructed(entity_index c, entity_index k) const;
+    bool default_constructor_deleted(entity_index c) const;
+    bool copy_constructor_deleted_by_move(entity_index c) const;
+    bool declares_move_assignment(entity_index c);
+    bool copy_assignment_deleted(entity_index c) const;
+    bool bytewise_const_member(entity_index c) const;
     bool trivial_special_members(entity_index c) const;
-    bool is_copy_constructor(entity_index c, entity_index k) const;
+    bool copy_or_move_constructor(entity_index c, entity_index k) const;
     bool declares_move_constructor(entity_index c) const;
     /* a user-declared copy constructor whose parameter is an lvalue reference
        ([class.copy.ctor]/1) */
     bool declares_copy_constructor(entity_index c) const;
-    bool copy_assignment_deleted(entity_index c) const;
-    bool default_constructor_deleted(entity_index c) const;
-    bool default_constructed(entity_index c, entity_index k) const;
     /* whether the destructor of subobject class k is not accessible from
        the destructor or constructor of class c ([class.access.base]/1) */
     bool subobject_destructor_inaccessible(entity_index c,
@@ -3149,7 +3153,6 @@ class semantic_analysis
     /* ext/clang/class-traits.cpp: the traits that ask about a class */
     bool class_property_trait(int which, qualified_type t, bool &answer);
     bool standard_layout_class(entity_index c, bool &answer);
-    bool declares_move_assignment(entity_index c);
     bool relocatable_type(qualified_type t, bool cpp26, bool &known);
     bool class_head_names_trivial_abi(entity_index c);
     bool unique_representation(qualified_type t, bool &answer);
@@ -4015,8 +4018,6 @@ class semantic_analysis
     /* [class.copy.assign]: the implicitly-declared copy and move assignment
        operators that are not trivial (class/implicit-assignment.cpp) */
     enum class assignment_use : uint8_t { usable, deleted, unknown };
-    bool move_assignment_operator(entity_index f, entity_index c) const;
-    bool bytewise_const_member(entity_index c) const;
     bool declared_deleted(entity_index f) const;
     assignment_use subobject_assignment(entity_index k, entity_index c,
                                         bool move, bool &non_throwing);
@@ -5799,6 +5800,9 @@ class semantic_analysis
     bool operators_held = false;
     /* [class.copy.assign]/1: f is a copy assignment operator of class c */
     bool copy_assignment_operator(entity_index f, entity_index c) const;
+    /* [class.copy.assign]/3: f is a move assignment operator of class c
+       (class/implicit-assignment.cpp) */
+    bool move_assignment_operator(entity_index f, entity_index c) const;
     /* [class.copy.assign]/12: the implicit copy assignment of class c
        assigns its members as the built-in operator does (no member's
        assignment is a user-provided operator=) */

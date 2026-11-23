@@ -99,7 +99,7 @@ bool semantic_analysis::triviality_unknown(entity_index c) const
         return true;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (entity_table[k].deleted && is_copy_constructor(c, k))
+        if (entity_table[k].deleted && copy_or_move_constructor(c, k))
             return true;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
@@ -464,30 +464,6 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     default:
         return false;
     }
-}
-
-/* whether class c declares a move assignment operator X::operator=(X&&) */
-bool semantic_analysis::declares_move_assignment(entity_index c)
-{
-    lookup_result found = lookup_qualified(
-        c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
-    if (found.unknown || found.ambiguous)
-        return true;
-    for (entity_index o = found.entity; o; o = entity_table[o].next_overload) {
-        if (entity_table[o].kind != entity_kind::function)
-            return true;
-        const struct type &f = type_table[entity_table[o].type.unqualified()];
-        if (f.parameter_count != 1)
-            continue;
-        qualified_type p =
-            type_table.parameters(entity_table[o].type.unqualified())[0];
-        const struct type &r = type_table[p.unqualified()];
-        if (r.kind == type_kind::rvalue_reference &&
-            type_table[r.operand.unqualified()].kind == type_kind::class_type &&
-            type_table[r.operand.unqualified()].entity == c)
-            return true;
-    }
-    return false;
 }
 
 /* the direct and indirect base classes of c (non-virtual ones: a class
@@ -871,7 +847,7 @@ bool semantic_analysis::relocatable_type(qualified_type t, bool cpp26,
         return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (!entity_table[k].implicit && is_copy_constructor(c, k))
+        if (!entity_table[k].implicit && copy_or_move_constructor(c, k))
             return false;
     if (x.user_copy_assignments || x.implicit_copy_deleted ||
         x.constructor_template || x.constructor_templates) {

@@ -125,7 +125,7 @@ bool semantic_analysis::trivial_copy_constructor(entity_index c) const
        a subobject's is not trivial, which (11.2) and (11.3) say */
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (!entity_table[k].implicit && is_copy_constructor(c, k))
+        if (!entity_table[k].implicit && copy_or_move_constructor(c, k))
             return false;
     /* (11.2), (11.3) */
     owned_array<entity_index> classes;
@@ -134,30 +134,6 @@ bool semantic_analysis::trivial_copy_constructor(entity_index c) const
         if (!trivial_copy_constructor(k))
             return false;
     return true;
-}
-
-/*
- * [class.copy.ctor]/6: "If the class definition declares a move
- * constructor or move assignment operator, the implicitly declared copy
- * constructor is defined as deleted"; /10: "A defaulted copy/move
- * constructor for a class X is defined as deleted if X has: a potentially
- * constructed subobject type M (or array thereof) that cannot be copied"
- * (here: whose copy constructor is deleted by /6).  Analysis sees only the
- * defaulted move members (a user-provided one makes the class no less
- * dynamic-free, and its copy is the one written or none).
- */
-bool semantic_analysis::copy_constructor_deleted_by_move(entity_index c) const
-{
-    const entity &x = entity_table[c];
-    if ((x.defaulted_move_constructor || x.defaulted_move_assignment) &&
-        !x.defaulted_copy_constructor)
-        return true;
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (entity_index k : classes)
-        if (copy_constructor_deleted_by_move(k))
-            return true;
-    return false;
 }
 
 /* whether a copy of a class c object copies its bytes: its copy constructor
@@ -214,7 +190,7 @@ bool semantic_analysis::trivial_special_members(entity_index c) const
         if (!entity_table[k].implicit &&
             (type_table[entity_table[k].type.unqualified()].parameter_count ==
                  0 ||
-             is_copy_constructor(c, k)))
+             copy_or_move_constructor(c, k)))
             return false;
     if (x.dynamic || x.destructor || x.user_copy_assignments)
         return false;

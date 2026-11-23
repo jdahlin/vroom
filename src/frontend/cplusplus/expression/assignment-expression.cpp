@@ -254,38 +254,6 @@ analysis_result semantic_analysis::assignment_of(
 }
 
 /*
- * Whether the implicit copy assignment operator of class c, whose subobjects
- * are assigned bitwise (assigned_bitwise), is deleted: [class.copy.assign]/2
- * "If the class definition declares a move constructor or move assignment
- * operator, the implicitly declared copy assignment operator is defined as
- * deleted"; /7 "a non-static data member of reference type", or a
- * subobject whose copy assignment is deleted (/7.4: overload resolution
- * finds a deleted function); a closure type's ([expr.prim.lambda.closure]/13).
- */
-bool semantic_analysis::copy_assignment_deleted(entity_index c) const
-{
-    if (declares_move_constructor(c) ||
-        entity_table[c].closure_assignment_deleted)
-        return true;
-    const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.member_count; i++) {
-        type_kind k = type_table[entity_table[class_members[x.first_member + i]]
-                                     .type.unqualified()]
-                          .kind;
-        if (k == type_kind::lvalue_reference ||
-            k == type_kind::rvalue_reference)
-            return true;
-    }
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (entity_index k : classes)
-        if (entity_table[k].kind == entity_kind::class_type &&
-            copy_assignment_deleted(k))
-            return true;
-    return false;
-}
-
-/*
  * [expr.ass]/4: "If the left operand is of class type, the class shall be
  * complete.  Assignment to objects of a class is defined by the copy/move
  * assignment operator ([class.copy.assign], [over.ass])."  The

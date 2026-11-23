@@ -1919,7 +1919,7 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
                 return constness::unknown;
         } else {
             if (x.count != 1 || !c_entity ||
-                !is_copy_constructor(c_entity, x.b))
+                !copy_or_move_constructor(c_entity, x.b))
                 return constness::unknown;
             uint32_t argument = semantics.items(x.first)[0];
             if (semantics[argument].kind != semantic_kind::bind_reference)
