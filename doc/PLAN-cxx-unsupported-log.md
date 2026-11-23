@@ -548,3 +548,15 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   expression-cxx11.cpp:1333 and :2539 need "constexpr function never produces
   a constant expression" for B().x with a non-literal B; stdinitializerlist
   :176 and :262 backing-array / deleted-constructor diagnostics).
+- 9.6 (5de58662a, f7444722c): initializer_list<array> conversion sequences
+  ([over.ics.list]/5, /8), list-init to initializer_list ranked first
+  ([over.ics.rank]/3.1.1), {} with an initializer-list constructor, a
+  constructor template makes a class non-POD for layout (Itanium; layout
+  refuted 365 -> 219), C++11 implicitly const constexpr member functions,
+  constexpr default-initialized objects of classes with a constructor.
+  Unsupported 36126 -> 35877, we reject 475 -> 456, we accept +12 (named in
+  the commits: constexpr evaluations not constant that clang diagnoses).
+  Review: 5de58662a holds four fixes (the formatter failed the first commit
+  and the second took everything); left as is.  Left: the deleted
+  destructor's vtable slot (__cxa_deleted_virtual, 197), the evaluator's
+  value of a default-initialized constexpr object.
