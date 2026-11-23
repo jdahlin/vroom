@@ -617,6 +617,11 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
                 spelled(name, written.size(), "__is_same_as");
     bool convertible = spelled(name, written.size(), "__is_convertible") ||
                        spelled(name, written.size(), "__is_convertible_to");
+    /* [meta.rel] is_nothrow_convertible: convertible, and the conversion
+       does not throw (a scalar's never does) */
+    bool nothrow_convertible =
+        spelled(name, written.size(), "__is_nothrow_convertible");
+    convertible = convertible || nothrow_convertible;
     if (spelled(name, written.size(), "__is_constructible"))
         return clang_constructible_trait(n, false, false, m);
     if (spelled(name, written.size(), "__is_nothrow_constructible"))
@@ -693,9 +698,24 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         answer = convertible_types(t, u, known);
         if (!known)
             return not_supported(n, "over.best.ics");
+        /* a class's conversion functions and constructors may throw: not
+           followed */
+        if (nothrow_convertible && answer &&
+            (class_or_referenced_class(t) || class_or_referenced_class(u)))
+            return not_supported(n, "over.best.ics");
     }
     m = integer_constant(fundamental_type::bool_, answer, n.first_token());
     return analysis_result::well_formed;
+}
+
+/* whether t, without a reference, is a class type */
+bool semantic_analysis::class_or_referenced_class(qualified_type t) const
+{
+    const struct type *k = &type_table[t.unqualified()];
+    if (k->kind == type_kind::lvalue_reference ||
+        k->kind == type_kind::rvalue_reference)
+        k = &type_table[k->operand.unqualified()];
+    return k->kind == type_kind::class_type;
 }
 
 /* [meta.trans.other] decay_t<T>: the type of a T passed by value */

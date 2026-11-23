@@ -3355,6 +3355,7 @@ class semantic_analysis
     bool relocatable_type(qualified_type t, bool cpp26, bool &known);
     bool class_head_names_trivial_abi(entity_index c);
     bool unique_representation(qualified_type t, bool &answer);
+    bool class_or_referenced_class(qualified_type t) const;
     bool unique_class_extent(entity_index c, bool &unique, uint64_t &extent);
     bool layout_compatible(qualified_type a, qualified_type b, bool &known);
     analysis_result clang_layout_compatible_trait(SyntaxRef n,
