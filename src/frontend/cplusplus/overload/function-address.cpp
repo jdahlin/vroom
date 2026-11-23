@@ -325,6 +325,16 @@ semantic_analysis::overload_set_sequence(const expression_meaning &a,
     return s;
 }
 
+/*
+ * [over.over]/1: "A use of a function name without arguments is resolved
+ * to a function, a pointer to function, or a pointer to member function
+ * for a specific function that is chosen from a set of selected functions
+ * determined based on the target type required in the context": the
+ * expression e initializing an object or reference of type target, its
+ * overload set (if it names one, with or without &) narrowed to the
+ * function select_for_target chooses for the target's function type; any
+ * other expression analysed as it is.
+ */
 analysis_result semantic_analysis::target_expression(SyntaxElement e,
                                                      qualified_type target,
                                                      expression_meaning &m)

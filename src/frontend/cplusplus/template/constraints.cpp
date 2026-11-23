@@ -373,8 +373,8 @@ analysis_result semantic_analysis::constraint_satisfied(SyntaxElement e,
     const struct type &t = type_table[value.type.unqualified()];
     if (t.kind != type_kind::fundamental ||
         t.fundamental != fundamental_type::bool_)
-        /* ill-formed ([temp.constr.atomic]/3), which clang reports at
-           the constraint, not where its satisfaction is checked */
+        /* ill-formed ([temp.constr.atomic]/3), which [impl.clang] clang reports
+           at the constraint, not where its satisfaction is checked */
         return not_supported(at, "temp.constr.atomic");
     if (value.evaluation != constness::constant)
         return not_supported(at, "temp.constr.atomic");

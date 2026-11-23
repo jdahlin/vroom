@@ -360,6 +360,7 @@ bench/cxx-c-suites.py -j 6 [-O 02] [--bless] [PAT]   # C5.1: the C suites' progr
 bench/cxx-syntax-audit.py [-j N]    # clang-tidy custom checks (src/frontend/cplusplus/syntax-audit.clang-tidy): an element's index() as a condition, a view stored in a field (~2 s; the net behind them is -DVCC_CHECK_SYNTAX_VIEWS in cxx-run/cxx-sema)
 bench/cxx-fe-bench.py [--save F|--against F]   # the C++ front end's user-mode instructions (perf stat, vpp -fsyntax-only over src/test/cxx/run), deterministic to 0.003%: the gate for changes to its data structures, budget +0.5%
 bench/cxx-spec-refs.py [--rules CLAUSE]   # citations, quoted grammar, [abi:...] labels, [ext:NAME] and ext/grammar.inc's productions; rules quoted per clause (<1 s)
+bench/cxx-spec-anchors.py --check   # no new analysis function of 40+ lines without a [label], no comment on clang's behaviour without [ext:]/[impl.]; today's in bench/cxx-spec-anchors.baseline (--bless) (<1 s)
 bench/cxx-syntax-conformance.py -j 6 [--suites]   # the C++ syntax tree against the grammar the views are generated from (src/tools/gen-syntax-views.py --check: syntax-views.inc current); --suites adds clang's C++ tests (<2 s, ~10 s)
 bench/itanium-abi.py [--check]      # docs/itanium-abi-index.tsv from the fetched ABI (fetch-testsuites.sh itanium-abi); section text in work/itanium-abi/
 bench/vcc-diag.py -j 6             # test/diag: vcc's .stderr snapshots, clang's locations/levels/flags (~2 s)

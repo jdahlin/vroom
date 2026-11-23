@@ -469,7 +469,12 @@ bool name_is(const char *name, size_t length, const char *s)
 /*
  * The attributes that change nothing vcc generates or lays out: they ask
  * for a diagnostic or describe the program to a tool.  Standard:
- * maybe_unused, nodiscard, deprecated, likely, unlikely; GCC's, as
+ * maybe_unused ([dcl.attr.unused]), nodiscard ([dcl.attr.nodiscard]),
+ * deprecated ([dcl.attr.deprecated]), likely and unlikely
+ * ([dcl.attr.likelihood]), none of which changes the program's meaning;
+ * others by [dcl.attr.grammar]/6: "For an attribute-token (including an
+ * attribute-scoped-token) not specified in this document, the behavior is
+ * implementation-defined", here as GCC's and clang's.  GCC's, as
  * gnu::NAME: nodebug, unused, deprecated, returns_nonnull, alloc_size,
  * alloc_align, nonnull, pure, const; clang's, as clang::NAME (also _Clang::NAME):
  * preferred_name, no_specializations, lifetimebound, availability (the names clang 23

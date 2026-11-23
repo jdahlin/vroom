@@ -465,8 +465,8 @@ parser::simple_declaration_rest(size_t mark, token_index first,
     bool function = facts.first == derivation::function;
     /* [dcl.decl]/1: init-declarator: declarator requires-clause, and
        [dcl.fct.def.general]/1: declarator requires-clause function-body */
-    /* [dcl.decl]/3 as clang reads it: "trailing requires clause can only
-       be used when declaring a function" */
+    /* [dcl.decl]/3 [impl.clang] as clang reads it: "trailing requires clause
+       can only be used when declaring a function" */
     if (at(standard_keyword::requires_) && !function)
         return violates("a requires-clause only after a function's declarator",
                         "dcl.decl", position);
@@ -1126,8 +1126,8 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     }
     /* [dcl.pre]/5: "the optional init-declarator-list can be omitted only
        when declaring a class or enumeration": the decl-specifier-seq has
-       neither (it would be unsupported), and clang accepts it with a
-       warning */
+       neither (it would be unsupported), and [ext.clang] clang accepts it with
+       a warning */
     /* [dcl.constexpr]/1: "The constexpr specifier shall be applied only
        to the definition of a variable or variable template or the
        declaration of a function or function template" */
@@ -1455,8 +1455,8 @@ analysis_result semantic_analysis::declare_with_initializer(
            yet */
         return not_supported(declaration, "dcl.init");
     {
-        /* a reference to an array of unknown bound: clang gives it the
-           bound of the braced-init-list it is bound to */
+        /* a reference to an array of unknown bound: [ext.clang] clang gives it
+           the bound of the braced-init-list it is bound to */
         const struct type &referred = type_table[type.unqualified()];
         if (initialized &&
             (referred.kind == type_kind::lvalue_reference ||

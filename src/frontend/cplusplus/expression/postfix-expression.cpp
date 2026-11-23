@@ -1855,7 +1855,7 @@ analysis_result semantic_analysis::template_call(
             if (substituting)
                 return analysis_result::ill_formed;
             /* (deduction failed for each: no viable function, which
-               clang reports with each template's reason) */
+               [impl.clang] clang reports with each template's reason) */
             return not_supported(n, "temp.over");
         }
         size_t chosen = 0;

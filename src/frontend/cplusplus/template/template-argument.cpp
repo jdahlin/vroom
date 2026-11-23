@@ -746,7 +746,7 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
  * parameter's list matches zero or more of the argument's parameters of
  * its form; a pack of the argument's accepts any number of the
  * parameter's; and one the parameter's list leaves over has a default
- * template-argument or is a pack (P0522R0, as clang's default).  A
+ * template-argument or is a pack (P0522R0, [impl.clang] as clang's default).  A
  * template template-parameter among them matches only when its own list
  * is the same (anything else is unsupported, by the caller).
  */

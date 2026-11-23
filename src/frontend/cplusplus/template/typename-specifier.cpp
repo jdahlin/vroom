@@ -80,8 +80,8 @@ node_index parser::typename_specifier()
  * is a member of an unknown specialization ([temp.dep.type]/6), a
  * dependent type (/9), known per specialization, where the declaration is
  * analysed again with the template-parameters' names bound to the
- * arguments.  Otherwise the name found shall be a type (clang rejects one
- * that is not, at the instantiation; analysis says not supported).
+ * arguments.  Otherwise the name found shall be a type ([impl.clang] clang
+ * rejects one that is not, at the instantiation; analysis says not supported).
  */
 analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
                                                  uint32_t &cv)

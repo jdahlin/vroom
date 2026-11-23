@@ -5,14 +5,14 @@
  * an entity.
  *
  * Each entity captured is a non-static data member of the closure type
- * (/10, /12: one for a capture by reference too, as clang has), made when
- * the capture is: the explicit ones in the order of the lambda-capture,
- * then the implicit ones in the order of their first use in the body
- * (clang's order).  In the body a name of a captured entity, and this,
- * designate the member through the function call operator's this (/11);
- * the closure object's members are initialized where the
- * lambda-expression is (/15, closure_object), where a capture of an
- * enclosing lambda's entity captures it in that lambda too (/14).
+ * (/10, /12: one for a capture by reference too, [impl.clang] as clang has),
+ * made when the capture is: the explicit ones in the order of the
+ * lambda-capture, then the implicit ones in the order of their first use in the
+ * body (clang's order).  In the body a name of a captured entity, and this,
+ * designate the member through the function call operator's this (/11); the
+ * closure object's members are initialized where the lambda-expression is (/15,
+ * closure_object), where a capture of an enclosing lambda's entity captures it
+ * in that lambda too (/14).
  *
  * A variable usable in constant expressions is captured only by an odr-use
  * ([basic.def.odr]/4): the names of such variables in a body are kept as
@@ -741,16 +741,15 @@ bool semantic_analysis::odr_use_in_statement(
  * implicitly captures, which its capture-default captures.  The body is
  * analysed once per specialization of the function call operator
  * template, but the closure type is complete where the lambda-expression
- * is; so the body's names decide here, as clang does for a template's:
- * every name of a local entity of the enclosing function, outside an
- * unevaluated operand, that is not a parameter or an init-capture, and no
- * variable usable in constant expressions (whose reads are no odr-use),
- * and this when the body names it or a non-static member.  /7 captures
- * a name "in a potentially-evaluated expression where the enclosing
- * full-expression depends on a generic lambda parameter"; whether an
- * expression does is not known before a specialization, so a name is
- * taken to.  A name that a declaration in the body hides is captured too,
- * which the closure type's size shows.
+ * is; so the body's names decide here, [impl.clang] as clang does for a
+ * template's: every name of a local entity of the enclosing function, outside
+ * an unevaluated operand, that is not a parameter or an init-capture, and no
+ * variable usable in constant expressions (whose reads are no odr-use), and
+ * this when the body names it or a non-static member.  /7 captures a name "in a
+ * potentially-evaluated expression where the enclosing full-expression depends
+ * on a generic lambda parameter"; whether an expression does is not known
+ * before a specialization, so a name is taken to.  A name that a declaration in
+ * the body hides is captured too, which the closure type's size shows.
  */
 analysis_result semantic_analysis::implicit_captures(
     SyntaxRef n, lambda_context &l,
