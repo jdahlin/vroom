@@ -395,12 +395,14 @@ class c_lowering
     void init_statement(uint32_t n, owned_array<uint32_t> &out);
     /* for each element of the array in symbol s (type array, elements of
        type element), first to last or last to first: a call of special
-       member e on its address */
+       member e on its address (a construct's arguments, each element's
+       own evaluation of them, [dcl.fct.default]/9) */
     uint32_t counted_loop(uint32_t i, ast_qualified_type t, uint32_t count,
                           bool reverse, uint32_t body);
     uint32_t each_element(uint32_t s, ast_qualified_type array,
                           ast_qualified_type element, uint64_t bound,
-                          bool reverse, entity_index e, token_index at);
+                          bool reverse, entity_index e, token_index at,
+                          const semantic_node *construct = nullptr);
 
     /* declaring every function's symbol, which uses none */
     bool declaring_symbols = false;
