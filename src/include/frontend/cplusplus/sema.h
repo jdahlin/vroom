@@ -404,6 +404,9 @@ enum gnu_attribute_flag : uint32_t {
        ignored (a warning) except that a variable it declares without an
        initializer is not a definition, as with extern */
     gnu_dllimport = 262144,
+    /* clang's require_constant_initialization: on a variable with static
+       or thread storage duration, constinit's rule ([dcl.constinit]/2) */
+    gnu_require_constant_initialization = 1u << 27,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -2500,6 +2503,9 @@ class semantic_analysis
     /* the declarator being declared has dllimport (gnu_dllimport): the
        decl-specifiers' flag is in specified::gnu_flags */
     bool declarator_dllimport = false;
+    /* the declarator being declared has require_constant_initialization
+       (gnu_require_constant_initialization) */
+    bool declarator_constinit = false;
     entity_index qualified_scope = 0;
     /* whether the type is, or is made of, a class or enumeration whose
        name has no external linkage; with arguments, a class template

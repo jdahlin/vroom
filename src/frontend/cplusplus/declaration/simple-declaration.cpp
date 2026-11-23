@@ -1440,6 +1440,20 @@ analysis_result semantic_analysis::declare_with_initializer(
        function type pointed to */
     if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
         return not_supported(declaration, "ext.gnu");
+    /* [ext:gnu_attributes] require_constant_initialization: on a variable
+       with static or thread storage duration (clang: "only applies to
+       global variables"), the declarator's own definition, not a member
+       defined by a qualified name */
+    bool require_constant_initialization =
+        (gnu_flags & gnu_require_constant_initialization) != 0;
+    if (require_constant_initialization &&
+        (kind != entity_kind::variable || m.qualifier ||
+         m.qualified_namespace ||
+         !(is_namespace(current_scope) || function_state.active) ||
+         (at_block_scope() && !s.static_ && !s.extern_ &&
+          !s.c11_thread_local) ||
+         (!initialized && element_class(type))))
+        return not_supported(declaration, "ext.gnu");
     /* [dcl.constinit]/1: "The constinit specifier shall be applied only
        to a declaration of a variable with static or thread storage
        duration." */
@@ -1538,9 +1552,11 @@ analysis_result semantic_analysis::declare_with_initializer(
         qualified_declarator = m.qualified_namespace;
         qualified_scope = m.namespace_qualifier;
         declarator_dllimport = (m.gnu_flags & gnu_dllimport) != 0;
+        declarator_constinit = require_constant_initialization;
         r = declare(declaration, m.id, kind, type, s, definition, initialized,
                     declared_entity);
         declarator_dllimport = false;
+        declarator_constinit = false;
         qualified_declarator = false;
         if (r == analysis_result::well_formed && m.qualified_namespace)
             current_scope = entity_table[declared_entity].enclosing;
@@ -1566,7 +1582,7 @@ analysis_result semantic_analysis::declare_with_initializer(
     }
     last_declared = declared_entity;
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&
-        s.constinit_) {
+        (s.constinit_ || require_constant_initialization)) {
         /* [dcl.constinit]/1: "If the specifier is applied to any
            declaration of a variable, it shall be applied to the
            initializing declaration": one added to a later declaration is
@@ -1986,7 +2002,8 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* [dcl.constinit]/2: "If a variable declared with the constinit
        specifier has dynamic initialization, the program is ill-formed."
        (what is not known to be constant initialization is not claimed) */
-    if (s.constinit_ || entity_table[declared_entity].constinit_) {
+    if (s.constinit_ || declarator_constinit ||
+        entity_table[declared_entity].constinit_) {
         if (value.evaluation == constness::not_constant)
             return ill_formed_at_token(m.id,
                                        "a variable declared with the "

@@ -446,6 +446,10 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"param_typestate", 0},
     {"test_typestate", 0},
     {"reentrant_capability", 0},
+    /* clang's require_constant_initialization: "This attribute specifies
+       that the variable to which it is attached is intended to have a
+       constant initializer" (constinit's rule, as the declarator's) */
+    {"require_constant_initialization", gnu_require_constant_initialization},
     /* clang's enable_if(condition, message) (below) */
     {"enable_if", gnu_enable_if},
 };

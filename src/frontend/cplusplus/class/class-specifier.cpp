@@ -1760,7 +1760,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
        a static data member's, a data member's function attributes) are not
        analysed yet; on a non-static data member they are GCC's error */
     if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section | gnu_mode |
-                        gnu_constructor | gnu_destructor | gnu_cleanup)) ||
+                        gnu_constructor | gnu_destructor | gnu_cleanup |
+                        gnu_require_constant_initialization)) ||
         (!is_function &&
          (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))))
         return not_supported(declaration, "ext.gnu");
