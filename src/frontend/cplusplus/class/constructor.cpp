@@ -2148,8 +2148,22 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         }
     }
     entity_table[c].implicit_copy_deleted = copy_deleted;
-    if (copy && !user_copy && !copy_deleted)
-        declare_implicit(c, special_member::constructor, true);
+    if (copy && !user_copy && !copy_deleted) {
+        bool nonconst_copy = false;
+        for (entity_index k : classes)
+            if (!has_const_copy_constructor(k))
+                nonconst_copy = true;
+        /* [dcl.fct.def.default]/2: X(const X&) = default where the
+           implicit one would be X(X&): ill-formed before C++20, deleted
+           from C++20 (not analysed) */
+        if (nonconst_copy && entity_table[c].defaulted_copy_constructor)
+            return not_supported_because(
+                n, "dcl.fct.def.default",
+                "X(const X&) = default where a subobject's copy "
+                "constructor takes a non-const reference");
+        declare_implicit(c, special_member::constructor, true, false,
+                         nonconst_copy);
+    }
     /* C++03 has no move constructors ([class.copy.ctor]/3 is C++11's) */
     if (move_implicitly_declared && move_declared && !move_deleted &&
         tokens.files.behavior.has(language_feature::rvalue_references)) {
@@ -2433,8 +2447,39 @@ analysis_result semantic_analysis::inherited_base_construct(
 
 /* an implicitly-declared constructor (the copy constructor X(const X&)
    when copy) or destructor of class c, public and inline */
+/*
+ * [class.copy.ctor]/7: whether class c has a copy constructor whose first
+ * parameter is "of type const M& or const volatile M&": one declared with
+ * such a parameter, X(const X&) = default, or none declared (the implicit
+ * one then has the form X(const X&) or, when a subobject has none, X(X&),
+ * which is then c's own, declared with its parameter).
+ */
+bool semantic_analysis::has_const_copy_constructor(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.defaulted_copy_constructor)
+        return true;
+    bool any = false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        if (!copy_or_move_constructor(c, k))
+            continue;
+        const struct type &p =
+            type_table[type_table
+                           .parameters(entity_table[k].type.unqualified())[0]
+                           .unqualified()];
+        if (p.kind != type_kind::lvalue_reference)
+            continue;
+        any = true;
+        if (p.operand.cv() & cv_const)
+            return true;
+    }
+    return !any;
+}
+
 void semantic_analysis::declare_implicit(entity_index c, special_member kind,
-                                         bool copy, bool move)
+                                         bool copy, bool move,
+                                         bool nonconst_copy)
 {
     qualified_type v = qualified_type::make(
         type_table.fundamental(fundamental_type::void_), cv_none);
@@ -2445,10 +2490,13 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
            for a class X will have the form X::X(const X&) if each potentially
            constructed subobject of a class type M (or array thereof) has a
            copy constructor whose first parameter is of type const M& or
-           const volatile M&" (the other form is not analysed) */
+           const volatile M&"; otherwise X::X(X&) */
+        uint32_t parameter_cv = cv_const;
+        if (nonconst_copy)
+            parameter_cv = cv_none;
         parameter = qualified_type::make(
             type_table.lvalue_reference_to(qualified_type::make(
-                entity_table[c].type.unqualified(), cv_const)),
+                entity_table[c].type.unqualified(), parameter_cv)),
             cv_none);
         count = 1;
     }
@@ -2686,7 +2734,9 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
                 initialized_value value;
                 r = construct(n, et, arguments, dst_elem.node, value);
                 if (r == analysis_result::ill_formed)
-                    return not_supported(n, "class.copy.ctor");
+                    return not_supported_because(
+                        n, "class.copy.ctor",
+                        "an array element's copy is ill-formed");
                 if (r != analysis_result::well_formed)
                     return r;
                 statements.append(statement_node(
@@ -2712,7 +2762,10 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
                copy constructor takes a non-const reference: neither is
                analysed */
             if (r == analysis_result::ill_formed)
-                return not_supported(n, "class.copy.ctor");
+                return not_supported_because(
+                    n, "class.copy.ctor",
+                    "a subobject's copy is deleted, ambiguous or "
+                    "inaccessible (defined as deleted)");
             if (r != analysis_result::well_formed)
                 return r;
             statements.append(statement_node(
@@ -2729,7 +2782,9 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
                object ([dcl.init.ref]); for a move, "static_cast<T&&>(x_i)"
                with T an lvalue reference stays an lvalue ([dcl.ref]/6) */
             if (record.kind == type_kind::rvalue_reference && !move)
-                return not_supported(n, "class.copy.ctor");
+                return not_supported_because(
+                    n, "class.copy.ctor",
+                    "a member of rvalue reference type (defined as deleted)");
             if (record.kind == type_kind::lvalue_reference)
                 from.category = value_category::lvalue;
             initialized_value bound;

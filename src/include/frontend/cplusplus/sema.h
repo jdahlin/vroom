@@ -4370,7 +4370,8 @@ class semantic_analysis
     analysis_result implicit_special_members(entity_index c, SyntaxRef n);
     /* copy: X(const X&); move (with copy): X(X&&) */
     void declare_implicit(entity_index c, special_member kind, bool copy,
-                          bool move = false);
+                          bool move = false, bool nonconst_copy = false);
+    bool has_const_copy_constructor(entity_index c) const;
     analysis_result implicit_definitions(entity_index c, SyntaxRef n);
     analysis_result define_defaulted_special_member(entity_index c,
                                                     entity_index f,

@@ -209,6 +209,9 @@ bool semantic_analysis::trivial_copy_selected(entity_index c, bool rvalue,
         sub_const = false;
         sub_rvalue = true;
     }
+    /* [class.copy.ctor]/7: X(X&) copies each subobject from a non-const one */
+    if (have_best && !best_rvalue && !(best_cv & cv_const))
+        sub_const = false;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (uint32_t i = 0; i < x.member_count; i++)
