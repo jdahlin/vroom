@@ -932,46 +932,14 @@ analysis_result semantic_analysis::defer_unsupported_body(SyntaxRef n,
  * declarator then reports it).
  */
 entity_index
-semantic_analysis::declarator_access_class(SyntaxRef declaration,
-                                           SyntaxRef specifiers) const
+semantic_analysis::declarator_access_class(SyntaxRef declaration) const
 {
     if (at_block_scope() || function_state.active || defining_class)
         return 0;
-    owned_array<SyntaxRef> work;
-    bool after = false;
-    for (SyntaxElement c : declaration.elements()) {
-        if (c.is_token())
-            continue;
-        if (c.index() == specifiers) {
-            after = true;
-            continue;
-        }
-        if (after && !c.is(syntax_kind::function_body))
-            work.append(c);
-    }
-    /* the first qualified-id in source order, not looking into parameters
-       or an initializer */
-    SyntaxRef found = 0;
-    while (!found && !work.empty()) {
-        SyntaxRef k = work.back();
-        work.resize(work.size() - 1);
-        syntax_kind kind = k.kind();
-        if (kind == syntax_kind::qualified_id) {
-            found = k;
-            break;
-        }
-        if (kind == syntax_kind::parameters_and_qualifiers ||
-            kind == syntax_kind::brace_or_equal_initializer ||
-            kind == syntax_kind::braced_init_list ||
-            kind == syntax_kind::function_body)
-            continue;
-        for (uint32_t i = k.size(); i-- > 0;)
-            if (!k[i].is_token())
-                work.append(k[i]);
-    }
-    if (!found)
+    DeclaratorParts first = DeclaratorParts::of_declaration(declaration);
+    if (!first.qualifier())
         return 0;
-    auto nested = found.qualified_id().nested_name_specifier();
+    auto nested = first.id.qualified_id().nested_name_specifier();
     if (!nested)
         return 0;
     entity_index scope = 0;
@@ -1043,7 +1011,7 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
     scoped_value<entity_index> member_context(
-        access_class, declarator_access_class(declaration, specifiers));
+        access_class, declarator_access_class(declaration));
     /* [dcl.type.class.deduct]/1: a placeholder for a deduced class type
        (C b(args); or O::C b(args);) */
     analysis_result r = analysis_result::well_formed;

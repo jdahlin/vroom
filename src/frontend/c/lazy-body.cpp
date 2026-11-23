@@ -62,7 +62,7 @@ CC_PRIVATE bool cc_lazy_body_eligible(cc *c, uint32_t s, const cc_declarator *d)
     return !pp_location_is_in_main_file(c->p, d->loc);
 }
 
-static void cc_lazy_body_token_append(cc *c, const ptok *t)
+CC_PRIVATE void cc_lazy_body_token_append(cc *c, const ptok *t)
 {
     cc_lazy_token *z = &c->lzt[c->nlzt++];
 

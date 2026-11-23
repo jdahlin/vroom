@@ -317,8 +317,7 @@ SyntaxElement semantic_analysis::member_template_id(SyntaxRef n) const
         id = n[3];
     if (id.is(syntax_kind::qualified_id) && id.size() >= 2)
         id = id.back();
-    if (id.is(syntax_kind::simple_template_id) && id.size() >= 3 &&
-        id[0].is_identifier())
+    if (id.simple_template_id().template_name())
         return id;
     if (id.is(syntax_kind::template_id) && id.size() >= 3 &&
         id[0].operator_function_id())
@@ -417,9 +416,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         SyntaxElement rhs = n[2].back();
         if (rhs.is_identifier()) {
             name = rhs.token();
-        } else if (rhs.is(syntax_kind::simple_template_id) && rhs.size() >= 3 &&
-                   rhs[0].is_identifier()) {
-            name = rhs[0].token();
+        } else if (SyntaxElement t = rhs.simple_template_id().template_name()) {
+            name = t.token();
         } else if (auto function = rhs.operator_function_id()) {
             declarator_meaning function_name;
             VTRY(r, operator_function_id(function, function_name));

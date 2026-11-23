@@ -51,7 +51,7 @@ relative to it); `TODO.md` stays at the top.
   lowering target.  Update the status of a step in `PLAN-vir.md`.
 - `src/codegen/vir/`: the VIR builder, one pass per file (`preir.h` the pre-IR and what the files share, `ssa-construction.cpp`, `lower-*.cpp`, `slot-promotion.cpp`, the simplifier in `rules.cpp`, `value-numbering.cpp`, `load-forwarding.cpp` and `simplify.cpp`, `if-conversion.cpp`, `condition-merge.cpp`, `to-vir.cpp`, `pipeline.cpp`).  `vectorize.cpp` is the loop vectorizer, on
   the builder's pre-IR, at `-O3` (`-fvectorize`; `-fvir-vectorize-report` reports each
-  innermost loop to stderr, `-fno-hoist-loop-constants` keeps loop constants unhoisted, `virbuild_loop_constants_pin`).  VIR's vectors: `SPEC-vir.md` 7.5.
+  innermost loop to stderr, `-fno-hoist-loop-constants` keeps loop constants unhoisted, `virbuild_loop_constants_pin`).  `carry-placement.cpp` puts an unsigned carry or borrow test behind its addition or subtraction, whose flags the lowerings then read (`-fno-carry-flags`).  VIR's vectors: `SPEC-vir.md` 7.5.
 - `src/arch/a64/vir/` (internal header `lowering-internal.h`; files by topic: `calling-convention.cpp`, `moves.cpp`, `compares.cpp`, `memory.cpp`, `calls.cpp`, `switch.cpp`, `address-folds.cpp`, `returns-and-jumps.cpp`, `vectors.cpp`, `instructions.cpp`, `function.cpp`) and `src/arch/x64/vir/` (the same cut): VIR's arm64 and x86-64 lowerings.  `-fno-rotate-loops` keeps VIR's block order (no loop
   rotation); arm64: `-fno-shrink-wrap` the prologue at the function's entry (no shrink-wrapping); `-fvir-probe=MASK` puts a nop after each allocator edit of the kinds in MASK, so that
   instructions retired count how often that kind runs.
@@ -378,6 +378,8 @@ bench/vcc-darwin-s.py -j 6 --clang   # clang's Darwin -S assembled by vpp -c run
 bench/fetch-testsuites.sh [NAME]    # external suites -> work/testsuites (clang, gcc, c-testsuite, ...; ~30 s)
 bench/vcc-verify.py -j 6 [-v] [PAT] # clang's -verify tests (C/, Sema/, ...): vcc vs the expected-* directives (~6 s warm, 2.5 min cold)
 bench/vcc-builtins.py [-v]          # clang builtins unknown to vcc, __has_builtin differences (<1 s)
+bench/vcc-builtins.py --check-consistency --vpp build/linux/src/vpp   # vcc only: per builtin in the C table, __has_builtin, a typed call, -c at -O0..2 and constant folding in C and C++ on arm64 and x86-64; no violation beyond src/test/builtins/consistency-failures.txt (--bless: bench/vcc-builtins-consistency.py; ~1.5 s)
+bench/vcc-builtins-demand.py [-j N]   # which builtins real code references (work/ projects, libc++, clang's intrinsic headers) and what vcc does with each: writes doc/builtins-demand.md (by hand: its inputs are not in the checkout; ~10 s)
 bench/clangdiag.py fetch|stats      # clang's Diagnostic*.td -> work/clang-td/VER/ (once); counts per language
 bench/vcc-diagcov.py [-v] [--missing]   # vcc's diagnostics vs clang's table: coverage, gaps (~1 s)
 bench/vcc-mutate.py -j 6             # one injected error per valid TU, vcc vs clang: first error, follow-ons (~25 s warm)

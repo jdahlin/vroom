@@ -336,28 +336,30 @@ bool semantic_analysis::initializer_form(SyntaxElement init,
                                          SyntaxElement &clause, bool &direct,
                                          bool &list) const
 {
-    if (init.is_token())
-        return false;
-    direct = false;
-    list = false;
-    if (init.is(syntax_kind::brace_or_equal_initializer) && init.size() == 2 &&
-        !init[1].is(syntax_kind::braced_init_list)) {
-        clause = init[1];
-    } else if (init.is(syntax_kind::initializer) && init.size() == 3 &&
-               !init[1].is(syntax_kind::initializer_list,
-                           syntax_kind::braced_init_list)) {
-        clause = init[1];
-        direct = true;
-    } else if (init.is(syntax_kind::braced_init_list) && init.size() == 3 &&
-               !init[1].is(syntax_kind::initializer_list,
-                           syntax_kind::braced_init_list) &&
-               !init[1].is(preprocessing_op_or_punc::RIGHT_BRACE)) {
-        clause = init[1];
-        direct = true;
-        list = true;
-    } else {
-        return false;
+    InitializerParts parts(init);
+    direct = parts.form != InitializerParts::syntax_form::equals;
+    list = parts.form == InitializerParts::syntax_form::braced;
+    SyntaxElement only;
+    switch (parts.form) {
+    case InitializerParts::syntax_form::equals:
+        only = parts.clause;
+        break;
+    case InitializerParts::syntax_form::parenthesized:
+        only = parts.list;
+        break;
+    case InitializerParts::syntax_form::braced:
+        /* { E }: one initializer-clause between the braces */
+        if (parts.clause.size() == 3 &&
+            !parts.clause[1].is(preprocessing_op_or_punc::RIGHT_BRACE))
+            only = parts.clause[1];
+        break;
+    case InitializerParts::syntax_form::none:
+        break;
     }
+    if (!only ||
+        only.is(syntax_kind::initializer_list, syntax_kind::braced_init_list))
+        return false;
+    clause = only;
     return true;
 }
 

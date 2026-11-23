@@ -533,14 +533,10 @@ analysis_result semantic_analysis::friend_function_template(
        template <class T> friend R G::f(P); */
     if (inner.is(syntax_kind::member_declaration) &&
         !inner[lead + 1].is_token()) {
-        SyntaxElement d = inner[lead + 1];
-        while (d.is(syntax_kind::ptr_declarator) && d.size() >= 2)
-            d = d[d.size() - 1];
-        if (d.is(syntax_kind::noptr_declarator) && d.size() >= 1 &&
-            d[0].is(syntax_kind::qualified_id) && d[0].size() == 2 &&
-            d[0][0].is(syntax_kind::nested_name_specifier)) {
+        DeclaratorParts d(inner[lead + 1]);
+        if (d.noptr && d.qualifier()) {
             nominated_scope ns;
-            VTRY(nr, nested_name_specifier(d[0][0].index(), ns));
+            VTRY(nr, nested_name_specifier(d.qualifier().index(), ns));
             if (is_class_entity(ns.entity)) {
                 entity_index target = ns.entity;
                 owned_array<SyntaxRef> parameters;

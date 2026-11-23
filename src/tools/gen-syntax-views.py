@@ -178,6 +178,75 @@ KNOWN_CHILDREN = {
 # the comma's left operand is an expression node): no range
 NOT_LISTS = {'expression'}
 
+# alternative views: where a node's children of one kind can stand in
+# several positions (postfix-expression [ expr-or-braced-init-list ] and
+# postfix-expression ( expression-list_opt )), a view per group of
+# alternatives reads them by the alternative they match.  nonterminal ->
+# {method: ([alternatives], {symbol: slot})}: a symbol is a nonterminal
+# (its slot by default its own name) or a token (a slot only if named;
+# template for template_opt).  The view of postfix-expression's
+# subscript() is PostfixOperationSubscript, its slots accessors.  An
+# alternative written +... is the parser's beyond the C++20 grammar (a
+# later standard's), with its reason.
+ALTERNATIVES = {
+    'postfix-expression': {
+        'subscript': (['postfix-expression [ expr-or-braced-init-list ]',
+                       # C++23 [expr.sub]/1 (P2128): a multidimensional
+                       # subscript, postfix-expression [ expression-list_opt ]
+                       '+postfix-expression [ expression-list_opt ]'],
+                      {'postfix-expression': 'operand', '[': 'bracket',
+                       'expr-or-braced-init-list': 'index',
+                       'expression-list': 'index'}),
+        'call': (['postfix-expression ( expression-list_opt )'],
+                 {'postfix-expression': 'callee', '(': 'parenthesis',
+                  'expression-list': 'arguments'}),
+        'member_access': (['postfix-expression . template_opt id-expression',
+                           'postfix-expression -> template_opt id-expression'],
+                          {'postfix-expression': 'object', '.': 'op',
+                           '->': 'op', 'template': 'template_keyword',
+                           'id-expression': 'member'}),
+        'increment': (['postfix-expression ++', 'postfix-expression --'],
+                      {'postfix-expression': 'operand', '++': 'op',
+                       '--': 'op'}),
+        'named_cast': (['dynamic_cast < type-id > ( expression )',
+                        'static_cast < type-id > ( expression )',
+                        'reinterpret_cast < type-id > ( expression )',
+                        'const_cast < type-id > ( expression )'],
+                       {'dynamic_cast': 'keyword', 'static_cast': 'keyword',
+                        'reinterpret_cast': 'keyword',
+                        'const_cast': 'keyword', 'expression': 'operand'}),
+        'typeid_operation': (['typeid ( type-id )', 'typeid ( expression )'],
+                             {'type-id': 'operand', 'expression': 'operand'}),
+        'type_conversion': (['simple-type-specifier ( expression-list_opt )',
+                             'typename-specifier ( expression-list_opt )',
+                             'simple-type-specifier braced-init-list',
+                             'typename-specifier braced-init-list'],
+                            {'simple-type-specifier': 'type',
+                             'typename-specifier': 'type', '(': 'parenthesis',
+                             'expression-list': 'arguments',
+                             'braced-init-list': 'braced'}),
+    },
+    'mem-initializer': {
+        'parenthesized': (['mem-initializer-id ( expression-list_opt )'],
+                          {'mem-initializer-id': 'id',
+                           'expression-list': 'arguments'}),
+        'braced': (['mem-initializer-id braced-init-list'],
+                   {'mem-initializer-id': 'id', 'braced-init-list': 'list'}),
+    },
+    'elaborated-type-specifier': {
+        'named': (['class-key attribute-specifier-seq_opt nested-name-specifier_opt identifier'],
+                  {'class-key': 'class_key', 'identifier': 'name'}),
+        'templated': (['class-key nested-name-specifier template_opt simple-template-id',
+                       'class-key simple-template-id'],
+                      {'class-key': 'class_key',
+                       'template': 'template_keyword'}),
+    },
+    'unqualified-id': {
+        'destructor': (['~ type-name', '~ decltype-specifier'],
+                       {'type-name': 'type', 'decltype-specifier': 'type'}),
+    },
+}
+
 
 def load_refs():
     spec = importlib.util.spec_from_file_location(
@@ -298,6 +367,23 @@ class Grammar:
                 return True
             s = self.single(a, nt)
             if s and self.derives_identifier(s, stack + (nt,)):
+                return True
+        return False
+
+    def derives_token(self, nt, stack=()):
+        """whether the parser can leave a position of nt as one token other
+        than a punctuator (an identifier, a literal, this, a class-key)"""
+        if nt in stack or nt not in self.g:
+            return nt not in self.g
+        for a in self.g[nt]:
+            t = [x for x in a.split() if not x.endswith('_opt')]
+            if len(t) != 1:
+                continue
+            if t[0] not in self.g:
+                if re.match(r'^[a-z_][a-z0-9_-]*$', t[0]):
+                    return True
+                continue
+            if self.derives_token(t[0], stack + (nt,)):
                 return True
         return False
 
@@ -430,6 +516,8 @@ def generate():
                      if c == 1 and tok not in extra.get(t, ())
                      and tok not in {n for n, _ in out}]
 
+    alternative_views = alternative_views_of(G, kind_type, nt_type)
+
     lines = []
     w = lines.append
     w('/* generated by src/tools/gen-syntax-views.py from parse/syntax-kinds.inc,')
@@ -438,6 +526,9 @@ def generate():
     w('#ifdef SYNTAX_VIEWS_DECLARE')
     for t in types:
         w('struct %s;' % t)
+    for t in sorted(alternative_views):
+        for v in alternative_views[t]:
+            w('struct %s;' % v['type'])
     w('/* a member of a sum, or a sum within it, converts to the sum */')
     for t in sorted(sums):
         members = sorted({kind_type[k] for k in sums[t]} - {t})
@@ -513,6 +604,9 @@ def generate():
             w('    %s %s() const;' % (rt, name))
         for tok in tokens.get(t, []):
             w('    SyntaxElement %s() const;' % tok)
+        for v in alternative_views.get(t, []):
+            w('    /* %s */' % '; '.join(v['alternatives']))
+            w('    %s %s() const;' % (v['type'], v['method']))
         w('};')
     w('')
     # definitions
@@ -564,6 +658,9 @@ def generate():
             w('    return token_of_kind(token_kind::%s);' % {'identifier': 'identifier', 'string_literal': 'literal'}[tok])
             w('}')
     w('')
+    for t in sorted(alternative_views):
+        for v in alternative_views[t]:
+            write_alternative_view(w, t, v)
     w("/* the view of s's kind if that kind is a member of S, else s itself */")
     w('template <class S, class F> decltype(auto) syntax_visit(const S &s, F &f)')
     w('{')
@@ -641,8 +738,152 @@ def generate():
     list_kinds = sorted(G.kind_of[nt] for nt, t in nt_type.items()
                         if t in lists and nt in G.kind_of)
     w('static const uint64_t syntax_list_kinds[%d] = %s;' % (words, bits(list_kinds)))
+    w('/* a node of a kind with alternative views: whether one of them reads it')
+    w('   (true for the other kinds) */')
+    w('static bool syntax_alternative_matches(SyntaxRef n)')
+    w('{')
+    w('    switch (n.kind()) {')
+    for t in sorted(alternative_views):
+        k = [k for k, v in kind_type.items() if v == t][0]
+        w('    case syntax_kind::%s:' % k)
+        w('        return %s;' % ' || '.join('static_cast<bool>(%s(n))' % v['type'] for v in alternative_views[t]))
+    w('    default:')
+    w('        return true;')
+    w('    }')
+    w('}')
     w('#endif')
     return '\n'.join(lines) + '\n'
+
+
+def token_tables():
+    """spelling -> (what, enum name) for the punctuators and keywords"""
+    out = {}
+    text = open(os.path.join(R, 'src', 'frontend', 'cplusplus', 'lexer',
+                             'operator-or-punctuator.inc'), encoding='utf-8').read()
+    for name, spelling in re.findall(r'^PREPROCESSING_OP_OR_PUNC\((\w+), "([^"]+)"', text, re.M):
+        out.setdefault(spelling, ('punctuator', 'preprocessing_op_or_punc::' + name))
+    text = open(os.path.join(R, 'src', 'frontend', 'cplusplus', 'parse',
+                             'keywords.inc'), encoding='utf-8').read()
+    for name, spelling in re.findall(r'^STANDARD_KEYWORD\((\w+), "([^"]+)"', text, re.M):
+        out.setdefault(spelling, ('keyword', 'standard_keyword::' + name))
+    return out
+
+
+def alternative_views_of(G, kind_type, nt_type):
+    """node type -> [{method, type, alternatives, slots, patterns}] from
+    ALTERNATIVES: each pattern a list of C++ syntax_pattern_item
+    initializers"""
+    tables = token_tables()
+    out = {}
+    for nt, views in sorted(ALTERNATIVES.items()):
+        k = G.kind_of.get(nt)
+        if not k or nt not in G.g:
+            sys.exit('gen-syntax-views.py: ALTERNATIVES names %s, which makes no node' % nt)
+        t = kind_type[k]
+        for method, (alternatives, names) in sorted(views.items()):
+            slots = []
+            patterns = []
+            anchors = []
+            for a in alternatives:
+                beyond = a.startswith('+')
+                a = a.lstrip('+')
+                if not beyond and a not in G.g[nt]:
+                    sys.exit('gen-syntax-views.py: %s has no alternative %r' % (nt, a))
+                items = []
+                for sym in a.split():
+                    optional = sym.endswith('_opt')
+                    b = base(sym)
+                    slot_name = names.get(b)
+                    if b in G.g:
+                        accepts = 'nullptr'
+                        known = sorted(set().union(*[G.member_kinds(x) for x in KNOWN_CHILDREN.get(nt, ())])
+                                       - G.member_kinds(b))
+                        if G.member_kinds(b) and known:
+                            # a child the parser puts here (KNOWN_CHILDREN)
+                            accepts = '[](syntax_kind k) { return %s::accepts(k) || %s; }' % (
+                                nt_type[b], ' || '.join('k == syntax_kind::%s' % x for x in known))
+                        elif G.member_kinds(b):
+                            accepts = '&%s::accepts' % nt_type[b]
+                        elif not G.derives_token(b):
+                            sys.exit('gen-syntax-views.py: %s in %r makes no node of its own' % (b, a))
+                        slot_name = slot_name or snake(b)
+                        what = 'nonterminal'
+                        value = '0'
+                        token = 'true' if G.derives_token(b) else 'false'
+                    elif b == 'identifier':
+                        what, value, token = 'identifier', '0', 'false'
+                    elif b == 'string-literal':
+                        what, value, token = 'string_literal', '0', 'false'
+                    elif b in tables:
+                        what, enum = tables[b]
+                        value = 'static_cast<uint8_t>(%s)' % enum
+                        token = 'false'
+                        accepts = 'nullptr'
+                    else:
+                        sys.exit('gen-syntax-views.py: token %r of %r is no punctuator or keyword' % (b, a))
+                    if b == 'identifier' or b == 'string-literal':
+                        accepts = 'nullptr'
+                    slot = -1
+                    if slot_name:
+                        if slot_name not in slots:
+                            slots.append(slot_name)
+                        slot = slots.index(slot_name)
+                    items.append('{syntax_pattern_item::%s, %s, %s, %s, %d, %s}' % (
+                        what, 'true' if optional else 'false', token, value, slot, accepts))
+                patterns.append(items)
+                # the first token item whose position is fixed: the items
+                # before it required, each one child
+                anchor = -1
+                for i, sym in enumerate(a.split()):
+                    if sym.endswith('_opt'):
+                        break
+                    if base(sym) not in G.g and base(sym) not in ('identifier', 'string-literal'):
+                        anchor = i
+                        break
+                anchors.append(anchor)
+            out.setdefault(t, []).append({
+                'method': method,
+                'type': t + camel(method),
+                'alternatives': [a.lstrip('+') for a in alternatives],
+                'slots': slots,
+                'patterns': patterns,
+                'anchors': anchors,
+            })
+    return out
+
+
+def write_alternative_view(w, t, v):
+    n = len(v['slots'])
+    w('')
+    w('/* %s::%s(): %s */' % (t, v['method'], '; '.join(v['alternatives'])))
+    w('struct %s : SyntaxAlternative<%d> {' % (v['type'], n))
+    w('    %s() = default;' % v['type'])
+    w('    explicit %s(SyntaxRef n)' % v['type'])
+    w('    {')
+    for i, items in enumerate(v['patterns']):
+        w('        static const syntax_pattern_item a%d[] = {' % i)
+        for it in items:
+            w('            %s,' % it)
+        w('        };')
+    w('        static const syntax_pattern_item *const alternatives[] = {%s};' %
+      ', '.join('a%d' % i for i in range(len(v['patterns']))))
+    w('        static const uint32_t counts[] = {%s};' %
+      ', '.join(str(len(p)) for p in v['patterns']))
+    w('        static const int8_t anchors[] = {%s};' %
+      ', '.join(str(x) for x in v['anchors']))
+    w('        match(n, alternatives, counts, anchors, %d);' % len(v['patterns']))
+    w('    }')
+    for i, name in enumerate(v['slots']):
+        w('    SyntaxElement %s() const' % name)
+        w('    {')
+        w('        return slots[%d];' % i)
+        w('    }')
+    w('};')
+    w('')
+    w('inline %s %s::%s() const' % (v['type'], t, v['method']))
+    w('{')
+    w('    return %s(*this);' % v['type'])
+    w('}')
 
 
 def main():

@@ -1,4 +1,4 @@
-/* x86's vector builtins (frontend/c/builtin-x86.cpp: pmovmskb128, the shifts) make scratch
+/* x86's vector builtins (frontend/c/builtins-x86.cpp: pmovmskb128, the shifts) make scratch
    variables to read a vector's lanes: locals of the function.  Made at scope depth 0 they were
    file-scope statics in .bss, one object for every thread: vcc built by vcc lexed comments
    wrongly with two compile threads (lexer/simd-search.h, _mm_movemask_epi8).  Four threads

@@ -21,10 +21,12 @@ The reader executable defaults to `build/linux/src/clang-builtin-reader`
 on Linux or `build/src/clang-builtin-reader` on macOS. Use
 `--clang-reader` to select a different build. The reader itself accepts
 a Clang include root and a TableGen entry file and prints sorted unique
-spellings, one per line. Compiler builds and runtime do not load these files.
-Add `--metadata` before the include root to emit JSON Lines containing
-the reference records and type variants. Use `make -C src builtin-registrations`
-to regenerate vroom's compiled registrations and C stub table.
+spellings, one per line. The normal compiler build compiles the host reader
+and generates its registration includes under `$(OUT)/generated/include/`;
+they are not checked in. Add `--metadata` before the include root to emit JSON
+Lines containing the reference records and type variants. Use
+`make -C src builtin-registrations` to regenerate the build-tree includes
+without building the compiler.
 
 For an upstream update, copy the entry points, their transitive includes,
 and the license from the new revision, then update `REVISION`. Recheck the

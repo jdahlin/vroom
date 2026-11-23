@@ -773,8 +773,20 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
     return initialize_with(at, m, type, direct, list, result);
 }
 
-/* the initialization of an object or reference of type type by the
-   analysed expression m (the rest of initialize_from) */
+/*
+ * [dcl.init]/17, from its second bullet: the initialization of an object or
+ * reference of type type by the analysed expression m (the rest of
+ * initialize_from, which has the braced-init-list, string-literal and
+ * array bullets).  One function per bullet:
+ * - "If the destination type is a reference type, see [dcl.init.ref]":
+ *   reference_initialization;
+ * - "Otherwise, if the destination type is a (possibly cv-qualified) class
+ *   type": class_initialization;
+ * - "Otherwise, if the source type is a (possibly cv-qualified) class type,
+ *   conversion functions are considered", and "Otherwise, the initial value
+ *   of the object being initialized is the (possibly converted) value of
+ *   the initializer expression": scalar_initialization.
+ */
 analysis_result semantic_analysis::initialize_with(SyntaxRef at,
                                                    expression_meaning &m,
                                                    qualified_type type,
@@ -787,131 +799,179 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
     if (type_index value = atomic_value_type(type))
         return initialize_with(at, m, qualified_type::make(value, type.cv()),
                                direct, list, result);
+    switch (type_table[type.unqualified()].kind) {
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+        return reference_initialization(at, m, type, result);
+    case type_kind::class_type:
+        return class_initialization(at, m, type, direct, result);
+    case type_kind::vector:
+        /* [ext:gnu_vector_size] a vector is initialized from a vector of
+           its type, a copy of its bytes (other conversions not analysed) */
+        return same_type_copy(at, m, type, constness::not_constant, result);
+    case type_kind::complex:
+        /* [ext:gnu_complex] a complex value initialized from the same
+           complex type */
+        return same_type_copy(at, m, type, m.evaluation, result);
+    default:
+        return scalar_initialization(at, m, type, direct, list, result);
+    }
+}
+
+/* an extension type initialized from an object of its own type, which is
+   copied; another source type is not analysed */
+analysis_result semantic_analysis::same_type_copy(SyntaxRef at,
+                                                  expression_meaning &m,
+                                                  qualified_type type,
+                                                  constness evaluation,
+                                                  initialized_value &result)
+{
+    if (m.type.unqualified() != type.unqualified())
+        return not_supported(at, "dcl.init");
+    VTRY(r, operand_value(at, m));
+    result.evaluation = evaluation;
+    result.value = 0;
+    result.node = m.node;
+    return r;
+}
+
+/* [dcl.init]/17.2: "If the destination type is a reference type, see
+   [dcl.init.ref]." */
+analysis_result
+semantic_analysis::reference_initialization(SyntaxRef at, expression_meaning &m,
+                                            qualified_type type,
+                                            initialized_value &result)
+{
+    result.evaluation = constness::unknown;
+    VTRY(r, reference_binding(at, m, type));
+    /* the reference's own type: what lowering makes an address of */
+    result.node = expression_node(semantic_kind::bind_reference, m,
+                                  at.first_token(), m.node);
+    semantics[result.node].type = type;
+    return r;
+}
+
+/*
+ * [dcl.init]/17.6: "Otherwise, if the destination type is a (possibly
+ * cv-qualified) class type:
+ * - (17.6.1) If the initializer expression is a prvalue and the
+ *   cv-unqualified version of the source type is the same class as the
+ *   class of the destination, the initializer expression is used to
+ *   initialize the destination object.
+ * - (17.6.2) Otherwise, if the initialization is direct-initialization, or
+ *   if it is copy-initialization where the cv-unqualified version of the
+ *   source type is the same class as, or a derived class of, the class of
+ *   the destination, constructors are considered.
+ * - (17.6.3) Otherwise (i.e., for the remaining copy-initialization
+ *   cases), user-defined conversions that can convert from the source type
+ *   to the destination type or (when a conversion function is used) to a
+ *   derived class thereof are enumerated as described in [over.match.copy]".
+ * Constructors are considered by construct when the class has any, or a
+ * deleted implicit copy constructor; else the implicitly-declared copy
+ * constructor ([class.copy.ctor]/6) is the one, which is trivial for those
+ * classes ([class.copy.ctor]/11): it copies the object representation.
+ */
+analysis_result
+semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
+                                        qualified_type type, bool direct,
+                                        initialized_value &result)
+{
     const struct type target = type_table[type.unqualified()];
     analysis_result r = analysis_result::well_formed;
-    if (target.kind == type_kind::lvalue_reference ||
-        target.kind == type_kind::rvalue_reference) {
-        /* [dcl.init]/17.2: "If the destination type is a reference type,
-           see [dcl.init.ref]." */
-        result.evaluation = constness::unknown;
-        VTRY_SET(r, reference_binding(at, m, type));
-        /* the reference's own type: what lowering makes an address of */
-        result.node = expression_node(semantic_kind::bind_reference, m,
-                                      at.first_token(), m.node);
-        semantics[result.node].type = type;
-        return r;
-    }
-    if (target.kind == type_kind::class_type) {
-        /* [dcl.init]/17.6.1: "If the initializer is a prvalue and the
-           cv-unqualified version of the source type is the same class as
-           the class of the destination, the initializer expression is used
-           to initialize the destination object"; /17.6.2: "Otherwise, if
-           the initialization is direct-initialization, or if it is
-           copy-initialization where the cv-unqualified version of the
-           source type is the same class as, or a derived class of, the
-           class of the destination, constructors are considered": the
-           implicitly-declared copy constructor ([class.copy.ctor]/6), which
-           is trivial for the classes analysis has ([class.copy.ctor]/11):
-           it copies the object representation */
-        if (entity_table[target.entity].kind != entity_kind::class_type)
-            return not_supported(at, "dcl.init");
-        bool same = m.type.unqualified() == type.unqualified();
-        bool related = false;
-        if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
-            !same) {
-            bool ambiguous = false;
-            related = base_step(type_table[m.type.unqualified()].entity,
-                                target.entity, ambiguous) != 0;
-        }
-        if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
-            !same && !related) {
-            /* [dcl.init]/17.6.3, [over.match.copy]/1.2: the conversion
-               functions of the source class are candidates too, and in a
-               direct-initialization ([over.match.ctor]) a constructor's
-               parameter may be initialized by one.  The one conversion
-               function that yields the class, no converting constructor
-               viable beside it, is called ([over.match.conv]), its result
-               initializing the object; else not analysed */
-            qualified_type unqualified =
-                qualified_type::make(type.unqualified(), cv_none);
-            conversion_sequence found;
-            bool cannot_tell = false;
-            if (conversion_function_to_class(m, unqualified, found,
-                                             cannot_tell)) {
-                conversion_sequence s = class_sequence(m, unqualified, true);
-                /* before C++17 the result initializes the object by a copy
-                   constructor, which may be elided but shall be viable
-                   ([dcl.init]/17.6.3, [class.copy.elision]/1): not
-                   analysed */
-                if (direct ||
-                    tokens.files.behavior.edition <
-                        standard_edition::cplusplus_17 ||
-                    s.kind != conversion_sequence::form::user_defined ||
-                    s.ambiguous || s.function != found.function)
-                    return not_supported(at, "over.match.copy");
-                bool converted = false;
-                VTRY_SET(r, conversion_function_call(at, m, unqualified, direct,
-                                                     converted));
-                if (!converted || m.type.unqualified() != type.unqualified())
-                    return not_supported(at, "over.match.copy");
-                same = true;
-            } else if (cannot_tell) {
-                return not_supported(at, "over.match.copy");
-            }
-        }
-        if (!(same && m.category == value_category::prvalue) &&
-            (entity_table[target.entity].first_constructor ||
-             /* its deleted implicit copy constructor (construct) */
-             entity_table[target.entity].implicit_copy_deleted)) {
-            /* /17.6.2 by [over.match.ctor]; /17.6.3: a user-defined
-               conversion by a converting constructor ([class.conv.ctor]),
-               whose result initializes the object (the copy elided) */
-            owned_array<expression_meaning> arguments;
-            arguments.append(m);
-            return construct(at, type, arguments, 0, result, !direct);
-        }
+    if (entity_table[target.entity].kind != entity_kind::class_type)
+        return not_supported(at, "dcl.init");
+    bool same = m.type.unqualified() == type.unqualified();
+    bool related = false;
+    if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
+        !same) {
         bool ambiguous = false;
-        if (!same &&
-            type_table[m.type.unqualified()].kind == type_kind::class_type &&
-            base_step(type_table[m.type.unqualified()].entity, target.entity,
-                      ambiguous)) {
-            /* the implicit copy constructor's const T& bound to the base
-               class subobject of the derived object */
-            if (!copies_bytes(target.entity))
-                return not_supported(at, "class.copy.ctor");
-            VTRY_SET(r, to_base(at.first_token(), target.entity, m));
+        related = base_step(type_table[m.type.unqualified()].entity,
+                            target.entity, ambiguous) != 0;
+    }
+    if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
+        !same && !related) {
+        /* [dcl.init]/17.6.3, [over.match.copy]/1.2: the conversion
+           functions of the source class are candidates too, and in a
+           direct-initialization ([over.match.ctor]) a constructor's
+           parameter may be initialized by one.  The one conversion
+           function that yields the class, no converting constructor
+           viable beside it, is called ([over.match.conv]), its result
+           initializing the object; else not analysed */
+        qualified_type unqualified =
+            qualified_type::make(type.unqualified(), cv_none);
+        conversion_sequence found;
+        bool cannot_tell = false;
+        if (conversion_function_to_class(m, unqualified, found, cannot_tell)) {
+            conversion_sequence s = class_sequence(m, unqualified, true);
+            /* before C++17 the result initializes the object by a copy
+               constructor, which may be elided but shall be viable
+               ([dcl.init]/17.6.3, [class.copy.elision]/1): not
+               analysed */
+            if (direct ||
+                tokens.files.behavior.edition <
+                    standard_edition::cplusplus_17 ||
+                s.kind != conversion_sequence::form::user_defined ||
+                s.ambiguous || s.function != found.function)
+                return not_supported(at, "over.match.copy");
+            bool converted = false;
+            VTRY_SET(r, conversion_function_call(at, m, unqualified, direct,
+                                                 converted));
+            if (!converted || m.type.unqualified() != type.unqualified())
+                return not_supported(at, "over.match.copy");
             same = true;
+        } else if (cannot_tell) {
+            return not_supported(at, "over.match.copy");
         }
-        if (!same)
-            return not_supported(at, "dcl.init");
-        VTRY_SET(r, operand_value(at, m));
-        result.evaluation = constness::unknown;
-        result.value = 0;
-        result.node = m.node;
-        return analysis_result::well_formed;
     }
-    if (target.kind == type_kind::vector) {
-        /* [ext:gnu_vector_size] a vector is initialized from a vector of its
-           type, a copy of its bytes (other conversions not analysed) */
-        if (m.type.unqualified() != type.unqualified())
-            return not_supported(at, "dcl.init");
-        VTRY_SET(r, operand_value(at, m));
-        result.evaluation = constness::not_constant;
-        result.value = 0;
-        result.node = m.node;
-        return analysis_result::well_formed;
+    if (!(same && m.category == value_category::prvalue) &&
+        (entity_table[target.entity].first_constructor ||
+         /* its deleted implicit copy constructor (construct) */
+         entity_table[target.entity].implicit_copy_deleted)) {
+        /* /17.6.2 by [over.match.ctor]; /17.6.3: a user-defined
+           conversion by a converting constructor ([class.conv.ctor]),
+           whose result initializes the object (the copy elided) */
+        owned_array<expression_meaning> arguments;
+        arguments.append(m);
+        return construct(at, type, arguments, 0, result, !direct);
     }
-    if (target.kind == type_kind::complex) {
-        /* [ext:gnu_complex] a complex value initialized from the same complex
-           type */
-        if (m.type.unqualified() != type.unqualified())
-            return not_supported(at, "dcl.init");
-        VTRY_SET(r, operand_value(at, m));
-        result.evaluation = m.evaluation;
-        result.value = 0;
-        result.node = m.node;
-        return analysis_result::well_formed;
+    bool ambiguous = false;
+    if (!same &&
+        type_table[m.type.unqualified()].kind == type_kind::class_type &&
+        base_step(type_table[m.type.unqualified()].entity, target.entity,
+                  ambiguous)) {
+        /* the implicit copy constructor's const T& bound to the base
+           class subobject of the derived object */
+        if (!copies_bytes(target.entity))
+            return not_supported(at, "class.copy.ctor");
+        VTRY_SET(r, to_base(at.first_token(), target.entity, m));
+        same = true;
     }
+    if (!same)
+        return not_supported(at, "dcl.init");
+    VTRY_SET(r, operand_value(at, m));
+    result.evaluation = constness::unknown;
+    result.value = 0;
+    result.node = m.node;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.init]/17.7: "Otherwise, if the source type is a (possibly
+ * cv-qualified) class type, conversion functions are considered"; /17.9:
+ * "Otherwise, the initial value of the object being initialized is the
+ * (possibly converted) value of the initializer expression.  A standard
+ * conversion sequence ([conv]) will be used, if necessary, to convert the
+ * initializer expression to the cv-unqualified version of the destination
+ * type"; a narrowing conversion in a list-initialization is ill-formed
+ * ([dcl.init.list]/3.9).  /17.8 (nullptr to bool) is implicit_conversion's.
+ */
+analysis_result
+semantic_analysis::scalar_initialization(SyntaxRef at, expression_meaning &m,
+                                         qualified_type type, bool direct,
+                                         bool list, initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    analysis_result r = analysis_result::well_formed;
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer &&
         target.kind != type_kind::pointer_to_member && !enumeration_of(type))
@@ -932,13 +992,7 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
         target.fundamental == fundamental_type::builtin_va_list) {
         /* [impl.clang] a va_list is initialized from a va_list only (a
            copy, as va_copy's) */
-        if (m.type.unqualified() != type.unqualified())
-            return not_supported(at, "dcl.init");
-        VTRY_SET(r, operand_value(at, m));
-        result.evaluation = constness::not_constant;
-        result.value = 0;
-        result.node = m.node;
-        return analysis_result::well_formed;
+        return same_type_copy(at, m, type, constness::not_constant, result);
     }
     VTRY_SET(r, operand_value(at, m));
     if (list &&
@@ -1110,71 +1164,110 @@ analysis_result semantic_analysis::list_clauses(
     return gather_clauses(list, list, clauses, packs, designated);
 }
 
+/*
+ * [dcl.init.list]/3: "List-initialization of an object or reference of type
+ * T is defined as follows:" (the designated-initializer-list of (3.1) is
+ * designated_list_initialization's).  By T's kind, one function each:
+ * - an array: (3.3) a string-literal, (3.4) aggregate initialization,
+ *   array_list_initialization;
+ * - a class: (3.2), (3.4) to (3.7), class_list_initialization;
+ * - a reference: (3.9), (3.10), reference_list_initialization;
+ * - a scalar: (3.8), (3.9), (3.11), (3.12), scalar_list_initialization.
+ */
 analysis_result semantic_analysis::list_initialization_of(
     SyntaxRef list, const owned_array<SyntaxElement> &clauses,
     qualified_type &type, bool direct, initialized_value &result)
 {
-    const struct type target = type_table[type.unqualified()];
-    if (target.kind == type_kind::array) {
-        /* [dcl.init.list]/3.3: "if T is a character array and the
-           initializer list has a single element that is an
-           appropriately-typed string-literal, initialization is performed
-           as described in that subclause" */
-        if (clauses.size() == 1 &&
-            is_unparenthesized_string_literal(tokens, clauses[0]) &&
-            character_type(fundamental_of(target.operand)))
-            return initialize_from(list, clauses[0], type, direct, true,
-                                   result);
-        /* ... in parentheses: an extension */
-        if (clauses.size() == 1 && !clauses[0].is_token() &&
-            character_type(fundamental_of(target.operand))) {
-            SyntaxElement inner = clauses[0];
-            while (inner.is(syntax_kind::primary_expression) &&
-                   inner.size() == 3)
-                inner = inner[1];
-            if (is_unparenthesized_string_literal(tokens, inner))
-                return not_supported(list, "dcl.init.string");
-        }
-        /* [dcl.init.aggr]/9: "An array of unknown bound initialized with a
-           brace-enclosed initializer-list containing n initializer-clauses
-           is defined as having n elements" */
-        uint64_t bound = target.bound;
-        qualified_type element = target.operand;
-        if (!target.bound_known) {
-            bound = clauses.size();
-            if (!bound) {
-                VTRY(r, extension_used(diagnostic_id::sema_zero_length_array,
-                                       list.first_token(), nullptr));
-            }
-            type = qualified_type::make(type_table.array_of(element, bound),
-                                        type.cv());
-        }
-        size_t next = 0;
-        VTRY(r, aggregate_elements(list, clauses, next, type, result));
-        if (!target.bound_known && clauses.size())
-            /* the elements the clauses initialized, with brace elision */
-            type = qualified_type::make(
-                type_table.array_of(element, semantics[result.node].count),
-                type.cv());
-        semantics[result.node].type = type;
-        return too_many_clauses(list, clauses, next);
-    }
-    if (target.kind == type_kind::vector) {
+    switch (type_table[type.unqualified()].kind) {
+    case type_kind::array:
+        return array_list_initialization(list, clauses, type, direct, result);
+    case type_kind::vector:
         /* [ext:gnu_vector_size] the elements in order, the rest zero */
-        size_t next = 0;
-        VTRY(r, aggregate_elements(list, clauses, next, type, result));
-        semantics[result.node].type = type;
-        return too_many_clauses(list, clauses, next);
-    }
-    if (target.kind == type_kind::class_type)
+        return element_list_initialization(list, clauses, type, result);
+    case type_kind::class_type:
         return class_list_initialization(list, clauses, type, direct, result);
-    if (target.kind == type_kind::lvalue_reference ||
-        target.kind == type_kind::rvalue_reference)
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
         return reference_list_initialization(list, clauses, type, direct,
                                              result);
-    /* [dcl.init.list]/3.10: no element: value-initialization
-       ([dcl.init]/8: zero-initialization of a scalar, an enumeration's
-       too); one element of an enumeration is not analysed */
+    default:
+        return scalar_list_initialization(list, clauses, type, direct, result);
+    }
+}
+
+/* [dcl.init.aggr]/4: the elements of an array (or a vector) initialized
+   in order by the clauses, the rest as /5 says; too many clauses are
+   ill-formed (/12) */
+analysis_result semantic_analysis::element_list_initialization(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+    qualified_type type, initialized_value &result)
+{
+    size_t next = 0;
+    VTRY(r, aggregate_elements(list, clauses, next, type, result));
+    semantics[result.node].type = type;
+    return too_many_clauses(list, clauses, next);
+}
+
+/* [dcl.init.list]/3.3 and /3.4 for an array T */
+analysis_result semantic_analysis::array_list_initialization(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+    qualified_type &type, bool direct, initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    /* [dcl.init.list]/3.3: "if T is a character array and the
+       initializer list has a single element that is an
+       appropriately-typed string-literal, initialization is performed
+       as described in that subclause" */
+    if (clauses.size() == 1 &&
+        is_unparenthesized_string_literal(tokens, clauses[0]) &&
+        character_type(fundamental_of(target.operand)))
+        return initialize_from(list, clauses[0], type, direct, true, result);
+    /* ... in parentheses: an extension */
+    if (clauses.size() == 1 && !clauses[0].is_token() &&
+        character_type(fundamental_of(target.operand))) {
+        SyntaxElement inner = clauses[0];
+        while (inner.is(syntax_kind::primary_expression) && inner.size() == 3)
+            inner = inner[1];
+        if (is_unparenthesized_string_literal(tokens, inner))
+            return not_supported(list, "dcl.init.string");
+    }
+    /* [dcl.init.aggr]/9: "An array of unknown bound initialized with a
+       brace-enclosed initializer-list containing n initializer-clauses
+       is defined as having n elements" */
+    uint64_t bound = target.bound;
+    qualified_type element = target.operand;
+    if (!target.bound_known) {
+        bound = clauses.size();
+        if (!bound) {
+            VTRY(r, extension_used(diagnostic_id::sema_zero_length_array,
+                                   list.first_token(), nullptr));
+        }
+        type = qualified_type::make(type_table.array_of(element, bound),
+                                    type.cv());
+    }
+    if (target.bound_known || !clauses.size())
+        return element_list_initialization(list, clauses, type, result);
+    size_t next = 0;
+    VTRY(r, aggregate_elements(list, clauses, next, type, result));
+    /* the elements the clauses initialized, with brace elision */
+    type = qualified_type::make(
+        type_table.array_of(element, semantics[result.node].count), type.cv());
+    semantics[result.node].type = type;
+    return too_many_clauses(list, clauses, next);
+}
+
+/* [dcl.init.list]/3 for a scalar T: "(3.8) Otherwise, if T is an
+   enumeration with a fixed underlying type ..."; "(3.9) Otherwise, if the
+   initializer list has a single element of type E ..., the object ... is
+   initialized from that element"; "(3.11) Otherwise, if the initializer
+   list has no elements, the object is value-initialized"; "(3.12)
+   Otherwise, the program is ill-formed." */
+analysis_result semantic_analysis::scalar_list_initialization(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+    qualified_type type, bool direct, initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    /* (3.8), an enumeration from one element, is not analysed */
     bool empty_enumeration =
         target.kind == type_kind::enumeration && clauses.empty();
     if (target.kind != type_kind::fundamental &&
@@ -1182,7 +1275,7 @@ analysis_result semantic_analysis::list_initialization_of(
         target.kind != type_kind::pointer_to_member && !empty_enumeration)
         return not_supported(list, "dcl.init.list");
     if (clauses.empty()) {
-        /* [dcl.init]/8: to value-initialize a scalar is to zero-initialize
+        /* (3.11) value-initialization; [dcl.init]/8: to value-initialize a scalar is to zero-initialize
            it: the value 0, a null pointer, a null member pointer (whose
            value analysis does not keep) */
         result.evaluation = constness::constant;
@@ -1196,6 +1289,7 @@ analysis_result semantic_analysis::list_initialization_of(
             expression_node(semantic_kind::zero, zero, list.first_token());
         return analysis_result::well_formed;
     }
+    /* (3.12) */
     if (clauses.size() > 1)
         return ill_formed(list,
                           "a scalar is list-initialized from a single "
@@ -1205,6 +1299,7 @@ analysis_result semantic_analysis::list_initialization_of(
     if (clauses[0].is(syntax_kind::braced_init_list))
         /* braces around a scalar's initializer: clang's warning */
         return not_supported(list, "dcl.init.list");
+    /* (3.9) */
     return initialize_from(list, clauses[0], type, direct, true, result);
 }
 
@@ -1287,20 +1382,19 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
-    switch (init.kind()) {
-    case syntax_kind::braced_init_list:
-        return list_initialization(init, type, true, result);
-    case syntax_kind::brace_or_equal_initializer:
-        if (init.size() != 2)
+    InitializerParts parts(init);
+    switch (parts.form) {
+    case InitializerParts::syntax_form::braced:
+        return list_initialization(parts.clause, type, true, result);
+    case InitializerParts::syntax_form::equals:
+        if (SyntaxElement list = parts.braced_list())
+            return list_initialization(list, type, false, result);
+        return initialize_from(init, parts.clause, type, false, false, result);
+    case InitializerParts::syntax_form::parenthesized:
+        if (!parts.list)
             return not_supported(init, "dcl.init");
-        if (init[1].is(syntax_kind::braced_init_list))
-            return list_initialization(init[1], type, false, result);
-        return initialize_from(init, init[1], type, false, false, result);
-    case syntax_kind::initializer:
-        if (init.size() != 3)
-            return not_supported(init, "dcl.init");
-        if (init[1].is(syntax_kind::initializer_list)) {
-            if (has_pack_expansion(init[1]))
+        if (parts.list_of_several()) {
+            if (has_pack_expansion(parts.list))
                 return not_supported(init, "temp.variadic");
             const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
@@ -1313,7 +1407,7 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                     !entity_table[target.entity].first_constructor)
                     return not_supported(init, "dcl.init");
                 owned_array<expression_meaning> arguments;
-                VTRY(r, expression_list_meanings(init[1], arguments));
+                VTRY(r, expression_list_meanings(parts.list, arguments));
                 return construct(init, type, arguments, 0, result);
             }
             return ill_formed(init,
@@ -1323,10 +1417,11 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                               "expression",
                               "dcl.init");
         }
-        return initialize_from(init, init[1], type, true, false, result);
-    default:
-        return not_supported(init, "dcl.init");
+        return initialize_from(init, parts.list, type, true, false, result);
+    case InitializerParts::syntax_form::none:
+        break;
     }
+    return not_supported(init, "dcl.init");
 }
 
 /*
@@ -1691,14 +1786,48 @@ bool semantic_analysis::initializer_names_nothing(SyntaxRef init) const
 }
 
 /*
+ * [dcl.init.aggr]/1: "The elements of an aggregate are: ... for a class,
+ * the direct base classes in declaration order, followed by the direct
+ * non-static data members ([class.mem]) that are not members of an
+ * anonymous union, in declaration order"; [class.bit]/2: "Unnamed
+ * bit-fields are not members".  A base class that is no field (an empty
+ * one, [class.derived]/4) is an element with no place in the object's
+ * fields (empty_base); a non-empty one is the field it is.
+ */
+void semantic_analysis::aggregate_class_elements(
+    entity_index c, owned_array<aggregate_class_element> &out) const
+{
+    const entity &x = entity_table[c];
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        aggregate_class_element e;
+        e.type = b.type;
+        e.empty_base = b.field == UINT32_MAX;
+        if (!e.empty_base) {
+            e.member = class_members[x.first_member + b.field];
+            e.type = entity_table[e.member].type;
+        }
+        out.append(e);
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        entity_index k = class_members[x.first_member + i];
+        const entity &m = entity_table[k];
+        if (m.base_subobject || (m.bit_field && !m.name))
+            continue;
+        aggregate_class_element e;
+        e.type = m.type;
+        e.default_initializer = m.default_initializer;
+        e.member = k;
+        out.append(e);
+    }
+}
+
+/*
  * The elements of the aggregate type (an array or an aggregate class),
  * initialized from clauses[next ..], next moved past the clauses used.
  * [dcl.init.aggr]/1: "The elements of an aggregate are: for an array, the
- * array elements in increasing subscript order, or for a class, the direct
- * base classes in declaration order, followed by the direct non-static data
- * members ([class.mem]) that are not members of an anonymous union, in
- * declaration order"; [class.bit]/2: "Unnamed bit-fields are not members".
- * /3.2: "the explicitly initialized elements of the aggregate are the first
+ * array elements in increasing subscript order", for a class
+ * aggregate_class_elements.  /3.2: "the explicitly initialized elements of the aggregate are the first
  * n elements"; /5: the others are value-initialized (zero here: the
  * elements analysis has).  /16: "When a union is initialized with an
  * initializer list, there shall not be more than one explicitly initialized
@@ -1712,11 +1841,7 @@ analysis_result semantic_analysis::aggregate_elements(
     /* [ext:gnu_vector_size] a vector's elements are listed as an array's */
     bool arraylike =
         target.kind == type_kind::array || target.kind == type_kind::vector;
-    owned_array<qualified_type> types;
-    owned_array<SyntaxRef> defaults;
-    /* a base class that is no field (an empty one): an element that has
-       no place in the object's fields */
-    owned_array<bool> empty_bases;
+    owned_array<aggregate_class_element> members;
     uint64_t count = 0;
     bool unknown_bound = false;
     if (arraylike) {
@@ -1724,40 +1849,16 @@ analysis_result semantic_analysis::aggregate_elements(
         unknown_bound = target.kind == type_kind::array && !target.bound_known;
     } else {
         const entity &x = entity_table[target.entity];
-        /* the direct base classes in declaration order (a non-empty one is
-           the field it is), then the other members */
-        for (uint32_t i = 0; i < x.base_count; i++) {
-            const entity &b = entity_table[class_bases[x.first_base + i]];
-            if (b.field == UINT32_MAX) {
-                types.append(b.type);
-                defaults.append(0);
-                empty_bases.append(true);
-            } else {
-                types.append(
-                    entity_table[class_members[x.first_member + b.field]].type);
-                defaults.append(0);
-                empty_bases.append(false);
-            }
-        }
-        for (uint32_t i = 0; i < x.member_count; i++) {
-            const entity &m = entity_table[class_members[x.first_member + i]];
-            if (m.base_subobject)
-                continue;
-            if (!m.bit_field || m.name) {
-                types.append(m.type);
-                defaults.append(m.default_initializer);
-                empty_bases.append(false);
-            }
-        }
-        count = types.size();
+        aggregate_class_elements(target.entity, members);
+        count = members.size();
         if (x.union_ && count > 1)
             count = 1;
         /* [dcl.init.aggr]/5.4.2 (C++20 /5.4): an empty list initializes a
            union's member that has a default member initializer, not its
            first member: not analysed */
         if (x.union_ && next >= clauses.size())
-            for (size_t i = 1; i < defaults.size(); i++)
-                if (defaults[i])
+            for (size_t i = 1; i < members.size(); i++)
+                if (members[i].default_initializer)
                     return not_supported(list, "dcl.init.aggr");
     }
     owned_array<uint32_t> elements;
@@ -1767,10 +1868,10 @@ analysis_result semantic_analysis::aggregate_elements(
             break;
         qualified_type element = target.operand;
         if (!arraylike)
-            element = types[i];
+            element = members[i].type;
         initialized_value one;
-        bool has_default = !arraylike && defaults[i];
-        if (!arraylike && empty_bases[i]) {
+        bool has_default = !arraylike && members[i].default_initializer;
+        if (!arraylike && members[i].empty_base) {
             VTRY(r, empty_base_element(list, clauses, next, element));
             continue;
         }
@@ -1792,7 +1893,7 @@ analysis_result semantic_analysis::aggregate_elements(
         } else {
             SyntaxRef default_initializer;
             if (!arraylike)
-                default_initializer = defaults[i];
+                default_initializer = members[i].default_initializer;
             VTRY(r, omitted_element_value(list, element, default_initializer,
                                           one));
         }
@@ -2101,24 +2202,21 @@ analysis_result semantic_analysis::designated_elements(
                               "dcl.init.aggr");
         const entity &x = entity_table[target.entity];
         is_union = x.union_;
-        /* [dcl.init.aggr]/5.2: an empty base class is an element too,
-           which no designator initializes: value-initialized (nothing to
-           do when its special members are trivial) */
-        for (uint32_t i = 0; i < x.base_count; i++) {
-            const entity &b = entity_table[class_bases[x.first_base + i]];
-            if (b.field == UINT32_MAX &&
-                !trivial_special_members(
-                    type_table[b.type.unqualified()].entity))
-                return not_supported(list, "dcl.init.aggr");
-        }
-        for (uint32_t i = 0; i < x.member_count; i++) {
-            entity_index e = class_members[x.first_member + i];
-            const entity &m = entity_table[e];
-            if (!m.bit_field || m.name) {
-                types.append(m.type);
-                defaults.append(m.default_initializer);
-                members.append(e);
+        owned_array<aggregate_class_element> elements;
+        aggregate_class_elements(target.entity, elements);
+        for (const aggregate_class_element &e : elements) {
+            /* [dcl.init.aggr]/5.2: an empty base class is an element too,
+               which no designator initializes: value-initialized (nothing
+               to do when its special members are trivial) */
+            if (e.empty_base) {
+                if (!trivial_special_members(
+                        type_table[e.type.unqualified()].entity))
+                    return not_supported(list, "dcl.init.aggr");
+                continue;
             }
+            types.append(e.type);
+            defaults.append(e.default_initializer);
+            members.append(e.member);
         }
         bound = members.size();
     } else if (target.kind == type_kind::lvalue_reference ||

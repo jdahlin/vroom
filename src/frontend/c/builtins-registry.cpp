@@ -21,7 +21,7 @@ CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want,
 }
 
 static const cc_builtin cc_builtin_table[] = {
-#include "target-builtins.inc"
+#include "frontend/c/target-builtins.inc"
     {"__builtin_ia32_pblendvb128", CC_BUILTIN_X86_BLENDVB, 1, "BBBB"},
     {"__builtin_elementwise_abs", CC_BUILTIN_ELEMENTWISE_ABS, 1, "i."},
     {"__builtin_elementwise_min", CC_BUILTIN_ELEMENTWISE_MIN, 1, "i."},
@@ -94,8 +94,8 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_ffsll", CC_BUILTIN_FFSLL, 1, "iw"},
     {"__builtin_clzg", CC_BUILTIN_CLZG, 1, "i."},
     {"__builtin_ctzg", CC_BUILTIN_CTZG, 1, "i."},
-    {"__builtin_stdc_count_ones", CC_BUILTIN_STDC_COUNT_ONES, 1, "u."},
-    {"__builtin_stdc_trailing_zeros", CC_BUILTIN_STDC_TRAILING_ZEROS, 1, "u."},
+    {"__builtin_stdc_count_ones", CC_BUILTIN_BODY, 1, "u.", 1},
+    {"__builtin_stdc_trailing_zeros", CC_BUILTIN_BODY, 1, "u.", 1},
     {"__builtin_popcountg", CC_BUILTIN_POPCOUNTG, 1, "i."},
     {"__builtin_unreachable", CC_BUILTIN_UNREACHABLE, 0, "v"},
     {"__builtin_trap", CC_BUILTIN_TRAP, 0, "v"},
@@ -127,16 +127,16 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_umul_overflow", CC_BUILTIN_MUL_OVERFLOW, 0, "buu."},
     {"__builtin_umull_overflow", CC_BUILTIN_MUL_OVERFLOW, 0, "bLL."},
     {"__builtin_umulll_overflow", CC_BUILTIN_MUL_OVERFLOW, 0, "bWW."},
-    {"__builtin_addcb", CC_BUILTIN_ADDC, 0, "CCCC."},
-    {"__builtin_addcs", CC_BUILTIN_ADDC, 0, "hhhh."},
-    {"__builtin_addc", CC_BUILTIN_ADDC, 0, "uuuu."},
-    {"__builtin_addcl", CC_BUILTIN_ADDC, 0, "LLLL."},
-    {"__builtin_addcll", CC_BUILTIN_ADDC, 0, "WWWW."},
-    {"__builtin_subcb", CC_BUILTIN_SUBC, 0, "CCCC."},
-    {"__builtin_subcs", CC_BUILTIN_SUBC, 0, "hhhh."},
-    {"__builtin_subc", CC_BUILTIN_SUBC, 0, "uuuu."},
-    {"__builtin_subcl", CC_BUILTIN_SUBC, 0, "LLLL."},
-    {"__builtin_subcll", CC_BUILTIN_SUBC, 0, "WWWW."},
+    {"__builtin_addcb", CC_BUILTIN_ADDC, 0, "CCCC.", 1},
+    {"__builtin_addcs", CC_BUILTIN_ADDC, 0, "hhhh.", 1},
+    {"__builtin_addc", CC_BUILTIN_ADDC, 0, "uuuu.", 1},
+    {"__builtin_addcl", CC_BUILTIN_ADDC, 0, "LLLL.", 1},
+    {"__builtin_addcll", CC_BUILTIN_ADDC, 0, "WWWW.", 1},
+    {"__builtin_subcb", CC_BUILTIN_SUBC, 0, "CCCC.", 1},
+    {"__builtin_subcs", CC_BUILTIN_SUBC, 0, "hhhh.", 1},
+    {"__builtin_subc", CC_BUILTIN_SUBC, 0, "uuuu.", 1},
+    {"__builtin_subcl", CC_BUILTIN_SUBC, 0, "LLLL.", 1},
+    {"__builtin_subcll", CC_BUILTIN_SUBC, 0, "WWWW.", 1},
     {"__builtin_object_size", CC_BUILTIN_OBJECT_SIZE, 0, "zPi"},
     {"__builtin_dynamic_object_size", CC_BUILTIN_DYNAMIC_OBJECT_SIZE, 0, "zPi"},
     {"__builtin_counted_by_ref", CC_BUILTIN_COUNTED_BY_REF, 0, "p."},
@@ -171,8 +171,8 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_isinf_sign", CC_BUILTIN_ISINF_SIGN, 1, "i."},
     {"__builtin_isnormal", CC_BUILTIN_ISNORMAL, 1, "i."},
     {"__builtin_isfpclass", CC_BUILTIN_ISFPCLASS, 1, "i."},
-    {"__builtin_issubnormal", CC_BUILTIN_ISSUBNORMAL, 1, "i."},
-    {"__builtin_iszero", CC_BUILTIN_ISZERO, 1, "i."},
+    {"__builtin_issubnormal", CC_BUILTIN_BODY, 1, "i.", 1},
+    {"__builtin_iszero", CC_BUILTIN_BODY, 1, "i.", 1},
     {"__builtin_isgreater", CC_BUILTIN_ISGREATER, 1, "i."},
     {"__builtin_isgreaterequal", CC_BUILTIN_ISGREATEREQUAL, 1, "i."},
     {"__builtin_isless", CC_BUILTIN_ISLESS, 1, "i."},
@@ -627,7 +627,7 @@ CC_PRIVATE const cc_builtin *cc_builtin_lookup(uint32_t id)
     return i ? &cc_builtin_table[i - 1] : NULL;
 }
 
-#include "builtin-stubs.inc"
+#include "frontend/c/builtin-stubs.inc"
 
 /* Search only when a call failed the normal builtin and library lookup. */
 CC_PRIVATE bool cc_builtin_stub_known(cc *c, uint32_t id)

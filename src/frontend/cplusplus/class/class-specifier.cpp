@@ -1320,19 +1320,8 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         if (!node.size() || !declares_special_member(c, special(node[at]))) {
             /* a conversion function ([class.conv.fct]) has no rules yet:
                reported at its conversion-function-id */
-            owned_array<SyntaxRef> work;
-            for (auto x : node.elements())
-                if (x.is_node() && !x.is(syntax_kind::function_body))
-                    work.append(x);
-            while (!work.empty()) {
-                auto k = work.back();
-                work.resize(work.size() - 1);
-                if (k.is(syntax_kind::conversion_function_id))
-                    return not_supported(k, "class.conv.fct");
-                for (auto x : k.elements())
-                    if (x.is_node())
-                        work.append(x);
-            }
+            if (SyntaxRef id = conversion_function_id_of(node))
+                return not_supported(id, "class.conv.fct");
             return not_supported(node, "class.ctor");
         }
         if (node.is(syntax_kind::member_declaration)) {
@@ -1414,12 +1403,8 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
         SyntaxElement d = node[lead + 1];
         if (d.is(syntax_kind::member_declarator_list) && d.size() == 1)
             d = d[0];
-        if (d.is(syntax_kind::member_declarator) && d.size() == 1)
-            d = d[0];
-        if (d.is(syntax_kind::noptr_declarator))
-            for (SyntaxElement part : d.elements())
-                if (part.is(syntax_kind::parameters_and_qualifiers))
-                    member_return_type = true;
+        if (DeclaratorParts(d).parameters())
+            member_return_type = true;
     }
     analysis_result r = decl_specifier_seq(first, s, false);
     member_return_type = saved_member_return;

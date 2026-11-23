@@ -1597,6 +1597,15 @@ struct inherited_call {
 struct clause_designation {
     uint32_t first = 0, count = 0;
 };
+/* an element of an aggregate class ([dcl.init.aggr]/1) */
+struct aggregate_class_element {
+    qualified_type type;
+    SyntaxRef default_initializer;
+    /* the field: the data member, or a non-empty base's subobject */
+    entity_index member = 0;
+    /* a base class with no field ([class.derived]/4) */
+    bool empty_base = false;
+};
 struct designated_item {
     /* the clause, and its designators from pool[chain_first] on */
     uint32_t clause = 0, chain_first = 0, chain_count = 0;
@@ -1775,17 +1784,26 @@ class semantic_analysis
        analysis cannot tell; basic/literal-types.cpp) */
     constness literal_type(qualified_type t) const;
     constness literal_class(entity_index c) const;
+    /* [special]: which special member functions are trivial
+       (class/triviality.cpp) */
     bool trivial_defaulted_default_constructor(entity_index c) const;
+    bool trivial_default_constructor(entity_index c, bool &known) const;
+    bool trivial_copy_constructor(entity_index c) const;
     bool copies_bytes(entity_index c) const;
+    /* [dcl.fct.def.delete]: which defaulted special member functions are
+       defined as deleted (class/deleted-special-members.cpp) */
+    bool default_constructed(entity_index c, entity_index k) const;
+    bool default_constructor_deleted(entity_index c) const;
+    bool copy_constructor_deleted_by_move(entity_index c) const;
+    bool declares_move_assignment(entity_index c);
+    bool copy_assignment_deleted(entity_index c) const;
+    bool bytewise_const_member(entity_index c) const;
     bool trivial_special_members(entity_index c) const;
-    bool is_copy_constructor(entity_index c, entity_index k) const;
+    bool copy_or_move_constructor(entity_index c, entity_index k) const;
     bool declares_move_constructor(entity_index c) const;
     /* a user-declared copy constructor whose parameter is an lvalue reference
        ([class.copy.ctor]/1) */
     bool declares_copy_constructor(entity_index c) const;
-    bool copy_assignment_deleted(entity_index c) const;
-    bool default_constructor_deleted(entity_index c) const;
-    bool default_constructed(entity_index c, entity_index k) const;
     /* whether the destructor of subobject class k is not accessible from
        the destructor or constructor of class c ([class.access.base]/1) */
     bool subobject_destructor_inaccessible(entity_index c,
@@ -3138,10 +3156,8 @@ class semantic_analysis
     /* [meta.unary.prop] is_constructible and is_nothrow_constructible
        (ext/clang/constructible-traits.cpp): the analysis of T t(declval<
        Args>()...); */
-    bool trivial_default_constructor(entity_index c) const;
-    bool trivial_copy_constructor(entity_index c) const;
     bool trivially_constructed(qualified_type t, const qualified_type *types,
-                               uint32_t count) const;
+                               uint32_t count, bool &known) const;
     analysis_result clang_constructible_trait(SyntaxRef n, bool nothrow,
                                               bool trivial,
                                               expression_meaning &m);
@@ -3172,11 +3188,9 @@ class semantic_analysis
     /* ext/clang/class-traits.cpp: the traits that ask about a class */
     bool class_property_trait(int which, qualified_type t, bool &answer);
     bool standard_layout_class(entity_index c, bool &answer);
-    bool declares_move_assignment(entity_index c);
     bool relocatable_type(qualified_type t, bool cpp26, bool &known);
     bool class_head_names_trivial_abi(entity_index c);
     bool unique_representation(qualified_type t, bool &answer);
-    bool trivial_default_class(entity_index c, bool &known) const;
     void base_classes_of(entity_index c, owned_array<entity_index> &out) const;
     void layout_member_types(entity_index c, owned_array<type_index> &out);
     bool first_data_class(entity_index c, entity_index &owner) const;
@@ -3315,8 +3329,9 @@ class semantic_analysis
                                      expression_meaning &m);
     /* [expr.static.cast], [expr.const.cast], [expr.reinterpret.cast] */
     /* [expr.typeid] */
-    analysis_result type_identification(SyntaxRef n, expression_meaning &m);
-    analysis_result named_cast(SyntaxRef n, standard_keyword keyword,
+    analysis_result type_identification(PostfixOperationTypeidOperation n,
+                                        expression_meaning &m);
+    analysis_result named_cast(PostfixOperationNamedCast cast,
                                expression_meaning &m);
     /* [expr.comma] */
     analysis_result comma(SyntaxRef n, expression_meaning &m);
@@ -3635,6 +3650,11 @@ class semantic_analysis
                                       const gnu_builtin &b,
                                       const semantic_node &call,
                                       constant_value &v);
+    constness evaluate_classify_type_builtin(const semantic_node &call,
+                                             constant_value &v);
+    constness evaluate_object_size_builtin(constant_evaluation &state,
+                                           const semantic_node &call,
+                                           constant_value &v);
     constness evaluate_overflow_builtin(constant_evaluation &state,
                                         const gnu_builtin &b,
                                         const semantic_node &call,
@@ -3800,6 +3820,16 @@ class semantic_analysis
     analysis_result list_initialization_of(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type &type, bool direct, initialized_value &result);
+    analysis_result
+    element_list_initialization(SyntaxRef list,
+                                const owned_array<SyntaxElement> &clauses,
+                                qualified_type type, initialized_value &result);
+    analysis_result array_list_initialization(
+        SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+        qualified_type &type, bool direct, initialized_value &result);
+    analysis_result scalar_list_initialization(
+        SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+        qualified_type type, bool direct, initialized_value &result);
     /* [dcl.init.list]/3.9, /3.10 for a reference: initialized from the
        single element it is reference-related to, else bound to a prvalue
        of the referenced type that the list initializes */
@@ -3848,6 +3878,9 @@ class semantic_analysis
     analysis_result too_many_clauses(SyntaxRef list,
                                      const owned_array<SyntaxElement> &clauses,
                                      size_t next);
+    void
+    aggregate_class_elements(entity_index c,
+                             owned_array<aggregate_class_element> &out) const;
     analysis_result
     aggregate_elements(SyntaxRef list,
                        const owned_array<SyntaxElement> &clauses, size_t &next,
@@ -4124,8 +4157,6 @@ class semantic_analysis
     /* [class.copy.assign]: the implicitly-declared copy and move assignment
        operators that are not trivial (class/implicit-assignment.cpp) */
     enum class assignment_use : uint8_t { usable, deleted, unknown };
-    bool move_assignment_operator(entity_index f, entity_index c) const;
-    bool bytewise_const_member(entity_index c) const;
     bool declared_deleted(entity_index f) const;
     assignment_use subobject_assignment(entity_index k, entity_index c,
                                         bool move, bool &non_throwing);
@@ -4263,8 +4294,7 @@ class semantic_analysis
     /* [class.access]/6: the class a member's qualified declarator-id
        nominates while its declaration is analysed, 0 otherwise (declarator_access_class) */
     entity_index access_class = 0;
-    entity_index declarator_access_class(SyntaxRef declaration,
-                                         SyntaxRef specifiers) const;
+    entity_index declarator_access_class(SyntaxRef declaration) const;
     /* the tokens of the member-specification of the class being defined
        (class_specifier), 0 outside one */
     token_index defining_members_first = 0, defining_members_end = 0;
@@ -5908,6 +5938,9 @@ class semantic_analysis
     bool operators_held = false;
     /* [class.copy.assign]/1: f is a copy assignment operator of class c */
     bool copy_assignment_operator(entity_index f, entity_index c) const;
+    /* [class.copy.assign]/3: f is a move assignment operator of class c
+       (class/implicit-assignment.cpp) */
+    bool move_assignment_operator(entity_index f, entity_index c) const;
     /* [class.copy.assign]/12: the implicit copy assignment of class c
        assigns its members as the built-in operator does (no member's
        assignment is a user-provided operator=) */
@@ -5952,6 +5985,19 @@ class semantic_analysis
     analysis_result initialize_with(SyntaxRef at, expression_meaning &m,
                                     qualified_type type, bool direct, bool list,
                                     initialized_value &result);
+    analysis_result same_type_copy(SyntaxRef at, expression_meaning &m,
+                                   qualified_type type, constness evaluation,
+                                   initialized_value &result);
+    analysis_result reference_initialization(SyntaxRef at,
+                                             expression_meaning &m,
+                                             qualified_type type,
+                                             initialized_value &result);
+    analysis_result class_initialization(SyntaxRef at, expression_meaning &m,
+                                         qualified_type type, bool direct,
+                                         initialized_value &result);
+    analysis_result scalar_initialization(SyntaxRef at, expression_meaning &m,
+                                          qualified_type type, bool direct,
+                                          bool list, initialized_value &result);
     /* the same where failure is no error: ok false, what it issued taken
        back ([temp.deduct]/8) */
     analysis_result try_initialization(SyntaxRef n, expression_meaning &a,

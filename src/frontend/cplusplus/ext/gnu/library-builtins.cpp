@@ -15,6 +15,7 @@
  */
 #include "../../cplusplus-internal.h"
 #include "common/softfloat.h"
+#include "frontend/builtin-fold.h"
 #include "frontend/c/ast-builder.h"
 #include "frontend/cplusplus/builtin-registry.h"
 #include "frontend/cplusplus/sema.h"
@@ -280,7 +281,7 @@ static floating_builtin floating_builtin_kind(const char *spelling,
 }
 
 /* the type of a letter of the C front end's builtin signatures (frontend/c/
-   builtin-table.cpp, cc_builtin_signature_type): a scalar, a vector of 16
+   builtins-registry.cpp, cc_builtin_signature_type): a scalar, a vector of 16
    bytes, or a pointer to void or char (p, P, s, S); not a va_list (V, M) */
 bool semantic_analysis::builtin_letter_type(char letter, qualified_type &t)
 {
@@ -312,7 +313,7 @@ bool semantic_analysis::builtin_letter_type(char letter, qualified_type &t)
     return true;
 }
 
-/* a builtin of vcc's C front end (frontend/c/builtin-table.cpp): its
+/* a builtin of vcc's C front end (frontend/c/builtins-registry.cpp): its
    function type is the table's signature when the registry has no row of
    another form, and the call lowers to the C front end's builtin node
    (gnu_compiler_builtin); the form of the registry's row says how a call
@@ -1271,7 +1272,7 @@ semantic_analysis::bit_count_arguments(SyntaxRef n, entity_index called,
 {
     int which = bit_count_builtin(called);
     size_t most = 2;
-    if (which == 1)
+    if (which == 1 || which >= 4)
         most = 1;
     if (nodes.size() < 1 || nodes.size() > most)
         return ill_formed(n,
@@ -1323,32 +1324,28 @@ constness semantic_analysis::evaluate_bit_count(constant_evaluation &state,
         return c;
     unsigned width = fundamental_type_width(
         tokens.files.behavior, fundamental_of(semantics[items[0]].type));
-    unsigned __int128 bits = x.integer;
-    if (width < 128)
-        bits &= (static_cast<unsigned __int128>(1) << width) - 1;
-    uint64_t low = static_cast<uint64_t>(bits);
-    uint64_t high = static_cast<uint64_t>(bits >> 64);
-    if (bits == 0 && which != 1) {
+    unsigned __int128 bits = vfold_mask(x.integer, width);
+    /* C23's stdc_trailing_zeros of 0 is the width; the g forms take the
+       fallback */
+    if (bits == 0 && which == 5) {
+        v = constant_value();
+        v.kind = constant_value_kind::integer;
+        v.integer = width;
+        return constness::constant;
+    }
+    if (bits == 0 && which != 1 && which != 4) {
         if (call.count < 2)
             return constness::not_constant;
         return evaluate_node(state, items[1], v);
     }
-    unsigned count = 0;
-    if (which == 1) {
-        count = static_cast<unsigned>(__builtin_popcountll(low) +
-                                      __builtin_popcountll(high));
-    } else if (which == 2) {
-        if (high)
-            count = static_cast<unsigned>(__builtin_clzll(high));
-        else
-            count = 64 + static_cast<unsigned>(__builtin_clzll(low));
-        /* the 128 bits counted: the leading zeros above the width */
-        count -= 128 - width;
-    } else if (low) {
-        count = static_cast<unsigned>(__builtin_ctzll(low));
-    } else {
-        count = 64 + static_cast<unsigned>(__builtin_ctzll(high));
-    }
+    int operation = vfold_popcount;
+    if (which == 2)
+        operation = vfold_clz;
+    else if (which == 3 || which == 5)
+        operation = vfold_ctz;
+    unsigned __int128 count = 0;
+    if (!vfold_integer(operation, bits, width, &count))
+        return constness::not_constant;
     v = constant_value();
     v.kind = constant_value_kind::integer;
     v.integer = count;

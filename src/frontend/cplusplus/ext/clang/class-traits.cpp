@@ -99,7 +99,7 @@ bool semantic_analysis::triviality_unknown(entity_index c) const
         return true;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (entity_table[k].deleted && is_copy_constructor(c, k))
+        if (entity_table[k].deleted && copy_or_move_constructor(c, k))
             return true;
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
@@ -122,6 +122,15 @@ bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
     if (entity_table[c].dynamic || destroys(c))
         return false;
     return copies_bytes(c) && assigned_bitwise(c);
+}
+
+/* [ext:clang_type_traits] __has_trivial_constructor and __is_trivial on a
+   class with a constructor template: clang does not answer by the
+   constructor [over.match.best] selects (llvm-project issue 59206); not
+   followed */
+static bool clang_template_default_constructor_of(const entity &x)
+{
+    return x.constructor_template || x.constructor_templates;
 }
 
 /* [class.derived]/2: whether class d has class b among its direct or
@@ -293,8 +302,10 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
             return false;
         switch (static_cast<unary_trait_kind>(which)) {
         case unary_trait_kind::has_trivial_constructor: {
+            if (clang_template_default_constructor_of(entity_table[c]))
+                return false;
             bool known = true;
-            answer = trivial_default_class(c, known);
+            answer = trivial_default_constructor(c, known);
             if (!known)
                 return false;
             break;
@@ -385,9 +396,11 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
             bool copyable = class_trivially_copyable(c, known);
             if (!known)
                 return false;
+            if (clang_template_default_constructor_of(entity_table[c]))
+                return false;
             bool known_default = true;
             answer = copyable && trivial_special_members(c) &&
-                     trivial_default_class(c, known_default);
+                     trivial_default_constructor(c, known_default);
             if (!known_default)
                 return false;
         }
@@ -451,30 +464,6 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     default:
         return false;
     }
-}
-
-/* whether class c declares a move assignment operator X::operator=(X&&) */
-bool semantic_analysis::declares_move_assignment(entity_index c)
-{
-    lookup_result found = lookup_qualified(
-        c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
-    if (found.unknown || found.ambiguous)
-        return true;
-    for (entity_index o = found.entity; o; o = entity_table[o].next_overload) {
-        if (entity_table[o].kind != entity_kind::function)
-            return true;
-        const struct type &f = type_table[entity_table[o].type.unqualified()];
-        if (f.parameter_count != 1)
-            continue;
-        qualified_type p =
-            type_table.parameters(entity_table[o].type.unqualified())[0];
-        const struct type &r = type_table[p.unqualified()];
-        if (r.kind == type_kind::rvalue_reference &&
-            type_table[r.operand.unqualified()].kind == type_kind::class_type &&
-            type_table[r.operand.unqualified()].entity == c)
-            return true;
-    }
-    return false;
 }
 
 /* the direct and indirect base classes of c (non-virtual ones: a class
@@ -646,47 +635,6 @@ bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
         }
     }
     answer = true;
-    return true;
-}
-
-/* a class's trivial default constructor ([class.default.ctor]/3): it has
-   one (none is declared, or X() = default is), none is user-provided
-   (or callable without arguments), no virtual function or virtual base, no
-   default member initializer, and every subobject's the same; known is
-   false for a constructor template */
-bool semantic_analysis::trivial_default_class(entity_index c, bool &known) const
-{
-    const entity &x = entity_table[c];
-    if (x.dynamic || x.virtual_base_count)
-        return false;
-    if (x.constructor_template || x.constructor_templates) {
-        known = false;
-        return false;
-    }
-    bool user_declared = false;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor) {
-        if (entity_table[k].implicit)
-            continue;
-        const struct type &f = type_table[entity_table[k].type.unqualified()];
-        /* X() = delete is not user-provided: clang counts it trivial */
-        if (entity_table[k].deleted && !f.parameter_count)
-            continue;
-        user_declared = true;
-        if (f.parameter_count == entity_table[k].default_arguments)
-            return false;
-    }
-    /* a user-declared constructor leaves no implicit default one */
-    if (user_declared && !trivial_defaulted_default_constructor(c))
-        return false;
-    for (uint32_t i = 0; i < x.member_count; i++)
-        if (entity_table[class_members[x.first_member + i]].default_initializer)
-            return false;
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (entity_index k : classes)
-        if (!trivial_default_class(k, known))
-            return false;
     return true;
 }
 
@@ -899,7 +847,7 @@ bool semantic_analysis::relocatable_type(qualified_type t, bool cpp26,
         return false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (!entity_table[k].implicit && is_copy_constructor(c, k))
+        if (!entity_table[k].implicit && copy_or_move_constructor(c, k))
             return false;
     if (x.user_copy_assignments || x.implicit_copy_deleted ||
         x.constructor_template || x.constructor_templates) {
