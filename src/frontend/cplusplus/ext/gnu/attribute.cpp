@@ -336,12 +336,12 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     /* [ext:microsoft_declspec] __declspec's dllexport: on clang's target
        (-triple aarch64-unknown-linux-gnu) "__declspec attribute
        'dllexport' is not supported" (-Wignored-attributes), accepted with
-       no effect (dllimport is not: a variable it declares is not defined
-       where the test's own target is Windows, so it stays refused until
-       analysis knows the target); novtable (no vtable stores in an abstract
+       no effect (dllimport has one: a variable it declares without an
+       initializer is not a definition, gnu_dllimport); novtable (no vtable stores in an abstract
        class's constructors), restrict and noalias (results or accesses
        that do not alias) and allocator change no code vcc generates */
     {"dllexport", 0},
+    {"dllimport", gnu_dllimport},
     {"novtable", 0},
     {"restrict", 0},
     {"noalias", 0},

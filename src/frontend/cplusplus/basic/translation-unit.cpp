@@ -447,6 +447,12 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
            contains the extern specifier ... and neither an initializer nor
            a function-body" */
         definition = !s.extern_ || initialized;
+        /* [ext:microsoft_declspec] dllimport (ignored on clang's target)
+           still makes a declaration without an initializer a
+           non-definition */
+        if (((s.gnu_flags & gnu_dllimport) || declarator_dllimport) &&
+            !initialized)
+            definition = false;
         /* [dcl.link]/7: "A declaration directly contained in a
            linkage-specification is treated as if it contains the extern
            specifier ([dcl.stc]) for the purpose of determining the linkage

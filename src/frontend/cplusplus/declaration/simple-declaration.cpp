@@ -1534,8 +1534,10 @@ analysis_result semantic_analysis::declare_with_initializer(
     } else {
         qualified_declarator = m.qualified_namespace;
         qualified_scope = m.namespace_qualifier;
+        declarator_dllimport = (m.gnu_flags & gnu_dllimport) != 0;
         r = declare(declaration, m.id, kind, type, s, definition, initialized,
                     declared_entity);
+        declarator_dllimport = false;
         qualified_declarator = false;
         if (r == analysis_result::well_formed && m.qualified_namespace)
             current_scope = entity_table[declared_entity].enclosing;

@@ -236,7 +236,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
        the closing brace; aligned in the class-head is not analysed) */
     if (gnu.aligned || gnu.section || gnu.priority || gnu.cleanup ||
         (gnu.flags & ~(gnu_hidden_visibility | gnu_abi_tag |
-                       gnu_exclude_from_explicit_instantiation | gnu_packed)))
+                       gnu_exclude_from_explicit_instantiation | gnu_packed |
+                       gnu_dllimport)))
         return not_supported(n, "ext.gnu");
     const SyntaxElement *head_children = head_list.data();
     uint32_t head_count = static_cast<uint32_t>(head_list.size());

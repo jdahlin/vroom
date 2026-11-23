@@ -400,6 +400,10 @@ enum gnu_attribute_flag : uint32_t {
        is not a constant expression (clang), which the evaluator does not
        decide by position: it does not answer for a null argument */
     gnu_nonnull = 1u << 31,
+    /* [ext:microsoft_declspec] __declspec(dllimport): on clang's target
+       ignored (a warning) except that a variable it declares without an
+       initializer is not a definition, as with extern */
+    gnu_dllimport = 262144,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -2491,6 +2495,9 @@ class semantic_analysis
        that nominates a namespace: the scope whose member declare()
        declares again */
     bool qualified_declarator = false;
+    /* the declarator being declared has dllimport (gnu_dllimport): the
+       decl-specifiers' flag is in specified::gnu_flags */
+    bool declarator_dllimport = false;
     entity_index qualified_scope = 0;
     /* whether the type is, or is made of, a class or enumeration whose
        name has no external linkage; with arguments, a class template
