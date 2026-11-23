@@ -542,6 +542,14 @@ it; none adds a second way to instantiate.
   itself a new lazy specialization (p15-cxx0x.cpp:97; scratchpad mp5.cpp:
   `ap<places<0>,places<0,0>>::type` resolves to a never-defined second
   record): queue, its own step.
+- 8.1 (c77c30198, dd3cc323a, 2e7778717, ee8385b36; no simplify needed):
+  clang's type traits: __is_literal of a union, __has_unique_object_
+  representations (void, functions, references, _BitInt, classes with
+  reference members), __is_layout_compatible (new: scalars, enums, arrays,
+  standard-layout classes without bases), __is_complete_type (new).
+  Unsupported 37643 -> 37344 (-299), we reject and we accept unchanged.
+  Left: implicit lifetime, standard layout with bit-fields, unions and
+  bases in layout compatibility, bitwise_cloneable, trivial_abi.
 - Decision (2026-11-23, from the user: low-hanging fruit, 2-3k): after 7.5,
   four cheap batches by the work list's extension groups (4691 declarations
   in all): (8.1) clang's type traits, ~770 (__has_unique_object_representations
