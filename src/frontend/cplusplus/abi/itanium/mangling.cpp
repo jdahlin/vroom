@@ -141,6 +141,10 @@ class itanium_mangler
     bool encoding(entity_index e);
     bool specialization_encoding(entity_index e);
     bool constraint_expression(entity_index t, SyntaxElement c);
+    bool constraint_parameter(entity_index t, entity_index parameter);
+    bool constraint_template_args(entity_index t, SyntaxElement c);
+    bool constraint_namespace_member(entity_index t, SyntaxElement qualifier,
+                                     SyntaxElement id);
     bool dependent_expression(SyntaxElement c);
     const char *binary_operator_code(SyntaxElement op) const;
     bool punctuator(SyntaxElement c, preprocessing_op_or_punc op) const
@@ -402,10 +406,8 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
 {
     if (c.is_token()) {
         if (entity_index parameter =
-                analysis.constraint_parameter(t, c.token())) {
-            template_param(analysis.entity_table[parameter].value);
-            return true;
-        }
+                analysis.constraint_parameter(t, c.token()))
+            return constraint_parameter(t, parameter);
         /* a decimal integer-literal of type int: Li <value> E */
         owned_buffer spelling;
         analysis.token_spelling(c.token(), spelling.get());
@@ -453,7 +455,7 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
                 return false;
             entity_index pe = analysis.constraint_parameter(t, a.token());
             text("st");
-            return pe && type(analysis.entity_table[pe].type);
+            return pe && constraint_parameter(t, pe);
         }
         if (c.size() != 2 ||
             !punctuator(c[0], preprocessing_op_or_punc::EXCLAMATION))
@@ -501,86 +503,201 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         text("E");
         return true;
     }
-    case syntax_kind::simple_template_id: {
+    case syntax_kind::simple_template_id:
         if (!c[0].is_token() || !analysis.constraint_template(t, c[0].token()))
             return false;
         if (!source_name(analysis.token_identifier(c[0].token())))
             return false;
-        text("I");
-        /* (more than one argument: a template-argument-list) */
-        owned_array<SyntaxElement> written;
-        for (uint32_t i = 2; i + 1 < c.size(); i++) {
-            if (c[i].is(syntax_kind::template_argument_list))
-                for (auto x : c[i].elements())
-                    written.append(x);
-            else
-                written.append(c[i]);
-        }
-        for (SyntaxElement a : written) {
-            if (a.is(preprocessing_op_or_punc::COMMA))
-                continue;
-            /* a type-id that is one template parameter's name */
-            while (a.is_node() && a.size() == 1 &&
-                   a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
-                a = a[0];
-            if (!a.is_token())
-                return false;
-            entity_index pe = analysis.constraint_parameter(t, a.token());
-            if (pe) {
-                if (!type(analysis.entity_table[pe].type))
-                    return false;
-                continue;
-            }
-            /* a fundamental type keyword (int, long, char, ...) */
-            if (a.is_token()) {
-                standard_keyword kw = a.keyword();
-                fundamental_type ft = fundamental_type::none;
-                switch (kw) {
-                case standard_keyword::void_:
-                    ft = fundamental_type::void_;
-                    break;
-                case standard_keyword::bool_:
-                    ft = fundamental_type::bool_;
-                    break;
-                case standard_keyword::char_:
-                    ft = fundamental_type::char_;
-                    break;
-                case standard_keyword::short_:
-                    ft = fundamental_type::short_int;
-                    break;
-                case standard_keyword::int_:
-                    ft = fundamental_type::int_;
-                    break;
-                case standard_keyword::long_:
-                    ft = fundamental_type::long_int;
-                    break;
-                case standard_keyword::float_:
-                    ft = fundamental_type::float_;
-                    break;
-                case standard_keyword::double_:
-                    ft = fundamental_type::double_;
-                    break;
-                default:
-                    break;
-                }
-                if (ft != fundamental_type::none) {
-                    if (!builtin_type(ft))
-                        return false;
-                    continue;
-                }
-            }
-            /* a class of the template's scope */
-            entity_index k = analysis.constraint_class(
-                analysis.entity_table[t].enclosing, a.token());
-            if (!k || !type(analysis.entity_table[k].type))
-                return false;
-        }
+        return constraint_template_args(t, c);
+    case syntax_kind::qualified_id: {
+        /* Q<args>::name, Q a class template of the template's scope:
+           [abi:expressions]' <unresolved-name>, [impl.clang] in its
+           qualifier-level form,
+
+               sr <unresolved-qualifier-level> E <base-unresolved-name>
+
+           the level Q's name and template-args */
+        if (c.size() != 2 || !c[0].is(syntax_kind::nested_name_specifier))
+            return false;
+        if (c[1].is(syntax_kind::simple_template_id))
+            return constraint_namespace_member(t, c[0], c[1]);
+        if (c[0].size() != 2 || !c[0][0].is(syntax_kind::simple_template_id) ||
+            !c[1].is_token() || !c[1].is_identifier())
+            return false;
+        SyntaxElement q = c[0][0];
+        if (!q[0].is_token())
+            return false;
+        if (!analysis.constraint_class_template(
+                analysis.entity_table[t].enclosing, q[0].token()))
+            return false;
+        text("sr");
+        if (!source_name(analysis.token_identifier(q[0].token())) ||
+            !constraint_template_args(t, q))
+            return false;
         text("E");
-        return true;
+        return source_name(analysis.token_identifier(c[1].token()));
     }
     default:
         return false;
     }
+}
+
+/* ns::v<args> in t's requires-clause, v a concept or variable template of
+   namespace ns (one or more levels, as written): [abi:expressions]'
+   <unresolved-name>,
+
+       sr <unresolved-qualifier-level>+ E <base-unresolved-name>
+
+   each level the namespace's name as written (std, not its inline
+   namespace) */
+bool itanium_mangler::constraint_namespace_member(entity_index t,
+                                                  SyntaxElement qualifier,
+                                                  SyntaxElement id)
+{
+    if (!id[0].is_token() || !qualifier.size() ||
+        qualifier[0].is(preprocessing_op_or_punc::COLON_COLON))
+        return false;
+    entity_index scope = 0;
+    for (uint32_t i = 0; i + 1 < qualifier.size(); i += 2) {
+        if (!qualifier[i].is_identifier())
+            return false;
+        uint32_t name = analysis.token_identifier(qualifier[i].token());
+        entity_index next = 0;
+        if (i == 0)
+            next = analysis.constraint_name(analysis.entity_table[t].enclosing,
+                                            qualifier[i].token());
+        else
+            next = analysis.entity_table.find(scope, name);
+        if (!next ||
+            analysis.entity_table[next].kind != entity_kind::namespace_entity)
+            return false;
+        scope = next;
+    }
+    if (!analysis.constraint_namespace_template(scope, id[0].token()))
+        return false;
+    text("sr");
+    for (uint32_t i = 0; i + 1 < qualifier.size(); i += 2)
+        if (!source_name(analysis.token_identifier(qualifier[i].token())))
+            return false;
+    text("E");
+    if (!source_name(analysis.token_identifier(id[0].token())))
+        return false;
+    return constraint_template_args(t, id);
+}
+
+/* the <template-args> of a template-id c written in t's requires-clause:
+   I, each argument (one of t's parameters, a fundamental type keyword or
+   a class of t's scope), E */
+bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
+{
+    text("I");
+    /* (more than one argument: a template-argument-list) */
+    owned_array<SyntaxElement> written;
+    for (uint32_t i = 2; i + 1 < c.size(); i++) {
+        if (c[i].is(syntax_kind::template_argument_list))
+            for (auto x : c[i].elements())
+                written.append(x);
+        else
+            written.append(c[i]);
+    }
+    for (SyntaxElement a : written) {
+        if (a.is(preprocessing_op_or_punc::COMMA))
+            continue;
+        /* a type-id that is one template parameter's name */
+        while (a.is_node() && a.size() == 1 &&
+               a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
+            a = a[0];
+        if (!a.is_token())
+            return false;
+        entity_index pe = analysis.constraint_parameter(t, a.token());
+        if (pe) {
+            if (!constraint_parameter(t, pe))
+                return false;
+            continue;
+        }
+        /* a fundamental type keyword (int, long, char, ...) */
+        if (a.is_token()) {
+            standard_keyword kw = a.keyword();
+            fundamental_type ft = fundamental_type::none;
+            switch (kw) {
+            case standard_keyword::void_:
+                ft = fundamental_type::void_;
+                break;
+            case standard_keyword::bool_:
+                ft = fundamental_type::bool_;
+                break;
+            case standard_keyword::char_:
+                ft = fundamental_type::char_;
+                break;
+            case standard_keyword::short_:
+                ft = fundamental_type::short_int;
+                break;
+            case standard_keyword::int_:
+                ft = fundamental_type::int_;
+                break;
+            case standard_keyword::long_:
+                ft = fundamental_type::long_int;
+                break;
+            case standard_keyword::float_:
+                ft = fundamental_type::float_;
+                break;
+            case standard_keyword::double_:
+                ft = fundamental_type::double_;
+                break;
+            default:
+                break;
+            }
+            if (ft != fundamental_type::none) {
+                if (!builtin_type(ft))
+                    return false;
+                continue;
+            }
+        }
+        /* a class of the template's scope */
+        entity_index k = analysis.constraint_class(
+            analysis.entity_table[t].enclosing, a.token());
+        if (!k || !type(analysis.entity_table[k].type))
+            return false;
+    }
+    text("E");
+    return true;
+}
+
+/*
+ * One of t's template parameters in t's requires-clause.  [impl.clang]: the
+ * clause is mangled unsubstituted, so a parameter keeps its level
+ * ([abi:mangle.template-param]):
+ *
+ *     <template-param> ::= T_ | T <parameter-2 non-negative number> _
+ *                      ::= TL <L-1 non-negative number> __
+ *                      ::= TL <L-1 non-negative number> _ <parameter-2 non-negative number> _
+ *
+ * L the number of class templates t is a member of (0: T_); a parameter
+ * of another level is a candidate of its own, not the type T_ names.
+ */
+bool itanium_mangler::constraint_parameter(entity_index t,
+                                           entity_index parameter)
+{
+    const entities &table = analysis.entity_table;
+    uint64_t level = 0;
+    for (entity_index s = table[t].enclosing; s; s = table[s].enclosing)
+        if (table[s].kind == entity_kind::class_type && table[s].instantiation)
+            level++;
+    if (!level)
+        return type(table[parameter].type);
+    if (substitution(parameter))
+        return true;
+    uint64_t position = table[parameter].value;
+    text("TL");
+    number(level - 1);
+    text("_");
+    if (position)
+        number(position - 1);
+    text("_");
+    candidate y;
+    y.scope = parameter;
+    candidates.append(y);
+    return true;
 }
 
 /*
@@ -1045,9 +1162,27 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
         return true;
 
     if (prefix.kind == entity_kind::template_specialization) {
-        if ((prefix.enclosing && !is_std(prefix.enclosing)) ||
-            !class_enum_type(t))
+        entity_index c = record(t).entity;
+        if (!prefix.enclosing || is_std(prefix.enclosing)) {
+            if (!class_enum_type(t))
+                return false;
+        } else if (analysis.entity_table[prefix.enclosing].kind !=
+                   entity_kind::namespace_entity) {
             return false;
+        } else if (prefix.instantiation &&
+                   substitution(analysis.specialized_template(c))) {
+            /* ns::Q<args> with ns::Q seen: its <substitution>, then the
+               arguments */
+            if (!template_args(c))
+                return false;
+        } else {
+            /* ns::Q<args> in the enclosing <nested-name>: the namespace's
+               <prefix>, Q (a candidate as the template-prefix), the
+               arguments */
+            if (!this->prefix(prefix.enclosing) || !unqualified_name(c) ||
+                !class_template_args(c))
+                return false;
+        }
     } else {
         if (!dependent_member_prefix(static_cast<type_index>(prefix.value)))
             return false;
@@ -1336,13 +1471,19 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     const entity &x = analysis.entity_table[d];
     if (!x.value)
         return false;
-    if (x.value == 8 || x.value == 9 || x.value == 10) {
-        if (x.value == 8)
-            text("aa");
-        else if (x.value == 9)
-            text("oo");
-        else
-            text("gt");
+    static const struct {
+        uint64_t value;
+        const char *code;
+    } binary[] = {
+        {8, "aa"},  {9, "oo"},  {10, "gt"}, {15, "lt"},
+        {16, "le"}, {17, "ge"}, {18, "eq"}, {19, "ne"},
+    };
+    const char *code = nullptr;
+    for (const auto &b : binary)
+        if (x.value == b.value)
+            code = b.code;
+    if (code) {
+        text(code);
         return dependent_value_expr(x.enclosing) &&
                dependent_value_expr(x.name);
     }
@@ -1359,6 +1500,14 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     if (x.value == 13) {
         text("clsr");
         if (!type(x.type) || !source_name(x.name))
+            return false;
+        text("E");
+        return true;
+    }
+    if (x.value == 20) {
+        /* a static data member: an external name, L_Z <encoding> E */
+        text("L_Z");
+        if (!encoding(x.name))
             return false;
         text("E");
         return true;

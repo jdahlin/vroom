@@ -570,6 +570,38 @@ entity_index semantic_analysis::constraint_template(entity_index scope,
     return 0;
 }
 
+entity_index
+semantic_analysis::constraint_namespace_template(entity_index ns,
+                                                 token_index i) const
+{
+    uint32_t name = tokens.identifier(i);
+    if (!name)
+        return 0;
+    /* (the namespace that declares it, ns or one of its inline
+       namespaces, then the name held there) */
+    entity_index e = entity_table.find(ns, name);
+    if (!e) {
+        lookup_result x = lookup_qualified(ns, name, lookup_filter::any);
+        entity_index found = x.entity;
+        if (!found)
+            found = x.unknown_entity;
+        if (found)
+            e = entity_table.find(entity_table[found].enclosing, name);
+    }
+    if (e && (concept_of(e) || variable_template_of(e)))
+        return e;
+    return 0;
+}
+
+entity_index semantic_analysis::constraint_class_template(entity_index scope,
+                                                          token_index i) const
+{
+    entity_index e = constraint_name(scope, i);
+    if (e && class_template_of(e))
+        return e;
+    return 0;
+}
+
 entity_index semantic_analysis::constraint_class(entity_index scope,
                                                  token_index i) const
 {
