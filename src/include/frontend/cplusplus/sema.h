@@ -3493,6 +3493,8 @@ class semantic_analysis
                constant expressions: its address is known, reading it is
                not constant ([expr.const]/5.8) */
             bool unusable = false;
+            /* made by a new-expression; deleted ([expr.new], [expr.delete]) */
+            bool heap = false, freed = false;
             /* its number among the evaluation's objects: unlike its
                place, never reused */
             uint32_t serial = 0;
@@ -3511,6 +3513,11 @@ class semantic_analysis
         /* inside a statement that ends its full-expressions: a temporary
            with a destructor may be made */
         uint32_t temporaries_ok = 0;
+        /* the new-expressions' objects not deleted yet, and the object
+           the allocated nodes being evaluated stand for (the innermost
+           last) */
+        uint32_t heap_live = 0;
+        owned_array<uint32_t> allocations;
         /* evaluate_object for a store (an assignment's target, an object
            constructed in place) or for a read: a union's member that is
            not active is made so, or is not constant */

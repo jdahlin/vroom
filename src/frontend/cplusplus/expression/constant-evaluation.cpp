@@ -427,6 +427,12 @@ analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
         return analysis_result::well_formed;
     constant_evaluation state;
     constness c = evaluate_node(state, node, v);
+    /* [expr.const]/5.18: an allocation not deallocated in the evaluation:
+       whether this expression is the whole of the constant expression is
+       not known here (`f(alloc())` has f delete what the consteval alloc
+       made), so it is not decided */
+    if (c == constness::constant && state.heap_live)
+        c = constness::unknown;
     if (c == constness::constant && !is_value(v))
         c = constness::unknown;
     /* a 128-bit value that expression_meaning's 64 bits do not hold */
@@ -1549,6 +1555,9 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
        expressions, read through a pointer or a reference */
     if (!(object & element_place) && state.objects[object].unusable)
         return constness::not_constant;
+    /* [basic.life]: the storage of a deleted object */
+    if (!(object & element_place) && state.objects[object].freed)
+        return constness::not_constant;
     v = place_value(state, object);
     /* [expr.const]/5.8: the object's value must be one it was given; an
        indeterminate value is undefined behavior ([basic.indet]/2) */
@@ -2195,9 +2204,12 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             const struct type from =
                 type_table[semantics[x.a].type.unqualified()];
             const struct type to = type_table[x.type.unqualified()];
+            /* ([conv.ptr]/2: to cv void *, the same address, which nothing
+               here reads through) */
             if (from.kind != type_kind::pointer ||
                 to.kind != type_kind::pointer ||
-                from.operand.unqualified() != to.operand.unqualified())
+                (from.operand.unqualified() != to.operand.unqualified() &&
+                 fundamental_of(to.operand) != fundamental_type::void_))
                 return CONST_UNKNOWN;
             c = evaluate_node(state, x.a, v);
             if (c == constness::constant &&
@@ -2550,6 +2562,102 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
     case semantic_kind::string_literal:
     case semantic_kind::bound_member_function:
     case semantic_kind::assignment:
+    /* [expr.new]/10, [expr.const]/5.18 (C++20): a new-expression is
+       constant when its storage is deallocated within the evaluation: the
+       allocation function is not called, the object is a heap one that
+       stays until a delete frees it (the allocated nodes of the
+       initialization are its place) */
+    case semantic_kind::new_object: {
+        const struct type pointer = type_table[x.type.unqualified()];
+        if (pointer.kind != type_kind::pointer || x.d)
+            return CONST_UNKNOWN;
+        /* [expr.new]/10: the placement arguments are evaluated (the
+           size, the first argument, is the allocation function's own) */
+        if (x.a && semantics[x.a].kind == semantic_kind::call) {
+            const semantic_node call = semantics[x.a];
+            const uint32_t *arguments = semantics.items(call.first);
+            for (uint32_t i = 1; i < call.count; i++) {
+                constant_value placed;
+                c = evaluate_node(state, arguments[i], placed);
+                if (c != constness::constant)
+                    return c;
+            }
+        }
+        constant_evaluation::object o;
+        o.heap = true;
+        uint32_t place = static_cast<uint32_t>(state.objects.size());
+        append_object(state, o);
+        pin_objects(state);
+        state.heap_live++;
+        c = evaluate_initialization(state, pointer.operand, 0, false, place);
+        if (c != constness::constant)
+            return c;
+        if (x.b) {
+            state.allocations.append(place);
+            if (semantics[x.b].kind == semantic_kind::construct) {
+                /* the constructor, called on the object */
+                constant_value stored;
+                c = evaluate_node(state, x.b, stored);
+            } else {
+                /* the value the object is initialized with */
+                c = evaluate_initialization(state, pointer.operand, x.b, false,
+                                            place);
+            }
+            state.allocations.resize(state.allocations.size() - 1);
+            if (c != constness::constant)
+                return c;
+        }
+        v = constant_value();
+        v.kind = constant_value_kind::pointer;
+        v.count = 1;
+        v.first = place;
+        v.stamp = state.objects[place].serial;
+        return constness::constant;
+    }
+    case semantic_kind::allocated: {
+        if (state.allocations.empty())
+            return CONST_UNKNOWN;
+        uint32_t place = state.allocations[state.allocations.size() - 1];
+        v = constant_value();
+        v.kind = constant_value_kind::pointer;
+        v.count = 1;
+        v.first = place;
+        v.stamp = state.objects[place].serial;
+        return constness::constant;
+    }
+    /* [expr.delete]/9: the destructor, then the storage is gone; the
+       operand shall point to an object a new-expression made */
+    case semantic_kind::delete_object: {
+        constant_value p;
+        c = evaluate_node(state, x.a, p);
+        if (c != constness::constant)
+            return c;
+        v = constant_value();
+        if (p.kind != constant_value_kind::pointer)
+            return CONST_UNKNOWN;
+        if (!p.count)
+            return constness::constant;
+        if (x.d || x.value)
+            return CONST_UNKNOWN;
+        uint32_t place = 0;
+        c = pointed_place(state, p, place);
+        if (c != constness::constant)
+            return c;
+        if ((place & element_place) || !state.objects[place].heap ||
+            state.objects[place].freed)
+            return constness::not_constant;
+        if (x.b) {
+            state.allocations.append(place);
+            constant_value discarded;
+            c = evaluate_node(state, x.b, discarded);
+            state.allocations.resize(state.allocations.size() - 1);
+            if (c != constness::constant)
+                return c;
+        }
+        state.objects[place].freed = true;
+        state.heap_live--;
+        return constness::constant;
+    }
     /* [class.cdtor]/4: the virtual table pointer a constructor stores is
        the object's dynamic type, which the evaluator finds from the class
        of the object itself */
@@ -2624,6 +2732,19 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         default:
             return evaluate_builtin_fold(state, b, x, v);
         }
+    }
+    /* __builtin_assume_aligned (p, alignment [, offset]): p, which clang
+       also checks against the asserted alignment (not done here: the call
+       is a constant expression, whose pointer is the first argument) */
+    if (!x.b && x.count >= 2) {
+        static const char assume_aligned[] = "__builtin_assume_aligned";
+        const entity &callee_entity = entity_table[semantics[callee].a];
+        if (callee_entity.name &&
+            callee_entity.name ==
+                tokens.pp.identifier(assume_aligned,
+                                     sizeof assume_aligned - 1) +
+                    1)
+            return evaluate_node(state, semantics.items(x.first)[0], v);
     }
     /* [class.this]/1: a non-static member function's this, the address
        of the object expression */
@@ -2929,6 +3050,8 @@ constness semantic_analysis::evaluate_variable(qualified_type t, uint32_t init,
     constant_evaluation::object o;
     append_object(state, o);
     constness c = evaluate_initialization(state, t, init, false, 0);
+    if (c == constness::constant && state.heap_live)
+        c = constness::not_constant;
     if (c == constness::constant)
         c = permitted_result(state, state.objects[0].value);
     if (c == constness::constant)
@@ -2978,6 +3101,9 @@ constness semantic_analysis::permitted_result(const constant_evaluation &state,
     }
     if (place >= state.objects.size() || state.objects[place].frame)
         return CONST_UNKNOWN;
+    /* [expr.const]/13.? : storage a new-expression made has to be freed */
+    if (state.objects[place].heap)
+        return constness::not_constant;
     /* a local constexpr variable: its address differs per invocation */
     if (state.objects[place].entity &&
         entity_table[state.objects[place].entity].automatic)
