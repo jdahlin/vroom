@@ -500,6 +500,16 @@ it; none adds a second way to instantiate.
   members, bases, constructors, destructors or the vtable without a .size
   check, and references into type_table or entity_table taken before a
   call (a lazy completion may grow the tables): 7.3b re-checks them.
+- 7.3b: 25f9fbd3d, the completion sites 7.3a missed (metrics unchanged,
+  two crashes avoided: a type_table reference held across a completion).
+  The lazy line itself (scratchpad lazy-template-type-on-top.patch):
+  unsupported -353, agree +293, lowered +7, but we reject +8 (five newly
+  analysed bugs: CTAD's deduced type against A<int> twice,
+  __is_same(common_type_base<char>, ...), warn-consumed-analysis.cpp:413,
+  align-x86.cpp alignments) and we accept +61 (explicit instantiations of
+  ill-formed specializations judged well-formed).  Then a fix of 7.3a's
+  garbled if in name-lookup.cpp (missed in its review: read every changed
+  condition) and copied arguments for re-instantiation.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
