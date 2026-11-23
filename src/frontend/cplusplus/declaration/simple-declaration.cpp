@@ -692,7 +692,11 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
     if (n.size() < 5)
         return not_supported(n, "dcl.pre");
     bool constant = false, value = false;
-    VTRY(r, bool_constant_expression(n, n[2], constant, value));
+    constant_only++;
+    analysis_result r = bool_constant_expression(n, n[2], constant, value);
+    constant_only--;
+    if (r != analysis_result::well_formed)
+        return r;
     if (!constant) {
         analysis_result refused = not_supported(n, expr_const_reason());
         evaluator_stop_detail();

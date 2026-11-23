@@ -4873,6 +4873,9 @@ class semantic_analysis
        analysed: a specialization named there needs no definition
        ([temp.inst]/5) */
     unsigned unevaluated = 0;
+    /* a static_assert's condition is analysed: its temporaries live only in
+       the constant evaluation, nothing is lowered for them */
+    unsigned constant_only = 0;
     /* a candidate's declaration is instantiated ([temp.over]/1): an
        invalid type or expression in it is a deduction failure
        ([temp.deduct]/8), not an error (its diagnostics are taken back);
