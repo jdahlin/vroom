@@ -386,6 +386,19 @@ it; none adds a second way to instantiate.
   reports the specialization's type "depends on itself" when asked), and
   vcc deduces const int as [dcl.type.auto.deduct] gives.  Listed in
   clang-failures.txt.
+- 2026-11-23 rebase on origin/main 12fd44be6 (user's request; 40 commits,
+  #550 among them).  Commits replayed one by one; dropped: step 2's
+  cxx-run cache (03a8f1150, f1f1d92cf: #550 has the same cache).
+  Resolved: --why's second pass in main's process pool; step 1b's
+  evaluation detail in main's evaluate_value/evaluate_constant split;
+  batch 2.4 and 3.1 in main's overload_of_type/explicit_instantiation_target;
+  d9b222d5a: 2.4's static data member explicit instantiation definition
+  moved into main's member_explicit_instantiation (its own branch was no
+  longer reached).  Metrics re-blessed against main's: unsupported 39530
+  -> 38368, we reject 677 -> 569, lowering refuted 36 -> 25.  Backup of
+  the old branch: tag backup/cxx-unsupported-zero-pre-rebase (local).
+- Next (from the --why of a1abbbf94): the parser's later-step grammar:
+  __declspec 320, a ( in a noptr-declarator 297, calling conventions 65.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
