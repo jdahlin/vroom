@@ -275,6 +275,15 @@ it; none adds a second way to instantiate.
 - Batch 1 done: 39709 -> 39155 (-554).  Lessons: size with --why only;
   brief "an exposed unrelated bug: report and stop", so a commit holds one
   fix.
+- Batch 2 starts (list regenerated after batch 1).  abcaed41c (orchestrator):
+  a template-id in an expression naming no function template says why
+  (677 in one opaque key, now followed to the holders).
+- 2.1 (87bf3f41c, no simplify needed): a variable template without an
+  initializer is a definition, through variable_template_definition
+  (`extern` ones stay refused there, checked).  The [temp.class] fallback
+  names the shape: identifier 323, qualified-id 150, declarator 93,
+  noptr-declarator 28, simple-template-id 27, decl-specifier-seq 15.
+  Unsupported 39155 -> 39027, agree +131.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
