@@ -3585,6 +3585,7 @@ class semantic_analysis
                                        bool &non_throwing);
     /* ... with the function_parameters in scope ([basic.scope.param]) */
     void open_parameter_scope();
+    analysis_result dynamic_exception_types(SyntaxRef n, bool member);
     analysis_result parameter_scope_noexcept(SyntaxRef n, bool member,
                                              bool &non_throwing);
     /* the noexcept-specifiers left value-dependent in templates' own

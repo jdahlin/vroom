@@ -382,7 +382,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     bool may_qualify = in_member_declarator;
     /* [except.spec]/1: the noexcept-specifier */
     bool specified_exceptions = false, non_throwing = false;
-    SyntaxRef exceptions = 0;
+    SyntaxRef exceptions = 0, dynamic_exceptions = 0;
     for (uint32_t i = parameters.size(); i-- > 0;) {
         auto c = parameters[i];
         if (c.is(punct::RIGHT_PARENTHESIS)) {
@@ -466,12 +466,28 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 exceptions = c;
                 continue;
             }
+            /* [except.spec]/1 (C++14): a dynamic-exception-specification;
+               analysed once the parameters are known */
+            if (c.dynamic_exception_specification() && !specified_exceptions) {
+                specified_exceptions = true;
+                dynamic_exceptions = c;
+                continue;
+            }
             /* a generic lambda's requires-clause (lambda_constraint) */
             if (c.requires_clause())
                 continue;
             /* a ref-qualifier, attributes, a cv-qualifier-seq of a type
                that is not a member function's */
-            return not_supported(parameters, "dcl.fct");
+            {
+                auto r = not_supported(parameters, "dcl.fct");
+                char text[96];
+                const char *what = "a token";
+                if (c.is_node())
+                    what = syntax_kind_name(c.kind());
+                snprintf(text, sizeof text, "after the parameters: %s", what);
+                last_unsupported_detail(text, strlen(text));
+                return r;
+            }
         }
     }
     /* a function declarator of the parameters is not the member's */
@@ -638,6 +654,9 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     function_empty_pack = empty_pack;
     function_cv = cv;
     function_exceptions_specified = specified_exceptions;
+    if (dynamic_exceptions) {
+        VTRY(r, dynamic_exception_types(dynamic_exceptions, may_qualify));
+    }
     if (exceptions) {
         VTRY(r,
              parameter_scope_noexcept(exceptions, may_qualify, non_throwing));
@@ -654,6 +673,56 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         type_table.function(type, list.data(), list.size(), variadic,
                             non_throwing, type_cv, type_ref),
         cv_none);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [except.spec]/1 (C++14): "type-id-list: type-id ..._opt ...", and
+ * /3 of C++14: "A type cv T, 'array of T', or 'function returning T' in an
+ * exception-specification is adjusted to T, pointer to T, or pointer to
+ * function returning T, respectively.  A type denoted in an
+ * exception-specification shall not denote an incomplete type, a pointer or
+ * reference to an incomplete type other than cv void*, or an rvalue
+ * reference type."  A member function's specification is a complete-class
+ * context ([class.mem]/6): a class being defined is not incomplete there.
+ * The exception specification is not part of the type before C++17 and a
+ * dynamic one is potentially throwing after it.
+ */
+analysis_result semantic_analysis::dynamic_exception_types(SyntaxRef n,
+                                                           bool member)
+{
+    for (auto c : n.elements()) {
+        if (c.is(syntax_kind::type_id_list)) {
+            VTRY(r, dynamic_exception_types(c, member));
+            continue;
+        }
+        if (!c.is(syntax_kind::type_id))
+            continue;
+        qualified_type type;
+        VTRY(r, type_id(c, type));
+        qualified_type base = type;
+        const struct type *t = &type_table[base.unqualified()];
+        bool through = false;
+        if (t->kind == type_kind::pointer ||
+            t->kind == type_kind::lvalue_reference) {
+            through = true;
+            base = t->operand;
+            t = &type_table[base.unqualified()];
+        }
+        if (t->kind == type_kind::fundamental &&
+            (t->fundamental != fundamental_type::void_ || through))
+            continue;
+        if (t->kind == type_kind::enumeration ||
+            t->kind == type_kind::pointer_to_member ||
+            t->kind == type_kind::template_parameter ||
+            t->kind == type_kind::dependent)
+            continue;
+        if (t->kind == type_kind::class_type &&
+            entity_table[t->entity].kind == entity_kind::class_type &&
+            (member || size_of_type(base)))
+            continue;
+        return not_supported(c, "except.spec");
+    }
     return analysis_result::well_formed;
 }
 
