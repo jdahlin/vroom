@@ -626,6 +626,17 @@ bool semantic_analysis::function_pointer_convertible(qualified_type from,
            differ_in_exceptions(f0.operand, t0.operand);
 }
 
+/*
+ * [conv.qual]/3: "A prvalue of type T1 can be converted to type T2 if the
+ * cv-combined type of T1 and T2 is T2", the cv-combined type T3 being,
+ * level by level of the cv-decompositions (/1), "for every i > 0, cv3_i is
+ * the union of cv1_i and cv2_i"; an array of unknown bound where either
+ * is; and "if the resulting cv3_i is different from cv1_i or cv2_i, or the
+ * resulting P3_i is different from P1_i or P2_i, then const is added to
+ * every cv3_k for 0 < k < i".  So T1 converts when at each level its cv is
+ * contained in T2's, a bound becomes unknown only in T2, and a level that
+ * differs has const at every level above it (const_above).
+ */
 bool semantic_analysis::qualification_convertible(qualified_type from,
                                                   qualified_type to) const
 {
