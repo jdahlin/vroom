@@ -457,6 +457,43 @@ bool semantic_analysis::closure_prvalue_binding(
 }
 
 /*
+ * [dcl.init.ref]/4: "Given types "cv1 T1" and "cv2 T2", "cv1 T1" is
+ * reference-related to "cv2 T2" if T1 is similar ([conv.qual]) to T2, or T1
+ * is a base class of T2."  ambiguous is set when T1 is an ambiguous base
+ * (base_step).
+ */
+bool semantic_analysis::reference_related(qualified_type t1, qualified_type t2,
+                                          bool &ambiguous) const
+{
+    if (similar(qualified_type::make(t1.unqualified(), cv_none),
+                qualified_type::make(t2.unqualified(), cv_none)))
+        return true;
+    const struct type &x = type_table[t1.unqualified()];
+    const struct type &y = type_table[t2.unqualified()];
+    return x.kind == type_kind::class_type && y.kind == type_kind::class_type &&
+           entity_table[x.entity].kind == entity_kind::class_type &&
+           entity_table[y.entity].kind == entity_kind::class_type &&
+           base_step(y.entity, x.entity, ambiguous) != 0;
+}
+
+/* [dcl.init.ref]/4: ""cv1 T1" is reference-compatible with "cv2 T2" if a
+   prvalue of type "pointer to cv2 T2" can be converted to the type "pointer
+   to cv1 T1" via a standard conversion sequence": the same pointer type, a
+   qualification conversion or a function pointer conversion (the
+   derived-to-base pointer conversion is the class rules') */
+bool semantic_analysis::reference_compatible(qualified_type t1,
+                                             qualified_type t2)
+{
+    qualified_type p1 =
+        qualified_type::make(type_table.pointer_to(t1), cv_none);
+    qualified_type p2 =
+        qualified_type::make(type_table.pointer_to(t2), cv_none);
+    return p1.unqualified() == p2.unqualified() ||
+           qualification_convertible(p2, p1) ||
+           function_pointer_convertible(p2, p1);
+}
+
+/*
  * [dcl.init.ref]/5: "A reference to type "cv1 T1" is initialized by an
  * expression of type "cv2 T2" as follows: ..."  [dcl.init.ref]/4: ""cv1
  * T1" is reference-related to "cv2 T2" if T1 is similar to T2, or T1 is a
@@ -548,15 +585,9 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     if (x.kind == type_kind::class_type || y.kind == type_kind::class_type ||
         x.kind == type_kind::none || y.kind == type_kind::none)
         return not_supported(at, "dcl.init.ref");
-    qualified_type p1 =
-        qualified_type::make(type_table.pointer_to(t1), cv_none);
-    qualified_type p2 =
-        qualified_type::make(type_table.pointer_to(t2), cv_none);
-    bool compatible = p1.unqualified() == p2.unqualified() ||
-                      qualification_convertible(p2, p1) ||
-                      function_pointer_convertible(p2, p1);
-    bool related = similar(qualified_type::make(t1.unqualified(), cv_none),
-                           qualified_type::make(t2.unqualified(), cv_none));
+    bool compatible = reference_compatible(t1, t2);
+    bool ambiguous = false;
+    bool related = reference_related(t1, t2, ambiguous);
     bool function_lvalue =
         y.kind == type_kind::function && m.category == value_category::lvalue;
     /* "If the reference is an lvalue reference and the initializer
@@ -693,7 +724,7 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
     if (c1 != c2 && !entity_table[c2].size)
         return not_supported(at, "dcl.init.ref");
     bool ambiguous = false;
-    bool related = c1 == c2 || base_step(c2, c1, ambiguous);
+    bool related = reference_related(t1, t2, ambiguous);
     if (!related)
         return not_supported(at, "dcl.init.ref");
     if (t2.cv() & ~t1.cv()) {
@@ -1332,16 +1363,8 @@ analysis_result semantic_analysis::reference_list_initialization(
     if (clauses.size() == 1 && !clauses[0].is(syntax_kind::braced_init_list)) {
         expression_meaning e;
         VTRY(r, target_expression(clauses[0], type, e));
-        const struct type y = type_table[e.type.unqualified()];
-        bool related = similar(
-            prvalue_type, qualified_type::make(e.type.unqualified(), cv_none));
-        if (!related && x.kind == type_kind::class_type &&
-            y.kind == type_kind::class_type &&
-            entity_table[x.entity].kind == entity_kind::class_type &&
-            entity_table[y.entity].kind == entity_kind::class_type) {
-            bool ambiguous = false;
-            related = base_step(y.entity, x.entity, ambiguous) != 0;
-        }
+        bool ambiguous = false;
+        bool related = reference_related(referenced, e.type, ambiguous);
         if (related)
             /* (3.9): initialized from the element */
             return initialize_with(list, e, type, direct, true, result);

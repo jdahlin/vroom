@@ -582,9 +582,9 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
             x.kind == type_kind::none || y.kind == type_kind::none)
             return of_form(sequence::form::unknown);
         bool ambiguous = false;
-        bool related = c1 && c2 &&
-                       (c1 == c2 || (entity_table[c2].size &&
-                                     base_step(c2, c1, ambiguous)));
+        /* a base needs the complete derived class */
+        bool related = c1 && c2 && (c1 == c2 || entity_table[c2].size) &&
+                       reference_related(t1, t2, ambiguous);
         if (ambiguous)
             return of_form(sequence::form::unknown);
         if (related) {
@@ -641,18 +641,9 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
             x.kind == type_kind::pointer_to_member ||
             y.kind == type_kind::pointer_to_member)
             return of_form(sequence::form::unknown);
-        /* [dcl.init.ref]/4: ""cv1 T1" is reference-compatible with "cv2 T2"
-           if a prvalue of type "pointer to cv2 T2" can be converted to the
-           type "pointer to cv1 T1" via a standard conversion sequence" */
-        qualified_type p1 =
-            qualified_type::make(type_table.pointer_to(t1), cv_none);
-        qualified_type p2 =
-            qualified_type::make(type_table.pointer_to(t2), cv_none);
-        bool compatible = p1.unqualified() == p2.unqualified() ||
-                          qualification_convertible(p2, p1) ||
-                          function_pointer_convertible(p2, p1);
-        bool related = similar(qualified_type::make(t1.unqualified(), cv_none),
-                               qualified_type::make(t2.unqualified(), cv_none));
+        bool compatible = reference_compatible(t1, t2);
+        bool ambiguous = false;
+        bool related = reference_related(t1, t2, ambiguous);
         bool function_lvalue = y.kind == type_kind::function && lvalue;
         if (compatible && ((!rvalue_reference && lvalue) ||
                            (binds_rvalues && (!lvalue || function_lvalue)))) {
