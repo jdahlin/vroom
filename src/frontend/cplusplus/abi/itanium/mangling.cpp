@@ -668,9 +668,13 @@ bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
  * clause is mangled unsubstituted, so a parameter keeps its level
  * ([abi:mangle.template-param]):
  *
- *     <template-param> ::= T_ | T <parameter-2 non-negative number> _
- *                      ::= TL <L-1 non-negative number> __
- *                      ::= TL <L-1 non-negative number> _ <parameter-2 non-negative number> _
+ *     <template-param> ::= T_
+ *                      ::= T <parameter-2 non-negative number> _
+ *
+ * and, for a parameter of an enclosing level, clang's TL forms of a later
+ * revision of the ABI than docs/itanium-abi-grammar.tsv has: TL, the level
+ * L-1 as a non-negative number, then __ for the first parameter or _, the
+ * parameter-2 number and _.
  *
  * L the number of class templates t is a member of (0: T_); a parameter
  * of another level is a candidate of its own, not the type T_ names.
