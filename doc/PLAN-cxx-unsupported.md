@@ -438,6 +438,21 @@ it; none adds a second way to instantiate.
   mark those scopes unknown, or enter the names; then the workarounds
   go.  ADL for calls with arguments: template arguments' associated
   namespaces, function and member pointers, overload sets are missing.
+- Decision (2026-11-23, from the user): each agent has 25 minutes (soft
+  limit 20: stop coding, run the gates).
+- 6.2 (dropped: marking scopes unknown only loosens 6.1's rule and costs
+  agreement).  Its finding, the names lookup misses although they are
+  declared (each a lookup bug, to fix by entering the name, one commit
+  each): a parameter's name in a later parameter-declaration
+  ([basic.scope.param]: `int n, int v[n]`, `T x, decltype(x) y`); `using
+  enum` enters no enumerators ([enum.udecl]); an anonymous union's members
+  at namespace scope ([class.union.anon]); a lambda's parameter in a later
+  parameter; the body of an extern "C" function redeclaring one of another
+  namespace looks up in that declaration's scope, not its own
+  (cwg3xx.cpp:1037); GNU attribute arguments (enable_if) not in scope; a
+  friend's noexcept in a complete-class context ([class.mem]/7); enumerators
+  of a refused enum-specifier not held.  Patch with the scope marks:
+  scratchpad unknown-scopes-b62.patch.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
