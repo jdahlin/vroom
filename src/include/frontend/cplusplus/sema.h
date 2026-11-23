@@ -5836,6 +5836,9 @@ class semantic_analysis
     /* the conversion-function-id that is the declarator-id of the
        member-declaration or function-definition n, 0 if none */
     SyntaxRef conversion_function_id_of(SyntaxRef n) const;
+    analysis_result qualified_conversion_type(SyntaxRef declaration,
+                                              SyntaxRef conversion,
+                                              qualified_type &type);
     /* the conversion function of class c the definition declared, 0 if
        none */
     entity_index conversion_function_declared_by(entity_index c,

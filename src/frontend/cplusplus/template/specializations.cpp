@@ -491,7 +491,7 @@ analysis_result semantic_analysis::named_specialization(
     if (r == analysis_result::well_formed) {
         type = s.type;
         if (conversion)
-            r = conversion_type(conversion, type);
+            r = qualified_conversion_type(declaration, conversion, type);
     }
     if (r == analysis_result::well_formed) {
         function_cv = 0;
