@@ -27,7 +27,9 @@ SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
 
 /* the simple-template-id of the declarator-id S<A...>::m of a
    simple-declaration of one init-declarator (template<class T> int S<T>::m
-   = 1;), else 0; and the member's name */
+   = 1;) or of one declarator without an initializer (template<class T> int
+   S<T>::m;: [temp.static]/1, a definition, [basic.def]/2), else 0; and the
+   member's name */
 SyntaxRef
 semantic_analysis::out_of_class_variable_member(SyntaxRef declaration,
                                                 token_index *name) const
@@ -35,12 +37,16 @@ semantic_analysis::out_of_class_variable_member(SyntaxRef declaration,
     if (!declaration.is(syntax_kind::simple_declaration) ||
         declaration.size() != 3 ||
         !declaration[0].is(syntax_kind::decl_specifier_seq) ||
-        !declaration[1].is(syntax_kind::init_declarator))
+        !declaration[1].is(syntax_kind::init_declarator,
+                           syntax_kind::qualified_id))
         return 0;
     auto item = declaration[1];
-    if (item.size() != 2 || !item[0].is(syntax_kind::qualified_id))
+    if (item.is(syntax_kind::init_declarator) &&
+        (item.size() != 2 || !item[0].is(syntax_kind::qualified_id)))
         return 0;
-    auto q = item[0];
+    auto q = item;
+    if (item.is(syntax_kind::init_declarator))
+        q = item[0];
     if (q.size() != 2 || !q[0].is(syntax_kind::nested_name_specifier) ||
         !q[1].is_identifier())
         return 0;
@@ -179,7 +185,9 @@ analysis_result semantic_analysis::member_definition_of_template(
     if (class_member) {
         after_declarator_id = class_member_name + 1;
     } else if (variable) {
-        after_declarator_id = definition[1][0].end_token();
+        after_declarator_id = definition[1].end_token();
+        if (definition[1].is(syntax_kind::init_declarator))
+            after_declarator_id = definition[1][0].end_token();
     } else {
         token_index name = 0;
         out_of_class_member(definition, &name);

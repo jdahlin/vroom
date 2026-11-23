@@ -139,6 +139,10 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
             return member_definition_of_template(t, s);
         return variable_template_definition(t, s);
     }
+    /* [temp.static]/1: a static data member of a class template defined
+       outside it without an initializer (template<class T> int S<T>::m;) */
+    if (s.size() == 3 && !lead && out_of_class_variable_member(s))
+        return member_definition_of_template(t, s);
     /* [temp.fct]/1: a function template's declaration (template<class T>
        T f(T);), one declarator not in an init-declarator-list */
     /* [temp.pre]/1: a variable template without an initializer
