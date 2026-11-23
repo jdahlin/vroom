@@ -1948,16 +1948,20 @@ lines:
   data (`pointer_tree`: `&x`, array plus index, a literal decayed, null),
   so a pointer a constexpr function returns is constant-initialized; virtual
   calls (`virtual constexpr` is declared; the final overrider by the dynamic
-  class's table slots, `this` the overrider's subobject).  `goto` is not
-  constant, as clang's.  `-DVCC_TRACE_UNKNOWN` prints each refusal's line.
-  Not done: `new`/`delete`, virtual bases, `dynamic_cast`/`typeid`, member
+  class's table slots, `this` the overrider's subobject); `new` and
+  `delete` (a heap object until freed, the destructor run, a leak makes a
+  constexpr variable's initializer not constant; the allocation function is
+  not called).  `goto` is not constant, as clang's.
+  `-DVCC_TRACE_UNKNOWN` prints each refusal's line.
+  Not done: array `new` (analysis refuses it), virtual bases,
+  `dynamic_cast`/`typeid`, member
   pointers, long double, arrays of unknown shape from brace elision (an
   analysis bound bug it showed: `Y b[] = {1,2,3,4,5,6}` with a default
   member initializer has bound 6).  cxx-sema (default suites): unsupported
-  40598 -> 40017, declarations as clang 83682 -> 84231, 0 refuted more;
+  40598 -> 39978, declarations as clang 83682 -> 84266, 0 refuted more;
   `--suites all` adds CodeGenCXX, Parser and Sema (1890 runs, no crash: 42
   more declarations as clang, nothing new refused or refuted); cxx-run
-  777/777; cxx-c-suites unchanged.
+  778/778; cxx-c-suites unchanged.
 
   S6b's first rules: function templates.  A namespace-scope
   function-definition after `template<class T, typename U>` (type
