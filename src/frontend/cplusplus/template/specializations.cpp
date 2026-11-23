@@ -138,6 +138,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                 !m.aligned && !ms.section && !m.section && !m.asm_label) {
                 entity_index e =
                     entity_table.find(m.qualifier, tokens.identifier(m.id));
+                if (e && entity_table[e].kind == entity_kind::function &&
+                    !entity_table[e].next_overload)
+                    define_waiting_members(m.qualifier, m.id, false);
                 entity_index match = overload_of_type(e, type, cv);
                 if (match) {
                     entity_table[match].member_body_deferred = false;
@@ -183,9 +186,11 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             item = item[0];
             VTRY(nr, nested_name_specifier(item[0].index(), ns));
             entity_index v = 0;
-            if (is_class_entity(ns.entity))
+            if (is_class_entity(ns.entity)) {
+                define_waiting_members(ns.entity, member_name, false);
                 v = entity_table.find(ns.entity,
                                       tokens.identifier(member_name));
+            }
             uint32_t record = 0;
             if (v)
                 record = entity_table[ns.entity].instantiation;
@@ -326,6 +331,7 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
             entity_index v = 0;
             uint32_t record = 0;
             if (is_class_entity(ns.entity)) {
+                define_waiting_members(ns.entity, member_name);
                 v = entity_table.find(ns.entity,
                                       tokens.identifier(member_name));
                 record = entity_table[ns.entity].instantiation;
@@ -934,7 +940,9 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     if (record.pattern &&
         !function_templates[record.pattern - 1].parameter_count)
         return not_supported(n, "temp.explicit");
-    /* the member: one function of the name, of the declared type */
+    /* the member: one function of the name, of the declared type (the
+       definition outside its class, if waiting, made now: [temp.explicit]/10) */
+    define_waiting_members(m.qualifier, m.id);
     entity_index f =
         explicit_instantiation_target(c, m, type, cv, has_specifiers, variable);
     if (!f || entity_table[f].enclosing != m.qualifier)

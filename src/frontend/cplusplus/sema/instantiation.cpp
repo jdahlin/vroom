@@ -13,6 +13,7 @@
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
+#include "../template/declared-templates.h"
 
 namespace cplusplus
 {
@@ -626,7 +627,7 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
             if (template_member_definitions[m].template_entity ==
                     record.template_entity &&
                 template_member_definitions[m].pattern == record.pattern)
-                define_template_member(m, index, true);
+                defer_or_define_member(m, index);
     /* a class being defined named the specialization: its members so far
        again after the specialization's, as after a nested class
        (class_definition) */
@@ -649,6 +650,104 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
     return refused;
 }
 
+/* [temp.inst]/2-4: an out-of-class definition of a member of a class
+   template's specialization is defined when a member it may define is needed
+   (postponed_bodies, instantiate_pending); a member template's, a nested
+   class's and one in a specialization defined within another class now */
+void semantic_analysis::defer_or_define_member(uint32_t m, uint32_t index)
+{
+    const template_member_definition o = template_member_definitions[m];
+    bool now = o.inner || !instantiations[index].specialization;
+    if (!now && o.definition.is(syntax_kind::simple_declaration) &&
+        out_of_class_class_member(sole_decl_specifier(o.definition), nullptr))
+        now = true;
+    /* [temp.inst]/3: a constexpr or const static data member is usable in
+       constant expressions: defined with the class */
+    if (!now && o.definition.is(syntax_kind::simple_declaration)) {
+        token_index name = member_definition_name(o);
+        entity_index v = 0;
+        if (name)
+            v = entity_table.find(instantiations[index].specialization,
+                                  tokens.identifier(name));
+        if (v && entity_table[v].kind == entity_kind::variable &&
+            (entity_table[v].constexpr_ ||
+             (entity_table[v].type.cv() & cv_const)))
+            now = true;
+    }
+    if (now) {
+        define_template_member(m, index, true);
+        return;
+    }
+    postponed_body b = {};
+    b.c = instantiations[index].specialization;
+    b.member_definition = m + 1;
+    b.instantiation = index;
+    postponed_bodies.append(b);
+}
+
+token_index
+semantic_analysis::member_definition_name(const template_member_definition &o)
+{
+    token_index name = 0;
+    if (o.definition.is(syntax_kind::simple_declaration))
+        out_of_class_variable_member(o.definition, &name);
+    else
+        out_of_class_member(o.definition, &name);
+    return name;
+}
+
+/* [temp.explicit]/10: an explicit instantiation of a member names it: the
+   definitions waiting for it are made now; [temp.expl.spec]/7: an explicit
+   specialization of it replaces them (define false) */
+void semantic_analysis::define_waiting_members(entity_index scope,
+                                               token_index name, bool define)
+{
+    for (size_t i = 0; i < postponed_bodies.size(); i++) {
+        const postponed_body b = postponed_bodies[i];
+        if (!b.c || !b.member_definition ||
+            instantiations[b.instantiation].specialization != scope)
+            continue;
+        token_index n = member_definition_name(
+            template_member_definitions[b.member_definition - 1]);
+        if (n && tokens.identifier(n) != tokens.identifier(name))
+            continue;
+        postponed_bodies[i].c = 0;
+        if (define)
+            define_template_member(b.member_definition - 1, b.instantiation,
+                                   true);
+    }
+}
+
+/* whether a member the definition may define is needed: one named so in the
+   specialization with its definition needed, or explicitly instantiated */
+bool semantic_analysis::member_definition_wanted(const postponed_body &b)
+{
+    const template_member_definition o =
+        template_member_definitions[b.member_definition - 1];
+    token_index name = member_definition_name(o);
+    if (!name)
+        return true;
+    entity_index scope = instantiations[b.instantiation].specialization;
+    /* (a virtual function is needed by the vtable, [temp.inst]/11; an
+       explicit instantiation of the class defines its members, /10) */
+    if (entity_table[scope].explicitly_instantiated ==
+        instantiation_kind::definition)
+        return true;
+    entity_index first = entity_table.find(scope, tokens.identifier(name));
+    /* (a constructor, destructor or operator is found by no such name here:
+       defined with the unit) */
+    if (!first || (entity_table[first].kind != entity_kind::function &&
+                   entity_table[first].kind != entity_kind::variable))
+        return true;
+    for (entity_index e = first; e; e = entity_table[e].next_overload) {
+        if (entity_table[e].member_definition_needed ||
+            entity_table[e].virtual_ ||
+            explicitly_instantiated(e) == instantiation_kind::definition)
+            return true;
+    }
+    return false;
+}
+
 /* [temp.point]/7: the definitions of the specializations used, after the
    translation unit's declarations (each may use more) */
 void semantic_analysis::instantiate_pending()
@@ -659,6 +758,15 @@ void semantic_analysis::instantiate_pending()
         progress = false;
         for (size_t i = 0; i < postponed_bodies.size(); i++) {
             const postponed_body b = postponed_bodies[i];
+            if (b.c && b.member_definition) {
+                if (!member_definition_wanted(b))
+                    continue;
+                postponed_bodies[i].c = 0;
+                define_template_member(b.member_definition - 1, b.instantiation,
+                                       true);
+                progress = true;
+                continue;
+            }
             if (!b.c || (b.function &&
                          !entity_table[b.function].member_definition_needed &&
                          explicitly_instantiated(b.function) !=

@@ -5387,8 +5387,18 @@ class semantic_analysis
         entity_index scope;
         SyntaxRef declaration;
         entity_index function = 0;
+        /* a member definition outside the class (template_member_definitions
+           index + 1) of the specialization instantiations[instantiation]:
+           defined when a member it may define is needed ([temp.inst]/2-4) */
+        uint32_t member_definition = 0;
+        uint32_t instantiation = 0;
     };
     owned_array<postponed_body> postponed_bodies;
+    bool member_definition_wanted(const postponed_body &b);
+    token_index member_definition_name(const template_member_definition &o);
+    void define_waiting_members(entity_index scope, token_index name,
+                                bool define = true);
+    void defer_or_define_member(uint32_t m, uint32_t index);
     bool postpone_member_bodies = false;
     analysis_result analyse_function_body(SyntaxRef definition,
                                           SyntaxElement compound,

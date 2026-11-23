@@ -136,6 +136,9 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
                  kind == semantic_kind::destroy ||
                  kind == semantic_kind::bound_member_function)
             function = b;
+        else if ((kind == semantic_kind::entity) && a &&
+                 entity_table[a].kind == entity_kind::variable)
+            function = a;
         if (function)
             entity_table[function].member_definition_needed = true;
         complete_class_type(m.type);
