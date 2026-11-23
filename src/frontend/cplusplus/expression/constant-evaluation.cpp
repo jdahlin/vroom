@@ -470,6 +470,103 @@ entity_index semantic_analysis::element_destructor(qualified_type type,
     return entity_table[type_table[object.unqualified()].entity].destructor;
 }
 
+/* [stmt.dcl]/2, [expr.call]/8: the object just made (the last of the
+   evaluation's objects) of this type is destroyed when its scope ends */
+void semantic_analysis::add_destroyed(constant_evaluation &state,
+                                      qualified_type type)
+{
+    constant_evaluation::destruction d;
+    d.object = static_cast<uint32_t>(state.objects.size() - 1);
+    d.type = type;
+    state.destructions.append(d);
+}
+
+/* [class.dtor]: the destructor of the object of the type at place, of each
+   element of an array from the last ([dcl.init.aggr]/?, [class.dtor]/13:
+   reverse order of the construction) */
+constness semantic_analysis::destroy_object(constant_evaluation &state,
+                                            uint32_t place, qualified_type type)
+{
+    qualified_type element;
+    entity_index destructor = element_destructor(type, element);
+    if (!destructor)
+        return constness::constant;
+    const struct type record = type_table[type.unqualified()];
+    if (record.kind == type_kind::array) {
+        const constant_value array = place_value(state, place);
+        if (array.kind != constant_value_kind::array)
+            return CONST_UNKNOWN;
+        for (uint32_t i = array.count; i-- > 0;) {
+            constness c = destroy_object(
+                state, element_place | (array.first + i), record.operand);
+            if (c != constness::constant)
+                return c;
+        }
+        return constness::constant;
+    }
+    constant_value self;
+    self.kind = constant_value_kind::pointer;
+    self.first = place;
+    self.count = 1;
+    if (!(place & element_place))
+        self.stamp = state.objects[place].serial;
+    bool returned = false;
+    constant_value result;
+    return evaluate_invocation(state, destructor, self, 0, 0, returned, result);
+}
+
+/* [intro.execution]/5: the end of a full-expression: the temporaries it
+   made are destroyed, last first (the destructions past keep) */
+constness semantic_analysis::end_full_expression(constant_evaluation &state,
+                                                 size_t keep, constness c,
+                                                 constant_value &result)
+{
+    while (state.destructions.size() > keep) {
+        constant_evaluation::destruction d =
+            state.destructions[state.destructions.size() - 1];
+        state.destructions.resize(state.destructions.size() - 1);
+        if (c != constness::constant)
+            continue;
+        constant_value held = result;
+        uint32_t jump = state.jump;
+        state.jump = jump_none;
+        c = destroy_object(state, d.object, d.type);
+        state.jump = static_cast<uint8_t>(jump);
+        result = held;
+    }
+    return c;
+}
+
+/* the end of a scope ([basic.stc.auto]/1): the objects declared since
+   objects (and their elements) are destroyed, last first, then go.  Only
+   an evaluation that is going on has destructors to run. */
+constness semantic_analysis::leave_scope(constant_evaluation &state,
+                                         size_t objects, size_t elements,
+                                         bool &returned, constant_value &result,
+                                         constness c)
+{
+    while (!state.destructions.empty() &&
+           state.destructions[state.destructions.size() - 1].object >=
+               objects) {
+        constant_evaluation::destruction d =
+            state.destructions[state.destructions.size() - 1];
+        state.destructions.resize(state.destructions.size() - 1);
+        if (c != constness::constant)
+            continue;
+        /* the value a return statement gave stays while they run */
+        bool destroyed_returned = false;
+        constant_value held = result;
+        uint32_t jump = state.jump;
+        state.jump = jump_none;
+        c = destroy_object(state, d.object, d.type);
+        state.jump = static_cast<uint8_t>(jump);
+        result = held;
+        (void)destroyed_returned;
+    }
+    restore(state, objects, kept_elements(state, elements, returned, result));
+    return c;
+}
+
 /* the object of entity e in the invocation being evaluated, or none */
 uint32_t semantic_analysis::frame_object(const constant_evaluation &state,
                                          entity_index e) const
@@ -1192,9 +1289,11 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
     if (x.category != value_category::prvalue || !evaluated_class(x.type))
         return CONST_UNKNOWN;
     /* [class.temporary]/4: the temporary's destructor runs at the end of
-       the full-expression, which the evaluator does not do yet */
+       the full-expression, which a statement that makes its own ends
+       (temporaries_ok) does */
     qualified_type destroyed;
-    if (element_destructor(x.type, destroyed))
+    bool destructor = element_destructor(x.type, destroyed) != 0;
+    if (destructor && !state.temporaries_ok)
         return CONST_UNKNOWN;
     constant_value v;
     c = evaluate_node(state, node, v);
@@ -1207,6 +1306,8 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
     o.value = v;
     object = static_cast<uint32_t>(state.objects.size());
     append_object(state, o);
+    if (destructor)
+        add_destroyed(state, x.type);
     return constness::constant;
 }
 
@@ -2116,9 +2217,18 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
     case semantic_kind::string_literal:
     case semantic_kind::bound_member_function:
     case semantic_kind::assignment:
+    /* [class.dtor]/13: the destructor called on the object (a
+       subobject's, after the body of a destructor; an explicit call) */
+    case semantic_kind::destroy: {
+        uint32_t place = 0;
+        c = evaluate_object(state, x.a, place);
+        if (c != constness::constant)
+            return c;
+        v = constant_value();
+        return destroy_object(state, place, semantics[x.a].type);
+    }
     /* initialization: [dcl.init], [class.dtor] */
     case semantic_kind::bind_reference:
-    case semantic_kind::destroy:
     default:
         return CONST_UNKNOWN;
     }
@@ -2309,7 +2419,7 @@ constness semantic_analysis::evaluate_invocation(
         with_this = 1;
     if (!body || semantics[body].kind != semantic_kind::function_body ||
         semantics[body].evaluation == constness::not_constant ||
-        semantics[body].c || semantics[body].count != count + with_this ||
+        semantics[body].count != count + with_this ||
         (state.defined_before && semantics[body].at > state.defined_before)) {
         if (entity_table[f].held_because)
             evaluation_cause = entity_table[f].held_because;
@@ -2354,22 +2464,17 @@ constness semantic_analysis::evaluate_invocation(
                     kept_elements(state, saved_elements, returned, result));
             return CONST_UNKNOWN;
         }
-        /* [expr.call]/8: a parameter of a type with a destructor is
-           destroyed when the function returns or at the end of the
-           full-expression: not run yet */
-        qualified_type destroyed;
-        if (element_destructor(entity_table[parameters[i + with_this]].type,
-                               destroyed) &&
-            type_table[entity_table[parameters[i + with_this]]
-                           .type.unqualified()]
-                    .kind != type_kind::lvalue_reference) {
-            restore(state, saved,
-                    kept_elements(state, saved_elements, returned, result));
-            return CONST_UNKNOWN;
-        }
         o.entity = parameters[i + with_this];
         o.frame = frame;
         append_object(state, o);
+        /* [expr.call]/8: a parameter of a class type with a destructor is
+           destroyed when the function returns (the order of the
+           parameters' destruction is reverse of their making) */
+        qualified_type destroyed;
+        qualified_type declared =
+            type_table.parameters(entity_table[f].type.unqualified())[i];
+        if (element_destructor(declared, destroyed))
+            add_destroyed(state, declared);
     }
     if (arguments != constness::constant) {
         restore(state, saved,
@@ -2377,6 +2482,9 @@ constness semantic_analysis::evaluate_invocation(
         return arguments;
     }
     uint32_t caller = state.frame;
+    /* the callee's statements end their own full-expressions */
+    uint32_t caller_temporaries = state.temporaries_ok;
+    state.temporaries_ok = 0;
     state.frames = frame;
     state.frame = frame;
     state.depth++;
@@ -2387,14 +2495,21 @@ constness semantic_analysis::evaluate_invocation(
         c = evaluate_statement(state, semantics[body].b, returned, result);
     if (c == constness::constant)
         c = evaluate_statement(state, semantics[body].a, returned, result);
+    /* [class.dtor]/9: after a destructor's body, the destructors of its
+       members and bases (the body's list of them) */
+    if (c == constness::constant && semantics[body].c) {
+        bool destructions_returned = false;
+        constant_value discarded;
+        c = evaluate_statement(state, semantics[body].c, destructions_returned,
+                               discarded);
+    }
     state.depth--;
     state.frame = caller;
+    state.temporaries_ok = caller_temporaries;
     /* a class object returned keeps its elements */
     if (result.kind == constant_value_kind::class_object)
         saved_elements = state.elements.size();
-    restore(state, saved,
-            kept_elements(state, saved_elements, returned, result));
-    return c;
+    return leave_scope(state, saved, saved_elements, returned, result, c);
 }
 
 /*
@@ -2680,13 +2795,38 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         }
         /* a declarations node's variables are in the enclosing block */
         if (x.kind == semantic_kind::block)
-            restore(state, saved,
-                    kept_elements(state, saved_elements, returned, result));
+            return leave_scope(state, saved, saved_elements, returned, result,
+                               c);
         return c;
     }
     case semantic_kind::expression_statement: {
         constant_value discarded;
-        return evaluate_node(state, x.a, discarded);
+        /* [class.temporary]/4: a discarded prvalue of a class type with a
+           destructor is a temporary destroyed at once: not run yet */
+        qualified_type destroyed;
+        bool in_place =
+            semantics[x.a].kind == semantic_kind::construct && semantics[x.a].a;
+        size_t mark = state.destructions.size();
+        state.temporaries_ok++;
+        if (!in_place && semantics[x.a].category == value_category::prvalue &&
+            element_destructor(semantics[x.a].type, destroyed)) {
+            /* the temporary is made, then destroyed at the semicolon */
+            c = evaluate_node(state, x.a, discarded);
+            if (c == constness::constant &&
+                discarded.kind == constant_value_kind::class_object) {
+                constant_evaluation::object o;
+                o.frame = state.frame;
+                o.value = discarded;
+                append_object(state, o);
+                add_destroyed(state, semantics[x.a].type);
+            } else if (c == constness::constant) {
+                c = CONST_UNKNOWN;
+            }
+        } else {
+            c = evaluate_node(state, x.a, discarded);
+        }
+        state.temporaries_ok--;
+        return end_full_expression(state, mark, c, result);
     }
     case semantic_kind::declaration_statement: {
         const entity &e = entity_table[x.a];
@@ -2702,11 +2842,6 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
                 return constness::not_constant;
             return CONST_UNKNOWN;
         }
-        /* [stmt.dcl]/2: the destructor runs when the block ends, which the
-           evaluator does not do yet */
-        qualified_type destroyed;
-        if (element_destructor(e.type, destroyed))
-            return CONST_UNKNOWN;
         /* [basic.scope.pdecl]/1: the variable is in scope in its own
            initializer */
         constant_evaluation::object o;
@@ -2717,7 +2852,19 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         uint32_t init = x.b;
         if (state.seek)
             init = 0;
-        return evaluate_initialization(state, e.type, init, false, index);
+        size_t mark = state.destructions.size();
+        state.temporaries_ok++;
+        c = evaluate_initialization(state, e.type, init, false, index);
+        state.temporaries_ok--;
+        c = end_full_expression(state, mark, c, result);
+        /* [stmt.dcl]/2: "Variables with automatic storage duration are
+           destroyed when the block is left, in reverse order of their
+           declaration" */
+        qualified_type destroyed;
+        if (c == constness::constant && !state.seek &&
+            element_destructor(e.type, destroyed))
+            add_destroyed(state, e.type);
+        return c;
     }
     case semantic_kind::if_statement: {
         if (x.d) {
@@ -2733,9 +2880,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
             else if (x.c)
                 c = evaluate_statement(state, x.c, returned, result);
         }
-        restore(state, saved,
-                kept_elements(state, saved_elements, returned, result));
-        return c;
+        return leave_scope(state, saved, saved_elements, returned, result, c);
     }
     case semantic_kind::while_statement:
     case semantic_kind::do_statement:
@@ -2769,8 +2914,8 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
             }
             skip_test = false;
             c = evaluate_statement(state, body, returned, result);
-            restore(state, iteration,
-                    kept_elements(state, iteration_elements, returned, result));
+            c = leave_scope(state, iteration, iteration_elements, returned,
+                            result, c);
             if (c != constness::constant || returned)
                 break;
             uint8_t jump = state.jump;
@@ -2788,9 +2933,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
                 break;
             }
         }
-        restore(state, saved,
-                kept_elements(state, saved_elements, returned, result));
-        return c;
+        return leave_scope(state, saved, saved_elements, returned, result, c);
     }
     case semantic_kind::break_statement:
         state.jump = jump_break;
@@ -2800,8 +2943,13 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         return c;
     case semantic_kind::return_statement:
         result = constant_value();
-        if (x.a)
+        if (x.a) {
+            size_t mark = state.destructions.size();
+            state.temporaries_ok++;
             c = evaluate_node(state, x.a, result);
+            state.temporaries_ok--;
+            c = end_full_expression(state, mark, c, result);
+        }
         returned = true;
         return c;
     case semantic_kind::identifier_label:
@@ -2843,9 +2991,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
             if (state.jump == jump_break)
                 state.jump = jump_none;
         }
-        restore(state, saved,
-                kept_elements(state, saved_elements, returned, result));
-        return c;
+        return leave_scope(state, saved, saved_elements, returned, result, c);
     }
     /* [dcl.constexpr]/3.5.1: "a goto statement" may not be in the body */
     case semantic_kind::goto_statement:

@@ -3500,6 +3500,16 @@ class semantic_analysis
             constant_value value;
         };
         owned_array<object> objects;
+        /* the objects whose destructor runs when their scope ends, last
+           made last: the index of the object, its declared type */
+        struct destruction {
+            uint32_t object = 0;
+            qualified_type type;
+        };
+        owned_array<destruction> destructions;
+        /* inside a statement that ends its full-expressions: a temporary
+           with a destructor may be made */
+        uint32_t temporaries_ok = 0;
         /* the string literals evaluated, one object each, which stay for
            the whole evaluation: what lies below them stays too */
         struct literal_object {
@@ -3539,6 +3549,14 @@ class semantic_analysis
        designates among state.objects; evaluate_read: the value a glvalue's
        lvalue-to-rvalue conversion reads; evaluate_statement: returned is set
        by a return statement, with its value in result */
+    void add_destroyed(constant_evaluation &state, qualified_type type);
+    constness destroy_object(constant_evaluation &state, uint32_t place,
+                             qualified_type type);
+    constness end_full_expression(constant_evaluation &state, size_t keep,
+                                  constness c, constant_value &result);
+    constness leave_scope(constant_evaluation &state, size_t objects,
+                          size_t elements, bool &returned,
+                          constant_value &result, constness c);
     void assign_value(constant_evaluation &state, uint32_t place,
                       const constant_value &v);
     constness base_subobject_place(const constant_evaluation &state,
