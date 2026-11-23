@@ -1610,9 +1610,17 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 named_at = t;
                 break;
             }
-            /* [dcl.spec.auto]/1: a placeholder-type-specifier */
-            if (!allow_placeholder)
-                return not_supported(seq, specifier_subclause(kw));
+            /* [dcl.spec.auto]/1: a placeholder-type-specifier; where the
+               context does not take one, the detail says which */
+            if (!allow_placeholder) {
+                const char *context = "in a declaration that takes none";
+                if (parameter)
+                    context = "in a parameter-declaration";
+                else if (seq.is(syntax_kind::type_specifier_seq))
+                    context = "in a type-id";
+                return not_supported_because(seq, specifier_subclause(kw),
+                                             context);
+            }
             if (!tokens.files.behavior.has(
                     language_feature::auto_type_specifier)) {
                 /* [ext.clang] before C++11: auto with no other type
