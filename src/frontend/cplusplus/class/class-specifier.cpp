@@ -2184,7 +2184,14 @@ void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n)
 {
     diagnostics_suppressed hush(diagnostics);
     size_t unsupported_before = unsupported.size();
+    quiet_member_bodies++;
     analysis_result r = member_function_body(c, n);
+    quiet_member_bodies--;
+    /* ill-formed for these arguments (its diagnostics hushed, or a
+       definition it wanted failed quietly): a use of the member is
+       refused, never a call of a function without code */
+    if (r == analysis_result::ill_formed && last_declared)
+        r = not_supported(n, "temp.inst");
     if (r == analysis_result::ill_formed)
         entity_table[last_declared].defined = false;
     if (r == analysis_result::unsupported && last_declared) {

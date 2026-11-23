@@ -4110,6 +4110,11 @@ class semantic_analysis
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, SyntaxRef definition);
     void instantiated_member_body(entity_index c, SyntaxRef definition);
+    /* [temp.inst]/4: inside instantiated_member_body, a body of an
+       implicit instantiation's member not known to be used, or a
+       definition only such a body wanted (instantiation_record::quiet):
+       what it instantiates is as quiet */
+    uint32_t quiet_member_bodies = 0;
     analysis_result member_function_definition(entity_index c,
                                                FunctionDefinition definition);
     /* [expr.ref]: the member e of the object m (a glvalue of class type) */
@@ -4537,6 +4542,10 @@ class semantic_analysis
            analysed */
         entity_index scope = 0;
         bool defined = false, pending = false, defining = false;
+        /* a function template's: its definition is wanted only by member
+           bodies analysed quietly (quiet_member_bodies), no use of the
+           specialization known: instantiated quietly too */
+        bool quiet = false;
         /* a class's: the partial or explicit specialization whose
            class-specifier defines it (function_templates' index plus one;
            0 the primary template's) and its parameters' arguments
@@ -5229,6 +5238,9 @@ class semantic_analysis
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
     owned_array<instantiation_record> instantiations;
+    void want_definition(instantiation_record &x, uint32_t index);
+    analysis_result quiet_definition_failed(SyntaxRef at, uint32_t index,
+                                            analysis_result r);
     /* the instantiation record of the template's specialization for the
        arguments, plus one; 0 if there is none yet */
     uint32_t find_instantiation(entity_index t, const template_argument *a,

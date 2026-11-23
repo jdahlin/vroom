@@ -86,6 +86,9 @@ class c_lowering
         tail_reused.resize(analysis.entity_table.size());
         for (uint8_t &f : tail_reused)
             f = 0;
+        used_symbols.resize(analysis.entity_table.size());
+        for (uint8_t &f : used_symbols)
+            f = 0;
         complete_symbols.resize(analysis.entity_table.size());
         for (uint32_t &s : complete_symbols)
             s = 0;
@@ -750,10 +753,14 @@ class c_lowering
     uint32_t condition(uint32_t n, owned_array<uint32_t> &out);
     uint32_t label(uint32_t identifier);
     bool function_definition(entity_index e);
-    /* a static or inline function of a system header that cannot be lowered
-       is dropped, and a use of it refused: clang emits none that nothing
-       uses (<immintrin.h> defines hundreds over builtins vcc lacks) */
+    /* an inline function, a static one of a system header, or a member of
+       an implicit instantiation ([temp.inst]/4: instantiated where used),
+       that cannot be lowered is dropped, and a use of it refused: clang
+       emits none that nothing uses (<immintrin.h> defines hundreds over
+       builtins vcc lacks); one a use already named is not */
     bool function_definition_or_drop(entity_index e);
+    /* per entity: a use made its symbol (symbol(), not declaring) */
+    owned_array<uint8_t> used_symbols;
     struct dropped_function {
         entity_index entity;
         lowering_failure failure;
