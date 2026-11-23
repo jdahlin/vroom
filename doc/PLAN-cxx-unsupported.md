@@ -186,6 +186,12 @@ after step 0 the work list gives a better estimate, recorded here.
   warm: cxx-sema --check 11 s, cxx-run 25 s, cxx-fe-bench under 1 s.
   cxx-fe-bench flickers by about 0.1-0.2 % with string layout (startup
   strcmp): a harness issue.  Next: step 2, faster gates (cxx-run first).
+- Step 2 (03a8f1150 fix, f1f1d92cf simplify): cxx-run caches clang's side
+  per program (ref.json) and marks a vcc object byte-identical to one that
+  passed against the same reference; keys hold the program, units, flags,
+  the tools' identity, the run time, clang's headers and the harness's code;
+  vpp always runs; --no-cache / NOCACHE=1.  Warm 25 s -> 8 s.  Per-step gate
+  warm now about 20 s (cxx-sema --check 11 s is next to look at).
 - Queue: vpp segfaults on two clang test files (found in the -std=gnu++20
   sweep); `semantic_kind_name` lacks complex_value, complex_part,
   statement_expression (wrong names in tree dumps).
