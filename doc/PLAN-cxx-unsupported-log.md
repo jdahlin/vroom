@@ -522,3 +522,7 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   refused ("dcl.constexpr", the rule is not implemented).  The implicit copy
   assignment X& operator=(X&) is declared; no metric moved.  Unsupported
   36382 -> 36214.
+- Review of 9.3 (orchestrator): 746a6ecf8 was blessed with we reject 495
+  (+3, p5-var.cpp:95), fixed by the next commit 4e4f4a73d; the tip is
+  right, that one commit alone is not (left as is: pushed history).
+  fe-bench per step +0.49 %: watched against an older base.
