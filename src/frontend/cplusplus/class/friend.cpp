@@ -500,6 +500,9 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     specified s;
     bool outer = friend_allowed;
     friend_allowed = true;
+    /* [dcl.spec.auto]/1, [dcl.spec.auto.general]: a friend function's
+       return type can be a placeholder */
+    placeholder_allowed = true;
     analysis_result r = decl_specifier_seq(tail[0], s, false);
     friend_allowed = outer;
     if (r != analysis_result::well_formed)
@@ -1106,6 +1109,7 @@ analysis_result semantic_analysis::friend_function_body(
     specified s;
     bool outer = friend_allowed;
     friend_allowed = true;
+    placeholder_allowed = true;
     analysis_result r =
         decl_specifier_seq(definition.decl_specifier_seq().index(), s, false);
     friend_allowed = outer;
