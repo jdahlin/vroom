@@ -984,8 +984,21 @@ semantic_analysis::common_type_of(SyntaxRef id, entity_index base,
     if (!count)
         return analysis_result::well_formed;
     /* /3.2: "If sizeof...(T) is one, ... common_type_t<T0, T0>" */
-    if (count == 1)
-        return common_type_pair(id, base, types[0], types[0], found, out);
+    if (count == 1) {
+        qualified_type two[2] = {types[0], types[0]};
+        type_index t = 0;
+        substitution_mark mark = mark_substitution();
+        substituting++;
+        analysis_result r = template_with_types(id, base, two, 2, t);
+        substituting--;
+        if (r == analysis_result::ill_formed && undo_substitution(mark))
+            return analysis_result::well_formed;
+        if (r != analysis_result::well_formed)
+            return r;
+        found = common_found::found;
+        out = qualified_type::make(t, cv_none);
+        return analysis_result::well_formed;
+    }
     /* /3.4: "If sizeof...(T) is greater than two, ... Let C denote the
        same type, if any, as common_type_t<T1, T2>. If there is such a
        type C, the member typedef-name type shall denote the same type, if
