@@ -189,6 +189,11 @@ VPRIV void driver_predef_build(struct driver_job *job)
             &job->predefines,
             "#undef __STDC_VERSION__\n#define __STDC_VERSION__ 201710L\n");
     }
+    /* C with -fexceptions: clang defines __EXCEPTIONS (C++'s tables have it) */
+    if (!job->cxx && job->c_exceptions && !job->asm_mode &&
+        !job->undefine_predefined)
+        driver_buffer_append_string(&job->predefines,
+                                    "#define __EXCEPTIONS 1\n");
     job->pp_options.target = job->darwin            ? PP_DARWIN
                              : job->wasm_bits == 64 ? PP_WASM64
                              : job->wasm_bits       ? PP_WASM32

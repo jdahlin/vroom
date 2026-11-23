@@ -915,9 +915,19 @@ static int codegen_unit_round_emit(cc *c, const cc_options *o, bool write_out,
             win64_tail(c, &tail, E.refptr,
                        atomic_load_explicit(&E.stack_guard_refptr,
                                             memory_order_relaxed));
-        else
+        else {
+            /* exceptions: the word holding the personality routine's address, the operand of
+               .cfi_personality 155 (arch/x64/codegen/print.cpp) */
+            if (c->eh_personality)
+                vtext_format_append(
+                    &tail,
+                    "\t.section\t.data.rel.ro,\"aw\",@progbits\n"
+                    "\t.p2align\t3\n.Lvcc_personality:\n"
+                    "\t.quad\t%s\n",
+                    c->eh_personality);
             vtext_string_append(
                 &tail, "\t.section\t\".note.GNU-stack\",\"\",@progbits\n");
+        }
         iov[k++] = VCC_LITERAL(struct iovec, hdr.p, hdr.n);
         for (uint32_t i = 0; i < E.chunk_count; i++)
             iov[k++] = VCC_LITERAL(struct iovec, (void *)E.chunks[i].text,

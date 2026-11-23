@@ -523,8 +523,9 @@ typedef struct
     int debug;    /* -g: DWARF line tables (ELF, COFF) */
     int dbg_version; /* -gdwarf-N: 2..5; 0 the target's default (Windows 4, else 5) */
     int cfi; /* -fasynchronous-unwind-tables: .cfi_* (ELF), .eh_frame from the assembler */
-    int eh; /* C++ with exceptions (x86-64 ELF, cfi): cleanup variables run when an exception unwinds
-				   their scope (landing pads, .gcc_except_table) */
+    int eh; /* exceptions (C++ unless -fno-exceptions, C with -fexceptions; x86-64 ELF, cfi): cleanup
+				   variables run when an exception unwinds their scope (landing pads, .gcc_except_table);
+				   ast_builder_exceptions_ready makes the run-time symbols they need */
     int no_seh; /* Windows: -fno-asynchronous-unwind-tables without -funwind-tables: no .seh_* (no .pdata/.xdata) */
     const char *dbg_dir,
         *dbg_name; /* the compilation directory and the main file, as named */

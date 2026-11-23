@@ -140,6 +140,7 @@ struct driver_job {
     /* C++ (PLAN-cxx.md X2): cxx is the standard's year (98 .. 26), 0 for C; cxx_given: -std=c++NN seen */
     int cxx, cxx_given, cxx_libcxx, no_exceptions, no_rtti,
         no_standard_cxx_includes;
+    int c_exceptions; /* C: -fexceptions (clang: off by default; C++ uses no_exceptions) */
     int trigraphs, standard, strict_standard, allow_implicit_int,
         allow_implicit_function, gnu89_inline, vcc_kernel,
         conversion_warning_flags;
@@ -185,6 +186,14 @@ VPRIV int driver_depfile_write(const pp *p, const char *cwd,
                                const char *depfile, const char *target,
                                int nosys, int phony, const char *first,
                                const char *out, int outfd, int errfd);
+/* exceptions on: C++ unless -fno-exceptions, C with -fexceptions (clang's defaults) */
+static inline int driver_exceptions(const struct driver_job *job)
+{
+    if (job->cxx)
+        return !job->no_exceptions;
+    return job->c_exceptions;
+}
+
 VPRIV void driver_depfile_names(struct driver_job *job);
 /* tokcmp.c */
 VPRIV void driver_tokens_hash_run(struct driver_job *job, pp *p,

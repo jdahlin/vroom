@@ -68,9 +68,9 @@ VPRIV uint32_t walk_label_new(codegen_context *e);
 VPRIV void walk_call_slot_argument(codegen_context *e, uint32_t fn,
                                    int64_t slot);
 VPRIV void walk_cleanup_call(codegen_context *e, uint32_t s);
-VPRIV void x64_eh_pads(
+VPRIV void WALK_LOWER(eh_pads)(
     codegen_context *
-        e); /* arch/x64/codegen/eh.cpp: the landing pads of the function's exception table */
+        e); /* arch/x64/codegen/eh.cpp: the landing pads of the function's exception table (VIR: refuses) */
 VPRIV codegen_value walk_value_emit(codegen_context *e, uint32_t n);
 VPRIV codegen_lvalue walk_lvalue_emit(codegen_context *e, uint32_t n);
 VPRIV codegen_value walk_division_signed_power_of_two_emit(

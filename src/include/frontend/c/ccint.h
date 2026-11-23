@@ -77,7 +77,9 @@ struct cc {
     uint32_t
         eh_resume_sym; /* C++ with exceptions: _Unwind_Resume, what a landing pad ends with (0: none yet) */
     uint32_t eh_begin_catch_sym,
-        eh_terminate_sym; /* ... __cxa_begin_catch, std::terminate: a cleanup that throws terminates */
+        eh_terminate_sym; /* ... __cxa_begin_catch (C: 0), std::terminate (C: abort): a cleanup that throws terminates */
+    const char *
+        eh_personality; /* __gxx_personality_v0 or C's __gcc_personality_v0 (0: no exceptions in the TU) */
     jmp_buf bail;
     int errors;
     struct cc_recovery_point *
