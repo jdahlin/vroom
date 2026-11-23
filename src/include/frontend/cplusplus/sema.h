@@ -4968,6 +4968,7 @@ class semantic_analysis
        ([temp.deduct.partial]/3.1): 1 when f is more specialized than g,
        -1 when g is more than f, 0 when neither; unknown set when analysis
        cannot tell */
+    int conversion_template_order(entity_index t1, entity_index t2);
     int function_template_order(uint32_t f, uint32_t g, size_t arguments,
                                 bool &unknown);
     int constraint_subsumption_order(uint32_t f, uint32_t g) const;

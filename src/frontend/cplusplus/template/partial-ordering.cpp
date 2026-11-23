@@ -218,6 +218,43 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
     return deduced && !penalty;
 }
 
+/*
+ * [temp.deduct.partial]/3.2: "In the context of a call to a conversion
+ * function, the return types of the conversion function templates are
+ * used."  Of the templates t1 and t2 (entities), 1 when t1 is more
+ * specialized (t2's return type is deduced from t1's and not the other way
+ * round), -1 when t2 is, 0 when neither.  The return types are compared as
+ * they are: the transformations of /5 to /9 (references, cv) are not
+ * applied.
+ */
+int semantic_analysis::conversion_template_order(entity_index t1,
+                                                 entity_index t2)
+{
+    const function_template ft1 =
+        function_templates[entity_table[t1].instantiation - 1];
+    const function_template ft2 =
+        function_templates[entity_table[t2].instantiation - 1];
+    qualified_type r1 = type_table[entity_table[t1].type.unqualified()].operand;
+    qualified_type r2 = type_table[entity_table[t2].type.unqualified()].operand;
+    owned_array<template_argument> v1, v2;
+    owned_array<bool> s1, s2;
+    for (uint32_t i = 0; i < ft1.parameter_count; i++) {
+        v1.append(template_argument());
+        s1.append(false);
+    }
+    for (uint32_t i = 0; i < ft2.parameter_count; i++) {
+        v2.append(template_argument());
+        s2.append(false);
+    }
+    bool two_from_one = deduce_type(r2, r1, v2, s2, true);
+    bool one_from_two = deduce_type(r1, r2, v1, s1, true);
+    if (two_from_one && !one_from_two)
+        return 1;
+    if (one_from_two && !two_from_one)
+        return -1;
+    return 0;
+}
+
 int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
                                                size_t arguments, bool &unknown)
 {
