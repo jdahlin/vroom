@@ -2282,6 +2282,10 @@ class semantic_analysis
     /* function_template_definition: the function_templates index plus one
        of the template its last declaration declared or redeclared */
     uint32_t last_function_template = 0;
+    enum class copy_kind : uint8_t { none, copy, move };
+    copy_kind copy_parameter(entity_index k, qualified_type function) const;
+    bool implicitly_declares(entity_index k, bool destructor, bool assignment,
+                             qualified_type type);
     analysis_result friend_member_function(entity_index c, SyntaxRef n,
                                            const declarator_meaning &m,
                                            qualified_type type, bool no_type,
@@ -2289,13 +2293,70 @@ class semantic_analysis
     analysis_result friend_function_template(entity_index c,
                                              TemplateDeclaration n,
                                              SyntaxRef inner);
+    analysis_result friend_class_template(entity_index c, TemplateDeclaration n,
+                                          SyntaxElement seq);
+    /* [temp.friend]/4: a friend declaration of a member of a dependent
+       type, C = A<args>: resolved per specialization of A
+       (template/friend-template.cpp).  C's arguments in terms of the
+       friend's template parameters are template_arguments[first_pattern
+       .. + pattern_count), the parameters
+       template_parameter_entities[first_parameter .. + parameter_count) */
+    struct member_friend {
+        entity_index granting = 0, template_entity = 0;
+        TemplateDeclaration declaration;
+        /* the elaborated-type-specifier, or the function's
+           member-declaration */
+        SyntaxElement member;
+        uint32_t first_parameter = 0, parameter_count = 0;
+        uint32_t first_pattern = 0, pattern_count = 0;
+    };
+    owned_array<member_friend> member_friends;
+    analysis_result dependent_member_friend(entity_index c,
+                                            TemplateDeclaration n,
+                                            SyntaxElement declaration,
+                                            SyntaxElement id);
+    void member_friends_of(entity_index s, bool complete);
+    /* function_template_definition declares a new template whatever the
+       namespace has ([temp.friend]/9) */
+    bool distinct_friend_template = false;
+    bool constraint_names_enclosing_parameter(entity_index c,
+                                              TemplateDeclaration n) const;
+    void befriend_member(uint32_t k, entity_index s);
+    bool redeclares_member_class(SyntaxElement elaborated, entity_index s);
+    entity_index redeclared_member_function(SyntaxElement inner,
+                                            entity_index s);
+    analysis_result qualified_friend_class_template(entity_index c,
+                                                    TemplateDeclaration n,
+                                                    SyntaxElement elaborated);
     analysis_result friend_member_declaration(entity_index c,
                                               MemberSimpleDeclaration d,
                                               owned_array<SyntaxRef> &bodies);
     analysis_result friend_declaration(entity_index c, SyntaxRef n,
                                        owned_array<SyntaxRef> &bodies);
-    analysis_result friend_class(entity_index c, SyntaxRef n,
-                                 SyntaxElement type);
+    analysis_result friend_type(entity_index c, SyntaxRef n, SyntaxElement seq);
+    analysis_result friend_elaborated_class(entity_index c, SyntaxRef n,
+                                            SyntaxElement type);
+    void befriend(entity_index c, entity_index e);
+    void befriend_by_name(entity_index c, entity_index scope, uint32_t name);
+    void befriend_template(entity_index c, entity_index t);
+    /* [class.local]: the block scope around class c, 0 if it is not a
+       local class or nested in one */
+    entity_index local_scope_of(entity_index c) const;
+    entity_index overload_with_parameters(entity_index first,
+                                          qualified_type type) const;
+    analysis_result befriend_function(entity_index c, SyntaxRef n,
+                                      entity_index f, const specified &s,
+                                      const declarator_meaning &m, bool defines,
+                                      owned_array<SyntaxRef> &bodies);
+    analysis_result constrained_friend_function(entity_index c, SyntaxRef n,
+                                                const declarator_meaning &m,
+                                                qualified_type type,
+                                                const specified &s,
+                                                SyntaxElement requires_clause,
+                                                owned_array<SyntaxRef> &bodies);
+    analysis_result local_friend_function(entity_index c, SyntaxRef n,
+                                          const declarator_meaning &m,
+                                          qualified_type type);
     analysis_result qualified_friend_function(entity_index c, SyntaxRef n,
                                               const declarator_meaning &m,
                                               qualified_type type);
