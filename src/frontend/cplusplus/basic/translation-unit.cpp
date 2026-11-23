@@ -733,6 +733,11 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                     (now.kind == type_kind::class_type &&
                      entity_table[now.entity].kind != entity_kind::class_type))
                     return not_supported(declaration, "temp.inst");
+                /* decltype of a name no rules hold has a dependent type
+                   of its own, which compares with nothing */
+                if (was.kind == type_kind::dependent ||
+                    now.kind == type_kind::dependent)
+                    return not_supported(declaration, "dcl.typedef");
                 return ill_formed_at_token(id,
                                            "a typedef specifier shall not be "
                                            "used to redeclare the name of a "
@@ -1183,6 +1188,11 @@ analysis_result semantic_analysis::declare_local(
            in that scope to refer to the type to which it already refers." */
         if (e.kind == entity_kind::typedef_name &&
             kind == entity_kind::typedef_name) {
+            if (!(e.type == type) &&
+                (type_table[e.type.unqualified()].kind ==
+                     type_kind::dependent ||
+                 type_table[type.unqualified()].kind == type_kind::dependent))
+                return not_supported(declaration, "dcl.typedef");
             if (!(e.type == type))
                 return ill_formed_at_token(id,
                                            "a typedef specifier shall not be "
