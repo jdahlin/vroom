@@ -638,6 +638,27 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         if (spelled(name, written.size(), "__is_trivially_assignable"))
             return clang_assignable_trait(n, 2, m);
     }
+    /* [ext:clang_type_traits] __is_lvalue_expr(expression) and
+       __is_rvalue_expr(expression): the expression's value category
+       ([basic.lval]); clang's rvalue is a prvalue, so an xvalue is
+       neither */
+    bool lvalue_trait = spelled(name, written.size(), "__is_lvalue_expr");
+    if ((lvalue_trait || spelled(name, written.size(), "__is_rvalue_expr")) &&
+        n.size() == 4 && !n[2].is(syntax_kind::type_id)) {
+        if (names_dependent_entity(n[2].first_token(), n[2].end_token()))
+            return not_supported(n, "temp.dep.constexpr");
+        expression_meaning operand;
+        unevaluated++;
+        analysis_result r = expression(n[2], operand);
+        unevaluated--;
+        if (r != analysis_result::well_formed)
+            return r;
+        bool answer = operand.category == value_category::prvalue;
+        if (lvalue_trait)
+            answer = operand.category == value_category::lvalue;
+        m = integer_constant(fundamental_type::bool_, answer, n.first_token());
+        return analysis_result::well_formed;
+    }
     /* ( type-id ): a trait of the type's category */
     if (!same && !convertible && n.size() == 4 &&
         n[2].is(syntax_kind::type_id)) {
