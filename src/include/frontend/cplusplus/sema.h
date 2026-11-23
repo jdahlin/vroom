@@ -2252,6 +2252,7 @@ class semantic_analysis
        held by a declaration ill-formed or not parsed, in a scope with
        names analysis did not follow, or in no scope */
     void name_lookup_detail(token_index t, const lookup_result &found);
+    bool constexpr_member_redeclaration(const declarator_meaning &m) const;
     void template_name_detail(token_index t, const lookup_result &found,
                               entity_index named);
     void name_held_detail(token_index t, held_cause by);

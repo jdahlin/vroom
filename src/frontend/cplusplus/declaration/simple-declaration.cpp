@@ -654,6 +654,22 @@ node_index parser::attribute_declaration()
  *
  * [dcl.pre]/7: "An empty-declaration has no effect."
  */
+/* [class.static.data]/3 (C++11, C++14): a constexpr static data member is
+   initialized in its class and "the namespace scope definition shall not
+   contain an initializer"; from C++17 the member is inline
+   ([dcl.constexpr]/1) and that declaration a redundant redeclaration
+   ([depr.static.constexpr]/1): A::x names a constexpr static data member
+   of class A */
+bool semantic_analysis::constexpr_member_redeclaration(
+    const declarator_meaning &m) const
+{
+    if (!m.qualifier || !is_class_entity(m.qualifier))
+        return false;
+    entity_index e = entity_table.find(m.qualifier, tokens.identifier(m.id));
+    return e && entity_table[e].kind == entity_kind::variable &&
+           entity_table[e].constexpr_;
+}
+
 analysis_result semantic_analysis::empty_declaration(EmptyDeclaration)
 {
     return analysis_result::well_formed;
@@ -1466,7 +1482,7 @@ analysis_result semantic_analysis::declare_with_initializer(
                 (c.first_constructor &&
                  !trivial_defaulted_default_constructor(record.entity)))
                 return not_supported(declaration, "dcl.init");
-        } else if (!initialized)
+        } else if (!initialized && !constexpr_member_redeclaration(m))
             return ill_formed_at_token(m.id,
                                        "a constexpr object shall be "
                                        "initialized",
@@ -1500,6 +1516,16 @@ analysis_result semantic_analysis::declare_with_initializer(
                                        declared_entity);
         if (r == analysis_result::well_formed && !var_inst)
             current_scope = m.qualifier;
+    } else if (m.qualifier && !initialized && s.constexpr_ &&
+               tokens.files.behavior.edition >=
+                   standard_edition::cplusplus_17 &&
+               constexpr_member_redeclaration(m)) {
+        /* [depr.static.constexpr]/1: the member, inline and defined in its
+           class, redeclared without an initializer: no second definition */
+        declared_entity =
+            entity_table.find(m.qualifier, tokens.identifier(m.id));
+        entity_table.add_declaration(declared_entity, declaration);
+        current_scope = m.qualifier;
     } else if (m.qualifier) {
         r = static_member_definition(declaration, m.id, m.qualifier, type, s,
                                      definition, declared_entity);
