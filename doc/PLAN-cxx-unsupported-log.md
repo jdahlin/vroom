@@ -464,3 +464,16 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   moves them.  Gaps: int&& r(A{}) refused in reference_binding; direct
   initialization of a reference ignores explicit conversion functions;
   pre-C++17 prvalue copy/move not modelled.
+- 8.10 (6cb97b9c3, 56f6873c2, 564dec6cd and the next): the C++-only
+  CustomTypeChecking builtins (align_up/down/is_aligned, get_vtable_pointer,
+  invoke, is_within_lifetime) are rows generated from Builtins.td's records
+  (cxx-builtins.inc, gen-builtin-registrations.py); the align builtins fold
+  for integers through the fold table (power of two up to 2^(width-1), modulo
+  the operand's type) and lower for a constant alignment; get_vtable_pointer
+  is analysed and lowered (the object's first word).  Unsupported 36494 ->
+  36493, we reject 492, we accept 5423 unchanged.  Left: align_* of pointers
+  (constant pointer values keep no alignment), __builtin_invoke with a
+  reference_wrapper, __builtin_is_within_lifetime (138 declarations; a
+  constant pointer value keeps no union member, and no lifetime of other
+  objects: needs the evaluator's pointer to carry the designated subobject's
+  type), now refused with that reason.

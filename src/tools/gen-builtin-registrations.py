@@ -183,6 +183,9 @@ CXX_RECORDS = (
     ('GetVtablePointer', '__builtin_get_vtable_pointer', 'CXX_LANG',
      {'NoThrow', 'Const', 'CustomTypeChecking'}, 'vtable_pointer', 0, 'none',
      'vtable_pointer'),
+    ('IsWithinLifetime', '__builtin_is_within_lifetime', 'CXX_LANG',
+     {'NoThrow', 'CustomTypeChecking', 'Consteval'}, 'within_lifetime', 0, 'none',
+     'refuse'),
     ('Invoke', '__builtin_invoke', '', {'CustomTypeChecking', 'Constexpr'},
      'invoke', 0, 'none', 'node'),
 )

@@ -43,6 +43,9 @@ enum class builtin_form : uint8_t {
     align,
     /* const void *__builtin_get_vtable_pointer(T *), T a polymorphic class */
     vtable_pointer,
+    /* bool __builtin_is_within_lifetime(T *), a constant evaluation only:
+       unsupported (a pointer value does not say which subobject it designates) */
+    within_lifetime,
     /* C23's <stdbit.h> functions and __builtin_bitreverseg, type-generic over
        the integer types (builtin_stdc_op): the result by the operation */
     stdc_bits,

@@ -348,7 +348,8 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
         form == builtin_form::launder || form == builtin_form::clear_padding ||
         form == builtin_form::bswapg || form == builtin_form::stdc_bits ||
         form == builtin_form::align || form == builtin_form::vtable_pointer ||
-        form == builtin_form::invoke || form == builtin_form::complex) {
+        form == builtin_form::within_lifetime || form == builtin_form::invoke ||
+        form == builtin_form::complex) {
         qualified_type result = void_type;
         /* (the type-generic ones have the signature's result type) */
         if (form == builtin_form::generic || form == builtin_form::bit_count)
@@ -755,6 +756,15 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         return align_result(n, called, nodes, result);
     case builtin_form::vtable_pointer:
         return vtable_pointer_result(n, called, nodes, result);
+    case builtin_form::within_lifetime:
+        /* [basic.life] needs the object a pointer designates, which for a
+           union's members (one offset) a pointer value does not say */
+        return not_supported_builtin(n, "ext.clang", called,
+                                     "whose answer needs the subobject a "
+                                     "pointer designates: a constant pointer "
+                                     "value of the evaluator keeps no "
+                                     "member of a union (they share one "
+                                     "offset) and no lifetime for others");
     case builtin_form::stdc_bits:
         return stdc_bits_result(n, called, nodes, result);
     case builtin_form::atomic:

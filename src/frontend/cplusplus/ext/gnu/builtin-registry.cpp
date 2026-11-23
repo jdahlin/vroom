@@ -260,6 +260,7 @@ bool gnu_builtin_untyped(uint16_t row)
     case builtin_form::bswapg:
     case builtin_form::align:
     case builtin_form::vtable_pointer:
+    case builtin_form::within_lifetime:
     case builtin_form::stdc_bits:
     case builtin_form::invoke:
     case builtin_form::unsupported:
