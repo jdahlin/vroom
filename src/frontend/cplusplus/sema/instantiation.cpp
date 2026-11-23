@@ -644,13 +644,14 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
         instantiations[index].has_failure = true;
     }
     c = 0;
+    /* the class's own analysis found its rules broken: the use is
+       ill-formed ([temp.inst]/1), as clang's "in instantiation of" error */
+    if (r == analysis_result::ill_formed && !instantiations[index].has_failure)
+        return r;
     analysis_result refused = not_supported(at, "temp.inst");
     if (instantiations[index].has_failure)
         instantiation_detail(instantiations[index].failure);
-    else if (r == analysis_result::ill_formed) {
-        const char *why = "the specialization is ill-formed";
-        last_unsupported_detail(why, strlen(why));
-    } else {
+    else {
         const char *why = "no specialization was made";
         last_unsupported_detail(why, strlen(why));
     }

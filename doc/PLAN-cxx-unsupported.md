@@ -462,6 +462,18 @@ it; none adds a second way to instantiate.
   6.2's list: anonymous union members at namespace scope, extern "C"
   redeclaration bodies, GNU attribute arguments, a friend's noexcept,
   enumerators of a refused enum-specifier.
+- 7.1 (dropped twice): an instantiation found ill-formed makes the use
+  ill-formed ([temp.inst]/1).  First drop: we reject +274, mostly a harness
+  artifact: clang's error is at the template's line, the use only has
+  "in instantiation of ... requested here".  f950839a5 (orchestrator): the
+  harness counts such a note (of an error's) as the use's rejection; the
+  honest baseline: agree -1032, we accept +1037 (declarations clang
+  rejects through an instantiation vcc misses, counted as agreement
+  before).  Second drop: with that, agree +172, unsupported -295, but we
+  reject +123: a non-dependent error in the template reported again at the
+  use, and dependent rules checked too early (dcl.constexpr/p6.cpp:60).
+  Decision: split, not hard: 7.2 works through those rejections by cause.
+  Patch: scratchpad b71.patch, the new failures b71-new-after-harness.txt.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
