@@ -432,7 +432,8 @@ bool semantic_analysis::redeclares_member_class(SyntaxElement elaborated,
 
 /* R A<args>::f(P) cv with the arguments bound: the member function of s
    it redeclares, by name, parameter-type-list, cv-qualifiers and (but for
-   a constructor or destructor) return type ([over.load]/2, [class.mem]/5) */
+   a constructor or destructor) return type ([over.load]/2, [class.mem]/5);
+   a conversion function by its type and cv-qualifiers */
 entity_index semantic_analysis::redeclared_member_function(SyntaxElement inner,
                                                            entity_index s)
 {
@@ -446,6 +447,12 @@ entity_index semantic_analysis::redeclared_member_function(SyntaxElement inner,
     if (no_type)
         type = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
+    /* [class.conv.fct]/1: a conversion function's declarator has no type
+       before it; its conversion-type-id is the function's return type */
+    SyntaxRef conversion = conversion_function_id_of(inner);
+    if (conversion && qualified_conversion_type(inner, conversion, type) !=
+                          analysis_result::well_formed)
+        return 0;
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
@@ -458,6 +465,9 @@ entity_index semantic_analysis::redeclared_member_function(SyntaxElement inner,
     uint32_t cv = function_cv;
     if (m.destructor)
         return entity_table[s].destructor;
+    if (conversion)
+        /* the conversion function of that type and cv-qualifiers */
+        return overload_of_type(own_conversion_functions(s), type, cv);
     entity_index member = 0;
     if (no_type) {
         for (entity_index o = entity_table[s].first_constructor; o;
