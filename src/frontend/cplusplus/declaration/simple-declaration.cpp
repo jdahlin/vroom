@@ -697,7 +697,9 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
        the attributes only those that change nothing vcc generates */
     uint32_t type_at = 3;
     gnu_attributes g;
-    if (n.size() == 6 && attributes_without_effect(n[2])) {
+    if (n.size() == 6 && (attributes_without_effect(n[2]) ||
+                          gnu_attributes_without_effect(n[2]))) {
+        /* (GNU's too: libc++'s _LIBCPP_DEPRECATED_IN_CXX17, a diagnostic) */
         type_at = 4;
     } else if (n.size() == 6 && !n[2].is_token() &&
                tokens.files.behavior.has(extension::clang_ext_vector_type)) {
