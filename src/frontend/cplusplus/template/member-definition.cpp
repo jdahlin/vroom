@@ -156,6 +156,20 @@ analysis_result semantic_analysis::member_definition_of_template(
         function_templates[ct - 1].primary ||
         entity_table[function_templates[ct - 1].entity].enclosing != outer)
         return not_supported(n, "temp.mem.func");
+    /* [class.static.data]/1: "The declaration of a static data member
+       ... static ... the keyword static shall appear only in its
+       declaration in the class" ([dcl.stc]/1: the storage class specifier
+       is not part of a definition outside the class): clang, "'static'
+       can only be specified inside the class definition" */
+    if (variable && !class_member && definition.size() &&
+        definition[0].is(syntax_kind::decl_specifier_seq)) {
+        for (auto sp : definition[0].elements())
+            if (sp.is(standard_keyword::static_))
+                return ill_formed(definition,
+                                  "'static' can only be specified inside "
+                                  "the class definition",
+                                  "class.static.data");
+    }
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
