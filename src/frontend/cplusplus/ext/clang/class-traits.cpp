@@ -164,7 +164,8 @@ bool semantic_analysis::derives_from(entity_index d, entity_index b) const
    ([meta.rel]/5: "complete type"), left unsupported. */
 analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
                                                        bool virtual_base,
-                                                       expression_meaning &m)
+                                                       expression_meaning &m,
+                                                       bool interconvertible)
 {
     qualified_type b, d;
     VTRY(r, type_id(n[2], b));
@@ -199,6 +200,18 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
             if (!entity_table[dk.entity].size)
                 return not_supported(n, "meta.rel");
             value = derives_from(dk.entity, bk.entity);
+        }
+        /* [meta.rel] is_pointer_interconvertible_base_of: "Derived is
+           a standard-layout class and Base is Derived or one of its
+           base classes" ([basic.compound]/4.3's chain of first
+           members), what clang answers: a class with data in two of
+           its bases is not standard-layout (not by this rule) */
+        if (interconvertible && value) {
+            bool layout = false;
+            if (!class_property_trait(int(unary_trait_kind::is_standard_layout),
+                                      d, layout))
+                return not_supported(n, "meta.rel");
+            value = layout;
         }
     }
     m = integer_constant(fundamental_type::bool_, value, n.first_token());

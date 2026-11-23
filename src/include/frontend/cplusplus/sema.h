@@ -3365,7 +3365,8 @@ class semantic_analysis
     bool first_data_class(entity_index c, entity_index &owner) const;
     bool derives_from(entity_index d, entity_index b) const;
     analysis_result clang_base_of_trait(SyntaxRef n, bool virtual_base,
-                                        expression_meaning &m);
+                                        expression_meaning &m,
+                                        bool interconvertible = false);
     bool polymorphic_class(entity_index c) const;
     bool virtual_destructor(entity_index c) const;
     bool triviality_unknown(entity_index c) const;
