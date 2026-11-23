@@ -412,6 +412,13 @@ it; none adds a second way to instantiate.
   joins the per-step gates (under 1 s).  Next: __declspec's attributes in
   the analysis (dllimport/dllexport, selectany, thread, uuid, align,
   property).
+- 5.2 (89017527f, no simplify needed: table rows): __declspec dllexport,
+  novtable, restrict, noalias, allocator accepted with no effect, as clang
+  on this target.  Unsupported 39362 -> 39051.  dllimport left out: the
+  harness's clang runs for aarch64 Linux (the test's -triple is dropped,
+  cxx-pp.py VALUE_DROP), where clang ignores the attribute ("not
+  supported") yet still makes `__declspec(dllimport) int x;` a declaration
+  (`U x`); vcc must do the same (5.3).
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
