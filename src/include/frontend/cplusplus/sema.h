@@ -1923,8 +1923,11 @@ class semantic_analysis
                                           call_site where = call_site());
     owned_objects<owned_string> detail_texts;
     void name_unsupported_detail(token_index t, const char *what);
-    /* not_supported with the shape refused as its detail */
-    analysis_result refuse(SyntaxRef n, const char *rule, const char *what);
+    /* not_supported with what is refused as its detail; the site is the
+       caller's (where) */
+    analysis_result not_supported_because(SyntaxRef n, const char *subclause,
+                                          const char *what,
+                                          call_site where = call_site());
     /* the last refusal recorded gets this text as its detail (a copy) */
     __attribute__((noinline, cold)) void
     last_unsupported_detail(const char *text, size_t size);

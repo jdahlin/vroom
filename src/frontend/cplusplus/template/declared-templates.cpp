@@ -157,12 +157,10 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
         (s.is(s[1 + gnu], syntax_kind::noptr_declarator) ||
          s.is(s[1 + gnu], syntax_kind::ptr_declarator)))
         return function_template_definition(t, s);
-    analysis_result refused = not_supported(t, "temp.class");
     char shape[160];
     snprintf(shape, sizeof shape, "%u parts, part 1 is %s", s.size(),
              syntax_kind_name(s[1 + gnu].kind()));
-    last_unsupported_detail(shape, strlen(shape));
-    return refused;
+    return not_supported_because(t, "temp.class", shape);
 }
 
 /*

@@ -164,6 +164,16 @@ void semantic_analysis::name_unsupported_detail(token_index t, const char *what)
     last_unsupported_detail(text.data(), text.size());
 }
 
+analysis_result semantic_analysis::not_supported_because(SyntaxRef n,
+                                                         const char *subclause,
+                                                         const char *what,
+                                                         call_site where)
+{
+    analysis_result r = not_supported(n, subclause, where);
+    last_unsupported_detail(what, strlen(what));
+    return r;
+}
+
 void semantic_analysis::last_unsupported_detail(const char *text, size_t size)
 {
     owned_string &detail = detail_texts.make(text, size);
