@@ -669,8 +669,6 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
                                            expression_meaning &m,
                                            bool check_access)
 {
-    if (aggregate_prvalue(m) && type_table[m.type.unqualified()].entity != base)
-        return not_supported(current_declaration, "class.temporary");
     for (;;) {
         entity_index c = type_table[m.type.unqualified()].entity;
         if (c == base)

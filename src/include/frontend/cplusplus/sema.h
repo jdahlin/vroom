@@ -4439,6 +4439,9 @@ class semantic_analysis
        destructors of its members and bases, in the reverse order of
        their construction */
     uint32_t subobject_destructions(entity_index c, token_index at);
+    /* whether the destructor of a class type's temporary is usable here:
+       none, or accessible (no check of it exists for temporaries yet) */
+    bool result_destructible(qualified_type t) const;
     /* [dcl.init]/7: whether the class is const-default-constructible */
     bool const_default_constructible(entity_index c) const;
     /* a class prvalue that is an aggregate's initializer list (T{...})

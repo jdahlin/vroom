@@ -519,6 +519,15 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
     return best;
 }
 
+bool semantic_analysis::result_destructible(qualified_type t) const
+{
+    const struct type &x = type_table[t.unqualified()];
+    if (x.kind != type_kind::class_type)
+        return true;
+    entity_index d = entity_table[x.entity].destructor;
+    return !d || (accessible(d, x.entity) && !entity_table[d].deleted);
+}
+
 /*
  * [dcl.init]/17.7: "Otherwise, if the source type is a (possibly
  * cv-qualified) class type, conversion functions are considered.  The
@@ -559,7 +568,9 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
     VTRY_SET(r, need_specialization_definition(at, f));
     /* (a captureless lambda's closure object has no members: its
        temporary is the call's object argument, as for its call operator) */
-    if ((aggregate_prvalue(m) && !entity_table[c].lambda) ||
+    if ((aggregate_prvalue(m) && !entity_table[c].lambda &&
+         (!at_block_scope() || entity_table[c].destructor ||
+          entity_table[f].instantiation || !result_destructible(to))) ||
         (m.category == value_category::prvalue && entity_table[c].destructor))
         /* the temporary's destruction ([class.temporary]/4), an aggregate's
            temporary (aggregate_prvalue) */

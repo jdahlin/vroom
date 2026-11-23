@@ -514,15 +514,12 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
        base subobject, and at namespace scope the temporary has static
        storage ([class.temporary]/6): not analysed */
     if (aggregate_prvalue(m) && !closure_prvalue_binding(m) &&
-        !(at_block_scope() &&
-          type_table[r.operand.unqualified()].kind == type_kind::class_type &&
-          type_table[m.type.unqualified()].kind == type_kind::class_type &&
-          type_table[r.operand.unqualified()].entity ==
-              type_table[m.type.unqualified()].entity))
+        (!at_block_scope() ||
+         type_table[m.type.unqualified()].kind != type_kind::class_type))
         return not_supported_because(
             at, "class.temporary",
             "an aggregate prvalue bound to a reference at namespace scope "
-            "(static temporary) or to a reference to another class");
+            "(static temporary) or an array's or scalar's list temporary");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const lvalue or rvalue reference is bound to a
        temporary holding its value ([conv.lval]) */
