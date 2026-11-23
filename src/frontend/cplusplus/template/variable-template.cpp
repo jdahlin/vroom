@@ -64,7 +64,11 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
     scoped_value<entity_index> member_scope(template_member_scope, scope);
     specified s;
     declarator_meaning m;
+    /* [dcl.spec.auto.general]/4: a placeholder in a variable template's
+       declaration with an initializer; deduced in each specialization */
+    placeholder_allowed = has_init;
     r = decl_specifier_seq(declaration[skip], s, false);
+    placeholder_allowed = false;
     qualified_type type = s.type;
     if (r == analysis_result::well_formed) {
         function_cv = 0;

@@ -587,6 +587,7 @@ types SemaCXX/constexpr-late-instantiation.cpp -std=c++20: 36:24: `f ( )` is not
 types SemaCXX/constexpr-late-instantiation.cpp -std=c++2c: 36:24: `f ( )` is not the constant 0ULL
 types SemaCXX/cxx2a-consteval.cpp -std=c++2a -Wno-unused-value -Wno-vla: 921:66: `testDefaultArgForParam ( ) + testDefaultArgForParam ( ( E ) 1 )` is not the constant 0ULL
 types SemaCXX/cxx2a-consteval.cpp -std=c++2a -Wno-unused-value -Wno-vla: 921:66: `testDefaultArgForParam ( )` is not the constant (-1LL)
+types SemaCXX/decltype.cpp -std=c++17 -Wno-c99-designator: 260:36: `C :: XBitMask < 0 >` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::const_<int>>`
 types SemaCXX/embed-init-list.cpp -std=gnu++17 -Wno-c++26-extensions: 105:41: `returned ( ) . size == 2` is not the constant 1ULL
 types SemaCXX/embed-init-list.cpp -std=gnu++17 -Wno-c++26-extensions: 98:48: `functional_cast ( ) . size == 2` is not the constant 1ULL
 verdict CXX/basic/basic.def/p2.cpp -std=c++1z -Wdeprecated: ill-formed for us, accepted by clang: line 7 (2 declarations)
