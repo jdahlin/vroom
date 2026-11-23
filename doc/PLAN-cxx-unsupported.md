@@ -600,3 +600,8 @@ it; none adds a second way to instantiate.
   is ill-formed (clang's error); the refusal left at simple-declaration.cpp
   has a detail.  Unsupported 36684 -> 36654, we reject 492, we accept 5423
   unchanged.
+- 8.6b: attributes before a statement that change nothing or that clang
+  does not know are ignored, also before a declaration statement
+  ([stmt.pre]/1, [dcl.attr.grammar]/6).  Unsupported 36654 -> 36652, we
+  reject 492, we accept 5423 unchanged.  Left: [[assume(e)]]
+  ([dcl.attr.assume]), [[clang::musttail]].

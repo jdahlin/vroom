@@ -615,14 +615,23 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
     if (n.size() < 2)
         return not_supported(n, "stmt.pre");
     SyntaxElement inner = n[n.size() - 1];
-    if (inner.is(syntax_kind::simple_declaration))
-        return not_supported(n, "dcl.attr");
+    bool declaration = inner.is(syntax_kind::simple_declaration);
     for (uint32_t i = 0; i + 1 < n.size(); i++) {
         SyntaxElement c = n[i];
         if (!c.is(syntax_kind::attribute_specifier,
                   syntax_kind::attribute_specifier_seq,
                   syntax_kind::gnu_attribute_specifier))
             return not_supported(n, "dcl.attr");
+        /* [dcl.attr.grammar]/6: the attributes that change nothing vcc
+           generates, and those clang does not know (it ignores them), may
+           stand before any statement */
+        if (c.is(syntax_kind::attribute_specifier,
+                 syntax_kind::attribute_specifier_seq) &&
+            attributes_without_effect(c))
+            continue;
+        if (declaration)
+            return not_supported_because(
+                n, "dcl.attr", "attributes of a declaration statement");
         for (token_index t = c.first_token(); t < c.end_token(); t++) {
             if (tokens[t].kind == token_kind::operator_or_punctuator)
                 continue;
