@@ -192,6 +192,16 @@ after step 0 the work list gives a better estimate, recorded here.
   the tools' identity, the run time, clang's headers and the harness's code;
   vpp always runs; --no-cache / NOCACHE=1.  Warm 25 s -> 8 s.  Per-step gate
   warm now about 20 s (cxx-sema --check 11 s is next to look at).
+- Batch 1.1 (f12c397b6, no simplify needed: two lines): a friend function's
+  return type may be a placeholder.  Unsupported 39700 -> 39674,
+  [dcl.spec.auto] 1103 -> 1000; we accept +2.  Agent 2 min.  What is left
+  of decl-specifier.cpp:1617, measured: 488 refusals at -std=c++98 (clang
+  takes `auto` there as a C++11 extension with a warning: batch 1.2), 248 at
+  -std=c++20 (contexts), and 567 at placeholder-type-specifier.cpp:514.
+- Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
+  vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
+  take its cxx-run.py (carry the texts/files digest split if it lacks it)
+  and make --why read the unsupported output from its single run.
 - Queue: vpp segfaults on two clang test files (found in the -std=gnu++20
   sweep); `semantic_kind_name` lacks complex_value, complex_part,
   statement_expression (wrong names in tree dumps).
