@@ -1797,8 +1797,9 @@ class semantic_analysis
     /* the function of the overload set that starts at first with type and
        member_cv cv, 0 if none ([dcl.meaning]/1: the one a member declarator
        declares again) */
-    entity_index overload_of_type(entity_index first, qualified_type type,
-                                  uint32_t cv) const;
+    entity_index
+    overload_of_type(entity_index first, qualified_type type, uint32_t cv,
+                     bool ignore_exception_specification = false) const;
     /* [basic.types]/10: whether t is a literal type (unknown:
        analysis cannot tell; basic/literal-types.cpp) */
     constness literal_type(qualified_type t) const;
@@ -2034,7 +2035,8 @@ class semantic_analysis
     analysis_result named_specialization(SyntaxRef n, SyntaxRef declaration,
                                          uint32_t lead, bool specialization,
                                          bool extern_, specified &s,
-                                         uint32_t &index);
+                                         uint32_t &index,
+                                         entity_index friend_of = 0);
     /* [dcl.type.simple] Table 14: the type of the simple-type-specifier
        keywords of a decl-specifier-seq */
     struct simple_type_keywords {
@@ -5773,6 +5775,9 @@ class semantic_analysis
     };
     owned_array<deferred_class_instantiation> deferred_class_instantiations;
     uint32_t require_complete_class = 0;
+    /* deduce_type matches a function declaration's type to a function
+       template's ([temp.deduct.decl]) */
+    bool matching_declaration = false;
     bool member_return_type = false;
     /* [over.best.ics]: the argument a converted to the type of a parameter;
        user-defined conversions considered unless [over.best.ics]/4 says

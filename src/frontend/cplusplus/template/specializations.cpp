@@ -446,7 +446,7 @@ semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
  */
 analysis_result semantic_analysis::named_specialization(
     SyntaxRef n, SyntaxRef declaration, uint32_t lead, bool specialization,
-    bool extern_, specified &s, uint32_t &index)
+    bool extern_, specified &s, uint32_t &index, entity_index friend_of)
 {
     index = 0;
     const char *rule = "temp.explicit";
@@ -468,7 +468,10 @@ analysis_result semantic_analysis::named_specialization(
     if (declaration.is(syntax_kind::simple_declaration) &&
         !tail[has_spec + 1].is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported(n, rule);
-    if (!is_namespace(current_scope) || defining_class || function_state.active)
+    /* (a friend declaration is in its class, naming the namespace's
+       template: [namespace.memdef]/3) */
+    if (!friend_of && (!is_namespace(current_scope) || defining_class ||
+                       function_state.active))
         return not_supported(n, rule);
     /* the declared type; what the declarator records for claims is the
        specialization's, which the definition (if any) records again */
@@ -541,6 +544,8 @@ analysis_result semantic_analysis::named_specialization(
     owned_array<template_argument> values;
     bool qualified = false;
     entity_index owner_scope = current_scope;
+    if (friend_of)
+        owner_scope = enclosing_namespace(friend_of);
     if (m.qualifier) {
         owner_scope = m.qualifier;
         entity_index held =
@@ -590,7 +595,11 @@ analysis_result semantic_analysis::named_specialization(
             values.append(template_argument());
         set.append(i < given);
     }
-    if (!deduce_type(t.type, type, values, set, true))
+    matching_declaration = true;
+    bool deduced_from_declaration =
+        deduce_type(t.type, type, values, set, true);
+    matching_declaration = false;
+    if (!deduced_from_declaration)
         return not_supported(n, "temp.deduct.decl");
     r = default_template_arguments(n, ft, values, set);
     if (r != analysis_result::well_formed)
@@ -845,15 +854,32 @@ void semantic_analysis::mark_explicit_instantiation(entity_index e,
             instantiation_kind::definition;
 }
 
-entity_index semantic_analysis::overload_of_type(entity_index first,
-                                                 qualified_type type,
-                                                 uint32_t cv) const
+entity_index
+semantic_analysis::overload_of_type(entity_index first, qualified_type type,
+                                    uint32_t cv,
+                                    bool ignore_exception_specification) const
 {
+    const struct type &wanted = type_table[type.unqualified()];
     for (entity_index o = first;
          o && entity_table[o].kind == entity_kind::function;
-         o = entity_table[o].next_overload)
-        if (entity_table[o].type == type && entity_table[o].member_cv == cv)
+         o = entity_table[o].next_overload) {
+        if (entity_table[o].member_cv != cv)
+            continue;
+        if (entity_table[o].type == type)
             return o;
+        /* [temp.explicit]: clang matches an explicit instantiation's type
+           to the member's without the exception specification, which
+           libc++'s extern templates leave out of noexcept members */
+        const struct type &have =
+            type_table[entity_table[o].type.unqualified()];
+        if (ignore_exception_specification &&
+            have.kind == type_kind::function &&
+            wanted.kind == type_kind::function &&
+            have.operand == wanted.operand &&
+            same_parameters(type_table, entity_table[o].type.unqualified(),
+                            type.unqualified()))
+            return o;
+    }
     return 0;
 }
 
@@ -882,7 +908,7 @@ entity_index semantic_analysis::explicit_instantiation_target(
             return f;
         return 0;
     }
-    f = overload_of_type(f, type, cv);
+    f = overload_of_type(f, type, cv, true);
     if (f && entity_table[f].special != special_member::none)
         return 0;
     return f;
