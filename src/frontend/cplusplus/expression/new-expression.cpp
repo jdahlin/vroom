@@ -360,8 +360,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     if (array) {
         if (init)
             return not_supported(n, "expr.new");
-        /* the class's operator delete[], as clang looks it up, ::new or
-           not */
+        /* the class's operator delete[], [impl.clang] as clang looks it up,
+           ::new or not */
         VTRY_SET(r, array_cookie(n, c, type, false, cookie));
     }
     bool elements =

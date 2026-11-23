@@ -586,7 +586,7 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
             return not_supported(n, "basic.scope.declarative");
         if (prior == nominated)
             /* /3: the alias again; (or the namespace's own name in its
-               scope, which clang accepts too) */
+               scope, which [ext.clang] clang accepts too) */
             return analysis_result::well_formed;
         /* [basic.scope.declarative]/4: "they shall all refer to the same
            entity, or all refer to functions and function templates" */

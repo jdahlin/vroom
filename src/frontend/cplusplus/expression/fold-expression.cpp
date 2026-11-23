@@ -182,9 +182,9 @@ node_index parser::requires_expression()
         }
         if (failed())
             return 0;
-        /* [expr.prim.req]/? as clang reads it: "varargs not allowed in
-           requires expression" (a local parameter is an object, and the
-           ellipsis declares none) */
+        /* [expr.prim.req]/? [impl.clang] as clang reads it: "varargs not
+           allowed in requires expression" (a local parameter is an object, and
+           the ellipsis declares none) */
         if (at(preprocessing_op_or_punc::RIGHT_PARENTHESIS) &&
             is_operator(tokens[position - 1],
                         preprocessing_op_or_punc::ELLIPSIS))

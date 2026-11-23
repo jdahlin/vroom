@@ -2442,7 +2442,7 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
            declared with the constexpr specifier is implicitly an inline
            function or variable"; this declaration (of it or of an inline
            one) is its definition ([basic.def]/2.3), and an odr-use emits it
-           (COMDAT, as clang) */
+           (COMDAT, [impl.clang] as clang) */
         if (tokens.files.behavior.edition < standard_edition::cplusplus_17)
             return not_supported(declarator, "class.static.data");
         x.inline_ = true;

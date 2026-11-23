@@ -311,9 +311,9 @@ analysis_result semantic_analysis::usual_deallocation(
        destructor or a (possibly multi-dimensional) array thereof, the
        function with a parameter of type std::size_t is selected.
        Otherwise, it is unspecified whether a deallocation function with a
-       parameter of type std::size_t is selected."  As clang: the sized one
-       for a single object and an array with a cookie, the unsized one for
-       another array. */
+       parameter of type std::size_t is selected."  [impl.clang] As clang: the
+       sized one for a single object and an array with a cookie, the unsized one
+       for another array. */
     function = unsized;
     if (!unsized || (sized && !in_class && (!array || cookie)))
         function = sized;

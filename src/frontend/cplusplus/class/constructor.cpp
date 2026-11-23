@@ -642,7 +642,7 @@ analysis_result semantic_analysis::special_member_declarator(
        its class shall not have any virtual base classes": a constructor
        defined with a body (clang's "constexpr constructor not allowed in
        struct with virtual base class"); one only declared, defaulted
-       (clang rejects it too, with another reason) or deleted (clang
+       (clang rejects it too, with another reason) or deleted ([ext.clang] clang
        accepts it) is not analysed */
     if (constexpr_specified && entity_table[c].virtual_base_count &&
         definition && !m.destructor)
@@ -2052,7 +2052,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
            accessible: none is declared, and a copy of the class, which
            does not copy its bytes, is refused where it is used */
         if (!copy_ok && !declares_copy) {
-            /* C++03 has no deleted functions: clang reports the
+            /* C++03 has no deleted functions: [impl.clang] clang reports the
                implicit copy constructor's definition at the class */
             if (!tokens.files.behavior.has(language_feature::rvalue_references))
                 return not_supported(n, "class.default.ctor");

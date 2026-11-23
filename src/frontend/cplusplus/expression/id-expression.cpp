@@ -891,7 +891,7 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         if (!e && !c && builtin_spelled(name))
             /* [lex.name]/3: a name spelled __builtin_ is the
                implementation's, declared at global namespace scope as
-               clang does, so ::__builtin_copysignl names it */
+               [impl.clang] clang does, so ::__builtin_copysignl names it */
             e = library_builtin(name);
         if (!e)
             return not_supported(n, "basic.lookup.qual");

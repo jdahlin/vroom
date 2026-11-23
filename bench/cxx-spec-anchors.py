@@ -32,9 +32,10 @@ BASELINE = os.path.join(ROOT, 'bench', 'cxx-spec-anchors.baseline')
 DIRS = ('basic', 'class', 'declaration', 'exception', 'expression', 'module',
         'overload', 'sema', 'statement', 'template')
 
-CITATION = re.compile(r'\[[a-z][a-z0-9_.:-]*\]')
-MARKED = re.compile(r'\[(ext:|impl[.:])')
-CLANG = re.compile(r"\b(as clang|like clang|clang(?:'s)? (?:does|accepts|rejects|"
+# a subclause's label; [ext...] and [impl...] mark choices, not citations
+CITATION = re.compile(r'\[(?!ext[.:]|impl[.:])[a-z][a-z0-9_.:-]*\]')
+MARKED = re.compile(r'\[(ext[.:]|impl[.:])')
+CLANG = re.compile(r"\b(as clang(?!::)|like clang(?!::)|clang(?:'s)? (?:does|accepts|rejects|"
                    r"answers|counts|keeps|treats|reports|gives|has it))\b",
                    re.IGNORECASE)
 DEFINITION = re.compile(r'^[A-Za-z_][\w:<>,\s*&]*?\b((?:\w+::)?)(~?\w+)\s*\(')

@@ -237,8 +237,8 @@ node_index parser::enum_specifier_or_elaborated(decl_specifier_facts &facts)
             return 0;
         base = true;
     }
-    /* [class.friend]/2 as clang reads it: no type is defined in a friend
-       declaration */
+    /* [class.friend]/2 [impl.clang] as clang reads it: no type is defined in a
+       friend declaration */
     if (facts.friend_ && at(preprocessing_op_or_punc::LEFT_BRACE) &&
         !facts.type_specifier_seq)
         return violates("no enumeration defined in a friend declaration",

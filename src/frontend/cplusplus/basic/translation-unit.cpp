@@ -734,7 +734,7 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                                    "compatible exception "
                                                    "specification",
                                                    "except.spec");
-                    /* the later declaration's, as clang's */
+                    /* the later declaration's, [impl.clang] as clang's */
                     e.type = type;
                 }
             }
@@ -798,7 +798,7 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
         /* [basic.link]/4.3: an unnamed class without a typedef name for
            linkage purposes ([dcl.typedef]/9) has no name for linkage; a
            variable of its type is [basic.link]/8's "entity with no
-           linkage" type's, which clang gives internal linkage */
+           linkage" type's, which [impl.clang] clang gives internal linkage */
         bool unnamed_type = false;
         if (kind == entity_kind::variable && implied == linkage::external &&
             unnamed_class_object(type)) {
