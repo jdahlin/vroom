@@ -407,6 +407,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
 {
     qualified_type operand;
     uint32_t typedef_alignment = 0;
+    bool packed_member = false;
     if (n.size() == 4 && n[2].is(syntax_kind::type_id)) {
         VTRY(r, type_id(n[2], operand, &typedef_alignment));
     } else if (n.size() == 2) {
@@ -437,6 +438,22 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
                               "expr.sizeof");
         }
         operand = e.type;
+        /* [ext:gnu_attributes] __alignof__ of a data member: the
+           alignment of the member, which packed and aligned change */
+        entity_index field = 0;
+        if (alignment && e.node &&
+            semantics[e.node].kind == semantic_kind::member)
+            field = semantics[e.node].b;
+        if (field && entity_table[field].kind == entity_kind::variable &&
+            entity_table[field].nonstatic_member) {
+            const entity &f = entity_table[field];
+            bool packed = (f.gnu_flags & gnu_packed) != 0;
+            if (packed)
+                typedef_alignment = 1;
+            if (f.alignment)
+                typedef_alignment = f.alignment;
+            packed_member = packed;
+        }
     } else if (!alignment && n.size() == 5 &&
                n[1].is(preprocessing_op_or_punc::ELLIPSIS) && n[3].is_token() &&
                n[3].is_identifier()) {
@@ -487,7 +504,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
         size = alignment_of_type(operand);
         /* [ext:gnu_attributes] alignof of a typedef-name declared with
            aligned */
-        if (typedef_alignment > size)
+        if (typedef_alignment > size || packed_member)
             size = typedef_alignment;
     }
     m.type = qualified_type::make(
