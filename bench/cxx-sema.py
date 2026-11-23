@@ -176,6 +176,8 @@ ANALYSIS_LINE = re.compile(r'^(\S+) (.*?):(\d+):(\d+) (.*?):(\d+):(\d+) '
                            r'(well-formed|ill-formed|not-parsed|unsupported)(?:=\[([^\]]*)\])?$')
 CLANG_ERROR = re.compile(r'^([^:\n]+):(\d+):\d+: (?:error|fatal error): .*?(?:\[([^\]]+)\])?$', re.M)
 SYNTAX_CATEGORIES = ('Parse Issue', 'Lexical or Preprocessor Issue')
+CLANG_DIAGNOSTIC = re.compile(r'^([^:\n]+):(\d+):\d+: (error|fatal error|warning|note): (.*)$', re.M)
+INSTANTIATION_NOTE = re.compile(r'^in instantiation of .* requested here')
 
 
 TYPES_FILE = 'cxx-type-claims'
@@ -847,6 +849,16 @@ def check(test, opts, clang, vpp):
         if m.group(3) in SYNTAX_CATEGORIES:
             syntax_lines.add(int(m.group(2)))
         else:
+            error_lines.add(int(m.group(2)))
+    # an error in an instantiation is clang's at the template's line; the
+    # use that asked for the instantiation has its note ("in instantiation
+    # of ... requested here"), and that declaration is rejected too
+    # ([temp.inst]/1): a note of an error's, not of a warning's
+    last_is_error = False
+    for m in CLANG_DIAGNOSTIC.finditer(c[2]):
+        if m.group(3) != 'note':
+            last_is_error = m.group(3) in ('error', 'fatal error')
+        elif last_is_error and m.group(1) == name and INSTANTIATION_NOTE.search(m.group(4)):
             error_lines.add(int(m.group(2)))
     # a fatal error (-Wfatal-errors, a missing include) ends clang's
     # analysis there: what follows it is not compared
