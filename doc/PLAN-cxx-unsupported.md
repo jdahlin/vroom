@@ -570,6 +570,11 @@ it; none adds a second way to instantiate.
 - 96ccf613f (orchestrator): an object of a lazily declared specialization
   whose definition failed carries its instantiation's refusal ([class.pre]
   509 -> 120 in --why).
+- 8.5 (dropped once: we reject +2) -> 650420038 (orchestrator): alignof
+  of a variable reads the variable's alignment; then 00e48571f, the agent's
+  declarator alignas ([dcl.decl]/4, [dcl.align]/1, /5).  Unsupported
+  36697 -> 36684, we accept -5.  Sites 2 and 3 (attribute-declarations and
+  leading attributes 117, statement attributes 48) to 8.6.
 - Decision (2026-11-23, from the user: low-hanging fruit, 2-3k): after 7.5,
   four cheap batches by the work list's extension groups (4691 declarations
   in all): (8.1) clang's type traits, ~770 (__has_unique_object_representations
