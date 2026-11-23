@@ -688,7 +688,17 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
                     inner.size() != 1 || function_state.switches.empty())
                     return not_supported(n, "dcl.attr.fallthrough");
             } else if (!likely && !unlikely && !wrapper) {
-                return not_supported(n, "dcl.attr");
+                /* assume (C++23, not in n4861): its argument is a
+                   balanced-token-seq, which the parser does not read as an
+                   expression: the expression would have to be parsed from
+                   its tokens to be analysed as a bool */
+                if (spelling.size() == 6 &&
+                    !memcmp(spelling.data(), "assume", 6))
+                    return not_supported_because(
+                        n, "dcl.attr",
+                        "assume: the argument is not parsed as an expression");
+                return not_supported_because(
+                    n, "dcl.attr", "an attribute that changes the program");
             }
         }
     }
