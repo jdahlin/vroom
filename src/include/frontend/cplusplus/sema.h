@@ -2061,6 +2061,9 @@ class semantic_analysis
         token_index section = 0, abi_tag = 0;
         uint32_t gnu_priority = 0;
         entity_index gnu_cleanup = 0;
+        /* [dcl.align]/5: the strongest alignas before the
+           decl-specifier-seq, 0 if none */
+        uint64_t alignas_lead = 0;
         uint64_t aligned = 0;
         /* [ext:gnu_attributes] the alignment a typedef-name among the
            type-specifiers was declared with (aligned), 0 if none: a
@@ -2117,6 +2120,12 @@ class semantic_analysis
            declarator (gnu_attribute_flag) and a section attribute's
            string-literal */
         uint64_t aligned = 0;
+        /* [dcl.align]/1: an alignas after the declarator-id appertains to
+           the entity; declare_with_initializer allows it (alignas_allowed)
+           and checks what it appertains to (alignas_suffix) */
+        bool alignas_allowed = false;
+        bool alignas_suffix = false;
+        uint64_t alignas_suffix_value = 0;
         uint32_t gnu_flags = 0;
         token_index section = 0, abi_tag = 0;
         uint32_t gnu_priority = 0;

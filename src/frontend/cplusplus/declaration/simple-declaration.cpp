@@ -1108,6 +1108,8 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
                 VTRY(ar, alignment_specifier(elem.alignment_specifier(), a));
                 if (a > s.aligned)
                     s.aligned = static_cast<uint32_t>(a);
+                if (a > s.alignas_lead)
+                    s.alignas_lead = a;
                 return analysis_result::well_formed;
             }
             return gnu_attribute_specifier(elem, s);
@@ -1230,6 +1232,7 @@ analysis_result semantic_analysis::declare_with_initializer(
     qualified_type type = s.type;
     declarator_meaning m;
     m.ext_vector.allowed = s.ext_vector.allowed;
+    m.alignas_allowed = true;
     function_cv = 0;
     /* the parameters of this declarator's function declarator, if it has
        one (function sets them) */
@@ -1244,6 +1247,41 @@ analysis_result semantic_analysis::declare_with_initializer(
         scoped_value<bool> run_time(variable_length_declarator,
                                     variable_length);
         VTRY_SET(r, declarator(declaration, d, type, m));
+    }
+    /* [dcl.align]/1: "An alignment-specifier may be applied to a variable
+       or to a class data member, ... It shall not be applied to a typedef,
+       ... " (clang: only variables, data members and tag types) */
+    if (m.alignas_suffix &&
+        (s.typedef_ ||
+         type_table[type.unqualified()].kind == type_kind::function))
+        return ill_formed(declaration,
+                          "an alignment-specifier applies only to "
+                          "variables, data members and tag types",
+                          "dcl.align");
+    /* [dcl.align]/5: "The combined effect of all alignment-specifiers in a
+       declaration shall not specify an alignment that is less strict than
+       the alignment that would be required for the entity being declared
+       if all alignment-specifiers appertaining to it were omitted" */
+    uint64_t asked = s.alignas_lead;
+    if (m.alignas_suffix_value > asked)
+        asked = m.alignas_suffix_value;
+    if (asked) {
+        qualified_type element = type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        const struct type &record = type_table[element.unqualified()];
+        uint64_t natural = 0;
+        if (record.kind == type_kind::class_type)
+            natural = entity_table[record.entity].alignment;
+        else if (record.kind == type_kind::fundamental &&
+                 record.fundamental != fundamental_type::builtin_va_list &&
+                 record.fundamental != fundamental_type::builtin_va_list_tag)
+            natural = alignment_of_type(element);
+        if (natural && asked < natural)
+            return ill_formed(declaration,
+                              "the alignment requested is less than the "
+                              "minimum alignment of the type",
+                              "dcl.align");
     }
     if (has_variable_bound(type)) {
         VTRY_SET(r, variable_length_declaration(declaration, type,

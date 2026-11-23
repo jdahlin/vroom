@@ -965,6 +965,24 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
     return analysis_result::well_formed;
 }
 
+namespace
+{
+
+/* an alignment-specifier, or an attribute-specifier-seq of them alone */
+bool alignments_only(SyntaxElement n)
+{
+    if (n.is(syntax_kind::alignment_specifier))
+        return true;
+    if (!n.is(syntax_kind::attribute_specifier_seq))
+        return false;
+    for (auto child : n.elements())
+        if (!child.is(syntax_kind::alignment_specifier))
+            return false;
+    return true;
+}
+
+} // namespace
+
 /*
  * The type the declarator d gives its declarator-id, from the type T of
  * the decl-specifier-seq (type on entry).
@@ -1236,6 +1254,31 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         }
         if (c.is_attribute()) {
             if (attributes_without_effect(c)) {
+                i++;
+                continue;
+            }
+            if (m.alignas_allowed && alignments_only(c)) {
+                /* [dcl.align]/1, [dcl.decl]/4: the alignment-specifiers
+                   after the declarator-id appertain to the entity */
+                owned_array<SyntaxElement> work;
+                work.append(c);
+                while (!work.empty()) {
+                    SyntaxElement e = work.back();
+                    work.resize(work.size() - 1);
+                    if (e.is(syntax_kind::alignment_specifier)) {
+                        uint64_t a = 0;
+                        VTRY(ar,
+                             alignment_specifier(e.alignment_specifier(), a));
+                        if (a > m.aligned)
+                            m.aligned = a;
+                        m.alignas_suffix = true;
+                        if (a > m.alignas_suffix_value)
+                            m.alignas_suffix_value = a;
+                    } else {
+                        for (auto child : e.elements())
+                            work.append(child);
+                    }
+                }
                 i++;
                 continue;
             }
