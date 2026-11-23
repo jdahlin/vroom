@@ -357,6 +357,14 @@ it; none adds a second way to instantiate.
   orchestrator gave the refusal a context detail: a declaration that takes
   none 350 (alias-declaration, template default argument: clang errors;
   `template<auto x>`: allowed, C++17), a type-id 273, a parameter 53.
+- 4.2 (dropped once: we reject +1 from typeid) -> 28bb429d7
+  (orchestrator): typeid needs std::type_info declared, not complete (we
+  reject 606 -> 573), then the agent's patch: auto in a type-id with a
+  trailing return type (-16; types/constants verified -13/-15 because
+  cwg12xx.cpp's g() is now ill-formed as clang says, checked by a
+  per-declaration diff of the old and new vpp).  We accept +1
+  (expr.prim.lambda/templates.cpp:77: a by-value Boom<T> parameter does not
+  instantiate its ill-formed copy constructor: queue).
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
