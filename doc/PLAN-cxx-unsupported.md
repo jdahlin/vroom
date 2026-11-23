@@ -292,10 +292,21 @@ it; none adds a second way to instantiate.
   initialization of such a member on instantiation ([dcl.init]/7, clang "no
   matching constructor"): queue.  Rule from here: a step that raises we
   accept names the new lines (diff of that file) in its report.
+- 2.3 (dropped once: we reject +2 from a missing access exemption) ->
+  2.3a (03a5ad9ab fix, 30bc2de77 simplify): no access check on the names of
+  an explicit specialization's or instantiation's declaration
+  ([temp.spec.general]/6; one flag, accessible() consults it): we reject
+  660 -> 613.  Then 9dfa80a4b (orchestrator): the same for a partial
+  specialization's template arguments ([temp.class.spec]/10), and
+  c05b4d3ce: non-type parameters of pointer-to-member, array, function type
+  (the agent's patch; its `?:` rewritten, caught by the hook).  Together
+  unsupported 38958 -> 38802, we reject 660 -> 606.  We accept +10, all
+  part.spec.cpp: a specialization's base-clause naming a private member is
+  not checked, because that base-clause is not analysed (queue).
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
   and make --why read the unsupported output from its single run.
-- Queue: default initialization of an instantiated static member without an initializer (the +6 of 2.2); the +11 of 1.3b and +2 of 1.1/1.2 (not yet named); vpp segfaults on two clang test files (found in the -std=gnu++20
+- Queue: a specialization's base-clause not analysed (we accept +10, part.spec.cpp); default initialization of an instantiated static member without an initializer (the +6 of 2.2); the +11 of 1.3b and +2 of 1.1/1.2 (not yet named); vpp segfaults on two clang test files (found in the -std=gnu++20
   sweep); `semantic_kind_name` lacks complex_value, complex_part,
   statement_expression (wrong names in tree dumps).
