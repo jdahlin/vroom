@@ -226,8 +226,7 @@ class class_layout
         return false;
     }
     const char *base(entity &b);
-    void bit_field(entity &m);
-    void packed_bit_field(entity &m);
+    void bit_field(entity &m, bool packed = false);
     const char *data_member(entity &m);
     void potentially_overlapping_member(entity &m, entity_index of,
                                         uint64_t member_alignment);
@@ -420,10 +419,16 @@ const char *class_layout::base(entity &b)
  * its type's.  One wider than its type ([class.bit]/1's padding bits) is
  * unsupported where it is declared.
  */
-void class_layout::bit_field(entity &m)
+void class_layout::bit_field(entity &m, bool packed)
 {
     uint64_t unit = analysis.size_of_type(m.type) * 8;
     uint64_t type_alignment = analysis.alignment_of_type(m.type);
+    /* [ext:gnu_attributes] a packed bit-field (the field's or its class's
+       attribute) starts at the next bit whatever its type's alignment and
+       aligns the class to one byte only (clang's FieldPacked) */
+    uint64_t class_alignment = type_alignment;
+    if (packed)
+        class_alignment = 1;
     uint64_t bit_alignment = type_alignment * 8;
     if (table[c].union_) {
         /* [class.union]/2: each member "as if it were the sole member of
@@ -434,42 +439,17 @@ void class_layout::bit_field(entity &m)
         if (bits > data_bits)
             data_bits = bits;
         raise_size(data_size());
-        raise_alignment(type_alignment);
+        raise_alignment(class_alignment);
         return;
     }
     uint64_t at = data_bits;
-    if (!m.bit_width || (at % bit_alignment) + m.bit_width > unit)
+    if (!packed && (!m.bit_width || (at % bit_alignment) + m.bit_width > unit))
         at = align_up(at, bit_alignment);
     m.offset = at / 8;
     m.bit_offset = at;
     data_bits = at + m.bit_width;
     raise_size(data_size());
-    raise_alignment(type_alignment);
-}
-
-/*
- * [ext:gnu_attributes] a packed bit-field (the field's or its class's
- * attribute): at the next bit whatever its type's alignment, raising the
- * class's alignment to one byte only (clang's FieldPacked: FieldAlign 1).
- */
-void class_layout::packed_bit_field(entity &m)
-{
-    if (table[c].union_) {
-        m.offset = 0;
-        m.bit_offset = 0;
-        uint64_t bits = align_up(m.bit_width, 8);
-        if (bits > data_bits)
-            data_bits = bits;
-        raise_size(data_size());
-        raise_alignment(1);
-        return;
-    }
-    uint64_t at = data_bits;
-    m.offset = at / 8;
-    m.bit_offset = at;
-    data_bits = at + m.bit_width;
-    raise_size(data_size());
-    raise_alignment(1);
+    raise_alignment(class_alignment);
 }
 
 /*
@@ -612,7 +592,7 @@ const char *class_layout::allocation_of_members()
                 /* (a zero-width one aligns to its type: not followed) */
                 if (!m.bit_width)
                     return "ext.gnu";
-                packed_bit_field(m);
+                bit_field(m, true);
                 continue;
             }
             bit_field(m);

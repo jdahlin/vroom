@@ -788,10 +788,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
                 type_table.fundamental(fundamental_type::void_), cv_none);
         function_cv = 0;
         function_parameters.clear();
-        uint32_t declarator_at = 0;
-        if (has_specifiers)
-            declarator_at = 1;
-        r = declarator(declaration, tail[declarator_at], type, m);
+        r = declarator(declaration, tail[has_specifiers], type, m);
         cv = function_cv;
         if (r == analysis_result::well_formed)
             r = misplaced_function_qualifiers(
