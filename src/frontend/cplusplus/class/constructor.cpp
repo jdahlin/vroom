@@ -952,21 +952,22 @@ analysis_result semantic_analysis::expression_list_meanings(
     return analysis_result::well_formed;
 }
 
-/*
- * [dcl.init]/17.6.2: "Otherwise, if the initialization is
- * direct-initialization, or if it is copy-initialization where the
- * cv-unqualified version of the source type is the same class as, or a
- * derived class of, the class of the destination, constructors are
- * considered.  The applicable constructors are enumerated
- * ([over.match.ctor]), and the best one is chosen through overload
- * resolution ([over.match]).  The constructor so selected is called to
- * initialize the object, with the initializer expression or
- * expression-list as its argument(s)."
- *
- * [over.match.ctor]/1: the candidates are the class's constructors and its
- * implicitly-declared copy constructor ([class.copy.ctor]/6), which for a
- * class that declares none copies the object's bytes (copies_bytes).
- */
+/* a trivial copy or move constructor that is no entity (a trivial
+   implicitly-declared one, or X(X&&) = default) as a candidate of
+   [over.match.ctor]/1: void(parameter) with no function to call */
+semantic_analysis::overload_candidate
+semantic_analysis::trivial_constructor_candidate(qualified_type parameter)
+{
+    overload_candidate one;
+    one.type = qualified_type::make(
+        type_table.function(
+            qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none),
+            &parameter, 1, false),
+        cv_none);
+    return one;
+}
+
 /*
  * Whether the deleted implicit copy constructor of class c can take part
  * in a construction from these arguments ([over.match.ctor]/1): its one
@@ -992,6 +993,21 @@ bool semantic_analysis::copy_argument_candidate(
     return from == c || base_step(from, c, ambiguous);
 }
 
+/*
+ * [dcl.init]/17.6.2: "Otherwise, if the initialization is
+ * direct-initialization, or if it is copy-initialization where the
+ * cv-unqualified version of the source type is the same class as, or a
+ * derived class of, the class of the destination, constructors are
+ * considered.  The applicable constructors are enumerated
+ * ([over.match.ctor]), and the best one is chosen through overload
+ * resolution ([over.match]).  The constructor so selected is called to
+ * initialize the object, with the initializer expression or
+ * expression-list as its argument(s)."
+ *
+ * [over.match.ctor]/1: the candidates are the class's constructors and its
+ * implicitly-declared copy constructor ([class.copy.ctor]/6), which for a
+ * class that declares none copies the object's bytes (copies_bytes).
+ */
 analysis_result semantic_analysis::construct(
     SyntaxRef at, qualified_type type,
     owned_array<expression_meaning> &arguments, uint32_t object,
@@ -1071,50 +1087,22 @@ analysis_result semantic_analysis::construct(
     bool implicit_copy =
         !x.defaulted_move_constructor || x.defaulted_copy_constructor;
     for (entity_index k = x.first_constructor; k && implicit_copy;
-         k = entity_table[k].next_constructor) {
-        const struct type &f = type_table[entity_table[k].type.unqualified()];
-        if (f.parameter_count != 1)
-            continue;
-        const struct type &p =
-            type_table[type_table
-                           .parameters(entity_table[k].type.unqualified())[0]
-                           .unqualified()];
-        if ((p.kind == type_kind::lvalue_reference ||
-             p.kind == type_kind::rvalue_reference) &&
-            p.operand.unqualified() == type.unqualified())
+         k = entity_table[k].next_constructor)
+        if (copy_or_move_constructor(c, k))
             implicit_copy = false;
-    }
-    if (implicit_copy) {
-        qualified_type parameter = qualified_type::make(
+    if (implicit_copy)
+        candidates.append(trivial_constructor_candidate(qualified_type::make(
             type_table.lvalue_reference_to(
                 qualified_type::make(type.unqualified(), cv_const)),
-            cv_none);
-        overload_candidate copy;
-        copy.type = qualified_type::make(
-            type_table.function(
-                qualified_type::make(
-                    type_table.fundamental(fundamental_type::void_), cv_none),
-                &parameter, 1, false),
-            cv_none);
-        candidates.append(copy);
-    }
+            cv_none)));
     /* X(X&&) = default, trivial (implicit_special_members): it copies the
        bytes */
     size_t move = candidates.size();
-    if (x.defaulted_move_constructor) {
-        qualified_type parameter = qualified_type::make(
+    if (x.defaulted_move_constructor)
+        candidates.append(trivial_constructor_candidate(qualified_type::make(
             type_table.rvalue_reference_to(
                 qualified_type::make(type.unqualified(), cv_none)),
-            cv_none);
-        overload_candidate moving;
-        moving.type = qualified_type::make(
-            type_table.function(
-                qualified_type::make(
-                    type_table.fundamental(fundamental_type::void_), cv_none),
-                &parameter, 1, false),
-            cv_none);
-        candidates.append(moving);
-    }
+            cv_none)));
     size_t best = 0;
     /* [over.best.ics]/4: "when considering the argument of a constructor
        ... that is a candidate by [over.match.copy]", copy-initialization of

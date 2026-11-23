@@ -5625,6 +5625,8 @@ class semantic_analysis
        member function call, or none): its index; ill-formed when there is
        no unique one; user_defined false: no argument converts by a
        user-defined conversion ([over.best.ics]/4) */
+    /* class/constructor.cpp */
+    overload_candidate trivial_constructor_candidate(qualified_type parameter);
     analysis_result best_viable_function(
         SyntaxRef at, const owned_array<overload_candidate> &candidates,
         const expression_meaning *object,
