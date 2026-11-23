@@ -796,6 +796,118 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
 }
 
 /*
+ * [basic.types]/11 and [class.mem]/26: whether a and b are
+ * layout-compatible types, cv-qualification ignored: the same type; two
+ * enumerations with the same underlying type; two arrays of
+ * layout-compatible elements and the same bound; two standard-layout
+ * non-union classes, without base classes, whose members are in order
+ * layout-compatible, with the same bit-field widths, offsets and no
+ * [[no_unique_address]] (clang, CWG 2759).  known is false for what is not
+ * followed: an
+ * incomplete class, a union, a class with bases.
+ */
+bool semantic_analysis::layout_compatible(qualified_type a, qualified_type b,
+                                          bool &known)
+{
+    a = qualified_type::make(a.unqualified(), cv_none);
+    b = qualified_type::make(b.unqualified(), cv_none);
+    if (a == b) {
+        const struct type &k = type_table[a.unqualified()];
+        if (k.kind == type_kind::class_type) {
+            require_complete(k.entity);
+            if (!entity_table[k.entity].size)
+                known = false;
+        }
+        return true;
+    }
+    const struct type &x = type_table[a.unqualified()];
+    const struct type &y = type_table[b.unqualified()];
+    if (x.kind == type_kind::array && y.kind == type_kind::array) {
+        if (x.bound_known != y.bound_known)
+            return false;
+        if (x.bound_known && x.bound != y.bound)
+            return false;
+        return layout_compatible(x.operand, y.operand, known);
+    }
+    if (x.kind == type_kind::enumeration && y.kind == type_kind::enumeration) {
+        require_complete(x.entity);
+        require_complete(y.entity);
+        return entity_table[x.entity].underlying ==
+               entity_table[y.entity].underlying;
+    }
+    if (x.kind != type_kind::class_type || y.kind != type_kind::class_type)
+        return false;
+    entity_index c = x.entity, d = y.entity;
+    require_complete(c);
+    require_complete(d);
+    const entity &p = entity_table[c];
+    const entity &q = entity_table[d];
+    if (!p.size || !q.size) {
+        known = false;
+        return false;
+    }
+    if (p.union_ != q.union_)
+        return false;
+    bool layout_p = false, layout_q = false;
+    if (!standard_layout_class(c, layout_p) ||
+        !standard_layout_class(d, layout_q)) {
+        known = false;
+        return false;
+    }
+    if (!layout_p || !layout_q)
+        return false;
+    if (p.union_ || p.base_count || q.base_count || p.virtual_base_count ||
+        q.virtual_base_count) {
+        known = false;
+        return false;
+    }
+    owned_array<entity_index> first, second;
+    for (uint32_t i = 0; i < p.member_count; i++) {
+        const entity &m = entity_table[class_members[p.first_member + i]];
+        if (m.kind == entity_kind::variable && m.nonstatic_member)
+            first.append(class_members[p.first_member + i]);
+    }
+    for (uint32_t i = 0; i < q.member_count; i++) {
+        const entity &m = entity_table[class_members[q.first_member + i]];
+        if (m.kind == entity_kind::variable && m.nonstatic_member)
+            second.append(class_members[q.first_member + i]);
+    }
+    if (first.size() != second.size())
+        return false;
+    for (uint32_t i = 0; i < first.size(); i++) {
+        const entity &m = entity_table[first[i]];
+        const entity &n = entity_table[second[i]];
+        /* clang: a [[no_unique_address]] member makes two distinct
+           classes not layout-compatible (CWG 2759); a member with another
+           alignment or offset is not the same layout */
+        if (m.bit_field != n.bit_field || m.bit_width != n.bit_width ||
+            m.no_unique_address || n.no_unique_address || m.offset != n.offset)
+            return false;
+        if (!layout_compatible(m.type, n.type, known))
+            return false;
+    }
+    return true;
+}
+
+/* ( type-id , type-id ): __is_layout_compatible(T, U), [meta.rel] */
+analysis_result
+semantic_analysis::clang_layout_compatible_trait(SyntaxRef n,
+                                                 expression_meaning &m)
+{
+    qualified_type t, u;
+    VTRY(r, type_id(n[2], t));
+    VTRY_SET(r, type_id(n[4], u));
+    if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
+        return not_supported(n, "temp.dep.constexpr");
+    bool known = true;
+    bool answer = layout_compatible(t, u, known);
+    if (!known)
+        return not_supported(n, "meta.rel");
+    m = integer_constant(fundamental_type::bool_, answer, n.first_token());
+    return analysis_result::well_formed;
+}
+
+/*
  * Whether t is trivially relocatable.  cpp26 is clang's
  * __builtin_is_cpp_trivially_relocatable (P2786: a const field, a
  * defaulted move, a union with a member that is not are not; a polymorphic

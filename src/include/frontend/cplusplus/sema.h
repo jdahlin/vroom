@@ -3340,6 +3340,9 @@ class semantic_analysis
     bool relocatable_type(qualified_type t, bool cpp26, bool &known);
     bool class_head_names_trivial_abi(entity_index c);
     bool unique_representation(qualified_type t, bool &answer);
+    bool layout_compatible(qualified_type a, qualified_type b, bool &known);
+    analysis_result clang_layout_compatible_trait(SyntaxRef n,
+                                                  expression_meaning &m);
     void base_classes_of(entity_index c, owned_array<entity_index> &out) const;
     void layout_member_types(entity_index c, owned_array<type_index> &out);
     bool first_data_class(entity_index c, entity_index &owner) const;

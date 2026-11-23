@@ -607,6 +607,8 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         n[4].is(syntax_kind::type_id)) {
         if (spelled(name, written.size(), "__is_base_of"))
             return clang_base_of_trait(n, false, m);
+        if (spelled(name, written.size(), "__is_layout_compatible"))
+            return clang_layout_compatible_trait(n, m);
         if (spelled(name, written.size(), "__builtin_is_virtual_base_of"))
             return clang_base_of_trait(n, true, m);
         if (spelled(name, written.size(), "__is_assignable"))
