@@ -2867,6 +2867,11 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
             return constness::not_constant;
     }
     entity_index function = semantics[callee].a;
+    /* [expr.const]/5.4 (C++20 allowed it): an invocation of a virtual
+       function, called through its dynamic type or not */
+    if (entity_table[function].virtual_ &&
+        tokens.files.behavior.edition < standard_edition::cplusplus_20)
+        return constness::not_constant;
     if (x.c == 1 && x.b) {
         /* [class.virtual]/16: the final overrider in the object's dynamic
            class, called on its own subobject */
