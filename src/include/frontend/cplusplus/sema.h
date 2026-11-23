@@ -3790,6 +3790,10 @@ class semantic_analysis
                                                 qualified_type reference);
     analysis_result class_reference_binding(SyntaxRef at, expression_meaning &m,
                                             qualified_type reference);
+    /* [dcl.init.ref]/4 (declaration/initializer.cpp) */
+    bool reference_related(qualified_type t1, qualified_type t2,
+                           bool &ambiguous) const;
+    bool reference_compatible(qualified_type t1, qualified_type t2);
     analysis_result reference_binding(SyntaxRef at, expression_meaning &m,
                                       qualified_type reference);
     /* [dcl.init.list]/7: whether converting m to to narrows */
