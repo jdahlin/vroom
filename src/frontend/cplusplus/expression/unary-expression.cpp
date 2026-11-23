@@ -454,6 +454,15 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
                 typedef_alignment = f.alignment;
             packed_member = packed;
         }
+        /* [ext:gnu_attributes] __alignof__ of a variable named: its own
+           alignment, which alignas and aligned give it ([dcl.align]) */
+        if (alignment && e.node &&
+            semantics[e.node].kind == semantic_kind::entity) {
+            entity_index v = semantics[e.node].a;
+            if (v && entity_table[v].kind == entity_kind::variable &&
+                !entity_table[v].nonstatic_member && entity_table[v].alignment)
+                typedef_alignment = entity_table[v].alignment;
+        }
     } else if (!alignment && n.size() == 5 &&
                n[1].is(preprocessing_op_or_punc::ELLIPSIS) && n[3].is_token() &&
                n[3].is_identifier()) {
