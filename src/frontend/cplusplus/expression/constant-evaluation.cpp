@@ -1110,7 +1110,6 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                ([expr.const]/13) and its value is not known (opaque) */
             if (!e.constexpr_ || !e.definition) {
                 o.opaque = true;
-                o.outside = true;
                 append_object(state, o);
                 return constness::constant;
             }
@@ -1157,7 +1156,11 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
            array type is designated, opaque and outside */
         if (x.a && e.kind == entity_kind::variable && e.automatic &&
             !e.constexpr_ &&
-            (tk == type_kind::array || tk == type_kind::class_type)) {
+            (tk == type_kind::array ||
+             (tk == type_kind::class_type &&
+              !empty_class(type_table[e.type.unqualified()].entity)))) {
+            /* (an empty class's copy reads no value, [class.copy.ctor]/14:
+               its object is not designated here, the answer stays unknown) */
             constant_evaluation::object o;
             o.entity = x.a;
             o.opaque = true;
@@ -1982,8 +1985,10 @@ constness semantic_analysis::evaluate_array_pointer(constant_evaluation &state,
     constness c = evaluate_object(state, node, array);
     if (c != constness::constant)
         return c;
+    /* (the decay of an array the evaluation has no value for: its address
+       is not read, [expr.const]/5.8 does not apply) */
     if (!(array & element_place) && state.objects[array].opaque)
-        return opaque_access(state.objects[array]);
+        return CONST_UNKNOWN;
     const constant_value a = place_value(state, array);
     if (a.kind != constant_value_kind::array || !a.count)
         return CONST_UNKNOWN;
