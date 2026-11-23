@@ -137,16 +137,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                 !m.aligned && !ms.section && !m.section && !m.asm_label) {
                 entity_index e =
                     entity_table.find(m.qualifier, tokens.identifier(m.id));
-                entity_index match = 0;
-                for (entity_index o = e;
-                     o && entity_table[o].kind == entity_kind::function;
-                     o = entity_table[o].next_overload) {
-                    if (entity_table[o].type == type &&
-                        entity_table[o].member_cv == cv) {
-                        match = o;
-                        break;
-                    }
-                }
+                entity_index match = overload_of_type(e, type, cv);
                 if (match) {
                     entity_table[match].member_body_deferred = false;
                     /* the template's body, queued with the class, is no
@@ -276,12 +267,7 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
     uint32_t index = 0;
     VTRY(r, named_specialization(n, d, lead, false, extern_, s, index));
     entity_index e = instantiations[index].specialization;
-    if (extern_)
-        entity_table[e].explicitly_instantiated =
-            instantiation_kind::declaration;
-    else
-        entity_table[e].explicitly_instantiated =
-            instantiation_kind::definition;
+    mark_explicit_instantiation(e, extern_);
     return analysis_result::well_formed;
 }
 
@@ -746,12 +732,7 @@ analysis_result semantic_analysis::class_explicit_instantiation(SyntaxRef n,
     if (was == instantiation_kind::definition ||
         (extern_ && (was == instantiation_kind::none) && prior))
         return not_supported(n, "temp.explicit");
-    if (extern_)
-        entity_table[c].explicitly_instantiated =
-            instantiation_kind::declaration;
-    else
-        entity_table[c].explicitly_instantiated =
-            instantiation_kind::definition;
+    mark_explicit_instantiation(c, extern_);
     return analysis_result::well_formed;
 }
 
@@ -826,35 +807,9 @@ analysis_result semantic_analysis::member_explicit_instantiation(
         !function_templates[record.pattern - 1].parameter_count)
         return not_supported(n, "temp.explicit");
     /* the member: one function of the name, of the declared type */
-    entity_index f = 0;
-    if (m.destructor) {
-        f = c.destructor;
-    } else if (!has_specifiers) {
-        /* a constructor: the one of the declared type */
-        for (entity_index k = c.first_constructor; k;
-             k = entity_table[k].next_constructor)
-            if (entity_table[k].type == type && entity_table[k].member_cv == cv)
-                f = k;
-    } else if (variable) {
-        f = entity_table.find(m.qualifier, tokens.identifier(m.id));
-        if (f && (entity_table[f].kind != entity_kind::variable ||
-                  !(entity_table[f].type == type)))
-            f = 0;
-    } else {
-        uint32_t member_name = tokens.identifier(m.id);
-        if (m.operator_function)
-            member_name = operator_name(m.implemented);
-        f = entity_table.find(m.qualifier, member_name);
-        /* (a name with overloads: the one of the declared type) */
-        while (f && !(entity_table[f].kind == entity_kind::function &&
-                      entity_table[f].type == type &&
-                      entity_table[f].member_cv == cv))
-            f = entity_table[f].next_overload;
-        if (f && entity_table[f].special != special_member::none)
-            f = 0;
-    }
-    if (!f || entity_table[f].enclosing != m.qualifier ||
-        (!variable && entity_table[f].kind != entity_kind::function))
+    entity_index f =
+        explicit_instantiation_target(c, m, type, cv, has_specifiers, variable);
+    if (!f || entity_table[f].enclosing != m.qualifier)
         return not_supported(n, "temp.explicit");
     if (variable) {
         /* a declaration only: the member is defined where the
@@ -862,8 +817,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
         if (!extern_ || entity_table[f].explicitly_instantiated ==
                             instantiation_kind::definition)
             return not_supported(n, "temp.explicit");
-        entity_table[f].explicitly_instantiated =
-            instantiation_kind::declaration;
+        mark_explicit_instantiation(f, true);
         return analysis_result::well_formed;
     }
     /* clang's "explicit instantiation of undefined function" (a
@@ -876,13 +830,62 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     instantiation_kind was = explicitly_instantiated(f);
     if (was == instantiation_kind::definition)
         return not_supported(n, "temp.explicit");
+    mark_explicit_instantiation(f, extern_);
+    return analysis_result::well_formed;
+}
+
+void semantic_analysis::mark_explicit_instantiation(entity_index e,
+                                                    bool extern_)
+{
     if (extern_)
-        entity_table[f].explicitly_instantiated =
+        entity_table[e].explicitly_instantiated =
             instantiation_kind::declaration;
     else
-        entity_table[f].explicitly_instantiated =
+        entity_table[e].explicitly_instantiated =
             instantiation_kind::definition;
-    return analysis_result::well_formed;
+}
+
+entity_index semantic_analysis::overload_of_type(entity_index first,
+                                                 qualified_type type,
+                                                 uint32_t cv) const
+{
+    for (entity_index o = first;
+         o && entity_table[o].kind == entity_kind::function;
+         o = entity_table[o].next_overload)
+        if (entity_table[o].type == type && entity_table[o].member_cv == cv)
+            return o;
+    return 0;
+}
+
+entity_index semantic_analysis::explicit_instantiation_target(
+    const entity &c, const declarator_meaning &m, qualified_type type,
+    uint32_t cv, bool has_specifiers, bool variable)
+{
+    entity_index f = 0;
+    if (m.destructor)
+        return c.destructor;
+    if (!has_specifiers) {
+        /* a constructor */
+        for (entity_index k = c.first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (entity_table[k].type == type && entity_table[k].member_cv == cv)
+                f = k;
+        return f;
+    }
+    uint32_t name = tokens.identifier(m.id);
+    if (m.operator_function)
+        name = operator_name(m.implemented);
+    f = entity_table.find(m.qualifier, name);
+    if (variable) {
+        if (f && entity_table[f].kind == entity_kind::variable &&
+            entity_table[f].type == type)
+            return f;
+        return 0;
+    }
+    f = overload_of_type(f, type, cv);
+    if (f && entity_table[f].special != special_member::none)
+        return 0;
+    return f;
 }
 
 instantiation_kind

@@ -496,18 +496,7 @@ void semantic_analysis::complete_instantiation(entity_index c)
 
 void semantic_analysis::complete_class_type(qualified_type t)
 {
-    for (;;) {
-        const struct type &r = type_table[t.unqualified()];
-        if (r.kind == type_kind::array ||
-            r.kind == type_kind::lvalue_reference ||
-            r.kind == type_kind::rvalue_reference) {
-            t = r.operand;
-            continue;
-        }
-        if (r.kind == type_kind::class_type)
-            complete_instantiation(r.entity);
-        return;
-    }
+    complete_instantiation(element_class(referenced_type(t)));
 }
 
 /* [temp.deduct]/8: "Only invalid types and expressions in the immediate

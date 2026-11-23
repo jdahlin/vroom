@@ -1725,6 +1725,15 @@ class semantic_analysis
             return nullptr;
         return &dynamic_classes[entity_table[c].dynamic - 1];
     }
+    /* t, or the type a reference t refers to ([dcl.ref]) */
+    qualified_type referenced_type(qualified_type t) const
+    {
+        const struct type &r = type_table[t.unqualified()];
+        if (r.kind == type_kind::lvalue_reference ||
+            r.kind == type_kind::rvalue_reference)
+            return r.operand;
+        return t;
+    }
     /* t, or the innermost element type of an array t ([dcl.array]) */
     qualified_type element_type(qualified_type t) const
     {
@@ -1780,6 +1789,14 @@ class semantic_analysis
     /* the explicit instantiation a function is the subject of, its own or
        its class's ([temp.explicit]/10) */
     instantiation_kind explicitly_instantiated(entity_index f) const;
+    /* [temp.explicit]/1: e explicitly instantiated, a declaration (extern)
+       or a definition */
+    void mark_explicit_instantiation(entity_index e, bool extern_);
+    /* the function of the overload set that starts at first with type and
+       member_cv cv, 0 if none ([dcl.meaning]/1: the one a member declarator
+       declares again) */
+    entity_index overload_of_type(entity_index first, qualified_type type,
+                                  uint32_t cv) const;
     /* [basic.types]/10: whether t is a literal type (unknown:
        analysis cannot tell; basic/literal-types.cpp) */
     constness literal_type(qualified_type t) const;
@@ -2077,6 +2094,14 @@ class semantic_analysis
            allows it) */
         token_index pack = 0;
     };
+    /* the member a member explicit instantiation names (a destructor, a
+       constructor, a static data member or a member function of class c),
+       0 if none */
+    entity_index explicit_instantiation_target(const entity &c,
+                                               const declarator_meaning &m,
+                                               qualified_type type, uint32_t cv,
+                                               bool has_specifiers,
+                                               bool variable);
     /* [dcl.fct]/2: noptr-declarator parameters-and-qualifiers
        trailing-return-type (placeholder-type-specifier.cpp) */
     analysis_result trailing_return(SyntaxRef declaration, SyntaxRef n,
