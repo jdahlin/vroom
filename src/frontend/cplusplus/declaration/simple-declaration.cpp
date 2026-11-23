@@ -203,15 +203,20 @@ node_index parser::recover_declaration(node_index (parser::*alternative)())
     /* the tokens were not a declaration of the grammar written so far */
     if (debug_fallbacks) {
         const char *why = "expected ";
-        if (failed_with.beyond_step)
+        const char *in = "", *in_word = "";
+        if (failed_with.beyond_step) {
             why = "later step: ";
+            in = failed_with.beyond_where;
+            in_word = " in ";
+        }
         owned_buffer spelling;
         tokens.spelling(failed_with.at, spelling.get());
         source_position at = tokens.position(failed_with.at);
-        fprintf(stderr, "vcc: declaration at %s:%u:%u: %s%s at %u:%u `%.*s`\n",
-                at.file_name, tokens.position(first).line,
-                tokens.position(first).column, why, failed_with.expected,
-                at.line, at.column, (int)spelling.size(), spelling.data());
+        fprintf(
+            stderr, "vcc: declaration at %s:%u:%u: %s%s%s%s at %u:%u `%.*s`\n",
+            at.file_name, tokens.position(first).line,
+            tokens.position(first).column, why, failed_with.expected, in_word,
+            in, at.line, at.column, (int)spelling.size(), spelling.data());
     }
     size_t messages = diagnostics.messages.size();
     node_index n = unparsed_declaration();

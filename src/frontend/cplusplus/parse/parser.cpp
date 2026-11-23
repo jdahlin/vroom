@@ -224,8 +224,12 @@ bool parser::nesting_within_limit(const char *what)
     return false;
 }
 
-node_index parser::beyond_this_step()
+/* (where: the parsing function that met it, which -fcxx-debug-fallbacks
+   names) */
+node_index parser::beyond_this_step(const char *where)
 {
+    if (!failure.failed)
+        failure.beyond_where = where;
     failure.beyond_step = true;
     return expected("grammar of a later step", "");
 }

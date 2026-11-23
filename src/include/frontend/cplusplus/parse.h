@@ -905,6 +905,8 @@ class parser
         bool failed = false;
         /* the declaration uses grammar of a later step */
         bool beyond_step = false;
+        /* beyond_step: the parsing function that met it (-fcxx-debug-fallbacks) */
+        const char *beyond_where = "";
         token_index at = 0;
         const char *expected = nullptr, *subclause = nullptr;
         /* parse_expected: "expected WHAT"; parse_violation: a rule the
@@ -919,7 +921,7 @@ class parser
     node_index expected(const char *what, const char *subclause);
     /* the tokens use grammar a later step writes (a template, an operator
        name, an attribute, an extension's keyword ...): returns 0 */
-    node_index beyond_this_step();
+    node_index beyond_this_step(const char *where = __builtin_FUNCTION());
     /* the tokens are the grammar but break a rule on its form (quoted, of
        subclause), at token at; returns 0 */
     node_index violates(const char *rule, const char *subclause,

@@ -978,8 +978,21 @@ def root_causes(test, opts, vpp, counted):
     """{root key: [count, example]} for the counted unsupported declarations
     of one run"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
-    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'analysis,unsupported', opts, name), cwd)
+    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'analysis,unsupported', opts, name,
+                                          ['-fcxx-debug-fallbacks']), cwd)
     decls, refusals = [], []
+    # why the parser kept a declaration as tokens or erroneous: its fallback
+    # line, else its first error, by (file, line)
+    parse_why = {}
+    for line in (ours[2] or '').splitlines():
+        f = re.match(r'^vcc: declaration at (.*?):(\d+):\d+: (.*)$', line)
+        if not f:
+            f = re.match(r'^(.*?):(\d+):\d+: error: (.*)$', line)
+        if f:
+            reason = re.sub(r' at \d+:\d+', '', f.group(3))
+            if not reason.startswith('later step'):
+                reason = re.sub(r'`[^`]*`', '`X`', reason)
+            parse_why.setdefault((f.group(1), int(f.group(2))), reason)
     for line in ours[1].splitlines():
         u = UNSUPPORTED_LINE.match(line)
         if u:
@@ -1015,7 +1028,13 @@ def root_causes(test, opts, vpp, counted):
     def root(i, depth):
         d = decls[i]
         if d['result'] != 'unsupported':
-            return f'{d["result"]}: {d["kind"]}', d
+            reason = ''
+            if d['result'] == 'not-parsed':
+                for n in range(d['l1'], d['l2'] + 1):
+                    if (d['path'], n) in parse_why:
+                        reason = ' ' + parse_why[(d['path'], n)]
+                        break
+            return f'{d["result"]}: {d["kind"]}{reason}', d
         r = first_refusal(d)
         if r is None:
             return f'[{d["sub"]}] (no refusal line in the declaration)', d
