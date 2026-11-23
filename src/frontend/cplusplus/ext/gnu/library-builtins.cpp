@@ -347,7 +347,8 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
         form == builtin_form::bit_count || form == builtin_form::generic ||
         form == builtin_form::launder || form == builtin_form::clear_padding ||
         form == builtin_form::bswapg || form == builtin_form::stdc_bits ||
-        form == builtin_form::invoke || form == builtin_form::complex) {
+        form == builtin_form::align || form == builtin_form::invoke ||
+        form == builtin_form::complex) {
         qualified_type result = void_type;
         /* (the type-generic ones have the signature's result type) */
         if (form == builtin_form::generic || form == builtin_form::bit_count)
@@ -750,6 +751,8 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         return clear_padding_result(n, called, nodes, result);
     case builtin_form::bswapg:
         return bswapg_result(n, called, nodes, result);
+    case builtin_form::align:
+        return align_result(n, called, nodes, result);
     case builtin_form::stdc_bits:
         return stdc_bits_result(n, called, nodes, result);
     case builtin_form::atomic:
@@ -1050,6 +1053,63 @@ semantic_analysis::bswapg_result(SyntaxRef n, entity_index called,
         return not_supported_builtin(n, "ext.clang", called,
                                      "of an integer wider than 64 bits or of a "
                                      "width that is not a multiple of 8");
+    result = qualified_type::make(t.unqualified(), cv_none);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [ext:clang_builtin_functions] __builtin_align_up(x, alignment),
+ * __builtin_align_down and bool __builtin_is_aligned (clang's
+ * Builtins.td, custom type checking): x an integer (not bool) or a pointer
+ * to an object or void, alignment an integer; the call has x's type (a
+ * bool for is_aligned).  A constant alignment shall be a power of two;
+ * other operands are unsupported.
+ */
+analysis_result
+semantic_analysis::align_result(SyntaxRef n, entity_index called,
+                                const owned_array<uint32_t> &nodes,
+                                qualified_type &result)
+{
+    const gnu_builtin &row =
+        gnu_builtin_at(entity_table[called].gnu_builtin_row);
+    if (nodes.size() != 2)
+        return ill_formed(n, "the builtin takes two arguments", "ext.clang");
+    qualified_type t = semantics[nodes[0]].type;
+    qualified_type a = semantics[nodes[1]].type;
+    if (depends_on_template_parameter(t) || depends_on_template_parameter(a))
+        return not_supported(n, "temp.dep.constexpr");
+    fundamental_type f = fundamental_of(t);
+    bool integer = f != fundamental_type::none &&
+                   fundamental_type_is_integral(f) &&
+                   f != fundamental_type::bool_;
+    const struct type &tk = type_table[t.unqualified()];
+    bool pointer = tk.kind == type_kind::pointer;
+    if (pointer) {
+        type_kind ok = type_table[tk.operand.unqualified()].kind;
+        if (ok == type_kind::function)
+            pointer = false;
+    }
+    if (!integer && !pointer)
+        return not_supported_builtin(n, "ext.clang", called,
+                                     "of an operand that is no integer and "
+                                     "no pointer to an object");
+    fundamental_type af = fundamental_of(a);
+    if (af == fundamental_type::none || !fundamental_type_is_integral(af))
+        return not_supported_builtin(n, "ext.clang", called,
+                                     "of an alignment that is no integer");
+    constant_value v;
+    if (evaluate_value(nodes[1], v) == constness::constant) {
+        if (v.kind != constant_value_kind::integer || !v.integer ||
+            (v.integer & (v.integer - 1)))
+            return not_supported_builtin(n, "ext.clang", called,
+                                         "of a constant alignment that is no "
+                                         "power of two");
+    }
+    if (row.which == 2) {
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::bool_), cv_none);
+        return analysis_result::well_formed;
+    }
     result = qualified_type::make(t.unqualified(), cv_none);
     return analysis_result::well_formed;
 }

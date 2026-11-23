@@ -69,6 +69,9 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_conjf", complex_conjugate, 0, none),
     ROW("__builtin_conjl", complex_conjugate, 0, none),
     ROWL("__builtin_invoke", invoke, 0, none, node, nullptr, nullptr),
+    ROWL("__builtin_align_up", align, 0, none, refuse, nullptr, nullptr),
+    ROWL("__builtin_align_down", align, 1, none, refuse, nullptr, nullptr),
+    ROWL("__builtin_is_aligned", align, 2, none, refuse, nullptr, nullptr),
     ROWL("__builtin_bswapg", bswapg, 0, bswap, bswap, nullptr, nullptr),
 /* the builtins a constant expression folds: the integer operations,
        the floating ones, the string functions; a `library` row is a call
@@ -251,6 +254,7 @@ bool gnu_builtin_untyped(uint16_t row)
     case builtin_form::launder:
     case builtin_form::clear_padding:
     case builtin_form::bswapg:
+    case builtin_form::align:
     case builtin_form::stdc_bits:
     case builtin_form::invoke:
     case builtin_form::unsupported:

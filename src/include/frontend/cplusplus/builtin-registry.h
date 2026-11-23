@@ -37,6 +37,10 @@ enum class builtin_form : uint8_t {
     clear_padding,
     /* T __builtin_bswapg(T), T an integer type of a multiple of 8 bits */
     bswapg,
+    /* T __builtin_align_up(T, alignment) and __builtin_align_down (which 0,
+       1), bool __builtin_is_aligned(T, alignment) (2), T an integer or
+       pointer type */
+    align,
     /* C23's <stdbit.h> functions and __builtin_bitreverseg, type-generic over
        the integer types (builtin_stdc_op): the result by the operation */
     stdc_bits,

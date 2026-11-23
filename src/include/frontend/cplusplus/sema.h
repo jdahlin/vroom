@@ -3426,6 +3426,9 @@ class semantic_analysis
     analysis_result bswapg_result(SyntaxRef n, entity_index called,
                                   const owned_array<uint32_t> &nodes,
                                   qualified_type &result);
+    analysis_result align_result(SyntaxRef n, entity_index called,
+                                 const owned_array<uint32_t> &nodes,
+                                 qualified_type &result);
     analysis_result stdc_bits_result(SyntaxRef n, entity_index called,
                                      const owned_array<uint32_t> &nodes,
                                      qualified_type &result);
