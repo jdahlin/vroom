@@ -284,10 +284,18 @@ it; none adds a second way to instantiate.
   names the shape: identifier 323, qualified-id 150, declarator 93,
   noptr-declarator 28, simple-template-id 27, decl-specifier-seq 15.
   Unsupported 39155 -> 39027, agree +131.
+- 2.2 (f3f27a905, no simplify needed): a class template's static data
+  member defined outside it without an initializer, through
+  member_definition_of_template.  Unsupported 39027 -> 38958, agree +66; we
+  accept +6.  The harness now writes work/cxx-sema-accepted.txt (each
+  we-accept declaration): the 6 are one missing check, the default
+  initialization of such a member on instantiation ([dcl.init]/7, clang "no
+  matching constructor"): queue.  Rule from here: a step that raises we
+  accept names the new lines (diff of that file) in its report.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
   and make --why read the unsupported output from its single run.
-- Queue: vpp segfaults on two clang test files (found in the -std=gnu++20
+- Queue: default initialization of an instantiated static member without an initializer (the +6 of 2.2); the +11 of 1.3b and +2 of 1.1/1.2 (not yet named); vpp segfaults on two clang test files (found in the -std=gnu++20
   sweep); `semantic_kind_name` lacks complex_value, complex_part,
   statement_expression (wrong names in tree dumps).
