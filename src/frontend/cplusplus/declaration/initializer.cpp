@@ -1287,20 +1287,19 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
-    switch (init.kind()) {
-    case syntax_kind::braced_init_list:
-        return list_initialization(init, type, true, result);
-    case syntax_kind::brace_or_equal_initializer:
-        if (init.size() != 2)
+    InitializerParts parts(init);
+    switch (parts.form) {
+    case InitializerParts::syntax_form::braced:
+        return list_initialization(parts.clause, type, true, result);
+    case InitializerParts::syntax_form::equals:
+        if (SyntaxElement list = parts.braced_list())
+            return list_initialization(list, type, false, result);
+        return initialize_from(init, parts.clause, type, false, false, result);
+    case InitializerParts::syntax_form::parenthesized:
+        if (!parts.list)
             return not_supported(init, "dcl.init");
-        if (init[1].is(syntax_kind::braced_init_list))
-            return list_initialization(init[1], type, false, result);
-        return initialize_from(init, init[1], type, false, false, result);
-    case syntax_kind::initializer:
-        if (init.size() != 3)
-            return not_supported(init, "dcl.init");
-        if (init[1].is(syntax_kind::initializer_list)) {
-            if (has_pack_expansion(init[1]))
+        if (parts.list_of_several()) {
+            if (has_pack_expansion(parts.list))
                 return not_supported(init, "temp.variadic");
             const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
@@ -1313,7 +1312,7 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                     !entity_table[target.entity].first_constructor)
                     return not_supported(init, "dcl.init");
                 owned_array<expression_meaning> arguments;
-                VTRY(r, expression_list_meanings(init[1], arguments));
+                VTRY(r, expression_list_meanings(parts.list, arguments));
                 return construct(init, type, arguments, 0, result);
             }
             return ill_formed(init,
@@ -1323,10 +1322,11 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                               "expression",
                               "dcl.init");
         }
-        return initialize_from(init, init[1], type, true, false, result);
-    default:
-        return not_supported(init, "dcl.init");
+        return initialize_from(init, parts.list, type, true, false, result);
+    case InitializerParts::syntax_form::none:
+        break;
     }
+    return not_supported(init, "dcl.init");
 }
 
 /*

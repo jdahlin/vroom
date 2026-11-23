@@ -1401,6 +1401,8 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         i = 0;
     for (size_t idx = 0; idx < items.size(); idx++) {
         SyntaxElement item = items[idx];
+        /* mem-initializer-id ( expression-list_opt ) or braced-init-list */
+        InitializerParts written = InitializerParts::after(item, 1);
         if (!item.size())
             return not_supported(item, "class.base.init");
         uint32_t times = 1;
@@ -1529,9 +1531,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             const struct type record = type_table[type.unqualified()];
             /* [class.base.init]/7: an array member can be initialized
                by a braced-init-list, using the ordinary array rules. */
-            if (record.kind == type_kind::array &&
-                !(item.size() == 2 &&
-                  item[1].is(syntax_kind::braced_init_list)))
+            if (record.kind == type_kind::array && !written.braced_list())
                 return not_supported(item, "class.base.init");
             expression_meaning object;
             VTRY(r, subobject(id, e, object));
@@ -1539,17 +1539,16 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 entity_table[record.entity].first_constructor) {
                 /* [class.base.init]/7: direct-initialization: a constructor */
                 owned_array<expression_meaning> arguments;
-                if (item.size() == 4)
-                    r = expression_list_meanings(item[2], arguments);
-                else if (item.size() == 2 &&
-                         item[1].is(syntax_kind::braced_init_list)) {
+                if (written.list)
+                    r = expression_list_meanings(written.list, arguments);
+                else if (SyntaxElement braced = written.braced_list()) {
                     bool base = entity_table[e].base_subobject;
                     if (base && is_aggregate(record.entity))
                         return not_supported(item, "class.base.init");
                     initialized_value listed;
                     bool saved_constructing_base = constructing_base;
                     constructing_base = base;
-                    r = list_initialization(item[1], type, true, listed);
+                    r = list_initialization(braced, type, true, listed);
                     constructing_base = saved_constructing_base;
                     if (r != analysis_result::well_formed)
                         return r;
@@ -1573,7 +1572,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     initialized[slot] =
                         subobject_store(object, type, id, listed.node);
                     continue;
-                } else if (item.size() != 3)
+                } else if (!written)
                     return not_supported(item, "class.base.init");
                 if (r != analysis_result::well_formed)
                     return r;
@@ -1618,8 +1617,8 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 continue;
             }
             initialized_value value;
-            if (item.size() == 2 && item[1].is(syntax_kind::braced_init_list)) {
-                r = list_initialization(item[1], type, true, value);
+            if (SyntaxElement braced = written.braced_list()) {
+                r = list_initialization(braced, type, true, value);
                 if (r == analysis_result::well_formed &&
                     (record.kind == type_kind::lvalue_reference ||
                      record.kind == type_kind::rvalue_reference) &&
@@ -1634,7 +1633,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                         "reference member in a mem-initializer is "
                         "ill-formed",
                         "class.base.init");
-            } else if (item.size() == 3) {
+            } else if (written && !written.list) {
                 /* ( ): value-initialization ([dcl.init]/11): zero for the
                members analysis has */
                 expression_meaning zero;
@@ -1642,8 +1641,8 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 zero.evaluation = constness::constant;
                 value.node = expression_node(semantic_kind::zero, zero,
                                              first_token(item));
-            } else if (item.size() == 4) {
-                SyntaxElement init = item[2];
+            } else if (written.list) {
+                SyntaxElement init = written.list;
                 if (init.is(syntax_kind::initializer_list)) {
                     if (has_pack_expansion(init))
                         return not_supported(item, "temp.variadic");
@@ -3193,14 +3192,13 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
     owned_array<expression_meaning> arguments;
     initialized_value value;
     analysis_result r = analysis_result::well_formed;
-    if (n[1].is(syntax_kind::braced_init_list)) {
-        if (n.size() != 2)
-            return not_supported(n, "expr.type.conv");
-        r = list_initialization(n[1], type, true, value);
+    InitializerParts written = InitializerParts::after(n, 1);
+    if (SyntaxElement braced = written.braced_list()) {
+        r = list_initialization(braced, type, true, value);
     } else {
-        if (n.size() == 4) {
-            VTRY_SET(r, expression_list_meanings(n[2], arguments));
-        } else if (n.size() != 3) {
+        if (written.list) {
+            VTRY_SET(r, expression_list_meanings(written.list, arguments));
+        } else if (!written) {
             return not_supported(n, "expr.type.conv");
         }
         return class_direct_initialization(n, c, arguments, m);

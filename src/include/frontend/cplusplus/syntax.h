@@ -1020,6 +1020,103 @@ struct DeclaratorParts {
 };
 
 /*
+ * [dcl.init.general]/1:
+ *
+ *     initializer:
+ *         brace-or-equal-initializer
+ *         ( expression-list )
+ *     brace-or-equal-initializer:
+ *         = initializer-clause
+ *         braced-init-list
+ *
+ * and the same ( expression-list_opt ) or braced-init-list after a
+ * mem-initializer-id ([class.base.init]/1), after the type of a functional
+ * cast ([expr.type.conv]/1) and as a new-initializer ([expr.new]/1).  An
+ * initializer taken apart by its form: the parser makes a node of some
+ * forms only (a braced-init-list passes through), so the form is read from
+ * the children here.
+ */
+struct InitializerParts {
+    enum class syntax_form : uint8_t {
+        none,
+        /* = initializer-clause: copy-initialization ([dcl.init]/15) */
+        equals,
+        /* ( expression-list_opt ): direct-initialization (/16) */
+        parenthesized,
+        /* braced-init-list: direct-list-initialization ([dcl.init.list]/1) */
+        braced,
+    };
+    syntax_form form = syntax_form::none;
+    /* equals: the initializer-clause (an expression or a braced-init-list);
+       braced: the braced-init-list */
+    SyntaxElement clause;
+    /* parenthesized: the expression-list, an initializer-list node or its
+       one initializer-clause, {} for ( ) */
+    SyntaxElement list;
+
+    InitializerParts() = default;
+    /* an initializer, brace-or-equal-initializer, braced-init-list or
+       new-initializer; none for anything else */
+    explicit InitializerParts(SyntaxElement init)
+    {
+        if (!init.is_node())
+            return;
+        if (init.is(syntax_kind::braced_init_list)) {
+            form = syntax_form::braced;
+            clause = init;
+        } else if (init.is(syntax_kind::brace_or_equal_initializer)) {
+            if (init.size() == 2 &&
+                init[0].is(preprocessing_op_or_punc::EQUAL)) {
+                form = syntax_form::equals;
+                clause = init[1];
+            }
+        } else if (init.is(syntax_kind::initializer,
+                           syntax_kind::new_initializer)) {
+            SyntaxRef node = init;
+            *this = after(node, 0);
+        }
+    }
+    /* what follows the at-th child of n, to n's end: ( expression-list_opt )
+       or a braced-init-list; none for anything else */
+    static InitializerParts after(SyntaxRef n, uint32_t at)
+    {
+        InitializerParts p;
+        if (at >= n.size())
+            return p;
+        uint32_t rest = n.size() - at;
+        if (rest == 1 && n[at].is(syntax_kind::braced_init_list)) {
+            p.form = syntax_form::braced;
+            p.clause = n[at];
+        } else if ((rest == 2 || rest == 3) &&
+                   n[at].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+                   n.back().is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+            p.form = syntax_form::parenthesized;
+            if (rest == 3)
+                p.list = n[at + 1];
+        }
+        return p;
+    }
+    explicit operator bool() const
+    {
+        return form != syntax_form::none;
+    }
+    /* [dcl.init]/17.1: list-initialization: a braced-init-list, or
+       = braced-init-list; the braced-init-list, else {} */
+    SyntaxElement braced_list() const
+    {
+        if (clause.is(syntax_kind::braced_init_list))
+            return clause;
+        return {};
+    }
+    /* parenthesized: the expression-list has more than one
+       initializer-clause (or a pack expansion) */
+    bool list_of_several() const
+    {
+        return list.is(syntax_kind::initializer_list);
+    }
+};
+
+/*
  * [stmt.iter]/1:
  *
  *     iteration-statement:

@@ -374,8 +374,10 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
        followed by a parenthesized optional expression-list or by a
        braced-init-list (the initializer) constructs a value of the
        specified type given the initializer." */
-    bool parenthesized = n[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS);
-    bool braced = n[1].is(syntax_kind::braced_init_list);
+    InitializerParts written = InitializerParts::after(n, 1);
+    bool parenthesized =
+        written.form == InitializerParts::syntax_form::parenthesized;
+    bool braced = written.form == InitializerParts::syntax_form::braced;
     type_index named = 0;
     /* [dcl.type.simple]/1: nested-name-specifier(opt) type-name */
     entity_index class_named = 0;
@@ -536,7 +538,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             return not_supported(n, "expr.type.conv");
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
-        if (parenthesized && n.size() == 3) {
+        if (parenthesized && !written.list) {
             /* [expr.type.conv]/2: "Otherwise, if the type is cv void and the
                initializer is () or {}, the expression is a prvalue of the
                specified type that performs no initialization.  Otherwise,
@@ -552,11 +554,11 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 expression_node(semantic_kind::constant, m, n.first_token());
             return analysis_result::well_formed;
         }
-        if (parenthesized && n.size() == 4) {
-            if (n[2].is(syntax_kind::initializer_list)) {
-                if (has_pack_expansion(n[2])) {
+        if (parenthesized) {
+            if (written.list_of_several()) {
+                if (has_pack_expansion(written.list)) {
                     owned_array<expression_meaning> expanded;
-                    VTRY(r, expression_list_meanings(n[2], expanded));
+                    VTRY(r, expression_list_meanings(written.list, expanded));
                     if (expanded.empty()) {
                         m = expression_meaning();
                         m.type = to;
@@ -584,14 +586,14 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             /* "If the initializer is a parenthesized single expression, the
                type conversion expression is equivalent to the corresponding
                cast expression." */
-            VTRY(r, expression(n[2], m));
+            VTRY(r, expression(written.list, m));
             return explicit_conversion(n, to, m);
         }
-        if (braced && n.size() == 2) {
+        if (braced) {
             if (is_void)
                 return not_supported(n, "expr.type.conv");
             initialized_value result;
-            VTRY(r, list_initialization(n[1], to, true, result));
+            VTRY(r, list_initialization(written.clause, to, true, result));
             m = expression_meaning();
             m.type = to;
             m.evaluation = result.evaluation;
@@ -727,17 +729,16 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
 {
     c = 0;
     owned_array<SyntaxElement> clauses;
-    if (n.is(syntax_kind::braced_init_list)) {
-        VTRY(gathered, list_clauses(n, clauses, nullptr));
-    } else if (n.is(syntax_kind::initializer)) {
-        if (n.size() == 3) {
-            for (SyntaxElement a : n[1].items(syntax_kind::initializer_list))
-                clauses.append(a);
-        }
-    } else if (n[1].is(syntax_kind::braced_init_list)) {
-        VTRY(gathered, list_clauses(n[1], clauses, nullptr));
-    } else if (n.size() == 4) {
-        for (SyntaxElement a : n[2].items(syntax_kind::initializer_list))
+    /* a declarator's initializer, or a functional cast's T ( ... ) or
+       T { ... } */
+    InitializerParts parts(n);
+    if (!parts)
+        parts = InitializerParts::after(n, 1);
+    if (SyntaxElement list = parts.braced_list()) {
+        VTRY(gathered, list_clauses(list, clauses, nullptr));
+    } else if (parts.form == InitializerParts::syntax_form::parenthesized &&
+               parts.list) {
+        for (SyntaxElement a : parts.list.items(syntax_kind::initializer_list))
             clauses.append(a);
     }
     size_t expressions_before = expressions.size();
