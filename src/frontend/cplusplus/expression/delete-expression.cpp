@@ -96,6 +96,7 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     entity_index c = 0;
     if (object.kind == type_kind::class_type) {
         c = object.entity;
+        require_complete(c);
         if (entity_table[c].kind != entity_kind::class_type ||
             !entity_table[c].size)
             /* /5: "If the object being deleted has incomplete class type at

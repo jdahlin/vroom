@@ -830,6 +830,7 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
                     n, "ext.gnu", called,
                     "on an object of a class that is not known to be "
                     "trivially copyable");
+            require_complete(c);
             uint64_t bytes = entity_table[c].size;
             if (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 &&
                 bytes != 16)

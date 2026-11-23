@@ -877,7 +877,7 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                       "basic.lookup.qual");
                 return not_supported(n, "temp.res");
             }
-            complete_instantiation(st.entity);
+            require_complete(st.entity);
             const entity &x = entity_table[st.entity];
             if (!x.size && st.entity != defining_class && !x.defined)
                 return not_supported(n, "basic.lookup.qual");
@@ -939,7 +939,8 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                     "basic.lookup.qual");
             e = named.entity;
         }
-        if (entity_table[e].kind == entity_kind::class_type &&
+        if (entity_table[e].kind ==
+                entity_kind::class_type &&require_complete(e);
             !entity_table[e].size && entity_table[e].instantiation &&
             e != defining_class && !entity_table[e].defined) {
             uint32_t k = entity_table[e].instantiation - 1;

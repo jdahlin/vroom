@@ -554,9 +554,21 @@ void semantic_analysis::complete_instantiation(entity_index c)
     define_class_outside(SyntaxRef(), index, done);
 }
 
-void semantic_analysis::complete_class_type(qualified_type t)
+bool semantic_analysis::require_complete(entity_index c) const
 {
-    complete_instantiation(element_class(referenced_type(t)));
+    if (!c || entity_table[c].kind != entity_kind::class_type)
+        return true;
+    const_cast<semantic_analysis *>(this)->complete_instantiation(c);
+    const entity &x = entity_table[c];
+    return x.size || x.defined;
+}
+
+bool semantic_analysis::require_complete(qualified_type t) const
+{
+    entity_index c = element_class(referenced_type(t));
+    if (!c)
+        return true;
+    return require_complete(c);
 }
 
 /* [temp.deduct]/8: "Only invalid types and expressions in the immediate

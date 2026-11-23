@@ -541,6 +541,7 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     if (x.kind == type_kind::class_type && y.kind == type_kind::class_type) {
         entity_index c1 = x.entity, c2 = y.entity;
         bool ambiguous = false;
+        require_complete(c2);
         if (entity_table[c1].kind == entity_kind::class_type &&
             entity_table[c2].kind == entity_kind::class_type &&
             entity_table[c2].size && c1 != c2 && !base_step(c2, c1, ambiguous))
@@ -721,6 +722,7 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
         return not_supported(at, "dcl.init.ref");
     /* the same class binds even when incomplete (an lvalue of it); a base
        needs the complete derived class */
+    require_complete(c2);
     if (c1 != c2 && !entity_table[c2].size)
         return not_supported(at, "dcl.init.ref");
     bool ambiguous = false;
@@ -1562,6 +1564,7 @@ analysis_result semantic_analysis::class_list_initialization(
         result.evaluation = constness::not_constant;
         return analysis_result::well_formed;
     }
+    require_complete(c);
     if (!entity_table[c].size)
         /* [dcl.init.list]/3: list-initialization of an incomplete class:
            clang's "incomplete type" error */
@@ -2219,6 +2222,7 @@ analysis_result semantic_analysis::designated_elements(
         bound_known = target.bound_known;
     } else if (target.kind == type_kind::class_type &&
                entity_table[target.entity].kind == entity_kind::class_type) {
+        require_complete(target.entity);
         if (!entity_table[target.entity].size)
             return not_supported(list, "dcl.init.list");
         if (!is_aggregate(target.entity))

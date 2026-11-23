@@ -1516,6 +1516,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                    constructors; a base class subobject's bytes are
                    not, its padding may hold a derived member (a base with
                    no tail padding, whose data size is its size, is) */
+                    require_complete(record.entity);
                     if (entity_table[e].base_subobject &&
                         entity_table[record.entity].data_size !=
                             entity_table[record.entity].size)
@@ -3001,6 +3002,7 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
                                                     expression_meaning &m)
 {
     qualified_type type = entity_table[c].type;
+    require_complete(c);
     if (!entity_table[c].size)
         return not_supported(n, "expr.type.conv");
     owned_array<expression_meaning> arguments;
@@ -3033,6 +3035,7 @@ analysis_result semantic_analysis::class_direct_initialization(
     expression_meaning &m)
 {
     qualified_type type = entity_table[c].type;
+    require_complete(c);
     if (!entity_table[c].size)
         return not_supported(n, "expr.type.conv");
     if (arguments.size() == 1 &&

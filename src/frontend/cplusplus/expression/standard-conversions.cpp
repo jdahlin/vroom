@@ -845,6 +845,7 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
         if (!converts) {
             const struct type fp = type_table[pointee.unqualified()];
             bool ambiguous = false;
+            require_complete(fp.entity);
             if (fp.kind == type_kind::class_type &&
                 tp.kind == type_kind::class_type &&
                 entity_table[fp.entity].size &&

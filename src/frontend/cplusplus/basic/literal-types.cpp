@@ -61,6 +61,7 @@ constness semantic_analysis::literal_type(qualified_type t) const
 
 constness semantic_analysis::literal_class(entity_index c) const
 {
+    require_complete(c);
     const entity &x = entity_table[c];
     if (!x.defined)
         return constness::unknown;

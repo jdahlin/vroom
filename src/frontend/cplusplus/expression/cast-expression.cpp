@@ -428,6 +428,8 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
         entity_table[d].kind != entity_kind::class_type ||
         entity_table[b].kind != entity_kind::class_type)
         return not_supported(at, "expr.static.cast");
+    require_complete(b);
+    require_complete(d);
     if (entity_table[d].size && base_subobjects(d, b) == 0 &&
         entity_table[b].size && base_subobjects(b, d)) {
         /* [conv.mem]/2; [expr.cast]/4: "a pointer to member of an
@@ -682,6 +684,8 @@ analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
        static_cast or the reinterpret_cast interpretation is used"
        ([impl.clang]: the reinterpret_cast's); a static_cast alone needs
        complete classes ([expr.static.cast]/11, [conv.ptr]/3) */
+    require_complete(fp.entity);
+    require_complete(tp.entity);
     if (!entity_table[fp.entity].size || !entity_table[tp.entity].size)
         return analysis_result::well_formed;
     bool ambiguous = false;

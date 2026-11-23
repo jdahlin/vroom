@@ -4808,7 +4808,21 @@ class semantic_analysis
        now: a use that needs the class complete (a call's result, a member
        lookup, its size); nothing for any other class */
     void complete_instantiation(entity_index c);
-    void complete_class_type(qualified_type t);
+    /* [temp.inst]/2: "unless a class template specialization has been
+       explicitly instantiated or explicitly specialized, the class template
+       specialization is implicitly instantiated when the specialization is
+       referenced in a context that requires a completely-defined object
+       type or when the completeness of the class type affects the semantics
+       of the program" ([basic.def.odr]/12 lists the contexts): every place
+       that reads a class's completeness, size, members, bases, constructors,
+       destructor, conversion functions or vtable calls this first.  t's
+       class (through cv and array element types) is defined now if it is a
+       lazily declared specialization; whether the type is complete: a class
+       with a layout or being defined, any other type (not tracked here).
+       The entity overload is the same for a class c.  A reference into
+       entity_table taken before the call may not be kept across it. */
+    bool require_complete(qualified_type t) const;
+    bool require_complete(entity_index c) const;
     /* in an instantiation, the template's first token: a namespace's
        name declared after it is not the template's to find
        (lookup_unqualified) */

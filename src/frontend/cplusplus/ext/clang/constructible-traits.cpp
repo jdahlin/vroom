@@ -309,6 +309,7 @@ analysis_result semantic_analysis::constructible_types(
     entity_index c = 0;
     if (is_class) {
         c = k.entity;
+        require_complete(c);
         if (!entity_table[c].size)
             return not_supported(n, "dcl.init");
         bool throws = false;

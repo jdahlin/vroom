@@ -599,6 +599,7 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
             return not_supported(n, "namespace.qual");
         category = found.entity;
     }
+    require_complete(category);
     if (!category || entity_table[category].kind != entity_kind::class_type ||
         !entity_table[category].size)
         return ill_formed(n,

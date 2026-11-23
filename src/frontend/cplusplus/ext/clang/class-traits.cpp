@@ -182,6 +182,7 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
             /* __builtin_is_virtual_base_of(B, D): B is one of D's virtual
                bases, direct or indirect ([class.mi]/4); a class is none of
                its own */
+            require_complete(dk.entity);
             if (!entity_table[dk.entity].size)
                 return not_supported(n, "meta.rel");
             const entity &x = entity_table[dk.entity];
@@ -194,6 +195,7 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
         } else if (bk.entity == dk.entity) {
             value = !entity_table[bk.entity].union_;
         } else {
+            require_complete(dk.entity);
             if (!entity_table[dk.entity].size)
                 return not_supported(n, "meta.rel");
             value = derives_from(dk.entity, bk.entity);
@@ -224,6 +226,7 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     entity_index c = 0;
     if (is_class) {
         c = type_table[t.unqualified()].entity;
+        require_complete(c);
         if (!entity_table[c].size)
             return false;
     }
@@ -678,6 +681,7 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
         return false;
     }
     entity_index c = record.entity;
+    require_complete(c);
     const entity &x = entity_table[c];
     if (!x.size)
         return false;
@@ -817,6 +821,7 @@ bool semantic_analysis::relocatable_type(qualified_type t, bool cpp26,
         return false;
     }
     entity_index c = record.entity;
+    require_complete(c);
     const entity &x = entity_table[c];
     if (!x.size) {
         known = false;

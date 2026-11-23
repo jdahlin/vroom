@@ -957,6 +957,7 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
         m.namespace_qualifier = scope.entity;
         return analysis_result::well_formed;
     }
+    require_complete(scope.entity);
     const entity &c = entity_table[scope.entity];
     if (c.kind != entity_kind::class_type || !c.size)
         return not_supported(nested, "basic.lookup.qual");

@@ -275,6 +275,7 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
     entity_index c = type_table[left.type.unqualified()].entity;
     if (entity_table[c].kind != entity_kind::class_type)
         return not_supported(n, "class.pre");
+    require_complete(c);
     if (!entity_table[c].size)
         return ill_formed(n,
                           "if the left operand is of class type, the class "

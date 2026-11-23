@@ -214,7 +214,7 @@ uint64_t semantic_analysis::pointer_size() const
    LP64), 0 if t is not a complete object type analysis knows the size of */
 uint64_t semantic_analysis::size_of_type(qualified_type t) const
 {
-    const_cast<semantic_analysis *>(this)->complete_class_type(t);
+    require_complete(t);
     const implementation_defined_behavior &b = tokens.files.behavior;
     const struct type record = type_table[t.unqualified()];
     switch (record.kind) {

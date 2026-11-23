@@ -230,6 +230,7 @@ analysis_result semantic_analysis::allocation_functions(
     implicit_allocation_functions();
     uint32_t name = allocation_function_name(kind);
     in_class = false;
+    require_complete(c);
     if (c && !class_complete && !entity_table[c].size &&
         allocation_names_spelled() != allocation_declarations_analysed)
         /* Before its layout, the class may declare one analysis has not

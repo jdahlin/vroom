@@ -234,6 +234,7 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
             entity_table[tp.entity].kind != entity_kind::class_type)
             return of_form(sequence::form::unknown);
         bool ambiguous = false;
+        require_complete(fp.entity);
         if (!entity_table[fp.entity].size || !cv_kept ||
             !base_step(fp.entity, tp.entity, ambiguous))
             return of_form(sequence::form::bad);
@@ -431,6 +432,7 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         if (c1 == c2)
             return s;
         bool ambiguous = false;
+        require_complete(c2);
         if (entity_table[c2].size && base_step(c2, c1, ambiguous)) {
             if (ambiguous)
                 return of_form(sequence::form::unknown);
@@ -583,6 +585,7 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
             return of_form(sequence::form::unknown);
         bool ambiguous = false;
         /* a base needs the complete derived class */
+        require_complete(c2);
         bool related = c1 && c2 && (c1 == c2 || entity_table[c2].size) &&
                        reference_related(t1, t2, ambiguous);
         if (ambiguous)

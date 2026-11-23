@@ -359,6 +359,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         }
         token_index id = named_ids[si];
         entity_index base = named_bases[si];
+        require_complete(base);
         const entity &bx = entity_table[base];
         if (!bx.size)
             return ill_formed_at_token(id,
@@ -635,7 +636,7 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
                                                     uint32_t name,
                                                     bool &ambiguous) const
 {
-    const_cast<semantic_analysis *>(this)->complete_instantiation(c);
+    require_complete(c);
     entity_index e = entity_table.find(c, name);
     if (e)
         return e;

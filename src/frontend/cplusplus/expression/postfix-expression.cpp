@@ -318,6 +318,7 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
         record.kind == type_kind::rvalue_reference)
         operand = record.operand;
     const struct type shape = type_table[operand.unqualified()];
+    require_complete(shape.entity);
     if (shape.kind == type_kind::class_type && !entity_table[shape.entity].size)
         return not_supported(n, "expr.typeid");
     entity_index std_ =

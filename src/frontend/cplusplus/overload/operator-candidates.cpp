@@ -318,6 +318,7 @@ analysis_result semantic_analysis::overloaded_operator(
         const struct type &t1 = type_table[operand(0).type.unqualified()];
         if (t1.kind == type_kind::class_type) {
             entity_index c = t1.entity;
+            require_complete(c);
             if (entity_table[c].kind != entity_kind::class_type ||
                 !entity_table[c].size)
                 return not_supported(n, "over.match.oper");

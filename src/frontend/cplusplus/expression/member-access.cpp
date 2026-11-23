@@ -408,6 +408,7 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         /* [expr.ref]/4: E1.B::m or E1->B::m */
         nominated_scope qscope;
         VTRY(qr, nested_name_specifier(n[2][0], qscope, false));
+        require_complete(qscope.entity);
         if (qscope.global || qscope.dependent || !qscope.entity ||
             entity_table[qscope.entity].kind != entity_kind::class_type ||
             !entity_table[qscope.entity].size)
@@ -472,6 +473,7 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     if (entity_table[c].kind != entity_kind::class_type)
         /* a class whose definition was not analysed */
         return not_supported(n, "class.pre");
+    require_complete(c);
     if (!entity_table[c].size)
         return ill_formed(n,
                           "the class type shall be complete unless the class "

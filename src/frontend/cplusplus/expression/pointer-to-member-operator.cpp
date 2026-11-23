@@ -92,6 +92,8 @@ analysis_result semantic_analysis::member_pointer_operator(
     }
     qualified_type pointee = type_table[object.type.unqualified()].operand;
     entity_index u = type_table[pointee.unqualified()].entity;
+    require_complete(t);
+    require_complete(u);
     if (!entity_table[t].size || !entity_table[u].size)
         return not_supported(n, "expr.mptr.oper");
     if (u != t) {

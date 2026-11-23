@@ -499,6 +499,7 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                        "basic.def");
         }
         if (record.kind == type_kind::class_type) {
+            require_complete(record.entity);
             if (definition && !entity_table[record.entity].size &&
                 entity_table[record.entity].instantiation &&
                 !entity_table[record.entity].defined) {

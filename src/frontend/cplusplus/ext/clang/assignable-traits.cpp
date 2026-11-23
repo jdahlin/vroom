@@ -105,6 +105,7 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
         lk.kind == type_kind::function || lk.kind == type_kind::array;
     if (!void_operand && !unassignable) {
         if (lk.kind == type_kind::class_type) {
+            require_complete(lk.entity);
             if (!entity_table[lk.entity].size)
                 return not_supported(n, "expr.ass");
             /* [over.match.funcs]/5: an operator= without a reference
