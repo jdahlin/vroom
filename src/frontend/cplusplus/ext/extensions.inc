@@ -177,6 +177,9 @@ EXTENSION(clang_lambda_template_parameters, clang,
           "accepted before C++20 (libc++'s <__algorithm/simd_utils.h> uses it in C++17)")
 
 /* Microsoft (-fms-extensions) */
+EXTENSION(microsoft_declspec, microsoft,
+          "MSVC: __declspec(attribute-list) among the declaration specifiers (clang's "
+          "ParseMicrosoftDeclSpecs)")
 EXTENSION(microsoft_pragma_operator, microsoft, "MSVC: __pragma(pp-tokens), the #pragma operator")
 EXTENSION(microsoft_operator_name_macros, microsoft,
           "MSVC: and, or, ... can be macro names")

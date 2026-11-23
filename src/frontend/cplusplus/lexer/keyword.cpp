@@ -187,6 +187,11 @@ VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
             if (status == keyword_status::enabled ||
                 status == keyword_status::extension)
                 return index;
+            /* [ext:microsoft_declspec] clang's DeclSpecKeyword (-fms-extensions
+               or -fdeclspec): __declspec has no flag in TokenKinds.def */
+            if (!keyword.flags && behavior.microsoft_extensions &&
+                !strcmp(keyword.clang_name, "kw___declspec"))
+                return index;
             return -1;
         }
         slot = (slot + 1) & (keyword_slot_count - 1);

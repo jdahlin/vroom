@@ -62,11 +62,17 @@ namespace cplusplus
 
 bool parser::at_gnu_attribute(unsigned ahead)
 {
+    /* [ext:microsoft_declspec] __declspec is the same keyword class: clang
+       takes it where an attribute-specifier goes */
     return at(extension_keyword::attribute, ahead);
 }
 
 node_index parser::gnu_attribute_specifier()
 {
+    int k = peek().keyword;
+    if (k == keyword_of_spelling("__declspec") ||
+        k == keyword_of_spelling("_declspec"))
+        return microsoft_declspec();
     size_t mark = begin_node();
     token_index first = position;
     add_token(); /* __attribute__ */
@@ -122,6 +128,56 @@ node_index parser::gnu_attribute_specifier()
     if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
         !accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
         return expected("'))' to end the attribute-specifier", "ext.gnu");
+    return finish_node(syntax_kind::gnu_attribute_specifier, mark, first);
+}
+
+/*
+ * [ext:microsoft_declspec]
+ *
+ *     microsoft-declspec:
+ *         __declspec ( gnu-attribute-list )
+ *     attribute-specifier:
+ *         microsoft-declspec
+ *     decl-specifier:
+ *         microsoft-declspec
+ *
+ * clang's ParseMicrosoftDeclSpecs: the attributes are separated by white
+ * space (commas are skipped); each is an identifier, with an
+ * expression-list in parentheses.  The node is a gnu-attribute-specifier
+ * whose first token is __declspec, so the analysis of the attributes
+ * (gnu_attribute_rules) is shared.
+ */
+node_index parser::microsoft_declspec()
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    add_token(); /* __declspec */
+    if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        return expected("'(' after __declspec", "ext.gnu");
+    while (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        if (accept(preprocessing_op_or_punc::COMMA))
+            continue;
+        if (!at_attribute_identifier())
+            return expected("an attribute", "ext.gnu");
+        size_t attribute_mark = begin_node();
+        token_index attribute_first = position;
+        add_token();
+        if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+            add_token();
+            flag_set greater(greater_is_operator, true);
+            if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+                expression_list();
+                if (failed())
+                    return 0;
+            }
+            if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+                return expected("')' to end the attribute's parameters",
+                                "ext.gnu");
+            finish_node(syntax_kind::gnu_attribute, attribute_mark,
+                        attribute_first);
+        }
+    }
+    add_token(); /* ) */
     return finish_node(syntax_kind::gnu_attribute_specifier, mark, first);
 }
 

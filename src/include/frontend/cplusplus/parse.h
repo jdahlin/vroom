@@ -991,6 +991,7 @@ class parser
     /* ---- ext/gnu/attribute.cpp: __attribute__ (( ... )) */
     bool at_gnu_attribute(unsigned ahead = 0);
     node_index gnu_attribute_specifier();
+    node_index microsoft_declspec();
     node_index gnu_attributes_opt();
     bool at_availability();
     node_index clang_availability_arguments();

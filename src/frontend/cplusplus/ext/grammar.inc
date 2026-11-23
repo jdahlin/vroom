@@ -65,6 +65,11 @@ PRODUCTION(gnu_attributes, "gnu-attribute-arguments", "expression-list")
    declarator-id), after a namespace's name */
 PRODUCTION(gnu_attributes, "attribute-specifier", "gnu-attribute-specifier")
 PRODUCTION(gnu_attributes, "decl-specifier", "gnu-attribute-specifier")
+/* MSVC's (clang's ParseMicrosoftDeclSpecs), where GCC's attributes go; the
+   parser's node is gnu-attribute-specifier's */
+PRODUCTION(microsoft_declspec, "microsoft-declspec", "__declspec ( gnu-attribute-list )")
+PRODUCTION(microsoft_declspec, "attribute-specifier", "microsoft-declspec")
+PRODUCTION(microsoft_declspec, "decl-specifier", "microsoft-declspec")
 PRODUCTION(gnu_attributes, "declarator", "ptr-declarator gnu-attribute-specifier-seq")
 PRODUCTION(gnu_attributes, "declarator",
            "noptr-declarator parameters-and-qualifiers trailing-return-type gnu-attribute-specifier-seq")
