@@ -435,6 +435,17 @@ void semantic_analysis::evaluate_analysed_expressions()
     }
 }
 
+/* the last refusal recorded: where the evaluator last answered "no
+   rules" (its source line), for a constant expression refused outside
+   evaluate_constant */
+void semantic_analysis::evaluator_stop_detail()
+{
+    char text[64] = "evaluator answered no value";
+    if (last_unknown_line)
+        snprintf(text, sizeof text, "evaluator met L%u", last_unknown_line);
+    last_unsupported_detail(text, strlen(text));
+}
+
 void semantic_analysis::evaluation_detail(uint32_t node, bool gave_up)
 {
     char text[128];

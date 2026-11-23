@@ -73,7 +73,8 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         return variable_specialization(n, inner, id, qualifier);
     if (!inner.is(syntax_kind::function_definition,
                   syntax_kind::simple_declaration))
-        return not_supported(n, "temp.expl.spec");
+        return not_supported_because(n, "temp.expl.spec",
+                                     syntax_kind_name(inner.kind()));
     /* [ext:gnu_attributes] before the declaration (e.g. SK_API /
        visibility("default")) */
     uint32_t lead = leading_gnu_attributes(inner);

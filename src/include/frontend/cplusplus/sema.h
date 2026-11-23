@@ -1942,6 +1942,8 @@ class semantic_analysis
     instantiation_detail(const unsupported_construct &inner);
     /* the last refusal of a constant evaluation: where the evaluator gave
        up, "evaluator met LINE (KIND)" */
+    /* the evaluator's last "no rules" line as the last refusal's detail */
+    __attribute__((noinline, cold)) void evaluator_stop_detail();
     __attribute__((noinline, cold)) void evaluation_detail(uint32_t node,
                                                            bool gave_up);
     analysis_result not_supported(SyntaxRef n, const char *subclause,

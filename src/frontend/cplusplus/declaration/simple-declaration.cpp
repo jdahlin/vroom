@@ -693,8 +693,11 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
         return not_supported(n, "dcl.pre");
     bool constant = false, value = false;
     VTRY(r, bool_constant_expression(n, n[2], constant, value));
-    if (!constant)
-        return not_supported(n, expr_const_reason());
+    if (!constant) {
+        analysis_result refused = not_supported(n, expr_const_reason());
+        evaluator_stop_detail();
+        return refused;
+    }
     if (!value)
         return ill_formed(n,
                           "if the value of the expression when so converted "
@@ -1923,8 +1926,12 @@ analysis_result semantic_analysis::declare_with_initializer(
                 uint32_t data = 0;
                 constness c = evaluate_variable(type, value.node,
                                                 semantics[value.node].at, data);
-                if (c == constness::unknown)
-                    return not_supported(declaration, expr_const_reason());
+                if (c == constness::unknown) {
+                    analysis_result refused =
+                        not_supported(declaration, expr_const_reason());
+                    evaluator_stop_detail();
+                    return refused;
+                }
                 if (c == constness::not_constant)
                     value.evaluation = constness::not_constant;
                 /* [basic.start.static]/2: constant initialization, its
