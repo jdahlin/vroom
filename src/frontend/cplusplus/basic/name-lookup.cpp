@@ -872,6 +872,33 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             qualified = true;
             continue;
         }
+        if (part.name.is(syntax_kind::decltype_specifier) && part.scoped &&
+            !part.has_template) {
+            /* [expr.prim.id.qual]/1: decltype-specifier ::, its class or
+               enumeration ([basic.lookup.qual]/1: a decltype-specifier is
+               not looked up as a name); a reference or other type is
+               ill-formed, not analysed */
+            qualified_type named;
+            VTRY(dr, decltype_type(part.name, named));
+            const struct type &dt = type_table[named.unqualified()];
+            if (dt.kind == type_kind::dependent && dependent_allowed) {
+                scope.entity = 0;
+                scope.global = false;
+                scope.dependent = named.unqualified();
+                qualified = true;
+                continue;
+            }
+            if (dt.kind != type_kind::class_type &&
+                dt.kind != type_kind::enumeration)
+                return not_supported(n, "basic.lookup.qual");
+            const entity &dx = entity_table[dt.entity];
+            if (!dx.size && dt.entity != defining_class && !dx.defined)
+                return not_supported(n, "basic.lookup.qual");
+            scope.entity = dt.entity;
+            scope.global = false;
+            qualified = true;
+            continue;
+        }
         if (!part.name.is_identifier() || !part.scoped) {
             /* [temp.names]: template before a simple-template-id */
             if (part.name.is(syntax_kind::simple_template_id))
