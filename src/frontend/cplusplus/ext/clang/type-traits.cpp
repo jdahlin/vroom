@@ -495,7 +495,9 @@ bool semantic_analysis::copy_constructible_from(entity_index c,
             continue;
         }
         copy_declared = true;
-        if (!entity_table[k].deleted)
+        /* [class.access]/1: a private or protected copy constructor is
+           no candidate the trait's context can use */
+        if (!entity_table[k].deleted && !entity_table[k].access)
             copy_usable = true;
     }
     if (category != value_category::lvalue && movable)
