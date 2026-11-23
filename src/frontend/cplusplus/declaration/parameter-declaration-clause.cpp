@@ -582,8 +582,17 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 variadic = false;
             continue;
         }
-        VTRY_SET(r, parameter_declaration(declarations[k], t, unnamed, id,
-                                          default_argument));
+        /* [basic.scope.param]/1: a parameter's name is in scope from its
+           point of declaration ([basic.scope.pdecl]/1), so a later
+           parameter's declaration (an array bound, a decltype) finds it */
+        entity_index outer = current_scope;
+        if (names_earlier_parameter(declarations[k], named))
+            open_parameter_scope(named, 0);
+        r = parameter_declaration(declarations[k], t, unnamed, id,
+                                  default_argument);
+        current_scope = outer;
+        if (r != analysis_result::well_formed)
+            return r;
         if (declared_pack) {
             /* [temp.variadic]/5: a template's own function parameter
                pack, of a type that names a template parameter pack

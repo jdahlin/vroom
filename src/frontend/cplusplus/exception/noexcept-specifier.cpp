@@ -227,6 +227,28 @@ bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
  */
 void semantic_analysis::open_parameter_scope()
 {
+    open_parameter_scope(function_parameters, function_empty_pack);
+}
+
+bool semantic_analysis::names_earlier_parameter(
+    SyntaxRef n, const owned_array<parameter_meaning> &list)
+{
+    for (token_index t = n.first_token(); t < n.end_token(); t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        uint32_t name = tokens.identifier(t);
+        for (const parameter_meaning &p : list) {
+            if (p.pack_name == name ||
+                (p.id && tokens.identifier(p.id) == name))
+                return true;
+        }
+    }
+    return false;
+}
+
+void semantic_analysis::open_parameter_scope(
+    const owned_array<parameter_meaning> &list, uint32_t empty_pack)
+{
     /* (a member function's declarator, the class being defined: the
        class's names and its template's parameters are found past it) */
     if (is_namespace(current_scope) && defining_class)
@@ -234,7 +256,7 @@ void semantic_analysis::open_parameter_scope()
     entity_index scope = open_scope(0, true);
     owned_array<entity_index> pack;
     uint32_t pack_name = 0;
-    for (const parameter_meaning &parameter : function_parameters) {
+    for (const parameter_meaning &parameter : list) {
         uint32_t name = parameter.pack_name;
         if (!name && parameter.id)
             name = tokens.identifier(parameter.id);
@@ -250,8 +272,8 @@ void semantic_analysis::open_parameter_scope()
             entity_table.bind(scope, name, e);
         }
     }
-    if (!pack_name && function_empty_pack)
-        make_bound_pack(scope, function_empty_pack, nullptr, 0);
+    if (!pack_name && empty_pack)
+        make_bound_pack(scope, empty_pack, nullptr, 0);
     if (pack_name && !entity_table.find(scope, pack_name))
         make_bound_pack(scope, pack_name, pack.data(),
                         static_cast<uint32_t>(pack.size()));

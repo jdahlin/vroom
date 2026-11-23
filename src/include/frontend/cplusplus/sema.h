@@ -3617,6 +3617,14 @@ class semantic_analysis
                                        bool &non_throwing);
     /* ... with the function_parameters in scope ([basic.scope.param]) */
     void open_parameter_scope();
+    /* ... the parameters of the list, a function declarator's own not yet
+       finished: what a later parameter's declaration finds
+       ([basic.scope.pdecl]/1) */
+    void open_parameter_scope(const owned_array<parameter_meaning> &list,
+                              uint32_t empty_pack);
+    /* whether the declaration n names one of the parameters of the list */
+    bool names_earlier_parameter(SyntaxRef n,
+                                 const owned_array<parameter_meaning> &list);
     analysis_result dynamic_exception_types(SyntaxRef n, bool member);
     analysis_result parameter_scope_noexcept(SyntaxRef n, bool member,
                                              bool &non_throwing);
