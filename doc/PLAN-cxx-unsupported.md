@@ -351,6 +351,12 @@ it; none adds a second way to instantiate.
   retry with that fixed first).  Fix 3 (an overload's specialization) not
   started.  The template micro-steps give little now: back to the largest
   keys of the work list.
+- 4.1 (9631334c0, no simplify needed): a non-static data member with a
+  placeholder is ill-formed, as clang (-4).  The agent took the 676 key as
+  stale (its own instrumentation had moved the line); it was not.  The
+  orchestrator gave the refusal a context detail: a declaration that takes
+  none 350 (alias-declaration, template default argument: clang errors;
+  `template<auto x>`: allowed, C++17), a type-id 273, a parameter 53.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
