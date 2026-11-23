@@ -518,6 +518,22 @@ it; none adds a second way to instantiate.
   (explicit instantiations of, and members of, specializations only named
   that clang finds ill-formed: queue).  No simplify needed (conditions
   read).  Next: 7.1's propagation again (7.4).
+- 7.4 (67df18202 harness, 2540234e9, ffbdbd6fa; propagation not landed):
+  the 'while substituting/checking ... required here' notes also mark the
+  use rejected (agree -12, we accept +12, same vpp); a specialization's
+  ill-formed member class does not make it ill-formed ([temp.inst]/3); a
+  member function's dynamic exception specification is not analysed with
+  the class from C++11 ([temp.inst]/15).  The propagation's we reject rise
+  is down from +27 to +7: deferred overload resolution with deduced return
+  types (overload-resolution-deferred-templates.cpp:133, 2), a template-time
+  check made at instantiation (p15-cxx0x.cpp:97, 2), a non-dependent error
+  reported again at a local class's use (instantiate-local-class.cpp:191, 2),
+  and a test clang crashes on (1).
+- 676011abc (orchestrator): a run where clang crashes (a signal: 18 tests,
+  33 runs) is skipped; decision: a crashed reference is no reference.
+  Counts drop with those runs (unsupported -677, we reject -29).
+- Decision (2026-11-23, from the user): push the branch to the PR after
+  each commit lands, not only at a step's end.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
