@@ -1076,8 +1076,6 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                outside its function's evaluation) is usable in constant
                expressions, its elements read as the evaluation needs
                them; another is not ([expr.const]/5.8) */
-            if (!e.constexpr_ || !e.definition)
-                return CONST_UNKNOWN;
             for (size_t i = 0; i < state.objects.size(); i++)
                 if (state.objects[i].entity == x.a && !state.objects[i].frame) {
                     object = static_cast<uint32_t>(i);
@@ -1089,6 +1087,15 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             /* [expr.const]/5.8: a volatile object is never read */
             o.unusable = (e.type.cv() & cv_volatile) != 0;
             object = static_cast<uint32_t>(state.objects.size());
+            /* [expr.const]/4: another object of static storage duration
+               (declared extern, or not constexpr) is not usable in
+               constant expressions: its address is a constant
+               ([expr.const]/13) and its value is not known (opaque) */
+            if (!e.constexpr_ || !e.definition) {
+                o.opaque = true;
+                append_object(state, o);
+                return constness::constant;
+            }
             append_object(state, o);
             /* (its constructor runs on it as on a temporary: a constexpr
                object's members are modified only during its

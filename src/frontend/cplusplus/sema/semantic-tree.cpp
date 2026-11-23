@@ -59,7 +59,6 @@ const char *semantic_kind_name(semantic_kind kind)
         "array_size",
         "delete_object",
         "throw_exception",
-        "type_identification",
         "va_arg",
         "label_address",
         "gnu_asm_operand",

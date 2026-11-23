@@ -443,6 +443,7 @@ class c_lowering
         return next_enclosing_function(analysis.entity_table, e);
     }
     uint32_t symbol(entity_index e, token_index at, int variant = 2);
+    bool typeinfo_in_runtime(type_index t) const;
     void symbol_linkage(entity_index e, int &storage, uint32_t &flags) const;
     void gnu_attributes(entity_index e, uint32_t s);
     void spelling(entity_index e, owned_buffer &out);

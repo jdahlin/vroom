@@ -701,6 +701,10 @@ struct entity {
     /* [ext:gnu_asm_labels] a function's or variable's asm label: the
        string-literal that is its symbol, 0 if none */
     token_index asm_label = 0;
+    /* [expr.typeid]: the std::type_info object of this static type (made
+       by typeid_object, a variable named _ZTI <type> by the ABI), 0 for
+       any other entity */
+    type_index typeinfo_of = 0;
     /* [dcl.link]/1: a function or variable with C language linkage,
        whose name is its symbol */
     bool c_language_linkage = false;
@@ -1327,8 +1331,6 @@ enum class semantic_kind : uint8_t {
     delete_object,
     /* [expr.throw]: a: the operand (0: none, a rethrow); not lowered */
     throw_exception,
-    /* [expr.typeid]: an lvalue of type const std::type_info; not lowered */
-    type_identification,
     /* [ext:gnu_va_arg] __builtin_va_arg (a, T): a: the va_list (an
        lvalue); a prvalue of the node's type */
     va_arg_,
@@ -2286,6 +2288,11 @@ class semantic_analysis
        blocks: members of their namespaces whose names are not bound
        there */
     owned_array<entity_index> block_declared;
+    /* [expr.typeid]/1: the object typeid of the static type names, made
+       once per type: a variable of type const info, whose symbol the
+       ABI names _ZTI <type> ([abi:mangling-special-vtables]) */
+    owned_array<entity_index> typeid_objects;
+    entity_index typeid_object(qualified_type type, entity_index info);
     /* [class.friend]/1: a class's friends.  A friend class not declared
        yet ([namespace.memdef]/3: the elaborated-type-specifier declares it
        in the innermost enclosing namespace, where ordinary lookup does

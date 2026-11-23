@@ -70,6 +70,13 @@ class itanium_mangler
     }
 
     bool mangled_name(entity_index e);
+    /* [abi:mangling-special-vtables]: <special-name> ::= TI <type>, the
+       std::type_info object of typeid(<type>) */
+    bool typeinfo_name(type_index t)
+    {
+        text("_ZTI");
+        return type(qualified_type::make(t, cv_none));
+    }
     /* [abi:mangling-special-vtables]: <special-name> ::= TV <type> */
     bool vtable_name(entity_index c)
     {
@@ -216,6 +223,8 @@ bool itanium_mangler::mangled_name(entity_index e)
     const entity &x = analysis.entity_table[e];
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
         return false;
+    if (x.typeinfo_of)
+        return typeinfo_name(x.typeinfo_of);
     /* (a closure type's constructor or destructor has its class's name:
        none) */
     /* (a structured binding declaration's variable e: its bindings'
