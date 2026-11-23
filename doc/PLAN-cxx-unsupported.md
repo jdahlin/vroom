@@ -214,6 +214,18 @@ after step 0 the work list gives a better estimate, recorded here.
   T[0]; __is_const/__is_volatile read an array's element cv.  We reject 679
   -> 667, types +932, constants +928, unsupported +4 (wrong rejections now
   honest refusals).  No simplify needed (element_type() reused).
+- 1.3b (269726ab5, with the prerequisites 77d21320a, b43fa23f3, 1138c459d;
+  the agent's one commit split by the orchestrator, one fix each, every
+  intermediate builds alone): dynamic-exception-specifications analysed.
+  The lowering refutes it exposed were two lowering bugs (an array element's
+  constructor without the construct's arguments; a constructor's class
+  argument not a caller-destroyed temporary) and __is_convertible counting a
+  private copy constructor.  Unsupported 39664 -> 39298, we reject 667 ->
+  660, lowering refuted 34 -> 23, lowered +28, constants +145, known
+  failures 873 -> 861; we accept +11 (not identified yet: queue).
+  special/class.dtor/p3-0x.cpp is a new known failure: no typeinfo for
+  classes with a vtable (S7), hidden before.  The agent ran past its limit
+  with work left in the background; stopped by the orchestrator.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
