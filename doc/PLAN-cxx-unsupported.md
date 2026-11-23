@@ -341,6 +341,16 @@ it; none adds a second way to instantiate.
   explicit specialization refusal (`template<> int C<int>::y;`) can be
   lifted now; an overloaded member function's specialization does not drop
   the waiting definition.
+- 3.2: 2f34f89b0 (no simplify needed): `static` on a class template's
+  out-of-class static member definition is an error at the definition (we
+  accept 4314 -> 4313).  Fix 1 (`template<> int C<int>::y;`) dropped once:
+  -7 unsupported but lookup refuted +3, because the specialization of a
+  member of an implicit instantiation reuses the member's entity and the
+  lookup claim names its first declaration, the in-class one, where clang
+  names the specialization (patch in the scratchpad: b32-fix1.patch; to
+  retry with that fixed first).  Fix 3 (an overload's specialization) not
+  started.  The template micro-steps give little now: back to the largest
+  keys of the work list.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
