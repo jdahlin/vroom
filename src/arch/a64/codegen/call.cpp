@@ -353,9 +353,15 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
     if (fslot != 1) {
         a64_record_emit_memory(e, A64_OP_LD, 3, 0, R_X16, A64_REGISTER_FRAME,
                                fslot);
+        uint32_t site = a64_eh_call_begin(e);
+
         a64_record_emit(e, A64_OP_BLR)->rn = R_X16;
+        a64_eh_call_end(e, site);
     } else {
+        uint32_t site = a64_eh_call_begin(e);
+
         a64_record_emit(e, A64_OP_BL)->reference = ref;
+        a64_eh_call_end(e, site);
     }
     if (codegen_type_is_void(c, rty)) {
         res = codegen_value_none();

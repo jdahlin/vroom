@@ -57,11 +57,11 @@ the back end without it:
 2. **C tests first.** clang accepts `-fexceptions` with
    `__attribute__((cleanup))` in C.  `src/test/vcc/cleanup_unwind.c` raises
    a forced unwind (`_Unwind_ForcedUnwind`, as `pthread_cancel`), so it needs
-   no C++ run time; it runs in `vcc-x86.py` (glibc's unwinder; the arm64
-   suite's bare-metal run time has none, so there it compiles to an empty
-   `main`).  Catching needs C++: `src/test/eh/` with a C++ half built by
-   clang++ and the harness `bench/vcc-eh.py` (clang/vcc x thrower/catcher,
-   as `vcc-abi.py`) come with E2.  When the C++ front end produces the
+   no C++ run time.  `src/test/eh/` holds the tests, each `NAME.c` built by
+   vcc and by clang, with an optional `NAME.cpp` built by clang++ (throws,
+   catches, `main`); `bench/vcc-eh.py` links them against glibc and
+   libstdc++ and runs them natively on x86-64 and under qemu-aarch64 for
+   arm64, at -O0 to -O3 (the bare-metal suites have no unwinder).  When the C++ front end produces the
    flags and nodes above, `src/test/cxx/run` gains `try`/`catch` cases.
 
 ## Design
@@ -147,8 +147,8 @@ the back end without it:
 |---|---|---|
 | E0 | This plan reviewed; clang's output studied on 20 small cases (`-fexceptions` C cleanups, C++ try/catch/cleanup, `noexcept`), notes in `RESEARCH-eh.md` | Plan merged |
 | E1 | `-fexceptions` for C as clang (`__EXCEPTIONS`, unwind tables forced on); `ast_builder_exceptions_ready`; C's cleanup variables run on unwind through x86-64's direct emitter; VIR refuses such functions (`exceptions`) so they fall back | `cleanup_unwind.c` at -O1/-O2/-O3 in `vcc-x86.py`; suites unchanged |
-| E2 | Direct emitter, arm64: invokes as calls with call-site records, pads, resume; `.gcc_except_table`; personality in `.eh_frame` | `bench/vcc-eh.py` passes at `-O1` under qemu; LSDA byte-identical to clang -O0's on the cases where call sites match; `vcc-cfi.py` unchanged without `-fexceptions` |
-| E3 | Direct emitter, x86-64: cleanups exist (E1); add try/catch and the type table | `vcc-eh.py --target x86_64-linux-gnu` at `-O1` |
+| E2 | Direct emitter, arm64: calls bracketed with call-site records, pads, resume; `.gcc_except_table`; personality in `.eh_frame` (cleanups; try/catch with E3) | `bench/vcc-eh.py` passes at `-O1` under qemu; LSDA byte-identical to clang -O0's on the cases where call sites match; `vcc-cfi.py` unchanged without `-fexceptions` |
+| E3 | Direct emitter, both targets: cleanups exist (E1, E2); add try/catch and the type table | `vcc-eh.py --target x86_64-linux-gnu` at `-O1` |
 | E4 | VIR format: `invoke`, `VB_LPAD`/`landingpad`, `resume`, `ehtypeid`, `VF_EH`, personality; text form, verifier rules, interpreter | `bench/vir-test.py` with the new cases and bad units; mutation run clean |
 | E5 | VIR builder (the walker's second instantiation) and the passes' rules above; the allocator's rule for values live into a pad | VIR builds every `vcc-eh.py` function (`-fvir-stats`: no `eh` refusals); `-fvir-verify -fvir-check` clean |
 | E6 | VIR lowering, arm64 then x86-64; call-site table after the record passes | `vcc-eh.py` at `-O2`/`-O3`, both targets; C suites unchanged at -O1/-O2/-O3 (`vcc-same.py` without `-fexceptions`) |
@@ -193,3 +193,23 @@ at E2 (needs clang++ and qemu, which CI has).
   -O1 and -O2 368/368, `cxx-run.py` 3196 passed, `vcc-cfi.py` 1637/1637,
   `vcc-driver.py` failures only the host clang's version strings
   (unchanged by E1).  Not done: arm64 (E2), try/catch (E2/E3).
+- E2 (2026-11-23): done for cleanups.  `arch/a64/codegen/eh.cpp`: in a
+  function of a TU with exceptions, `do_call` brackets a call with two
+  external labels when cleanup variables are live (the tree of nodes built
+  from `e->cleanups` as it stands at the call); `a64_eh_pads` before the
+  return label (the exception in a slot reserved at the function's start,
+  the pads' temporaries above every slot the body used, since the
+  variables' scopes have ended); `.cfi_personality 155`/`.cfi_lsda 27`
+  and `.gcc_except_table` from func.cpp's printer, GCC's arm64 encodings.
+  A cleanup running on the normal path is no longer covered by its own pad
+  (its call would run it again: clang gives such a call the pads below
+  it); the same was wrong on x86-64 and is fixed there
+  (`eh_cleanup_limit`).  `bench/vcc-eh.py` with `src/test/eh/`
+  (`forced_unwind.c` moved there from `src/test/vcc/`, `catch_through_c`
+  with a C++ half): 16/16 (two tests, two targets, -O0..-O3); in
+  `ci/premerge.sh` arm64 and x86 jobs.  Checked: vcc-ctests -O1/-O2/-O3
+  2170/2170, vcc-x86 (one flaky run failure, gone on rerun), cxx-run 3196
+  (one run of 47 failures on a machine at load 17, clean twice after),
+  vcc-cfi 1636/1636.  Cost: a function of such a TU reserves 8 bytes for
+  the exception even without cleanups.  Left: try/catch and the type
+  table (E3, both targets), the LSDA against clang's.

@@ -573,6 +573,16 @@ typedef struct codegen_context {
     int loop_count;
     uint32_t *cleanups; /* syms with cleanup, innermost last */
     int cleanup_count;
+    /* exceptions in arm64's direct emitter (options->eh; arch/a64/codegen/eh.cpp): each call's
+       labels and the cleanups live there as a node of a tree (symbol, parent; 0: none, UINT32_MAX:
+       a call in a landing pad), and per node its landing pad's label */
+    struct codegen_eh_site *eh_sites;
+    struct codegen_eh_node *eh_nodes;
+    uint32_t eh_site_count, eh_node_count, eh_node_capacity, eh_terminate_pad;
+    int64_t
+        eh_slot; /* the exception, at a landing pad (a slot of the whole function) */
+    int eh_cleanup_limit; /* while cleanup k runs on the normal path: k (it no longer covers calls) */
+    bool eh_function, eh_in_pads;
     codegen_function_instance *function_instance;
     int inline_depth;
     uint32_t top_symbol; /* sym being emitted */
@@ -852,6 +862,14 @@ typedef struct a64_abi_spill {
 #define CODEGEN_LOG_CAPACITY ((size_t)1 << 28)
 
 /* ---------------- calls ---------------- */
+
+/* exceptions in arm64's direct emitter (codegen_context's eh_sites, eh_nodes) */
+struct codegen_eh_site {
+    uint32_t begin, end, node;
+};
+struct codegen_eh_node {
+    uint32_t symbol, parent, pad;
+};
 
 typedef struct a64_call_argument {
     codegen_value value;
@@ -1386,6 +1404,16 @@ VPRIV void gen_cond(codegen_context *e, uint32_t n, bool jump_if, uint32_t l);
 VPRIV void gen_init_local(codegen_context *e, const codegen_lvalue *dst,
                           ast_qualified_type ty, uint32_t init);
 VPRIV void run_cleanups(codegen_context *e, int to);
+VPRIV void a64_cleanup_run(codegen_context *e,
+                           uint32_t s); /* cleanup(f) variable s: f(&s) */
+/* arch/a64/codegen/eh.cpp: exceptions in the direct emitter */
+VPRIV void a64_eh_function_begin(codegen_context *e);
+VPRIV uint32_t a64_eh_call_begin(codegen_context *e);
+VPRIV void a64_eh_call_end(codegen_context *e, uint32_t site);
+VPRIV int a64_eh_cleanup_limit_set(codegen_context *e, int k);
+VPRIV void a64_eh_pads(codegen_context *e);
+VPRIV bool a64_eh_wanted(const codegen_context *e);
+VPRIV void a64_eh_table(const codegen_context *e, tbuf *b, uint32_t s);
 VPRIV uint32_t user_label(codegen_context *e, uint32_t l);
 VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want);
 VPRIV codegen_value vla_bytes(codegen_context *e, ast_qualified_type t);

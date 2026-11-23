@@ -189,7 +189,7 @@ VPRIV void gen_init_local(codegen_context *e, const codegen_lvalue *dst,
 
 /* ---------------- cleanups ---------------- */
 
-static void run_cleanup(codegen_context *e, uint32_t s)
+VPRIV void a64_cleanup_run(codegen_context *e, uint32_t s)
 {
     cc *c = e->compile_context;
     uint32_t fn = codegen_symbol_attributes(c, s)->cleanup;
@@ -239,8 +239,13 @@ static void run_cleanup(codegen_context *e, uint32_t s)
 /* run cleanups (innermost first) down to depth `to` without popping them */
 VPRIV void run_cleanups(codegen_context *e, int to)
 {
-    for (int i = e->cleanup_count; i-- > to;)
-        run_cleanup(e, e->cleanups[i]);
+    for (int i = e->cleanup_count; i-- > to;) {
+        /* (with exceptions: its calls are covered by the cleanups below it) */
+        int old = a64_eh_cleanup_limit_set(e, i);
+
+        a64_cleanup_run(e, e->cleanups[i]);
+        a64_eh_cleanup_limit_set(e, old);
+    }
 }
 
 /* ---------------- statements ---------------- */
