@@ -605,3 +605,8 @@ it; none adds a second way to instantiate.
   ([stmt.pre]/1, [dcl.attr.grammar]/6).  Unsupported 36654 -> 36652, we
   reject 492, we accept 5423 unchanged.  Left: [[assume(e)]]
   ([dcl.attr.assume]), [[clang::musttail]].
+- 8.6c: the attributes before a label that change nothing or that clang does
+  not know are ignored ([stmt.label]/1).  Unsupported 36652 -> 36649, we
+  reject 492, we accept 5423 unchanged.  Left: namespace-definition.cpp
+  :327/:337/:525 (address-space and annotate_type attribute placements), the
+  musttail/assume statements.
