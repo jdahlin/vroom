@@ -164,6 +164,11 @@ analysis_result semantic_analysis::class_specialization_definition(
     const char *rule = "temp.class.spec";
     if (parameters.empty())
         rule = "temp.expl.spec";
+    /* [temp.class.spec]/10: "The usual access checking rules do not apply
+       to non-dependent names used to specify template arguments of the
+       simple-template-id of the partial specialization" (as an explicit
+       specialization's, [temp.spec.general]/6; accessible()) */
+    flag_set exempt(explicit_declaration_names, true);
     entity_index outer = current_scope;
     /* [temp.class.spec]/5: a partial specialization of a member class
        template is declared in the member's class (member_template_declaration
