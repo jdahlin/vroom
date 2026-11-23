@@ -971,8 +971,14 @@ struct DeclaratorParts {
             if (c.is(syntax_kind::init_declarator_list,
                      syntax_kind::member_declarator_list))
                 return DeclaratorParts(c[0]);
-            if (c.is_identifier() || (c.is_node() && DeclaratorParts(c).id))
+            if (c.is_identifier())
                 return DeclaratorParts(c);
+            if (!c.is_node() || c.is(syntax_kind::decl_specifier_seq) ||
+                c.is_attribute())
+                continue;
+            DeclaratorParts parts(c);
+            if (parts.id)
+                return parts;
         }
         return {};
     }
