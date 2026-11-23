@@ -99,6 +99,10 @@ struct dump_request {
     /* -fcxx-speculation-limit=N: the parser's tentative parses per
        declaration (0: its default), to test the limit */
     uint32_t speculation_limit = 0;
+    /* -fcxx-dump-sections: a line `#cxx-dump NAME` before each analysis
+       output, so that one run's outputs can be told apart
+       (bench/cxx-sema.py asks for all of its outputs in one run) */
+    bool sections = false;
 
     bool has(dump_output d) const
     {

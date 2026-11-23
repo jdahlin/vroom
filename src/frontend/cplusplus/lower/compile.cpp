@@ -249,6 +249,8 @@ static bool compile_arguments(const cplusplus_compile_options *o,
             }
         } else if (!strcmp(a, "-fcxx-phase4-diagnostics-only"))
             r.phase4_diagnostics_only = true;
+        else if (!strcmp(a, "-fcxx-dump-sections"))
+            r.sections = true;
         else if (!strcmp(a, "-fcxx-debug-fallbacks"))
             r.debug_fallbacks = true;
         else if (!strncmp(a, "-fcxx-speculation-limit=", 24))

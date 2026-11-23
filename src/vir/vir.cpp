@@ -53,7 +53,7 @@ vir_context *vir_context_get(void)
     c->ctab = (struct vir_cent *)(vreserve(
         ((size_t)1 << VIR_CONSTANT_TABLE_BITS) * sizeof(*c->ctab),
         MAP_NORESERVE, "vir: constants"));
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 12; i++)
         c->bs[i] = (uint32_t *)(vreserve((size_t)VIR_MAX_BLK * 4, MAP_NORESERVE,
                                          "vir: block scratch"));
     c->sc = (uint32_t *)(vreserve((size_t)VIR_MAX_EXTRA * 4, MAP_NORESERVE,
@@ -544,13 +544,101 @@ static uint32_t vir_blocks_reverse_postorder(const vir_function *f,
     return np;
 }
 
+/* Semi-NCA (Georgiadis; Lengauer and Tarjan's semidominators, then each immediate dominator as
+ * the nearest common ancestor on the DFS tree): near linear, where Cooper, Harvey and Kennedy's
+ * iteration took quadratic time on a long switch (each case's fall-through chain walked again).
+ * id[b] is b's immediate dominator (id[0] = 0), VIR_BLOCK_NONE for an unreachable block.  w
+ * holds six per block scratch arrays; the vertices are numbered in DFS preorder. */
+static void vir_dominators_semi_nca(const vir_function *f, const uint32_t *off,
+                                    const uint32_t *succ, uint32_t *id,
+                                    uint32_t **w)
+{
+    uint32_t n = f->block_count, cnt = 1, sp = 0;
+    uint32_t *dfn = w[0], *vert = w[1], *par = w[2], *semi = w[3], *lab = w[4],
+             *anc = w[5];
+    uint32_t *it = id, *stk = semi; /* the DFS's own scratch, reused after it */
+
+    for (uint32_t b = 0; b < n; b++)
+        dfn[b] = VIR_BLOCK_NONE;
+    dfn[0] = 0;
+    vert[0] = 0;
+    par[0] = 0;
+    it[0] = off[0];
+    stk[sp++] = 0;
+    while (sp) {
+        uint32_t b = stk[sp - 1];
+
+        if (it[b] < off[b + 1]) {
+            uint32_t s = succ[it[b]++];
+
+            if (dfn[s] == VIR_BLOCK_NONE) {
+                dfn[s] = cnt;
+                vert[cnt] = s;
+                par[cnt] = dfn[b];
+                cnt++;
+                it[s] = off[s];
+                stk[sp++] = s;
+            }
+        } else
+            sp--;
+    }
+    for (uint32_t v = 0; v < cnt; v++) {
+        semi[v] = v;
+        lab[v] = v;
+        anc[v] = VIR_BLOCK_NONE;
+    }
+    for (uint32_t v = cnt; v-- > 1;) {
+        const vir_block *k = &f->blocks[vert[v]];
+
+        for (uint32_t j = 0; j < k->predecessor_count; j++) {
+            uint32_t u = dfn[f->extra[k->predecessor_first + j]];
+
+            if (u == VIR_BLOCK_NONE)
+                continue;
+            if (anc[u] !=
+                VIR_BLOCK_NONE) { /* eval: compress u's path, iteratively */
+                uint32_t top = 0, y = u;
+
+                while (anc[anc[y]] != VIR_BLOCK_NONE) {
+                    id[top++] = y; /* id is free until the last loop */
+                    y = anc[y];
+                }
+                while (top) {
+                    uint32_t z = id[--top];
+
+                    if (semi[lab[anc[z]]] < semi[lab[z]])
+                        lab[z] = lab[anc[z]];
+                    anc[z] = anc[anc[z]];
+                }
+                u = lab[u];
+            }
+            if (semi[u] < semi[v])
+                semi[v] = semi[u];
+        }
+        anc[v] = par[v];
+    }
+    /* lab is free now: the immediate dominators by number */
+    lab[0] = 0;
+    for (uint32_t v = 1; v < cnt; v++) {
+        uint32_t y = par[v];
+
+        while (y > semi[v])
+            y = lab[y];
+        lab[v] = y;
+    }
+    for (uint32_t b = 0; b < n; b++)
+        id[b] = VIR_BLOCK_NONE;
+    for (uint32_t v = 0; v < cnt; v++)
+        id[vert[v]] = vert[lab[v]];
+}
+
 bool vir_dominators_build(vir_function *f)
 {
     vir_context *x = vir_context_get();
     uint32_t n = f->block_count, np, *rpo = x->bs[2], *stk = x->bs[3],
              *rn = x->bs[4], *id = x->bs[5];
     uint32_t *off = x->bs[0], *succ = x->sc, *sz = x->bs[1], *nx = x->bs[3];
-    bool ch = true, fresh = !(f->valid & VIR_VALID_CFG);
+    bool fresh = !(f->valid & VIR_VALID_CFG);
 
     if (f->valid & VIR_VALID_DOM)
         return vir_cfg_build(
@@ -562,42 +650,7 @@ bool vir_dominators_build(vir_function *f)
     if (!fresh && !vir_successors_build(f, off, succ))
         return false;
     np = vir_blocks_reverse_postorder(f, off, succ, rpo, stk, rn);
-    for (uint32_t b = 0; b < n; b++)
-        id[b] = VIR_BLOCK_NONE;
-    id[0] = 0;
-    while (ch) { /* Cooper, Harvey and Kennedy */
-        ch = false;
-        for (uint32_t i = 1; i < np; i++) {
-            uint32_t b = rpo[i], ni = VIR_BLOCK_NONE;
-            const vir_block *k = &f->blocks[b];
-
-            for (uint32_t j = 0; j < k->predecessor_count; j++) {
-                uint32_t p = f->extra[k->predecessor_first + j];
-
-                if (id[p] == VIR_BLOCK_NONE)
-                    continue;
-                if (ni == VIR_BLOCK_NONE) {
-                    ni = p;
-                    continue;
-                }
-                {
-                    uint32_t a = p, c = ni;
-
-                    while (a != c) {
-                        while (rn[a] > rn[c])
-                            a = id[a];
-                        while (rn[c] > rn[a])
-                            c = id[c];
-                    }
-                    ni = a;
-                }
-            }
-            if (id[b] != ni) {
-                id[b] = ni;
-                ch = true;
-            }
-        }
-    }
+    vir_dominators_semi_nca(f, off, succ, id, x->bs + 6);
     /* subtree sizes, then preorder numbers: a child's range is inside its parent's */
     for (uint32_t b = 0; b < n; b++)
         sz[b] = 1;
