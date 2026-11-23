@@ -172,6 +172,20 @@ after step 0 the work list gives a better estimate, recorded here.
   found, a template-id that names no class or alias template.  Next step
   (1b): make them say why, in their detail text, so that `--why` splits
   them into real causes.  Then work down the list.
+- Step 1b (7a3135687 fix, e0ec73bee simplify): the four catch-all refusals
+  give a detail (evaluator's last "no rules" line and node kind; what a
+  template-name names; an instantiation's inner failure; the held cause of
+  a qualified name).  Metrics unchanged; --why keys 1618 -> 1777.  The
+  constant evaluator's keys name a vcc source line, so they move when that
+  file is edited: compare them only within one batch.  Agent took 24 min.
+- Decisions (2026-11-23, from the user): the work list is regenerated every
+  5 steps (the next 5 distinct sites, each re-measured by its agent, which
+  stops if it fell below about 100); each agent has 15 minutes (soft limit
+  10: stop coding, run the gates; hard limit 15: the orchestrator stops it,
+  resets, counts a drop).  Gates should be near instantaneous.  Measured
+  warm: cxx-sema --check 11 s, cxx-run 25 s, cxx-fe-bench under 1 s.
+  cxx-fe-bench flickers by about 0.1-0.2 % with string layout (startup
+  strcmp): a harness issue.  Next: step 2, faster gates (cxx-run first).
 - Queue: vpp segfaults on two clang test files (found in the -std=gnu++20
   sweep); `semantic_kind_name` lacks complex_value, complex_part,
   statement_expression (wrong names in tree dumps).
