@@ -939,8 +939,9 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                     "basic.lookup.qual");
             e = named.entity;
         }
-        if (entity_table[e].kind ==
-                entity_kind::class_type &&require_complete(e);
+        if (entity_table[e].kind == entity_kind::class_type)
+            require_complete(e);
+        if (entity_table[e].kind == entity_kind::class_type &&
             !entity_table[e].size && entity_table[e].instantiation &&
             e != defining_class && !entity_table[e].defined) {
             uint32_t k = entity_table[e].instantiation - 1;
@@ -948,11 +949,15 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             uint32_t ct = entity_table[t_ent].instantiation;
             if (ct && !instantiations[k].defining) {
                 entity_index done = e;
+                /* (a copy: instantiate_class may grow template_arguments) */
+                owned_array<template_argument> arguments;
+                for (uint32_t i = 0; i < instantiations[k].argument_count; i++)
+                    arguments.append(
+                        template_arguments[instantiations[k].first_argument +
+                                           i]);
                 VTRY(ir,
-                     instantiate_class(
-                         n, ct,
-                         &template_arguments[instantiations[k].first_argument],
-                         instantiations[k].argument_count, done));
+                     instantiate_class(n, ct, arguments.data(),
+                                       instantiations[k].argument_count, done));
             }
         }
         const entity &x = entity_table[e];

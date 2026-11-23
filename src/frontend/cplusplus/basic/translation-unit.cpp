@@ -511,10 +511,15 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                 uint32_t ct = entity_table[t].instantiation;
                 if (ct && !instantiations[k].defining) {
                     entity_index done = record.entity;
+                    /* (a copy: instantiate_class may grow template_arguments) */
+                    owned_array<template_argument> arguments;
+                    for (uint32_t i = 0; i < instantiations[k].argument_count;
+                         i++)
+                        arguments.append(
+                            template_arguments
+                                [instantiations[k].first_argument + i]);
                     VTRY(ir, instantiate_class(
-                                 declaration, ct,
-                                 &template_arguments[instantiations[k]
-                                                         .first_argument],
+                                 declaration, ct, arguments.data(),
                                  instantiations[k].argument_count, done));
                 }
             }
