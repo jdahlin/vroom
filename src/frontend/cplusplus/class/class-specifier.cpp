@@ -1719,8 +1719,18 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             (m.operator_function && m.allocation != allocation_function::none))
             return not_supported(declaration, "dcl.spec.auto");
     }
-    if (!is_function && contains_placeholder(type))
-        return not_supported(declaration, "dcl.spec.auto");
+    if (!is_function && contains_placeholder(type)) {
+        /* [dcl.spec.auto.general]/5 lists where a placeholder type may
+           appear: a non-static data member is none of them
+           ("'auto' not allowed in non-static struct member") */
+        if (!s.static_)
+            return ill_formed_at_token(m.id,
+                                       "a placeholder type is not allowed in "
+                                       "a non-static data member",
+                                       "dcl.spec.auto");
+        return not_supported_because(declaration, "dcl.spec.auto",
+                                     "in a static data member");
+    }
     /* [dcl.fct.spec]/2: "The virtual specifier shall be used only in the
        initial declaration of a non-static class member function" */
     if (s.virtual_ && !is_function)
