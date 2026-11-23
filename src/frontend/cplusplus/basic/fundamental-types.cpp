@@ -21,7 +21,8 @@ implementation_defined_behavior::for_edition(standard_edition edition,
     behavior.edition = edition;
     behavior.gnu_extensions = gnu_extensions;
     /* [diff.cpp14.lex]/1: "Removal of trigraph support as a required
-       feature."  clang keeps trigraphs in the strict modes before C++17. */
+       feature."  [impl.clang] clang keeps trigraphs in the strict modes before
+       C++17. */
     behavior.trigraphs =
         !gnu_extensions && behavior.has(language_feature::trigraphs);
     behavior.char8_t_keyword = behavior.has(language_feature::char8_t_type);

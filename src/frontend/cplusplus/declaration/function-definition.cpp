@@ -565,7 +565,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
            the parameters unknown fails before it reads one (clang's
            "constexpr function never produces a constant expression"; not
            in a system header, where libstdc++ declares constexpr functions
-           on builtins clang does not fold) */
+           on builtins [impl.clang] clang does not fold) */
         else if (!b.has(language_feature::constexpr_without_constant_result) &&
                  !in_system_header(first_token(compound)) &&
                  potential_constant(body) == constness::not_constant)

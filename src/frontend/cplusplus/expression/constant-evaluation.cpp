@@ -88,7 +88,8 @@ constexpr uint32_t single_object_base = UINT32_MAX;
 
 /* a read of an indeterminate value ([basic.indet]/2) or of a volatile
    object ([expr.const]/5.8): not constant, but the check of a body for a
-   potential constant expression does not count it, as clang does not */
+   potential constant expression does not count it, [impl.clang] as clang does
+   not */
 template <class state_type> constness undefined_value(const state_type &state)
 {
     if (state.potential)
@@ -1125,8 +1126,8 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         /* an automatic variable whose lifetime did not begin within the
            evaluation: [expr.const]/5.8 forbids an lvalue-to-rvalue
            conversion of it, not designating it (the object expression of
-           a member call that reads nothing, as clang accepts), which the
-           evaluation has no object for; a variable of static storage
+           a member call that reads nothing, [impl.clang] as clang accepts),
+           which the evaluation has no object for; a variable of static storage
            duration may not be modified (/5.16) */
         return CONST_UNKNOWN;
     }
@@ -2019,7 +2020,8 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
             if (p.count && q.count && p.literal && q.literal &&
                 p.stamp != q.stamp) {
                 /* (a function that does it is not "never constant": the
-                   objects depend on the evaluation, as clang's check) */
+                   objects depend on the evaluation, [impl.clang] as clang's
+                   check) */
                 if (state.potential)
                     return CONST_UNKNOWN;
                 return constness::not_constant;
@@ -2069,8 +2071,8 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
         return CONST_UNKNOWN;
     int order = 0;
     /* [expr.eq]/3.1: whether two distinct string literals share an object
-       is unspecified: clang does not take the comparison of the address of
-       a literal with one of an object as a constant */
+       is unspecified: [impl.clang] clang does not take the comparison of the
+       address of a literal with one of an object as a constant */
     if (p.count && q.count && (p.literal || q.literal) &&
         !(p.literal && q.literal && p.stamp == q.stamp && p.base == q.base)) {
         if (state.potential)

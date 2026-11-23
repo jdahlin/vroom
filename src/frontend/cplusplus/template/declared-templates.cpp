@@ -1131,8 +1131,8 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
     uint32_t name = tokens.identifier(alias.first_token() + 1);
     if (entity_index prior = entity_table.find(outer, name)) {
         /* a redeclaration of the same tokens (libc++'s __swap_result_t in
-           two headers), as clang accepts it; [temp.alias] has no rule for
-           one that differs */
+           two headers), [ext.clang] as clang accepts it; [temp.alias] has no
+           rule for one that differs */
         uint32_t same = alias_template_of(prior);
         if (!same || !same_tokens(function_templates[same - 1].declaration, n))
             return not_supported(n, "temp.alias");
@@ -1272,8 +1272,8 @@ analysis_result semantic_analysis::variable_partial_specialization(
  * equivalent to another of the template (each at least as specialized as
  * the other: their arguments the same but for the names of their
  * parameters, void_t<typename T::a> and void_t<typename T::b> both void)
- * redeclares it, which clang reports as a redefinition and then uses
- * neither; the template is not used ([temp.over.link]/7: functionally
+ * redeclares it, which [impl.clang] clang reports as a redefinition and then
+ * uses neither; the template is not used ([temp.over.link]/7: functionally
  * equivalent but not equivalent, no diagnostic required)
  */
 void semantic_analysis::equivalent_partial_specializations(uint32_t added)
@@ -1454,8 +1454,8 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
  * affects the semantics of the program."  Here at any use: the template's
  * simple-declaration analysed again where each template-parameter's name
  * is its argument, the variable made in the template's namespace without
- * binding its name (declare_variable_specialization); inline, as clang
- * makes an implicit instantiation (linkonce_odr).
+ * binding its name (declare_variable_specialization); inline, [impl.clang] as
+ * clang makes an implicit instantiation (linkonce_odr).
  */
 analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
                                                         expression_meaning &m)
@@ -1548,8 +1548,8 @@ semantic_analysis::instantiate_variable(SyntaxRef at, uint32_t vt,
     declarator_template_id = false;
     instantiations[index].defining = false;
     leave_instantiation(context);
-    /* an argument that makes the declaration ill-formed: clang reports it
-       at the template, with a note at the use */
+    /* an argument that makes the declaration ill-formed: [impl.clang] clang
+       reports it at the template, with a note at the use */
     if (r != analysis_result::well_formed ||
         !instantiations[index].specialization)
         return not_supported(at, "temp.inst");
@@ -1666,8 +1666,8 @@ analysis_result semantic_analysis::alias_template_specialization(
     if (!dependent_arguments(arguments)) {
         bool satisfied = true;
         VTRY_SET(r, template_constraints_satisfied(at, arguments, satisfied));
-        /* clang reports the unsatisfied constraint at the use; while a
-           candidate is substituted, a deduction failure */
+        /* [impl.clang] clang reports the unsatisfied constraint at the use;
+           while a candidate is substituted, a deduction failure */
         if (!satisfied && substituting)
             return analysis_result::ill_formed;
         if (!satisfied)
@@ -1709,8 +1709,8 @@ analysis_result semantic_analysis::alias_template_specialization(
                 entity_table[c].enclosing = saved_scope;
         }
     }
-    /* an argument that makes the type ill-formed: clang reports it at the
-       alias template, with a note at the use; while a candidate is
+    /* an argument that makes the type ill-formed: [impl.clang] clang reports it
+       at the alias template, with a note at the use; while a candidate is
        substituted, [temp.alias]/3's deduction failure */
     if (r == analysis_result::ill_formed && substituting)
         return r;
@@ -2715,8 +2715,8 @@ analysis_result semantic_analysis::template_id_arguments(
     if (pack < count)
         arguments[pack] =
             make_pack(elements.data(), static_cast<uint32_t>(elements.size()));
-    /* a default the arguments make ill-formed: clang reports it at the
-       default, "in instantiation of default argument" the use; neither
+    /* a default the arguments make ill-formed: [impl.clang] clang reports it at
+       the default, "in instantiation of default argument" the use; neither
        declaration is judged */
     analysis_result r = default_template_arguments(id, ct, arguments, set);
     if (r == analysis_result::ill_formed)
@@ -3312,8 +3312,8 @@ semantic_analysis::defined_special_member(entity_index specialization,
  * nested-name-specifier names the specialization, whose member it defines
  * ([class.mfct]/1), inline as the class's own member functions are
  * ([basic.def.odr]/13: emitted where used, weak).  Errors are the
- * instantiation's, not judged here ([temp.inst]/1; clang reports them at
- * the definition "in instantiation of" the use): unsupported.
+ * instantiation's, not judged here ([temp.inst]/1; [impl.clang] clang reports
+ * them at the definition "in instantiation of" the use): unsupported.
  */
 analysis_result semantic_analysis::define_template_member(uint32_t member,
                                                           uint32_t index,
@@ -3336,7 +3336,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         entity_kind::block_scope, 0, entity_table[x.template_entity].enclosing);
     bool variable = o.definition.is(syntax_kind::simple_declaration);
     /* [temp.local]/1, [basic.scope.temp]/1: the definition's own parameter
-       names (clang does not find the class's, if they differ) */
+       names ([impl.clang] clang does not find the class's, if they differ) */
     uint32_t names = o.first_parameter;
     for (uint32_t i = 0; i < of.parameter_count; i++)
         bind_template_argument(scope, template_parameter_entities[names + i],

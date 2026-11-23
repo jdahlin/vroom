@@ -30,8 +30,8 @@ namespace cplusplus
  * name, declare_specialization).  Its definition, unless the call is in an
  * unevaluated operand or a default argument: at once for a constexpr
  * template, which a constant expression may evaluate; else after the
- * translation unit's declarations ([temp.point]/7), as clang does.  Not
- * yet the rules of [temp.res]/8 (two-phase lookup): the definition's names
+ * translation unit's declarations ([temp.point]/7), [impl.clang] as clang does.
+ * Not yet the rules of [temp.res]/8 (two-phase lookup): the definition's names
  * are looked up again (lookup_horizon).
  */
 analysis_result
@@ -546,9 +546,9 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
     if (r == analysis_result::well_formed && c)
         return r;
     /* the class's rules broken, or not known: [temp.inst]/1 makes the
-       instantiation, not the template, ill-formed (clang reports it at the
-       use, "in instantiation of"); the use cannot go on without the class
-       and is not judged */
+       instantiation, not the template, ill-formed ([impl.clang] clang reports
+       it at the use, "in instantiation of"); the use cannot go on without the
+       class and is not judged */
     if (unsupported.size() > unsupported_before) {
         instantiations[index].failure = unsupported[unsupported_before];
         instantiations[index].has_failure = true;

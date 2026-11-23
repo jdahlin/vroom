@@ -1030,8 +1030,8 @@ semantic_analysis::scalar_initialization(SyntaxRef at, expression_meaning &m,
         tokens.files.behavior.has(language_feature::list_initialization)) {
         bool narrows = false;
         VTRY_SET(r, narrowing(at, m, type, narrows));
-        /* Microsoft's extensions: clang accepts a narrowing conversion
-           by the -fms-compatibility-version it emulates */
+        /* Microsoft's extensions: [ext.microsoft] clang accepts a narrowing
+           conversion by the -fms-compatibility-version it emulates */
         if (narrows && tokens.files.behavior.microsoft_extensions)
             return not_supported(at, "dcl.init.list");
         if (narrows) {
@@ -1380,10 +1380,10 @@ analysis_result semantic_analysis::reference_list_initialization(
         /* a class or an array initialized from it: the clause is analysed
            again by the list-initialization of the prvalue */
     }
-    /* [dcl.init.list]/3.10 as clang has it (and as C++11 to C++17 worded
-       it): by copy-list-initialization or direct-list-initialization,
-       depending on the kind of initialization for the reference; the
-       text since CWG 2267 always copies */
+    /* [dcl.init.list]/3.10 [impl.clang] as clang has it (and as C++11 to C++17
+       worded it): by copy-list-initialization or direct-list-initialization,
+       depending on the kind of initialization for the reference; the text since
+       CWG 2267 always copies */
     VTRY(r, list_initialization_of(list, clauses, prvalue_type, direct, made));
     m.evaluation = made.evaluation;
     m.value = made.value;

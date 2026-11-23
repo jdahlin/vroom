@@ -1,0 +1,6 @@
+# bench/cxx-spec-anchors.py --bless: what is there today
+uncited declaration/attribute-specifier.cpp attribute_without_effect
+uncited declaration/attribute-specifier.cpp gnu_attributes_without_effect
+uncited expression/expression.cpp expression_kind
+uncited expression/standard-conversions.cpp qualification_convertible
+uncited overload/function-address.cpp target_expression
