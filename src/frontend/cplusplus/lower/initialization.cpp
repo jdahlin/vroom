@@ -20,8 +20,19 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
 {
     owned_array<uint32_t> arguments;
     const uint32_t *items = analysis.semantics.items(n.first);
+    /* [abi:calls]: a class parameter passed by address is a temporary the
+       caller constructs and destroys at the end of the full-expression */
+    qualified_type function_type = analysis.entity_table[n.b].type;
+    const struct type &ft = record(function_type);
+    const qualified_type *parameters =
+        analysis.type_table.parameters(function_type.unqualified());
     for (uint32_t i = 0; i < n.count; i++) {
-        uint32_t a = expression(items[i]);
+        uint32_t a = 0;
+        if (i < ft.parameter_count && collecting &&
+            passed_indirectly(parameters[i]))
+            a = indirect_argument(items[i], parameters[i], at);
+        else
+            a = expression(items[i]);
         if (!a)
             return 0;
         arguments.append(a);
@@ -65,8 +76,8 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
         if (!count)
             return construct_at(x, object, 0, x.at);
         /* [dcl.init]/7.2: each element, first to last */
-        uint32_t loop =
-            each_element(s, t, type(element, x.at), count, false, x.b, x.at);
+        uint32_t loop = each_element(s, t, type(element, x.at), count, false,
+                                     x.b, x.at, &x);
         if (!loop)
             return 0;
         return statement_expression(v, block(&loop, 1));
