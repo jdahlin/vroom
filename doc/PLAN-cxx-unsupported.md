@@ -373,6 +373,19 @@ it; none adds a second way to instantiate.
   trailing return type are not analysed at the use (queue).  What is left
   of the key: variable templates with a placeholder (~270, clang accepts:
   deduce per instantiation).
+- 4.4 (983a8e60d, no simplify needed: two lines): a variable template with
+  a placeholder and an initializer; each specialization deduces through
+  simple_declaration.  Unsupported 38679 -> 38558 (-121), agree +115.  We
+  accept +13 (6 places): clang checks a variable template's dependent
+  initializer in the definition (unexpanded packs, the template in its own
+  initializer, a bad lambda default argument); vcc analyses it only per
+  specialization (queue: the initializer's definition-time checks,
+  [temp.res]).  types refuted +1, accepted as a clang quirk (decision):
+  SemaCXX/decltype.cpp:260 (GH161196, a crash test) where clang leaves
+  decltype(B<int>::XBitMask<0>) as the undeduced `const auto` (it even
+  reports the specialization's type "depends on itself" when asked), and
+  vcc deduces const int as [dcl.type.auto.deduct] gives.  Listed in
+  clang-failures.txt.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
