@@ -282,11 +282,7 @@ VPRIV bool virbuild_function_try(codegen_context *e, uint32_t s)
             V->failure_detail[0] = 0;
             if (timed)
                 t0 = vperformance_now();
-            /* exceptions: invoke and landing pads are not lowered yet (doc/PLAN-vir-eh.md E6) */
-            if (V->f.flags & VIR_FUNCTION_FLAG_EH) {
-                ok = false;
-                why = VIRBUILD_FAILURE(exceptions_lowering);
-            } else if (CODEGEN_IS_X64(e->compile_context))
+            if (CODEGEN_IS_X64(e->compile_context))
                 ok = x64_vir_function_lower(e, s, &why);
             else
                 ok = a64_vir_function_lower(e, s, &why);

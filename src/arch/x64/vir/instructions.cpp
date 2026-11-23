@@ -59,6 +59,115 @@ static bool x64_vir_carry_flags_hold(x64_vir_context *L, uint32_t v)
     return true;
 }
 
+/* ---- exceptions (SPEC-vir.md 8.8): the walker's table state (arch/x64/codegen/eh.cpp prints it) ---- */
+
+/* landing pad b catches everything: the terminate pad */
+static bool x64_vir_landing_pad_catches_all(const vir_function *f, uint32_t b)
+{
+    const vir_block *k = &f->blocks[b];
+
+    for (uint32_t i = k->first; i < k->first + k->insn_count; i++) {
+        const vir_insn *x = &f->insns[i];
+
+        if (vir_opcode_is_constant(x->op))
+            continue;
+        if (x->op != VIR_OP_LANDINGPAD)
+            return false;
+        for (uint32_t c = 0; c < f->extra[x->a + 1]; c++)
+            if (!f->extra[x->a + 2 + c])
+                return true;
+        return false;
+    }
+    return false;
+}
+
+/* the walker's node standing for landing pad b: b + 1, or UINT32_MAX for the catch-all pad */
+static uint32_t x64_vir_eh_pad_node(x64_vir_context *L, uint32_t b)
+{
+    if (!x64_vir_landing_pad_catches_all(L->function, b))
+        return b + 1;
+    if (L->eh_catch_all_block != VIR_BLOCK_NONE &&
+        L->eh_catch_all_block != b) /* (the table has one catch-all record) */
+        x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+    L->eh_catch_all_block = b;
+    return UINT32_MAX;
+}
+
+/* the mark of landing pad b (node from x64_vir_eh_pad_node), made on first use */
+static uint32_t x64_vir_eh_pad_mark(x64_vir_context *L, uint32_t b,
+                                    uint32_t node)
+{
+    walk_state *W = L->context->walk_state;
+
+    (void)b;
+    if (node == UINT32_MAX) {
+        if (!W->eh_term)
+            W->eh_term = ++W->eh_marks;
+        return W->eh_term;
+    }
+    if (!W->eh_pad[node])
+        W->eh_pad[node] = ++W->eh_marks;
+    return W->eh_pad[node];
+}
+
+static uint32_t x64_vir_eh_site_begin(x64_vir_context *L, const vir_insn *in)
+{
+    walk_state *W = L->context->walk_state;
+    const vir_function *f = L->function;
+    uint32_t unwind = f->extra[in->c + 2 + f->extra[in->c]];
+
+    if (W->eh_nsites >= WALK_EH_SITES)
+        x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+    uint32_t node = x64_vir_eh_pad_node(L, unwind), k = W->eh_nsites++;
+
+    x64_vir_eh_pad_mark(L, unwind, node);
+    W->eh_sites[k].node = node;
+    W->eh_sites[k].begin = ++W->eh_marks;
+    x64_record_emit(L->context, X64_OP_EHMARK)->label = W->eh_sites[k].begin;
+    return k + 1;
+}
+
+static void x64_vir_eh_site_end(x64_vir_context *L, uint32_t site)
+{
+    walk_state *W = L->context->walk_state;
+
+    W->eh_sites[site - 1].end = ++W->eh_marks;
+    x64_record_emit(L->context, X64_OP_EHMARK)->label =
+        W->eh_sites[site - 1].end;
+}
+
+/* after an invoke's call: its result where it goes, then the normal edge (the unwind edge has no moves) */
+static void x64_vir_invoke_finish(x64_vir_context *L, uint32_t b,
+                                  const vir_insn *in, uint8_t res, int d)
+{
+    const vir_function *f = L->function;
+    uint32_t normal = f->extra[in->c + 1 + f->extra[in->c]];
+    uint32_t g =
+        L->allocation->edge_indices[L->allocation->slot_offsets[b] + 1];
+
+    if (g != VIR_BLOCK_NONE && L->allocation->edge[g].count)
+        x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+    if (in->type == VIR_TYPE_MULTI)
+        x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+    if (res !=
+        VIR_REGISTER_NONE) { /* the result from rax or xmm0 (on the normal path only) */
+        int from = RAX;
+
+        if (vir_register_class(in->type))
+            from = XMM0;
+        if (d != from)
+            x64_mov(L->context, d, from);
+    }
+    /* (spilled at its definition: stored here, on the normal path, not after the branch) */
+    uint32_t v = (uint32_t)(in - f->insns);
+
+    if (res != VIR_REGISTER_NONE && L->allocation->slot[v] != VIR_BLOCK_NONE &&
+        L->allocation->spill_defined[v])
+        x64_vir_slot_access(L, false, res, L->allocation->slot[v]);
+    x64_vir_edge_emit(L, b, 0);
+    x64_vir_goto_emit(L, b, normal);
+}
+
 VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                               const uint8_t *p, uint32_t n, uint8_t res)
 {
@@ -402,7 +511,27 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         }
         x64_record_emit(e, X64_OP_REP)->condition = i->op == VIR_OP_MEMSET;
         return;
-    case VIR_OP_CALL: {
+    case VIR_OP_LANDINGPAD: /* the pad's mark: the unwinder enters here, rax the exception, rdx the selector */
+        x64_record_emit(e, X64_OP_EHMARK)->label =
+            x64_vir_eh_pad_mark(L, b, x64_vir_eh_pad_node(L, b));
+        return;
+    case VIR_OP_RESUME: { /* _Unwind_Resume(exception) */
+        cc *c = e->compile_context;
+        uint32_t ref =
+            CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, c->eh_resume_sym);
+
+        if (!c->eh_resume_sym)
+            x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+        if (a != RDI)
+            x64_mov(e, RDI, a);
+        codegen_reference_note(e, ref);
+        x64_record_emit(e, X64_OP_CALL)->reference = ref;
+        x64_record_emit(e, X64_OP_UD2);
+        e->has_calls = true;
+        return;
+    }
+    case VIR_OP_CALL:
+    case VIR_OP_INVOKE: {
         uint32_t ng = L->function->extra[i->c];
         int total = 0, nf = 0;
         for (uint32_t k = 0; k < ng; k++) {
@@ -487,6 +616,10 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         else if (VIR_SIGNATURE_IS_VARIADIC(L->function->extra[i->b]))
             x64_record_emit_move_immediate(e, RAX, nf);
         record *call;
+        /* an invoke: the call between two marks, a site of the exception table */
+        uint32_t eh_site = 0;
+        if (i->op == VIR_OP_INVOKE)
+            eh_site = x64_vir_eh_site_begin(L, i);
         if (indirect)
             call = x64_record_emit_three_registers(
                 e, X64_OP_CALLR, 8, X64_REGISTER_NONE, R11, X64_REGISTER_NONE);
@@ -497,9 +630,13 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             call->reference = callee->a;
         }
         call->shift = L->ms; /* (a Microsoft callee: print.c's save set) */
+        if (eh_site)
+            x64_vir_eh_site_end(L, eh_site);
         if (total)
             x64_record_emit(e, X64_OP_ADJSP)->immediate = total;
         e->has_calls = true;
+        if (i->op == VIR_OP_INVOKE)
+            x64_vir_invoke_finish(L, b, i, res, d);
         return;
     }
     case VIR_OP_PARAM: {

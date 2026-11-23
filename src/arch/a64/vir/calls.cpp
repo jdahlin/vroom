@@ -26,7 +26,7 @@ VPRIV const char *a64_vir_tail_call_reason(a64_vir_context *L, uint8_t *d)
                     x.op == VIR_OP_FRAMEADDR || x.op == VIR_OP_RETADDR ||
                     x.op == VIR_OP_VA_START)
                     return "asm or the frame's address";
-                if (x.op == VIR_OP_CALL &&
+                if (vir_op_is_call(x.op) &&
                     virbuild_call_returns_twice(L->context, &f->insns[x.a]))
                     return "a call that returns twice";
                 vir_operand_iterator_init(&it, (vir_function *)f, &x, false);
@@ -100,6 +100,9 @@ VPRIV bool a64_vir_call_is_sibling(a64_vir_context *L, uint32_t b, uint32_t i)
     const vir_insn *r, *t = &f->insns[f->insns[i].a];
     uint32_t res = i, j;
 
+    if (f->insns[i].op ==
+        VIR_OP_INVOKE) /* (its frame must stay for the landing pad) */
+        return false;
     if (!L->tail || f->insns[i].type == VIR_TYPE_MULTI ||
         (t->op == VIR_OP_SYMADDR &&
          CODEGEN_REFERENCE_KIND(t->a) == CODEGEN_REFERENCE_SYMBOL &&

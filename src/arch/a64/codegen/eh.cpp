@@ -59,7 +59,7 @@ static uint32_t a64_eh_node_current(codegen_context *e)
                                      "exception table");
             k = ++e->eh_node_count;
             e->eh_nodes[k].symbol = s, e->eh_nodes[k].parent = node,
-            e->eh_nodes[k].pad = 0;
+            e->eh_nodes[k].pad = 0, e->eh_nodes[k].catch_all = false;
         }
         node = k;
     }
@@ -88,6 +88,36 @@ VPRIV uint32_t a64_eh_call_begin(codegen_context *e)
         node = a64_eh_node_current(e);
     if (!node)
         return 0;
+    if (e->eh_site_count >= e->label_capacity / 2)
+        codegen_fatal_report(e, 0, "too many calls for the exception table");
+    struct codegen_eh_site *t = &e->eh_sites[e->eh_site_count++];
+
+    t->node = node;
+    t->begin = a64_eh_label_place(e);
+    t->end = 0;
+    return e->eh_site_count;
+}
+
+/* VIR's lowering: the node standing for the landing pad at label (made on first use) */
+VPRIV uint32_t a64_eh_pad_node(codegen_context *e, uint32_t label,
+                               bool catch_all)
+{
+    for (uint32_t k = 1; k <= e->eh_node_count; k++)
+        if (e->eh_nodes[k].pad == label)
+            return k;
+    if (e->eh_node_count + 1 >= e->eh_node_capacity)
+        codegen_fatal_report(e, 0, "too many landing pads");
+    uint32_t k = ++e->eh_node_count;
+
+    e->eh_nodes[k] =
+        VCC_LITERAL(struct codegen_eh_node, .symbol = 0, .parent = 0,
+                    .pad = label, .catch_all = catch_all);
+    return k;
+}
+
+/* VIR's lowering: in front of an invoke's bl/blr, unwinding to node's pad */
+VPRIV uint32_t a64_eh_site_begin(codegen_context *e, uint32_t node)
+{
     if (e->eh_site_count >= e->label_capacity / 2)
         codegen_fatal_report(e, 0, "too many calls for the exception table");
     struct codegen_eh_site *t = &e->eh_sites[e->eh_site_count++];
@@ -255,6 +285,13 @@ VPRIV void a64_eh_table(const codegen_context *e, tbuf *b, uint32_t s)
     uint8_t *seen = a64_eh_labels_present(e);
     bool term = e->eh_terminate_pad && seen[e->eh_terminate_pad];
 
+    /* (a VIR catch-all pad needs the same type table as the terminate pad) */
+    for (uint32_t k = 0; k < e->eh_site_count && !term; k++) {
+        uint32_t m = e->eh_sites[k].node;
+
+        if (m != UINT32_MAX && e->eh_nodes[m].catch_all)
+            term = true;
+    }
     vtext_string_append(
         b,
         "\t.pushsection\t.gcc_except_table,\"a\",@progbits\n\t.p2align\t2\n");
@@ -302,7 +339,7 @@ VPRIV void a64_eh_table(const codegen_context *e, tbuf *b, uint32_t s)
         } else
             vtext_string_append(b, "\t.byte\t0\n");
         /* (action 0: a cleanup; 1: the catch (...) record) */
-        if (in_pad && pad)
+        if ((in_pad || e->eh_nodes[t->node].catch_all) && pad)
             vtext_string_append(b, "\t.byte\t1\n");
         else
             vtext_string_append(b, "\t.byte\t0\n");

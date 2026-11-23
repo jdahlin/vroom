@@ -182,7 +182,7 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
                   (q->insn.op == VIR_OP_LOAD || q->insn.op == VIR_OP_STORE ||
                    virbuild_promote_memset_zero_length(V, i, &rel))))
                 virbuild_promote_escape_mark(V, bad, (&q->insn.a)[k]);
-        if (q->insn.op == VIR_OP_CALL || q->insn.op == VIR_OP_RET)
+        if (vir_op_is_call(q->insn.op) || q->insn.op == VIR_OP_RET)
             for (uint32_t k = 0; k < V->extra[q->insn.c]; k++)
                 virbuild_promote_escape_mark(V, bad,
                                              V->extra[q->insn.c + 1 + k]);

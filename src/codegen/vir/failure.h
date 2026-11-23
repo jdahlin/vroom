@@ -42,7 +42,8 @@
     X(stack_pointer, "VIR: stack pointer")                                     \
     X(setjmp, "VIR: setjmp")                                                   \
     X(exceptions, "VIR: exceptions the builder does not handle")               \
-    X(exceptions_lowering, "VIR: invoke and landing pads (not lowered yet)")   \
+    X(exceptions_lowering,                                                     \
+      "VIR: an invoke or landing pad the lowering does not take")              \
     X(longjmp, "VIR: longjmp")                                                 \
     X(inline_assembly, "VIR: inline asm")                                      \
     X(variadic_start, "VIR: va_start (AAPCS64's register save areas)")         \

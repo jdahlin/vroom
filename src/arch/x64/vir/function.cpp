@@ -155,7 +155,13 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
             return false;
         }
     for (uint32_t i = f->constant_count; i < f->insn_count; i++) {
-        if (f->insns[i].op == VIR_OP_CALL &&
+        /* (an invoke's projections are in its normal block, not after it: 15.x wants them there) */
+        if (f->insns[i].op == VIR_OP_INVOKE &&
+            f->insns[i].type == VIR_TYPE_MULTI) {
+            *why = VIRBUILD_FAILURE(exceptions_lowering);
+            return false;
+        }
+        if (vir_op_is_call(f->insns[i].op) &&
             f->extra[f->insns[i].c] >= VIR_REGISTER_CONSTRAINT_MAX) {
             *why = VIRBUILD_FAILURE(x64_too_many_call_arguments);
             return false;
@@ -312,6 +318,22 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
     e->walk_state->label_count = 0;
     e->walk_state->stack_pointer_needed = false;
     e->walk_state->canary = 0;
+    /* exceptions: the walker's table state, filled per invoke and landing pad (instructions.cpp) */
+    {
+        walk_state *W = e->walk_state;
+
+        W->eh_nsites = W->eh_marks = W->eh_term = 0;
+        W->eh_overflow = W->eh_in_pads = 0;
+        W->eh_fn = (f->flags & VIR_FUNCTION_FLAG_EH) != 0;
+        L.eh_catch_all_block = VIR_BLOCK_NONE;
+        if (W->eh_fn && f->block_count + 1 >= WALK_CLEANUP_MAX) {
+            *why = VIRBUILD_FAILURE(exceptions_lowering);
+            e->vir_try = false;
+            return false;
+        }
+        if (W->eh_fn)
+            memset(W->eh_pad, 0, (f->block_count + 1) * sizeof *W->eh_pad);
+    }
     if (VIR_GROUP_KIND(f->extra[f->signature + 1]) == VIR_GROUP_SRET) {
         L.result_pointer_slot = walk_slot_temporary(e, 8, 8);
         codegen_lvalue at = {.kind = CODEGEN_LVALUE_FRAME,

@@ -48,6 +48,26 @@ static int a64_vir_integer_compare_flags(a64_vir_context *L, const vir_insn *in,
                                                                          in)];
 }
 
+/* the landing pad b catches everything (its landingpad has a catchall clause): the terminate pad */
+static bool a64_vir_landing_pad_catches_all(const vir_function *f, uint32_t b)
+{
+    const vir_block *k = &f->blocks[b];
+
+    for (uint32_t i = k->first; i < k->first + k->insn_count; i++) {
+        const vir_insn *x = &f->insns[i];
+
+        if (vir_opcode_is_constant(x->op))
+            continue;
+        if (x->op != VIR_OP_LANDINGPAD)
+            return false;
+        for (uint32_t c = 0; c < f->extra[x->a + 1]; c++)
+            if (!f->extra[x->a + 2 + c])
+                return true;
+        return false;
+    }
+    return false;
+}
+
 VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
                               uint8_t res)
 {
@@ -561,6 +581,73 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
         a64_record_emit(e, A64_OP_BRK)->immediate = 1;
         e->is_reachable = false;
         return;
+    /* exceptions (SPEC-vir.md 8.8): the call between two labels for the call-site table; the
+       unwind edge carries no moves (the allocator keeps what a pad uses in callee-saved registers
+       or slots, as across any call), the normal edge is a branch's */
+    case VIR_OP_INVOKE: {
+        uint32_t n = f->extra[in->c], normal = f->extra[in->c + 1 + n],
+                 unwind = f->extra[in->c + 2 + n];
+
+        if (!e->eh_function || !a64_vir_edge_is_plain(L, b, 1)) {
+            snprintf(L->context->vir_builder->failure_detail,
+                     sizeof L->context->vir_builder->failure_detail,
+                     "moves on the unwind edge of b%u", b);
+            a64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+        }
+        uint32_t site = a64_eh_site_begin(
+            e, a64_eh_pad_node(e, L->labels[unwind],
+                               a64_vir_landing_pad_catches_all(f, unwind)));
+
+        a64_vir_call_lower(L, b, i, in);
+        a64_eh_call_end(e, site);
+        if (in->type == VIR_TYPE_MULTI)
+            a64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+        if (res !=
+            VIR_REGISTER_NONE) { /* the result from x0 or v0 (on the normal path only) */
+            if (a64_vir_register_is_float(res)) {
+                if (vd != 0)
+                    a64_record_emit_word(
+                        e, (d ? 0x1e604000u : 0x1e204000u) |
+                               (unsigned)vd); /* fmov d/s vd, d/s0 */
+            } else if (rd != 0)
+                a64_record_emit_move(e, 1, rd, 0);
+        }
+        /* (spilled at its definition: stored here, on the normal path, not after the branch) */
+        if (res != VIR_REGISTER_NONE &&
+            L->allocation->slot[i] != VIR_BLOCK_NONE &&
+            L->allocation->spill_defined[i])
+            a64_vir_register_spill(L, res, L->allocation->slot[i], R_X16);
+        if (a64_vir_edge_is_plain(L, b, 0))
+            a64_vir_goto_emit(L, b, a64_vir_block_chase(L, normal));
+        else
+            a64_jump_emit(e, a64_vir_successor_label(L, b, 0, normal));
+        return;
+    }
+    case VIR_OP_LANDINGPAD: /* (its label is the block's: entered with x0 the exception, x1 the selector) */
+        return;
+    case VIR_OP_PROJ:
+        if (f->insns[in->a].op != VIR_OP_LANDINGPAD || in->b != 0)
+            a64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+        if (res != VIR_REGISTER_NONE && rd != 0)
+            a64_record_emit_move(e, 1, rd, 0);
+        return;
+    case VIR_OP_RESUME: { /* _Unwind_Resume(exception) */
+        cc *c = e->compile_context;
+        int r = a64_vir_operand_general_register(L, 0, R_X16);
+        uint32_t ref =
+            CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, c->eh_resume_sym);
+
+        if (!c->eh_resume_sym)
+            a64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+        if (r != 0)
+            a64_record_emit_move(e, 1, 0, r);
+        e->has_calls = true;
+        codegen_reference_note(e, ref);
+        a64_record_emit(e, A64_OP_BL)->reference = ref;
+        a64_record_emit(e, A64_OP_BRK)->immediate = 1;
+        e->is_reachable = false;
+        return;
+    }
     default: {
         snprintf(L->context->vir_builder->failure_detail,
                  sizeof L->context->vir_builder->failure_detail, "%s",
