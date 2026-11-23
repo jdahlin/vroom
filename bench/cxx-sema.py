@@ -928,13 +928,30 @@ def check(test, opts, clang, vpp):
 # counted declarations each blocks (doc/PLAN-cxx-unsupported.md, step 0)
 UNSUPPORTED_LINE = re.compile(r'^\[([^\]]*)\] (\S+) (.*?):(\d+):(\d+)\t(.*?)\t(.*)$')
 HELD = re.compile(r'^(\S+) is declared by a declaration (that is not parsed|that is ill-formed|with no rules yet)$')
+INSTANTIATION = re.compile(r'^instantiation refused: \[([^\]]*)\] (\S+:\d+) ?(.*)$')
 WHY_DEPTH = 8
+
+
+def unwrap_instantiation(sub, detail, site):
+    """an instantiation's refusal is its own analysis's: (SUB, DETAIL, SITE)
+    of the innermost failure ("instantiation refused: [SUB] FILE:LINE
+    DETAIL"; the detail itself may be another instantiation's)"""
+    while True:
+        i = INSTANTIATION.match(detail)
+        if not i:
+            return sub, detail, site
+        sub, site, detail = i.group(1), i.group(2), i.group(3)
+        site = os.path.relpath(site, R) if os.path.isabs(site) else site
 
 
 def why_key(sub, detail, site):
     """(subclause, vcc's site, the detail with the name generic unless it is
     a builtin's)"""
     site = os.path.relpath(site, R) if os.path.isabs(site) else site
+    sub, detail, site = unwrap_instantiation(sub, detail, site)
+    if detail.startswith('evaluator '):
+        # "evaluator met L1234 (KIND)": the line is the cause
+        return f'[{sub}] {site} {detail}'
     m = re.match(r'^(\S+) (.*)$', detail)
     if m and not m.group(2).startswith('is a compiler builtin'):
         detail = 'NAME ' + m.group(2)
@@ -1001,7 +1018,7 @@ def root_causes(test, opts, vpp, counted):
         r = first_refusal(d)
         if r is None:
             return f'[{d["sub"]}] (no refusal line in the declaration)', d
-        h = HELD.match(r['detail'])
+        h = HELD.match(unwrap_instantiation(r['sub'], r['detail'], r['site'])[1])
         if h and depth < WHY_DEPTH:
             j = holder(i, h.group(1))
             if j is not None:

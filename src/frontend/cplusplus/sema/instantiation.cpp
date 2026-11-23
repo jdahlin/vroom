@@ -643,7 +643,10 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
         instantiations[index].has_failure = true;
     }
     c = 0;
-    return not_supported(at, "temp.inst");
+    analysis_result refused = not_supported(at, "temp.inst");
+    if (instantiations[index].has_failure)
+        instantiation_detail(instantiations[index].failure);
+    return refused;
 }
 
 /* [temp.point]/7: the definitions of the specializations used, after the

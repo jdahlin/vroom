@@ -1,2 +1,2 @@
-equivalent-partial-specializations.cpp:17:9: error: the rules of [temp.names] are not implemented yet
+equivalent-partial-specializations.cpp:17:9: error: the rules of [temp.names] are not implemented yet: trait is declared by a declaration with no rules yet
 equivalent-partial-specializations.cpp:17:9: note: refused by vcc's frontend/cplusplus/template/declared-templates.cpp:N (template_type)

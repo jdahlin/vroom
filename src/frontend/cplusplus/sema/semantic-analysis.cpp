@@ -118,6 +118,20 @@ void semantic_analysis::name_unsupported_detail(token_index t, const char *what)
     unsupported[unsupported.size() - 1].detail = detail.c_str();
 }
 
+void semantic_analysis::last_unsupported_detail(const char *text)
+{
+    owned_string &detail = detail_texts.make(text, strlen(text));
+    unsupported[unsupported.size() - 1].detail = detail.c_str();
+}
+
+void semantic_analysis::instantiation_detail(const unsupported_construct &in)
+{
+    char text[512];
+    snprintf(text, sizeof text, "instantiation refused: [%s] %s:%u %s",
+             in.subclause, in.file, static_cast<unsigned>(in.line), in.detail);
+    last_unsupported_detail(text);
+}
+
 analysis_result semantic_analysis::not_supported_builtin(SyntaxRef n,
                                                          const char *subclause,
                                                          entity_index called,

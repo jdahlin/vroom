@@ -816,6 +816,40 @@ bool semantic_analysis::depends_on_parameter_from(qualified_type t,
     return made_of_template_parameter(type_table, t, &entity_table, from);
 }
 
+namespace
+{
+/* what a template-id's name is when it is not a class or alias template
+   ([temp.names]/1), for the detail of the refusal */
+const char *template_name_names(const entity &e)
+{
+    switch (e.kind) {
+    case entity_kind::template_entity:
+        return "names a template that is not a class or alias template";
+    case entity_kind::template_specialization:
+        return "names a template specialization";
+    case entity_kind::class_type:
+        return "names a class that is not a template";
+    case entity_kind::function:
+        return "names a function";
+    case entity_kind::variable:
+        return "names a variable";
+    case entity_kind::typedef_name:
+        return "names a typedef-name";
+    case entity_kind::enumeration:
+        return "names an enumeration";
+    case entity_kind::enumerator:
+        return "names an enumerator";
+    case entity_kind::namespace_entity:
+        return "names a namespace";
+    case entity_kind::pack:
+        return "names a pack";
+    default:
+        break;
+    }
+    return "names something that is not a template";
+}
+} // namespace
+
 /*
  * [temp.names]/1 with [temp.arg.type]/1: template-name <
  * template-argument-list > naming a class template, its arguments type-ids;
@@ -852,7 +886,13 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
         uint32_t at = alias_template_of(named);
         if (at)
             return alias_template_type(id, at, type, cv);
-        return not_supported(id, "temp.names");
+        analysis_result refused = not_supported(id, "temp.names");
+        if (!x.entity)
+            name_lookup_detail(template_name.token(), x);
+        else
+            name_unsupported_detail(template_name.token(),
+                                    template_name_names(entity_table[named]));
+        return refused;
     }
     owned_array<template_argument> arguments;
     VTRY(filled, template_id_arguments(id, ct, arguments));

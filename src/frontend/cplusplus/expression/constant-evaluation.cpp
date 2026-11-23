@@ -42,6 +42,11 @@ namespace
 
 enum : uint8_t { jump_none, jump_break, jump_continue };
 
+/* the line of the last answer "no rules" (the one nearest the node the
+   evaluation started from): the detail of the refusal that follows, read
+   only when an evaluation answers unknown */
+thread_local uint32_t last_unknown_line = 0;
+
 /* The answer "the evaluator has no rules for this": normally just
    constness::unknown.  Compiled with -DVCC_TRACE_UNKNOWN each such answer
    prints "CXXUNK line" to stderr, which tells which refusal an input
@@ -50,11 +55,12 @@ enum : uint8_t { jump_none, jump_break, jump_continue };
 constness trace_unknown(int line)
 {
     fprintf(stderr, "CXXUNK %d\n", line);
+    last_unknown_line = static_cast<uint32_t>(line);
     return constness::unknown;
 }
 #define CONST_UNKNOWN trace_unknown(__LINE__)
 #else
-#define CONST_UNKNOWN constness::unknown
+#define CONST_UNKNOWN (last_unknown_line = __LINE__, constness::unknown)
 #endif
 
 /* a class or union object (not an array): the values whose members are
@@ -429,6 +435,21 @@ void semantic_analysis::evaluate_analysed_expressions()
     }
 }
 
+void semantic_analysis::evaluation_detail(uint32_t node, bool gave_up)
+{
+    char text[128];
+    if (!gave_up) {
+        /* the evaluation was constant but its value is not one the
+           analysis keeps (or an allocation was left) */
+        snprintf(text, sizeof text, "evaluator kept no value (%s)",
+                 semantic_kind_name(semantics[node].kind));
+    } else {
+        snprintf(text, sizeof text, "evaluator met L%u (%s)", last_unknown_line,
+                 semantic_kind_name(semantics[node].kind));
+    }
+    last_unsupported_detail(text);
+}
+
 constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
 {
     if (semantics[node].evaluation == constness::not_constant)
@@ -456,9 +477,16 @@ analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
                                                      bool &constant)
 {
     constant = false;
+    last_unknown_line = 0;
     constness c = evaluate_value(node, v);
-    if (c == constness::unknown)
-        return not_supported(at, expr_const_reason());
+    if (c == constness::unknown) {
+        /* (the reason of a refused function the evaluation called is the
+           subclause; its detail is where the evaluator stopped: a "no
+           rules" answer, or a value the analysis does not keep) */
+        analysis_result refused = not_supported(at, expr_const_reason());
+        evaluation_detail(node, last_unknown_line != 0);
+        return refused;
+    }
     constant = c == constness::constant;
     return analysis_result::well_formed;
 }

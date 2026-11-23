@@ -907,8 +907,11 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                        "namespace.udir");
         /* a name that is not found may be one a declaration analysis has
            no rules for declared */
-        if (r.unknown || !r.entity)
-            return not_supported(n, "basic.lookup.qual");
+        if (r.unknown || !r.entity) {
+            analysis_result refused = not_supported(n, "basic.lookup.qual");
+            name_lookup_detail(t, r);
+            return refused;
+        }
         entity_index e = r.entity;
         if (entity_table[e].kind == entity_kind::typedef_name) {
             /* [dcl.typedef]/1: "a typedef-name is thus a synonym for another

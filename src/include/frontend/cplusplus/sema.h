@@ -1910,6 +1910,18 @@ class semantic_analysis
                                           call_site where = call_site());
     owned_objects<owned_string> detail_texts;
     void name_unsupported_detail(token_index t, const char *what);
+    /* the last refusal recorded gets this text as its detail (a copy) */
+    __attribute__((noinline, cold)) void
+    last_unsupported_detail(const char *text);
+    /* the last refusal of an instantiation: the failure of the
+       specialization's own analysis, "instantiation refused: [SUBCLAUSE]
+       FILE:LINE DETAIL" */
+    __attribute__((noinline, cold)) void
+    instantiation_detail(const unsupported_construct &inner);
+    /* the last refusal of a constant evaluation: where the evaluator gave
+       up, "evaluator met LINE (KIND)" */
+    __attribute__((noinline, cold)) void evaluation_detail(uint32_t node,
+                                                           bool gave_up);
     analysis_result not_supported(SyntaxRef n, const char *subclause,
                                   call_site where = call_site());
     /* whether the parser gave up on a part of the declaration */
