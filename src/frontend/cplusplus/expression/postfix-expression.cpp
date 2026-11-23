@@ -330,8 +330,10 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
             return not_supported(n, "namespace.qual");
         info = found.entity;
     }
-    if (!info || entity_table[info].kind != entity_kind::class_type ||
-        !entity_table[info].size)
+    /* [expr.typeid]/1: an lvalue of type const std::type_info, which may be
+       incomplete here (clang asks only for its declaration; a use of a
+       member needs the class complete, [expr.ref]) */
+    if (!info || entity_table[info].kind != entity_kind::class_type)
         return ill_formed(n,
                           "the header <typeinfo> shall be included before a "
                           "use of typeid",
