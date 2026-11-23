@@ -3334,8 +3334,13 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         }
         return leave_scope(state, saved, saved_elements, returned, result, c);
     }
-    /* [dcl.constexpr]/3.5.1: "a goto statement" may not be in the body */
+    /* [stmt.goto]: clang's evaluator has no goto: "subexpression not valid
+       in a constant expression", whatever the language version; the check
+       of a body for a potential constant expression does not count it */
     case semantic_kind::goto_statement:
+        if (state.potential)
+            return CONST_UNKNOWN;
+        return constness::not_constant;
     default:
         return CONST_UNKNOWN;
     }
