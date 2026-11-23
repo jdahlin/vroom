@@ -60,3 +60,11 @@ int subscript = listed[2];
 int *element = &listed[1];
 int *advanced = listed + 2;
 long difference = &listed[3] - &listed[0];
+
+// [dcl.init]/8: value-initialization zero-initializes first; a base's
+// user-provided constructor keeps the zeros of the members it leaves alone.
+namespace value_init_zero_first {
+struct A { constexpr A() {} int x; };
+struct B : A { int y; };
+static_assert(B().x == 0 && B().y == 0, "");
+}

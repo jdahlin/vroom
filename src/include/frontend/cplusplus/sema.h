@@ -3691,6 +3691,10 @@ class semantic_analysis
        their lifetime began within it), the depth of invocations and the
        full-expressions evaluated, against [implimits] */
     struct constant_evaluation {
+        /* a value-initialized object's subobjects were zero-initialized
+           first ([dcl.init]/8.2): a constructor of one an implicit
+           constructor runs keeps those zeros */
+        bool zeroed = false;
         /* the elements of the arrays in objects (an element's value may be
            an array whose elements are further on), and whether each may
            not be modified: an element of a variable whose lifetime did not

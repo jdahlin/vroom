@@ -820,7 +820,7 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
                when the construct says so, [dcl.init]/8.2), then the
                constructor runs on it */
             uint32_t first = 0;
-            if (semantics[init].op)
+            if (semantics[init].op || state.zeroed)
                 first = zero_fill;
             constness c =
                 evaluate_initialization(state, t, first, read_only, place);
@@ -1337,7 +1337,10 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         state.writing--;
         if (c != constness::constant)
             return c;
-        c = evaluate_initialization(state, semantics[x.a].type, 0, false,
+        uint32_t first = 0;
+        if (state.zeroed)
+            first = zero_fill;
+        c = evaluate_initialization(state, semantics[x.a].type, first, false,
                                     object);
         if (c != constness::constant)
             return c;
@@ -3141,8 +3144,18 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
     self.count = 1;
     bool returned = false;
     constant_value result;
-    return evaluate_invocation(state, x.b, self, x.first, x.count, returned,
-                               result);
+    /* [dcl.init]/8.2: the zeros of a value-initialization are kept by the
+       implicit constructor's base and member constructions, not by a
+       user-provided constructor's */
+    bool saved = state.zeroed;
+    if (x.op)
+        state.zeroed = true;
+    else if (!k.implicit)
+        state.zeroed = false;
+    constness c = evaluate_invocation(state, x.b, self, x.first, x.count,
+                                      returned, result);
+    state.zeroed = saved;
+    return c;
 }
 
 constness semantic_analysis::evaluate_variable(qualified_type t, uint32_t init,
