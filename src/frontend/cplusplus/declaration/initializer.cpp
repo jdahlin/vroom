@@ -773,8 +773,20 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
     return initialize_with(at, m, type, direct, list, result);
 }
 
-/* the initialization of an object or reference of type type by the
-   analysed expression m (the rest of initialize_from) */
+/*
+ * [dcl.init]/17, from its second bullet: the initialization of an object or
+ * reference of type type by the analysed expression m (the rest of
+ * initialize_from, which has the braced-init-list, string-literal and
+ * array bullets).  One function per bullet:
+ * - "If the destination type is a reference type, see [dcl.init.ref]":
+ *   reference_initialization;
+ * - "Otherwise, if the destination type is a (possibly cv-qualified) class
+ *   type": class_initialization;
+ * - "Otherwise, if the source type is a (possibly cv-qualified) class type,
+ *   conversion functions are considered", and "Otherwise, the initial value
+ *   of the object being initialized is the (possibly converted) value of
+ *   the initializer expression": scalar_initialization.
+ */
 analysis_result semantic_analysis::initialize_with(SyntaxRef at,
                                                    expression_meaning &m,
                                                    qualified_type type,
@@ -787,131 +799,179 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
     if (type_index value = atomic_value_type(type))
         return initialize_with(at, m, qualified_type::make(value, type.cv()),
                                direct, list, result);
+    switch (type_table[type.unqualified()].kind) {
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+        return reference_initialization(at, m, type, result);
+    case type_kind::class_type:
+        return class_initialization(at, m, type, direct, result);
+    case type_kind::vector:
+        /* [ext:gnu_vector_size] a vector is initialized from a vector of
+           its type, a copy of its bytes (other conversions not analysed) */
+        return same_type_copy(at, m, type, constness::not_constant, result);
+    case type_kind::complex:
+        /* [ext:gnu_complex] a complex value initialized from the same
+           complex type */
+        return same_type_copy(at, m, type, m.evaluation, result);
+    default:
+        return scalar_initialization(at, m, type, direct, list, result);
+    }
+}
+
+/* an extension type initialized from an object of its own type, which is
+   copied; another source type is not analysed */
+analysis_result semantic_analysis::same_type_copy(SyntaxRef at,
+                                                  expression_meaning &m,
+                                                  qualified_type type,
+                                                  constness evaluation,
+                                                  initialized_value &result)
+{
+    if (m.type.unqualified() != type.unqualified())
+        return not_supported(at, "dcl.init");
+    VTRY(r, operand_value(at, m));
+    result.evaluation = evaluation;
+    result.value = 0;
+    result.node = m.node;
+    return r;
+}
+
+/* [dcl.init]/17.2: "If the destination type is a reference type, see
+   [dcl.init.ref]." */
+analysis_result
+semantic_analysis::reference_initialization(SyntaxRef at, expression_meaning &m,
+                                            qualified_type type,
+                                            initialized_value &result)
+{
+    result.evaluation = constness::unknown;
+    VTRY(r, reference_binding(at, m, type));
+    /* the reference's own type: what lowering makes an address of */
+    result.node = expression_node(semantic_kind::bind_reference, m,
+                                  at.first_token(), m.node);
+    semantics[result.node].type = type;
+    return r;
+}
+
+/*
+ * [dcl.init]/17.6: "Otherwise, if the destination type is a (possibly
+ * cv-qualified) class type:
+ * - (17.6.1) If the initializer expression is a prvalue and the
+ *   cv-unqualified version of the source type is the same class as the
+ *   class of the destination, the initializer expression is used to
+ *   initialize the destination object.
+ * - (17.6.2) Otherwise, if the initialization is direct-initialization, or
+ *   if it is copy-initialization where the cv-unqualified version of the
+ *   source type is the same class as, or a derived class of, the class of
+ *   the destination, constructors are considered.
+ * - (17.6.3) Otherwise (i.e., for the remaining copy-initialization
+ *   cases), user-defined conversions that can convert from the source type
+ *   to the destination type or (when a conversion function is used) to a
+ *   derived class thereof are enumerated as described in [over.match.copy]".
+ * Constructors are considered by construct when the class has any, or a
+ * deleted implicit copy constructor; else the implicitly-declared copy
+ * constructor ([class.copy.ctor]/6) is the one, which is trivial for those
+ * classes ([class.copy.ctor]/11): it copies the object representation.
+ */
+analysis_result
+semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
+                                        qualified_type type, bool direct,
+                                        initialized_value &result)
+{
     const struct type target = type_table[type.unqualified()];
     analysis_result r = analysis_result::well_formed;
-    if (target.kind == type_kind::lvalue_reference ||
-        target.kind == type_kind::rvalue_reference) {
-        /* [dcl.init]/17.2: "If the destination type is a reference type,
-           see [dcl.init.ref]." */
-        result.evaluation = constness::unknown;
-        VTRY_SET(r, reference_binding(at, m, type));
-        /* the reference's own type: what lowering makes an address of */
-        result.node = expression_node(semantic_kind::bind_reference, m,
-                                      at.first_token(), m.node);
-        semantics[result.node].type = type;
-        return r;
-    }
-    if (target.kind == type_kind::class_type) {
-        /* [dcl.init]/17.6.1: "If the initializer is a prvalue and the
-           cv-unqualified version of the source type is the same class as
-           the class of the destination, the initializer expression is used
-           to initialize the destination object"; /17.6.2: "Otherwise, if
-           the initialization is direct-initialization, or if it is
-           copy-initialization where the cv-unqualified version of the
-           source type is the same class as, or a derived class of, the
-           class of the destination, constructors are considered": the
-           implicitly-declared copy constructor ([class.copy.ctor]/6), which
-           is trivial for the classes analysis has ([class.copy.ctor]/11):
-           it copies the object representation */
-        if (entity_table[target.entity].kind != entity_kind::class_type)
-            return not_supported(at, "dcl.init");
-        bool same = m.type.unqualified() == type.unqualified();
-        bool related = false;
-        if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
-            !same) {
-            bool ambiguous = false;
-            related = base_step(type_table[m.type.unqualified()].entity,
-                                target.entity, ambiguous) != 0;
-        }
-        if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
-            !same && !related) {
-            /* [dcl.init]/17.6.3, [over.match.copy]/1.2: the conversion
-               functions of the source class are candidates too, and in a
-               direct-initialization ([over.match.ctor]) a constructor's
-               parameter may be initialized by one.  The one conversion
-               function that yields the class, no converting constructor
-               viable beside it, is called ([over.match.conv]), its result
-               initializing the object; else not analysed */
-            qualified_type unqualified =
-                qualified_type::make(type.unqualified(), cv_none);
-            conversion_sequence found;
-            bool cannot_tell = false;
-            if (conversion_function_to_class(m, unqualified, found,
-                                             cannot_tell)) {
-                conversion_sequence s = class_sequence(m, unqualified, true);
-                /* before C++17 the result initializes the object by a copy
-                   constructor, which may be elided but shall be viable
-                   ([dcl.init]/17.6.3, [class.copy.elision]/1): not
-                   analysed */
-                if (direct ||
-                    tokens.files.behavior.edition <
-                        standard_edition::cplusplus_17 ||
-                    s.kind != conversion_sequence::form::user_defined ||
-                    s.ambiguous || s.function != found.function)
-                    return not_supported(at, "over.match.copy");
-                bool converted = false;
-                VTRY_SET(r, conversion_function_call(at, m, unqualified, direct,
-                                                     converted));
-                if (!converted || m.type.unqualified() != type.unqualified())
-                    return not_supported(at, "over.match.copy");
-                same = true;
-            } else if (cannot_tell) {
-                return not_supported(at, "over.match.copy");
-            }
-        }
-        if (!(same && m.category == value_category::prvalue) &&
-            (entity_table[target.entity].first_constructor ||
-             /* its deleted implicit copy constructor (construct) */
-             entity_table[target.entity].implicit_copy_deleted)) {
-            /* /17.6.2 by [over.match.ctor]; /17.6.3: a user-defined
-               conversion by a converting constructor ([class.conv.ctor]),
-               whose result initializes the object (the copy elided) */
-            owned_array<expression_meaning> arguments;
-            arguments.append(m);
-            return construct(at, type, arguments, 0, result, !direct);
-        }
+    if (entity_table[target.entity].kind != entity_kind::class_type)
+        return not_supported(at, "dcl.init");
+    bool same = m.type.unqualified() == type.unqualified();
+    bool related = false;
+    if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
+        !same) {
         bool ambiguous = false;
-        if (!same &&
-            type_table[m.type.unqualified()].kind == type_kind::class_type &&
-            base_step(type_table[m.type.unqualified()].entity, target.entity,
-                      ambiguous)) {
-            /* the implicit copy constructor's const T& bound to the base
-               class subobject of the derived object */
-            if (!copies_bytes(target.entity))
-                return not_supported(at, "class.copy.ctor");
-            VTRY_SET(r, to_base(at.first_token(), target.entity, m));
+        related = base_step(type_table[m.type.unqualified()].entity,
+                            target.entity, ambiguous) != 0;
+    }
+    if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
+        !same && !related) {
+        /* [dcl.init]/17.6.3, [over.match.copy]/1.2: the conversion
+           functions of the source class are candidates too, and in a
+           direct-initialization ([over.match.ctor]) a constructor's
+           parameter may be initialized by one.  The one conversion
+           function that yields the class, no converting constructor
+           viable beside it, is called ([over.match.conv]), its result
+           initializing the object; else not analysed */
+        qualified_type unqualified =
+            qualified_type::make(type.unqualified(), cv_none);
+        conversion_sequence found;
+        bool cannot_tell = false;
+        if (conversion_function_to_class(m, unqualified, found, cannot_tell)) {
+            conversion_sequence s = class_sequence(m, unqualified, true);
+            /* before C++17 the result initializes the object by a copy
+               constructor, which may be elided but shall be viable
+               ([dcl.init]/17.6.3, [class.copy.elision]/1): not
+               analysed */
+            if (direct ||
+                tokens.files.behavior.edition <
+                    standard_edition::cplusplus_17 ||
+                s.kind != conversion_sequence::form::user_defined ||
+                s.ambiguous || s.function != found.function)
+                return not_supported(at, "over.match.copy");
+            bool converted = false;
+            VTRY_SET(r, conversion_function_call(at, m, unqualified, direct,
+                                                 converted));
+            if (!converted || m.type.unqualified() != type.unqualified())
+                return not_supported(at, "over.match.copy");
             same = true;
+        } else if (cannot_tell) {
+            return not_supported(at, "over.match.copy");
         }
-        if (!same)
-            return not_supported(at, "dcl.init");
-        VTRY_SET(r, operand_value(at, m));
-        result.evaluation = constness::unknown;
-        result.value = 0;
-        result.node = m.node;
-        return analysis_result::well_formed;
     }
-    if (target.kind == type_kind::vector) {
-        /* [ext:gnu_vector_size] a vector is initialized from a vector of its
-           type, a copy of its bytes (other conversions not analysed) */
-        if (m.type.unqualified() != type.unqualified())
-            return not_supported(at, "dcl.init");
-        VTRY_SET(r, operand_value(at, m));
-        result.evaluation = constness::not_constant;
-        result.value = 0;
-        result.node = m.node;
-        return analysis_result::well_formed;
+    if (!(same && m.category == value_category::prvalue) &&
+        (entity_table[target.entity].first_constructor ||
+         /* its deleted implicit copy constructor (construct) */
+         entity_table[target.entity].implicit_copy_deleted)) {
+        /* /17.6.2 by [over.match.ctor]; /17.6.3: a user-defined
+           conversion by a converting constructor ([class.conv.ctor]),
+           whose result initializes the object (the copy elided) */
+        owned_array<expression_meaning> arguments;
+        arguments.append(m);
+        return construct(at, type, arguments, 0, result, !direct);
     }
-    if (target.kind == type_kind::complex) {
-        /* [ext:gnu_complex] a complex value initialized from the same complex
-           type */
-        if (m.type.unqualified() != type.unqualified())
-            return not_supported(at, "dcl.init");
-        VTRY_SET(r, operand_value(at, m));
-        result.evaluation = m.evaluation;
-        result.value = 0;
-        result.node = m.node;
-        return analysis_result::well_formed;
+    bool ambiguous = false;
+    if (!same &&
+        type_table[m.type.unqualified()].kind == type_kind::class_type &&
+        base_step(type_table[m.type.unqualified()].entity, target.entity,
+                  ambiguous)) {
+        /* the implicit copy constructor's const T& bound to the base
+           class subobject of the derived object */
+        if (!copies_bytes(target.entity))
+            return not_supported(at, "class.copy.ctor");
+        VTRY_SET(r, to_base(at.first_token(), target.entity, m));
+        same = true;
     }
+    if (!same)
+        return not_supported(at, "dcl.init");
+    VTRY_SET(r, operand_value(at, m));
+    result.evaluation = constness::unknown;
+    result.value = 0;
+    result.node = m.node;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.init]/17.7: "Otherwise, if the source type is a (possibly
+ * cv-qualified) class type, conversion functions are considered"; /17.9:
+ * "Otherwise, the initial value of the object being initialized is the
+ * (possibly converted) value of the initializer expression.  A standard
+ * conversion sequence ([conv]) will be used, if necessary, to convert the
+ * initializer expression to the cv-unqualified version of the destination
+ * type"; a narrowing conversion in a list-initialization is ill-formed
+ * ([dcl.init.list]/3.9).  /17.8 (nullptr to bool) is implicit_conversion's.
+ */
+analysis_result
+semantic_analysis::scalar_initialization(SyntaxRef at, expression_meaning &m,
+                                         qualified_type type, bool direct,
+                                         bool list, initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    analysis_result r = analysis_result::well_formed;
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer &&
         target.kind != type_kind::pointer_to_member && !enumeration_of(type))
@@ -932,13 +992,7 @@ analysis_result semantic_analysis::initialize_with(SyntaxRef at,
         target.fundamental == fundamental_type::builtin_va_list) {
         /* [impl.clang] a va_list is initialized from a va_list only (a
            copy, as va_copy's) */
-        if (m.type.unqualified() != type.unqualified())
-            return not_supported(at, "dcl.init");
-        VTRY_SET(r, operand_value(at, m));
-        result.evaluation = constness::not_constant;
-        result.value = 0;
-        result.node = m.node;
-        return analysis_result::well_formed;
+        return same_type_copy(at, m, type, constness::not_constant, result);
     }
     VTRY_SET(r, operand_value(at, m));
     if (list &&

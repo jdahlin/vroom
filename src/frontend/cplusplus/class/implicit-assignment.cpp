@@ -62,25 +62,6 @@ bool semantic_analysis::move_assignment_operator(entity_index f,
     return t.kind == type_kind::class_type && t.entity == c;
 }
 
-/* whether a class assigned bytewise has a const member (or array of them),
-   which makes its assignment operator deleted ([class.copy.assign]/7.2) */
-bool semantic_analysis::bytewise_const_member(entity_index c) const
-{
-    const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.member_count; i++)
-        if (cv_of(type_table,
-                  entity_table[class_members[x.first_member + i]].type) &
-            cv_const)
-            return true;
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (entity_index k : classes)
-        if (entity_table[k].kind == entity_kind::class_type &&
-            bytewise_const_member(k))
-            return true;
-    return false;
-}
-
 /* whether member function f is deleted: by its flag, which a member
    function's body sets once analysed (a specialization's after the class
    that uses it), or by a declaration whose function-body is = delete */
@@ -341,7 +322,7 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
     bool user_move_constructor = x.defaulted_move_constructor;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
-        if (!entity_table[k].implicit && is_copy_constructor(c, k) &&
+        if (!entity_table[k].implicit && copy_or_move_constructor(c, k) &&
             type_table[type_table
                            .parameters(entity_table[k].type.unqualified())[0]
                            .unqualified()]
