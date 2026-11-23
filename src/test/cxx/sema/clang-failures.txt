@@ -1951,7 +1951,6 @@ verdict SemaCXX/embed-init-list.cpp -std=gnu++17 -Wno-c++26-extensions: ill-form
 verdict SemaCXX/ext-int-vector.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 30 (6 declarations)
 verdict SemaCXX/ext-int.cpp -std=gnu++17 -Wimplicit-int-conversion -Wno-unused -Wunevaluated-expression: ill-formed for us, accepted by clang: line 266 (2 declarations)
 verdict SemaCXX/gh102293.cpp -std=c++23: ill-formed for us, accepted by clang: line 60 (1 declarations)
-verdict SemaCXX/gh139818.cpp -std=c++23: ill-formed for us, accepted by clang: line 20 (1 declarations)
 verdict SemaCXX/has_unique_object_reps_bitint.cpp -std=c++17 -Wno-bitfield-width: ill-formed for us, accepted by clang: line 50 (3 declarations)
 verdict SemaCXX/imaginary-constants.cpp -std=c++14 -DCXX14=1: ill-formed for us, accepted by clang: line 13 (3 declarations)
 verdict SemaCXX/libstdcxx_common_type_hack.cpp -std=c++11 -D__GLIBCXX__=20100000L: ill-formed for us, accepted by clang: line 28 (1 declarations)

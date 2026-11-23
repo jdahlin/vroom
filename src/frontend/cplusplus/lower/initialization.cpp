@@ -224,12 +224,7 @@ uint32_t c_lowering::temporary_object(uint32_t n)
 entity_index c_lowering::element_destructor(qualified_type type,
                                             qualified_type &object) const
 {
-    object = type;
-    while (record(object).kind == type_kind::array)
-        object = record(object).operand;
-    if (record(object).kind != type_kind::class_type)
-        return 0;
-    return analysis.entity_table[record(object).entity].destructor;
+    return analysis.element_destructor(type, object);
 }
 
 bool c_lowering::has_mutable_subobject(qualified_type type) const

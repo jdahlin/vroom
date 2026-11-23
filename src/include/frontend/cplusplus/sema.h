@@ -1835,6 +1835,12 @@ class semantic_analysis
     mutable owned_array<entity_index> unnumbered_closures;
     mutable bool number_closures = false;
 
+    /* [stmt.dcl]/2, [class.temporary]/4: the destructor of the object of
+       type type, or of its elements when an array (0: none); object is the
+       element type */
+    entity_index element_destructor(qualified_type type,
+                                    qualified_type &object) const;
+
   private:
     /* the node needs rules that are not written: those of the subclause
        that defines its nonterminal, or of the one named */
