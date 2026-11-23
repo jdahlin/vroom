@@ -432,3 +432,16 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   reject 492, we accept 5423 unchanged.  Left: namespace-definition.cpp
   :327/:337/:525 (address-space and annotate_type attribute placements), the
   musttail/assume statements.
+- 8.6 (5e97ae383, 3174d0e14, ae7f39b45, 610c28655): attribute-declarations,
+  unknown attributes ignored, leading/statement/label attributes that change
+  nothing.  Unsupported 36684 -> 36649.  Left: [[assume]] (its argument is
+  not parsed as an expression), [[clang::musttail]].
+- 8.7 (feb091973, 2e5c501c5; refactor, no metric moved): the stdc builtins'
+  registrations generated from the pinned Builtins.td by
+  gen-builtin-registrations.py (frontend/stdc-builtins.inc) for both front
+  ends; 0a8827707's hand-written C++ rows removed.
+- Decisions (2026-11-23, from the user): token use: briefs point at the
+  plan's "Agent rules and gates", the step log lives here, reports are 15
+  lines; larger chunks: an agent takes 3-5 related causes.  Builtins and
+  type traits left: ~1150 of 36684 (traits 725, unknown builtins 229, other
+  builtin refusals 201); next 8.8 traits, 8.9 builtins.
