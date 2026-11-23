@@ -623,14 +623,14 @@ analysis_result semantic_analysis::id_expression(token_index t,
        argument-dependent lookup ([basic.lookup.argdep]/1) found nothing
        either: the program is ill-formed, as clang says "use of undeclared
        identifier" */
-    bool adl_applies = t && t == overloaded_callee && callee_has_arguments;
+    bool callee = t && t == overloaded_callee;
+    bool adl_applies = callee && callee_has_arguments;
     /* [lex.name]/3: a name beginning with an underscore may be the
        implementation's (clang's _ReadWriteBarrier, __unknown_anytype) */
     size_t spelled_length = 0;
     const char *spelled =
         tokens.pp.identifier_spelling(name - 1, &spelled_length);
-    bool called =
-        t && t == overloaded_callee && spelled_length > 0 && spelled[0] != '_';
+    bool called = callee && spelled_length > 0 && spelled[0] != '_';
     if (!e && !found.unknown && !found.ambiguous && !builtin_spelled(name) &&
         called && !adl_applies && !declaration_not_parsed_seen)
         return ill_formed_at_token(t, "use of an undeclared identifier",
