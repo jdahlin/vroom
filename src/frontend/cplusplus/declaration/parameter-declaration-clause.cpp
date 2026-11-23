@@ -663,7 +663,14 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     function_empty_pack = empty_pack;
     function_cv = cv;
     function_exceptions_specified = specified_exceptions;
-    if (dynamic_exceptions) {
+    /* [temp.inst]/15: the exception specification of a specialization's
+       member function is instantiated when it is needed, not with the class:
+       its types are not analysed with the member's declaration (C++98
+       made it with the class) */
+    if (dynamic_exceptions &&
+        !(may_qualify &&
+          tokens.files.behavior.has(language_feature::rvalue_references) &&
+          defining_class && entity_table[defining_class].instantiation)) {
         VTRY(r, dynamic_exception_types(dynamic_exceptions, may_qualify));
     }
     if (exceptions) {
