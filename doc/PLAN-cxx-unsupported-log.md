@@ -445,3 +445,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   lines; larger chunks: an agent takes 3-5 related causes.  Builtins and
   type traits left: ~1150 of 36684 (traits 725, unknown builtins 229, other
   builtin refusals 201); next 8.8 traits, 8.9 builtins.
+- 8.8 (83436e2e6, e34dfd9b3, 75f0dd98e, 5a862a262, f782c1ecf): unique object
+  representations of bit-fields and no_unique_address, __is_lvalue_expr /
+  __is_rvalue_expr, standard layout with bit-fields and bases, aggregates
+  with bases, __is_nothrow_convertible of scalars.  Unsupported 36649 ->
+  36517 (-132).  A full count of all refusals (not only first ones) added
+  traits behind other causes: __has_trivial_* / __has_nothrow_*,
+  __reference_*_temporary, __is_pointer_interconvertible_base_of,
+  __array_extent; builtins __builtin_align_up/down/is_aligned,
+  __builtin_get_vtable_pointer, __builtin_invoke (8.9).
