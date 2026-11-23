@@ -427,6 +427,17 @@ it; none adds a second way to instantiate.
   39051 -> 38677, verified +505 in all.  Queue: clang emits a constexpr
   static member's inline variable for its namespace-scope redeclaration,
   vcc does not.
+- 6.1 (26957ac63, simplify after): a call with no arguments to a name no
+  scope has is ill-formed ("use of undeclared identifier"), as clang (-20).
+  Kept conservative by two workarounds (no name beginning with `_`; off
+  once a declaration of the TU was not parsed), because "no scope has it"
+  is not reliable: names the analysis does not enter (enumerators of an
+  enumeration with a fixed underlying type, anonymous-union members, the
+  names of a declaration not parsed) leave their scope marked as known
+  (making non-call names ill-formed gave we reject +156).  Next (6.2):
+  mark those scopes unknown, or enter the names; then the workarounds
+  go.  ADL for calls with arguments: template arguments' associated
+  namespaces, function and member pointers, overload sets are missing.
 - Decision: [jdahlin/vroom#550] adds the same cxx-run cache as step 2 and one
   vpp run per test in cxx-sema.  When it lands, merge origin/main at once,
   take its cxx-run.py (carry the texts/files digest split if it lacks it)
