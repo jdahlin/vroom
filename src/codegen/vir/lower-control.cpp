@@ -97,6 +97,10 @@ VPRIV void virbuild_spset(codegen_context *e, int r)
     (void)r;
     virbuild_fail(e, VIRBUILD_FAILURE(stack_pointer));
 }
+VPRIV void virbuild_eh_pads(codegen_context *e)
+{
+    virbuild_fail(e, VIRBUILD_FAILURE(exceptions));
+}
 VPRIV codegen_value virbuild_setjmp(codegen_context *e, int rbuf)
 {
     (void)rbuf;

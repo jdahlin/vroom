@@ -339,10 +339,14 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
         if (!strcmp(a, "-fno-exceptions") ||
             !strcmp(a, "-fno-cxx-exceptions")) {
             job->no_exceptions = 1;
+            if (!strcmp(a, "-fno-exceptions"))
+                job->c_exceptions = 0;
             continue;
         }
         if (!strcmp(a, "-fexceptions") || !strcmp(a, "-fcxx-exceptions")) {
             job->no_exceptions = 0;
+            if (!strcmp(a, "-fexceptions"))
+                job->c_exceptions = 1;
             continue;
         }
         if (!strcmp(a, "-fno-rtti")) {

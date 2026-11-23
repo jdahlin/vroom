@@ -65,13 +65,15 @@ VPRIV void x64_eh_pads(codegen_context *e)
     walk_label_place(e, resume);
     walk_call_slot_argument(e, c->eh_resume_sym, slot);
     x64_record_emit(e, X64_OP_UD2); /* (_Unwind_Resume does not return) */
-    /* the terminate pad, of a cleanup's call that throws: catch it, std::terminate() ([except.terminate]) */
-    if (c->eh_begin_catch_sym && c->eh_terminate_sym) {
+    /* the terminate pad, of a cleanup's call that throws: catch it, std::terminate() ([except.terminate]);
+       C: abort(), without __cxa_begin_catch (as clang) */
+    if (c->eh_terminate_sym) {
         W->eh_term = ++W->eh_marks;
         e->is_reachable = true;
         x64_record_emit(e, X64_OP_EHMARK)->label = W->eh_term;
         x64_store(e, RAX, &sl, 8);
-        walk_call_slot_argument(e, c->eh_begin_catch_sym, slot);
+        if (c->eh_begin_catch_sym)
+            walk_call_slot_argument(e, c->eh_begin_catch_sym, slot);
         {
             walk_argument none;
             codegen_value r;

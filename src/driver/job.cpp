@@ -338,8 +338,8 @@ static void driver_job_compile(struct driver_job *job, pp *p,
         .debug = job->debug,
         .dbg_version = job->dwarf_version,
         .cfi = job->cfi > 0,
-        .eh = job->cxx && !job->no_exceptions && job->target_x64 &&
-              !job->target_win64 && job->cfi > 0,
+        .eh = driver_exceptions(job) && job->target_x64 && !job->target_win64 &&
+              job->cfi > 0,
         .no_seh = job->no_seh,
         .dbg_name = job->main_file,
         .tlsmodel = job->tls_model,
@@ -653,6 +653,9 @@ driver_job_run_one(int argc, char **argv, const driver_environment *env)
             job->pie = hl && !job->pic ? 2 : 0;
         if (job->cfi < 0)
             job->cfi = hl && !job->freestanding;
+        /* exceptions need unwind tables, whatever -f[no-]asynchronous-unwind-tables said (clang) */
+        if (hl && driver_exceptions(job))
+            job->cfi = 1;
     }
     driver_searchpath_build(job, env);
     driver_job_pp_options_prepare(job, env);

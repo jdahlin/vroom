@@ -27,32 +27,42 @@ semantic analysis of `try`, `throw` and `catch` comes later
 (`PLAN-cxx-sema.md` S7).  This plan defines what it will produce, and tests
 the back end without it:
 
-1. **AST nodes** (E1), added to C's AST and its builder, documented with the
-   C++ paragraphs they serve:
-   - `cleanup scope`: a statement with a cleanup statement that runs when an
-     exception passes out of it (and, with a flag, also on normal exit, for
-     destructors of automatic objects: [except.ctor]/1-2).  GNU C's
-     `__attribute__((cleanup(f)))` under `-fexceptions` produces the same
-     node, which is how C tests reach it today.
+1. **Cleanups are cleanup variables.** The walker already keeps the
+   cleanup variables in scope as a tree (`walk.h`: `cleanup_nodes`), and
+   x86-64's direct emitter already builds landing pads and
+   `.gcc_except_table` from it (`arch/x64/codegen/eh.cpp`, written for the
+   first C++ front end, unused since that front end was removed until E1).
+   So a cleanup scope is a variable with `cleanup(f)`, from C's attribute
+   or the builder's `ast_builder_symbol_cleanup`; there is no new node.
+   The run-time symbols the pads call come from one entry point,
+   `ast_builder_exceptions_ready(cc, cxx)` (`_Unwind_Resume`; C++:
+   `__cxa_begin_catch` and `std::terminate`, C: `abort`; the personality
+   routine, `__gxx_personality_v0` or `__gcc_personality_v0`).
+   What the C++ front end will need on top (E8, with `PLAN-cxx-sema.md` S7):
+   - a cleanup that runs on unwind only: the lowering already destroys
+     objects on normal exits itself (`lower/scopes.cpp`), so a destructible
+     local gets a flag that keeps the walker from running it again there;
+     the declaration follows the construction, so a constructor that throws
+     does not destroy the object it did not make;
    - `try/catch`: a body and handlers, each a `_ZTI` symbol (or none for
      `catch (...)`), plus the variable the handler binds; the front end emits
      `__cxa_begin_catch`/`__cxa_end_catch` itself, as calls in the handler
      ([except.handle]).  The back end matches types only through the LSDA.
-   - `eh pointer` and `eh selector` expressions (the landing pad's two values)
-     and `resume` (rethrow out of a cleanup: `_Unwind_Resume`).
-   - A per-call `nounwind` bit and a per-function `noexcept` bit (a
-     `noexcept` function gets a terminate landing pad:
-     [except.spec]/5, `__clang_call_terminate` as clang).
+     A node of C's AST, added with its first back end (E2/E3), not before;
+   - a per-call `nounwind` bit and a per-function `noexcept` bit (a
+     `noexcept` function gets a terminate landing pad: [except.spec]/5,
+     `__clang_call_terminate` as clang);
    - `throw` needs no node: `__cxa_allocate_exception` + `__cxa_throw` are
      ordinary (noreturn) calls the front end builds.
 2. **C tests first.** clang accepts `-fexceptions` with
-   `__attribute__((cleanup))` in C: a C function with cleanups calls a C++
-   function (built by clang++) that throws; the cleanups must run and the
-   exception reach a C++ catch.  `src/test/eh/` holds these, with a small
-   C++ runtime half built by clang++ and the harness `bench/vcc-eh.py`
-   (clang/vcc x thrower/catcher, as `vcc-abi.py`).  When the C++ front end
-   produces the nodes, `src/test/cxx/run` gains `try`/`catch` cases with no
-   back end change.
+   `__attribute__((cleanup))` in C.  `src/test/vcc/cleanup_unwind.c` raises
+   a forced unwind (`_Unwind_ForcedUnwind`, as `pthread_cancel`), so it needs
+   no C++ run time; it runs in `vcc-x86.py` (glibc's unwinder; the arm64
+   suite's bare-metal run time has none, so there it compiles to an empty
+   `main`).  Catching needs C++: `src/test/eh/` with a C++ half built by
+   clang++ and the harness `bench/vcc-eh.py` (clang/vcc x thrower/catcher,
+   as `vcc-abi.py`) come with E2.  When the C++ front end produces the
+   flags and nodes above, `src/test/cxx/run` gains `try`/`catch` cases.
 
 ## Design
 
@@ -136,9 +146,9 @@ the back end without it:
 | Step | What | Done when |
 |---|---|---|
 | E0 | This plan reviewed; clang's output studied on 20 small cases (`-fexceptions` C cleanups, C++ try/catch/cleanup, `noexcept`), notes in `RESEARCH-eh.md` | Plan merged |
-| E1 | AST nodes and the builder (`ast-builder.h`); C's sema maps `__attribute__((cleanup))` under `-fexceptions` onto `cleanup scope`; `-fexceptions`/`-fno-exceptions` in the driver as clang (`bench/vcc-driver.py`) | `-fsyntax-only` unchanged on the suites; vcc-sema green |
+| E1 | `-fexceptions` for C as clang (`__EXCEPTIONS`, unwind tables forced on); `ast_builder_exceptions_ready`; C's cleanup variables run on unwind through x86-64's direct emitter; VIR refuses such functions (`exceptions`) so they fall back | `cleanup_unwind.c` at -O1/-O2/-O3 in `vcc-x86.py`; suites unchanged |
 | E2 | Direct emitter, arm64: invokes as calls with call-site records, pads, resume; `.gcc_except_table`; personality in `.eh_frame` | `bench/vcc-eh.py` passes at `-O1` under qemu; LSDA byte-identical to clang -O0's on the cases where call sites match; `vcc-cfi.py` unchanged without `-fexceptions` |
-| E3 | Direct emitter, x86-64 | `vcc-eh.py --target x86_64-linux-gnu` at `-O1` |
+| E3 | Direct emitter, x86-64: cleanups exist (E1); add try/catch and the type table | `vcc-eh.py --target x86_64-linux-gnu` at `-O1` |
 | E4 | VIR format: `invoke`, `VB_LPAD`/`landingpad`, `resume`, `ehtypeid`, `VF_EH`, personality; text form, verifier rules, interpreter | `bench/vir-test.py` with the new cases and bad units; mutation run clean |
 | E5 | VIR builder (the walker's second instantiation) and the passes' rules above; the allocator's rule for values live into a pad | VIR builds every `vcc-eh.py` function (`-fvir-stats`: no `eh` refusals); `-fvir-verify -fvir-check` clean |
 | E6 | VIR lowering, arm64 then x86-64; call-site table after the record passes | `vcc-eh.py` at `-O2`/`-O3`, both targets; C suites unchanged at -O1/-O2/-O3 (`vcc-same.py` without `-fexceptions`) |
@@ -167,3 +177,19 @@ at E2 (needs clang++ and qemu, which CI has).
 ## Status
 
 - E0 (2026-11-23): plan written.
+- E1 (2026-11-23): done.  Found on the way: x86-64's direct emitter had
+  cleanup pads, call-site tables and a terminate pad from the first C++
+  front end (67e33d83e), dead since its removal (nothing made the run-time
+  symbols, nothing emitted `.Lvcc_personality`); E1 makes them from
+  `ast_builder_exceptions_ready` and writes the personality word in the
+  unit's tail, so the design reuses cleanup variables instead of a new
+  cleanup node.  VIR on x86-64 had been building such functions without
+  pads; it now refuses them (`VIR: cleanups run by an unwinding exception`).
+  `-fexceptions` in C: `__EXCEPTIONS`, and unwind tables on regardless of
+  `-fno-asynchronous-unwind-tables`, as clang (C++ on Linux too, since it
+  has exceptions by default).  The terminate pad of C calls `abort` without
+  `__cxa_begin_catch`, as clang.  Checked: `vcc-x86.py` 2166 (one run
+  failure in the first run, gone on rerun), `vcc-ctests.py --suite vcc` at
+  -O1 and -O2 368/368, `cxx-run.py` 3196 passed, `vcc-cfi.py` 1637/1637,
+  `vcc-driver.py` failures only the host clang's version strings
+  (unchanged by E1).  Not done: arm64 (E2), try/catch (E2/E3).

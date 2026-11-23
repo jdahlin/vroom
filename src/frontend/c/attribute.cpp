@@ -1,5 +1,6 @@
 /* vcc front end: attribute tables, parsing, merging, typo correction and asm labels */
 #include "cc-internal.h"
+#include "frontend/c/ast-builder.h"
 
 /* ---------------- attributes ---------------- */
 
@@ -628,6 +629,7 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c,
                         cc_report_error(c, tok(c)->loc,
                                         "'cleanup' argument is not a function");
                     a->cleanup = s;
+                    ast_builder_exceptions_ready(c, false);
                     if (s)
                         c->syms[s].flags |=
                             AST_SYMBOL_FLAG_REFERENCED | AST_SYMBOL_FLAG_USED;

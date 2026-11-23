@@ -128,6 +128,11 @@ void ast_builder_symbol_priority(cc *c, uint32_t s, uint32_t priority);
    function is called with the variable's address when its scope ends */
 void ast_builder_symbol_cleanup(cc *c, uint32_t s, uint32_t function);
 void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags);
+/* With options->eh: the run-time symbols the landing pads of cleanup variables call (_Unwind_Resume;
+   C++: __cxa_begin_catch and std::terminate, C: abort, for a cleanup that throws) and the personality
+   routine (C++: __gxx_personality_v0, C: __gcc_personality_v0, as clang).  Once per TU, before a
+   function with a cleanup variable is emitted; no effect without options->eh (doc/PLAN-vir-eh.md). */
+void ast_builder_exceptions_ready(cc *c, bool cxx);
 /* GNU C's __attribute__((section(name))): the section the symbol is
    placed in */
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,

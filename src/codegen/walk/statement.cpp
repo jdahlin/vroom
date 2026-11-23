@@ -2181,14 +2181,15 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
 
         walk_vla_scan(e, y->body, &top);
     }
-    /* C++ exceptions: a function with cleanup variables gets an exception table (every call's bounds, the
-	   landing pads that run the cleanups live there); x86-64's direct emitter only */
+    /* exceptions: a function with cleanup variables gets an exception table (every call's bounds, the
+	   landing pads that run the cleanups live there); x86-64's direct emitter only, VIR refuses the
+	   function (its eh_pads, before anything is built: doc/PLAN-vir-eh.md E5) */
     W->eh_nsites = W->eh_marks = 0, W->eh_in_pads = W->eh_overflow = 0;
-#ifndef WALK_LOWER_PREFIX
     W->eh_fn = e->unit->options->eh && e->unit->options->cfi &&
                W->cleanup_node_count > 0 && c->eh_resume_sym;
-#else
-    W->eh_fn = 0;
+#ifdef WALK_LOWER_PREFIX
+    if (W->eh_fn)
+        WALK_LOWER(eh_pads)(e);
 #endif
     walk_statement_emit(e, y->body);
     if (walk_function_is_main(c, s) &&

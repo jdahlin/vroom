@@ -259,6 +259,7 @@ void ast_builder_symbol_priority(cc *c, uint32_t s, uint32_t priority)
 void ast_builder_symbol_cleanup(cc *c, uint32_t s, uint32_t function)
 {
     ast_builder_attributes(c, s)->cleanup = function;
+    ast_builder_exceptions_ready(c, true); /* (the builder's users are C++) */
     c->syms[function].flags |=
         AST_SYMBOL_FLAG_REFERENCED | AST_SYMBOL_FLAG_USED;
 }
@@ -310,6 +311,41 @@ void ast_builder_symbol_align(cc *c, uint32_t s, uint32_t alignment)
 {
     if (alignment > c->syms[s].align)
         c->syms[s].align = alignment;
+}
+
+static uint32_t ast_builder_runtime_function(cc *c, const char *name,
+                                             bool pointer_parameter)
+{
+    ast_qualified_type p =
+        ast_builder_type_pointer(c, ast_builder_type_basic(AST_TYPE_VOID));
+    uint32_t count = 0;
+
+    if (pointer_parameter)
+        count = 1;
+    ast_qualified_type t = ast_builder_type_function(
+        c, ast_builder_type_basic(AST_TYPE_VOID), &p, count, false);
+    uint32_t s = ast_builder_symbol(
+        c, AST_SYMBOL_FUNCTION, name, strlen(name), t, AST_STORAGE_EXTERN,
+        AST_SYMBOL_FLAG_REFERENCED | AST_SYMBOL_FLAG_USED, 0);
+
+    return s;
+}
+
+void ast_builder_exceptions_ready(cc *c, bool cxx)
+{
+    if (!c->o->eh || c->eh_resume_sym)
+        return;
+    c->eh_resume_sym = ast_builder_runtime_function(c, "_Unwind_Resume", true);
+    if (cxx) {
+        c->eh_begin_catch_sym =
+            ast_builder_runtime_function(c, "__cxa_begin_catch", true);
+        c->eh_terminate_sym =
+            ast_builder_runtime_function(c, "_ZSt9terminatev", false);
+        c->eh_personality = "__gxx_personality_v0";
+    } else {
+        c->eh_terminate_sym = ast_builder_runtime_function(c, "abort", false);
+        c->eh_personality = "__gcc_personality_v0";
+    }
 }
 
 void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags)
