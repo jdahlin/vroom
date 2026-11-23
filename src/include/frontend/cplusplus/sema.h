@@ -1850,6 +1850,7 @@ class semantic_analysis
     /* [class.mem]/10: whether a member or base of the class has a default
        member initializer (value-initialization is more than zeros) */
     bool has_default_member_initializer(entity_index c) const;
+    bool has_mutable_subobject(qualified_type type) const;
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -3510,6 +3511,10 @@ class semantic_analysis
         /* inside a statement that ends its full-expressions: a temporary
            with a destructor may be made */
         uint32_t temporaries_ok = 0;
+        /* evaluate_object for a store (an assignment's target, an object
+           constructed in place) or for a read: a union's member that is
+           not active is made so, or is not constant */
+        uint32_t writing = 0, reading = 0;
         /* the string literals evaluated, one object each, which stay for
            the whole evaluation: what lies below them stays too */
         struct literal_object {
@@ -3557,6 +3562,12 @@ class semantic_analysis
     constness leave_scope(constant_evaluation &state, size_t objects,
                           size_t elements, bool &returned,
                           constant_value &result, constness c);
+    constness evaluate_union_initialization(constant_evaluation &state,
+                                            uint32_t init, bool zero,
+                                            uint32_t given,
+                                            const uint32_t *items,
+                                            bool read_only, uint32_t place,
+                                            entity_index c_entity);
     void assign_value(constant_evaluation &state, uint32_t place,
                       const constant_value &v);
     constness base_subobject_place(const constant_evaluation &state,
@@ -3571,6 +3582,9 @@ class semantic_analysis
                                    constant_value &v) const;
     constness evaluate_subscript_pointer(constant_evaluation &state,
                                          uint32_t node, constant_value &moved);
+    constant_value bit_field_stored(uint32_t target, constant_value v) const;
+    constant_value bit_field_member_stored(entity_index member,
+                                           constant_value v) const;
     bool pointer_offset_count(qualified_type type, const constant_value &i,
                               __int128 &n) const;
     constness permitted_result(const constant_evaluation &state,
