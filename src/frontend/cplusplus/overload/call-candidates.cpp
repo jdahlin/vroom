@@ -63,8 +63,8 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
         SyntaxElement rhs = c.back();
         if (rhs.is_token() && rhs.is_identifier())
             return rhs.token();
-        if (rhs.is(syntax_kind::simple_template_id) && rhs[0].is_identifier())
-            return rhs[0].token();
+        if (SyntaxElement name = rhs.simple_template_id().template_name())
+            return name.token();
         if (rhs.is(syntax_kind::operator_function_id))
             return rhs.first_token();
     }
@@ -83,8 +83,8 @@ token_index semantic_analysis::callee_name(SyntaxElement c) const
         SyntaxElement id = c[c.size() - 1];
         if ((c.size() == 3 ||
              (c.size() == 4 && c[2].is(standard_keyword::template_))) &&
-            id.is(syntax_kind::simple_template_id) && id[0].is_identifier())
-            return id[0].token();
+            id.simple_template_id().template_name())
+            return id.simple_template_id().template_name().token();
         if ((c.size() == 3 ||
              (c.size() == 4 && c[2].is(standard_keyword::template_))) &&
             id.is(syntax_kind::template_id) && id[0].operator_function_id())

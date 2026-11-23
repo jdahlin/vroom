@@ -1104,9 +1104,10 @@ semantic_analysis::template_of_form(entity_index e,
 bool semantic_analysis::template_id_name(SyntaxRef id, lookup_result &x,
                                          entity_index &named) const
 {
-    if (id.size() < 3 || !id[0].is_identifier())
+    SyntaxElement template_name = id.simple_template_id().template_name();
+    if (!template_name)
         return false;
-    x = lookup_unqualified(tokens.identifier(id[0].token()),
+    x = lookup_unqualified(tokens.identifier(template_name.token()),
                            lookup_filter::any);
     named = x.entity;
     if (!named)
@@ -1204,7 +1205,11 @@ analysis_result semantic_analysis::variable_partial_specialization(
     lookup_result x;
     entity_index named = 0;
     if (qualifier) {
-        x = lookup_in_namespace(qualifier, tokens.identifier(id[0].token()),
+        SyntaxElement template_name = id.simple_template_id().template_name();
+        if (!template_name)
+            return not_supported(n, "temp.class.spec");
+        x = lookup_in_namespace(qualifier,
+                                tokens.identifier(template_name.token()),
                                 lookup_filter::any);
         named = x.entity;
         if (!named)
@@ -2513,9 +2518,10 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
                                                  bool qualified,
                                                  type_index &type, uint32_t *cv)
 {
-    if (id.size() < 3 || !id[0].is_identifier())
+    SyntaxElement template_name = id.simple_template_id().template_name();
+    if (!template_name)
         return not_supported(id, "temp.names");
-    uint32_t name = tokens.identifier(id[0].token());
+    uint32_t name = tokens.identifier(template_name.token());
     lookup_result x;
     if (qualified)
         x = lookup_qualified(scope, name, lookup_filter::any);
@@ -2525,7 +2531,7 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
     if (!named)
         named = x.unknown_entity;
     if (!named && qualified && !x.unknown) {
-        VTRY(m, missing_member(id[0].token(), scope));
+        VTRY(m, missing_member(template_name.token(), scope));
     }
     if (!named && !qualified && is_builtin_common_type(name))
         return builtin_common_type(id, type);

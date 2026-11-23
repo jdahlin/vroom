@@ -622,9 +622,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                     if (name.is_identifier()) {
                         ids.append(name.token());
                         class_template = true;
-                    } else if (name.is(syntax_kind::simple_template_id) &&
-                               name.size() && name[0].is_identifier()) {
-                        ids.append(name[0].token());
+                    } else if (SyntaxElement t =
+                                   name.simple_template_id().template_name()) {
+                        ids.append(t.token());
                         class_template = true;
                     }
                     continue;
@@ -635,9 +635,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                 if (name.is_identifier()) {
                     ids.append(name.token());
                     class_template = true;
-                } else if (name.is(syntax_kind::simple_template_id) &&
-                           name.size() && name[0].is_identifier()) {
-                    ids.append(name[0].token());
+                } else if (SyntaxElement t =
+                               name.simple_template_id().template_name()) {
+                    ids.append(t.token());
                     class_template = true;
                 }
             }
@@ -1116,8 +1116,8 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         has_head = true;
         head = id;
         i = 1;
-    } else if (declarator_template_id && id.simple_template_id() &&
-               id.size() >= 3 && id[0].is_identifier()) {
+    } else if (declarator_template_id &&
+               id.simple_template_id().template_name()) {
         /* [temp.expl.spec]/1, [temp.explicit]/3: a specialization's
            template-id (its template-name the declarator-id's name) */
         m.template_id = id;
@@ -1152,8 +1152,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         bool operator_name = !m.destructor && (name.operator_function_id() ||
                                                name.conversion_function_id());
         bool template_name = !m.destructor && declarator_template_id &&
-                             name.is(syntax_kind::simple_template_id) &&
-                             name.size() >= 3 && name[0].is_identifier();
+                             name.simple_template_id().template_name();
         if (q.size() != 2 || !q.nested_name_specifier() ||
             (!operator_name && !template_name && !name.is_identifier()))
             return not_supported(q, "dcl.meaning");

@@ -804,6 +804,33 @@ template <> struct SyntaxExtra<FunctionDefinition> : SyntaxExtraBase {
 };
 
 /*
+ * [temp.names]/1:
+ *
+ *     simple-template-id:
+ *         template-name < template-argument-list_opt >
+ *     template-name:
+ *         identifier
+ */
+template <> struct SyntaxExtra<SimpleTemplateId> : SyntaxExtraBase {
+    using SyntaxExtraBase::SyntaxExtraBase;
+    /* the template-name, an identifier token ({} for another node) */
+    SyntaxElement template_name() const
+    {
+        if (!is(syntax_kind::simple_template_id) || size() < 3 ||
+            !(*this)[0].is_identifier())
+            return {};
+        return (*this)[0];
+    }
+    /* the template-argument-list or its one argument, {} for < > */
+    SyntaxElement arguments() const
+    {
+        if (!template_name() || size() != 4)
+            return {};
+        return (*this)[2];
+    }
+};
+
+/*
  * [dcl.decl.general]/5, [dcl.name]/1:
  *
  *     noptr-declarator:

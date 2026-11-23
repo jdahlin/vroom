@@ -1354,9 +1354,8 @@ analysis_result semantic_analysis::member_callee(
         if (!id.is_identifier())
             return analysis_result::well_formed;
         name = id.token();
-    } else if (id.is(syntax_kind::simple_template_id) && id.size() >= 3 &&
-               id[0].is_identifier()) {
-        name = id[0].token();
+    } else if (SyntaxElement t = id.simple_template_id().template_name()) {
+        name = t.token();
     } else {
         return analysis_result::well_formed;
     }
@@ -1463,7 +1462,7 @@ analysis_result semantic_analysis::template_callee_parts(
             return analysis_result::well_formed;
         name = id.token();
     } else if (id.is(syntax_kind::simple_template_id)) {
-        if (id.size() < 3 || !id[0].is_identifier())
+        if (!id.simple_template_id().template_name())
             return analysis_result::well_formed;
         name = id[0].token();
         VTRY(r, written_arguments_of(id, written, expansion));
