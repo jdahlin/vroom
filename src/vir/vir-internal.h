@@ -48,9 +48,9 @@ struct vir_context {
     uint32_t gen, ncon; /* the current generation; constants in the table */
     bool fail;
     uint32_t cfg_mark,
-        cfg_end;     /* extra before the predecessor lists, and after */
-    uint32_t *bs[6]; /* per block scratch (dominators, canon) */
-    uint32_t *sc;    /* successor lists (CSR) built by vir_cfg_build's users */
+        cfg_end;      /* extra before the predecessor lists, and after */
+    uint32_t *bs[12]; /* per block scratch (dominators, canon) */
+    uint32_t *sc;     /* successor lists (CSR) built by vir_cfg_build's users */
 };
 #define VIR_CONSTANT_TABLE_BITS 24
 
