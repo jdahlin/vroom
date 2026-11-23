@@ -3494,6 +3494,11 @@ class semantic_analysis
        is_trivially_assignable (ext/clang/assignable-traits.cpp) */
     analysis_result clang_assignable_trait(SyntaxRef n, int which,
                                            expression_meaning &m);
+    /* ( type-id , type-id ): __reference_binds_to_temporary and its
+       constructs and converts forms (which 0, 1: direct-initialization, 2:
+       copy-initialization) */
+    analysis_result clang_reference_temporary_trait(SyntaxRef n, int which,
+                                                    expression_meaning &m);
     /* [expr.ass]/4: = of a class */
     analysis_result class_assignment(SyntaxRef n, preprocessing_op_or_punc op,
                                      expression_meaning &left,

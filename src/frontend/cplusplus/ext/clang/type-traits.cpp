@@ -642,6 +642,13 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
             return clang_layout_compatible_trait(n, m);
         if (spelled(name, written.size(), "__builtin_is_virtual_base_of"))
             return clang_base_of_trait(n, true, m);
+        if (spelled(name, written.size(), "__reference_binds_to_temporary") ||
+            spelled(name, written.size(),
+                    "__reference_constructs_from_temporary"))
+            return clang_reference_temporary_trait(n, 0, m);
+        if (spelled(name, written.size(),
+                    "__reference_converts_from_temporary"))
+            return clang_reference_temporary_trait(n, 2, m);
         if (spelled(name, written.size(), "__is_assignable"))
             return clang_assignable_trait(n, 0, m);
         if (spelled(name, written.size(), "__is_nothrow_assignable"))
