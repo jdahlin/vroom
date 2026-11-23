@@ -842,6 +842,11 @@ def check(test, opts, clang, vpp):
     if c[0] == 'timeout':
         res['skip'] = 'clang timed out'
         return res
+    # clang killed by a signal (SemaCXX/using-decl-templates.cpp: a
+    # segmentation fault): its diagnostics are no reference
+    if isinstance(c[0], int) and (c[0] < 0 or c[0] >= 128):
+        res['skip'] = f'clang crashed (status {c[0]})'
+        return res
     syntax_lines, error_lines = set(), set()
     for m in CLANG_ERROR.finditer(c[2]):
         if m.group(1) != name:
