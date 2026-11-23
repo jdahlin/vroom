@@ -661,7 +661,17 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                 declaring_lambda = &l;
                 size_t claims_before = expressions.size();
                 declared_view_used = false;
-                r = type_id(part[1], returns);
+                /* [basic.scope.param]/1: the lambda-declarator's
+                   parameters are in scope in the trailing-return-type:
+                   their types first (analysed again below) */
+                entity_index outer = current_scope;
+                qualified_type probe = placeholder_type(false);
+                r = function(d, probe);
+                if (r == analysis_result::well_formed) {
+                    open_parameter_scope();
+                    r = type_id(part[1], returns);
+                }
+                current_scope = outer;
                 /* (a claim of what a name's type is there is clang's from
                    outside the lambda: not checkable) */
                 if (declared_view_used)
