@@ -524,9 +524,18 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                 }
             }
             const entity &c = entity_table[record.entity];
-            if (c.kind != entity_kind::class_type)
-                /* a class whose definition was not analysed */
-                return not_supported(declaration, "class.pre");
+            if (c.kind != entity_kind::class_type) {
+                /* a class whose definition was not analysed: a lazily
+                   declared specialization whose definition failed says why
+                   (its instantiation's own refusal, [temp.inst]) */
+                analysis_result refused =
+                    not_supported(declaration, "class.pre");
+                if (c.instantiation &&
+                    instantiations[c.instantiation - 1].has_failure)
+                    instantiation_detail(
+                        instantiations[c.instantiation - 1].failure);
+                return refused;
+            }
             /* [basic.def]/5 */
             if (definition && !c.size)
                 return ill_formed_at_token(id,
