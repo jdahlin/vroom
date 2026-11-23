@@ -1928,6 +1928,37 @@ lines:
   class type, destructors, member pointers, long double and 128-bit values,
   pointer results lowered as data.
 
+  The evaluator and lowering, consolidated (a review found most of what
+  the evaluator refused was in the tree already, not missing from it):
+  `element_destructor` and `initializer_member` are semantic_analysis's, one
+  answer for lowering and the evaluator; zero-initialization of classes with
+  bases and `construct.op` ([dcl.init]/8.2); base subobjects (pointer and
+  glvalue conversions both ways are moves between element places, the
+  implicit constructors and copies run); an object made again at its place
+  keeps its elements (a copy after a constructor initialized the members was
+  corrupt: the members' storage was above the invocation and went with it);
+  implicit special members run their synthesized definitions, a class or
+  array assignment is member by member (`assign_value`); destructors (locals
+  and by-value parameters at scope end, last first, through break, continue
+  and return; temporaries at the end of the full-expression of an
+  expression statement, a return or a declaration; a destructor's members
+  and bases after its body; a temporary elsewhere stays unknown); unions (one
+  slot, the active member, activation by assignment or constructor, copies)
+  and bit-fields (modulo 2^width on every store); constant pointers as tree
+  data (`pointer_tree`: `&x`, array plus index, a literal decayed, null),
+  so a pointer a constexpr function returns is constant-initialized; virtual
+  calls (`virtual constexpr` is declared; the final overrider by the dynamic
+  class's table slots, `this` the overrider's subobject).  `goto` is not
+  constant, as clang's.  `-DVCC_TRACE_UNKNOWN` prints each refusal's line.
+  Not done: `new`/`delete`, virtual bases, `dynamic_cast`/`typeid`, member
+  pointers, long double, arrays of unknown shape from brace elision (an
+  analysis bound bug it showed: `Y b[] = {1,2,3,4,5,6}` with a default
+  member initializer has bound 6).  cxx-sema (default suites): unsupported
+  40598 -> 40017, declarations as clang 83682 -> 84231, 0 refuted more;
+  `--suites all` adds CodeGenCXX, Parser and Sema (1890 runs, no crash: 42
+  more declarations as clang, nothing new refused or refuted); cxx-run
+  777/777; cxx-c-suites unchanged.
+
   S6b's first rules: function templates.  A namespace-scope
   function-definition after `template<class T, typename U>` (type
   parameters, no defaults, packs or constraints) is a `template_entity`

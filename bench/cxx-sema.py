@@ -113,6 +113,11 @@ LLVM_TEST = cxxparse.LLVM_TEST
 TARGET = cxxparse.TRIPLE + ['-fno-signed-char']
 ALIASES = ['-mconstructor-aliases']
 SUITES = ('CXX', 'SemaCXX', 'SemaTemplate')
+# --suites NAME,...: clang's other directories with C++ tests (CodeGenCXX,
+# Parser, Sema), for a wider look than the gate's; the baselines
+# (clang-failures.txt, clang-metrics.json) are of the default three
+WIDER_SUITES = ('CXX', 'SemaCXX', 'SemaTemplate', 'CodeGenCXX', 'Parser',
+                'Sema')
 KNOWN_FAILURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                               'src/test/cxx/sema/clang-failures.txt')
 METRICS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -869,8 +874,17 @@ def main():
                          'or on a listed one that passes now')
     ap.add_argument('--bless', action='store_true',
                     help=f'rewrite {relative(KNOWN_FAILURES)} with the current failures (a full run)')
+    ap.add_argument('--suites', metavar='NAME,...',
+                    help='clang test directories to run (default CXX,SemaCXX,'
+                         'SemaTemplate; "all": also CodeGenCXX, Parser, Sema; '
+                         '--check and --bless are of the default only)')
     ap.add_argument('patterns', nargs='*')
     a = ap.parse_args()
+    if a.suites:
+        if a.check or a.bless:
+            sys.exit('cxx-sema: --check and --bless are of the default suites')
+        globals()['SUITES'] = (WIDER_SUITES if a.suites == 'all'
+                               else tuple(a.suites.split(',')))
     clang = cxxpp.find_clang()
     vpp = cxxpp.find_vpp(a.bin_dir or os.environ.get('VCC_BIN'))
     resource_include = os.path.join(

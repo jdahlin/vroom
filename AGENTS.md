@@ -350,6 +350,7 @@ bench/vcc-self.py -j 6              # [needs VCC_WASM=1; not maintained] vcc.was
 bench/vcc-darwin-s.py -j 6           # Darwin -S assembled by Apple's as, runs as the direct object (~2 min)
 bench/cxx-pp.py -j 6 [-v] [PAT]     # C++ front end phase 4 (vpp -fcxx-dump=tokens) vs clang -cc1 on clang's Preprocessor tests: tokens, diagnostics, -dM (~2 min)
 bench/cxx-sema.py -j 6 [-v] [PAT]   # C++ semantic analysis (vpp -fcxx-dump=analysis,...) vs clang's test/CXX, SemaCXX, SemaTemplate: per declaration accepted/rejected, types, lookup, symbols, class layouts (vs -fdump-record-layouts), unsupported by subclause (~70 s cold)
+bench/cxx-sema.py --suites all   # ... also on clang's CodeGenCXX, Parser and Sema directories (no baselines: compare two binaries with --bin-dir)
 bench/cxx-sema.py --check     # ... as in CI: no failure beyond src/test/cxx/sema/clang-failures.txt (known failures, xfail), none of its lines passing now; --bless rewrites it, with the fix (~70 s)
 bench/cxx-sema.py selftest          # the type and layout claims' paths through clang on hand-written claims (<1 s)
 bench/cxx-run.py -j 6 [-O 0123] [PAT]  # src/test/cxx/run: vpp -c (the driver: frontend/cplusplus lowered to C's AST, frontend/c/ast-builder.h) at -O0..3 vs clang++ -O2, run under qemu; -O0 symbols = clang's; /* cxx-run-flags: */ in a test adds flags for both (<10 s)
