@@ -476,6 +476,11 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     if (entity_table[c].kind != entity_kind::class_type)
         /* a class whose definition was not analysed */
         return not_supported(n, "class.pre");
+    /* a specialization whose definition could not be analysed is no
+       incomplete class */
+    if (!entity_table[c].size && entity_table[c].instantiation &&
+        instantiations[entity_table[c].instantiation - 1].has_failure)
+        return not_supported(n, "temp.inst");
     if (!entity_table[c].size)
         return ill_formed(n,
                           "the class type shall be complete unless the class "
