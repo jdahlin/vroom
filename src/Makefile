@@ -269,6 +269,7 @@ clang-builtin-reader-check: clang-builtin-reader $(BUILTIN_GENERATED)
 
 BUILTIN_TD = $(wildcard ../contrib/clang-builtins/clang/include/clang/Basic/*.td)
 BUILTIN_GENERATED = $(OUT)/generated/include/frontend/integer-builtins.inc \
+	$(OUT)/generated/include/frontend/stdc-builtins.inc \
 	$(OUT)/generated/include/frontend/c/target-builtins.inc \
 	$(OUT)/generated/include/frontend/c/builtin-stubs.inc
 $(BUILTIN_GENERATED) &: $(OUT)/clang-builtin-reader tools/gen-builtin-registrations.py $(BUILTIN_TD)
