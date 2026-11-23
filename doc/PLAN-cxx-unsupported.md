@@ -559,6 +559,12 @@ it; none adds a second way to instantiate.
   files that do not use it (bitfield.cpp, class-layout.cpp:658): a flag
   collision?; unavailable, init_priority, multiversioning, address_space,
   code_seg/uuid checks, swiftcall's checks.
+- 8.3 (0a8827707, no simplify needed: one rule for the family): C23's
+  __builtin_stdc_* bit functions and __builtin_bitreverseg, analysed and
+  constant-evaluated; the rotations lowered, the others refused in
+  lowering with a reason.  Unsupported 37047 -> 36738 (-309).  Left:
+  __builtin_is_within_lifetime (evaluator), the synthesizes_from_spaceship
+  traits (rewritten candidates), 128-bit results (integer_wrap keeps 64).
 - Decision (2026-11-23, from the user: low-hanging fruit, 2-3k): after 7.5,
   four cheap batches by the work list's extension groups (4691 declarations
   in all): (8.1) clang's type traits, ~770 (__has_unique_object_representations
