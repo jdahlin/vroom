@@ -585,6 +585,17 @@ class c_lowering
        the reference it initializes (a declared variable's), not to the
        end of the full-expression */
     const semantic_node *extended_temporary = nullptr;
+    /* [basic.stc.static]: the namespace-scope variable whose dynamic
+       initialization is being lowered and the initializer's root node: a
+       prvalue bound to the reference initialized there has static storage
+       ([class.temporary]/6), _ZGR<name>_ */
+    entity_index static_owner = 0;
+    uint32_t static_root = 0;
+    /* the glvalue of that reference is being lowered: a temporary under it
+       would be automatic, not extended */
+    bool static_glvalue = false;
+    uint32_t static_temporary(const semantic_node &n,
+                              ast_qualified_type pointer);
     /* the destruction of the temporary of the prvalue n: at the end of
        the full-expression, or with the block's variables */
     void destroyed_temporary(const semantic_node &n, uint32_t temporary,

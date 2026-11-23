@@ -4463,6 +4463,14 @@ class semantic_analysis
                (semantics[m.node].kind == semantic_kind::initializer_list ||
                 semantics[m.node].kind == semantic_kind::zero);
     }
+    /* [class.temporary]/6: the initializer of a declared variable is being
+       analysed (declared_initializer), and the binding of its reference
+       (binding_extends) extends the lifetime of a temporary, which at
+       namespace scope has static storage: the reference's own, not one of
+       a call's arguments */
+    bool declared_initializer = false;
+    bool trivial_zero_initialized(entity_index c);
+    bool binding_extends = false;
     /* a lambda's closure prvalue that a reference binds to (initializer.cpp) */
     bool closure_prvalue_binding(const expression_meaning &m) const;
     /* [dcl.init.aggr]/1: whether the class is an aggregate */

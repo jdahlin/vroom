@@ -215,6 +215,9 @@ uint32_t c_lowering::temporary_object(uint32_t n)
     const semantic_node &x = node(n);
     if (!collecting)
         return fail("a class temporary outside a statement", x.at);
+    if (static_glvalue)
+        return fail("a temporary extended through a member at static storage",
+                    x.at);
     ast_qualified_type t = type(x.type, x.at);
     uint32_t held = full_expression_temporary(t);
     entity_index destructor =
@@ -444,13 +447,17 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
     ast_qualified_type pointer = type(n.type, n.at);
     const semantic_node &bound = node(n.a);
     if (is_glvalue(bound)) {
+        static_glvalue = static_owner && &n == &node(static_root);
         uint32_t a = object(n.a);
+        static_glvalue = false;
         if (!a)
             return 0;
         return address_of(a, pointer);
     }
     if (!in_function)
         return fail("a temporary bound to a reference of static storage", n.at);
+    if (static_owner && &n == &node(static_root))
+        return static_temporary(n, pointer);
     entity_index cls = record(bound.type).entity;
     if (record(bound.type).kind == type_kind::class_type &&
         analysis.entity_table[cls].destructor) {
@@ -466,6 +473,60 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
     if (!literal)
         return 0;
     return make(AST_NODE_ADDRESS, pointer, literal, 0, 0, 0, 0);
+}
+
+/* [class.temporary]/6, [basic.stc.static]: the prvalue a namespace-scope
+   reference is initialized by, held in an object of static storage
+   _ZGR<the variable's name>_ constructed by the initialization, its
+   destructor registered with __cxa_atexit */
+uint32_t c_lowering::static_temporary(const semantic_node &n,
+                                      ast_qualified_type pointer)
+{
+    const semantic_node &bound = node(n.a);
+    owned_buffer name;
+    if (!itanium_symbol_name(analysis, tokens.pp, static_owner, name.get(),
+                             0) ||
+        name.size() < 1)
+        return fail("an entity whose symbol is not mangled", n.at);
+    owned_buffer zgr;
+    vbuffer_string_append(zgr.get(), "_ZGR");
+    if (name.size() > 2 && name.data()[0] == '_' && name.data()[1] == 'Z')
+        vbuffer_append(zgr.get(), name.data() + 2, name.size() - 2);
+    else {
+        /* a variable of the global namespace is mangled as its name; the
+           reference temporary's is <length><name> ([abi:mangling.special]) */
+        vbuffer_format_append(zgr.get(), "%zu", name.size());
+        vbuffer_append(zgr.get(), name.data(), name.size());
+    }
+    vbuffer_string_append(zgr.get(), "_");
+    owned_buffer written;
+    if (target == PP_DARWIN)
+        vbuffer_string_append(written.get(), "_");
+    vbuffer_append(written.get(), zgr.data(), zgr.size());
+    ast_qualified_type t = type(bound.type, bound.at);
+    uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, zgr.data(),
+                                    zgr.size(), t, AST_STORAGE_STATIC,
+                                    AST_SYMBOL_FLAG_ADDRESS_TAKEN, 1);
+    ast_builder_symbol_assembler_name(c, s, written.data(), written.size());
+    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+    ast_builder_symbol_keep(c, s);
+    uint32_t made = initialize_into(s, bound.type, t, n.a);
+    if (!made)
+        return 0;
+    uint32_t address = address_of(c_variable(c, s, t), pointer);
+    if (record(bound.type).kind == type_kind::class_type) {
+        entity_index destructor =
+            analysis.entity_table[record(bound.type).entity].destructor;
+        if (destructor) {
+            uint32_t registered = destructor_registration(
+                special_callee(destructor, n.at), entity_type(destructor, n.at),
+                address_of(c_variable(c, s, t), pointer_to(t)));
+            if (!registered)
+                return 0;
+            made = comma(pointer, made, registered);
+        }
+    }
+    return comma(pointer, made, address);
 }
 
 /* the prvalue n held in a temporary of the enclosing block, as C's

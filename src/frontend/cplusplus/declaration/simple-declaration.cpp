@@ -1932,7 +1932,11 @@ analysis_result semantic_analysis::declare_with_initializer(
         scoped_value<entity_index> deducing(deducing_variable, declared_entity);
         r = deduced_initializer(init, declared_entity, type, value);
     } else {
+        /* (a constexpr reference to a static temporary: the evaluator has
+           no rule for it) */
+        declared_initializer = !s.constexpr_;
         r = initializer(init, type, value);
+        declared_initializer = false;
     }
     if (r != analysis_result::well_formed)
         return r;

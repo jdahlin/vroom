@@ -512,14 +512,14 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
        class is held in a temporary of the enclosing block (bind_reference);
        one bound to a base class's reference needs the conversion to the
        base subobject, and at namespace scope the temporary has static
-       storage ([class.temporary]/6): not analysed */
+       storage ([class.temporary]/6): _ZGR<name>_ (lowering) */
     if (aggregate_prvalue(m) && !closure_prvalue_binding(m) &&
-        (!at_block_scope() ||
-         type_table[m.type.unqualified()].kind != type_kind::class_type))
+        (type_table[m.type.unqualified()].kind != type_kind::class_type ||
+         (!at_block_scope() && !binding_extends)))
         return not_supported_because(
             at, "class.temporary",
-            "an aggregate prvalue bound to a reference at namespace scope "
-            "(static temporary) or an array's or scalar's list temporary");
+            "an array's or scalar's list temporary, or a temporary of a call's "
+            "argument at namespace scope");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const lvalue or rvalue reference is bound to a
        temporary holding its value ([conv.lval]) */
@@ -807,8 +807,13 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
                           "dcl.init");
     }
     /* [over.over]/1: "an object or reference being initialized" */
+    bool extends = declared_initializer;
+    declared_initializer = false;
     VTRY(r, target_expression(clause, type, m));
-    return initialize_with(at, m, type, direct, list, result);
+    binding_extends = extends;
+    analysis_result done = initialize_with(at, m, type, direct, list, result);
+    binding_extends = false;
+    return done;
 }
 
 /*
