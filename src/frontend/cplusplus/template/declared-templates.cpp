@@ -149,13 +149,15 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
        (template<class T> int v;), its one declarator not an
        init-declarator; [basic.def]/2: a definition */
     if (s.size() == 3 + lead && !lead &&
-        s.is(s[0], syntax_kind::decl_specifier_seq) &&
-        (s[1].is_identifier() || s.is(s[1], syntax_kind::declarator)))
+        s.is(s[0], syntax_kind::decl_specifier_seq) && s[1].is_identifier())
         return variable_template_definition(t, s);
     uint32_t gnu = leading_gnu_attributes(s);
+    /* a declarator with a trailing-return-type is a function's
+       ([dcl.fct]/1; template<class T> auto f() -> T;) */
     if (s.size() == 3 + gnu &&
         (s.is(s[1 + gnu], syntax_kind::noptr_declarator) ||
-         s.is(s[1 + gnu], syntax_kind::ptr_declarator)))
+         s.is(s[1 + gnu], syntax_kind::ptr_declarator) ||
+         s.is(s[1 + gnu], syntax_kind::declarator)))
         return function_template_definition(t, s);
     char shape[160];
     snprintf(shape, sizeof shape, "%u parts, part 1 is %s", s.size(),

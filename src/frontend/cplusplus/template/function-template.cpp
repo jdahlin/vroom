@@ -146,9 +146,10 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     if (tail.size() != 3 + trailing ||
         !tail[0].is(syntax_kind::decl_specifier_seq) || tail[1].is_token() ||
         (defines && !tail[2 + trailing].is(syntax_kind::function_body)) ||
-        (!defines && (!tail[2].is(preprocessing_op_or_punc::SEMICOLON) ||
-                      (!tail[1].is(syntax_kind::noptr_declarator,
-                                   syntax_kind::ptr_declarator)))))
+        (!defines &&
+         (!tail[2].is(preprocessing_op_or_punc::SEMICOLON) ||
+          (!tail[1].is(syntax_kind::noptr_declarator,
+                       syntax_kind::ptr_declarator, syntax_kind::declarator)))))
         return not_supported(n, "temp.fct");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
