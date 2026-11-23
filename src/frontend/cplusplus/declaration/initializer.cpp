@@ -1164,71 +1164,110 @@ analysis_result semantic_analysis::list_clauses(
     return gather_clauses(list, list, clauses, packs, designated);
 }
 
+/*
+ * [dcl.init.list]/3: "List-initialization of an object or reference of type
+ * T is defined as follows:" (the designated-initializer-list of (3.1) is
+ * designated_list_initialization's).  By T's kind, one function each:
+ * - an array: (3.3) a string-literal, (3.4) aggregate initialization,
+ *   array_list_initialization;
+ * - a class: (3.2), (3.4) to (3.7), class_list_initialization;
+ * - a reference: (3.9), (3.10), reference_list_initialization;
+ * - a scalar: (3.8), (3.9), (3.11), (3.12), scalar_list_initialization.
+ */
 analysis_result semantic_analysis::list_initialization_of(
     SyntaxRef list, const owned_array<SyntaxElement> &clauses,
     qualified_type &type, bool direct, initialized_value &result)
 {
-    const struct type target = type_table[type.unqualified()];
-    if (target.kind == type_kind::array) {
-        /* [dcl.init.list]/3.3: "if T is a character array and the
-           initializer list has a single element that is an
-           appropriately-typed string-literal, initialization is performed
-           as described in that subclause" */
-        if (clauses.size() == 1 &&
-            is_unparenthesized_string_literal(tokens, clauses[0]) &&
-            character_type(fundamental_of(target.operand)))
-            return initialize_from(list, clauses[0], type, direct, true,
-                                   result);
-        /* ... in parentheses: an extension */
-        if (clauses.size() == 1 && !clauses[0].is_token() &&
-            character_type(fundamental_of(target.operand))) {
-            SyntaxElement inner = clauses[0];
-            while (inner.is(syntax_kind::primary_expression) &&
-                   inner.size() == 3)
-                inner = inner[1];
-            if (is_unparenthesized_string_literal(tokens, inner))
-                return not_supported(list, "dcl.init.string");
-        }
-        /* [dcl.init.aggr]/9: "An array of unknown bound initialized with a
-           brace-enclosed initializer-list containing n initializer-clauses
-           is defined as having n elements" */
-        uint64_t bound = target.bound;
-        qualified_type element = target.operand;
-        if (!target.bound_known) {
-            bound = clauses.size();
-            if (!bound) {
-                VTRY(r, extension_used(diagnostic_id::sema_zero_length_array,
-                                       list.first_token(), nullptr));
-            }
-            type = qualified_type::make(type_table.array_of(element, bound),
-                                        type.cv());
-        }
-        size_t next = 0;
-        VTRY(r, aggregate_elements(list, clauses, next, type, result));
-        if (!target.bound_known && clauses.size())
-            /* the elements the clauses initialized, with brace elision */
-            type = qualified_type::make(
-                type_table.array_of(element, semantics[result.node].count),
-                type.cv());
-        semantics[result.node].type = type;
-        return too_many_clauses(list, clauses, next);
-    }
-    if (target.kind == type_kind::vector) {
+    switch (type_table[type.unqualified()].kind) {
+    case type_kind::array:
+        return array_list_initialization(list, clauses, type, direct, result);
+    case type_kind::vector:
         /* [ext:gnu_vector_size] the elements in order, the rest zero */
-        size_t next = 0;
-        VTRY(r, aggregate_elements(list, clauses, next, type, result));
-        semantics[result.node].type = type;
-        return too_many_clauses(list, clauses, next);
-    }
-    if (target.kind == type_kind::class_type)
+        return element_list_initialization(list, clauses, type, result);
+    case type_kind::class_type:
         return class_list_initialization(list, clauses, type, direct, result);
-    if (target.kind == type_kind::lvalue_reference ||
-        target.kind == type_kind::rvalue_reference)
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
         return reference_list_initialization(list, clauses, type, direct,
                                              result);
-    /* [dcl.init.list]/3.10: no element: value-initialization
-       ([dcl.init]/8: zero-initialization of a scalar, an enumeration's
-       too); one element of an enumeration is not analysed */
+    default:
+        return scalar_list_initialization(list, clauses, type, direct, result);
+    }
+}
+
+/* [dcl.init.aggr]/4: the elements of an array (or a vector) initialized
+   in order by the clauses, the rest as /5 says; too many clauses are
+   ill-formed (/12) */
+analysis_result semantic_analysis::element_list_initialization(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+    qualified_type type, initialized_value &result)
+{
+    size_t next = 0;
+    VTRY(r, aggregate_elements(list, clauses, next, type, result));
+    semantics[result.node].type = type;
+    return too_many_clauses(list, clauses, next);
+}
+
+/* [dcl.init.list]/3.3 and /3.4 for an array T */
+analysis_result semantic_analysis::array_list_initialization(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+    qualified_type &type, bool direct, initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    /* [dcl.init.list]/3.3: "if T is a character array and the
+       initializer list has a single element that is an
+       appropriately-typed string-literal, initialization is performed
+       as described in that subclause" */
+    if (clauses.size() == 1 &&
+        is_unparenthesized_string_literal(tokens, clauses[0]) &&
+        character_type(fundamental_of(target.operand)))
+        return initialize_from(list, clauses[0], type, direct, true, result);
+    /* ... in parentheses: an extension */
+    if (clauses.size() == 1 && !clauses[0].is_token() &&
+        character_type(fundamental_of(target.operand))) {
+        SyntaxElement inner = clauses[0];
+        while (inner.is(syntax_kind::primary_expression) && inner.size() == 3)
+            inner = inner[1];
+        if (is_unparenthesized_string_literal(tokens, inner))
+            return not_supported(list, "dcl.init.string");
+    }
+    /* [dcl.init.aggr]/9: "An array of unknown bound initialized with a
+       brace-enclosed initializer-list containing n initializer-clauses
+       is defined as having n elements" */
+    uint64_t bound = target.bound;
+    qualified_type element = target.operand;
+    if (!target.bound_known) {
+        bound = clauses.size();
+        if (!bound) {
+            VTRY(r, extension_used(diagnostic_id::sema_zero_length_array,
+                                   list.first_token(), nullptr));
+        }
+        type = qualified_type::make(type_table.array_of(element, bound),
+                                    type.cv());
+    }
+    if (target.bound_known || !clauses.size())
+        return element_list_initialization(list, clauses, type, result);
+    size_t next = 0;
+    VTRY(r, aggregate_elements(list, clauses, next, type, result));
+    /* the elements the clauses initialized, with brace elision */
+    type = qualified_type::make(
+        type_table.array_of(element, semantics[result.node].count), type.cv());
+    semantics[result.node].type = type;
+    return too_many_clauses(list, clauses, next);
+}
+
+/* [dcl.init.list]/3 for a scalar T: "(3.8) Otherwise, if T is an
+   enumeration with a fixed underlying type ..."; "(3.9) Otherwise, if the
+   initializer list has a single element of type E ..., the object ... is
+   initialized from that element"; "(3.11) Otherwise, if the initializer
+   list has no elements, the object is value-initialized"; "(3.12)
+   Otherwise, the program is ill-formed." */
+analysis_result semantic_analysis::scalar_list_initialization(
+    SyntaxRef list, const owned_array<SyntaxElement> &clauses,
+    qualified_type type, bool direct, initialized_value &result)
+{
+    const struct type target = type_table[type.unqualified()];
+    /* (3.8), an enumeration from one element, is not analysed */
     bool empty_enumeration =
         target.kind == type_kind::enumeration && clauses.empty();
     if (target.kind != type_kind::fundamental &&
@@ -1236,7 +1275,7 @@ analysis_result semantic_analysis::list_initialization_of(
         target.kind != type_kind::pointer_to_member && !empty_enumeration)
         return not_supported(list, "dcl.init.list");
     if (clauses.empty()) {
-        /* [dcl.init]/8: to value-initialize a scalar is to zero-initialize
+        /* (3.11) value-initialization; [dcl.init]/8: to value-initialize a scalar is to zero-initialize
            it: the value 0, a null pointer, a null member pointer (whose
            value analysis does not keep) */
         result.evaluation = constness::constant;
@@ -1250,6 +1289,7 @@ analysis_result semantic_analysis::list_initialization_of(
             expression_node(semantic_kind::zero, zero, list.first_token());
         return analysis_result::well_formed;
     }
+    /* (3.12) */
     if (clauses.size() > 1)
         return ill_formed(list,
                           "a scalar is list-initialized from a single "
@@ -1259,6 +1299,7 @@ analysis_result semantic_analysis::list_initialization_of(
     if (clauses[0].is(syntax_kind::braced_init_list))
         /* braces around a scalar's initializer: clang's warning */
         return not_supported(list, "dcl.init.list");
+    /* (3.9) */
     return initialize_from(list, clauses[0], type, direct, true, result);
 }
 
