@@ -162,6 +162,50 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             }
         }
     }
+    /* [temp.expl.spec]/1.5: the static data member of a class template's
+       specialization, template<> T C<A>::m = v; its definition is the
+       specialization's, which the template's is not instantiated for
+       ([temp.expl.spec]/7: declared before an instantiation of the member;
+       here the class's instantiation has made the template's, replaced) */
+    {
+        token_index member_name = 0;
+        if (SyntaxRef sid = out_of_class_variable_member(inner, &member_name)) {
+            nominated_scope ns;
+            SyntaxRef item = inner[1];
+            /* [temp.expl.spec]/13: without an initializer it declares, and
+               the class's instantiation has instantiated the template's
+               definition already: not yet */
+            if (!item.is(syntax_kind::init_declarator))
+                return refuse(n, "temp.expl.spec",
+                              "a static data member's declaration without "
+                              "an initializer");
+            item = item[0];
+            VTRY(nr, nested_name_specifier(item[0].index(), ns));
+            entity_index v = 0;
+            if (is_class_entity(ns.entity))
+                v = entity_table.find(ns.entity,
+                                      tokens.identifier(member_name));
+            uint32_t record = 0;
+            if (v)
+                record = entity_table[ns.entity].instantiation;
+            if (record &&
+                instantiations[record - 1].specialization == ns.entity &&
+                entity_table[v].kind == entity_kind::variable && !lead &&
+                /* [dcl.init.general]: a const or constexpr member may
+                   have its initializer in the class ([class.static.data]
+                   /3: "static data member 'a' already has an initializer") */
+                !entity_table[v].constexpr_ && !entity_table[v].type.cv()) {
+                entity_table[v].defined = false;
+                entity_table[v].definition = 0;
+                /* (not the template's weak, inline copy) */
+                entity_table[v].inline_ = false;
+                return simple_declaration(inner);
+            }
+            return refuse(
+                n, "temp.expl.spec",
+                "not a static data member of a class template specialization");
+        }
+    }
     specified s;
     uint32_t index = 0;
     VTRY(r, named_specialization(n, inner, lead, true, false, s, index));
@@ -265,6 +309,50 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
          named_declarator.size() &&
          named_declarator[0].is(syntax_kind::qualified_id)))
         return member_explicit_instantiation(n, d, lead, extern_);
+    /* [temp.explicit]/10: the static data member of a class template's
+       specialization, template T C<A>::m; its definition is instantiated
+       with the class's ([temp.inst]/3); defined by the template, else
+       clang's error ("explicit instantiation of undefined static data
+       member") */
+    {
+        token_index member_name = 0;
+        if (!lead && !extern_ &&
+            out_of_class_variable_member(d, &member_name)) {
+            specified vs;
+            VTRY(dr, decl_specifier_seq(tail[0], vs, false));
+            nominated_scope ns;
+            VTRY(nr, nested_name_specifier(tail[1][0].index(), ns));
+            entity_index v = 0;
+            uint32_t record = 0;
+            if (is_class_entity(ns.entity)) {
+                v = entity_table.find(ns.entity,
+                                      tokens.identifier(member_name));
+                record = entity_table[ns.entity].instantiation;
+            }
+            if (v && record &&
+                instantiations[record - 1].specialization == ns.entity &&
+                entity_table[v].kind == entity_kind::variable &&
+                entity_table[v].defined && entity_table[v].type == vs.type &&
+                !vs.typedef_ && !vs.static_ && !vs.extern_ && !vs.inline_ &&
+                !vs.constexpr_ && !vs.gnu_flags && !vs.aligned && !vs.section) {
+                entity_table[v].explicitly_instantiated =
+                    instantiation_kind::definition;
+                /* (emitted whether used or not: lowering walks `declared`) */
+                declared_name x;
+                x.declaration = d;
+                x.outermost = n;
+                x.entity = v;
+                x.kind = entity_kind::variable;
+                x.type = entity_table[v].type;
+                x.claimable = false;
+                declared.append(x);
+                return analysis_result::well_formed;
+            }
+            return refuse(n, "temp.explicit",
+                          "a static data member not defined by the template, "
+                          "or of another type");
+        }
+    }
     specified s;
     uint32_t index = 0;
     VTRY(r, named_specialization(n, d, lead, false, extern_, s, index));
@@ -446,6 +534,14 @@ semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
  * which no instantiation defines then ([temp.expl.spec]/7: it shall be
  * declared before a use that would instantiate it).
  */
+analysis_result semantic_analysis::refuse(SyntaxRef n, const char *rule,
+                                          const char *what)
+{
+    analysis_result r = not_supported(n, rule);
+    last_unsupported_detail(what, strlen(what));
+    return r;
+}
+
 analysis_result semantic_analysis::named_specialization(
     SyntaxRef n, SyntaxRef declaration, uint32_t lead, bool specialization,
     bool extern_, specified &s, uint32_t &index, entity_index friend_of)
@@ -458,23 +554,27 @@ analysis_result semantic_analysis::named_specialization(
     SyntaxRef conversion = conversion_function_id_of(declaration);
     uint32_t has_spec =
         tail.size() > 0 && tail[0].is(syntax_kind::decl_specifier_seq);
-    if (leading_gnu_attributes(declaration) != lead ||
-        tail.size() != 2 + has_spec || (!has_spec && !conversion) ||
-        tail[has_spec].is_token() ||
-        (!tail[has_spec].is(syntax_kind::noptr_declarator,
-                            syntax_kind::ptr_declarator)))
-        return not_supported(n, rule);
+    if (leading_gnu_attributes(declaration) != lead)
+        return refuse(n, rule, "leading attributes");
+    if (!has_spec && !conversion)
+        return refuse(n, rule,
+                      "no decl-specifier-seq (a constructor or destructor)");
+    if (tail.size() != 2 + has_spec || tail[has_spec].is_token())
+        return refuse(n, rule, "a declaration of another form (no declarator)");
+    if (!tail[has_spec].is(syntax_kind::noptr_declarator,
+                           syntax_kind::ptr_declarator))
+        return refuse(n, rule, "a declarator that is neither noptr nor ptr");
     if (declaration.is(syntax_kind::function_definition) &&
         !declaration.function_definition().function_body().plain())
-        return not_supported(n, rule);
+        return refuse(n, rule, "a function definition with a non-plain body");
     if (declaration.is(syntax_kind::simple_declaration) &&
         !tail[has_spec + 1].is(preprocessing_op_or_punc::SEMICOLON))
-        return not_supported(n, rule);
+        return refuse(n, rule, "a declaration with an initializer-like tail");
     /* (a friend declaration is in its class, naming the namespace's
        template: [namespace.memdef]/3) */
     if (!friend_of && (!is_namespace(current_scope) || defining_class ||
                        function_state.active))
-        return not_supported(n, rule);
+        return refuse(n, rule, "not at namespace scope");
     /* the declared type; what the declarator records for claims is the
        specialization's, which the definition (if any) records again */
     size_t expressions_before = expressions.size();
@@ -528,18 +628,19 @@ analysis_result semantic_analysis::named_specialization(
     if (!m.has_id || m.qualified_namespace || m.operator_function ||
         m.literal_operator || cv || defaults ||
         type_table[type.unqualified()].kind != type_kind::function)
-        return not_supported(n, rule);
+        return refuse(n, rule, "not a function with a named declarator-id");
     if (m.qualifier &&
         entity_table[m.qualifier].kind != entity_kind::class_type)
-        return not_supported(n, rule);
+        return refuse(n, rule, "a qualifier that is not a class");
     if (s.typedef_ || s.static_ || s.extern_ || s.gnu_flags || m.gnu_flags ||
         s.aligned || m.aligned || s.section || m.section || m.asm_label)
-        return not_supported(n, rule);
+        return refuse(n, rule, "a storage class, typedef or attribute");
     /* [temp.explicit]/3: "An explicit instantiation of a function
        template ... shall not use the inline, constexpr, or consteval
        specifiers" */
     if (!specialization && (s.inline_ || s.constexpr_))
-        return not_supported(n, rule);
+        return refuse(n, rule,
+                      "an explicit instantiation with inline or constexpr");
     /* the template and the arguments given */
     token_index name = 0;
     uint32_t ft = 0;
@@ -576,19 +677,22 @@ analysis_result semantic_analysis::named_specialization(
         }
     }
     if (!ft)
-        return not_supported(n, rule);
+        return refuse(n, rule,
+                      "no function template found for the declarator-id");
     {
         /* [temp.func.order]/1.4: which of the name's templates the
            declaration refers to is partial ordering's: not analysed */
         owned_array<uint32_t> group;
         function_template_overloads(function_templates[ft - 1].name, group);
         if (group.size() > 1)
-            return not_supported(n, rule);
+            return refuse(n, rule,
+                          "overloaded function templates (partial ordering)");
     }
     const function_template f = function_templates[ft - 1];
     const entity t = entity_table[f.entity];
     if (t.enclosing != owner_scope || f.primary)
-        return not_supported(n, rule);
+        return refuse(n, rule,
+                      "the template is a member of another scope or primary");
     /* [temp.deduct.decl]/1: the arguments from the function type */
     owned_array<bool> set;
     uint32_t given = static_cast<uint32_t>(values.size());
@@ -602,17 +706,18 @@ analysis_result semantic_analysis::named_specialization(
         deduce_type(t.type, type, values, set, true);
     matching_declaration = false;
     if (!deduced_from_declaration)
-        return not_supported(n, "temp.deduct.decl");
+        return refuse(n, "temp.deduct.decl",
+                      "the declared type deduces no arguments");
     r = default_template_arguments(n, ft, values, set);
     if (r != analysis_result::well_formed)
-        return not_supported(n, "temp.deduct.decl");
+        return refuse(n, "temp.deduct.decl", "default template arguments fail");
     uint32_t prior = find_instantiation(f.entity, values.data(),
                                         static_cast<uint32_t>(values.size()));
     if (prior) {
         const instantiation_record &x = instantiations[prior - 1];
         entity_index e = x.specialization;
         if (!e)
-            return not_supported(n, rule);
+            return refuse(n, rule, "a prior record without a specialization");
         if (specialization) {
             /* [temp.expl.spec]/7: a specialization used (or explicitly
                instantiated) before is clang's error; one declared by an
@@ -621,7 +726,9 @@ analysis_result semantic_analysis::named_specialization(
                 entity_table[e].inline_ != (s.inline_ || s.constexpr_) ||
                 entity_table[e].constexpr_ != s.constexpr_ ||
                 !(entity_table[e].type == type))
-                return not_supported(n, rule);
+                return refuse(
+                    n, rule,
+                    "an explicit specialization redeclared differently");
             entity_table.add_declaration(e, declaration);
             index = prior - 1;
             return analysis_result::well_formed;
@@ -635,11 +742,15 @@ analysis_result semantic_analysis::named_specialization(
             (extern_ && (x.defined || x.pending ||
                          entity_table[e].explicitly_instantiated !=
                              instantiation_kind::declaration)))
-            return not_supported(n, rule);
+            return refuse(n, rule,
+                          "an explicit instantiation after a specialization, "
+                          "definition or use");
     }
     /* clang's "explicit instantiation of undefined function template" */
     if (!specialization && !extern_ && !f.definition)
-        return not_supported(n, rule);
+        return refuse(
+            n, rule,
+            "an explicit instantiation of an undefined function template");
     entity_index e = 0;
     /* (an explicit specialization or an explicit instantiation
        declaration does not instantiate the definition) */
@@ -650,9 +761,10 @@ analysis_result semantic_analysis::named_specialization(
     if (specialization || extern_)
         unevaluated--;
     if (r != analysis_result::well_formed || !e)
-        return not_supported(n, rule);
+        return refuse(n, rule, "the instantiation gave no specialization");
     if (!(entity_table[e].type == type))
-        return not_supported(n, "temp.deduct.decl");
+        return refuse(n, "temp.deduct.decl",
+                      "the specialization has another type");
     index = entity_table[e].instantiation - 1;
     if (specialization) {
         /* [temp.expl.spec]/12: "An explicit specialization of a function
@@ -920,6 +1032,8 @@ instantiation_kind
 semantic_analysis::explicitly_instantiated(entity_index f) const
 {
     const entity &x = entity_table[f];
+    if (x.kind == entity_kind::variable)
+        return x.explicitly_instantiated;
     if (x.kind != entity_kind::function)
         return instantiation_kind::none;
     /* [ext:gnu_attributes] exclude_from_explicit_instantiation: a member
