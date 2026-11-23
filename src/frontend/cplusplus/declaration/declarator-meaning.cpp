@@ -598,6 +598,18 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                          (declaration.is(syntax_kind::simple_declaration,
                                          syntax_kind::function_definition,
                                          syntax_kind::condition));
+    /* [dcl.fct.def.general]/1: a function-definition whose body is not
+       parsed still has its decl-specifier-seq and declarator: it declares
+       the declarator-id and only uses the names of the rest (a return
+       type) */
+    if (!by_declarator && declaration.is(syntax_kind::function_definition)) {
+        bool head_parsed = true;
+        for (auto c : declaration.elements())
+            if (c.is_node() && !c.is(syntax_kind::function_body) &&
+                !parsed_completely(c.index()))
+                head_parsed = false;
+        by_declarator = head_parsed;
+    }
     /* a template of a function or of declarators: what its declarator-ids
        name (below), not the types its declaration names (an explicit
        specialization's name is a template-id: all its names held) */

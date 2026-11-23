@@ -216,10 +216,21 @@ struct tree_checker {
             prvalue(n, node.a, "operand");
             break;
         case semantic_kind::binary:
-        case semantic_kind::subscript:
             child(n, node.a, tree_sort::expression, false, "left operand");
             child(n, node.b, tree_sort::expression, false, "right operand");
             prvalue(n, node.a, "left operand");
+            prvalue(n, node.b, "right operand");
+            break;
+        case semantic_kind::subscript:
+            child(n, node.a, tree_sort::expression, false, "left operand");
+            child(n, node.b, tree_sort::expression, false, "right operand");
+            /* [ext:gnu_vector_size]: a lane of a vector object is an lvalue
+               of that object, which the vector operand is */
+            if (node.a >= analysis.semantics.size() ||
+                analysis.type_table[analysis.semantics[node.a]
+                                        .type.unqualified()]
+                        .kind != type_kind::vector)
+                prvalue(n, node.a, "left operand");
             prvalue(n, node.b, "right operand");
             break;
         case semantic_kind::logical_and:
@@ -481,6 +492,10 @@ size_t check_tree(const semantic_analysis &analysis, const syntax_tree &tree,
     for (const semantic_analysis::definition_record &d : analysis.definitions) {
         if (declaration_result(analysis, d.declaration) !=
             analysis_result::well_formed)
+            continue;
+        /* a system header's inline function whose body is not supported
+           is left undefined (defer_unsupported_body): its tree is partial */
+        if (analysis.entity_table[d.entity].unsupported_body)
             continue;
         uint32_t root = analysis.entity_table[d.entity].definition;
         if (!root) {
