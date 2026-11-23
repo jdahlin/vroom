@@ -196,7 +196,8 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
         if (!entity_table[k].implicit &&
-            !type_table[entity_table[k].type.unqualified()].parameter_count)
+            type_table[entity_table[k].type.unqualified()].parameter_count ==
+                entity_table[k].default_arguments)
             return true;
     if (x.union_ && x.member_count)
         return false;

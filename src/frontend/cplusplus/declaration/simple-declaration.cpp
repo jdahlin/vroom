@@ -1567,9 +1567,16 @@ analysis_result semantic_analysis::declare_with_initializer(
            ([dcl.init]/7.1) */
         if (!initialized && record.kind == type_kind::class_type) {
             const entity &c = entity_table[record.entity];
-            if (c.dynamic || c.member_count ||
-                (c.first_constructor &&
-                 !trivial_defaulted_default_constructor(record.entity)))
+            /* a class with a default constructor that does something is
+               default-initialized below, and its evaluation must be a
+               constant ([dcl.constexpr]/10) */
+            bool by_constructor =
+                c.first_constructor && !c.dynamic && element == type &&
+                !trivial_defaulted_default_constructor(record.entity);
+            if (!by_constructor &&
+                (c.dynamic || c.member_count ||
+                 (c.first_constructor &&
+                  !trivial_defaulted_default_constructor(record.entity))))
                 return not_supported(declaration, "dcl.init");
         } else if (!initialized && !constexpr_member_redeclaration(m))
             return ill_formed_at_token(m.id,
@@ -1833,6 +1840,8 @@ analysis_result semantic_analysis::declare_with_initializer(
             owned_array<expression_meaning> none;
             initialized_value value;
             VTRY_SET(r, construct(declaration, object, none, 0, value));
+            if (s.constexpr_ && entity_table[declared_entity].automatic)
+                return not_supported(declaration, "dcl.init");
             /* [basic.start.static]/2: constant initialization for a static
                variable default-initialized by a constexpr constructor */
             if (!entity_table[declared_entity].automatic && value.node) {
@@ -1841,6 +1850,8 @@ analysis_result semantic_analysis::declare_with_initializer(
                                                 semantics[value.node].at, data);
                 if (c == constness::constant && data)
                     value.node = data;
+                if (c != constness::constant && s.constexpr_)
+                    return not_supported(declaration, "dcl.init");
             }
             entity_table[declared_entity].definition = value.node;
             default_constructed = true;
