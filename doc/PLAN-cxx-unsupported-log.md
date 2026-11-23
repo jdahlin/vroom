@@ -504,3 +504,21 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   197 (virtual-function.cpp:328: the vtable slot of a deleted destructor).
   Left: the implicit copy assignment's X& operator=(X&) form
   (implicit-assignment.cpp subobject_assignment returns unknown for it).
+- 9.3 (746a6ecf8, 4e4f4a73d, e3a9e4933): aggregate prvalue temporaries: the
+  block-scope lowering (temporary_object, compound_literal) already handled
+  them, so the refusals went for a member of one with a destructor or of a
+  base, a conversion function called on one (non-template, accessible result
+  destructor) and a reference to its base class; kept: namespace scope
+  (static temporary), arrays, conversion function templates (ordering of
+  Bar<X, enable_if<..>> vs Bar<Foo<T>>, GH18291) and a temporary's
+  inaccessible destructor (no analysis check exists for any temporary, p4.cpp:509).
+  Unnamed class default member initializers: an anonymous union's initializers
+  run in the enclosing constructor (anonymous_member_initializers; clang has no
+  constructor for it), an unnamed class of a class is mangled Ut<n>_; exposed
+  and fixed: nested anonymous unions' multiple initializers (variant_initialized),
+  const-default-constructible /7.6, a non-const lvalue reference bound to a
+  conversion function's lvalue (we reject 492 -> 479).  Pre-C++20 constexpr
+  defaulted constructors that leave an anonymous union uninitialized are still
+  refused ("dcl.constexpr", the rule is not implemented).  The implicit copy
+  assignment X& operator=(X&) is declared; no metric moved.  Unsupported
+  36382 -> 36214.
