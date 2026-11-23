@@ -1,0 +1,21 @@
+; ehtypeid of a type no clause catches
+vir 1
+target arm64-linux
+extern @g
+extern @_ZTIi
+extern @__gxx_personality_v0
+sig %s = (int) -> int
+func @f %s personality @__gxx_personality_v0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = invoke @g %s (v0) -> b1 unwind b2
+b1:
+  ret v1
+b2 lpad:
+  v2:multi = landingpad cleanup
+  v3:ptr = proj v2, 0
+  v4:i32 = ehtypeid @_ZTIi
+  resume v3
+}
+; ---
+@f b2.2: E4: ehtypeid of a type no landingpad catches

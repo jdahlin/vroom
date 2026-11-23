@@ -207,6 +207,18 @@ const vir_opcode_info vir_opcode_table[256] = {
       VIR_EFFECT_T),
     R(VIR_OP_TRAP, "trap", VIR_FORM_NONE, VIR_TYPE_MASK_V, NONE, NONE, NONE, 0,
       VIR_EFFECT_T),
+    /* exceptions (8.8): invoke as call, its successors after its values in extra[c] */
+    R(VIR_OP_INVOKE, "invoke", VIR_FORM_INVOKE,
+      VIR_TYPE_MASK_V | VIR_TYPE_MASK_ANY | VIR_TYPE_MASK_MULTI, PTR, SIG, EXT,
+      VIR_INSN_FLAG_CALL_NORETURN | VIR_INSN_FLAG_CALL_PURE |
+          VIR_INSN_FLAG_CALL_CONST,
+      VIR_EFFECT_T | VIR_EFFECT_C),
+    R(VIR_OP_RESUME, "resume", VIR_FORM_STD, VIR_TYPE_MASK_V, PTR, NONE, NONE,
+      0, VIR_EFFECT_T),
+    R(VIR_OP_LANDINGPAD, "landingpad", VIR_FORM_LANDINGPAD, VIR_TYPE_MASK_MULTI,
+      EXT, NONE, NONE, 0, VIR_EFFECT_C),
+    R(VIR_OP_EHTYPEID, "ehtypeid", VIR_FORM_SYMBOL, VIR_TYPE_MASK_I32, SYMREF,
+      NONE, NONE, 0, VIR_EFFECT_P),
 };
 
 const char *const vir_type_names[VIR_TYPE_COUNT] = {
@@ -234,7 +246,9 @@ bool vir_opcode_is_constant(uint32_t op)
 }
 bool vir_opcode_is_terminator(uint32_t op)
 {
-    return op >= VIR_OP_BR && op <= VIR_OP_TRAP && vir_opcode_table[op].name;
+    return (op >= VIR_OP_BR && op <= VIR_OP_TRAP &&
+            vir_opcode_table[op].name) ||
+           op == VIR_OP_INVOKE || op == VIR_OP_RESUME;
 }
 
 uint32_t vir_type_size(uint32_t ty)

@@ -1,0 +1,120 @@
+; exceptions (SPEC-vir.md 8.8): invoke with its normal and unwind blocks, landing pads with
+; their clauses, the selector compared with ehtypeid, resume, a noreturn invoke (__cxa_throw)
+vir 1
+target arm64-linux
+extern @may_throw
+extern @__cxa_throw
+extern @__cxa_begin_catch
+extern @__cxa_end_catch
+extern @_ZTIi
+extern @_ZTIc
+extern @__gxx_personality_v0
+sig %s = (int) -> int
+sig %p = (int) -> int
+sig %t = (int, int, int) -> none
+sig %v = () -> none
+
+func @cleanup %s personality @__gxx_personality_v0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = invoke @may_throw %s (v0) -> b1 unwind b2
+b1:
+  v2:i64 = add v1, v0
+  ret v2
+b2 lpad:
+  v3:multi = landingpad cleanup
+  v4:ptr = proj v3, 0
+  call @__cxa_end_catch %v ()
+  resume v4
+}
+
+func @catches %s personality @__gxx_personality_v0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = invoke @may_throw %s (v0) -> b1 unwind b2
+b1:
+  ret v1
+b2 lpad:
+  v3:multi = landingpad catch @_ZTIi catch @_ZTIc catchall
+  v4:ptr = proj v3, 0
+  v5:i32 = proj v3, 1
+  v6:i32 = ehtypeid @_ZTIi
+  v7:i32 = icmp.eq v5, v6
+  brif v7, b3, b4
+b3:
+  v8:ptr = call @__cxa_begin_catch %p (v4)
+  call @__cxa_end_catch %v ()
+  ret 1:i64
+b4:
+  resume v4
+}
+
+func @throws %v personality @__gxx_personality_v0 {
+b0:
+  invoke @__cxa_throw %t (0:ptr, @_ZTIi, 0:ptr) -> b1 unwind b2 noreturn
+b1:
+  trap
+b2 lpad:
+  v0:multi = landingpad cleanup
+  v1:ptr = proj v0, 0
+  resume v1
+}
+; ---
+vir 1
+target arm64-linux
+extern @may_throw
+extern @__cxa_throw
+extern @__cxa_begin_catch
+extern @__cxa_end_catch
+extern @_ZTIi
+extern @_ZTIc
+extern @__gxx_personality_v0
+sig %s0 = (int) -> int
+sig %s1 = (int, int, int) -> none
+sig %s2 = () -> none
+
+func @cleanup %s0 personality @__gxx_personality_v0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = invoke @may_throw %s0 (v0) -> b1 unwind b2
+b1:
+  v2:i64 = add v1, v0
+  ret v2
+b2 lpad:
+  v3:multi = landingpad cleanup
+  v4:ptr = proj v3, 0
+  call @__cxa_end_catch %s2 ()
+  resume v4
+}
+
+func @catches %s0 personality @__gxx_personality_v0 {
+b0:
+  v0:i64 = param 0.0
+  v1:i64 = invoke @may_throw %s0 (v0) -> b1 unwind b2
+b1:
+  ret v1
+b2 lpad:
+  v2:multi = landingpad catch @_ZTIi catch @_ZTIc catchall
+  v3:ptr = proj v2, 0
+  v4:i32 = proj v2, 1
+  v5:i32 = ehtypeid @_ZTIi
+  v6:i32 = icmp.eq v4, v5
+  brif v6, b3, b4
+b3:
+  v7:ptr = call @__cxa_begin_catch %s0 (v3)
+  call @__cxa_end_catch %s2 ()
+  ret 1:i64
+b4:
+  resume v3
+}
+
+func @throws %s2 personality @__gxx_personality_v0 {
+b0:
+  invoke @__cxa_throw %s1 (0x0:ptr, @_ZTIi:ptr, 0x0:ptr) -> b1 unwind b2 noreturn
+b1:
+  trap
+b2 lpad:
+  v0:multi = landingpad cleanup
+  v1:ptr = proj v0, 0
+  resume v1
+}

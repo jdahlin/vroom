@@ -148,8 +148,8 @@ the back end without it:
 | E0 | This plan reviewed; clang's output studied on 20 small cases (`-fexceptions` C cleanups, C++ try/catch/cleanup, `noexcept`), notes in `RESEARCH-eh.md` | Plan merged |
 | E1 | `-fexceptions` for C as clang (`__EXCEPTIONS`, unwind tables forced on); `ast_builder_exceptions_ready`; C's cleanup variables run on unwind through x86-64's direct emitter; VIR refuses such functions (`exceptions`) so they fall back | `cleanup_unwind.c` at -O1/-O2/-O3 in `vcc-x86.py`; suites unchanged |
 | E2 | Direct emitter, arm64: calls bracketed with call-site records, pads, resume; `.gcc_except_table`; personality in `.eh_frame` (cleanups; try/catch with E3) | `bench/vcc-eh.py` passes at `-O1` under qemu; LSDA byte-identical to clang -O0's on the cases where call sites match; `vcc-cfi.py` unchanged without `-fexceptions` |
-| E3 | Direct emitter, both targets: cleanups exist (E1, E2); add try/catch and the type table | `vcc-eh.py --target x86_64-linux-gnu` at `-O1` |
-| E4 | VIR format: `invoke`, `VB_LPAD`/`landingpad`, `resume`, `ehtypeid`, `VF_EH`, personality; text form, verifier rules, interpreter | `bench/vir-test.py` with the new cases and bad units; mutation run clean |
+| E3 | Direct emitter, both targets: cleanups exist (E1, E2); add try/catch and the type table (deferred to E8: nothing produces a try/catch before the C++ front end does) | `vcc-eh.py --target x86_64-linux-gnu` at `-O1` |
+| E4 | VIR format: `invoke`, `VB_LPAD`/`landingpad`, `resume`, `ehtypeid`, `VF_EH`, personality; text form, verifier rules (no interpreter: VIR has none yet) | `bench/vir-test.py` with the new cases and bad units; mutation run clean |
 | E5 | VIR builder (the walker's second instantiation) and the passes' rules above; the allocator's rule for values live into a pad | VIR builds every `vcc-eh.py` function (`-fvir-stats`: no `eh` refusals); `-fvir-verify -fvir-check` clean |
 | E6 | VIR lowering, arm64 then x86-64; call-site table after the record passes | `vcc-eh.py` at `-O2`/`-O3`, both targets; C suites unchanged at -O1/-O2/-O3 (`vcc-same.py` without `-fexceptions`) |
 | E7 | Inlining across invokes; `nounwind` simplification | `src/test/inline` cases with throwing callees; instructions per `vbench.py gate` not worse |
@@ -213,3 +213,22 @@ at E2 (needs clang++ and qemu, which CI has).
   vcc-cfi 1636/1636.  Cost: a function of such a TU reserves 8 bytes for
   the exception even without cleanups.  Left: try/catch and the type
   table (E3, both targets), the LSDA against clang's.
+- E3 (2026-11-23): deferred to E8, by decision: try/catch needs a node of
+  C's AST that only the C++ front end would produce, and its analysis of
+  `try` is not written (`[except.pre]` refused).
+- E4 (2026-11-23): done.  SPEC-vir.md 8.8 (the constructs, their text form,
+  effects), rules E1-E4 and the additions to A1, A3, D1 in section 12;
+  `invoke` (90), `resume` (91), `landingpad` (92), `ehtypeid` (93),
+  `VIR_BLOCK_FLAG_LPAD`, `VIR_FUNCTION_FLAG_EH` with `vir_function.personality`
+  (`vir_function_load` copies it: a unit's functions lost it at first).  The
+  operand iterator gives an invoke's values and its two successors, so the
+  CFG, dominators and the verifier's C4 see the edges.  Tests:
+  `src/test/vir/ops-eh.vir` (cleanup, catch clauses with the selector
+  compared, a noreturn `__cxa_throw` invoke) and nine `bad/` units, each its
+  rule only.  vir-test 143/143; `--mutate` 3000 over all units, 4000 over
+  ops-eh, 2000 over the E units, ASan: no crash; vir-alloc, virgen-test
+  green; vcc-ctests -O2, -O3 with `-fvir-verify -fvir-check` 2170/2170;
+  vcc-x86's one failure (`inline/gcc/gcc.dg-ipa-pr92497-1`) fails on
+  origin/main too (E1 and E2 called it intermittent: it is not).  Not done:
+  the builder producing these (E5), the passes' rules of 8.8, the lowerings
+  (E6); VIR's interpreter does not exist, so nothing runs a unit.

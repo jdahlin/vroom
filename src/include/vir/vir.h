@@ -171,6 +171,14 @@ enum {
     VIR_OP_RET = 85,
     VIR_OP_TRAP = 86,
     VIR_OP_CRC32C64 = 89, /* update a CRC32C with eight low-to-high bytes */
+    /* exceptions (SPEC-vir.md 8.8) */
+    VIR_OP_INVOKE =
+        90, /* a call with two successors: normal, unwind (a terminator) */
+    VIR_OP_RESUME =
+        91, /* continue unwinding with the exception (a terminator) */
+    VIR_OP_LANDINGPAD =
+        92, /* a landing pad's first instruction: multi (exception ptr, selector i32) */
+    VIR_OP_EHTYPEID = 93, /* the selector of a catch clause's type (i32) */
     VIR_OP_TARGET_FIRST =
         128, /* 128-255: target instructions introduced by lowering */
     VIR_OP_COUNT = 256
@@ -204,7 +212,9 @@ enum {
 enum {
     VIR_BLOCK_FLAG_LOOP = 1,
     VIR_BLOCK_FLAG_ADDR = 2,
-    VIR_BLOCK_FLAG_COLD = 4
+    VIR_BLOCK_FLAG_COLD = 4,
+    VIR_BLOCK_FLAG_LPAD =
+        8 /* a landing pad: reached by unwind edges only (8.8) */
 };
 enum { VIR_SLOT_FLAG_PARAM = 1, VIR_SLOT_FLAG_EXPOSED = 2 };
 enum {
@@ -216,7 +226,9 @@ enum {
     VIR_FUNCTION_FLAG_LOCAL =
         32, /* the symbol is local to the unit (text form: `local`) */
     VIR_FUNCTION_FLAG_EXPOSURE =
-        64 /* VIR_SLOT_FLAG_EXPOSED of every slot is valid (computed by `mem`, checked by M1) */
+        64, /* VIR_SLOT_FLAG_EXPOSED of every slot is valid (computed by `mem`, checked by M1) */
+    VIR_FUNCTION_FLAG_EH =
+        128 /* has a personality routine (personality): may invoke, have landing pads, resume (8.8) */
 };
 enum {
     VIR_TARGET_NONE,
@@ -282,6 +294,8 @@ typedef struct vir_function {
     uint32_t symbol;    /* the function's symbol (emitter ref) */
     uint32_t signature; /* extra offset of its signature (section 9) */
     uint32_t flags;     /* VF_* */
+    uint32_t
+        personality; /* with VIR_FUNCTION_FLAG_EH: the personality routine's symbol */
     vir_insn *insns;
     uint32_t insn_count,
         constant_count; /* nconst: end of the constant region */
@@ -480,7 +494,10 @@ enum { /* text forms, 11.4 */
        VIR_FORM_RET,
        VIR_FORM_CONST,
        VIR_FORM_BPARAM,
-       VIR_FORM_TLS
+       VIR_FORM_TLS,
+       VIR_FORM_INVOKE,     /* call's, then `-> bN unwind bM` */
+       VIR_FORM_LANDINGPAD, /* `landingpad [cleanup] [catch @T | catch 0]...` */
+       VIR_FORM_SYMBOL      /* `ehtypeid @T` */
 };
 typedef struct vir_opcode_info {
     const char *name; /* NULL: not an opcode */

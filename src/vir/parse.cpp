@@ -1561,10 +1561,12 @@ static void vir_parse_insn(vir_parse_state *p, uint32_t rty)
         in.b = vir_extra_add(&p->function, g, 2);
         break;
     }
-    case VIR_FORM_CALL: {
+    case VIR_FORM_CALL:
+    case VIR_FORM_INVOKE: {
         vir_parse_token *st;
         bool isnew;
         uint32_t e, si, n, off;
+        bool invoke = oi->form == VIR_FORM_INVOKE;
 
         in.a = vir_parse_field_value(p, 0);
         st = vir_parse_token_kind_expect(p, VIR_PARSE_TOKEN_SIG,
@@ -1584,20 +1586,76 @@ static void vir_parse_insn(vir_parse_state *p, uint32_t rty)
         vir_parse_operand_list(p, 1, VIR_PARSE_LIST_MODE_LIST, 0, &n);
         vir_parse_punctuation_expect(p, ')');
         {
-            uint32_t *w = (uint32_t *)(calloc((size_t)n + 1, 4));
+            /* invoke: the normal and the unwind block after the values */
+            uint32_t extra_words = 0;
+
+            if (invoke)
+                extra_words = 2;
+            uint32_t *w = (uint32_t *)(calloc((size_t)n + 1 + extra_words, 4));
 
             if (!w)
                 abort();
             w[0] = n;
-            off = vir_extra_add(&p->function, w, n + 1);
+            off = vir_extra_add(&p->function, w, n + 1 + extra_words);
             free(w);
         }
         in.c = off;
         for (uint32_t i = 0; i < n; i++)
             vir_parse_list_value(p, off + 1 + i, VIR_PARSE_LIST_MODE_LIST, 0, i,
                                  p->scratch.v[i]);
+        if (invoke) {
+            vir_parse_token *nt, *ut;
+            uint32_t normal, unwind;
+
+            vir_parse_token_kind_expect(p, VIR_PARSE_TOKEN_ARROW, "`->`");
+            nt = vir_parse_token_current(p);
+            normal = vir_parse_block_reference(p);
+            vir_parse_keyword_expect(p, "unwind");
+            ut = vir_parse_token_current(p);
+            unwind = vir_parse_block_reference(p);
+            vir_parse_list_block(p, off + 1 + n, normal, nt);
+            vir_parse_list_block(p, off + 2 + n, unwind, ut);
+        }
         break;
     }
+    case VIR_FORM_LANDINGPAD: {
+        PV(uint32_t) w = {0};
+        uint32_t flags = 0;
+
+        if (vir_parse_token_is_identifier(vir_parse_token_current(p),
+                                          "cleanup")) {
+            p->position++;
+            flags |= 1;
+        }
+        VIR_PARSE_VECTOR_PUSH(w, flags);
+        VIR_PARSE_VECTOR_PUSH(w, 0);
+        for (;;) {
+            vir_parse_token *t = vir_parse_token_current(p);
+
+            if (vir_parse_token_is_identifier(t, "catchall")) {
+                p->position++;
+                VIR_PARSE_VECTOR_PUSH(w, 0);
+            } else if (vir_parse_token_is_identifier(t, "catch")) {
+                p->position++;
+                VIR_PARSE_VECTOR_PUSH(
+                    w, vir_parse_symbol_reference(
+                           p, vir_parse_token_kind_expect(
+                                  p, VIR_PARSE_TOKEN_SYM,
+                                  "the caught type's symbol (@name)")) +
+                           1);
+            } else
+                break;
+            w.v[1]++;
+        }
+        in.a = vir_extra_add(&p->function, w.v, w.n);
+        VIR_PARSE_VECTOR_FREE(w);
+        break;
+    }
+    case VIR_FORM_SYMBOL:
+        in.a = vir_parse_symbol_reference(
+            p, vir_parse_token_kind_expect(p, VIR_PARSE_TOKEN_SYM,
+                                           "a symbol (@name)"));
+        break;
     case VIR_FORM_ASM:
     case VIR_FORM_ASMGOTO: {
         vir_parse_token *tt = vir_parse_token_kind_expect(
@@ -1947,6 +2005,9 @@ static void vir_parse_block_header(vir_parse_state *p)
         else if (vir_parse_token_is_identifier(t, "cold"))
             p->parsed_block.v[p->parsed_block.n - 1].flags |=
                 VIR_BLOCK_FLAG_COLD;
+        else if (vir_parse_token_is_identifier(t, "lpad"))
+            p->parsed_block.v[p->parsed_block.n - 1].flags |=
+                VIR_BLOCK_FLAG_LPAD;
         else
             break;
         p->position++;
@@ -2262,7 +2323,7 @@ static uint32_t vir_parse_function_signature(vir_parse_state *p,
 static void vir_parse_function(vir_parse_state *p)
 {
     vir_parse_token *st, *gt;
-    uint32_t fl = 0, sym, si;
+    uint32_t fl = 0, sym, si, personality = 0;
     bool slots_open = true;
 
     vir_parse_token_next(p);
@@ -2289,7 +2350,15 @@ static void vir_parse_function(vir_parse_state *p)
             fl |= VIR_FUNCTION_FLAG_LOCAL;
         else if (vir_parse_token_is_identifier(t, "exposure"))
             fl |= VIR_FUNCTION_FLAG_EXPOSURE;
-        else
+        else if (vir_parse_token_is_identifier(t, "personality")) {
+            p->position++;
+            fl |= VIR_FUNCTION_FLAG_EH;
+            personality = vir_parse_symbol_reference(
+                p,
+                vir_parse_token_kind_expect(p, VIR_PARSE_TOKEN_SYM,
+                                            "the personality routine (@name)"));
+            continue;
+        } else
             break;
         p->position++;
     }
@@ -2298,6 +2367,7 @@ static void vir_parse_function(vir_parse_state *p)
     vir_function_begin(&p->function, p->unit->target, sym, fl);
     p->function.version = p->unit->version;
     vir_parse_function_reset(p);
+    p->function.personality = personality;
     p->in_function = true;
     si = vir_parse_function_signature(p, gt);
     p->function.signature = p->signature_offset.v[si];
@@ -2379,6 +2449,7 @@ static void vir_parse_function(vir_parse_state *p)
                         vir_parse_token_is_identifier(t1, "loop") ||
                         vir_parse_token_is_identifier(t1, "addr") ||
                         vir_parse_token_is_identifier(t1, "cold") ||
+                        vir_parse_token_is_identifier(t1, "lpad") ||
                         (vir_parse_token_is_punctuation(t1, ':') &&
                          (t2->kind == VIR_PARSE_TOKEN_NL ||
                           t2->kind == VIR_PARSE_TOKEN_EOF)));

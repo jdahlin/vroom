@@ -474,6 +474,38 @@ with respect to memory but never removed or duplicated.
 8.7 Loops may run forever, and an infinite loop without effects is defined
 behaviour (it must not be removed).
 
+8.8 **Exceptions** (Itanium C++ ABI zero-cost unwinding; doc/PLAN-vir-eh.md).
+A function with `VF_EH` (text: `personality @sym` in its header) names its
+personality routine in `personality` and may use:
+
+| # | Op | a | b | c | Meaning |
+|---|---|---|---|---|---|
+| 90 | `invoke` | v:ptr callee | sig | @x | A terminator: a `call` (section 9's values and flags) with two successors.  `extra[c]` = n, the n values, then the normal block and the unwind block.  Text: `invoke CALLEE %sig (VALUES) -> bN unwind bM [FLAGS]` |
+| 91 | `resume` | v:ptr | - | - | A terminator: continue unwinding with the exception (`_Unwind_Resume`) |
+| 92 | `landingpad` | @x clauses | - | - | `multi`: `proj 0` the exception's address (`ptr`), `proj 1` the selector (`i32`).  `extra[a]` = flags (bit 0: cleanup), the clause count, then per clause the caught type's symbol + 1, or 0 for catch-all.  Text: `landingpad [cleanup] [catch @T \| catchall]...` |
+| 93 | `ehtypeid` | @sym | - | - | `i32`: the selector a landing pad has when the clause catching `@sym` matched |
+
+- A **landing pad** is a block with `VB_LPAD` (text: `lpad` after the block
+  name).  It is reached by unwind edges only, has no parameters (8.2: values
+  reach it through slots or through definitions that dominate it), and its
+  first instruction is its `landingpad`; no other block has one.
+- An `invoke`'s **normal block** has the invoke's block as its only
+  predecessor and is not a landing pad; its result is defined only where the
+  normal block dominates (not on the unwind edge).  A `noreturn` invoke
+  (`__cxa_throw`) has a normal block that ends in `trap`.
+- An exception may leave a function only through calls: a `call` in a
+  function that has landing pads unwinds out of the function, never into
+  one of them, so a call that may throw inside a scope with cleanups or
+  handlers is an `invoke`.
+- Effects (section 10): an `invoke` is a call (C) on both edges: every exposed
+  object may have changed in the landing pad too.  `landingpad` is never
+  removed or moved.  The unwind edge carries no moves: a value used in a
+  landing pad is in a callee-saved register or a slot (section 15).
+- The lowering writes the call-site table (`.gcc_except_table`) from the
+  invokes and the type table from the catch clauses; `ehtypeid` is the type's
+  index there.  Not in VIR 1.0's interpreter (section 13), which does not
+  exist yet.
+
 ## 9. ABI signatures
 
 9.1 A **signature** describes how a function type is passed on the target. It
@@ -580,11 +612,12 @@ datadecl  = ( "data" | "tdata" ) SYM "align" INT "=" "{" item { "," item } "}" N
 item      = TYPE const | "zero" INT | "bytes" STRING .
 externdecl= "extern" SYM NL .
 func      = "func" SYM SIG { fflag } "{" NL { slotdecl } block { block } "}" NL .
-fflag     = "nofp" | "fenv" | "nullinvalid" | "noreturn" | "local" | "exposure" .
+fflag     = "nofp" | "fenv" | "nullinvalid" | "noreturn" | "local" | "exposure"
+          | "personality" SYM .
 slotdecl  = "slot" SLOT "size" INT "align" INT [ "hint" INT ] { "param" | "exposed" } NL .
 block     = BLOCK [ "(" bp { "," bp } ")" ] { bflag } ":" NL { instr NL } term NL .
 bp        = VALUE ":" TYPE .
-bflag     = "loop" | "addr" | "cold" .
+bflag     = "loop" | "addr" | "cold" | "lpad" .
 instr     = [ VALUE ":" TYPE "=" ] OP [ "." suffix ] [ operands ] { iflag } .
             (* a constant op (`iconst`, `fconst`, `symaddr`, `slotaddr`, `labeladdr`) written as an
                instruction, `v7:i32 = iconst 5`, names a constant of the constant region as written:
@@ -606,6 +639,10 @@ v4:i32 = icmp.slt v1, 10
 v5:i64 = ext.1s v4                      ; low byte, sign-extended
 v6:i32 = load.2u v9 align 2             ; 2 bytes, zero-extended
 store.4 v9, v6 align 4 volatile
+v7:i64 = invoke @f %s (v1) -> b2 unwind b3  ; 8.8; b3 has `lpad`
+v8:multi = landingpad cleanup catch @_ZTIi catchall
+v9:i32 = ehtypeid @_ZTIi
+resume v10
 memcpy v1, v2, 24 align 8
 v7:i64 = axadd.8 v1, v2
 v8:i64 = call @f %s0 (v1, $0+8) pure
@@ -684,10 +721,14 @@ internal compiler error with a dump.
 | C5 | `switch` cases sorted, disjoint, lo not above hi |
 | C6 | Every `VB_ADDR` block is listed by every `ibr`; an `ibr` lists only `VB_ADDR` blocks |
 | C7 | Every `asmgoto` target has the `asmgoto` block as its only predecessor |
-| D1 | Definitions dominate uses (8.5) |
-| A1 | `call`: argument words match the signature's groups in number and type; `ty` matches the result group |
+| D1 | Definitions dominate uses (8.5); an `invoke`'s result only where its normal block dominates (8.8) |
+| E1 | Without `VF_EH`: no `invoke`, `landingpad`, `resume`, `ehtypeid` and no `VB_LPAD` block (8.8) |
+| E2 | `invoke`: the unwind block is a landing pad, the normal block is not and has the invoke's block as its only predecessor |
+| E3 | A landing pad's predecessors reach it by unwind edges only; its first instruction is `landingpad`, and `landingpad` is nowhere else |
+| E4 | `ehtypeid`'s symbol is caught by some clause of a `landingpad` of the function |
+| A1 | `call`, `invoke`: argument words match the signature's groups in number and type; `ty` matches the result group |
 | A2 | `ret` values match the function's result group |
-| A3 | A `NORETURN` call is followed only by `trap` |
+| A3 | A `NORETURN` call is followed only by `trap`; a `NORETURN` invoke's normal block ends in `trap` |
 | A4 | Asm: operand counts match the template; a memory operand's value is `ptr` |
 | F1 | `VF_NOFP`: no `f32`/`f64` value and no `fconst` |
 | F2 | Not `VF_VARIADIC`: no `va_start` |

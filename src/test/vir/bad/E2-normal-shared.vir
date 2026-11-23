@@ -1,0 +1,22 @@
+; an invoke whose normal block has another predecessor
+vir 1
+target arm64-linux
+extern @g
+extern @_ZTIi
+extern @__gxx_personality_v0
+sig %s = (int) -> int
+func @f %s personality @__gxx_personality_v0 {
+b0:
+  v0:i64 = param 0.0
+  brif v0, b1, b2
+b1:
+  v1:i64 = invoke @g %s (v0) -> b2 unwind b3
+b2:
+  ret v0
+b3 lpad:
+  v2:multi = landingpad cleanup
+  v3:ptr = proj v2, 0
+  resume v3
+}
+; ---
+@f b1.0: E2: invoke's normal block b2 has another predecessor
