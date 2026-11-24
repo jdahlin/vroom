@@ -174,8 +174,17 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         VTRY(r, template_head_parameters(n, list, true, true, true, true));
         return class_specialization_definition(n, elaborated, list);
     }
-    if (elaborated.size() != 2 || !elaborated[0].is_token() ||
-        !elaborated[1].is_identifier())
+    /* the attribute-specifier-seq after the class-key, left out when none
+       changes what vcc generates ([dcl.type.elab]/1), one without an
+       argument (clang checks preferred_name's against the template) */
+    uint32_t at = 1;
+    if (elaborated.size() == 3 &&
+        class_head_attributes_without_effect(elaborated[1]) &&
+        elaborated[1].size() == 5 &&
+        !elaborated[1][2].is(syntax_kind::attribute))
+        at = 2;
+    if (elaborated.size() != at + 1 || !elaborated[0].is_token() ||
+        !elaborated[at].is_identifier())
         return not_supported(n, "temp.class");
     standard_keyword key = elaborated[0].keyword();
     if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
@@ -184,7 +193,7 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
     owned_array<SyntaxRef> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
     VTRY(r, template_head_parameters(n, parameters, true, true, false, true));
-    uint32_t name = tokens.identifier(elaborated[1].token());
+    uint32_t name = tokens.identifier(elaborated[at].token());
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
