@@ -579,3 +579,13 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   uses `this` (analysis, evaluator's partial object, lowering).  Next (9.9):
   the evaluator records why it answers not_constant; the 365 of
   simple-declaration.cpp:701 split by that reason.
+- 9.9 (2 commits): the evaluator records the line of its last not_constant
+  answer (155 of the 365: reading an inactive union member, L1283); a
+  variant member's default member initializer only when no other variant
+  member is initialized ([class.base.init]/9).  Unsupported +1, we reject
+  -1, we accept -6.  Decision: a correctness fix may raise unsupported a
+  little (a newly analysed declaration reaching a later cause); refuted and
+  we reject still must not rise.  Next (9.10): three union evaluator bugs
+  (a static member through an inactive member, anonymous member nesting, an
+  implicit constructor's default member initializer), then the rejection
+  (scratchpad rule-and-ctor.patch).
