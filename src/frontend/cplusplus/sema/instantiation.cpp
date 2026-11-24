@@ -448,6 +448,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         unsupported.resize(unsupported_before);
         return quiet_definition_failed(at, index, r);
     }
+    /* (one analysed where a substitution is tried is not diagnosed here) */
+    instantiations[index].body_ill_formed =
+        r == analysis_result::ill_formed && !diagnostics.suppressed;
     if (r == analysis_result::unsupported &&
         unsupported.size() > unsupported_before) {
         /* a use of the specialization is refused when lowered (as an

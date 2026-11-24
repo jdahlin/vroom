@@ -3930,6 +3930,11 @@ class semantic_analysis
                                                   bool &constant);
     /* [expr.const]/10: a contextually converted constant expression of
        type bool, from the expression e */
+    /* set by the evaluator when it answered "not constant" for a call of a
+       specialization whose definition is ill-formed ([temp.inst]/1): an
+       error there is not a substitution failure ([temp.deduct]/8), which
+       the caller that drops a candidate for one does not tell apart */
+    bool invalid_specialization_called = false;
     analysis_result bool_constant_expression(SyntaxRef at, SyntaxElement e,
                                              bool &constant, bool &value);
     /* [except.spec]/2: whether the noexcept-specifier n makes the exception
@@ -5109,6 +5114,10 @@ class semantic_analysis
         /* a function template's declaration whose substitution failed
            while a candidate was considered ([temp.deduct]/8) */
         bool substitution_failed = false;
+        /* a function template's specialization whose definition is
+           ill-formed for these arguments ([temp.inst]/1): clang marks it
+           invalid, so a call of it is not a constant expression */
+        bool body_ill_formed = false;
         /* a class's definition that failed ([temp.inst]/1): the first
            construct it could not analyse, for the uses that follow */
         bool has_failure = false;

@@ -243,7 +243,12 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
                 continue;
             }
             bool constant = false, value = false;
+            invalid_specialization_called = false;
             VTRY(r, bool_constant_expression(x, x[2], constant, value));
+            /* (an error in a function's instantiation is a hard error, not
+               a candidate dropped: not told apart here) */
+            if (!constant && invalid_specialization_called)
+                return not_supported(x, "temp.deduct");
             if (!constant)
                 return ill_formed(x,
                                   "the constant-expression of an "

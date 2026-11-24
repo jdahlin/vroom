@@ -1717,6 +1717,13 @@ analysis_result semantic_analysis::declare_with_initializer(
             r = literal_operator_declaration(declaration, declared_entity);
     }
     last_declared = declared_entity;
+    /* a read of the variable whose value stays unknown (its initializer
+       evaluated to unknown, or the declaration is refused after this) is
+       refused for this declaration: the evaluator names it
+       (entity::holder) */
+    if (r == analysis_result::well_formed && kind == entity_kind::variable &&
+        declared_entity && initialized)
+        entity_table[declared_entity].holder = declaration;
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&
         (s.constinit_ || require_constant_initialization)) {
         /* [dcl.constinit]/1: "If the specifier is applied to any

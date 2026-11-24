@@ -1322,10 +1322,17 @@ constness semantic_analysis::evaluate_align(constant_evaluation &state,
     }
     unsigned width = fundamental_type_width(tokens.files.behavior, f);
     fundamental_type g = fundamental_of(semantics[items[1]].type);
-    if (g == fundamental_type::none ||
-        (fundamental_type_is_signed(tokens.files.behavior, g) &&
-         static_cast<__int128>(x[1].integer) <= 0))
+    if (g == fundamental_type::none)
         return constness::unknown;
+    /* [impl.clang] clang's constant evaluation of the alignment: "requested
+       alignment is not a positive power of two", or one above what the
+       operand's type has room for, is not a constant expression */
+    if (width <= 64 &&
+        ((fundamental_type_is_signed(tokens.files.behavior, g) &&
+          static_cast<__int128>(x[1].integer) <= 0) ||
+         !x[1].integer || (x[1].integer & (x[1].integer - 1)) ||
+         x[1].integer > (static_cast<unsigned __int128>(1) << (width - 1))))
+        return constness::not_constant;
     unsigned __int128 r = 0;
     if (!vfold_align_integer(which, x[0].integer, x[1].integer, width, &r))
         return constness::unknown;
@@ -1699,6 +1706,24 @@ analysis_result semantic_analysis::builtin_addressof(SyntaxRef n,
                           "the operand of __builtin_addressof shall be an "
                           "lvalue",
                           "specialized.addressof");
+    /* [over.over]/1: a template-id names the set of the function template's
+       specializations, an overload set that nothing resolves for a
+       parameter of type T &: [impl.clang] clang rejects it ("reference to
+       overloaded function could not be resolved") */
+    SyntaxElement named = operand;
+    while (named.is(syntax_kind::primary_expression) && named.size() == 3 &&
+           named[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        named = named[1];
+    /* (not in a specialization's definition: clang's instantiation of the
+       call finds the one function the arguments name, [impl.clang]; nor
+       with a dependent type) */
+    if (named.is(syntax_kind::simple_template_id) && !instantiating &&
+        !instantiation_depth && !depends_on_template_parameter(m.type) &&
+        type_table[m.type.unqualified()].kind == type_kind::function)
+        return ill_formed(n,
+                          "reference to overloaded function could not be "
+                          "resolved",
+                          "over.over");
     if (m.bit_field_width)
         return address_of_bit_field(n.first_token());
     address_of_glvalue(n.first_token(), m);

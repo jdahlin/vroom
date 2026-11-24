@@ -46,6 +46,9 @@ enum : uint8_t { jump_none, jump_break, jump_continue };
    evaluation started from): the detail of the refusal that follows, read
    only when an evaluation answers unknown */
 thread_local uint32_t last_unknown_line = 0;
+/* with last_unknown_line: the declaration of the variable or object whose
+   unknown value made the evaluation stop (entity::holder), 0 if none */
+thread_local node_index last_unknown_holder;
 
 /* the line of the last answer "not a constant expression" (a rule of
    [expr.const]/5), for the detail of the refusal that follows when the
@@ -117,9 +120,18 @@ constexpr const char call_non_constexpr_function[] =
     "expression";
 constexpr const char reference_to_temporary[] =
     "reference to temporary is not a constant expression";
+constexpr const char reinterpret_cast_[] =
+    "cast that performs the conversions of a reinterpret_cast is not "
+    "allowed in a constant expression";
 constexpr const char pointer_to_temporary[] =
     "pointer to temporary is not a constant expression";
 } // namespace rule_note
+
+/* CONST_UNKNOWN for a read of the entity E whose value is unknown because
+   of its own declaration: the refusal names that declaration */
+#define CONST_UNKNOWN_HELD(e)                                                  \
+    (CONST_UNKNOWN, last_unknown_holder = (e).holder.index(),                  \
+     constness::unknown)
 
 /* The answer "the evaluator has no rules for this": normally just
    constness::unknown.  Compiled with -DVCC_TRACE_UNKNOWN each such answer
@@ -131,11 +143,14 @@ constness trace_unknown(int line)
 {
     fprintf(stderr, "CXXUNK %d\n", line);
     last_unknown_line = static_cast<uint32_t>(line);
+    last_unknown_holder = node_index();
     return constness::unknown;
 }
 #define CONST_UNKNOWN trace_unknown(__LINE__)
 #else
-#define CONST_UNKNOWN (last_unknown_line = __LINE__, constness::unknown)
+#define CONST_UNKNOWN                                                          \
+    (last_unknown_line = __LINE__, last_unknown_holder = node_index(),         \
+     constness::unknown)
 #endif
 
 /* a class or union object (not an array): the values whose members are
@@ -563,6 +578,9 @@ void semantic_analysis::evaluator_stop_detail()
         snprintf(text, sizeof text, "evaluator not_constant L%u",
                  last_not_constant_line);
     last_unsupported_detail(text, strlen(text));
+    if (last_unknown_line && last_unknown_holder != node_index())
+        unsupported[unsupported.size() - 1].holder =
+            SyntaxRef(last_unknown_holder);
 }
 
 void semantic_analysis::evaluation_detail(uint32_t node, bool gave_up,
@@ -580,6 +598,9 @@ void semantic_analysis::evaluation_detail(uint32_t node, bool gave_up,
                  semantic_kind_name(semantics[node].kind));
     }
     last_unsupported_detail(text, strlen(text));
+    if (gave_up && last_unknown_holder != node_index())
+        unsupported[unsupported.size() - 1].holder =
+            SyntaxRef(last_unknown_holder);
 }
 
 /* [expr.const]/5.8: the read of a variable that is not usable in constant
@@ -1385,6 +1406,48 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
            is a permitted result ([expr.const]/11), its value is read only
            when the variable is usable in constant expressions
            ([expr.const]/5.8) */
+        /* [expr.const]/13, [expr.eq]/3: a function's address is a permitted
+           result, one object per function whose value is not known: equal
+           for the same function, unequal for different ones (a weak
+           function's address may be null) */
+        if (x.a && e.kind == entity_kind::function && e.name &&
+            !(e.gnu_flags & gnu_weak)) {
+            /* [impl.clang] a specialization's linkage is the weakest of its
+               arguments': the address of one made with a member of an
+               unnamed class computes the class's linkage, before a typedef
+               name may give it one (clang's error): not modelled */
+            if (e.instantiation) {
+                const instantiation_record &made =
+                    instantiations[e.instantiation - 1];
+                for (uint32_t i = 0; i < made.argument_count; i++) {
+                    const template_argument &a =
+                        template_arguments[made.first_argument + i];
+                    if (a.kind != template_argument::kind_t::type)
+                        continue;
+                    const struct type &t = type_table[a.type.unqualified()];
+                    if (t.kind != type_kind::class_type &&
+                        t.kind != type_kind::enumeration)
+                        continue;
+                    for (entity_index c = entity_table[t.entity].enclosing; c;
+                         c = entity_table[c].enclosing)
+                        if (entity_table[c].kind == entity_kind::class_type &&
+                            !entity_table[c].name)
+                            return CONST_UNKNOWN;
+                }
+            }
+            for (size_t i = 0; i < state.objects.size(); i++)
+                if (state.objects[i].entity == x.a && !state.objects[i].frame) {
+                    object = static_cast<uint32_t>(i);
+                    return constness::constant;
+                }
+            constant_evaluation::object o;
+            o.entity = x.a;
+            o.opaque = true;
+            object = static_cast<uint32_t>(state.objects.size());
+            append_object(state, o);
+            pin_objects(state);
+            return constness::constant;
+        }
         /* a weak variable's address may be null, a thread-local one's is
            not a constant */
         if (e.kind == entity_kind::variable &&
@@ -1615,6 +1678,10 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             if (state.reading && unusable_object_read(state, w))
                 return CONST_NOT_CONSTANT_NOTE(
                     rule_note::read_non_constexpr_variable);
+            /* (a variable's own declaration, which left its value unknown,
+               is the reason; a temporary has none) */
+            if (w.entity && entity_table[w.entity].holder)
+                return CONST_UNKNOWN_HELD(entity_table[w.entity]);
             return CONST_UNKNOWN;
         }
         constant_value o = place_value(state, whole);
@@ -2056,9 +2123,10 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
         const entity &e = entity_table[x.a];
         /* ([expr.prim.this]'s `this` is the one variable of no name: its
            rules are not these) */
-        if (e.kind != entity_kind::variable || e.usable == constness::unknown ||
-            !e.name)
+        if (e.kind != entity_kind::variable || !e.name)
             return CONST_UNKNOWN;
+        if (e.usable == constness::unknown)
+            return CONST_UNKNOWN_HELD(e);
         if (e.usable == constness::not_constant) {
             constness refused = unusable_variable_read(e, state.potential);
             if (refused == constness::not_constant)
@@ -2889,6 +2957,21 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         }
         if (k == conversion_kind::array_to_pointer)
             return evaluate_array_pointer(state, x.a, v);
+        /* [conv.func]/1: a function lvalue becomes a pointer to the
+           function, the address of its object ([expr.unary.op]/3) */
+        if (k == conversion_kind::function_to_pointer) {
+            uint32_t function = 0;
+            c = evaluate_object(state, x.a, function);
+            if (c != constness::constant)
+                return c;
+            v = constant_value();
+            v.kind = constant_value_kind::pointer;
+            v.first = function;
+            v.count = 1;
+            if (!(function & element_place))
+                v.stamp = state.objects[function].serial;
+            return constness::constant;
+        }
         /* [conv.ptr]/1: "A null pointer constant of integral type can be
            converted to a pointer type" */
         if (k == conversion_kind::null_pointer) {
@@ -2986,6 +3069,11 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             return convert_base_pointer(
                 state, k == conversion_kind::derived_to_base, x.b, p, v);
         }
+        /* [expr.const]/5.15 (n4861 numbering): "a reinterpret_cast"; an
+           integer converted to a pointer is its conversion ([expr.reinterpret.cast]/5),
+           whatever the value */
+        if (k == conversion_kind::integral_to_pointer)
+            return CONST_NOT_CONSTANT_NOTE(rule_note::reinterpret_cast_);
         if (k != conversion_kind::integral && k != conversion_kind::floating &&
             k != conversion_kind::floating_integral &&
             k != conversion_kind::boolean)
@@ -3129,6 +3217,10 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         c = evaluate_node(state, x.a, v);
         if (c == constness::unknown && state.potential) {
             constant_value arm;
+            /* (a __builtin_constant_p condition is always a potential
+               constant: clang folds the arm it chooses, below) */
+            if (constant_p_call(x.a))
+                return c;
             if (evaluate_node(state, second, arm) == constness::not_constant &&
                 evaluate_node(state, x.c, arm) == constness::not_constant)
                 return CONST_NOT_CONSTANT;
@@ -3314,9 +3406,28 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
                 return c;
             /* (one past the end is a pointer, not an object) */
             uint32_t place = 0;
-            if (v.count && !(v.extent && v.offset >= v.extent))
+            /* (an element of an array the evaluation holds no values of,
+               opaque: its address is a pointer, no element is read) */
+            bool opaque_element =
+                v.base >= opaque_array_base && v.base < unknown_bound_base;
+            if (v.count && !(v.extent && v.offset >= v.extent) &&
+                !opaque_element)
                 c = pointed_place(state, v, place);
             return c;
+        }
+        /* [impl.clang] clang does not diagnose `&*(p + n)` of a pointer one
+           past the end of an array it holds no values of (CWG2823): not
+           decided here */
+        if (semantics[x.a].kind == semantic_kind::indirection) {
+            constant_value operand;
+            c = evaluate_node(state, semantics[x.a].a, operand);
+            if (c != constness::constant)
+                return c;
+            if (operand.kind == constant_value_kind::pointer &&
+                operand.extent && operand.offset >= operand.extent &&
+                operand.base >= opaque_array_base &&
+                operand.base < unknown_bound_base)
+                return CONST_UNKNOWN;
         }
         c = evaluate_object(state, x.a, object);
         if (c != constness::constant)
@@ -3538,6 +3649,30 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         static_cast<conversion_kind>(semantics[callee].op) ==
             conversion_kind::function_to_pointer)
         callee = semantics[callee].a;
+    /* [expr.ref]/6.3.1: a static member function named through an object
+       expression, `e.f`: the comma of e and f; "the postfix expression
+       before the dot or arrow is evaluated" (a glvalue designates its
+       object, nothing is read) */
+    if (semantics[callee].kind == semantic_kind::comma &&
+        semantics[semantics[callee].b].kind == semantic_kind::entity &&
+        entity_table[semantics[semantics[callee].b].a].kind ==
+            entity_kind::function) {
+        uint32_t object_expression = semantics[callee].a;
+        constness c;
+        if (semantics[object_expression].category == value_category::prvalue) {
+            constant_value ignored;
+            c = evaluate_node(state, object_expression, ignored);
+        } else {
+            uint32_t object = 0;
+            uint32_t outer_reading = state.reading;
+            state.reading = 0;
+            c = evaluate_object(state, object_expression, object);
+            state.reading = outer_reading;
+        }
+        if (c != constness::constant)
+            return c;
+        callee = semantics[callee].b;
+    }
     if (semantics[callee].kind != semantic_kind::entity)
         return CONST_UNKNOWN;
     /* [meta.const.eval]/1: true within a manifestly constant-evaluated
@@ -3572,8 +3707,13 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
             return evaluate_bswap(state, x, v);
         case builtin_fold::stdc_bits:
             return evaluate_stdc_bits(state, b.which, x, v);
-        case builtin_fold::align:
-            return evaluate_align(state, b.which, x, v);
+        case builtin_fold::align: {
+            constness c = evaluate_align(state, b.which, x, v);
+            /* (an alignment clang's evaluation refuses: a rule it applies) */
+            if (c == constness::not_constant)
+                return CONST_NOT_CONSTANT_RULE;
+            return c;
+        }
         default:
             return evaluate_builtin_fold(state, b, x, v);
         }
@@ -3784,6 +3924,15 @@ constness semantic_analysis::evaluate_invocation(
         (state.defined_before && semantics[body].at > state.defined_before)) {
         if (entity_table[f].held_because)
             evaluation_cause = entity_table[f].held_because;
+        /* [temp.inst]/1, [expr.const]/5.3: a specialization whose
+           definition is ill-formed for its arguments (diagnosed where it
+           was instantiated) is invalid: its invocation is not a constant
+           expression */
+        if (!state.potential && entity_table[f].instantiation &&
+            instantiations[entity_table[f].instantiation - 1].body_ill_formed) {
+            invalid_specialization_called = true;
+            return CONST_NOT_CONSTANT;
+        }
         /* [expr.const]/5.3: "an invocation of an undefined constexpr
            function": declared, with no definition anywhere yet (not a
            template's specialization, not one whose body failed analysis) */
@@ -4141,6 +4290,18 @@ constness semantic_analysis::permitted_result(const constant_evaluation &state,
            of this evaluation, none of which is a local (the invocations
            are over: frame 0) */
         uint32_t index = place & ~element_place;
+        /* an element of an array whose values the evaluation does not hold
+           (opaque: declared only, or not constexpr): the address of an
+           object of static storage duration, [expr.const]/13.1; a local's
+           is not */
+        if (v.base >= opaque_array_base && v.base < unknown_bound_base) {
+            const constant_evaluation::object &owner =
+                state.objects[v.base - opaque_array_base];
+            if (owner.frame ||
+                (owner.entity && entity_table[owner.entity].automatic))
+                return CONST_NOT_CONSTANT;
+            return constness::constant;
+        }
         /* (one past the last element is a permitted result too) */
         bool one_past =
             v.extent && v.offset == v.extent && v.base != UINT32_MAX;
