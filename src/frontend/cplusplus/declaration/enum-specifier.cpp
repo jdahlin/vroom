@@ -898,6 +898,10 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     entity &z = entity_table[e];
     z.underlying = underlying;
     z.promoted = promoted;
+    if (!is_fixed) {
+        z.positive_bits = static_cast<uint8_t>(positive_bits);
+        z.negative_bits = static_cast<uint8_t>(negative_bits);
+    }
     z.defined = true;
     for (entity_index en : enumerators_declared) {
         entity &y = entity_table[en];

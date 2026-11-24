@@ -284,6 +284,29 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
                 semantics[m.node].op =
                     static_cast<uint8_t>(conversion_kind::integral);
         }
+        /* [expr.static.cast]/10: a value outside the range of the
+           enumeration's values ([dcl.enum]/8) is undefined behavior, so
+           no core constant expression ([expr.const]/5) */
+        fundamental_type from = fundamental_of(m.type);
+        if (!entity_table[e].fixed_underlying && entity_table[e].defined &&
+            m.evaluation == constness::constant &&
+            fundamental_type_is_integral(from)) {
+            __int128 n = integer_value(tokens.files.behavior, from, m.value);
+            unsigned neg = entity_table[e].negative_bits;
+            unsigned width = entity_table[e].positive_bits;
+            __int128 low = 0;
+            if (neg) {
+                if (width + 1 > neg)
+                    width = width + 1;
+                else
+                    width = neg;
+                low = -(static_cast<__int128>(1) << (width - 1));
+                width = width - 1;
+            }
+            __int128 high = (static_cast<__int128>(1) << width) - 1;
+            if (n < low || n > high)
+                m.evaluation = constness::not_constant;
+        }
         convert_arithmetic(m, entity_table[e].underlying);
         m.type = qualified_type::make(to.unqualified(), cv_none);
         converted(m, conversion_kind::integral);

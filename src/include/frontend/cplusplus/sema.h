@@ -764,6 +764,10 @@ struct entity {
        whether its underlying type is fixed ([dcl.enum]/5) */
     fundamental_type underlying = fundamental_type::none;
     bool scoped = false, fixed_underlying = false;
+    /* ... and, its underlying type not fixed, the bits of its values'
+       range ([dcl.enum]/8): of the largest enumerator value and of the
+       most negative one (0: none negative) */
+    uint8_t positive_bits = 0, negative_bits = 0;
     /* ... and, its underlying type not fixed, the type it promotes to
        ([conv.prom]/4) */
     fundamental_type promoted = fundamental_type::none;
