@@ -598,3 +598,17 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   reject unchanged, we accept -1, types/constants verified -20/-5 (claims of
   the newly rejected static_asserts).  Next: the other not_constant rules
   one at a time (CONST_NOT_CONSTANT_RULE).
+- 9.11 (5 commits after 725be83f3): more not_constant answers marked as rules
+  of [expr.const]/5 (CONST_NOT_CONSTANT_RULE): a call of a non-constexpr
+  function (L3031), a read of an indeterminate or volatile object (L129), pointer
+  arithmetic out of the array (L2063), a null indirection (L1965); first the
+  evaluator bug the indeterminate rule exposed: the reserved placement new
+  made a new object and left the designated one indeterminate (now
+  unknown).  Unsupported 35701 -> 35616, we reject 455 -> 454, we accept
+  5412 unchanged.  Open: the past-the-end indirection (L1963) rejects
+  clang-accepted code: `(&s)[1].k` with static k (constant-expression-cxx11.cpp:227),
+  a reference member bound to "hello"[0] (:869), `(new(&x.b) int[5])[1]=12`
+  (cxx2c-constexpr-placement-new.cpp:194).  Not yet looked at: L2223 (literal
+  address comparison), "answered no value" (32), reserved placement new's
+  proper evaluation (constants_refuted +5 when the object is initialized
+  in place).
