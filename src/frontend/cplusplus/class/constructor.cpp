@@ -1594,9 +1594,20 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     !entity_table[e].base_subobject && arguments.size() == 1 &&
                     arguments[0].category == value_category::prvalue &&
                     arguments[0].type.unqualified() == type.unqualified();
-                if (elided && !trivial_class(record.entity))
-                    return not_supported(item, "class.copy.elision");
                 initialized_value value;
+                if (elided && !trivial_class(record.entity)) {
+                    /* [class.copy.elision]/1.3 ([dcl.init]/17.6.1): the
+                       prvalue initializes the member itself, whatever its
+                       copy and move constructors do (as a variable's
+                       initializer, initialize_with); only a class that has
+                       a constructor reaches here */
+                    VTRY(rv, initialize_with(item, arguments[0], type, true,
+                                             false, value));
+                    set_slot(
+                        slot, id,
+                        subobject_store(object, type, id, value.node, true));
+                    continue;
+                }
                 constructing_base = entity_table[e].base_subobject;
                 r = construct(item, type, arguments, object.node, value);
                 constructing_base = false;
@@ -1910,7 +1921,7 @@ void semantic_analysis::construction_order(
 
 uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
                                             qualified_type type, token_index at,
-                                            uint32_t value)
+                                            uint32_t value, bool initializes)
 {
     /* [dcl.attr.nouniqueaddr]: an empty subobject may share its address with
        another member; do not write its padding byte */
@@ -1927,6 +1938,8 @@ uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
     uint32_t assigned = expression_node(
         semantic_kind::assignment, stored, at, object.node, value,
         static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
+    if (initializes)
+        semantics[assigned].c = 1;
     return statement_node(semantic_kind::expression_statement, at, assigned);
 }
 
