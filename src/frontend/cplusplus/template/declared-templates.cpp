@@ -57,7 +57,7 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
             /* [temp.mem.func]/1: "A member function of a class template
                may be defined outside of the class template definition in
                which it is declared." */
-            if (out_of_class_member(f))
+            if (out_of_class_member(f) || out_of_class_member_class_function(f))
                 return member_definition_of_template(t, f);
             if (SyntaxRef nested = out_of_class_nested(f))
                 if (entity_index c = plain_class_nominated(nested))
@@ -1108,6 +1108,14 @@ analysis_result semantic_analysis::template_id_arguments(
 {
     const function_template ft = function_templates[ct - 1];
     uint32_t count = ft.parameter_count;
+    /* [temp.inst]/2: the class a nested-name-specifier names is complete;
+       a specialization named in its template-arguments
+       (And<B, E<U...>>::value) is only named */
+    uint32_t complete_needed = require_complete_class;
+    if (nested_template_id)
+        complete_needed = 0;
+    nested_template_id = false;
+    scoped_value<uint32_t> complete(require_complete_class, complete_needed);
     /* [temp.arg]/1: "When the parameter declared by the template is a
        template parameter pack, it will correspond to zero or more
        template-arguments": the last parameter's, the arguments from its
@@ -1303,6 +1311,10 @@ bool semantic_analysis::equivalent_template(const function_template &f,
         !same_template_parameters(first, f.first_parameter, count) ||
         !same_constraints(f.declaration, n))
         return false;
+    /* two definitions: [impl.clang] clang reports a redefinition; analysis
+       does not claim it for a non-type parameter (a refusal holds the name) */
+    bool both_defined = f.definition && n.size() &&
+                        n[n.size() - 1].is(syntax_kind::function_definition);
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < count; i++) {
@@ -1329,6 +1341,15 @@ bool semantic_analysis::equivalent_template(const function_template &f,
                     el.count != UINT32_MAX || el.template_entity != pe)
                     return false;
             }
+        } else if ((f.friend_class || friend_allowed || !both_defined) &&
+                   entity_table[pe].kind != entity_kind::typedef_name &&
+                   values[i].kind == template_argument::kind_t::value &&
+                   values[i].template_entity) {
+            /* a friend template's non-type parameter: the argument is the
+               parameter itself, value-dependent (elsewhere the equivalence
+               of such templates is not claimed) */
+            if (values[i].template_entity != pe)
+                return false;
         } else if (entity_table[pe].kind != entity_kind::typedef_name ||
                    !(values[i].type == entity_table[pe].type)) {
             return false;

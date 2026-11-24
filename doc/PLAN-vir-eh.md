@@ -148,7 +148,7 @@ the back end without it:
 | E0 | This plan reviewed; clang's output studied on 20 small cases (`-fexceptions` C cleanups, C++ try/catch/cleanup, `noexcept`), notes in `RESEARCH-eh.md` | Plan merged |
 | E1 | `-fexceptions` for C as clang (`__EXCEPTIONS`, unwind tables forced on); `ast_builder_exceptions_ready`; C's cleanup variables run on unwind through x86-64's direct emitter; VIR refuses such functions (`exceptions`) so they fall back | `cleanup_unwind.c` at -O1/-O2/-O3 in `vcc-x86.py`; suites unchanged |
 | E2 | Direct emitter, arm64: calls bracketed with call-site records, pads, resume; `.gcc_except_table`; personality in `.eh_frame` (cleanups; try/catch with E3) | `bench/vcc-eh.py` passes at `-O1` under qemu; LSDA byte-identical to clang -O0's on the cases where call sites match; `vcc-cfi.py` unchanged without `-fexceptions` |
-| E3 | Direct emitter, both targets: cleanups exist (E1, E2); add try/catch and the type table (deferred to E8: nothing produces a try/catch before the C++ front end does) | `vcc-eh.py --target x86_64-linux-gnu` at `-O1` |
+| E3 | Direct emitter, both targets, and VIR: try/catch (catch scopes on the cleanup tree, `ast_builder_try`) and the type table | `vcc-eh.py` at `-O0`..`-O3`, both targets |
 | E4 | VIR format: `invoke`, `VB_LPAD`/`landingpad`, `resume`, `ehtypeid`, `VF_EH`, personality; text form, verifier rules (no interpreter: VIR has none yet) | `bench/vir-test.py` with the new cases and bad units; mutation run clean |
 | E5 | VIR builder (the walker's second instantiation) and the passes' rules above; the allocator's rule for values live into a pad | VIR builds every `vcc-eh.py` function (`-fvir-stats`: no `eh` refusals); `-fvir-verify -fvir-check` clean |
 | E6 | VIR lowering, arm64 then x86-64; call-site table after the record passes | `vcc-eh.py` at `-O2`/`-O3`, both targets; C suites unchanged at -O1/-O2/-O3 (`vcc-same.py` without `-fexceptions`) |
@@ -213,9 +213,50 @@ at E2 (needs clang++ and qemu, which CI has).
   vcc-cfi 1636/1636.  Cost: a function of such a TU reserves 8 bytes for
   the exception even without cleanups.  Left: try/catch and the type
   table (E3, both targets), the LSDA against clang's.
-- E3 (2026-11-23): deferred to E8, by decision: try/catch needs a node of
-  C's AST that only the C++ front end would produce, and its analysis of
-  `try` is not written (`[except.pre]` refused).
+- E3 (2026-11-24): done, both targets, direct emitter and VIR.  Not a new
+  node: a *catch scope* is a variable (a `char` the builder declares) whose
+  attributes carry the handlers (`attrs.catch_list`/`catch_count`: the
+  exception variable, then (`_ZTI` symbol or 0, label) pairs); it sits on
+  the walker's cleanup stack and node tree, so a call in a try body gets
+  the pads of the cleanups between it and the scope, a scope runs nothing
+  on the normal path, and `goto`/`break`/`return` need nothing new.  The
+  C++ lowering calls `ast_builder_try(cc, body, exception, handlers, n)`
+  (`include/frontend/c/ast-builder.h`): `exception` is a `void *` local
+  the builder declares in the statement's block, set to the unwinder's
+  pointer when a handler starts; each handler's `body` calls
+  `__cxa_begin_catch(exception)` itself and keeps `__cxa_end_catch` on every
+  exit, also on unwind, by a cleanup variable whose function is
+  `ast_builder_end_catch_function` (a handler that throws then unwinds
+  through it; the scope does not cover its own handlers).  Test hook in C:
+  `char s __attribute__((vcc_catch(exception, _ZTIx, &&label, 0, &&any)))`.
+  Pads: the unwinder's x0/x1 or rax/rdx stored (exception, selector); a
+  catch node's dispatch copies the exception into the variable and
+  compares the selector with each handler's type table index
+  (`a64_eh_dispatch`, `x64_eh_dispatch`; VIR: `ehtypeid` + `icmp` in the
+  node's run block, `virbuild_eh_pads`).  `codegen/eh-table.cpp` is the
+  one LSDA module: type table in first-use order (indirect pc-relative
+  sdata4, cells in `.data.rel.ro`), an action chain per call site (catch
+  types innermost first up to the first `catch (...)`, then a filter-0
+  record if a cleanup runs on the way), `codegen_eh_vir_action` for VIR's
+  landingpad clauses.  VIR: landingpad clauses from the chain, selector
+  variable, `proj 1` in x1/rdx, `ehtypeid` lowered to the index,
+  catch-all pads no longer special.  Found on the way: C++'s personality
+  routine terminates at an address in no call site, and `_Unwind_Resume`
+  (and the terminate pad's calls) were in none on arm64 and in VIR's
+  lowerings (C's personality had let them pass); they are call sites
+  without a pad now, as clang's.  A TU that gets a try block after C
+  cleanups switches to `__gxx_personality_v0`.  Tests:
+  `src/test/eh/catch_scope.c` (+ `.cpp`; vcc only, `vcc-only` on the first
+  line skips clang's build of the C half): basic, pass-through with
+  cleanups, nested scopes, a handler that throws; `vcc-eh.py` 40/40
+  (two targets, -O0..3), `-fvir-verify -fvir-check` clean.  Not done:
+  the LSDA is checked by running, not byte for byte against clang's (call
+  site ranges differ with our code; clang's `catch (T)` tables for the
+  same C++ would need the C++ front end); a function where a promoted
+  local is written in a try body and read in a handler is refused by VIR
+  (`exceptions`: a landing pad would take a block parameter) and falls
+  back to the direct emitter, which is correct (the first case:
+  `rethrow` in `catch_scope.c`); E7's slot promotion rule is the fix.
 - E4 (2026-11-23): done.  SPEC-vir.md 8.8 (the constructs, their text form,
   effects), rules E1-E4 and the additions to A1, A3, D1 in section 12;
   `invoke` (90), `resume` (91), `landingpad` (92), `ehtypeid` (93),
@@ -284,3 +325,41 @@ at E2 (needs clang++ and qemu, which CI has).
   tables on origin/main too (E1 makes `-fexceptions` turn them on); no
   nounwind inference, so landing pads are kept for calls clang proves
   cannot throw.
+- E8 (2026-11-24): the C++ front end's exceptions, first part.  Analysis
+  (`exception/try-block.cpp`, `expression/throw-expression.cpp`):
+  `try_statement`, `handler` (the exception-declaration's variable declared
+  and initialized from an `exception_object` lvalue, [except.handle]/10; its
+  type adjusted as /3; a declaration of an abstract class and a class type
+  by value without a name are refused), `throw_exception` (the exception
+  object copy-initialized into `*allocated`, [except.throw]/3; an implicitly
+  movable operand declared in the innermost try-block is an xvalue,
+  [class.copy.elision]/3), `throw;`.  A try-block holding a label is not
+  analysed.  Lowering (`lower/exceptions.cpp`): `__cxa_allocate_exception`,
+  the initialization, `__cxa_throw` with the type's `_ZTI` and destructor;
+  `ast_builder_try` with a handler that is `__cxa_begin_catch`, the
+  variable, the body, `__cxa_end_catch` by a cleanup variable;
+  `catch (...)`; `throw;` is `__cxa_rethrow`.  Destructors on unwind: an
+  automatic object with a destructor has a guard, a `void *` cleanup
+  variable holding its address whose function (`.Lcxx_unwind`, an
+  assembler-local symbol, one per destructor) destroys it; the lowering
+  nulls the guard where it destroys the object itself, so the normal
+  paths run the function without effect.  Arrays, temporaries, parameters,
+  members and bases of a constructor that throws are not guarded.  Back
+  ends: a function with a try-block keeps its locals in memory (the direct
+  emitter's allocators know no edge from a call to a pad), and a function
+  with a try-block or, with exceptions, a cleanup variable is not inlined
+  (the pads are made at the function's end: an inlined copy's labels and
+  slots are out of scope there); x86-64's VIR lowering puts a landing
+  pad's mark before the block's edits (an allocator spill ahead of it was
+  skipped by the unwinder: wrong values after a catch at -O2); arm64's VIR
+  refuses a landing pad's selector, so a function with a typed handler runs
+  in the direct emitter (an invoke's result live into a pad lost its move
+  into the callee-saved register).  Tests: `src/test/eh/cxx_throw_catch.cpp`
+  and `cxx_exceptions.cpp` (by value, reference, pointer, base class,
+  `catch (...)`, rethrow, destructors while unwinding, nested try, a handler
+  that throws, a handler that continues a loop), built whole by vcc and
+  clang++ and run by `bench/vcc-eh.py`: 56/56 (both targets, -O0..3).
+  Not done: function-try-blocks, `noexcept` terminate, exception
+  specifications, `std::uncaught_exceptions`-style bookkeeping, constructors
+  that throw (members and bases destroyed), temporaries on unwind.
+

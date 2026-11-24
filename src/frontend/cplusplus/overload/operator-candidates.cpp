@@ -385,8 +385,12 @@ analysis_result semantic_analysis::overloaded_operator(
         if (found.unknown && !found.ambiguous &&
             function_template_of(found.unknown_entity))
             held_names.append(found.unknown_entity);
-        else if (found.unknown || found.ambiguous)
-            return not_supported(n, "over.match.oper");
+        else if (found.unknown || found.ambiguous) {
+            analysis_result refused = not_supported(n, "over.match.oper");
+            if (found.unknown_entity)
+                last_unsupported_held_by(found.unknown_entity);
+            return refused;
+        }
         owned_array<entity_index> set;
         if (found.entity) {
             const entity &x = entity_table[found.entity];
@@ -396,8 +400,24 @@ analysis_result semantic_analysis::overloaded_operator(
             set.append(found.entity);
         }
         owned_array<qualified_type> types;
-        for (const expression_meaning &e : operands)
+        for (const expression_meaning &e : operands) {
+            /* [basic.lookup.argdep]/3: an overload set named with a
+               template-id: the function templates' parameter types are
+               not looked at, only the template-arguments' */
+            if (e.entity &&
+                entity_table[e.entity].kind == entity_kind::function &&
+                entity_table[e.entity].instantiation) {
+                const instantiation_record &q =
+                    instantiations[entity_table[e.entity].instantiation - 1];
+                for (uint32_t i = 0; i < q.argument_count; i++)
+                    if (template_arguments[q.first_argument + i].kind ==
+                        template_argument::kind_t::type)
+                        types.append(
+                            template_arguments[q.first_argument + i].type);
+                continue;
+            }
             types.append(e.type);
+        }
         entity_index known = 0;
         if (!held_names.empty())
             known = held_names[0];
@@ -582,12 +602,34 @@ analysis_result semantic_analysis::overloaded_operator(
                     declares_move = true;
             /* a copy assignment operator declared defaulted has no
                candidate here, and is no implicit one */
-            if (!declares_move || entity_table[c].defaulted_copy_assignment ||
-                operands.size() != 2 ||
-                operands[1].type.unqualified() !=
-                    operands[0].type.unqualified())
-                return not_supported(n, "class.copy.assign");
-            deleted_copy = true;
+            bool implicit_viable = true;
+            if (!declares_move && !entity_table[c].defaulted_copy_assignment &&
+                !entity_table[c].defaulted_move_assignment &&
+                operands.size() == 2 &&
+                type_table[operands[1].type.unqualified()].entity == 0) {
+                /* [over.match.viable]/4: the implicit X& operator=(const
+                   X&) (and X&&) is no candidate when the right operand, of
+                   no class type, has no implicit conversion sequence to
+                   the parameter ([over.best.ics]): one operator= taking
+                   another type is the only candidate */
+                qualified_type parameter = qualified_type::make(
+                    type_table.lvalue_reference_to(qualified_type::make(
+                        entity_table[c].type.unqualified(), cv_const)),
+                    cv_none);
+                conversion_sequence s =
+                    implicit_conversion_sequence(operands[1], parameter, true);
+                if (s.kind == conversion_sequence::form::bad)
+                    implicit_viable = false;
+            }
+            if (implicit_viable) {
+                if (!declares_move ||
+                    entity_table[c].defaulted_copy_assignment ||
+                    operands.size() != 2 ||
+                    operands[1].type.unqualified() !=
+                        operands[0].type.unqualified())
+                    return not_supported(n, "class.copy.assign");
+                deleted_copy = true;
+            }
         }
     }
     /* [over.match.oper]/2, Table 15: a@ is "(a).operator@ (0)" or
@@ -818,7 +860,7 @@ analysis_result semantic_analysis::overloaded_operator(
         call_syntax.append(ordered_syntax[i]);
     }
     VTRY_SET(r, call_with(n, callee, x.type, object, member, call_syntax,
-                          call_arguments, m));
+                          call_arguments, m, true));
     if (from_three_way) {
         /* /8: "If a rewritten operator<=> candidate is selected by overload
            resolution for an operator @, x @ y is interpreted as 0 @ (y <=>

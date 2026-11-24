@@ -359,7 +359,17 @@ struct tree_checker {
             prvalue(n, node.a, "operand");
             break;
         case semantic_kind::throw_exception:
-            child(n, node.a, tree_sort::expression, true, "operand");
+            child(n, node.a, tree_sort::initializer, true, "initialization");
+            break;
+        case semantic_kind::exception_object:
+            break;
+        case semantic_kind::try_statement:
+            child(n, node.a, tree_sort::statement, false, "compound-statement");
+            list(n, tree_sort::statement, "handler");
+            break;
+        case semantic_kind::handler:
+            child(n, node.a, tree_sort::statement, true, "declaration");
+            child(n, node.c, tree_sort::statement, false, "compound-statement");
             break;
         case semantic_kind::block:
         case semantic_kind::declarations:

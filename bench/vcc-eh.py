@@ -3,7 +3,7 @@
 
   bench/vcc-eh.py [-j N] [-v] [-O LEVELS] [--target aarch64|x86_64] [PAT]
 
-Every src/test/eh/NAME.c is a test: built by vcc (`vpp -c -fexceptions`) and,
+Every src/test/eh/NAME.c is a test (cxx_NAME.cpp: a C++ program built whole by vcc and by clang++): built by vcc (`vpp -c -fexceptions`) and,
 as the reference, by clang; NAME.cpp next to it, when there is one, is built
 by clang++ (the C++ half: throws, catches, main).  Linked by clang++ against
 glibc and libstdc++ and run: natively on an x86-64 host, under qemu-aarch64
@@ -103,13 +103,20 @@ def run_one(job):
     src = f'{T}/{name}.c'
     cpp = f'{T}/{name}.cpp'
     objs = []
+    if name.startswith('cxx_'):
+        return run_cxx(job, wd, cpp)
     if os.path.exists(cpp):
         rc, err = sh([CXX, f'--target={triple}', '-O1', '-c', cpp, '-o', f'{wd}/cxx.o'])
         if rc:
             return job, 'broken', 'clang++: ' + err.strip().split('\n')[0]
         objs.append(f'{wd}/cxx.o')
+    # a test whose first line says "vcc-only" uses a vcc extension: no clang build of the C half
+    with open(src) as f:
+        vcc_only = 'vcc-only' in f.readline()
     for side, cc in (('clang', [CL, f'--target={triple}', f'-O{level}']),
                      ('vcc', [VPP, f'--target={triple}', f'-O{level}'] + inc)):
+        if side == 'clang' and vcc_only:
+            continue
         rc, err = sh(cc + ['-fexceptions', '-c', src, '-o', f'{wd}/{side}.o'])
         if rc:
             if side == 'clang':
@@ -130,6 +137,27 @@ def run_one(job):
     return job, 'pass', ''
 
 
+def run_cxx(job, wd, src):
+    """a C++ test (cxx_NAME.cpp): the whole program compiled by vcc's C++ front end and by clang++, each linked
+    and run; exit 0 is a pass"""
+    name, (tname, triple, inc, link, run), level = job
+    for side, cc in (('clang', [CXX, f'--target={triple}', f'-O{level}', '-std=c++20']),
+                     ('vcc', [VPP, f'--target={triple}', f'-O{level}', '-x', 'c++', '-std=c++20'])):
+        rc, err = sh(cc + ['-fexceptions', '-c', src, '-o', f'{wd}/{side}.o'])
+        if rc:
+            kind = 'broken' if side == 'clang' else 'fail'
+            return job, kind, f'{side}: ' + (err.strip().split('\n') or [''])[0]
+        rc, err = sh([CXX, f'--target={triple}', f'{wd}/{side}.o'] + link + ['-o', f'{wd}/{side}'])
+        if rc:
+            kind = 'broken' if side == 'clang' else 'fail'
+            return job, kind, 'link: ' + err.strip().split('\n')[0]
+        rc, err = sh(run + [f'{wd}/{side}'])
+        if rc != 0:
+            return job, ('broken' if side == 'clang' else 'fail'), f'{side} exit {rc}'
+    shutil.rmtree(wd, ignore_errors=True)
+    return job, 'pass', ''
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('-j', type=int, default=os.cpu_count())
@@ -138,8 +166,9 @@ def main():
     ap.add_argument('--target', choices=['aarch64', 'x86_64'])
     ap.add_argument('pattern', nargs='?')
     a = ap.parse_args()
-    tests = sorted(f[:-2] for f in os.listdir(T) if f.endswith('.c') and
-                   (not a.pattern or a.pattern in f))
+    tests = sorted([f[:-2] for f in os.listdir(T) if f.endswith('.c')] +
+                   [f[:-4] for f in os.listdir(T) if f.startswith('cxx_') and f.endswith('.cpp')])
+    tests = [t for t in tests if not a.pattern or a.pattern in t]
     tgts, skipped = targets(a.target)
     for name, why in skipped:
         print(f'skip {name}: {why}')

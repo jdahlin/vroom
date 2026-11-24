@@ -122,6 +122,8 @@ void c_lowering::initialized_variable(const semantic_node &n,
         r.symbol = symbol(e, n.at);
         r.object_type = x.type;
         r.owner = e;
+        if (x.automatic && element_count(x.type, object) == 0)
+            r.guard = guard_object(r.symbol, x.type, destructor, n.at, out);
         live.append(r);
     }
 }
@@ -673,6 +675,8 @@ uint32_t c_lowering::statement(uint32_t index)
     }
     case semantic_kind::null_statement:
         return c_statement(c, 0);
+    case semantic_kind::try_statement:
+        return try_statement(n);
     case semantic_kind::gnu_asm_statement:
         return asm_statement(n);
     case semantic_kind::declaration_statement: {

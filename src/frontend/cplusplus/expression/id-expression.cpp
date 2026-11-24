@@ -1038,6 +1038,13 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
     owned_array<uint32_t> group;
     if (held)
         function_template_overloads(held, group);
+    /* ([namespace.memdef]/3: a friend declaration is not found by an
+       unqualified lookup) */
+    owned_array<uint32_t> found_templates;
+    for (uint32_t t : group)
+        if (!function_templates[t - 1].friend_declaration)
+            found_templates.append(t);
+    group = static_cast<owned_array<uint32_t> &&>(found_templates);
     if (group.size() != 1)
         return not_supported(n, "over.over");
     uint32_t ft = group[0];

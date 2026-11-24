@@ -61,36 +61,10 @@ static bool x64_vir_carry_flags_hold(x64_vir_context *L, uint32_t v)
 
 /* ---- exceptions (SPEC-vir.md 8.8): the walker's table state (arch/x64/codegen/eh.cpp prints it) ---- */
 
-/* landing pad b catches everything: the terminate pad */
-static bool x64_vir_landing_pad_catches_all(const vir_function *f, uint32_t b)
-{
-    const vir_block *k = &f->blocks[b];
-
-    for (uint32_t i = k->first; i < k->first + k->insn_count; i++) {
-        const vir_insn *x = &f->insns[i];
-
-        if (vir_opcode_is_constant(x->op))
-            continue;
-        if (x->op != VIR_OP_LANDINGPAD)
-            return false;
-        for (uint32_t c = 0; c < f->extra[x->a + 1]; c++)
-            if (!f->extra[x->a + 2 + c])
-                return true;
-        return false;
-    }
-    return false;
-}
-
-/* the walker's node standing for landing pad b: b + 1, or UINT32_MAX for the catch-all pad */
+/* the walker's node standing for landing pad b: b + 1 */
 static uint32_t x64_vir_eh_pad_node(x64_vir_context *L, uint32_t b)
 {
-    if (!x64_vir_landing_pad_catches_all(L->function, b))
-        return b + 1;
-    if (L->eh_catch_all_block != VIR_BLOCK_NONE &&
-        L->eh_catch_all_block != b) /* (the table has one catch-all record) */
-        x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
-    L->eh_catch_all_block = b;
-    return UINT32_MAX;
+    return b + 1;
 }
 
 /* the mark of landing pad b (node from x64_vir_eh_pad_node), made on first use */
@@ -100,14 +74,19 @@ static uint32_t x64_vir_eh_pad_mark(x64_vir_context *L, uint32_t b,
     walk_state *W = L->context->walk_state;
 
     (void)b;
-    if (node == UINT32_MAX) {
-        if (!W->eh_term)
-            W->eh_term = ++W->eh_marks;
-        return W->eh_term;
-    }
-    if (!W->eh_pad[node])
+    if (!W->eh_pad[node]) {
         W->eh_pad[node] = ++W->eh_marks;
+        W->eh_action[node] =
+            codegen_eh_vir_action(L->context, &W->eh_lsda, L->function, b);
+    }
     return W->eh_pad[node];
+}
+
+/* the pad's mark, before any edit of the block: the unwinder enters here, rax the exception, rdx the selector */
+VPRIV void x64_vir_landing_pad_enter(x64_vir_context *L, uint32_t b)
+{
+    x64_record_emit(L->context, X64_OP_EHMARK)->label =
+        x64_vir_eh_pad_mark(L, b, x64_vir_eh_pad_node(L, b));
 }
 
 static uint32_t x64_vir_eh_site_begin(x64_vir_context *L, const vir_insn *in)
@@ -496,6 +475,12 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     case VIR_OP_CRC32C64:
         x64_record_emit_three_registers(e, X64_OP_CRC32, 8, d, a, c);
         return;
+    case VIR_OP_EHTYPEID: /* the type's index in the function's type table */
+        x64_record_emit_three_registers(e, X64_OP_MOVI, 4, d, X64_REGISTER_NONE,
+                                        X64_REGISTER_NONE)
+            ->immediate = codegen_eh_type_index(e, &e->walk_state->eh_lsda,
+                                                CODEGEN_REFERENCE_INDEX(i->a));
+        return;
     case VIR_OP_PROJ:
     case VIR_OP_NOP:
     case VIR_OP_BPARAM:
@@ -511,9 +496,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         }
         x64_record_emit(e, X64_OP_REP)->condition = i->op == VIR_OP_MEMSET;
         return;
-    case VIR_OP_LANDINGPAD: /* the pad's mark: the unwinder enters here, rax the exception, rdx the selector */
-        x64_record_emit(e, X64_OP_EHMARK)->label =
-            x64_vir_eh_pad_mark(L, b, x64_vir_eh_pad_node(L, b));
+    case VIR_OP_LANDINGPAD: /* (its mark is the block's first: x64_vir_landing_pad_enter) */
         return;
     case VIR_OP_RESUME: { /* _Unwind_Resume(exception) */
         cc *c = e->compile_context;
@@ -525,7 +508,21 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         if (a != RDI)
             x64_mov(e, RDI, a);
         codegen_reference_note(e, ref);
-        x64_record_emit(e, X64_OP_CALL)->reference = ref;
+        {
+            /* (a call site without a pad: C++'s personality routine terminates at an address in none) */
+            walk_state *W = e->walk_state;
+            uint32_t k = W->eh_nsites;
+
+            if (W->eh_nsites >= WALK_EH_SITES)
+                x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+            W->eh_nsites++;
+            W->eh_sites[k].node = 0;
+            W->eh_sites[k].begin = ++W->eh_marks;
+            x64_record_emit(e, X64_OP_EHMARK)->label = W->eh_sites[k].begin;
+            x64_record_emit(e, X64_OP_CALL)->reference = ref;
+            W->eh_sites[k].end = ++W->eh_marks;
+            x64_record_emit(e, X64_OP_EHMARK)->label = W->eh_sites[k].end;
+        }
         x64_record_emit(e, X64_OP_UD2);
         e->has_calls = true;
         return;

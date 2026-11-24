@@ -634,6 +634,10 @@ bool semantic_analysis::associated_with(
         entity_index c = record.entity;
         if (entity_table[c].kind != entity_kind::class_type)
             return false;
+        /* ([temp.inst]/1: its bases and friends are those of the specialization
+           once defined: one named where no complete type was needed is
+           defined now) */
+        require_complete(c);
         /* the class and its direct and indirect base classes, each once */
         owned_array<entity_index> work;
         work.append(c);
@@ -902,8 +906,10 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                 uint32_t declaring = declaring_specializations;
                 declaring_specializations = 0;
                 require_complete_class++;
+                nested_template_id = true;
                 analysis_result r =
                     template_type(part.name, scope.entity, qualified, named);
+                nested_template_id = false;
                 require_complete_class--;
                 declaring_specializations = declaring;
                 if (r != analysis_result::well_formed)

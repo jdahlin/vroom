@@ -24,6 +24,15 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
         if (r.kind != scope_record::object)
             continue;
         uint32_t destroyed = destruction(r.symbol, r.object_type, at);
+        if (destroyed && r.guard) {
+            /* the lowering destroys it here: the unwinding cleanup is off */
+            ast_qualified_type vp = pointer_to(v);
+            out.append(c_statement(
+                c, assign(vp, c_variable(c, r.guard, vp),
+                          cast(ast_builder_integer(
+                                   c, ast_builder_type_basic(AST_TYPE_LONG), 0),
+                               vp, AST_CAST_INTEGER_TO_POINTER))));
+        }
         if (destroyed)
             out.append(if_constructed(destroyed, r.flag));
     }

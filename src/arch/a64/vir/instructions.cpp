@@ -48,26 +48,6 @@ static int a64_vir_integer_compare_flags(a64_vir_context *L, const vir_insn *in,
                                                                          in)];
 }
 
-/* the landing pad b catches everything (its landingpad has a catchall clause): the terminate pad */
-static bool a64_vir_landing_pad_catches_all(const vir_function *f, uint32_t b)
-{
-    const vir_block *k = &f->blocks[b];
-
-    for (uint32_t i = k->first; i < k->first + k->insn_count; i++) {
-        const vir_insn *x = &f->insns[i];
-
-        if (vir_opcode_is_constant(x->op))
-            continue;
-        if (x->op != VIR_OP_LANDINGPAD)
-            return false;
-        for (uint32_t c = 0; c < f->extra[x->a + 1]; c++)
-            if (!f->extra[x->a + 2 + c])
-                return true;
-        return false;
-    }
-    return false;
-}
-
 VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
                               uint8_t res)
 {
@@ -595,8 +575,9 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
             a64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
         }
         uint32_t site = a64_eh_site_begin(
-            e, a64_eh_pad_node(e, L->labels[unwind],
-                               a64_vir_landing_pad_catches_all(f, unwind)));
+            e,
+            a64_eh_pad_node(e, L->labels[unwind],
+                            codegen_eh_vir_action(e, &e->eh_lsda, f, unwind)));
 
         a64_vir_call_lower(L, b, i, in);
         a64_eh_call_end(e, site);
@@ -626,10 +607,26 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
     case VIR_OP_LANDINGPAD: /* (its label is the block's: entered with x0 the exception, x1 the selector) */
         return;
     case VIR_OP_PROJ:
-        if (f->insns[in->a].op != VIR_OP_LANDINGPAD || in->b != 0)
+        if (f->insns[in->a].op != VIR_OP_LANDINGPAD || in->b > 1)
             a64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
-        if (res != VIR_REGISTER_NONE && rd != 0)
-            a64_record_emit_move(e, 1, rd, 0);
+        /* a try block's selector: refused until an invoke's normal edge keeps its moves here (a value defined
+           by the invoke's result and live into a pad lost its move to the callee-saved register,
+           doc/PLAN-vir-eh.md E8); the direct emitter runs the function */
+        if (in->b == 1) {
+            snprintf(L->context->vir_builder->failure_detail,
+                     sizeof L->context->vir_builder->failure_detail,
+                     "a try block's selector");
+            a64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+        }
+        /* (the allocator put it in x0, the exception, or x1, the selector) */
+        if (res != VIR_REGISTER_NONE && rd != (int)in->b)
+            a64_record_emit_move(e, 1, rd, (int)in->b);
+        return;
+    case VIR_OP_EHTYPEID: /* the type's index in the function's type table */
+        a64_record_emit_move_immediate(
+            e, 0, rd,
+            (int64_t)codegen_eh_type_index(e, &e->eh_lsda,
+                                           CODEGEN_REFERENCE_INDEX(in->a)));
         return;
     case VIR_OP_RESUME: { /* _Unwind_Resume(exception) */
         cc *c = e->compile_context;
@@ -643,7 +640,12 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
             a64_record_emit_move(e, 1, 0, r);
         e->has_calls = true;
         codegen_reference_note(e, ref);
+        /* (a call site without a pad: C++'s personality routine terminates at an address in none) */
+        uint32_t site = e->eh_function ? a64_eh_site_begin(e, 0) : 0;
+
         a64_record_emit(e, A64_OP_BL)->reference = ref;
+        if (site)
+            a64_eh_call_end(e, site);
         a64_record_emit(e, A64_OP_BRK)->immediate = 1;
         e->is_reachable = false;
         return;

@@ -19,6 +19,8 @@ static void vx_target_block_begin(void *ctx, uint32_t b)
     L->memory_value = L->memory_skip = L->scaled_value = L->scaled_skip =
         L->big_endian_value = L->test_value = L->compare_memory_value = 0;
     L->carry_value = 0;
+    if (L->function->blocks[b].flags & VIR_BLOCK_FLAG_LPAD)
+        x64_vir_landing_pad_enter(L, b);
 }
 
 static void vx_target_block_enter(void *ctx, uint32_t b)
@@ -323,9 +325,10 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         walk_state *W = e->walk_state;
 
         W->eh_nsites = W->eh_marks = W->eh_term = 0;
+        W->eh_vir = 1;
+        memset(&W->eh_lsda, 0, sizeof W->eh_lsda);
         W->eh_overflow = W->eh_in_pads = 0;
         W->eh_fn = (f->flags & VIR_FUNCTION_FLAG_EH) != 0;
-        L.eh_catch_all_block = VIR_BLOCK_NONE;
         if (W->eh_fn && f->block_count + 1 >= WALK_CLEANUP_MAX) {
             *why = VIRBUILD_FAILURE(exceptions_lowering);
             e->vir_try = false;

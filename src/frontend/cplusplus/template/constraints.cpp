@@ -687,6 +687,17 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         constraint = trailing_constraint(ft.declaration);
         is_trailing = static_cast<bool>(constraint);
     }
+    /* a generic lambda's requires-clause after its parameters
+       ([expr.prim.lambda]/1) is a trailing one */
+    SyntaxElement lambda_declarator;
+    if (constraint && ft.declaration.is(syntax_kind::lambda_expression)) {
+        lambda_constraint(ft.declaration, &is_trailing);
+        for (uint32_t i = 1; i + 1 < ft.declaration.size(); i++)
+            if (ft.declaration[i].is(syntax_kind::lambda_declarator))
+                lambda_declarator = ft.declaration[i];
+        if (!lambda_declarator)
+            is_trailing = false;
+    }
     /* [temp.constr.decl]/3: the associated constraints are the
        conjunction of the type-constraints' immediately-declared
        constraints, in order, then the requires-clause's
@@ -750,7 +761,30 @@ analysis_result semantic_analysis::template_constraints_satisfied(
             return not_supported(constraint, "temp.constr");
     constraints_in_progress.append(key);
     entity_index constraint_scope = scope;
-    if (is_trailing && ft.declarator) {
+    if (is_trailing && lambda_declarator) {
+        /* [basic.scope.param]/1: the lambda-declarator's parameters are in
+           scope in its requires-clause */
+        function_parameter_guard saved(*this);
+        scoped_value<entity_index> saved_scope(current_scope, scope);
+        substituting++;
+        substitution_mark mark = mark_substitution();
+        qualified_type type = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+        analysis_result pr = function(lambda_declarator, type);
+        substituting--;
+        if (pr == analysis_result::well_formed) {
+            open_parameter_scope();
+            constraint_scope = current_scope;
+        } else if (pr == analysis_result::ill_formed &&
+                   undo_substitution(mark)) {
+            constraints_in_progress.resize(constraints_in_progress.size() - 1);
+            satisfied = false;
+            return analysis_result::well_formed;
+        } else {
+            constraints_in_progress.resize(constraints_in_progress.size() - 1);
+            return pr;
+        }
+    } else if (is_trailing && ft.declarator) {
         /* [basic.scope.param]/1: function parameters are in scope in a
            trailing requires-clause */
         function_parameter_guard saved(*this);

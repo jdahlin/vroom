@@ -49,7 +49,9 @@ typedef struct attrs { /* the attributes of one declaration */
     uint32_t aligned;    /* bytes; 0: none */
     uint32_t section, alias, asmname; /* string index + 1, 0: none */
     uint32_t cleanup;                 /* sym */
-    uint32_t mode;    /* 0, or the integer type kind from mode() */
+    uint32_t catch_list,
+        catch_count; /* a catch scope (try block): lists[catch_list] the exception variable, then catch_count (type symbol or 0, label) pairs; cleanup is then that variable (never called) */
+    uint32_t mode;   /* 0, or the integer type kind from mode() */
     uint32_t vecsize; /* vector_size(n) bytes, 0: none */
     uint32_t extvec;  /* ext_vector_type(n) elements, 0: none */
     uint32_t depr;    /* deprecated: the attribute name's location, 0: none */

@@ -526,6 +526,7 @@ typedef struct
     int eh; /* exceptions (C++ unless -fno-exceptions, C with -fexceptions; x86-64 ELF, cfi): cleanup
 				   variables run when an exception unwinds their scope (landing pads, .gcc_except_table);
 				   ast_builder_exceptions_ready makes the run-time symbols they need */
+    int rtti; /* C++: -frtti (clang's default): the type_info objects of [abi:rtti] and the virtual tables' pointers to them */
     int no_seh; /* Windows: -fno-asynchronous-unwind-tables without -funwind-tables: no .seh_* (no .pdata/.xdata) */
     const char *dbg_dir,
         *dbg_name; /* the compilation directory and the main file, as named */

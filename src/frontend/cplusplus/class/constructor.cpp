@@ -1643,12 +1643,12 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     arguments[0].category == value_category::prvalue &&
                     arguments[0].type.unqualified() == type.unqualified();
                 initialized_value value;
-                if (elided && !trivial_class(record.entity)) {
+                if (elided) {
                     /* [class.copy.elision]/1.3 ([dcl.init]/17.6.1): the
                        prvalue initializes the member itself, whatever its
                        copy and move constructors do (as a variable's
-                       initializer, initialize_with); only a class that has
-                       a constructor reaches here */
+                       initializer, initialize_with), also for a trivially
+                       copyable class with a user-provided constructor */
                     VTRY(rv, initialize_with(item, arguments[0], type, true,
                                              false, value));
                     set_slot(
@@ -1768,6 +1768,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 union_default = i;
                 union_member_designated = true;
             }
+    /* (9.2) a variant member that is neither designated nor has a default
+       member initializer: "no initialization is performed" */
+    if (entity_table[c].union_)
+        union_member_designated = true;
     for (size_t i = 0; i < subobjects.size(); i++) {
         if (initialized[i])
             continue;
@@ -2232,12 +2236,39 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         }
         if (copy_usable)
             copy_ok = true;
+        /* [class.default.ctor]/2.1: a constructor template whose template
+           arguments all have defaults and that takes no parameter (libc++'s
+           unique_ptr()) is the subobject's default constructor */
+        if (!default_ok && sub.constructor_templates && !sub.union_) {
+            owned_array<overload_candidate> found;
+            VTRY(probe, constructor_template_candidates(n, k, nullptr, 0, false,
+                                                        found));
+            if (!found.empty())
+                default_ok = true;
+        }
         if (move_seen && !copies_bytes(k))
             move_declared = true;
         /* the subobject's move, by overload resolution on an xvalue: its
            move constructor if it declares one, else its copy constructor */
-        if (!copies_bytes(k) && !(move_seen && move_usable) &&
-            !(!move_seen && copy_usable))
+        /* [over.ics.ref]/3: a const member (unique_ptr const) does not bind
+           to X(X&&)'s parameter, an xvalue of const T selects the copy
+           constructor */
+        bool const_member = false;
+        for (uint32_t j = 0; j < x.member_count; j++) {
+            const entity &mj = entity_table[class_members[x.first_member + j]];
+            if (mj.base_subobject || element_class(mj.type) != k)
+                continue;
+            qualified_type t = mj.type;
+            while (type_table[t.unqualified()].kind == type_kind::array)
+                t = type_table[t.unqualified()].operand;
+            if (t.cv() & cv_const)
+                const_member = true;
+        }
+        bool moves = move_seen && move_usable && !const_member;
+        bool copies = copy_usable;
+        if (!const_member && move_seen)
+            copies = false;
+        if (!copies_bytes(k) && !moves && !copies)
             move_deleted = true;
         /* [class.default.ctor]/2.2: a variant member of a union with a
            default member initializer does not delete the constructor */
@@ -3217,6 +3248,8 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
                                        FunctionBody body)
 {
     SyntaxElement init = body.ctor_initializer();
+    scoped_value<entity_index> deferring(needs_deferred_by, needs_deferred_by);
+    defer_needs_of_instantiated_body(last_declared);
     if (body.defaulted()) {
         /* [dcl.fct.def.default]/1: out-of-class = default for a constructor
            or destructor (e.g. X::X() = default; X::~X() = default;) */

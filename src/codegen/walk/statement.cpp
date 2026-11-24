@@ -208,7 +208,7 @@ static uint32_t walk_label_slot_get(codegen_context *e, uint32_t *generations,
     return labels[i];
 }
 
-static uint32_t walk_user_label_find(codegen_context *e, uint32_t l)
+VPRIV uint32_t walk_user_label_find(codegen_context *e, uint32_t l)
 {
     walk_state *W = e->walk_state;
 
@@ -431,8 +431,11 @@ VPRIV void walk_call_slot_argument(codegen_context *e, uint32_t fn,
 VPRIV void walk_cleanup_call(codegen_context *e, uint32_t s)
 {
     cc *c = e->compile_context;
-    uint32_t fn =
-        codegen_symbol_canonical(c, codegen_symbol_attributes(c, s)->cleanup);
+    uint32_t fn;
+
+    if (codegen_symbol_attributes(c, s)->catch_count)
+        return; /* (a catch scope: nothing to run when its block is left) */
+    fn = codegen_symbol_canonical(c, codegen_symbol_attributes(c, s)->cleanup);
     codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
                         .align = 8,
                         .offset = walk_local_slot(e, s)};
@@ -2211,6 +2214,8 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
 	   landing pads that run the cleanups live there): x86-64's direct emitter, and VIR's invokes and
 	   landing pads (codegen/vir/exceptions.cpp) */
     W->eh_nsites = W->eh_marks = 0, W->eh_in_pads = W->eh_overflow = 0;
+    memset(&W->eh_lsda, 0, sizeof W->eh_lsda);
+    W->eh_vir = 0;
     W->eh_cleanup_limit = INT32_MAX;
     W->eh_fn = e->unit->options->eh && e->unit->options->cfi &&
                W->cleanup_node_count > 0 && c->eh_resume_sym;

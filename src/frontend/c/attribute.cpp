@@ -13,6 +13,7 @@ enum {
     CC_ATTRIBUTE_SECTION,
     CC_ATTRIBUTE_MODE,
     CC_ATTRIBUTE_CLEANUP,
+    CC_ATTRIBUTE_VCC_CATCH,
     CC_ATTRIBUTE_ALIAS,
     CC_ATTRIBUTE_WEAK,
     CC_ATTRIBUTE_USED,
@@ -77,6 +78,7 @@ static const char *const cc_attribute_names[CC_ATTRIBUTE_COUNT] = {
     [CC_ATTRIBUTE_SECTION] = "section",
     [CC_ATTRIBUTE_MODE] = "mode",
     [CC_ATTRIBUTE_CLEANUP] = "cleanup",
+    [CC_ATTRIBUTE_VCC_CATCH] = "vcc_catch",
     [CC_ATTRIBUTE_ALIAS] = "alias",
     [CC_ATTRIBUTE_WEAK] = "weak",
     [CC_ATTRIBUTE_USED] = "used",
@@ -637,6 +639,38 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c,
                 next(c);
                 cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
                 continue;
+            case CC_ATTRIBUTE_VCC_CATCH: {
+                /* vcc_catch(exception, type, &&label, ...): a try block's catch scope (doc/PLAN-vir-eh.md E3), the
+                   test hook for ast_builder_try: the scope of the variable this is on; an unwinding exception
+                   whose type matches `type` (a _ZTI symbol, 0: any) continues at the label with the exception
+                   pointer stored in the variable `exception` (void *) */
+                uint32_t items[1 + 2 * 16], n = 0;
+
+                cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
+                items[n++] = cc_symbol_lookup(c, tok(c)->id);
+                next(c);
+                while (cc_token_accept(c, LEX_TOKEN_COMMA) &&
+                       n + 2 <= 1 + 2 * 16) {
+                    uint32_t ty = 0;
+
+                    if (cc_token_is(c, LEX_TOKEN_IDENTIFIER))
+                        ty = cc_symbol_lookup(c, tok(c)->id);
+                    next(c);
+                    cc_token_expect(c, LEX_TOKEN_COMMA, "','");
+                    cc_token_expect(c, LEX_TOKEN_AMPERSAND_AMPERSAND, "'&&'");
+                    items[n++] = ty;
+                    items[n++] = cc_label_reference(c, tok(c)->id, tok(c)->loc);
+                    next(c);
+                }
+                cc_token_expect(c, LEX_TOKEN_RIGHT_PAREN, "')'");
+                a->catch_list = ast_builder_list(c, items, n);
+                a->catch_count = (n - 1) / 2;
+                a->cleanup = items[0];
+                c->syms[items[0]].flags |=
+                    AST_SYMBOL_FLAG_ADDRESS_TAKEN; /* (the landing pad stores it) */
+                ast_builder_exceptions_ready(c, true);
+                continue;
+            }
             case CC_ATTRIBUTE_COUNTED_BY:
                 cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
                 if (cc_token_is(c, LEX_TOKEN_IDENTIFIER))
@@ -973,6 +1007,8 @@ CC_PRIVATE void cc_attribute_merge(attrs *to, const attrs *from)
         to->asmname = from->asmname;
     if (from->cleanup)
         to->cleanup = from->cleanup;
+    if (from->catch_count)
+        to->catch_list = from->catch_list, to->catch_count = from->catch_count;
     if (from->mode)
         to->mode = from->mode;
     if (from->vecsize)

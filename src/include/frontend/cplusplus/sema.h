@@ -1483,8 +1483,13 @@ enum class semantic_kind : uint8_t {
        element's destruction (last first), c is given the cookie's address
        as allocated and array_count is the cookie's count */
     delete_object,
-    /* [expr.throw]: a: the operand (0: none, a rethrow); not lowered */
+    /* [expr.throw]: a: the initialization of the exception object ([except.throw]/3: copy-initialized from
+       the operand), of *allocated, a pointer to the memory the lowering makes (0: none, a rethrow);
+       computation: the exception object's type */
     throw_exception,
+    /* [except.handle]/10: an lvalue of the handler's exception object, of the node's type: what a
+       handler's variable is initialized from */
+    exception_object,
     /* [ext:gnu_va_arg] __builtin_va_arg (a, T): a: the va_list (an
        lvalue); a prvalue of the node's type */
     va_arg_,
@@ -1562,6 +1567,13 @@ enum class semantic_kind : uint8_t {
        of asm goto, list[d .. d + value >> 8); value & 1: volatile, & 2:
        inline, & 4: goto, & 8: extended (a colon) */
     gnu_asm_statement,
+    /* [except.pre]: a: the compound-statement; the handlers (handler nodes) in list[first .. first + count) */
+    try_statement,
+    /* [except.handle]: a: the declaration_statement of the exception-declaration's variable, initialized
+       from the exception_object (0: catch (...) or an unnamed declaration), c: the compound-statement; computation: the
+       type the handler matches ([except.handle]/3: the declared type without a reference and top-level
+       cv, an array or function adjusted to a pointer) */
+    handler,
     /* ; */
     null_statement,
     /* a condition that declares: a: the declaration_statement, b: its
@@ -2203,6 +2215,10 @@ class semantic_analysis
     /* the function type of a deduction-guide: its parameters returning the
        class template specialization it names (in the scope current) */
     analysis_result deduction_guide_type(SyntaxRef guide, qualified_type &type);
+    /* [over.match.class.deduct]/1.1: the implicit guides of the class
+       template ct made from its constructors (once) */
+    void implicit_deduction_guides(uint32_t ct);
+    analysis_result implicit_guide_member(uint32_t ct, SyntaxElement member);
     /* [over.match.class.deduct]/1, [dcl.type.class.deduct]/2: the class
        template specialization the placeholder for a deduced class type
        (the class template whose function_templates' index plus one is
@@ -3755,6 +3771,11 @@ class semantic_analysis
         entity_index by = 0, needed = 0;
     };
     entity_index needs_deferred_by = 0;
+    /* the next function body analysed is one of an instantiation not known
+       to be used: its needs wait for its function's (analyse_function_body) */
+    bool defer_next_body_needs = false;
+    void defer_needs_of_instantiated_body(entity_index f);
+    bool virtual_table_needed(entity_index c) const;
     owned_array<deferred_need> deferred_needs;
     void mark_needed(entity_index function);
     bool pass_deferred_needs();
@@ -4739,6 +4760,7 @@ class semantic_analysis
                                        entity_index to, qualified_type type,
                                        expression_meaning &m);
     /* the non-virtual bases from class c to its base, outermost first */
+    bool covariant_override(type_index base_function, type_index function);
     bool nonvirtual_path(entity_index c, entity_index base,
                          owned_array<entity_index> &steps) const;
     analysis_result accessible_path(token_index at, entity_index derived,
@@ -5014,6 +5036,9 @@ class semantic_analysis
     entity_index current_scope = 0;
     /* the entity the last declarator declared */
     entity_index last_declared = 0;
+    /* [except.throw]: the first entity made inside the innermost try-block being analysed (an implicitly movable
+       operand of a throw-expression is one declared since), 0: none */
+    size_t try_entities = 0;
     /* where claims about the expressions analysed now go
        (analysed_expression::place), the scope there, and whether
        declarations analysed now can have claims after them */
@@ -5212,6 +5237,10 @@ class semantic_analysis
         entity_index entity = 0, name = 0;
         entity_index friend_class = 0;
         bool hidden_friend = false;
+        /* a friend declaration (not a definition) in a class: not found by
+           an ordinary lookup until a declaration at namespace scope
+           redeclares it ([namespace.memdef]/3) */
+        bool friend_declaration = false;
         SyntaxRef declaration = 0, definition = 0;
         /* a function template's function-definition or (declared, not
            yet defined: definition 0) simple-declaration, whose first two
@@ -5262,8 +5291,26 @@ class semantic_analysis
            guide's parameters returning the class template's
            specialization it names */
         uint32_t guide_of = 0;
+        /* an implicit deduction guide ([over.match.class.deduct]/1.1) made
+           from a constructor of the class template: its declarator is the
+           constructor's parameters-and-qualifiers; explicit_guide: the
+           constructor is explicit (or conditionally so) */
+        bool implicit_guide = false, explicit_guide = false;
+        /* ... of a constructor template */
+        bool guide_of_template = false;
+        /* a class template declared (not defined) with alignas: its
+           definition carries it too (checked) */
+        bool alignas_declared = false;
+        /* a class template whose implicit guides are made */
+        bool guides_made = false;
     };
     owned_array<function_template> function_templates;
+    /* the function type of an implicit guide specialization: the
+       constructor's parameters returning the class specialization */
+    analysis_result implicit_guide_type(const function_template &ft,
+                                        const template_argument *arguments,
+                                        SyntaxRef at, qualified_type &type);
+    bool class_parameter_of_guide(qualified_type t) const;
     function_template new_template(uint32_t name, entity_index outer,
                                    SyntaxRef n, uint32_t index, uint32_t first,
                                    uint32_t count);
@@ -5800,6 +5847,7 @@ class semantic_analysis
     };
     owned_array<template_member_definition> template_member_definitions;
     SyntaxRef out_of_class_member_class_function(SyntaxRef definition) const;
+    bool member_class_function_unjudged(const SyntaxTail &parts) const;
     bool parameter_names_after_declarator(SyntaxRef definition,
                                           token_index after, uint32_t mine,
                                           uint32_t theirs,
@@ -5859,6 +5907,10 @@ class semantic_analysis
     analysis_result template_type(SyntaxRef id, entity_index scope,
                                   bool qualified, type_index &type,
                                   uint32_t *cv = nullptr);
+    analysis_result
+    specialization_matching_in_progress(SyntaxRef at, uint32_t class_template,
+                                        const template_argument *arguments,
+                                        uint32_t count);
     /* [temp.inst]/2: the class template specialization, instantiated */
     analysis_result instantiate_class(SyntaxRef at, uint32_t class_template,
                                       const template_argument *arguments,
@@ -6134,6 +6186,9 @@ class semantic_analysis
                                          uint32_t &built);
     analysis_result selection_statement(SelectionStatement n, uint32_t &built);
     analysis_result iteration_statement(IterationStatement n, uint32_t &built);
+    /* [except.pre]: a try-block, and one of its handlers */
+    analysis_result try_block(TryBlock n, uint32_t &built);
+    analysis_result handler(Handler n, uint32_t &built);
     /* [stmt.ranged]: the range-based for statement n, whose
        for-range-declaration is its child declaration */
     analysis_result range_based_for(SyntaxRef n, uint32_t declaration,
@@ -6613,6 +6668,9 @@ class semantic_analysis
         }
     };
     uint32_t require_complete_class = 0;
+    /* a nested-name-specifier's simple-template-id is being analysed: its
+       template-arguments are only named (template_id_arguments) */
+    bool nested_template_id = false;
     /* deduce_type matches a function declaration's type to a function
        template's ([temp.deduct.decl]) */
     bool matching_declaration = false;
@@ -6792,7 +6850,8 @@ class semantic_analysis
                               entity_index member,
                               const owned_array<SyntaxElement> &arguments,
                               const owned_array<expression_meaning> &early,
-                              expression_meaning &m);
+                              expression_meaning &m,
+                              bool operator_expression = false);
     /* [expr.call]: the call of the function f, named at the token at
        (but not by its name: a literal operator, an allocation function),
        with the analysed arguments, each initialized as its parameter: m */
@@ -7068,6 +7127,12 @@ bool itanium_symbol_name(const semantic_analysis &analysis,
 bool itanium_reference_temporary_name(const semantic_analysis &analysis,
                                       const preprocessor &pp, entity_index e,
                                       uint32_t index, vbuffer *out);
+/* [abi:mangling-special-vtables]: type t's std::type_info object (what 0:
+   _ZTI <type>), its name string (1: _ZTS <type>) or the characters of that
+   string (2: <type>) */
+bool itanium_typeinfo_name(const semantic_analysis &analysis,
+                           const preprocessor &pp, type_index t, int what,
+                           vbuffer *out);
 /* [abi:mangling-special-vtables]: the symbol of class c's virtual table
    (_ZTV <type>) */
 bool itanium_vtable_name(const semantic_analysis &analysis,

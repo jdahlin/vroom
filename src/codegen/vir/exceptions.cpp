@@ -32,6 +32,17 @@ VPRIV void virbuild_eh_function_begin(codegen_context *e)
     V->eh_used = false;
 }
 
+/* the variable a node's pad works on: a cleanup variable, or a catch scope's exception variable */
+static uint32_t virbuild_eh_node_variable(codegen_context *e, uint32_t node)
+{
+    cc *c = e->compile_context;
+    uint32_t s = e->walk_state->cleanup_nodes[node].symbol;
+
+    if (codegen_symbol_attributes(c, s)->catch_count)
+        return c->lists[codegen_symbol_attributes(c, s)->catch_list];
+    return s;
+}
+
 /* a cleanup node's variables: their slots, now, while they are in scope */
 static void virbuild_eh_node_slots_note(codegen_context *e, uint32_t node)
 {
@@ -42,7 +53,7 @@ static void virbuild_eh_node_slots_note(codegen_context *e, uint32_t node)
          m = W->cleanup_nodes[m].parent) {
         int64_t rel;
         uint32_t s = virbuild_slot_find(
-            e, walk_local_slot(e, W->cleanup_nodes[m].symbol), 1, &rel);
+            e, walk_local_slot(e, virbuild_eh_node_variable(e, m)), 1, &rel);
 
         V->eh_node_slots[m] = s + 1;
     }
@@ -74,18 +85,43 @@ VPRIV uint32_t virbuild_eh_unwind_block(codegen_context *e)
     return V->eh_pad_blocks[node];
 }
 
-/* in a landing pad (the current block): its landingpad (clause: 0 cleanup, else catch-all), the exception */
-static uint32_t virbuild_eh_landingpad(codegen_context *e, bool catch_all)
+/* in a landing pad (the current block): its landingpad with the clauses of chain k (the catch types, a cleanup
+   flag), the exception, and with catch scopes the selector in its variable.  Returns the exception. */
+static uint32_t virbuild_eh_landingpad(codegen_context *e,
+                                       const codegen_eh_chain *k, bool selector)
 {
-    uint32_t clauses[3] = {1, 0, 0};
+    uint32_t clauses[2 + CODEGEN_EH_CHAIN_TYPES];
 
-    if (catch_all)
-        clauses[0] = 0, clauses[1] = 1;
-    uint32_t list = virbuild_extra_append(e, clauses, 2 + clauses[1]);
+    clauses[0] = k->cleanup;
+    clauses[1] = k->count;
+    for (uint32_t i = 0; i < k->count; i++)
+        clauses[2 + i] = k->types[i]
+                             ? CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL,
+                                                      k->types[i]) +
+                                   1
+                             : 0;
+    uint32_t list = virbuild_extra_append(e, clauses, 2 + k->count);
     uint32_t lp = virbuild_insn_append(e, VIR_OP_LANDINGPAD, VIR_TYPE_MULTI, 0,
                                        list, 0, 0);
 
+    if (selector)
+        virbuild_variable_write(
+            e, VIRBUILD_SELECTOR_VARIABLE, e->vir_builder->current_block,
+            virbuild_insn_append(e, VIR_OP_PROJ, VIR_TYPE_I32, 0, lp, 1, 0));
     return virbuild_insn_append(e, VIR_OP_PROJ, VIR_TYPE_PTR, 0, lp, 0, 0);
+}
+
+/* the clauses of the pad of walker node m: every catch type of the scopes around it (to the first catch (...)), a
+   cleanup flag when a cleanup runs on the way */
+static void virbuild_eh_chain(codegen_context *e, uint32_t m,
+                              codegen_eh_chain *k)
+{
+    walk_state *W = e->walk_state;
+
+    memset(k, 0, sizeof *k);
+    for (; m; m = W->cleanup_nodes[m].parent)
+        codegen_eh_chain_node(k, e->compile_context,
+                              W->cleanup_nodes[m].symbol);
 }
 
 static void virbuild_eh_runtime_call(codegen_context *e, uint32_t fn,
@@ -118,7 +154,7 @@ VPRIV void virbuild_eh_pads(codegen_context *e)
     walk_state *W = e->walk_state;
     cc *c = e->compile_context;
     uint32_t n = W->cleanup_node_count, run[VIRBUILD_EH_NODES], resume;
-    bool any = false;
+    bool any = false, catches = false;
 
     if (!V->eh_used)
         return;
@@ -128,8 +164,22 @@ VPRIV void virbuild_eh_pads(codegen_context *e)
     for (uint32_t m = 1; m <= n; m++)
         if (V->eh_pad_blocks[m])
             for (uint32_t k = m; k && k <= n && !run[k];
-                 k = W->cleanup_nodes[k].parent)
+                 k = W->cleanup_nodes[k].parent) {
+                uint32_t count;
+                const uint32_t *h =
+                    codegen_catch_scope(c, W->cleanup_nodes[k].symbol, &count);
+                bool closes = false;
+
                 run[k] = virbuild_block_new(e), any = true;
+                if (h)
+                    catches = true;
+                for (uint32_t i = 0; h && i < count; i++)
+                    if (!h[2 * i])
+                        closes =
+                            true; /* (a catch (...): nothing outside it is reached) */
+                if (closes)
+                    break;
+            }
     if (e->is_reachable)
         virbuild_jump(e, W->return_label);
     W->eh_in_pads = 1;
@@ -138,19 +188,24 @@ VPRIV void virbuild_eh_pads(codegen_context *e)
     for (uint32_t m = 1; m <= n; m++) {
         if (!V->eh_pad_blocks[m])
             continue;
+        codegen_eh_chain chain;
+
         V->current_block = V->eh_pad_blocks[m];
         V->store_count = 0;
         e->is_reachable = true;
+        virbuild_eh_chain(e, m, &chain);
         virbuild_variable_write(e, VIRBUILD_EXCEPTION_VARIABLE,
                                 V->current_block,
-                                virbuild_eh_landingpad(e, false));
+                                virbuild_eh_landingpad(e, &chain, catches));
         virbuild_branch_emit(e, run[m]);
     }
     /* each node's cleanup, then its parent's (the outermost's: resume) */
     for (uint32_t m = n; any && m >= 1; m--) {
         if (!run[m])
             continue;
-        uint32_t p = W->cleanup_nodes[m].parent, next = resume;
+        uint32_t p = W->cleanup_nodes[m].parent, next = resume, count = 0;
+        const uint32_t *h =
+            codegen_catch_scope(c, W->cleanup_nodes[m].symbol, &count);
 
         if (p && p <= n && run[p])
             next = run[p];
@@ -163,6 +218,53 @@ VPRIV void virbuild_eh_pads(codegen_context *e)
         V->active_slots[V->active_slot_count++] = V->eh_node_slots[m] - 1;
         uint32_t depth = V->active_slot_count;
 
+        if (h) { /* a catch scope: the exception to its variable, then each handler whose type the selector names */
+            codegen_lvalue var = {
+                .kind = CODEGEN_LVALUE_FRAME,
+                .align = 8,
+                .offset = walk_local_slot(e, virbuild_eh_node_variable(e, m))};
+            int r = virbuild_treg(e);
+            bool all = false;
+
+            virbuild_register_write(
+                e, r,
+                virbuild_variable_read(e, VIRBUILD_EXCEPTION_VARIABLE, run[m],
+                                       VIR_TYPE_PTR));
+            virbuild_store(e, r, &var, 8);
+            virbuild_tfree(e, r);
+            for (uint32_t i = 0; i < count && !all; i++) {
+                uint32_t target = walk_user_label_find(e, h[2 * i + 1]);
+
+                if (!h[2 * i]) {
+                    virbuild_jump(e, target);
+                    all = true;
+                    break;
+                }
+                uint32_t id = virbuild_insn_append(
+                    e, VIR_OP_EHTYPEID, VIR_TYPE_I32, 0,
+                    CODEGEN_REFERENCE_MAKE(
+                        CODEGEN_REFERENCE_SYMBOL,
+                        codegen_symbol_canonical(c, h[2 * i])),
+                    0, 0);
+                uint32_t sel = virbuild_value_convert(
+                    e,
+                    virbuild_variable_read(e, VIRBUILD_SELECTOR_VARIABLE,
+                                           V->current_block, VIR_TYPE_I32),
+                    VIR_TYPE_I32);
+                uint32_t cond =
+                    virbuild_insn_append(e, VIR_OP_ICMP, VIR_TYPE_I32,
+                                         virbuild_integer_condition_code(
+                                             LEX_TOKEN_EQUAL_EQUAL, false),
+                                         sel, id, 0);
+
+                virbuild_branch_if(e, cond, target, true);
+            }
+            if (V->active_slot_count == depth)
+                V->active_slot_count--;
+            if (!all)
+                virbuild_branch_emit(e, next);
+            continue;
+        }
         W->eh_in_pads = 2;
         walk_cleanup_call(e, W->cleanup_nodes[m].symbol);
         W->eh_in_pads = 1;
@@ -183,7 +285,12 @@ VPRIV void virbuild_eh_pads(codegen_context *e)
         V->current_block = V->eh_terminate_block;
         V->store_count = 0;
         e->is_reachable = true;
-        uint32_t x = virbuild_eh_landingpad(e, true);
+        codegen_eh_chain all;
+
+        memset(&all, 0, sizeof all);
+        all.types[all.count++] = 0;
+        all.closed = true;
+        uint32_t x = virbuild_eh_landingpad(e, &all, catches);
 
         if (c->eh_begin_catch_sym)
             virbuild_eh_runtime_call(e, c->eh_begin_catch_sym, x);

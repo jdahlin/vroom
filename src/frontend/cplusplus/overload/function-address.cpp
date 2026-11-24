@@ -75,6 +75,14 @@ bool semantic_analysis::function_set_at(token_index at, function_set &out) const
         if (!function_template_of(found.unknown_entity))
             return false;
         function_template_overloads(found.unknown_entity, out.templates);
+        /* [namespace.memdef]/3: a friend template declared in a class is
+           not found by an unqualified lookup (no argument-dependent lookup
+           in an address) */
+        owned_array<uint32_t> visible;
+        for (uint32_t t : out.templates)
+            if (!function_templates[t - 1].friend_declaration)
+                visible.append(t);
+        out.templates = static_cast<owned_array<uint32_t> &&>(visible);
         for (const template_name_function &x : template_name_functions)
             if (x.name == found.unknown_entity)
                 out.functions.append(x.function);
@@ -332,6 +340,10 @@ analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
     if (!found ||
         entity_table[function_templates[found - 1].entity].nonstatic_member)
         return analysis_result::well_formed;
+    /* [namespace.memdef]/3: a friend declaration is not found by an
+       unqualified lookup, and an address names no argument for ADL */
+    if (!qualified && function_templates[found - 1].friend_declaration)
+        return not_supported(id.index(), "namespace.memdef");
     handled = true;
     owned_array<uint32_t> group;
     if (written_at)

@@ -333,9 +333,15 @@ static uint32_t ast_builder_runtime_function(cc *c, const char *name,
 
 void ast_builder_exceptions_ready(cc *c, bool cxx)
 {
-    if (!c->o->eh || c->eh_resume_sym)
+    if (!c->o->eh)
         return;
-    c->eh_resume_sym = ast_builder_runtime_function(c, "_Unwind_Resume", true);
+    if (c->eh_resume_sym && !(cxx && !c->eh_begin_catch_sym))
+        return;
+    if (!c->eh_resume_sym)
+        c->eh_resume_sym =
+            ast_builder_runtime_function(c, "_Unwind_Resume", true);
+    /* (a TU that began with C's cleanups and gets a try block: C++'s personality from here on, the one
+       the unit's tail names; C's cannot match a catch type) */
     if (cxx) {
         c->eh_begin_catch_sym =
             ast_builder_runtime_function(c, "__cxa_begin_catch", true);
@@ -764,4 +770,63 @@ uint32_t ast_builder_case_range(cc *c, int64_t lo, int64_t hi, uint32_t s)
 uint32_t ast_builder_case(cc *c, int64_t value, uint32_t s)
 {
     return ast_builder_case_range(c, value, value, s);
+}
+
+uint32_t ast_builder_end_catch_function(cc *c)
+{
+    if (!c->eh_end_catch_sym)
+        c->eh_end_catch_sym =
+            ast_builder_runtime_function(c, "__cxa_end_catch", true);
+    return c->eh_end_catch_sym;
+}
+
+uint32_t ast_builder_try(cc *c, uint32_t body, uint32_t exception,
+                         const ast_builder_catch *handlers, uint32_t count)
+{
+    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    uint32_t depth = c->syms[exception].depth, items[1 + 2 * 64], n = 0,
+             scope_items[2], block[1 + 4 * 64 + 4], m = 0;
+
+    if (count > 64)
+        return 0;
+    ast_builder_exceptions_ready(c, true);
+    uint32_t end = ast_builder_label(c, "", 0);
+    uint32_t scope = ast_builder_symbol(
+        c, AST_SYMBOL_VARIABLE, "", 0, ast_builder_type_basic(AST_TYPE_CHAR),
+        AST_STORAGE_AUTO, AST_SYMBOL_FLAG_USED, depth);
+    attrs *a = ast_builder_attributes(c, scope);
+
+    c->syms[exception].flags |= AST_SYMBOL_FLAG_ADDRESS_TAKEN;
+    items[n++] = exception;
+    block[m++] =
+        ast_builder_node(c, AST_NODE_DECLARATION, v, exception, 0, 0, 0, 0);
+    scope_items[0] =
+        ast_builder_node(c, AST_NODE_DECLARATION, v, scope, 0, 0, 0, 0);
+    scope_items[1] = body;
+    uint32_t labels[64];
+
+    for (uint32_t i = 0; i < count; i++) {
+        labels[i] = ast_builder_label(c, "", 0);
+        items[n++] = handlers[i].type;
+        items[n++] = labels[i];
+    }
+    a->catch_list = ast_builder_list(c, items, n);
+    a->catch_count = count;
+    a->cleanup = exception;
+    block[m++] = ast_builder_node(c, AST_NODE_BLOCK, v, 0,
+                                  ast_builder_list(c, scope_items, 2), 2, 0, 0);
+    block[m++] = ast_builder_node(c, AST_NODE_GOTO, v, end, 0, 0, 0, 0);
+    for (uint32_t i = 0; i < count; i++) {
+        block[m++] = ast_builder_label_define(c, labels[i], handlers[i].body);
+        block[m++] = ast_builder_node(c, AST_NODE_GOTO, v, end, 0, 0, 0, 0);
+    }
+    block[m++] = ast_builder_label_define(
+        c, end, ast_builder_node(c, AST_NODE_BLOCK, v, 0, 0, 0, 0, 0));
+    return ast_builder_node(c, AST_NODE_BLOCK, v, 0,
+                            ast_builder_list(c, block, m), m, 0, 0);
+}
+
+bool ast_builder_exceptions_enabled(cc *c)
+{
+    return c->o->eh != 0;
 }

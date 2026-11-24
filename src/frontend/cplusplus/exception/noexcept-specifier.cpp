@@ -230,6 +230,27 @@ analysis_result semantic_analysis::member_noexcept_specifiers(entity_index c)
    primary template's declaration, an alias's =, a function's ( ...) */
 bool semantic_analysis::names_template_or_scope(token_index t) const
 {
+    /* a name after = (a default argument or initializer) is a use: no
+       declaration has it there */
+    if (t > defining_members_first &&
+        tokens[t - 1].kind == token_kind::operator_or_punctuator &&
+        preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc) ==
+            preprocessing_op_or_punc::EQUAL)
+        return true;
+    /* [temp.local]/6: the name of a template-parameter in a member
+       template's head (class _And = _And, typename T>) is no member */
+    if (t > defining_members_first && t + 1 < defining_members_end &&
+        tokens[t - 1].kind == token_kind::keyword &&
+        (p.keyword_of(tokens[t - 1]) == standard_keyword::class_ ||
+         p.keyword_of(tokens[t - 1]) == standard_keyword::typename_) &&
+        tokens[t + 1].kind == token_kind::operator_or_punctuator) {
+        preprocessing_op_or_punc next =
+            preprocessing_op_or_punc_primary(tokens[t + 1].op_or_punc);
+        if (next == preprocessing_op_or_punc::EQUAL ||
+            next == preprocessing_op_or_punc::COMMA ||
+            next == preprocessing_op_or_punc::GREATER)
+            return true;
+    }
     if (t + 1 >= defining_members_end ||
         tokens[t + 1].kind != token_kind::operator_or_punctuator)
         return false;

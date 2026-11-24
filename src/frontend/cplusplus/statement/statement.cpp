@@ -519,6 +519,7 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
         [&](ExpressionStatement e) { return expression_statement(e, built); },
         [&](SelectionStatement c) { return selection_statement(c, built); },
         [&](IterationStatement c) { return iteration_statement(c, built); },
+        [&](TryBlock c) { return try_block(c, built); },
         /* (jump-statement's sum also has these two kinds: the sum's case
            would take them, and report their own subclauses elsewhere) */
         [&](CoroutineReturnStatement c) { return not_supported(c); },

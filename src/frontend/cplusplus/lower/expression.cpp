@@ -283,7 +283,9 @@ uint32_t c_lowering::expression(uint32_t index)
     case semantic_kind::delete_object:
         return delete_object(n);
     case semantic_kind::throw_exception:
-        return fail("a throw-expression (no exception support)", n.at);
+        return throw_expression(n);
+    case semantic_kind::exception_object:
+        return exception_object(n);
     case semantic_kind::array_count:
         if (!count_symbol)
             return fail("an array count outside new or delete", n.at);

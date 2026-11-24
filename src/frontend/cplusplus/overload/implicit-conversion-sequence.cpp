@@ -627,6 +627,29 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                             a, qualified_type::make(t1.unqualified(), cv_none),
                             found, cannot_tell) ||
                         cannot_tell;
+                    /* [dcl.init.ref]/5.1.2, [over.match.ref]: the one
+                       conversion function yielding an lvalue reference to
+                       a type cv1 T1 reference-compatible with (here the
+                       same class as) T1 binds the lvalue reference
+                       directly: the user-defined conversion sequence of
+                       that function, its second conversion an identity
+                       ([over.ics.ref]/2) */
+                    if (functions && !cannot_tell && !rvalue_reference &&
+                        found.kind == sequence::form::user_defined &&
+                        found.function && found.rank == 0) {
+                        const struct type &fr =
+                            type_table[conversion_function_result(
+                                           found.function)
+                                           .type.unqualified()];
+                        qualified_type referent =
+                            conversion_function_result(found.function).type;
+                        bool yields_lvalue =
+                            conversion_function_result(found.function)
+                                .category == value_category::lvalue;
+                        if (yields_lvalue && fr.kind == type_kind::class_type &&
+                            fr.entity == c1 && !(referent.cv() & ~t1.cv()))
+                            return found;
+                    }
                 }
                 if (functions)
                     return of_form(sequence::form::unknown);

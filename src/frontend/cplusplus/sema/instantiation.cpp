@@ -108,7 +108,10 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
            substitution process", in the template's context: the template
            is a friend of the class that befriends it ([temp.friend]/3) */
         scoped_value<entity_index> access(access_class, template_entity);
-        if (guide) {
+        if (guide && ft.implicit_guide) {
+            stage = guide_type;
+            r = implicit_guide_type(ft, arguments, at, lambda_type);
+        } else if (guide) {
             stage = guide_type;
             r = deduction_guide_type(ft.declarator, lambda_type);
         } else if (lambda) {
@@ -377,6 +380,10 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     diagnostics_suppressed_if hush(diagnostics, quiet);
     /* (what a quiet definition wants is as quiet) */
     quiet_member_bodies += quiet;
+    /* [temp.inst]/4: a specialization nobody uses is not instantiated, so
+       what a quiet definition needs is needed once the specialization is */
+    scoped_value<entity_index> deferring(needs_deferred_by, needs_deferred_by);
+    defer_next_body_needs = quiet;
     /* (leave_instantiation drops the claims of the template's expressions:
        they are about one specialization, which clang makes none of) */
     instantiation_context context;
@@ -454,6 +461,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     instantiations[index].defined = true;
     entity_table[instantiations[index].specialization].defined = true;
     quiet_member_bodies -= quiet;
+    defer_next_body_needs = false;
     if (r == analysis_result::well_formed)
         return r;
     if (quiet) {
@@ -558,6 +566,30 @@ void semantic_analysis::lambda_error_in_enclosing(SyntaxRef lambda)
 }
 
 /*
+ * A specialization's pattern is chosen once at a time: choosing it can name
+ * the same specialization again (a default argument or decltype in a partial
+ * specialization), which would recurse without the depth growing.
+ */
+analysis_result semantic_analysis::specialization_matching_in_progress(
+    SyntaxRef at, uint32_t class_template, const template_argument *arguments,
+    uint32_t count)
+{
+    for (const class_matching &m : class_matchings) {
+        if (m.class_template != class_template || m.count != count)
+            continue;
+        bool same = true;
+        for (uint32_t i = 0; i < count && same; i++)
+            same = m.arguments[i] == arguments[i];
+        if (same)
+            return ill_formed(at,
+                              "the class template specialization is incomplete "
+                              "while its definition is chosen",
+                              "temp.inst");
+    }
+    return analysis_result::well_formed;
+}
+
+/*
  * [temp.inst]/2: "Unless a class template specialization is a declared
  * specialization, the class template specialization is implicitly
  * instantiated when the specialization is referenced in a context that
@@ -640,6 +672,10 @@ analysis_result semantic_analysis::instantiate_class(
            named ([temp.class.spec.match]) */
         uint32_t pattern = 0;
         owned_array<template_argument> deduced;
+        VTRY(matching, specialization_matching_in_progress(at, class_template,
+                                                           arguments, count));
+        class_matching_scope matching_scope(class_matchings, class_template,
+                                            arguments, count);
         VTRY(matched, matching_specialization(at, class_template, arguments,
                                               count, pattern, deduced));
         if (pattern != x.pattern) {
@@ -681,18 +717,8 @@ analysis_result semantic_analysis::instantiate_class(
        is a substitution failure ([impl.clang] clang has created the
        specialization before it matches the pattern: libc++'s
        __is_ostreamable, whose operator<< names it in a default argument) */
-    for (const class_matching &m : class_matchings) {
-        if (m.class_template != class_template || m.count != count)
-            continue;
-        bool same = true;
-        for (uint32_t i = 0; i < count && same; i++)
-            same = m.arguments[i] == arguments[i];
-        if (same)
-            return ill_formed(at,
-                              "the class template specialization is incomplete "
-                              "while its definition is chosen",
-                              "temp.inst");
-    }
+    VTRY(matching, specialization_matching_in_progress(at, class_template,
+                                                       arguments, count));
     class_matching_scope matching_scope(class_matchings, class_template,
                                         arguments, count);
     instantiation_record record;

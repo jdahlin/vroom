@@ -40,6 +40,64 @@ bool semantic_analysis::overrides_function(entity_index e, entity_index g) const
 }
 
 /*
+ * [class.virtual]/8: "If the class type in the covariant return type of
+ * D::f differs from that of B::f, the class type in the return type of
+ * D::f shall be complete at the point of declaration of D::f or shall be
+ * the class type D."  The return types are covariant when "both are
+ * pointers to classes, both are lvalue references to classes, or both are
+ * rvalue references to classes", the class in B::f's is "an unambiguous
+ * and accessible direct or indirect base class of the class in D::f's",
+ * and "the cv-qualification of the return type of D::f is the same or less
+ * than that of B::f".  Analysed here: a base reached by non-virtual bases
+ * all at offset 0, where the returned address needs no adjustment (the
+ * other paths are not analysed); the rest of the function type is
+ * identical.
+ */
+bool semantic_analysis::covariant_override(type_index base_function,
+                                           type_index function)
+{
+    const struct type &b = type_table[base_function];
+    const struct type &d = type_table[function];
+    if (b.kind != type_kind::function || d.kind != type_kind::function ||
+        b.parameter_count != d.parameter_count)
+        return false;
+    const struct type &br = type_table[b.operand.unqualified()];
+    const struct type &dr = type_table[d.operand.unqualified()];
+    if (br.kind != dr.kind || (br.kind != type_kind::pointer &&
+                               br.kind != type_kind::lvalue_reference &&
+                               br.kind != type_kind::rvalue_reference))
+        return false;
+    /* the rest of the type is the base function's */
+    if (type_table.function(d.operand, type_table.parameters(base_function),
+                            b.parameter_count, b.variadic, b.non_throwing,
+                            b.function_cv, b.function_ref) != function)
+        return false;
+    qualified_type bc = br.operand, dc = dr.operand;
+    if (dc.cv() & ~bc.cv())
+        return false;
+    const struct type &bt = type_table[bc.unqualified()];
+    const struct type &dt = type_table[dc.unqualified()];
+    if (bt.kind != type_kind::class_type || dt.kind != type_kind::class_type ||
+        bt.entity == dt.entity)
+        return false;
+    /* (a class template's specialization still to instantiate is not
+       analysed: its errors would be this declaration's) */
+    if (!entity_table[dt.entity].size && !entity_table[dt.entity].defined)
+        return false;
+    owned_array<entity_index> steps;
+    if (!single_nonvirtual_path(dt.entity, bt.entity) ||
+        !nonvirtual_path(dt.entity, bt.entity, steps))
+        return false;
+    for (size_t i = 0; i < steps.size(); i++) {
+        /* "unambiguous and accessible": a private or protected base is not
+           analysed */
+        if (entity_table[steps[i]].offset || entity_table[steps[i]].access)
+            return false;
+    }
+    return true;
+}
+
+/*
  * A non-static member function e just declared in class c: whether it is
  * virtual ([class.virtual]/1: "if it is first declared with the keyword
  * virtual or if it overrides a virtual member function declared in a base
@@ -88,10 +146,15 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
     uint32_t overrides = ~0u;
     if (!overridden && !specified)
         return analysis_result::well_formed;
-    if (entity_table[e].operator_function || entity_table[c].union_ ||
-        local_class_rule(c))
-        /* a virtual operator function's calls through operator expressions,
-           [class.union]/2's "A union shall not have virtual functions",
+    if ((entity_table[e].operator_function &&
+         (entity_table[e].implemented == preprocessing_op_or_punc::EQUAL ||
+          entity_table[e].implemented ==
+              preprocessing_op_or_punc::EQUAL_EQUAL)) ||
+        entity_table[c].union_ || local_class_rule(c))
+        /* a virtual assignment operator, which a derived class's implicit
+           copy assignment overrides ([class.copy.assign]), a virtual
+           operator==, which a defaulted operator<=> declares again
+           ([class.compare.default]/4), [class.union]/2's "A union shall not have virtual functions",
            a local class's virtual table: not analysed (a constexpr
            virtual function is an inline one, [dcl.constexpr]/1) */
         return not_supported(declaration, "class.virtual");
@@ -110,7 +173,9 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
         /* [class.virtual]/8: "The return type of an overriding function
            shall be either identical to the return type of the overridden
            function or covariant": covariant returns are not analysed */
-        if (g.type != entity_table[e].type)
+        if (g.type != entity_table[e].type &&
+            !covariant_override(g.type.unqualified(),
+                                entity_table[e].type.unqualified()))
             return not_supported(declaration, "class.virtual");
         /* [class.virtual]/4: "If a virtual function f in some class B is
            marked with the virt-specifier final and in a class D derived
