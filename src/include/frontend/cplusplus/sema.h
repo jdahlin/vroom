@@ -5277,6 +5277,9 @@ class semantic_analysis
         bool implicit_guide = false, explicit_guide = false;
         /* ... of a constructor template */
         bool guide_of_template = false;
+        /* a class template declared (not defined) with alignas: its
+           definition carries it too (checked) */
+        bool alignas_declared = false;
         /* a class template whose implicit guides are made */
         bool guides_made = false;
     };
