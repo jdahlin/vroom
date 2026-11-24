@@ -814,3 +814,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   Orchestrator: the we-reject +5 (source_location.cpp:119 follow-on, a
   builtin default argument in [over.match.viable]) breaks the no-rise rule;
   kept because it exposes an existing bug, which 11.11 fixes first.
+- 11.11 (7680ae7f1, 1783c82c2, e104111bb): a default argument that makes no
+  semantic node (__builtin_source_location()) is an unknown default, not an
+  absent one: we reject 441 -> 391 (all of source_location.cpp's rejects);
+  an ill-formed operator function is held by its operator name; a default
+  member initializer naming members is analysed with `this` the aggregate
+  (not constant yet; lowering refuses it: it compiled to an uninitialised
+  read).  Unsupported 34641 -> 34689 (+51 newly refused instead of
+  rejected), layout_verified -5 blessed.  Open: the evaluator binding `this`
+  to the aggregate under construction (~200, dcl.init.aggr/p7.cpp).
