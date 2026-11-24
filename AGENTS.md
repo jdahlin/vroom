@@ -456,6 +456,7 @@ bench/sqlite/run.py --target win64 all   # WIN8: amalgamation, shell, speedtest1
 bench/ffmpeg/run.py --target win64 all   # WIN8: FFmpeg C fallbacks for mingw32 by clang/vcc/vir (vcc's tools only), sample-free FATE under Wine, no vcc-only failures
 bench/vnm-coff.py -j 6              # vnm on COFF objects, archives and import records vs llvm-nm (the sysroot's libraries; ~8 s)
 bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3 at vcc -O1, -O2, -O3, loops vectorized (~20 s)
+bench/vcpkg/build.py [-j N] [--clang] [-v] [PAT]   # microsoft/vcpkg-tool (C++17, 119 TUs; work/vcpkg-tool, work/vcpkg-deps-{fmt,cmrc,curl}: git clone --depth 1): vpp -x c++ -c per TU, refusals grouped by reason; --clang is the reference (all 119 build)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
 `vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (3 s

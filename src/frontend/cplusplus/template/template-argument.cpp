@@ -909,6 +909,22 @@ analysis_result semantic_analysis::template_argument_for(
         }
         return not_supported_because(at, "temp.arg.nontype", what);
     }
+    /* [expr.const]/10, [conv.prom]/3-4: a converted constant expression
+       allows the integral promotions: an unscoped enumerator is its value
+       as the promoted underlying type (fmt's conditional_t<long_short,
+       ...>, long_short an enumerator) */
+    if (type_table[m.type.unqualified()].kind == type_kind::enumeration) {
+        const entity &en =
+            entity_table[type_table[m.type.unqualified()].entity];
+        if (!en.scoped && en.underlying != fundamental_type::none) {
+            fundamental_type promoted = en.promoted;
+            if (en.fixed_underlying)
+                promoted = promotion_of(en.underlying);
+            if (promoted != fundamental_type::none)
+                m.type = qualified_type::make(type_table.fundamental(promoted),
+                                              cv_none);
+        }
+    }
     if (!is_integral(m.type)) {
         const char *what = "argument is of a type that is not integral";
         switch (type_table[m.type.unqualified()].kind) {
