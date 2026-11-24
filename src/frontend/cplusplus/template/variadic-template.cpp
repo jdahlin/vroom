@@ -239,6 +239,15 @@ entity_index semantic_analysis::find_pack(uint32_t name) const
     entity_index start = current_scope;
     if (is_namespace(start) && defining_class)
         start = defining_class;
+    /* (a member class template's specialization, defined in its enclosing
+       class's scope: the specialization's own scope holds its parameters'
+       packs, as lookup_unqualified) */
+    for (entity_index s = defining_class; s && !is_namespace(start);
+         s = entity_table[s].enclosing)
+        if (entity_table[s].enclosing == start) {
+            start = defining_class;
+            break;
+        }
     for (entity_index s = start;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
         if (e) {
