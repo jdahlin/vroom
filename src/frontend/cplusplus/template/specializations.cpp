@@ -1001,6 +1001,9 @@ analysis_result semantic_analysis::class_explicit_instantiation(
         (extern_ && (was == instantiation_kind::none) && prior))
         return not_supported(n, "temp.explicit");
     mark_explicit_instantiation(c, extern_);
+    if (!extern_)
+        explicit_class_instantiations.append(
+            explicit_class_instantiation{c, n});
     return analysis_result::well_formed;
 }
 

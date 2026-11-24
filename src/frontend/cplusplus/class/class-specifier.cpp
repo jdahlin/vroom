@@ -2270,7 +2270,7 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
  * left undefined, so that no code is made for it; one that is unsupported
  * also makes a use of the function a refusal.
  */
-void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n,
+bool semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n,
                                                  bool used)
 {
     /* [temp.inst]/1, /4: a member function used is instantiated, and an
@@ -2285,6 +2285,7 @@ void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n,
     /* ill-formed for these arguments (its diagnostics hushed, or a
        definition it wanted failed quietly): a use of the member is
        refused, never a call of a function without code */
+    bool failed = used && r == analysis_result::ill_formed;
     if (r == analysis_result::ill_formed && last_declared && !used)
         r = not_supported(n, "temp.inst");
     if (r == analysis_result::ill_formed)
@@ -2300,6 +2301,7 @@ void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n,
                 static_cast<uint32_t>(body_failures.size());
         }
     }
+    return failed;
 }
 
 analysis_result

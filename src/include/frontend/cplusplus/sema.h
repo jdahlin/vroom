@@ -4346,7 +4346,8 @@ class semantic_analysis
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, SyntaxRef definition);
-    void instantiated_member_body(entity_index c, SyntaxRef definition,
+    /* whether a used body is ill-formed */
+    bool instantiated_member_body(entity_index c, SyntaxRef definition,
                                   bool used = false);
     /* [temp.inst]/4: inside instantiated_member_body, a body of an
        implicit instantiation's member not known to be used, or a
@@ -5603,6 +5604,14 @@ class semantic_analysis
         uint32_t instantiation = 0;
     };
     owned_array<postponed_body> postponed_bodies;
+    /* the explicit instantiation definitions of classes ([temp.explicit]/10):
+       the declaration an ill-formed member body makes ill-formed */
+    struct explicit_class_instantiation {
+        entity_index c;
+        SyntaxRef declaration;
+    };
+    owned_array<explicit_class_instantiation> explicit_class_instantiations;
+    void explicit_instantiation_ill_formed(entity_index c);
     bool member_definition_wanted(const postponed_body &b);
     token_index member_definition_name(const template_member_definition &o);
     void define_waiting_members(entity_index scope, token_index name,

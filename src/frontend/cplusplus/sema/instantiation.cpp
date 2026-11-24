@@ -812,6 +812,20 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     return false;
 }
 
+/* [temp.explicit]/10: the explicit instantiation definition of the class
+   (or of a class it is a member of) is ill-formed */
+void semantic_analysis::explicit_instantiation_ill_formed(entity_index c)
+{
+    for (const explicit_class_instantiation &x :
+         explicit_class_instantiations) {
+        if (x.c != c)
+            continue;
+        for (analysed_declaration &d : declarations)
+            if (d.node == x.declaration)
+                d.result = analysis_result::ill_formed;
+    }
+}
+
 /* [temp.point]/7: the definitions of the specializations used, after the
    translation unit's declarations (each may use more) */
 void semantic_analysis::instantiate_pending()
@@ -841,8 +855,25 @@ void semantic_analysis::instantiate_pending()
                 entity_table[b.function].member_body_deferred = false;
             instantiation_context context;
             enter_instantiation(context, b.scope, b.declaration);
-            instantiated_member_body(b.c, b.body, b.function != 0);
+            /* [temp.explicit]/10: an explicit instantiation definition
+               of the class instantiates the members defined at that
+               point: one ill-formed for these arguments makes the
+               explicit instantiation ill-formed, not the template */
+            entity_index explicit_class = b.c;
+            while (explicit_class &&
+                   entity_table[explicit_class].kind ==
+                       entity_kind::class_type &&
+                   entity_table[explicit_class].explicitly_instantiated !=
+                       instantiation_kind::definition)
+                explicit_class = entity_table[explicit_class].enclosing;
+            bool explicit_ =
+                explicit_class &&
+                entity_table[explicit_class].kind == entity_kind::class_type;
+            bool failed = instantiated_member_body(
+                b.c, b.body, b.function != 0 || explicit_);
             leave_instantiation(context);
+            if (failed && explicit_)
+                explicit_instantiation_ill_formed(explicit_class);
             progress = true;
         }
         for (; next_definition < pending_definitions.size();
