@@ -143,6 +143,10 @@ EXTRA_MEMBERS = {
 # children the parser puts where the grammar has none of their kind, each
 # a choice of the parser: allowed by the conformance check, no accessor
 KNOWN_CHILDREN = {
+    # C++14's dynamic-exception-specification ([except.spec]/1, removed by
+    # [diff.cpp14.except]/1), parsed in every edition as clang does, and
+    # Microsoft's throw ( ... ) [impl.clang]
+    'parameters-and-qualifiers': ['dynamic-exception-specification'],
     # a member template's or member specialization's declaration is a
     # member-declaration ([class.mem]) rather than a declaration
     'template-declaration': ['member-declaration'],

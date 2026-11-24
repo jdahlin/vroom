@@ -37,6 +37,9 @@ bool semantic_analysis::structural_parameter_type(qualified_type t) const
            to.kind == type_kind::class_type;
 }
 
+/* [temp.param]/6: why a non-type template-parameter is not one this
+   analysis takes (its decl-specifiers, or a type that is not structural
+   or not handled yet), as the reason its refusal reports */
 const char *
 semantic_analysis::parameter_refusal_reason(qualified_type t,
                                             const specified &sp) const

@@ -2363,7 +2363,7 @@ analysis_result semantic_analysis::instantiated_member_body(entity_index c,
     /* [temp.inst]/1, /4: a member function used is instantiated, and an
        ill-formed instantiation makes the program ill-formed: its errors
        are reported (in the instantiation's context, as clang's "in
-       instantiation of member function ... requested here") */
+       instantiation of member function ... requested here") [impl.clang] */
     diagnostics_suppressed_if hush(diagnostics, !used);
     size_t unsupported_before = unsupported.size();
     quiet_member_bodies++;

@@ -196,7 +196,7 @@ analysis_result semantic_analysis::constant_expression(SyntaxRef at,
         /* the analysis folded it as not constant without saying by which
            rule: the evaluator applies [expr.const]/5 to the tree, and when
            a rule of it holds as clang applies it the expression is not a
-           constant expression */
+           constant expression [impl.clang] */
         if (m.node && semantics[m.node].evaluation == constness::not_constant &&
             refuted_by_rule(m.node))
             constant_stop = 3;

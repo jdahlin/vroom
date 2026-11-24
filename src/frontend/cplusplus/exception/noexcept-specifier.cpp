@@ -49,7 +49,7 @@ node_index parser::noexcept_specifier()
  * parsed in every edition; the analysis diagnoses them as clang does
  * (semantic_analysis::dynamic_exception_types); throw ( ... ) is
  * Microsoft's in every edition.  C++03 has no pack expansion: the
- * ... after a type-id is C++11's (variadic templates, P7's).
+ * ... after a type-id is C++11's (variadic templates, P7's). [impl.clang]
  */
 node_index parser::dynamic_exception_specification()
 {

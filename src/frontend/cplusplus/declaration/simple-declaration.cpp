@@ -1860,7 +1860,7 @@ analysis_result semantic_analysis::declare_with_initializer(
         block_variables.append(declared_entity);
     /* [class.dtor]/16, [dcl.fct.def.delete]/2: "the destructor is
        potentially invoked" for an object defined here: a deleted one is
-       ill-formed (as clang) */
+       ill-formed (as clang) [impl.clang] */
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&
         entity_table[declared_entity].defined && !s.extern_ &&
         !entity_table[declared_entity].nonstatic_member) {

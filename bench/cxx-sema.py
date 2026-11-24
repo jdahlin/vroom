@@ -1334,7 +1334,12 @@ def main():
         return 0
     if a.check:
         rc = check_known(failed, {relative(t) for t in seen})
-        rc |= check_accepted(accepted, {relative(t) for t in seen})
+        # a run compared only up to where clang crashed: where clang crashes
+        # depends on the host (its stack), so its listed lines past the
+        # crash are not stale
+        crashed = {f'{relative(r["test"])} {" ".join(r["opts"])}'
+                   for r in results if 'clang_crash' in r}
+        rc |= check_accepted(accepted, {relative(t) for t in seen}, crashed)
         if not a.patterns:
             rc |= check_metrics(metrics)
         return rc
@@ -1418,7 +1423,7 @@ def check_known(failed, ran):
     return 1 if new or stale else 0
 
 
-def check_accepted(accepted, ran):
+def check_accepted(accepted, ran, crashed=frozenset()):
     """The we-accept lines against src/test/cxx/sema/clang-accepted.txt (a
     multiset: two declarations may start on one line): a new one fails, a
     listed one that is gone is stale and fails too (--bless rewrites it)."""
@@ -1431,7 +1436,12 @@ def check_accepted(accepted, ran):
     now = collections.Counter(accepted)
     new = sorted((now - known).elements())
     # only a line of a test that ran can be stale (a PATTERN runs a part)
-    stale = sorted(k for k in (known - now).elements() if k.split(':', 1)[0] in ran)
+    def crash_cut(k):
+        test, rest = k.split(':', 1)
+        opts = rest.partition(' ')[2]
+        return f'{test} {opts}' in crashed
+    stale = sorted(k for k in (known - now).elements()
+                   if k.split(':', 1)[0] in ran and not crash_cut(k))
     for k in new:
         print(f'NEW ACCEPT    {k}')
     for k in stale:

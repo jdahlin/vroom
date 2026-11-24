@@ -395,7 +395,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     /* [expr.new]/(array of class type): the destructor is potentially
        invoked for the elements ([class.dtor]/16, [dcl.fct.def.delete]/2): a
        deleted one is ill-formed (as clang; C++98 has no deleted
-       destructors) */
+       destructors) [impl.clang] */
     if (array && c &&
         tokens.files.behavior.has(language_feature::rvalue_references) &&
         destructor_deleted(c))

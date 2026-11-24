@@ -867,7 +867,7 @@ void semantic_analysis::explicit_instantiation_verdict(entity_index e,
  * temp.dep, temp.names, expr.type.conv, ...), so it is taken only for a
  * coroutine's, whose promise's members are looked up in the instantiated
  * body only ([dcl.fct.def.coroutine]/5, /6), until fewer bodies are
- * refused.
+ * refused. [impl.clang]
  */
 bool semantic_analysis::explicit_instantiation_takes_verdict(
     const explicit_instantiation_unit &x) const
