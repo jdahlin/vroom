@@ -333,11 +333,10 @@ analysis_result semantic_analysis::array_cookie(SyntaxRef n, entity_index c,
  * class c (0: not a class) calls, ::delete when global, delete[] when
  * array; sized when it takes the size.
  */
-analysis_result
-semantic_analysis::usual_deallocation(SyntaxRef n, entity_index c, bool global,
-                                      bool array, entity_index &function,
-                                      bool &is_sized, bool class_complete,
-                                      bool cookie, bool over_aligned)
+analysis_result semantic_analysis::usual_deallocation(
+    SyntaxRef n, entity_index c, bool global, bool array,
+    entity_index &function, bool &is_sized, bool class_complete, bool cookie,
+    bool over_aligned, bool at_definition)
 {
     /* /9: "When the keyword delete in a delete-expression is preceded by
        the unary :: operator, the deallocation function's name is looked up
@@ -363,6 +362,26 @@ semantic_analysis::usual_deallocation(SyntaxRef n, entity_index c, bool global,
         type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
     entity_index unsized = 0, sized = 0;
     bool other = false;
+    /* a destroying delete's first parameter is the class, not void*
+       ([basic.stc.dynamic.deallocation]/2): not followed */
+    bool all_void_first = true;
+    for (entity_index f : set) {
+        const struct type &ft = type_table[entity_table[f].type.unqualified()];
+        const qualified_type *parameters =
+            type_table.parameters(entity_table[f].type.unqualified());
+        bool void_pointer = false;
+        if (ft.parameter_count && parameters[0].unqualified() &&
+            type_table[parameters[0].unqualified()].kind ==
+                type_kind::pointer) {
+            const struct type &pointee =
+                type_table[type_table[parameters[0].unqualified()]
+                               .operand.unqualified()];
+            void_pointer = pointee.kind == type_kind::fundamental &&
+                           pointee.fundamental == fundamental_type::void_;
+        }
+        if (!void_pointer)
+            all_void_first = false;
+    }
     /* [expr.delete]/10: "If the type has new-extended alignment, a function
        with a parameter of type std::align_val_t is preferred; otherwise a
        function without such a parameter is preferred. If exactly one
@@ -428,9 +447,13 @@ semantic_analysis::usual_deallocation(SyntaxRef n, entity_index c, bool global,
     if (!unsized || (sized && !in_class && (!array || cookie)))
         function = sized;
     is_sized = function && function == sized;
+    if (!function && in_class && !at_definition && all_void_first)
+        /* [expr.delete]/9 finds the class's deallocation functions, and
+           none is usual ([basic.stc.dynamic.deallocation]/2): clang's "no
+           suitable member 'operator delete' in 'C'" */
+        return ill_formed(n, "no suitable member 'operator delete'",
+                          "expr.delete");
     if (!function)
-        /* a deallocation function that is no usual one: clang's "no
-           suitable member 'operator delete'" */
         return not_supported(n, "expr.delete");
     return analysis_result::well_formed;
 }
