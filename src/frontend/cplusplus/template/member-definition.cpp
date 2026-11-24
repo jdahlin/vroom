@@ -297,6 +297,37 @@ analysis_result semantic_analysis::member_definition_of_template(
                 "template's",
                 "temp.mem");
     }
+    if (class_member && inner &&
+        of.definition.is(syntax_kind::class_specifier)) {
+        /* [temp.mem]/1: the class template's member template the
+           definition declares, with the template-head it was declared
+           with: found by its name, a member that is a template-declaration
+           of the class template (the definition is analysed per
+           specialization, which finds the rest; a head with a
+           requires-clause, or no such member, is not judged here) */
+        uint32_t wanted = tokens.identifier(class_member_name);
+        bool found = false;
+        for (auto member : of.definition.class_specifier()
+                               .member_specification()
+                               .elements()) {
+            if (member.is_token() ||
+                !member.is(syntax_kind::template_declaration))
+                continue;
+            bool writes = false;
+            for (token_index t = member.first_token(); t < member.end_token();
+                 t++)
+                if (tokens[t].kind == token_kind::identifier &&
+                    tokens.identifier(t) == wanted)
+                    writes = true;
+            if (!writes)
+                continue;
+            found = true;
+            if (head_constraint(member) || trailing_constraint(member))
+                return not_supported(n, "temp.mem");
+        }
+        if (!found || head_constraint(inner) || trailing_constraint(inner))
+            return not_supported(n, "temp.mem");
+    }
     template_member_definition record;
     record.first_parameter = first;
     record.declaration = n;
@@ -512,9 +543,74 @@ analysis_result semantic_analysis::define_member_template(uint32_t member,
                                                           bool recorded)
 {
     const template_member_definition o = template_member_definitions[member];
+    if (o.definition.is(syntax_kind::simple_declaration))
+        return define_member_class_template_of(
+            instantiations[index].specialization, o.declaration, o.inner,
+            o.definition, recorded);
     return define_member_template_of(instantiations[index].specialization,
                                      o.declaration, o.inner, o.definition,
                                      recorded);
+}
+
+/*
+ * [temp.mem]/1: the member class template of a class template, defined
+ * outside it (template<class T> template<class U> struct S<T>::X {...};),
+ * for the specialization c: the member class template of c that declares X
+ * takes the definition, as a class template declared before does
+ * (class_template_definition); X<B> is then instantiated as any class
+ * template's specialization (instantiate_class).
+ */
+analysis_result semantic_analysis::define_member_class_template_of(
+    entity_index c, SyntaxRef declaration, SyntaxRef inner,
+    SyntaxRef definition, bool recorded)
+{
+    owned_array<SyntaxRef> parameters;
+    instantiation_context context;
+    enter_instantiation(context, entity_table[c].enclosing, declaration);
+    SyntaxRef only = sole_decl_specifier(definition);
+    token_index name_token = 0;
+    if (!only || !out_of_class_class_member(only, &name_token) ||
+        template_head_parameters(inner, parameters, true, true, true, true) !=
+            analysis_result::well_formed ||
+        head_constraint(inner) || trailing_constraint(inner)) {
+        leave_instantiation(context);
+        return member_definition_unsupported(declaration, recorded);
+    }
+    uint32_t name = tokens.identifier(name_token);
+    current_scope = c;
+    uint32_t number = 0, first = 0;
+    entity_index scope = 0;
+    analysis_result r = template_parameter_scope(inner, parameters, c, name,
+                                                 number, scope, first);
+    leave_instantiation(context);
+    entity_index held = entity_table.find(c, name);
+    uint32_t declared = class_template_of(held);
+    if (r != analysis_result::well_formed || !held || !declared ||
+        function_templates[declared - 1].name != held ||
+        function_templates[declared - 1].primary ||
+        function_templates[declared - 1].definition ||
+        !function_templates[declared - 1].is_class)
+        return member_definition_unsupported(declaration, recorded);
+    const function_template d = function_templates[declared - 1];
+    /* [temp.over.link]/6: the same template-head */
+    if (entity_table[d.entity].enclosing != c ||
+        d.parameter_count != parameters.size() ||
+        !same_template_parameters(first, d.first_parameter,
+                                  d.parameter_count) ||
+        !same_constraints(d.declaration, inner))
+        return member_definition_unsupported(declaration, recorded);
+    for (uint32_t i = 0; i < d.parameter_count; i++)
+        if (entity_table[template_parameter_entities[first + i]].kind !=
+            entity_kind::template_entity)
+            entity_table[template_parameter_entities[first + i]].instantiation =
+                declared;
+    function_template &record = function_templates[declared - 1];
+    record.declaration = inner;
+    record.definition = only;
+    record.first_parameter = first;
+    entity_table[d.entity].defined = true;
+    entity_table.add_declaration(d.entity, inner);
+    return analysis_result::well_formed;
 }
 
 /* the member template of class c that the template-declaration

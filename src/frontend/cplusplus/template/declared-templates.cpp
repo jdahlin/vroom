@@ -60,6 +60,14 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
             if (d.is(syntax_kind::function_definition) &&
                 out_of_class_member(d))
                 return member_definition_of_template(t, d, inner);
+            /* [temp.mem]/1's member class template of a class template,
+               defined outside it */
+            if (d.is(syntax_kind::simple_declaration)) {
+                SyntaxRef only = sole_decl_specifier(d);
+                if (only && only.is(syntax_kind::class_specifier) &&
+                    out_of_class_class_member(only))
+                    return member_definition_of_template(t, d, inner);
+            }
             return not_supported(t, "temp.mem");
         },
         /* [temp.alias]/1: "A template-declaration in which the declaration

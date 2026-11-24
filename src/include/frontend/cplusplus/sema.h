@@ -5310,6 +5310,11 @@ class semantic_analysis
     define_member_template_of(entity_index c, SyntaxRef declaration,
                               SyntaxRef inner, SyntaxRef definition,
                               bool recorded, bool allow_redefine = false);
+    analysis_result define_member_class_template_of(entity_index c,
+                                                    SyntaxRef declaration,
+                                                    SyntaxRef inner,
+                                                    SyntaxRef definition,
+                                                    bool recorded);
     analysis_result member_definition_of_template(SyntaxRef n,
                                                   SyntaxRef definition,
                                                   SyntaxRef inner = 0);
