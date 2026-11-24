@@ -2748,6 +2748,17 @@ analysis_result semantic_analysis::define_defaulted_special_member(
         }
     } defining = {defining_defaulted_member, defining_defaulted_member};
     defining_defaulted_member = true;
+    /* defaulted on its first declaration: defined only when odr-used */
+    struct deferring_scope {
+        entity_index &by;
+        entity_index before;
+        ~deferring_scope()
+        {
+            by = before;
+        }
+    } deferring = {needs_deferred_by, needs_deferred_by};
+    if (!after_declaration)
+        needs_deferred_by = f;
     synthesized_function sf;
     begin_synthesized(
         sf, f,

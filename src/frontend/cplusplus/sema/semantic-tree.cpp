@@ -125,7 +125,35 @@ void semantic_analysis::require_destructor_definition(qualified_type type)
         return;
     entity_index destructor = entity_table[object.entity].destructor;
     if (destructor)
-        entity_table[destructor].member_definition_needed = true;
+        mark_needed(destructor);
+}
+
+void semantic_analysis::mark_needed(entity_index function)
+{
+    if (needs_deferred_by && function != needs_deferred_by) {
+        deferred_need d;
+        d.by = needs_deferred_by;
+        d.needed = function;
+        deferred_needs.append(d);
+        return;
+    }
+    entity_table[function].member_definition_needed = true;
+}
+
+/* the needs of a defaulted special member now needed (or virtual: its
+   vtable needs it, [temp.inst]/11), passed on; whether any was */
+bool semantic_analysis::pass_deferred_needs()
+{
+    bool passed = false;
+    for (const deferred_need &d : deferred_needs) {
+        const entity &by = entity_table[d.by];
+        if ((by.member_definition_needed || by.virtual_) &&
+            !entity_table[d.needed].member_definition_needed) {
+            entity_table[d.needed].member_definition_needed = true;
+            passed = true;
+        }
+    }
+    return passed;
 }
 
 uint32_t semantic_analysis::expression_node(semantic_kind kind,
@@ -147,7 +175,7 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
                  entity_table[a].kind == entity_kind::variable)
             function = a;
         if (function)
-            entity_table[function].member_definition_needed = true;
+            mark_needed(function);
         require_complete(m.type);
         if (m.category == value_category::prvalue)
             require_destructor_definition(m.type);
