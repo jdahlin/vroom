@@ -662,3 +662,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   members, !=, <=>, the implicit == of a defaulted <=>; a local constexpr
   object default-initialized by a user constructor (scratchpad
   local-constexpr.patch).
+- 10.6 (50df49836, 308a4dd60, 3169d77e0, cb26496e0): defaulted == with bases,
+  arrays, friends; defaulted !=; defaulted <=> with an explicit ordering
+  type; a constexpr class variable read as a value in lowering.
+  Unsupported 35291 -> 35265.  Review: 308a4dd60 blessed we reject 454 ->
+  456 (the report said unchanged): except.spec/p11-2a.cpp:52, `struct E {
+  D<E> d; ... }` where D<E> is taken as incomplete, an existing wrong
+  rejection one more declaration now reaches: 10.7 fixes it first.  Leads:
+  SemaCXX/Inputs/std-compare.h refused at line 23 (a pointer to member of
+  an incomplete class); builtin <=> on arithmetic not evaluated or lowered.
