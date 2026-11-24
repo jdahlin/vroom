@@ -1959,8 +1959,11 @@ constness semantic_analysis::pointed_place(const constant_evaluation &state,
 {
     if (p.kind != constant_value_kind::pointer)
         return CONST_UNKNOWN;
+    /* [expr.unary.op]/1, [expr.const]/5.7: the operand of the indirection
+       is null: undefined behavior (past the end: not decided, a member
+       that is static does not read the object) */
     if (!p.count)
-        return CONST_NOT_CONSTANT;
+        return CONST_NOT_CONSTANT_RULE;
     if (p.extent && p.offset >= p.extent)
         return CONST_NOT_CONSTANT;
     uint32_t index = p.first;
