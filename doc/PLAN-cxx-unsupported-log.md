@@ -778,3 +778,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   Left: a used (not explicit) member body's errors do not reject the use's
   declaration; trivial implicit assignment operators are not declared
   (class.copy.assign refusal in id-expression.cpp).
+- 11.8 (82b5737cc, 1002af8f2, c47a1536e, 4bc1a1fb9, 2e0839825): qualified
+  variable template explicit specialization without initializer; a
+  partial specialization's default template argument and a permuted
+  `S<U,T>` are ill-formed; partial specializations of variable templates
+  without initializer; details for the `!ct` refusals (mostly follow-ons of
+  held class templates, e.g. a [[deprecated]] forward declaration,
+  class-template.cpp:179) and class-specifier.cpp:1280 (125: in-class
+  explicit specialization, CWG727).  Unsupported 34791 -> 34766, we accept
+  5318 -> 5312.  1002af8f2 also carries detail-only changes (hook abort).
