@@ -2644,11 +2644,15 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
            function or variable"; this declaration (of it or of an inline
            one) is its definition ([basic.def]/2.3), and an odr-use emits it
            (COMDAT, [impl.clang] as clang) */
-        if (tokens.files.behavior.edition < standard_edition::cplusplus_17)
-            return not_supported(declarator, "class.static.data");
-        x.inline_ = true;
         x.constexpr_ = s.constexpr_;
-        x.defined = true;
+        /* before C++17 it is not inline: the declaration in the class is not
+           a definition, as for a const integral member ([class.static.data]/3,
+           C++14) */
+        if (s.inline_ ||
+            tokens.files.behavior.edition >= standard_edition::cplusplus_17) {
+            x.inline_ = true;
+            x.defined = true;
+        }
     }
     return analysis_result::well_formed;
 }
