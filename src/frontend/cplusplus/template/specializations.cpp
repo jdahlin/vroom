@@ -356,11 +356,24 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
         if (e.size() == 3 && ec[1].is(syntax_kind::gnu_attribute_specifier) &&
             gnu_attributes_without_effect(ec[1]))
             id = 2;
-        if (e.size() != id + 1 || !ec[0].is_token() ||
-            !ec[id].is(syntax_kind::simple_template_id) ||
-            (ec[0].keyword() != standard_keyword::struct_ &&
-             ec[0].keyword() != standard_keyword::class_))
-            return not_supported(n, "temp.explicit");
+        if (e.size() != id + 1 || !ec[0].is_token())
+            return not_supported_because(
+                n, "temp.explicit",
+                "an elaborated-type-specifier of another shape");
+        if (!ec[id].is(syntax_kind::simple_template_id)) {
+            if (ec[id].is(syntax_kind::nested_name_specifier))
+                return not_supported_because(
+                    n, "temp.explicit",
+                    "a class explicitly instantiated by a qualified name");
+            return not_supported_because(
+                n, "temp.explicit",
+                "an explicit instantiation of a class that is not a "
+                "simple-template-id");
+        }
+        if (ec[0].keyword() != standard_keyword::struct_ &&
+            ec[0].keyword() != standard_keyword::class_)
+            return not_supported_because(
+                n, "temp.explicit", "an explicit instantiation of a union");
         return class_explicit_instantiation(n, ec[id], extern_);
     }
     /* a constructor or destructor: no decl-specifier-seq,
