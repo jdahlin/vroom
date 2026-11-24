@@ -583,6 +583,8 @@ enum class extension_keyword : uint8_t {
     source_location_value,
     typeof_,
     c11_thread_local,
+    /* [ext:microsoft_declspec] __declspec, _declspec */
+    declspec,
 };
 
 /*

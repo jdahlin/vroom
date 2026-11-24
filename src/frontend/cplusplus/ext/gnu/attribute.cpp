@@ -62,16 +62,16 @@ namespace cplusplus
 
 bool parser::at_gnu_attribute(unsigned ahead)
 {
-    /* [ext:microsoft_declspec] __declspec is the same keyword class: clang
-       takes it where an attribute-specifier goes */
-    return at(extension_keyword::attribute, ahead);
+    /* [ext:microsoft_declspec] clang takes __declspec where an
+       attribute-specifier goes */
+    extension_keyword k = extension_keyword_of(peek(ahead));
+    return k == extension_keyword::attribute ||
+           k == extension_keyword::declspec;
 }
 
 node_index parser::gnu_attribute_specifier()
 {
-    int k = peek().keyword;
-    if (k == keyword_of_spelling("__declspec") ||
-        k == keyword_of_spelling("_declspec"))
+    if (at(extension_keyword::declspec))
         return microsoft_declspec();
     size_t mark = begin_node();
     token_index first = position;
@@ -144,8 +144,8 @@ node_index parser::gnu_attribute_specifier()
  * clang's ParseMicrosoftDeclSpecs: the attributes are separated by white
  * space (commas are skipped); each is an identifier, with an
  * expression-list in parentheses.  The node is a gnu-attribute-specifier
- * whose first token is __declspec, so the analysis of the attributes
- * (gnu_attribute_rules) is shared.
+ * whose first token is the keyword __declspec (extension_keyword::declspec),
+ * so the analysis of the attributes (gnu_attribute_rules) is shared.
  */
 node_index parser::microsoft_declspec()
 {
@@ -630,14 +630,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                 attributes.append(c);
         }
     }
-    bool declspec = false;
-    {
-        owned_buffer first_spelling;
-        tokens.spelling(n.first_token(), first_spelling.get());
-        declspec = first_spelling.size() >= 8 &&
-                   !memcmp(first_spelling.data() + first_spelling.size() - 8,
-                           "declspec", 8);
-    }
+    /* [ext:microsoft_declspec] (the keyword, extension_keyword::declspec) */
+    bool declspec = p.extension_keyword_of(tokens[n.first_token()]) ==
+                    extension_keyword::declspec;
     for (SyntaxElement a : attributes) {
         token_index name_token = a.token();
         uint32_t count = a.size();
