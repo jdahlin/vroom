@@ -621,3 +621,24 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   reject unchanged, we accept -4.  Needs a design: an explicit
   specialization of a member class or member class template of a class
   template specialization (template<> struct S0<int>::S1;).
+- 10.2 (25aa29f2f, ac831bf1b, 54b1ed016, 59c1c8cb3): an explicit
+  specialization of a member class of a class template specialization
+  (`template<> struct S<int>::M;`, with a body when the template only
+  declares M: the out-of-class definition of a member class of the
+  instantiation), an explicit instantiation of an explicitly specialized
+  class (no effect, a second one still unsupported), hold_names no longer
+  holds S for a refused `template<class T> template<class U> struct S<T>::X`
+  (it hid every later `S<T>::f` definition: member-definition.cpp:158 was
+  that cascade, not a missing rule), `template<>` members of an explicitly
+  specialized class and defaults in a member template's out-of-class head
+  ill-formed.  Unsupported 35428 -> 35392, we reject 454, we accept 5408 -> 5403.
+  Open: the out-of-class definition of a member class template
+  (`template<class T> template<class U> struct S<T>::X {}`,
+  declared-templates.cpp:63, 255 declarations: needs the member template's
+  record in each specialization to take the definition, as
+  define_member_template_of does for functions); an explicit specialization
+  of a member class the template defines in its class (the instantiation has
+  defined it already: needs undoing); member class templates and member
+  variable templates of a specialization (`template<> template<class X> class
+  A<int>::B`); partial specializations of member templates defined outside
+  (still hold S, p6.cpp).
