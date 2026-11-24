@@ -161,6 +161,16 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
             return member_definition_of_template(t, s);
         return variable_template_definition(t, s);
     }
+    /* [temp.class.spec]/1: a partial specialization of a variable
+       template declared without an initializer (template<class T> int
+       v<T*>;), named plainly or through its namespace */
+    if (s.size() == 3 && !lead && s.is(s[0], syntax_kind::decl_specifier_seq)) {
+        if (SyntaxRef id = variable_specialization_id(s))
+            return variable_partial_specialization(t, s, id, 0);
+        entity_index qualifier = 0;
+        if (SyntaxRef id = qualified_variable_specialization_id(s, qualifier))
+            return variable_partial_specialization(t, s, id, qualifier);
+    }
     /* [temp.static]/1: a static data member of a class template defined
        outside it without an initializer (template<class T> int S<T>::m;) */
     if (s.size() == 3 && !lead && out_of_class_variable_member(s))
