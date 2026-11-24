@@ -207,7 +207,11 @@ bool semantic_analysis::declares_move_assignment(entity_index c)
  */
 bool semantic_analysis::copy_assignment_deleted(entity_index c) const
 {
-    if (declares_move_constructor(c) ||
+    /* [class.copy.assign]/2: only an implicitly-declared copy assignment
+       operator is defined as deleted by a declared move constructor; a
+       defaulted X& operator=(const X&) is a declaration of it */
+    if ((declares_move_constructor(c) &&
+         !entity_table[c].defaulted_copy_assignment) ||
         entity_table[c].closure_assignment_deleted)
         return true;
     const entity &x = entity_table[c];
