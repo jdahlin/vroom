@@ -334,6 +334,34 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                 "class's is defined as defaulted)");
         if (own)
             entity_table[own].deleted = true;
+        if (own && entity_table[own].virtual_) {
+            /* [class.virtual]/17: "A function with a deleted definition
+               shall not override a function that does not have a deleted
+               definition." */
+            const entity &cx = entity_table[c];
+            for (uint32_t i = 0; i < cx.base_count + cx.virtual_base_count;
+                 i++) {
+                entity_index base;
+                if (i < cx.base_count)
+                    base = class_bases[cx.first_base + i];
+                else
+                    base = class_virtual_bases[cx.first_virtual_base + i -
+                                               cx.base_count];
+                entity_index bd =
+                    entity_table
+                        [type_table[entity_table[base].type.unqualified()]
+                             .entity]
+                            .destructor;
+                if (bd && entity_table[bd].virtual_ &&
+                    !entity_table[bd].deleted)
+                    return ill_formed(n,
+                                      "a function with a deleted "
+                                      "definition shall not override a "
+                                      "function that does not have a "
+                                      "deleted definition",
+                                      "class.virtual");
+            }
+        }
         break;
     }
     entity_index destructor = entity_table[c].destructor;

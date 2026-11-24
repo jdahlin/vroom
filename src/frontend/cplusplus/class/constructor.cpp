@@ -1970,8 +1970,18 @@ bool semantic_analysis::subobject_destructor_inaccessible(entity_index c,
     if (!kd)
         return false;
     uint8_t access = entity_table[kd].access;
-    if (access != 1)
-        return access != 0;
+    if (access != 1) {
+        if (access == 0)
+            return false;
+        /* [class.access.base]/1: a private member is accessible in the
+           members and friends of its class ([class.friend]/2), and of a
+           class nested in it ([class.access.nest]/1) */
+        for (entity_index e = c; !is_namespace(e);
+             e = entity_table[e].enclosing)
+            if (e == k || grants(k, e))
+                return false;
+        return true;
+    }
     const entity &x = entity_table[c];
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
@@ -2187,8 +2197,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
            implicit constructor beside a subobject's inaccessible
            destructor is deleted */
         if (subobject_destructor_inaccessible(c, k) &&
-            (!x.destructor || !declares_copy || !x.first_constructor))
-            return not_supported(n, "class.default.ctor");
+            (!x.destructor || !declares_copy || !x.first_constructor)) {
+            if (construction && !x.first_constructor)
+                entity_table[c].implicit_default_deleted = true;
+            copy_deleted = true;
+            move_deleted = true;
+        }
     }
     /* [temp.mem]/1: a constructor template is user-declared, and the
        implicit copy constructor is declared beside it

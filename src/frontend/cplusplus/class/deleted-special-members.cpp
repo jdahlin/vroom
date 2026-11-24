@@ -45,7 +45,7 @@ bool semantic_analysis::default_constructed(entity_index c,
  * type M (or array thereof) and M has a destructor that is deleted or
  * inaccessible".  Whether class c's destructor is deleted: by its
  * definition (= delete), or, when it is not user-provided, by a
- * subobject's.  Access is not analysed.
+ * subobject's (deleted or inaccessible).
  */
 bool semantic_analysis::destructor_deleted(entity_index c) const
 {
@@ -58,7 +58,7 @@ bool semantic_analysis::destructor_deleted(entity_index c) const
     subobject_classes(c, classes);
     for (entity_index k : classes)
         if (entity_table[k].kind == entity_kind::class_type &&
-            destructor_deleted(k))
+            (destructor_deleted(k) || subobject_destructor_inaccessible(c, k)))
             return true;
     return false;
 }

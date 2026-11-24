@@ -368,6 +368,18 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
            ::new or not */
         VTRY_SET(r, array_cookie(n, c, type, false, cookie));
     }
+    /* [expr.new]/(array of class type): the destructor is potentially
+       invoked for the elements ([class.dtor]/16, [dcl.fct.def.delete]/2): a
+       deleted one is ill-formed (as clang; C++98 has no deleted
+       destructors) */
+    if (array && c &&
+        tokens.files.behavior.has(language_feature::rvalue_references) &&
+        destructor_deleted(c))
+        return ill_formed(n,
+                          "a program that refers to a deleted function "
+                          "implicitly or explicitly is ill-formed: the "
+                          "destructor of the elements is deleted",
+                          "class.dtor");
     bool elements =
         array && c &&
         (entity_table[c].first_constructor || destroys(c) || cookie);
