@@ -26,6 +26,20 @@
 namespace cplusplus
 {
 
+/* a nested-name-specifier's components' kinds into out: i an identifier,
+   t a simple-template-id */
+static void qualifier_form(SyntaxRef nested, char (&out)[16])
+{
+    size_t n = 0;
+    for (size_t k = 0; k < nested.size() && n < 12; k++) {
+        if (nested[k].is(syntax_kind::simple_template_id))
+            out[n++] = 't';
+        else if (nested[k].is_identifier())
+            out[n++] = 'i';
+    }
+    out[n] = 0;
+}
+
 /*
  * [temp.pre]/1: "A template defines a family of classes, functions, or
  * variables, an alias for a family of types, or a concept."
@@ -83,17 +97,8 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
                         "a member template function definition without a "
                         "nested-name-specifier");
                 if (nested.size() != 2) {
-                    /* the components' kinds: i an identifier, t a
-                       simple-template-id */
-                    char form[16] = "";
-                    size_t n = 0;
-                    for (size_t k = 0; k < nested.size() && n < 12; k++) {
-                        if (nested[k].is(syntax_kind::simple_template_id))
-                            form[n++] = 't';
-                        else if (nested[k].is_identifier())
-                            form[n++] = 'i';
-                    }
-                    form[n] = 0;
+                    char form[16];
+                    qualifier_form(nested, form);
                     char why[160];
                     snprintf(why, sizeof why,
                              "a member template function definition of a "
@@ -107,11 +112,41 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
                     "a member template function definition whose "
                     "nested-name-specifier is not a simple-template-id");
             }
-            if (d.is(syntax_kind::simple_declaration))
-                return not_supported_because(
-                    t, "temp.mem",
-                    "a member template simple-declaration that is no "
-                    "variable or class definition outside its class");
+            if (d.is(syntax_kind::simple_declaration)) {
+                /* by form: the qualifier's components (i an identifier, t a
+                   simple-template-id) of a class definition or of a
+                   variable's declarator-id */
+                char form[16] = "";
+                const char *kind = "other";
+                SyntaxRef only = sole_decl_specifier(d);
+                if (only && only.is(syntax_kind::class_specifier)) {
+                    kind = "a class definition";
+                    auto head = only.class_specifier().class_head();
+                    if (head && head.size() == 2 &&
+                        head[1].is(syntax_kind::class_head_name) &&
+                        head[1].size() == 2 &&
+                        head[1][0].is(syntax_kind::nested_name_specifier))
+                        qualifier_form(head[1][0], form);
+                    else
+                        kind = "a class definition without a qualifier";
+                } else if (d.size() == 3) {
+                    SyntaxElement q = d[1];
+                    if (q.is(syntax_kind::init_declarator) && q.size())
+                        q = q[0];
+                    if (q.is(syntax_kind::qualified_id) && q.size() == 2 &&
+                        q[0].is(syntax_kind::nested_name_specifier)) {
+                        kind = "a variable";
+                        qualifier_form(q[0], form);
+                    }
+                }
+                char why[160];
+                snprintf(why, sizeof why,
+                         "a member template simple-declaration that is no "
+                         "variable or class definition outside its class: %s "
+                         "(qualifier %s)",
+                         kind, form);
+                return not_supported_because(t, "temp.mem", why);
+            }
             return not_supported_because(t, "temp.mem",
                                          "a member template of another kind of "
                                          "declaration");
