@@ -1705,10 +1705,12 @@ analysis_result semantic_analysis::class_list_initialization(
                                                result);
     }
     if (clauses.size() == 1 && !clauses[0].is(syntax_kind::braced_init_list)) {
-        /* (3.2): an element of the class's own type */
+        /* (3.2): an element of the class's own type or of a class derived
+           from it (CWG 1467) */
         expression_meaning e;
         VTRY(r, expression(clauses[0], e));
-        if (e.type.unqualified() == type.unqualified())
+        if (e.type.unqualified() == type.unqualified() ||
+            same_or_derived_class(e, c))
             return initialize_with(list, e, type, false, true, result);
         /* an element initialized from it: analysed again below */
     }
