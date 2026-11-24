@@ -2494,6 +2494,8 @@ class semantic_analysis
        comparison function whose body function_body makes */
     bool defaulted_equality_declared(entity_index c, uint32_t name,
                                      qualified_type type);
+    bool defaulted_member_equality(entity_index c, SyntaxElement d,
+                                   const specified &s, uint8_t access);
     entity_index defaulted_comparison = 0;
     analysis_result defaulted_equality(token_index at,
                                        const owned_array<uint32_t> &parameters,

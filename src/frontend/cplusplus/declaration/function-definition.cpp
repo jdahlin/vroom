@@ -552,7 +552,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
            value and has no return statement flows off its end
            ([stmt.return]/2), which clang diagnoses until C++23 */
         if (!b.has(language_feature::constexpr_without_constant_result) &&
-            !returns_void && !found.returns)
+            !returns_void && !found.returns && !entity_table[f].deleted)
             result =
                 worse(result,
                       ill_formed_at_token(first_token(compound),
@@ -568,6 +568,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
            on builtins [impl.clang] clang does not fold) */
         else if (!b.has(language_feature::constexpr_without_constant_result) &&
                  !in_system_header(first_token(compound)) &&
+                 !defaulted_comparison &&
                  potential_constant(body) == constness::not_constant)
             result = worse(
                 result,

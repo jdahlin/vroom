@@ -882,7 +882,11 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
             if (initializer_member(class_members[x.first_member + i]))
                 listed++;
     }
-    if (given > listed || (c_entity && init && !zero && given != listed))
+    /* a list that has an item for each member, the unnamed bit-fields
+       too (a constructor's, one per member in order) */
+    bool all_members = c_entity && init && listed != count && given == count;
+    if (!all_members &&
+        (given > listed || (c_entity && init && !zero && given != listed)))
         return CONST_UNKNOWN;
     /* an object made again at its place (a constructor's initialization of
        a member the object's own allocation made) keeps the elements it
@@ -923,7 +927,9 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         if (c_entity)
             listed_member = initializer_member(
                 class_members[entity_table[c_entity].first_member + i]);
-        if (!listed_member)
+        if (all_members)
+            element = items[i];
+        else if (!listed_member)
             element = zero_initializer;
         else if (item < given)
             element = items[item++];

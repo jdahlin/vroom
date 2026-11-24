@@ -1514,10 +1514,15 @@ analysis_result semantic_analysis::member_declarators(
             VTRY(cr, constraint_satisfied(n[body_at][1], current_scope,
                                           lookup_horizon, satisfied));
         }
-        if (body_at == first + 1 && body.defaulted())
+        bool compared = false;
+        if (body_at == first + 1 && body.defaulted() && !constrained) {
+            scoped_value<SyntaxRef> member_declaration(current_declaration, n);
+            compared = defaulted_member_equality(c, n[first], s, access);
+        }
+        if (body_at == first + 1 && body.defaulted() && !compared)
             return defaulted_copy_assignment(c, n, n[first], s, access);
         /* = delete: member_function_definition's deleted_definition */
-        if (!body.deleted() && !body.plain())
+        if (!body.deleted() && !body.plain() && !compared)
             /* a ctor-initializer, a function-try-block, = default */
             return not_supported(n, "dcl.fct.def.general");
         virt_override = override_;
@@ -2371,6 +2376,12 @@ semantic_analysis::member_function_definition(entity_index c,
     auto body = definition.function_body();
     if (body.deleted())
         return deleted_definition(definition, last_declared);
+    if (body.defaulted()) {
+        /* [class.compare.default]: the member operator== member_declarators
+           declared */
+        scoped_value<entity_index> compared(defaulted_comparison, c);
+        return analyse_function_body(definition, body);
+    }
     if (!body.plain())
         return not_supported(definition, "dcl.fct.def.general");
     return analyse_function_body(definition, body.compound_statement());

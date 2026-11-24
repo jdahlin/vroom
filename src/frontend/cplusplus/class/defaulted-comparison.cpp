@@ -53,25 +53,50 @@ analysis_result semantic_analysis::defaulted_equality(
     token_index at, const owned_array<uint32_t> &parameters, uint32_t &block)
 {
     const entity &x = entity_table[defaulted_comparison];
-    if (!x.member_count || parameters.size() != 2)
+    entity_table[last_declared].inline_ = true;
+    /* a member's first parameter entity is its object */
+    bool of_class =
+        entity_table[last_declared].kind == entity_kind::function &&
+        entity_table[last_declared].enclosing == defaulted_comparison;
+    if (!x.member_count || parameters.size() != 2u)
         return not_supported(current_declaration, "class.compare.default");
     expression_meaning all;
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = class_members[x.first_member + i];
+        /* [class.eq]/3: an unnamed bit-field is no subobject compared
+           ([class.compare.default]/6) */
+        if (!entity_table[member].name && entity_table[member].bit_field)
+            continue;
         if (type_table[entity_table[member].type.unqualified()].kind ==
             type_kind::array)
             return not_supported(current_declaration, "class.compare.default");
         expression_meaning sides[2], equal;
+        size_t issued = diagnostics.messages.size();
         for (int k = 0; k < 2; k++) {
-            analysis_result r =
-                named_entity(at, parameters[k], sides[k], false);
+            analysis_result r = analysis_result::well_formed;
+            if (of_class && k == 0)
+                r = this_object(at, sides[k]);
+            else
+                r = named_entity(at, parameters[k], sides[k], false);
             if (r == analysis_result::well_formed)
                 VTRY_SET(r, member_access(at, member, sides[k]));
         }
-        VTRY(r,
-             binary_of(current_declaration, at,
-                       preprocessing_op_or_punc::EQUAL_EQUAL, SyntaxElement(),
-                       sides[0], SyntaxElement(), sides[1], equal));
+        analysis_result compared = binary_of(
+            current_declaration, at, preprocessing_op_or_punc::EQUAL_EQUAL,
+            SyntaxElement(), sides[0], SyntaxElement(), sides[1], equal);
+        if (compared == analysis_result::ill_formed) {
+            /* [class.eq]/2: "A defaulted == operator function for class C
+               is defined as deleted if ... overload resolution as applied
+               to find the corresponding == operator ... results in an
+               ambiguity or a function that is deleted or inaccessible":
+               not an error where it is declared */
+            diagnostics.discard_since(issued);
+            entity_table[last_declared].deleted = true;
+            owned_array<uint32_t> none;
+            block = block_statement(at, none);
+            return analysis_result::well_formed;
+        }
+        VTRY(r, compared);
         /* a bool prvalue each ([class.eq]/2), joined by && ([expr.log.and]) */
         if (i) {
             if (all.evaluation == constness::not_constant)
@@ -81,11 +106,71 @@ analysis_result semantic_analysis::defaulted_equality(
         }
         all = equal;
     }
+    /* [class.compare.default]/3: "A defaulted comparison operator function
+       is constexpr-compatible if it satisfies the requirements for a
+       constexpr function": its parameters are of literal types and each
+       comparison it makes may be a constant expression; it is then
+       implicitly constexpr ([dcl.fct.def.default]/3) */
+    bool literal = true;
+    for (size_t k = 0; k < parameters.size(); k++)
+        if (!(of_class && k == 0) &&
+            literal_type(entity_table[parameters[k]].type) !=
+                constness::constant)
+            literal = false;
+    if (literal && potential_constant(all.node) != constness::not_constant)
+        entity_table[last_declared].constexpr_ = true;
     owned_array<uint32_t> statements;
     statements.append(
         statement_node(semantic_kind::return_statement, at, all.node));
     block = block_statement(at, statements);
     return analysis_result::well_formed;
+}
+
+} // namespace cplusplus
+
+namespace cplusplus
+{
+
+/*
+ * [class.compare.default]/1: a member function of C with one parameter of
+ * type const C& and the cv-qualifier const, declared in the class with
+ * = default: the declarator of member_declaration n of class c, whether it
+ * is such an operator==, the only defaulted comparison analysed as a
+ * member.  [class.eq]/1: its declared return type is bool.
+ */
+bool semantic_analysis::defaulted_member_equality(entity_index c,
+                                                  SyntaxElement d,
+                                                  const specified &s,
+                                                  uint8_t access)
+{
+    if (access || !s.has_type || s.typedef_ || s.static_ || s.extern_ ||
+        s.virtual_ || s.friend_ || s.explicit_ || s.declares_class ||
+        s.aligned || entity_table[c].base_count)
+        return false;
+    qualified_type type = s.type;
+    declarator_meaning m;
+    function_cv = 0;
+    in_member_declarator = true;
+    function_parameters.clear();
+    analysis_result r = declarator(current_declaration, d, type, m);
+    in_member_declarator = false;
+    if (r != analysis_result::well_formed || !m.has_id || m.qualifier ||
+        !m.operator_function || m.aligned ||
+        m.implemented != preprocessing_op_or_punc::EQUAL_EQUAL ||
+        function_cv != cv_const)
+        return false;
+    for (const parameter_meaning &parameter : function_parameters)
+        if (parameter.default_argument)
+            return false;
+    const struct type &f = type_table[type.unqualified()];
+    if (f.kind != type_kind::function || f.variadic || f.parameter_count != 1 ||
+        fundamental_of(f.operand) != fundamental_type::bool_ || f.operand.cv())
+        return false;
+    const struct type &first =
+        type_table[type_table.parameters(type.unqualified())[0].unqualified()];
+    return first.kind == type_kind::lvalue_reference &&
+           first.operand == qualified_type::make(
+                                entity_table[c].type.unqualified(), cv_const);
 }
 
 } // namespace cplusplus
