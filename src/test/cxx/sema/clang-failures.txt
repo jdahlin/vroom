@@ -367,7 +367,6 @@ tree SemaCXX/uninitialized.cpp -Wall -Wc++20-compat -Wuninitialized -Wno-unused-
 tree SemaCXX/uninitialized.cpp -Wall -Wc++20-compat -Wuninitialized -Wno-unused-value -Wno-unused-lambda-capture -Wno-uninitialized-const-reference -std=c++20: uninitialized.cpp:763:5: declaration_statement: the initializer is a statement_expression
 tree SemaCXX/uninitialized.cpp -Wall -Wc++20-compat -Wuninitialized -Wno-unused-value -Wno-unused-lambda-capture -Wno-uninitialized-const-reference -std=c++20: uninitialized.cpp:797:7: declaration_statement: the initializer is a statement_expression
 tree SemaCXX/uninitialized.cpp -Wall -Wc++20-compat -Wuninitialized -Wno-unused-value -Wno-unused-lambda-capture -Wno-uninitialized-const-reference -std=c++20: uninitialized.cpp:80:3: declaration_statement: the initializer is a statement_expression
-tree SemaCXX/union-member-destructor.cpp -std=c++11: union-member-destructor.cpp:17:17: expression_statement: the expression is a zero
 tree SemaCXX/union-member-destructor.cpp -std=c++11: union-member-destructor.cpp:49:17: expression_statement: the expression is a zero
 tree SemaCXX/unused.cpp -std=c++17 -Wunused: unused.cpp:92:7: if_statement: no substatement
 tree SemaCXX/unused.cpp -std=c++17 -Wunused: unused.cpp:97:5: if_statement: no substatement

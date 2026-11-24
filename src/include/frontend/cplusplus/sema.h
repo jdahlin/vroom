@@ -4098,6 +4098,12 @@ class semantic_analysis
            constructed in place) or for a read: a union's member that is
            not active is made so, or is not constant */
         uint32_t writing = 0, reading = 0;
+        /* [basic.life]/1, [expr.const]/5.8: the places whose initialization
+           (a constructor's store of a member) is under way: an assignment
+           to one from its own initializer is outside its lifetime */
+        static constexpr uint32_t initializing_limit = 8;
+        uint32_t initializing[initializing_limit] = {};
+        uint32_t initializing_count = 0;
         /* an object expression evaluated and not read ([expr.ref]/6.1): an
            inactive union member is designated without being read */
         uint32_t designating = 0;

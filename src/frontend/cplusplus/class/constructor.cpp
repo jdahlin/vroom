@@ -1959,6 +1959,9 @@ uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
         static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
     if (initializes)
         semantics[assigned].c = 1;
+    /* a member's store of its initialization (the constant evaluator's
+       places under initialization) */
+    semantics[assigned].d = 1;
     return statement_node(semantic_kind::expression_statement, at, assigned);
 }
 
@@ -3240,6 +3243,25 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
                                   "invoked by the constructor and it is "
                                   "deleted",
                                   "class.base.init");
+        /* the destructors it potentially invokes are used by this
+           definition ([temp.inst]/4: an argument-dependent error in an
+           instantiated one makes it ill-formed), those of an unnamed
+           union's or struct's members too */
+        owned_array<entity_index> pending;
+        for (entity_index sub : subobjects)
+            pending.append(sub);
+        for (size_t i = 0; i < pending.size(); i++) {
+            entity_index sub = pending[i];
+            if (entity_table[sub].kind != entity_kind::class_type)
+                continue;
+            if (entity_table[sub].anonymous_object)
+                subobject_classes(sub, pending);
+            entity_index dtor = entity_table[sub].destructor;
+            if (!dtor || instantiation_depth)
+                continue;
+            entity_table[dtor].member_needed_by = definition;
+            mark_needed(dtor);
+        }
     }
     return analyse_function_body(definition, body.compound_statement(), init);
 }

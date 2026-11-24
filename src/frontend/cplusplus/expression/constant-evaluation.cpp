@@ -106,6 +106,9 @@ constexpr const char cast_dynamic_type[] =
 constexpr const char read_past_the_end[] =
     "read of dereferenced one-past-the-end pointer is not allowed "
     "in a constant expression";
+constexpr const char modify_outside_lifetime[] =
+    "assignment to object outside its lifetime is not allowed in a "
+    "constant expression";
 constexpr const char read_outside_lifetime[] =
     "read of object outside its lifetime is not allowed in a "
     "constant expression";
@@ -1816,8 +1819,28 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 return CONST_NOT_CONSTANT;
             return CONST_NOT_CONSTANT_NOTE(rule_note::modify_outside_object);
         }
+        /* [basic.life]/1, [expr.const]/5.8: the member's own initializer
+           assigns to it before its initialization has finished (clang:
+           "assignment to object outside its lifetime"); since C++20 the
+           lifetime of an object with a trivial destructor begins when its
+           storage is obtained (CWG 2256), the assignment is fine */
+        bool before_lifetime =
+            tokens.files.behavior.edition < standard_edition::cplusplus_20;
+        for (uint32_t i = 0; i < state.initializing_count; i++)
+            if (before_lifetime && state.initializing[i] == target && !x.d) {
+                if (state.potential)
+                    return CONST_NOT_CONSTANT;
+                return CONST_NOT_CONSTANT_NOTE(
+                    rule_note::modify_outside_lifetime);
+            }
+        bool tracked =
+            x.d && state.initializing_count < state.initializing_limit;
+        if (tracked)
+            state.initializing[state.initializing_count++] = target;
         constant_value y;
         c = evaluate_node(state, x.b, y);
+        if (tracked)
+            state.initializing_count--;
         if (c != constness::constant)
             return c;
         /* [dcl.init.ref]: a mem-initializer binds a reference member that has

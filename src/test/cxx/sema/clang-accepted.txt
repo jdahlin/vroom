@@ -3616,7 +3616,6 @@ SemaCXX/typo-correction.cpp:87 -Wno-c++11-extensions -std=c++20
 SemaCXX/typo-correction.cpp:87 -std=gnu++17 -Wno-c++11-extensions
 SemaCXX/uninit-asm-goto.cpp:13 -std=c++11 -Wuninitialized
 SemaCXX/uninit-asm-goto.cpp:52 -std=c++11 -Wuninitialized
-SemaCXX/union-member-destructor.cpp:17 -std=c++11
 SemaCXX/union-member-destructor.cpp:22 -std=c++11
 SemaCXX/union-member-destructor.cpp:4 -std=c++11
 SemaCXX/union-member-destructor.cpp:40 -std=c++11
