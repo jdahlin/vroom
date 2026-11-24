@@ -6660,7 +6660,8 @@ class semantic_analysis
                                          entity_index c,
                                          owned_array<entity_index> &set,
                                          bool &in_class,
-                                         bool class_complete = false);
+                                         bool class_complete = false,
+                                         entity_index *templates = nullptr);
 
     /* [expr.new] and [expr.delete]: the expressions */
     analysis_result new_expression(NewExpression n, expression_meaning &m);

@@ -155,8 +155,9 @@ analysis_result semantic_analysis::member_function_template(
             return not_supported_because(n, "temp.mem",
                                          "an allocation or deallocation "
                                          "function template of other form");
-        /* its body is instantiated at a new-expression's use, which does
-           not weigh member templates yet */
+        /* its body is instantiated at a new-expression's use, whose
+           over-aligned form ([expr.new]/19) is not analysed: the body's
+           errors would go unseen */
         if (defines)
             return not_supported_because(n, "temp.mem",
                                          "the definition of an allocation "
@@ -168,8 +169,10 @@ analysis_result semantic_analysis::member_function_template(
                                              "an allocation function "
                                              "template with a default "
                                              "argument");
-        /* [class.free]/1, /3: a static member function */
+        /* [class.free]/1, /3: a static member function; the declaration is
+           analysed (a new-expression's overload resolution may rely on it) */
         s.static_ = true;
+        allocation_declarations_analysed++;
     }
     if (s.static_ && function_cv)
         return ill_formed_at_token(m.id,

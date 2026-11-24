@@ -225,7 +225,8 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
 
 analysis_result semantic_analysis::allocation_functions(
     SyntaxRef n, allocation_function kind, entity_index c,
-    owned_array<entity_index> &set, bool &in_class, bool class_complete)
+    owned_array<entity_index> &set, bool &in_class, bool class_complete,
+    entity_index *templates)
 {
     implicit_allocation_functions();
     uint32_t name = allocation_function_name(kind);
@@ -239,15 +240,27 @@ analysis_result semantic_analysis::allocation_functions(
         return not_supported(n, "class.free");
     if (c) {
         lookup_result found = lookup_qualified(c, name, lookup_filter::any);
+        if (templates && found.unknown && !found.ambiguous && !found.entity &&
+            member_function_template_of(found.unknown_entity)) {
+            /* only member function templates of the name: [class.free]/1,
+               candidates by deduction ([expr.new]/21) */
+            *templates = found.unknown_entity;
+            in_class = true;
+            return analysis_result::well_formed;
+        }
         if (found.ambiguous || found.unknown)
             return not_supported(n, "class.free");
         if (found.entity) {
             if (entity_table[found.entity].kind != entity_kind::function)
                 return not_supported(n, "class.free");
-            if (entity_table[found.entity].member_templates)
+            if (entity_table[found.entity].member_templates) {
                 /* [class.free]/1: its member function templates are
-                   candidates too ([expr.new]/21), not weighed yet */
-                return not_supported(n, "class.free");
+                   candidates too ([expr.new]/21), by deduction from the
+                   arguments of the new-expression; not for a delete */
+                if (!templates)
+                    return not_supported(n, "class.free");
+                *templates = member_templates_of(found.entity);
+            }
             overload_set(found.entity, set);
             in_class = true;
             return analysis_result::well_formed;
@@ -502,14 +515,27 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     entity_index scope = c;
     if (global)
         scope = 0;
-    VTRY_SET(r, allocation_functions(n, kind, scope, set, in_class));
+    entity_index templates = 0;
+    VTRY_SET(r, allocation_functions(n, kind, scope, set, in_class, false,
+                                     &templates));
     owned_array<overload_candidate> candidates;
+    owned_array<uint32_t> first_arguments;
     for (entity_index f : set) {
         overload_candidate k;
         k.function = f;
         k.type = entity_table[f].type;
         candidates.append(k);
+        first_arguments.append(0);
     }
+    /* [expr.new]/21, [temp.over]/1: the specializations of the class's
+       allocation function templates deduced from the arguments, [static]
+       candidates without an object */
+    owned_array<template_argument> all;
+    if (templates)
+        VTRY_SET(r, member_template_candidates(
+                        n, templates, false, arguments.data(),
+                        static_cast<uint32_t>(arguments.size()), candidates,
+                        &first_arguments, &all));
     size_t chosen = 0;
     bool none_viable = false;
     VTRY_SET(r, best_viable_function(n, candidates, nullptr, arguments, chosen,
@@ -526,7 +552,15 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                           "ill-formed",
                           "over.match");
     }
-    entity_index function = set[chosen];
+    entity_index function = candidates[chosen].function;
+    if (candidates[chosen].template_index) {
+        /* [temp.inst]/4: the specialization chosen is referenced: its
+           definition is instantiated */
+        const struct function_template ft =
+            function_templates[candidates[chosen].template_index - 1];
+        VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
+                                ft.parameter_count, function));
+    }
     expression_meaning call;
     VTRY_SET(r, call_function(n, at, function, arguments, call));
     bool reserved = reserved_placement(function) && !array;

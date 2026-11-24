@@ -13,3 +13,19 @@ struct B {
   void *operator new(size_t);
   template <typename T> void *operator new(size_t, T);
 };
+
+/* [expr.new]/21: the class's allocation function templates are candidates,
+   their arguments deduced from the placement arguments. */
+struct C {
+  template <typename T> static void *operator new(size_t, T *p);
+  template <typename T> static void *operator new(size_t, T, int);
+};
+int use_c(int *ip) {
+  C *a = new (ip) C;
+  C *b = new (1.5, 2) C;
+  return a != b;
+}
+struct D {
+  template <typename T> static void *operator new(size_t, T *);
+};
+void use_d(int i) { new (i) D; } // expected-error {{no matching function}}
