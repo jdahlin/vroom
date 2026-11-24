@@ -159,8 +159,18 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
 analysis_result semantic_analysis::missing_member(token_index t,
                                                   entity_index scope)
 {
-    if (!substituting || !scope ||
-        entity_table[scope].kind != entity_kind::class_type ||
+    if (!substituting || !scope)
+        return analysis_result::well_formed;
+    /* [basic.lookup.qual]/1: an enumeration may be named before ::, its
+       members are its enumerators ([dcl.enum]/10): any other name is not
+       found, a substitution failure ([temp.deduct]/8) */
+    if (entity_table[scope].kind == entity_kind::enumeration &&
+        !entity_table[scope].unknown_names)
+        return ill_formed_at_token(t,
+                                   "the name shall represent a member of "
+                                   "that enumeration",
+                                   "basic.lookup.qual");
+    if (entity_table[scope].kind != entity_kind::class_type ||
         !entity_table[scope].defined || entity_table[scope].unknown_names)
         return analysis_result::well_formed;
     return ill_formed_at_token(t,
