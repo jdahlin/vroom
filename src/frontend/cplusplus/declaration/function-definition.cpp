@@ -292,6 +292,9 @@ analysis_result semantic_analysis::analyse_function_body(
     if (result == analysis_result::unsupported && unsupported.size() > before &&
         f && !entity_table[f].held_because)
         entity_table[f].held_because = unsupported[before].subclause;
+    /* the body's own declarations (a local alias, a variable) are not the
+       function: its definition's caller asks which function it defined */
+    last_declared = f;
     return result;
 }
 
