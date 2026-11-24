@@ -4472,9 +4472,9 @@ class semantic_analysis
                           bool move = false, bool nonconst_copy = false);
     bool has_const_copy_constructor(entity_index c) const;
     analysis_result implicit_definitions(entity_index c, SyntaxRef n);
-    analysis_result define_defaulted_special_member(entity_index c,
-                                                    entity_index f,
-                                                    SyntaxRef n);
+    analysis_result
+    define_defaulted_special_member(entity_index c, entity_index f, SyntaxRef n,
+                                    bool after_declaration = false);
     /* [class.copy.assign]: the implicitly-declared copy and move assignment
        operators that are not trivial (class/implicit-assignment.cpp) */
     enum class assignment_use : uint8_t { usable, deleted, unknown };

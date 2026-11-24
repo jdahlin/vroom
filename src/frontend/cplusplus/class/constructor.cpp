@@ -2704,11 +2704,33 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
  * function-body".  The bodies of class c's implicitly-declared special
  * members, at the end of its definition n.
  */
-analysis_result
-semantic_analysis::define_defaulted_special_member(entity_index c,
-                                                   entity_index f, SyntaxRef n)
+analysis_result semantic_analysis::define_defaulted_special_member(
+    entity_index c, entity_index f, SyntaxRef n, bool after_declaration)
 {
     current_declaration = n;
+    /* [class.base.init]/13: an abstract class's constructor does not
+       construct its virtual bases: not analysed */
+    if (after_declaration && entity_table[c].virtual_base_count &&
+        abstract_class(entity_table[c].type))
+        after_declaration = false;
+    if (after_declaration &&
+        entity_table[f].special == special_member::constructor &&
+        !entity_table[c].union_) {
+        /* [dcl.fct.def.default]/3: defaulted after its first declaration, a
+           function that would be implicitly deleted is ill-formed; a
+           subobject's deleted or inaccessible destructor deletes a
+           constructor ([class.default.ctor]/2, [class.copy.ctor]/10) */
+        owned_array<entity_index> subobjects;
+        subobject_classes(c, subobjects);
+        for (entity_index sub : subobjects)
+            if (entity_table[sub].kind == entity_kind::class_type &&
+                (destructor_deleted(sub) ||
+                 subobject_destructor_inaccessible(c, sub)))
+                return ill_formed(n,
+                                  "defaulting this function would delete it "
+                                  "after its first declaration",
+                                  "dcl.fct.def.default");
+    }
     token_index at = n.first_token();
     struct defining_scope {
         bool &flag;
@@ -2768,6 +2790,11 @@ semantic_analysis::define_defaulted_special_member(entity_index c,
         r = ctor_initializer(SyntaxElement(), members);
     finish_synthesized(sf, n, at, statement_node(semantic_kind::block, at),
                        members, destructions);
+    if (r == analysis_result::ill_formed && after_declaration)
+        return ill_formed(n,
+                          "defaulting this function would delete it after "
+                          "its first declaration",
+                          "dcl.fct.def.default");
     if (r == analysis_result::ill_formed)
         /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
            special member that would be ill-formed is defined as
@@ -3065,7 +3092,7 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
         entity_index c = entity_table[f].enclosing;
         if (entity_table[f].special == special_member::constructor ||
             entity_table[f].special == special_member::destructor)
-            return define_defaulted_special_member(c, f, definition);
+            return define_defaulted_special_member(c, f, definition, true);
     }
     if (!body.compound_statement())
         return not_supported(definition, "dcl.fct.def.general");
