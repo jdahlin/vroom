@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "frontend/builtin-fold.h"
+
 namespace cplusplus
 {
 
@@ -99,23 +101,24 @@ enum class builtin_fold : uint8_t {
     align,
 };
 
-/* the operations of the stdc_bits form, [stdbit.h.syn] (C23 7.18) */
+/* the operations of the stdc_bits form, [stdbit.h.syn] (C23 7.18): the
+   shared fold's (frontend/builtin-fold.h, vfold_stdc) */
 enum class builtin_stdc_op : uint8_t {
-    leading_zeros,
-    leading_ones,
-    trailing_ones,
-    first_leading_zero,
-    first_leading_one,
-    first_trailing_zero,
-    first_trailing_one,
-    count_zeros,
-    bit_width,
-    has_single_bit,
-    bit_ceil,
-    bit_floor,
-    rotate_left,
-    rotate_right,
-    bitreverse,
+    leading_zeros = vfold_stdc_leading_zeros,
+    leading_ones = vfold_stdc_leading_ones,
+    trailing_ones = vfold_stdc_trailing_ones,
+    first_leading_zero = vfold_stdc_first_leading_zero,
+    first_leading_one = vfold_stdc_first_leading_one,
+    first_trailing_zero = vfold_stdc_first_trailing_zero,
+    first_trailing_one = vfold_stdc_first_trailing_one,
+    count_zeros = vfold_stdc_count_zeros,
+    bit_width = vfold_stdc_bit_width,
+    has_single_bit = vfold_stdc_has_single_bit,
+    bit_ceil = vfold_stdc_bit_ceil,
+    bit_floor = vfold_stdc_bit_floor,
+    rotate_left = vfold_stdc_rotate_left_by,
+    rotate_right = vfold_stdc_rotate_right_by,
+    bitreverse = vfold_stdc_bitreverse,
 };
 
 enum class builtin_integer_op : uint8_t {

@@ -1271,100 +1271,18 @@ constness semantic_analysis::evaluate_stdc_bits(constant_evaluation &state,
     unsigned width = fundamental_type_width(tokens.files.behavior, f);
     if (f == fundamental_type::bool_)
         width = 1;
-    unsigned __int128 bits = vfold_mask(x[0].integer, width);
-    unsigned __int128 inverse = vfold_mask(~bits, width);
-    /* the counts of zero bits from the most or the least significant end
-       (the width for a value with none) */
-    auto leading = [&](unsigned __int128 value) -> unsigned {
-        return vfold_leading_zeros(value, width);
-    };
-    auto trailing = [&](unsigned __int128 value) -> unsigned {
-        if (!value)
-            return width;
-        return vfold_trailing_zeros(value);
-    };
+    /* a count of a signed type is negative by its value */
+    unsigned __int128 count = 0;
+    bool negative = false;
+    if (call.count > 1) {
+        fundamental_type g = fundamental_of(semantics[items[1]].type);
+        count = x[1].integer;
+        negative = fundamental_type_is_signed(tokens.files.behavior, g) &&
+                   static_cast<__int128>(count) < 0;
+    }
     unsigned __int128 r = 0;
-    switch (static_cast<builtin_stdc_op>(which)) {
-    case builtin_stdc_op::leading_zeros:
-        r = leading(bits);
-        break;
-    case builtin_stdc_op::leading_ones:
-        r = leading(inverse);
-        break;
-    case builtin_stdc_op::trailing_ones:
-        r = trailing(inverse);
-        break;
-    case builtin_stdc_op::first_leading_zero:
-        if (inverse)
-            r = leading(inverse) + 1;
-        break;
-    case builtin_stdc_op::first_leading_one:
-        if (bits)
-            r = leading(bits) + 1;
-        break;
-    case builtin_stdc_op::first_trailing_zero:
-        if (inverse)
-            r = trailing(inverse) + 1;
-        break;
-    case builtin_stdc_op::first_trailing_one:
-        if (bits)
-            r = trailing(bits) + 1;
-        break;
-    case builtin_stdc_op::count_zeros:
-        r = width - vfold_count_ones(bits);
-        break;
-    case builtin_stdc_op::bit_width:
-        r = width - leading(bits);
-        break;
-    case builtin_stdc_op::has_single_bit:
-        r = vfold_count_ones(bits) == 1;
-        break;
-    case builtin_stdc_op::bit_ceil: {
-        /* 1 for 0 and 1; the power of two above x - 1, which wraps to 0
-           when the type has none (clang) */
-        r = 1;
-        if (bits > 1) {
-            unsigned shift = width - leading(bits - 1);
-            if (shift < width)
-                r = static_cast<unsigned __int128>(1) << shift;
-            else
-                r = 0;
-        }
-        break;
-    }
-    case builtin_stdc_op::bit_floor:
-        if (bits)
-            r = static_cast<unsigned __int128>(1)
-                << (width - 1 - leading(bits));
-        break;
-    case builtin_stdc_op::rotate_left:
-    case builtin_stdc_op::rotate_right: {
-        r = bits;
-        if (width > 1) {
-            /* a count of a signed type rotates the other way when
-               negative: its value modulo the width */
-            fundamental_type g = fundamental_of(semantics[items[1]].type);
-            __int128 count = static_cast<__int128>(x[1].integer);
-            bool negative =
-                fundamental_type_is_signed(tokens.files.behavior, g) &&
-                count < 0;
-            bool right =
-                which == static_cast<int>(builtin_stdc_op::rotate_right);
-            unsigned __int128 magnitude = x[1].integer;
-            if (negative) {
-                magnitude = static_cast<unsigned __int128>(-count);
-                right = !right;
-            }
-            r = vfold_rotate(bits, width, magnitude % width, right);
-        }
-        break;
-    }
-    case builtin_stdc_op::bitreverse:
-        r = bits;
-        if (width > 1 && !vfold_integer(vfold_bitreverse, bits, width, &r))
-            return constness::not_constant;
-        break;
-    }
+    if (!vfold_stdc(which, x[0].integer, width, count, negative, &r))
+        return constness::not_constant;
     /* (a 128-bit result that does not fit in 64 bits has no value kept) */
     if (!integer_kept_exactly(tokens.files.behavior, fundamental_of(call.type),
                               r))
@@ -1408,24 +1326,9 @@ constness semantic_analysis::evaluate_align(constant_evaluation &state,
         (fundamental_type_is_signed(tokens.files.behavior, g) &&
          static_cast<__int128>(x[1].integer) <= 0))
         return constness::unknown;
-    unsigned __int128 a = x[1].integer;
-    if (!a || (a & (a - 1)) || width > 64 ||
-        a > (static_cast<unsigned __int128>(1) << (width - 1)))
-        return constness::unknown;
-    unsigned __int128 bits = vfold_mask(x[0].integer, width);
-    unsigned __int128 mask = vfold_mask(~(a - 1), width);
     unsigned __int128 r = 0;
-    switch (which) {
-    case 0:
-        r = vfold_mask(bits + a - 1, width) & mask;
-        break;
-    case 1:
-        r = bits & mask;
-        break;
-    default:
-        r = (bits & (a - 1)) == 0;
-        break;
-    }
+    if (!vfold_align_integer(which, x[0].integer, x[1].integer, width, &r))
+        return constness::unknown;
     if (!integer_kept_exactly(tokens.files.behavior, fundamental_of(call.type),
                               r))
         return constness::unknown;
