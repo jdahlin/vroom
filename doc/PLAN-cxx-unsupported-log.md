@@ -569,3 +569,13 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   (170: design needed); the deleted destructor's vtable slot works
   (scratchpad deleted-virtual-slot.patch) but needs [class.dtor]/6's error
   for a constructor or variable that uses it.
+- 9.8 (a55934ef8): a deleted destructor: __cxa_deleted_virtual slots, and the
+  errors for a variable, a defaulted default constructor and a user-provided
+  constructor of such a class.  Unsupported 35862 -> 35855, we accept 5431
+  -> 5419 (12 declarations clang rejects now rejected), types/constants
+  verified -6 (claims of declarations now rejected).  Queue: typeinfo
+  (_ZTI/_ZTS) emitted with a vtable (the patch's test avoided it).  Needs a
+  design: an omitted aggregate element's default member initializer that
+  uses `this` (analysis, evaluator's partial object, lowering).  Next (9.9):
+  the evaluator records why it answers not_constant; the 365 of
+  simple-declaration.cpp:701 split by that reason.
