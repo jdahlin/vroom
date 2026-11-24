@@ -1112,6 +1112,12 @@ struct analysed_declaration {
        (semantic_analysis::recovered_error_at): the declaration goes on,
        declares what it declares, and is judged ill-formed at its end */
     bool recovered = false;
+    /* a specialization it required has a definition refused for a name
+       not visible from the template's definition ([temp.dep]):
+       unsupported at its end, that refusal the first (an index into
+       semantic_analysis::unsupported) */
+    bool refused_instantiation = false;
+    uint32_t refused_at = 0;
 };
 
 /* a name a declaration declared, with the type analysis gave it: what
@@ -2111,6 +2117,11 @@ class semantic_analysis
                                        const char *subclause);
     void record_recovered_error();
     void lambda_error_in_enclosing(SyntaxRef lambda);
+    void charge_requester(SyntaxRef requester, size_t first_refusal);
+    /* lookups at an instantiation that found only functions declared after
+       the template, left to argument-dependent lookup (mutable: lookup is
+       const) */
+    mutable uint32_t horizon_hidden = 0;
     analysis_result extension_used(diagnostic_id id, token_index at,
                                    const char *argument);
 
@@ -5048,6 +5059,9 @@ class semantic_analysis
            analysed */
         entity_index scope = 0;
         bool defined = false, pending = false, defining = false;
+        /* a function template's: the declaration whose analysis first
+           wanted its definition ([temp.point]; charge_requester) */
+        SyntaxRef requested_by = 0;
         /* a function template's: its definition is wanted only by member
            bodies analysed quietly (quiet_member_bodies), no use of the
            specialization known: instantiated quietly too */

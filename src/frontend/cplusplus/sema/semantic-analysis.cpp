@@ -359,11 +359,19 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     bool declares = d.recovered && d.result == analysis_result::well_formed;
     if (declares)
         d.result = analysis_result::ill_formed;
+    bool refused_use =
+        d.refused_instantiation && d.result == analysis_result::well_formed;
+    if (refused_use)
+        d.result = analysis_result::unsupported;
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
+    if (refused_use)
+        d.first_unsupported = d.refused_at;
     d.has_unsupported = unsupported.size() > unsupported_before;
     /* (a linkage-specification holds the names of its own declarations) */
-    if (d.result != analysis_result::well_formed && !declares &&
+    /* (nor one only a specialization it required was refused in: its own
+       analysis declared what it declares) */
+    if (d.result != analysis_result::well_formed && !declares && !refused_use &&
         tree[n].kind != syntax_kind::linkage_specification) {
         /* [basic.scope.declarative]: a function redeclared ill-formed is
            still the function its first declaration declared */

@@ -273,6 +273,8 @@ semantic_analysis::need_specialization_definition(SyntaxRef at, entity_index f)
    of the translation unit; quiet while only quiet member bodies want it */
 void semantic_analysis::want_definition(instantiation_record &x, uint32_t index)
 {
+    if (!x.requested_by && analysing)
+        x.requested_by = analysing->node;
     x.pending = true;
     x.quiet = quiet_member_bodies != 0;
     pending_definitions.append(index);
@@ -327,6 +329,8 @@ analysis_result semantic_analysis::quiet_definition_failed(SyntaxRef at,
 analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
                                                           uint32_t index)
 {
+    if (!instantiations[index].requested_by && analysing)
+        instantiations[index].requested_by = analysing->node;
     /* [temp.inst]/17: "There is an implementation-defined quantity that
        specifies the limit on the total depth of recursive
        instantiations"; [implimits]/2 suggests 1024, this one is lower
@@ -337,6 +341,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     const function_template ft =
         function_templates[entity_table[template_entity].instantiation - 1];
     size_t unsupported_before = unsupported.size();
+    uint32_t hidden_before = horizon_hidden;
     bool quiet = instantiations[index].quiet;
     diagnostics_suppressed_if hush(diagnostics, quiet);
     /* (what a quiet definition wants is as quiet) */
@@ -445,8 +450,43 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
             d.first_unsupported = static_cast<uint32_t>(unsupported_before);
         d.has_unsupported = unsupported.size() > unsupported_before;
     }
+    /* [temp.dep.candidate]: a dependent call's candidates are the
+       declarations visible from the template's definition and those
+       argument-dependent lookup finds from the point of instantiation; a
+       definition refused after a lookup found only later declarations
+       (horizon_hidden) is the use's as much as the template's
+       ([impl.clang] reports the error with a note at the declaration
+       that required it) */
+    if (r == analysis_result::unsupported &&
+        unsupported.size() > unsupported_before &&
+        horizon_hidden != hidden_before &&
+        instantiations[index].requested_by != ft.declaration)
+        charge_requester(instantiations[index].requested_by,
+                         unsupported_before);
     /* the use names a function all the same */
     return analysis_result::well_formed;
+}
+
+void semantic_analysis::charge_requester(SyntaxRef requester,
+                                         size_t first_refusal)
+{
+    if (!requester)
+        return;
+    /* (being analysed: judged at its end) */
+    if (analysing && analysing->node == requester) {
+        if (!analysing->refused_instantiation) {
+            analysing->refused_instantiation = true;
+            analysing->refused_at = static_cast<uint32_t>(first_refusal);
+        }
+        return;
+    }
+    for (analysed_declaration &d : declarations) {
+        if (d.node != requester || d.result != analysis_result::well_formed)
+            continue;
+        d.result = analysis_result::unsupported;
+        d.first_unsupported = static_cast<uint32_t>(first_refusal);
+        d.has_unsupported = true;
+    }
 }
 
 void semantic_analysis::lambda_error_in_enclosing(SyntaxRef lambda)
