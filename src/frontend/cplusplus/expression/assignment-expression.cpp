@@ -128,7 +128,10 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
         if (type_table[left.type.unqualified()].kind == type_kind::class_type) {
             /* [expr.ass]/8: x = {...} means x.operator=({...}) of a class:
                its operator= functions take the list, the left operand's
-               own type only when they are its copy assignment operators */
+               own type only when they are its copy or move assignment
+               operators ([over.ics.list]/9, [over.ics.rank]/3.2.3: the
+               temporary is a prvalue, so the rvalue reference binds better
+               than a const lvalue reference) */
             entity_index c = type_table[left.type.unqualified()].entity;
             lookup_result found =
                 lookup_qualified(c, operator_name(op), lookup_filter::any);
@@ -136,7 +139,8 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
                 owned_array<entity_index> candidates;
                 overload_set(found.entity, candidates);
                 for (entity_index f : candidates)
-                    if (!copy_assignment_operator(f, c))
+                    if (!copy_assignment_operator(f, c) &&
+                        !move_assignment_operator(f, c))
                         return not_supported(n, "over.match.oper");
             }
         }
