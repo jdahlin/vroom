@@ -882,3 +882,23 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   Unsupported 34495 -> 34498 (canonical-expr-type.cpp:36 now sees the
   redefinition and stays unsupported, basic.def.odr), we reject 390,
   we accept 5297 -> 5296.
+- 11.17a (90d175b51): a template argument that is an expression naming a
+  non-type template parameter (`S<I + 1>`) in a function template's
+  declarator was refused at the name (the unfollowed lookup's entity was not
+  looked at); it now takes the existing value-dependent argument path
+  (dependent_value_entity), and an expression with no structure there gets
+  `entity::expression`, expression_digest of its tokens, so `S<I + 1>` twice
+  is one function and `S<I + 1>` / `S<I * 2>` two overloads
+  ([temp.over.link]/5); deduction treats it as non-deduced
+  ([temp.deduct.type]/5.3); instantiation analyses the declarator again.
+  A class partial specialization whose arguments are only such expressions
+  (`A<I + 5, I * 2>`, [temp.class.spec]/9.2 non-deducible) and any variable
+  partial specialization with one stay unsupported.  Unsupported 34498 ->
+  34416, we reject 390, we accept 5296.
+- 11.17b: an explicit instantiation of a coroutine function template whose
+  own declaration is unsupported is unsupported (coroutines.cpp:714): the
+  declaration is found through the template's record (instantiation record
+  -> function_templates[].declaration) inside the analysed declaration that
+  holds it.  The general form (any held template) costs +416 unsupported,
+  -305 agree, so it is limited to templates with co_await/co_return/co_yield
+  tokens: unsupported 34416 -> 34428, we accept 5296 -> 5293 (-9 agree).
