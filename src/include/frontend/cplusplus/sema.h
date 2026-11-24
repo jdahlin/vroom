@@ -201,7 +201,7 @@ class types
     type_index atomic_of(qualified_type value);
     type_index complex_of(qualified_type value);
     type_index block_pointer_to(qualified_type function);
-    type_index bit_int(uint64_t width, uint32_t parameter);
+    type_index bit_int(uint64_t width, uint32_t parameter, bool is_unsigned);
     type_index vector_of(qualified_type element, uint64_t count);
     type_index vector_mask_of(const type &vector, uint64_t element,
                               bool long_is_64);
@@ -536,6 +536,9 @@ struct entity {
     bool inline_ = false;
     /* A constructor with an unsatisfied associated constraint. */
     bool constraint_unsatisfied = false;
+    /* [over.load]/2: a member function declared with a trailing
+       requires-clause (it overloads one that differs in it) */
+    bool trailing_requires = false;
     /* a scope: a declaration analysis did not follow may have brought
        names into it that are not held one by one (a using-directive whose
        namespace is not known, a using-enum-declaration): a name not found
@@ -3179,6 +3182,11 @@ class semantic_analysis
     /* [dcl.spec.auto]/11: a use of e, whose type may have an undeduced
        placeholder */
     analysis_result undeduced_use(token_index t, entity_index e);
+    /* the member function bodies of the class being defined that wait for
+       its closing brace (defining_bodies, of defining_bodies_class) */
+    owned_array<SyntaxRef> *defining_bodies = nullptr;
+    entity_index defining_bodies_class = 0;
+    bool deduce_member_body_now(entity_index e);
     /* [dcl.spec.auto]/8-9: a return statement's operand (or none) in a
        function whose declared return type has a placeholder */
     analysis_result deduce_return(SyntaxRef at, const expression_meaning *e,
@@ -3760,7 +3768,8 @@ class semantic_analysis
     uint32_t bind_call_site(uint32_t node, token_index call);
     analysis_result clang_atomic_type(SyntaxRef n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
-    analysis_result clang_bit_int_type(SyntaxRef n, qualified_type &type);
+    analysis_result clang_bit_int_type(SyntaxRef n, bool is_unsigned,
+                                       qualified_type &type);
     /* [ext:gnu_typeof] the type typeof ( expression or type-id ) denotes */
     analysis_result gnu_typeof_type(SyntaxRef n, qualified_type &type);
     analysis_result clang_ext_vector_count(SyntaxRef at, SyntaxElement count,
@@ -4007,6 +4016,7 @@ class semantic_analysis
     };
     owned_array<pending_noexcept> pending_noexcepts;
     bool noexcept_needs_complete_class(SyntaxRef n);
+    bool names_parameter_of_class(SyntaxRef n, entity_index c);
     analysis_result member_noexcept_specifiers(entity_index c);
     /* the noexcept-specifiers left value-dependent in templates' own
        declarations */
@@ -5208,6 +5218,11 @@ class semantic_analysis
            children are its decl-specifier-seq and declarator */
         SyntaxRef declarator = 0;
         uint32_t first_parameter = 0, parameter_count = 0;
+        /* a member template defined outside a class template whose
+           template-head renames the class's parameters: the first of
+           them, and the class specialization (instantiations index plus
+           one) whose arguments they name */
+        uint32_t outer_first_parameter = 0, outer_instantiation = 0;
         bool unusable = false;
         /* a function template: the GNU attributes of its specializations'
            symbols (gnu_function_symbol_flags) and abi_tag */
@@ -5614,6 +5629,10 @@ class semantic_analysis
     /* [temp.param]: the parameters' entities in scope, for the template
        function_templates[index] will be; reserved is a name they shall not
        have ([temp.local]/6) */
+    bool is_template_template_parameter(entity_index e) const;
+    analysis_result template_template_record(SyntaxRef n, SyntaxRef parameter,
+                                             entity_index e,
+                                             entity_index scope);
     analysis_result declare_template_parameters(
         SyntaxRef n, const owned_array<SyntaxRef> &parameters,
         entity_index scope, uint32_t &index, uint32_t reserved);
@@ -5802,10 +5821,10 @@ class semantic_analysis
     analysis_result define_plain_member_template(SyntaxRef n,
                                                  SyntaxRef definition,
                                                  entity_index c);
-    analysis_result
-    define_member_template_of(entity_index c, SyntaxRef declaration,
-                              SyntaxRef inner, SyntaxRef definition,
-                              bool recorded, bool allow_redefine = false);
+    analysis_result define_member_template_of(
+        entity_index c, SyntaxRef declaration, SyntaxRef inner,
+        SyntaxRef definition, bool recorded, bool allow_redefine = false,
+        uint32_t outer_member = 0, uint32_t outer_instantiation = 0);
     analysis_result define_member_class_template_of(entity_index c,
                                                     SyntaxRef declaration,
                                                     SyntaxRef inner,
@@ -6573,6 +6592,26 @@ class semantic_analysis
         entity_index specialization = 0;
     };
     owned_array<deferred_class_instantiation> deferred_class_instantiations;
+    /* instantiate_class choosing the definition of a specialization */
+    struct class_matching {
+        uint32_t class_template = 0;
+        const template_argument *arguments = nullptr;
+        uint32_t count = 0;
+    };
+    owned_array<class_matching> class_matchings;
+    struct class_matching_scope {
+        owned_array<class_matching> &list;
+        class_matching_scope(owned_array<class_matching> &l, uint32_t t,
+                             const template_argument *a, uint32_t n)
+            : list(l)
+        {
+            list.append(class_matching{t, a, n});
+        }
+        ~class_matching_scope()
+        {
+            list.resize(list.size() - 1);
+        }
+    };
     uint32_t require_complete_class = 0;
     /* deduce_type matches a function declaration's type to a function
        template's ([temp.deduct.decl]) */

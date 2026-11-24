@@ -323,6 +323,32 @@ bool semantic_analysis::names_earlier_parameter(
     return false;
 }
 
+/* whether the noexcept-specifier n of a friend function defined in the class c
+   names a parameter of type c, c&, c* or one of those with cv ([class.mem]/6:
+   a complete-class context, which c's layout is needed for until its
+   closing }) */
+bool semantic_analysis::names_parameter_of_class(SyntaxRef n, entity_index c)
+{
+    for (token_index t = n.first_token(); t < n.end_token(); t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        uint32_t name = tokens.identifier(t);
+        for (const parameter_meaning &p : function_parameters) {
+            if (!p.id || tokens.identifier(p.id) != name)
+                continue;
+            type_index k = p.type.unqualified();
+            while (type_table[k].kind == type_kind::lvalue_reference ||
+                   type_table[k].kind == type_kind::rvalue_reference ||
+                   type_table[k].kind == type_kind::pointer)
+                k = type_table[k].operand.unqualified();
+            if (type_table[k].kind == type_kind::class_type &&
+                type_table[k].entity == c)
+                return true;
+        }
+    }
+    return false;
+}
+
 void semantic_analysis::open_parameter_scope(
     const owned_array<parameter_meaning> &list, uint32_t empty_pack)
 {
@@ -383,9 +409,15 @@ analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
     entity_index outer = current_scope;
     open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
-    if (member && !names_dependent_entity(n.first_token(), n.end_token()) &&
-        noexcept_needs_complete_class(n) &&
-        !names_earlier_parameter(n, function_parameters)) {
+    bool friend_of_class =
+        friend_declarator && defining_class &&
+        !entity_table[defining_class].size &&
+        !names_dependent_entity(n.first_token(), n.end_token()) &&
+        names_parameter_of_class(n, defining_class);
+    if (friend_of_class ||
+        (member && !names_dependent_entity(n.first_token(), n.end_token()) &&
+         noexcept_needs_complete_class(n) &&
+         !names_earlier_parameter(n, function_parameters))) {
         /* [class.mem]/6: the noexcept-specifier is a complete-class context
            and it names the class being defined (libc++'s
            noexcept(__is_nothrow_swappable_v<__tuple_leaf>)): analysed at

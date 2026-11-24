@@ -2793,7 +2793,10 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
            A dependent width here is a non-type template parameter.
            Clang substitutes repeated _BitInt types, so keep them in
            the substitution table for interoperation. */
-        text("DB");
+        if (r.fundamental == fundamental_type::unsigned_int)
+            text("DU");
+        else
+            text("DB");
         if (r.entity)
             template_param(analysis.entity_table[r.entity].value);
         else

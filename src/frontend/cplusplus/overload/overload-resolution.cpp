@@ -468,6 +468,31 @@ analysis_result semantic_analysis::best_viable_function(
             if (same)
                 return true;
         }
+        /* (2.7, n4861 /2.5) "F1 and F2 are non-template functions with the
+           same parameter-type-lists ([over.match.funcs]/4), and F1 is more
+           constrained than F2": a function with a trailing requires-clause
+           against one with none (subsumption of two requires-clauses is not
+           analysed) */
+        if (x.function && y.function && !x.template_index &&
+            !y.template_index && entity_table[x.function].trailing_requires &&
+            !entity_table[y.function].trailing_requires &&
+            entity_table[x.function].nonstatic_member ==
+                entity_table[y.function].nonstatic_member &&
+            entity_table[x.function].member_cv ==
+                entity_table[y.function].member_cv) {
+            type_index t1 = entity_table[x.function].type.unqualified();
+            type_index t2 = entity_table[y.function].type.unqualified();
+            const qualified_type *p1 = type_table.parameters(t1);
+            const qualified_type *p2 = type_table.parameters(t2);
+            bool same = type_table[t1].parameter_count ==
+                        type_table[t2].parameter_count;
+            for (uint32_t i = 0; same && i < type_table[t1].parameter_count;
+                 i++)
+                if (p1[i] != p2[i])
+                    same = false;
+            if (same)
+                return true;
+        }
         /* (2.8) "F2 is a rewritten candidate ([over.match.oper]) and F1 is
            not"; (2.9) "F1 and F2 are rewritten candidates, and F2 is a
            synthesized candidate with reversed order of parameters and F1

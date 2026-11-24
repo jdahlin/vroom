@@ -197,7 +197,7 @@ bool semantic_analysis::names_dependent_entity(token_index first,
             continue;
         }
         entity_kind k = entity_table[e].kind;
-        if (k == entity_kind::none)
+        if (k == entity_kind::none || is_template_template_parameter(e))
             return true;
         if ((k == entity_kind::variable || k == entity_kind::typedef_name) &&
             depends_on_template_parameter(entity_table[e].type))

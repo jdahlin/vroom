@@ -238,11 +238,14 @@ bool semantic_analysis::copy_assignment_deleted(entity_index c) const
 bool semantic_analysis::bytewise_const_member(entity_index c) const
 {
     const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.member_count; i++)
-        if (cv_of(type_table,
-                  entity_table[class_members[x.first_member + i]].type) &
-            cv_const)
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        /* an unnamed bit-field is no member that is assigned */
+        if (!m.name && m.bit_field)
+            continue;
+        if (cv_of(type_table, m.type) & cv_const)
             return true;
+    }
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes)

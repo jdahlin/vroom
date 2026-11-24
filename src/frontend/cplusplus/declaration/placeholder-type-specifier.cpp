@@ -497,6 +497,44 @@ analysis_result semantic_analysis::deduce_return(SyntaxRef at,
 }
 
 /*
+ * [temp.inst]/4, [dcl.spec.auto]/12: a member function of a class template's
+ * specialization whose return type is deduced is instantiated where its
+ * type is needed, in the member declarations of the class (a member
+ * alias-declaration naming decltype(f())): its body, which waits for the
+ * closing brace, is analysed now.  Whether the type is deduced after it.
+ */
+bool semantic_analysis::deduce_member_body_now(entity_index e)
+{
+    const entity &x = entity_table[e];
+    if (x.kind != entity_kind::function || !defining_bodies ||
+        x.enclosing != defining_bodies_class ||
+        !entity_table[x.enclosing].instantiation)
+        return false;
+    for (size_t i = 0; i < defining_bodies->size(); i++) {
+        SyntaxRef body = (*defining_bodies)[i];
+        if (!body || !declared_by(e, body))
+            continue;
+        (*defining_bodies)[i] = nullptr;
+        SyntaxRef outer_declaration = current_declaration;
+        function_context outer_function =
+            static_cast<function_context &&>(function_state);
+        function_state = function_context();
+        owned_array<entity_index> outer_variables =
+            static_cast<owned_array<entity_index> &&>(block_variables);
+        block_variables = owned_array<entity_index>();
+        entity_index outer_scope = current_scope;
+        instantiated_member_body(x.enclosing, body);
+        current_declaration = outer_declaration;
+        function_state = static_cast<function_context &&>(outer_function);
+        block_variables =
+            static_cast<owned_array<entity_index> &&>(outer_variables);
+        current_scope = outer_scope;
+        return !contains_placeholder(entity_table[e].type);
+    }
+    return false;
+}
+
+/*
  * [dcl.spec.auto]/11: "If the name of an entity with an undeduced
  * placeholder type appears in an expression, the program is ill-formed."
  * A variable in its own initializer, a function declared but not defined,
@@ -512,6 +550,8 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
     else if (x.kind == entity_kind::function)
         undeduced = !x.defined ||
                     (function_state.active && function_state.function == e);
+    if (!undeduced && deduce_member_body_now(e))
+        return analysis_result::well_formed;
     if (!undeduced) {
         if (x.kind == entity_kind::variable)
             return not_supported_because(

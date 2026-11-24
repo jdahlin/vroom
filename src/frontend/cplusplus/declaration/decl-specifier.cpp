@@ -301,6 +301,14 @@ struct type_specifier_count {
     unsigned int128 = 0;
     /* [ext:gnu_float128]: __float128, alone */
     unsigned float128 = 0;
+    /* [ext:clang_bit_int]: _BitInt(N), with signed or unsigned only (it is
+       also counted in other) */
+    unsigned bit_int = 0;
+
+    unsigned base() const
+    {
+        return char_ + int_ + double_ + other + int128 + float128;
+    }
 
     /* adds the specifier: false if the sequence now breaks the rule */
     bool add(standard_keyword k, extension_keyword ext)
@@ -317,6 +325,11 @@ struct type_specifier_count {
             int128++;
             return int128 == 1 && !char_ && !int_ && !double_ && !other &&
                    !short_ && !long_ && !float128;
+        }
+        if (ext == extension_keyword::bit_int) {
+            bit_int++;
+            other++;
+            return base() == 1 && !short_ && !long_;
         }
         switch (k) {
         case standard_keyword::const_:
@@ -346,11 +359,10 @@ struct type_specifier_count {
             other++;
             break;
         }
-        unsigned base = char_ + int_ + double_ + other + int128 + float128;
-        if (base > 1 || sign > 1 || short_ > 1 || long_ > 2 ||
+        if (base() > 1 || sign > 1 || short_ > 1 || long_ > 2 ||
             (short_ && long_))
             return false;
-        if (sign && (double_ || other || float128))
+        if (sign && (double_ || other > bit_int || float128))
             return false;
         if ((short_ || long_) && (char_ || other || int128 || float128))
             return false;
@@ -467,6 +479,8 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
     token_index first = position;
     type_specifier_count count;
     token_index other_specifier = 0;
+    /* the position just after a lone signed or unsigned, 0 otherwise */
+    token_index sign_only_end = 0;
     bool has_other_specifier = false, has_auto = false;
     uint64_t dependent_before = names.dependent_found;
     for (;;) {
@@ -550,7 +564,13 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                    k == standard_keyword::volatile_) {
             add_token();
         } else if (is_simple_type_keyword(k)) {
+            bool alone = !facts.has_defining_type_specifier &&
+                         (k == standard_keyword::signed_ ||
+                          k == standard_keyword::unsigned_);
             add_token();
+            sign_only_end = position;
+            if (!alone)
+                sign_only_end = 0;
             facts.has_defining_type_specifier = true;
         } else if (k == standard_keyword::auto_) {
             /* placeholder-type-specifier: type-constraint_opt auto; the
@@ -612,8 +632,11 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
         } else if (at(extension_keyword::atomic) ||
                    at(extension_keyword::bit_int)) {
             /* [ext:clang_atomic], [ext:clang_bit_int] a
-               simple-type-specifier */
-            if (facts.has_defining_type_specifier)
+               simple-type-specifier; signed or unsigned _BitInt(N) is one
+               ([ext:clang_bit_int]) */
+            bool signed_bit_int = at(extension_keyword::bit_int) &&
+                                  sign_only_end && sign_only_end == position;
+            if (facts.has_defining_type_specifier && !signed_bit_int)
                 break;
             if (at(extension_keyword::atomic))
                 clang_atomic_type_specifier();
@@ -1314,7 +1337,13 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             } else if (c.is(syntax_kind::clang_bit_int_type_specifier)) {
                 /* [ext:clang_bit_int] */
                 qualified_type denoted;
-                r = clang_bit_int_type(c, denoted);
+                bool unsigned_bit_int = k.unsigned_ == 1 && !k.signed_;
+                if (k.unsigned_ + k.signed_ == 1 && !k.short_ && !k.long_ &&
+                    !k.char_ && !k.int_)
+                    k.unsigned_ = k.signed_ = 0; /* the _BitInt's own */
+                else
+                    unsigned_bit_int = false;
+                r = clang_bit_int_type(c, unsigned_bit_int, denoted);
                 class_type = denoted.unqualified();
             } else if (c.is(syntax_kind::placeholder_type_specifier)) {
                 /* [dcl.spec.auto]: decltype(auto); a type-constraint is

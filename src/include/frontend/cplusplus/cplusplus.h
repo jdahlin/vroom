@@ -101,8 +101,9 @@ struct implementation_defined_behavior {
        types is implementation-defined": IEEE binary32, binary64 and, for
        long double, binary128 (aarch64 Linux; 52 where it is binary64) */
     uint8_t long_double_fraction_bits = 112;
-    /* the widest _BitInt(N) (C23's BITINT_MAXWIDTH), clang's extension */
-    uint16_t bit_precise_maximum_width = 128;
+    /* the widest _BitInt(N) (C23's BITINT_MAXWIDTH), clang's extension;
+       [impl.clang] 128, x86-64 Linux 8388608 */
+    uint32_t bit_precise_maximum_width = 128;
     /* [basic.fundamental]/8: wchar_t's width and signedness */
     uint8_t wchar_t_width = 32;
     bool wchar_t_is_signed = false;

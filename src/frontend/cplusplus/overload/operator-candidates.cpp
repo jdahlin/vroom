@@ -559,6 +559,7 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     if (converts && (!unary_prefix || candidates.empty()))
         return not_supported(n, "over.built");
+    bool deleted_copy = false;
     if (op == preprocessing_op_or_punc::EQUAL) {
         /* [class.copy.assign]/2: "If the class definition does not
            explicitly declare a copy assignment operator, one is declared
@@ -568,8 +569,26 @@ analysis_result semantic_analysis::overloaded_operator(
         for (const overload_candidate &k : candidates)
             if (copy_assignment_operator(k.function, c))
                 copy = true;
-        if (!copy)
-            return not_supported(n, "class.copy.assign");
+        if (!copy) {
+            /* [class.copy.assign]/2: a class that declares a move assignment
+               operator and no copy assignment operator has its implicit copy
+               assignment operator defined as deleted; it is a candidate
+               ([over.match.funcs]) taking const X&, which is settled below
+               for a right operand of the class's own type */
+            bool declares_move = false;
+            for (const overload_candidate &k : candidates)
+                if (!k.rewritten && !k.reversed &&
+                    move_assignment_operator(k.function, c))
+                    declares_move = true;
+            /* a copy assignment operator declared defaulted has no
+               candidate here, and is no implicit one */
+            if (!declares_move || entity_table[c].defaulted_copy_assignment ||
+                operands.size() != 2 ||
+                operands[1].type.unqualified() !=
+                    operands[0].type.unqualified())
+                return not_supported(n, "class.copy.assign");
+            deleted_copy = true;
+        }
     }
     /* [over.match.oper]/2, Table 15: a@ is "(a).operator@ (0)" or
        "operator@(a, 0)" */
@@ -589,6 +608,22 @@ analysis_result semantic_analysis::overloaded_operator(
     bool none_viable = false;
     r = best_viable_function(n, candidates, nullptr, arguments, chosen,
                              &none_viable);
+    if (r == analysis_result::well_formed && deleted_copy) {
+        /* the deleted copy assignment operator is viable for the left
+           operand and the class's own type on the right: with no other
+           candidate viable it is selected; a viable move assignment
+           operator binds a non-const rvalue better ([over.ics.rank]/3.2.3),
+           any other choice is not analysed */
+        bool movable = operands[1].category != value_category::lvalue &&
+                       !(operands[1].type.cv() & cv_const);
+        if (none_viable || (operands[0].type.cv() & cv_const))
+            return ill_formed(n,
+                              "the implicitly-declared copy assignment "
+                              "operator is defined as deleted",
+                              "class.copy.assign");
+        if (!movable)
+            return not_supported(n, "class.copy.assign");
+    }
     if (r == analysis_result::well_formed && none_viable && converts)
         /* a built-in candidate may be viable through the conversion */
         return not_supported(n, "over.built");

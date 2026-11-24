@@ -57,6 +57,9 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     bool enumeration = record.kind == type_kind::enumeration;
     if (enumeration && !size_of_type(type))
         return not_supported(declaration, "class.bit");
+    /* [ext:clang_bit_int] a _BitInt bit-field: its layout is not written */
+    if (record.kind == type_kind::bit_int)
+        return not_supported(declaration, "ext.clang");
     if (!enumeration && (record.kind != type_kind::fundamental ||
                          !fundamental_type_is_integral(record.fundamental)))
         return ill_formed(declaration,
