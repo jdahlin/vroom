@@ -188,7 +188,15 @@ ANALYSIS_LINE = re.compile(r'^(\S+) (.*?):(\d+):(\d+) (.*?):(\d+):(\d+) '
 CLANG_ERROR = re.compile(r'^([^:\n]+):(\d+):\d+: (?:error|fatal error): .*?(?:\[([^\]]+)\])?$', re.M)
 SYNTAX_CATEGORIES = ('Parse Issue', 'Lexical or Preprocessor Issue')
 CLANG_DIAGNOSTIC = re.compile(r'^([^:\n]+):(\d+):\d+: (error|fatal error|warning|note): (.*)$', re.M)
-INSTANTIATION_NOTE = re.compile(r'^(?:in instantiation of .* requested here|while (?:substituting|checking|instantiating)\b.* (?:requested|required) here|while substituting explicitly-specified template arguments|while checking constraint satisfaction)')
+# the notes of clang's instantiation stack (Sema::PrintInstantiationStack;
+# DiagnosticSemaKinds.td's note_template_*_here, note_*_substitution_here,
+# note_checking_constraints_*, note_member_synthesized_at, ...), each a link of a
+# chain
+INSTANTIATION_NOTE = re.compile(r'^(?:in instantiation of .* (?:requested|required) here'
+                                r'|in instantiation of requirement(?: parameters)? here'
+                                r'|in evaluation of exception specification for .* needed here'
+                                r'|in (?:implicit|defaulted) .* first required here'
+                                r'|while (?:substituting|checking|building|declaring|rewriting)\b)')
 
 
 TYPES_FILE = 'cxx-type-claims'
@@ -869,13 +877,24 @@ def check(test, opts, clang, vpp):
     # an error in an instantiation is clang's at the template's line; the
     # use that asked for the instantiation has its note ("in instantiation
     # of ... requested here"), and that declaration is rejected too
-    # ([temp.inst]/1): a note of an error's, not of a warning's
-    last_is_error = False
+    # ([temp.inst]/1): a note of an error's, not of a warning's.  The notes
+    # are a chain, innermost first: only its last link, the outermost use,
+    # is a declaration clang rejects; a middle link is the place inside
+    # another template that asked for the next instantiation, and that
+    # template is not rejected for it
+    outermost, last_is_error = None, False
+
+    def end_chain():
+        if outermost is not None and outermost[0] == name:
+            error_lines.add(outermost[1])
     for m in CLANG_DIAGNOSTIC.finditer(c[2]):
         if m.group(3) != 'note':
+            end_chain()
+            outermost = None
             last_is_error = m.group(3) in ('error', 'fatal error')
-        elif last_is_error and m.group(1) == name and INSTANTIATION_NOTE.search(m.group(4)):
-            error_lines.add(int(m.group(2)))
+        elif last_is_error and INSTANTIATION_NOTE.search(m.group(4)):
+            outermost = (m.group(1), int(m.group(2)))
+    end_chain()
     # a fatal error (-Wfatal-errors, a missing include) ends clang's
     # analysis there: what follows it is not compared
     fatal = re.search(r'^[^:\n]+:(\d+):\d+: fatal error:', c[2], re.M)
