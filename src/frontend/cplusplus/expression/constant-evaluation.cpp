@@ -3468,7 +3468,7 @@ bool semantic_analysis::constant_p_call(uint32_t node) const
     return row && gnu_builtin_at(row).fold == builtin_fold::constant_p;
 }
 
-/* a call of std::move, std::move_if_noexcept, std::forward,
+/* [impl.clang] a call of std::move, std::move_if_noexcept, std::forward,
    std::forward_like or std::as_const (in std or an inline namespace of it,
    libc++'s std::__1), which clang treats as builtins that return their
    argument: that argument's node, else 0 */

@@ -475,7 +475,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
        appear in a constant expression." */
     bool specialization = entity_table[f].instantiation != 0;
     /* a member function of a class template's specialization is
-       instantiated with it ([temp.inst]/3): clang does not check /6's
+       instantiated with it ([temp.inst]/3): [impl.clang] clang does not check /6's
        "no argument values" on it either */
     bool instantiated_member = false;
     for (entity_index c = entity_table[f].enclosing;
