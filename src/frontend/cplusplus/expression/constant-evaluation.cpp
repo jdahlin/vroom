@@ -1424,8 +1424,14 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         /* [expr.const]/5.9: reading a mutable subobject of an object that
            is usable in constant expressions is not constant: which object
            this is is not modelled */
-        if (entity_table[x.b].mutable_member)
+        if (entity_table[x.b].mutable_member) {
+            /* a read of it in an object that began its life outside the
+               evaluation ([expr.const]/5.9) is not constant */
+            if (state.reading && !state.potential &&
+                place_read_only(state, whole))
+                return CONST_NOT_CONSTANT_RULE;
             return CONST_UNKNOWN;
+        }
         for (uint32_t i = 0; i < k.member_count; i++)
             if (class_members[k.first_member + i] == x.b) {
                 object = element_place | (o.first + i);
