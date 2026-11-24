@@ -148,6 +148,18 @@ bool semantic_analysis::primary_arguments(
     return !template_head_constrained(n) || template_head_constrained(primary);
 }
 
+/* whether the class is an explicit specialization of a class template (its
+   definition is the template<> one), not an implicit instantiation */
+bool semantic_analysis::explicitly_specialized_class(entity_index c) const
+{
+    uint32_t record = entity_table[c].instantiation;
+    if (!record)
+        return false;
+    const instantiation_record &r = instantiations[record - 1];
+    return r.specialization == c && r.pattern &&
+           !function_templates[r.pattern - 1].parameter_count;
+}
+
 /*
  * [temp.expl.spec]/17: "A member class of a class template may be
  * explicitly specialized for a given implicit instantiation of the class
@@ -193,6 +205,15 @@ bool semantic_analysis::member_class_specialization(SyntaxRef n,
     uint32_t record = entity_table[ns.entity].instantiation;
     if (!record || instantiations[record - 1].specialization != ns.entity)
         return false;
+    /* [temp.expl.spec]/5: the members of an explicitly specialized class
+       are defined as a normal class's, without template<> */
+    if (explicitly_specialized_class(ns.entity)) {
+        result = ill_formed(n,
+                            "extraneous 'template<>' in the declaration of "
+                            "a member of an explicitly specialized class",
+                            "temp.expl.spec");
+        return true;
+    }
     entity_index member = entity_table.find(ns.entity, tokens.identifier(id));
     if (!member || entity_table[member].kind != entity_kind::class_type ||
         entity_table[member].defined || entity_table[member].instantiation)

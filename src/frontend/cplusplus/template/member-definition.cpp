@@ -138,6 +138,18 @@ analysis_result semantic_analysis::member_definition_of_template(
     for (SyntaxRef x : parameters)
         if (template_parameter_has_default(x))
             return not_supported(x, "temp.param");
+    /* ... nor in the member template's own template-head */
+    if (inner) {
+        owned_array<SyntaxRef> own;
+        VTRY(ri, template_head_parameters(inner, own, true, true, true, true));
+        for (SyntaxRef x : own)
+            if (template_parameter_has_default(x))
+                return ill_formed(x,
+                                  "cannot add a default template argument to "
+                                  "the definition of a member of a class "
+                                  "template",
+                                  "temp.param");
+    }
     SyntaxRef id = 0;
     token_index class_member_name = 0;
     if (class_member) {

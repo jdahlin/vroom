@@ -161,6 +161,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                 !m.template_id && !m.operator_function && !m.literal_operator &&
                 !defaults &&
                 entity_table[m.qualifier].kind == entity_kind::class_type &&
+                !explicitly_specialized_class(m.qualifier) &&
                 type_table[type.unqualified()].kind == type_kind::function &&
                 !ms.typedef_ && !ms.static_ && !ms.extern_ && !ms.aligned &&
                 !m.aligned && !ms.section && !m.section && !m.asm_label) {

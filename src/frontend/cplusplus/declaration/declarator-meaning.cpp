@@ -623,9 +623,13 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
        its template arguments and base clause name existing entities. */
     bool class_template = false;
     SyntaxRef inner = declaration;
+    bool specializes = false;
     while ((inner.template_declaration() || inner.explicit_specialization()) &&
-           inner.size() && inner.back().is_node())
+           inner.size() && inner.back().is_node()) {
+        if (inner.explicit_specialization())
+            specializes = true;
         inner = inner.back();
+    }
     if (inner != declaration && parsed_completely(inner)) {
         for (SyntaxElement part : inner.elements()) {
             if (!part.is(syntax_kind::decl_specifier_seq))
@@ -647,6 +651,17 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                 if (!spec.is(syntax_kind::class_specifier) || !spec.size())
                     continue;
                 SyntaxElement name = class_head_name(spec[0]);
+                /* [class.mem]: a member class (template) defined outside its
+                   class (S<T>::X) declares a name of that class's scope, not
+                   this one: it holds none; an explicit or partial
+                   specialization of one (not analysed) holds the class's
+                   name, for what the member is then is not known */
+                if (!specializes && name.is_node() &&
+                    name.qualified_class_head_name() && name.size() == 2 &&
+                    name[1].is_identifier()) {
+                    class_template = true;
+                    continue;
+                }
                 if (name.is_identifier()) {
                     ids.append(name.token());
                     class_template = true;
