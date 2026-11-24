@@ -58,7 +58,8 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
                defined outside it */
             SyntaxRef d = inner.declaration();
             if (d.is(syntax_kind::function_definition) &&
-                out_of_class_member(d))
+                (out_of_class_member(d) ||
+                 out_of_class_member_class_function(d)))
                 return member_definition_of_template(t, d, inner);
             /* [temp.mem]/1's member class template of a class template,
                defined outside it */
@@ -81,12 +82,26 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
                         t, "temp.mem",
                         "a member template function definition without a "
                         "nested-name-specifier");
-                if (nested.size() != 2)
-                    return not_supported_because(
-                        t, "temp.mem",
-                        "a member template function definition of a member "
-                        "class (the nested-name-specifier has more than one "
-                        "component)");
+                if (nested.size() != 2) {
+                    /* the components' kinds: i an identifier, t a
+                       simple-template-id */
+                    char form[16] = "";
+                    size_t n = 0;
+                    for (size_t k = 0; k < nested.size() && n < 12; k++) {
+                        if (nested[k].is(syntax_kind::simple_template_id))
+                            form[n++] = 't';
+                        else if (nested[k].is_identifier())
+                            form[n++] = 'i';
+                    }
+                    form[n] = 0;
+                    char why[160];
+                    snprintf(why, sizeof why,
+                             "a member template function definition of a "
+                             "member class (the nested-name-specifier has "
+                             "more than one component: %s)",
+                             form);
+                    return not_supported_because(t, "temp.mem", why);
+                }
                 return not_supported_because(
                     t, "temp.mem",
                     "a member template function definition whose "

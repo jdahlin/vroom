@@ -5390,8 +5390,20 @@ class semantic_analysis
         /* the definition's own template-parameters (template_parameter_
            entities' index) */
         uint32_t first_parameter = 0;
+        /* [temp.mem]/1: a member of a member class template, defined
+           outside both (template<class T> template<class U> R
+           X<T>::Y<U>::f(P) {...}): the record of X (member_class), which
+           makes the record of Y in each specialization of X, with the
+           record and the specialization of X (plus one) whose parameters
+           the definition's qualifier also names */
+        bool member_class = false;
+        uint32_t outer_record = 0, outer_instantiation = 0;
     };
     owned_array<template_member_definition> template_member_definitions;
+    SyntaxRef out_of_class_member_class_function(SyntaxRef definition) const;
+    analysis_result define_member_of_member_class(uint32_t member,
+                                                  uint32_t index,
+                                                  bool recorded);
     /* the simple-template-id before the declarator-id's :: of a
        function-definition (box<T>::f), or 0; and the member's name (for an
        operator function, its operator keyword's token) */
