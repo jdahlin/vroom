@@ -224,18 +224,32 @@ analysis_result semantic_analysis::member_default_arguments(entity_index c)
     analysis_result result = analysis_result::well_formed;
     owned_array<pending_default_arguments> kept;
     entity_index scope = current_scope;
+    /* [class.mem]/6: "A complete-class context of a nested class is also a
+       complete-class context of any enclosing class": the default
+       arguments of a class nested in a class being defined wait for the
+       enclosing class's closing } */
+    if (defining_class && defining_class != c &&
+        entity_table[defining_class].kind == entity_kind::class_type &&
+        entity_table[c].enclosing == defining_class)
+        return analysis_result::well_formed;
     for (const pending_default_arguments &p : pending_defaults) {
-        if (entity_table[p.function].enclosing != c) {
+        entity_index owner = entity_table[p.function].enclosing;
+        while (owner != c && owner &&
+               entity_table[owner].kind == entity_kind::class_type &&
+               entity_table[owner].enclosing)
+            owner = entity_table[owner].enclosing;
+        if (owner != c) {
             kept.append(p);
             continue;
         }
+        owner = entity_table[p.function].enclosing;
         function_parameters.clear();
         for (uint32_t i = 0; i < p.count; i++)
             function_parameters.append(member_default_parameters[p.first + i]);
-        current_scope = c;
+        current_scope = owner;
         analysing_member_defaults = true;
         analysis_result r;
-        if (entity_table[c].instantiation) {
+        if (entity_table[owner].instantiation) {
             /* [temp.inst]/3: a default argument of a member of an implicit
                instantiation is instantiated only when a call uses it, and
                one that is ill-formed for these arguments is no error of the
