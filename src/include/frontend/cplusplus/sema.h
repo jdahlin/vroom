@@ -6305,6 +6305,7 @@ class semantic_analysis
     /* the name of the operator function of op, as an identifier number
        (operator+ for both forms of +, [over.unary]/2) */
     uint32_t operator_name(preprocessing_op_or_punc op);
+    void name_operator_declarator(SyntaxElement d);
     /* operator followed by the spelling rest, as an identifier number (no
        identifier is spelt so) */
     uint32_t operator_identifier(const char *rest, size_t length) const;

@@ -210,6 +210,46 @@ uint32_t semantic_analysis::allocation_function_name(allocation_function kind)
     return operator_identifier(rest, strlen(rest));
 }
 
+/* [over.oper]/1: the name an operator-function-id of declarator d gives
+   its `operator` token when the declaration is held without being analysed
+   (an ill-formed one): the token of an operator function is named by it,
+   as operator_function_id does, so that a later declaration finds the
+   entity held under the operator's name, not under `operator`.  Operators
+   that function does not analyse (co_await, a conversion) keep the token */
+void semantic_analysis::name_operator_declarator(SyntaxElement d)
+{
+    SyntaxElement id = DeclaratorParts(d).id;
+    if (!id.is(syntax_kind::operator_function_id))
+        return;
+    OperatorFunctionId f = id.operator_function_id();
+    if (!f.operator_keyword().is_token() || !f.symbol().is_token())
+        return;
+    if ((f.size() == 2 || f.size() == 4) &&
+        f.symbol().is(standard_keyword::new_, standard_keyword::delete_)) {
+        bool is_new = f.symbol().is(standard_keyword::new_);
+        bool array = f.is_array_form();
+        allocation_function kind = allocation_function::delete_;
+        if (is_new && array)
+            kind = allocation_function::new_array;
+        else if (is_new)
+            kind = allocation_function::new_;
+        else if (array)
+            kind = allocation_function::delete_array;
+        tokens.name_token(f.operator_keyword().token(),
+                          allocation_function_name(kind));
+        return;
+    }
+    if (f.size() < 2 || f.size() > 3 ||
+        tokens[f.symbol().token()].kind != token_kind::operator_or_punctuator)
+        return;
+    preprocessing_op_or_punc op =
+        preprocessing_op_or_punc_primary(tokens[f.symbol().token()].op_or_punc);
+    if (f.size() == 3 && op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
+        op != preprocessing_op_or_punc::LEFT_BRACKET)
+        return;
+    tokens.name_token(f.operator_keyword().token(), operator_name(op));
+}
+
 /*
  * The operator-function-id of a declarator: operator @, operator (),
  * operator [], or an allocation or deallocation function's name

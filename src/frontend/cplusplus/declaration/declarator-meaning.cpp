@@ -584,8 +584,10 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
     auto declarator_ids = [&](SyntaxRef d) {
         for (auto c : d.elements()) {
             if (c.init_declarators()) {
-                for (auto i : c.elements())
+                for (auto i : c.elements()) {
+                    name_operator_declarator(i);
                     ids.append(declarator_id(i));
+                }
             } else if (c.identifier_list()) {
                 /* [dcl.struct.bind]/1: a structured binding declaration's
                    identifiers */
@@ -593,6 +595,7 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                     if (i.is_identifier())
                         ids.append(i.token());
             } else {
+                name_operator_declarator(c);
                 ids.append(declarator_id(c));
             }
         }
