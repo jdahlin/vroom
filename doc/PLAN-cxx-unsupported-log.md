@@ -671,3 +671,11 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   rejection one more declaration now reaches: 10.7 fixes it first.  Leads:
   SemaCXX/Inputs/std-compare.h refused at line 23 (a pointer to member of
   an incomplete class); builtin <=> on arithmetic not evaluated or lowered.
+- 10.7 (b940562eb, a02ad85b2): a member whose type is a specialization of a
+  template with the defining class as its argument is defined at the
+  member's declaration (D<E> d; in E, [temp.inst]/2); a pointer to member of
+  an incomplete class ([dcl.mptr]/2; std-compare.h line 23).  Unsupported
+  35265 -> 35199, we reject 456 -> 449, we accept +2 (p11-2a.cpp:59: a
+  defaulted == does not instantiate the member operator== it uses).  Left:
+  the builtin <=> on arithmetic (evaluation, lowering), auto <=> and its
+  implicit ==.
