@@ -34,7 +34,8 @@ SyntaxRef semantic_analysis::out_of_class_member_class_function(
     SyntaxRef nested = out_of_class_nested(definition, nullptr);
     if (!nested || nested.size() != 4 ||
         !nested[0].is(syntax_kind::simple_template_id) ||
-        !nested[2].is(syntax_kind::simple_template_id))
+        !(nested[2].is(syntax_kind::simple_template_id) ||
+          nested[2].is_identifier()))
         return 0;
     return nested[0].index();
 }
@@ -113,6 +114,41 @@ SyntaxRef semantic_analysis::out_of_class_nested(SyntaxRef definition,
     return nested.index();
 }
 
+/* a function-definition of a member of a member class of a class template
+   (X<T>::Y::f) that has a default argument ([dcl.fct.default]/6: "default
+   arguments ... shall not be specified in the definition of a member
+   function outside its class") or a qualified type in its decl-specifier-seq
+   without typename ([temp.res]/5): neither is judged here */
+bool semantic_analysis::member_class_function_unjudged(
+    const SyntaxTail &parts) const
+{
+    size_t last = parts.size() - 1;
+    if (parts.size() == 3 && parts[0].is(syntax_kind::decl_specifier_seq)) {
+        bool typename_seen = false, qualified = false;
+        for (token_index t = parts[0].first_token(); t < parts[0].end_token();
+             t++) {
+            const token &x = tokens[t];
+            if (x.kind == token_kind::operator_or_punctuator &&
+                preprocessing_op_or_punc_primary(x.op_or_punc) ==
+                    preprocessing_op_or_punc::COLON_COLON)
+                qualified = true;
+            if (p.keyword_of(x) == standard_keyword::typename_)
+                typename_seen = true;
+        }
+        if (qualified && !typename_seen)
+            return true;
+    }
+    for (token_index t = parts[last - 1].first_token();
+         t < parts[last].first_token(); t++) {
+        const token &x = tokens[t];
+        if (x.kind == token_kind::operator_or_punctuator &&
+            preprocessing_op_or_punc_primary(x.op_or_punc) ==
+                preprocessing_op_or_punc::EQUAL)
+            return true;
+    }
+    return false;
+}
+
 /*
  * [temp.mem.func]/1: "A member function of a class template may be
  * defined outside of the class template definition in which it is
@@ -175,8 +211,11 @@ analysis_result semantic_analysis::member_definition_of_template(
         id = out_of_class_variable_member(definition);
     } else {
         id = out_of_class_member(definition);
-        if (!id && inner)
+        if (!id) {
             id = out_of_class_member_class_function(definition);
+            if (id && member_class_function_unjudged(parts))
+                return not_supported(n, "dcl.fct.default");
+        }
     }
     lookup_result x;
     entity_index named = 0;
@@ -587,11 +626,23 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     } else if (r == analysis_result::well_formed) {
         token_index name = 0;
         out_of_class_member(o.definition, &name);
-        defined = defined_special_member(x.specialization, o, name);
+        /* [class.mfct]/1: a member of a member class Y of the class
+           template, X<T>::Y::f: the class is Y of the specialization */
+        entity_index owner = x.specialization;
+        SyntaxRef qualifier = out_of_class_nested(o.definition);
+        if (qualifier && qualifier.size() == 4 && !o.inner &&
+            qualifier[2].is_identifier()) {
+            owner = entity_table.find(x.specialization,
+                                      tokens.identifier(qualifier[2].token()));
+            if (!owner || entity_table[owner].kind != entity_kind::class_type ||
+                !entity_table[owner].defined)
+                return member_definition_unsupported(o.declaration, recorded);
+        }
+        defined = defined_special_member(owner, o, name);
         if (!defined) {
             /* (the overload this definition is the member's) */
-            for (entity_index f = entity_table.find(x.specialization,
-                                                    tokens.identifier(name));
+            for (entity_index f =
+                     entity_table.find(owner, tokens.identifier(name));
                  f && !defined && entity_table[f].kind == entity_kind::function;
                  f = entity_table[f].next_overload)
                 if (declared_by(f, o.definition) ||
