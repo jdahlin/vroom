@@ -1752,6 +1752,10 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
             !e.name)
             return CONST_UNKNOWN;
         if (e.usable == constness::not_constant) {
+            /* [dcl.constexpr]/10, [expr.const]/5.8: a constexpr variable
+               whose initializer is no constant expression is not usable */
+            if (e.unusable_initializer && !state.potential)
+                return CONST_NOT_CONSTANT_RULE;
             /* [expr.const]/4: only a const or constexpr object may be
                usable; another variable (a reference, a const one) may be
                one analysis could not classify (a later definition, a

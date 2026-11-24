@@ -565,6 +565,10 @@ struct entity {
     /* a variable: [dcl.constinit]/1 declared constinit (by any of its
        declarations) */
     bool constinit_ = false;
+    /* a constexpr variable whose initializer is not a constant expression
+       ([dcl.constexpr]/10): not usable in constant expressions, a read of
+       it is not constant ([expr.const]/5.8) */
+    bool unusable_initializer = false;
     /* a block_scope: the scope whose names it shall not redeclare (the
        function parameter scope for the outermost block of a function
        definition, the scope of a statement's condition for its

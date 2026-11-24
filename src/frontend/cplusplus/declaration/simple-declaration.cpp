@@ -2186,6 +2186,21 @@ analysis_result semantic_analysis::declare_with_initializer(
        full-expression of the initialization shall be a constant
        expression" */
     if (s.constexpr_) {
+        if (value.evaluation == constness::not_constant) {
+            entity_table[declared_entity].usable = constness::not_constant;
+            /* (only when the evaluator applies a rule of [expr.const]/5
+               to it: a not constant the analysis folded without one may
+               be an error of ours) */
+            if (value.node) {
+                constant_value v;
+                constness folded = semantics[value.node].evaluation;
+                semantics[value.node].evaluation = constness::unknown;
+                constness c = evaluate_value(value.node, v);
+                semantics[value.node].evaluation = folded;
+                if (c == constness::not_constant && evaluation_rule_applied())
+                    entity_table[declared_entity].unusable_initializer = true;
+            }
+        }
         if (value.evaluation == constness::not_constant)
             return ill_formed_at_token(m.id,
                                        "in any constexpr variable "
