@@ -2081,6 +2081,25 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "data member of reference type",
                                        "class.union");
         uint64_t size = size_of_type(type);
+        if (record.kind == type_kind::class_type && !size &&
+            entity_table[record.entity].kind == entity_kind::class_type &&
+            entity_table[record.entity].instantiation &&
+            !entity_table[record.entity].defined &&
+            !instantiations[entity_table[record.entity].instantiation - 1]
+                 .defining) {
+            /* [temp.inst]/2: a member of class template specialization type
+               needs a completely-defined type, so the specialization is
+               defined here, though its argument is the class being defined
+               (an incomplete argument is fine: D<E> in E, with D's member
+               function bodies instantiated only when used, /4) */
+            entity_index done = 0;
+            analysis_result r = define_class_outside(
+                SyntaxRef(), entity_table[record.entity].instantiation - 1,
+                done);
+            if (r != analysis_result::well_formed)
+                return r;
+            size = size_of_type(type);
+        }
         bool is_reference = record.kind == type_kind::lvalue_reference ||
                             record.kind == type_kind::rvalue_reference;
         if (is_reference)
