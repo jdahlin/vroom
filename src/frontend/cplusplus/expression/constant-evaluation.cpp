@@ -378,6 +378,8 @@ constness semantic_analysis::evaluate_binary(uint8_t op, fundamental_type t,
        one is not decided */
     if (c == constness::not_constant && !fundamental_type_is_floating(t))
         return CONST_NOT_CONSTANT_RULE;
+    if (c == constness::unknown)
+        return CONST_UNKNOWN;
     return c;
 }
 
@@ -1606,7 +1608,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             if (state.reading && unusable_object_read(state, w))
                 return CONST_NOT_CONSTANT_NOTE(
                     rule_note::read_non_constexpr_variable);
-            return constness::unknown;
+            return CONST_UNKNOWN;
         }
         constant_value o = place_value(state, whole);
         if (o.kind == constant_value_kind::union_object) {
@@ -3073,6 +3075,8 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
                        kept_of(operand, v), value);
         if (c == constness::constant)
             v = value_of(t, value);
+        if (c == constness::unknown)
+            return CONST_UNKNOWN;
         return c;
     }
     case semantic_kind::binary: {

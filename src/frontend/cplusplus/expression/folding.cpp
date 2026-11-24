@@ -123,8 +123,11 @@ constness fold_binary(const implementation_defined_behavior &b,
         if (floating_point_pragma)
             return constness::unknown;
         double r = floating_operation(t, op, p, q);
-        if ((op == preprocessing_op_or_punc::SLASH && q == 0) || isinf(r) ||
-            isnan(r))
+        /* [expr.pre]/4: a division by zero or an operation with no
+           mathematical result (a NaN) is undefined; a result beyond the
+           type's range is the infinity, as clang folds it (a conversion
+           to a narrower type does the same) */
+        if ((op == preprocessing_op_or_punc::SLASH && q == 0) || isnan(r))
             return constness::not_constant;
         out = floating_kept(r);
         return constness::constant;
