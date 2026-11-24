@@ -214,7 +214,7 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
         cc *c = ast_builder_open(p, co);
         lowering_failure why;
         if (!lower_translation_unit(analysis, tokens, c, co->target, why,
-                                    o->path)) {
+                                    o->path, co->rtti != 0)) {
             report_failure(o->errfd, tokens, why);
             status = 1;
         } else if (ast_builder_emit(c))

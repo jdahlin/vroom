@@ -425,9 +425,10 @@ bool analysis_complete(const semantic_analysis &analysis, lowering_failure &why)
 
 bool lower_translation_unit(const semantic_analysis &analysis,
                             token_stream &tokens, cc *c, int target,
-                            lowering_failure &why, const char *main_path)
+                            lowering_failure &why, const char *main_path,
+                            bool rtti)
 {
-    c_lowering lowering(analysis, tokens, c, target, main_path);
+    c_lowering lowering(analysis, tokens, c, target, main_path, rtti);
     /* [impl.clang]: the closures unique to the translation unit numbered
        in the order their symbols are made (itanium_mangler) */
     analysis.unnumbered_closures.clear();
