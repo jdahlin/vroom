@@ -587,7 +587,6 @@ verdict SemaCXX/cxx2a-initializer-aggregates.cpp -std=c++20 -Wno-c99-designator 
 verdict SemaCXX/cxx2a-initializer-aggregates.cpp -std=c++20 -Wno-c99-designator -Wno-reorder-init-list -Wno-initializer-overrides: ill-formed for us, accepted by clang: line 113 (1 declarations)
 verdict SemaCXX/cxx2b-consteval-propagate.cpp -std=c++2a -Wno-unused-value: ill-formed for us, accepted by clang: line 9 (4 declarations)
 verdict SemaCXX/cxx2b-consteval-propagate.cpp -std=c++2b -Wno-unused-value: ill-formed for us, accepted by clang: line 9 (4 declarations)
-verdict SemaCXX/cxx2c-constexpr-placement-new.cpp -std=c++2c: ill-formed for us, accepted by clang: line 111 (1 declarations)
 verdict SemaCXX/deduced-return-type-cxx14.cpp -std=c++23 -DDELAYED_TEMPLATE_PARSING: ill-formed for us, accepted by clang: line 154 (1 declarations)
 verdict SemaCXX/deduced-return-type-cxx14.cpp -std=c++23: ill-formed for us, accepted by clang: line 154 (1 declarations)
 verdict SemaCXX/diagnose_if.cpp -std=c++14: ill-formed for us, accepted by clang: line 303 (1 declarations)

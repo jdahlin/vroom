@@ -2728,6 +2728,12 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
                     return c;
             }
         }
+        /* [new.delete.placement]/2: the reserved placement form makes no
+           call, the pointer is the allocation and the object constructed
+           is the one it designates: not followed yet (a new object here
+           would leave the designated one indeterminate) */
+        if (x.a && semantics[x.a].kind != semantic_kind::call)
+            return CONST_UNKNOWN;
         constant_evaluation::object o;
         o.heap = true;
         uint32_t place = static_cast<uint32_t>(state.objects.size());
