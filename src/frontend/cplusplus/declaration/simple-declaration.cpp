@@ -1851,6 +1851,14 @@ analysis_result semantic_analysis::declare_with_initializer(
                               "implicitly or explicitly is ill-formed: the "
                               "destructor of the object is deleted",
                               "class.dtor");
+        /* [class.access]/1: a private or protected one is named from
+           here, by the declaration's context */
+        if (is_class_entity(record) && entity_table[record].destructor &&
+            !accessible(entity_table[record].destructor))
+            return ill_formed(declaration,
+                              "the destructor of the object is potentially "
+                              "invoked and it is private or protected",
+                              "class.access");
     }
     bool default_constructed = false;
     if (r == analysis_result::well_formed && !initialized &&
