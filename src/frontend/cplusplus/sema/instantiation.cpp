@@ -224,6 +224,10 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
     if (!specialization)
         return not_supported(at, "temp.inst");
     instantiation_record &x = instantiations[index];
+    /* [ext.clang] a call of a C++ library builtin is the builtin's: its
+       definition is not instantiated */
+    if (needed && resolving_calls && cxx_library_builtin(specialization))
+        needed = false;
     /* [dcl.spec.auto]/12: "Return type deduction for a templated function
        with a placeholder in its declared type occurs when the definition
        is instantiated even if the function body contains a return
@@ -243,6 +247,11 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         return analysis_result::well_formed;
     }
     x.quiet = quiet_member_bodies != 0;
+    /* (a use, not a return type deduced for an unevaluated operand or an
+       explicit instantiation's declaration) */
+    if (!instantiation_depth && !x.wanted_by && needed &&
+        !explicit_declaration_names)
+        x.wanted_by = current_declaration;
     return instantiate_definition(at, index);
 }
 
@@ -266,6 +275,8 @@ semantic_analysis::need_specialization_definition(SyntaxRef at, entity_index f)
         return analysis_result::well_formed;
     }
     rec.quiet = quiet_member_bodies != 0;
+    if (!instantiation_depth && !rec.wanted_by && !explicit_declaration_names)
+        rec.wanted_by = current_declaration;
     return instantiate_definition(at, idx);
 }
 
@@ -275,7 +286,20 @@ void semantic_analysis::want_definition(instantiation_record &x, uint32_t index)
 {
     x.pending = true;
     x.quiet = quiet_member_bodies != 0;
+    if (!instantiation_depth && !x.wanted_by)
+        x.wanted_by = current_declaration;
     pending_definitions.append(index);
+}
+
+void semantic_analysis::use_ill_formed(SyntaxRef d)
+{
+    /* (the declaration under analysis, a constexpr specialization's
+       definition instantiated at its use: ill-formed when it ends) */
+    if (analysing && analysing->node == d)
+        analysing->recovered = true;
+    for (analysed_declaration &x : declarations)
+        if (x.node == d && x.result == analysis_result::well_formed)
+            x.result = analysis_result::ill_formed;
 }
 
 /*
@@ -447,6 +471,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     if (r == analysis_result::ill_formed &&
         ft.definition.is(syntax_kind::lambda_expression))
         lambda_error_in_enclosing(ft.definition);
+    if (r == analysis_result::ill_formed && dependent &&
+        instantiations[index].wanted_by)
+        use_ill_formed(instantiations[index].wanted_by);
     for (analysed_declaration &d : declarations) {
         if (d.node != ft.declaration || d.result == analysis_result::ill_formed)
             continue;
@@ -977,6 +1004,9 @@ void semantic_analysis::instantiate_pending()
             if (explicit_)
                 explicit_instantiation_verdict(explicit_class, r, failure,
                                                dependent);
+            else if (r == analysis_result::ill_formed && dependent &&
+                     b.function && entity_table[b.function].member_needed_by)
+                use_ill_formed(entity_table[b.function].member_needed_by);
             progress = true;
         }
         for (; next_definition < pending_definitions.size();

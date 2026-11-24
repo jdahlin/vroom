@@ -1060,8 +1060,11 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             owned_array<expression_meaning> early;
             for (const expression_meaning &e : expanded)
                 early.append(e);
-            VTRY_SET(r, template_call(n, name, ft, specified, qualified,
-                                      arguments, early, f));
+            {
+                resolving_call scope(resolving_calls);
+                VTRY_SET(r, template_call(n, name, ft, specified, qualified,
+                                          arguments, early, f));
+            }
             return call_with(n, f, f.type, 0, 0, arguments, early, m);
         }
     }
@@ -1155,8 +1158,11 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 if (!found_template)
                     return not_supported(n, "basic.lookup.argdep");
                 owned_array<template_argument> specified;
-                VTRY_SET(r, template_call(n, t, found_template, specified,
-                                          false, arguments, early, f));
+                {
+                    resolving_call scope(resolving_calls);
+                    VTRY_SET(r, template_call(n, t, found_template, specified,
+                                              false, arguments, early, f));
+                }
                 return call_with(n, f, f.type, 0, 0, arguments, early, m);
             }
             /* the functions of the sets found: [over.call.func]/3's
@@ -1303,7 +1309,10 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
     for (entity_index e : found_by_adl)
         overload_set(e, set);
     if (set.size() > 1) {
-        VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
+        {
+            resolving_call scope(resolving_calls);
+            VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
+        }
         function_type = f.type;
         if (member)
             member = semantics[f.node].b;
@@ -1649,7 +1658,8 @@ analysis_result semantic_analysis::template_candidates(
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
     const owned_array<SyntaxElement> *written, SyntaxRef written_at,
     const owned_array<template_argument> *specified,
-    const owned_array<bool> *written_expansion)
+    const owned_array<bool> *written_expansion,
+    const qualified_type *target_function)
 {
     for (uint32_t g : group) {
         /* the explicit template arguments ([temp.arg.explicit]), if given */
@@ -1717,8 +1727,18 @@ analysis_result semantic_analysis::template_candidates(
                     break;
             }
         }
-        if (r == analysis_result::well_formed && !failed)
-            r = deduce_from_call(n, g, meanings, count, d, &failed);
+        if (r == analysis_result::well_formed && !failed) {
+            if (target_function) {
+                /* [temp.deduct.funcaddr]/1 */
+                owned_array<template_argument> given;
+                for (const template_argument &a : d)
+                    given.append(a);
+                r = deduce_from_function_type(n, g, *target_function, d, failed,
+                                              &given);
+            } else {
+                r = deduce_from_call(n, g, meanings, count, d, &failed);
+            }
+        }
         entity_index e = 0;
         const struct function_template ft = function_templates[g - 1];
         if (r == analysis_result::well_formed && !failed) {
@@ -1726,6 +1746,16 @@ analysis_result semantic_analysis::template_candidates(
             r = instantiate(n, ft.entity, d.data(),
                             static_cast<uint32_t>(d.size()), e);
             unevaluated--;
+        }
+        if (r == analysis_result::well_formed && !failed && target_function) {
+            /* [over.over]/3: selected when the specialization's type is
+               the target's, after the [conv.fctptr] conversion */
+            qualified_type t = entity_table[e].type;
+            bool compatible = type_table[t.unqualified()].non_throwing &&
+                              differ_in_exceptions(t, *target_function);
+            if (t.unqualified() != target_function->unqualified() &&
+                !compatible)
+                failed = true;
         }
         substituting--;
         if (r == analysis_result::ill_formed && undo_substitution(mark))

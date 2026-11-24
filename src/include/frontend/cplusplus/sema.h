@@ -494,6 +494,11 @@ struct entity {
     exception_specification exceptions;
     /* [temp.inst]/4: a definition deferred until the function is used. */
     bool member_definition_needed = false, member_body_deferred = false;
+    /* the declaration of the translation unit whose use first needed the
+       definition ([temp.inst]/4), 0 if none: an argument-dependent error
+       of the instantiated body makes it ill-formed (clang: "in
+       instantiation of ... requested here") */
+    SyntaxRef member_needed_by = 0;
     /* the preprocessor's identifier number, 0 for an unnamed entity */
     uint32_t name = 0;
     /* the entity whose scope the name is declared in (a namespace, a
@@ -686,6 +691,11 @@ struct entity {
        base-specifier depends on a template-parameter: [temp.dep]/3, its
        class's members are not found by unqualified lookup */
     bool dependent_base = false;
+    /* a class (a class template's pattern or specialization) with a
+       template friend class that is a member of a dependent type
+       ([temp.friend]/4): clang does not check access to its members
+       (-Wunsupported-friend, "turning off access control") */
+    bool access_unchecked = false;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
@@ -5085,6 +5095,9 @@ class semantic_analysis
            bodies analysed quietly (quiet_member_bodies), no use of the
            specialization known: instantiated quietly too */
         bool quiet = false;
+        /* the translation unit's declaration whose use first wanted the
+           definition (want_definition), 0 if none */
+        SyntaxRef wanted_by = 0;
         /* a class's: the partial or explicit specialization whose
            class-specifier defines it (function_templates' index plus one;
            0 the primary template's) and its parameters' arguments
@@ -5238,6 +5251,27 @@ class semantic_analysis
     mutable bool argument_named = false;
     uint32_t dependent_errors = 0, independent_errors = 0;
     void count_error();
+    /* [temp.inst]/4, [temp.point]: the use at declaration d instantiated a
+       definition whose argument-dependent error makes it ill-formed */
+    void use_ill_formed(SyntaxRef d);
+    /* [ext.clang] clang's C++ library builtins (Builtins.td's std::move,
+       std::forward, ...): a call of one is the builtin's, whose definition
+       is not instantiated.  resolving_calls counts the overload
+       resolutions of calls under way (call): a specialization instantiated
+       there is a called function's candidate, not a use of its name */
+    bool cxx_library_builtin(entity_index f) const;
+    uint32_t resolving_calls = 0;
+    struct resolving_call {
+        uint32_t &count;
+        explicit resolving_call(uint32_t &c) : count(c)
+        {
+            count++;
+        }
+        ~resolving_call()
+        {
+            count--;
+        }
+    };
     /* whether a variable of type t declared naming a template argument is
        argument_bound: not one of pointer, array, function or
        pointer-to-member type, whose form, which clang checks at the
@@ -6302,6 +6336,9 @@ class semantic_analysis
            it converts to std::initializer_list<X> */
         bool from_list = false;
         bool to_initializer_list = false;
+        /* [over.ics.list]/6: a list to an array, whose bound /3.1 (C++20,
+           CWG1307) ranks: not compared here */
+        bool to_array = false;
         /* [diff.lex]/3: a string literal to char* (clang's extension since
            C++11): a function that needs one is worse than any viable
            function that needs none ([impl.clang]) */
@@ -6410,7 +6447,16 @@ class semantic_analysis
         const owned_array<SyntaxElement> *written = nullptr,
         SyntaxRef written_at = 0,
         const owned_array<template_argument> *specified = nullptr,
-        const owned_array<bool> *written_expansion = nullptr);
+        const owned_array<bool> *written_expansion = nullptr,
+        const qualified_type *target_function = nullptr);
+    /* [over.over]/3 with [temp.deduct.funcaddr]: the expression e, a
+       template-id (qualified or not) of function templates not called,
+       initializing a target of function type ft: the one specialization
+       whose type is ft, then e analysed naming it; handled false when e
+       is no such template-id */
+    analysis_result template_id_for_target(SyntaxElement e, qualified_type ft,
+                                           expression_meaning &m,
+                                           bool &handled);
     /* a call's template-id naming several function templates: its
        template-arguments as written, checked against each template by
        template_candidates ([temp.over]/1), from template_callee_parts to
@@ -6512,6 +6558,10 @@ class semantic_analysis
        sequence, more than 0 when b is, 0 when neither is */
     int compare_conversions(const conversion_sequence &a,
                             const conversion_sequence &b) const;
+    /* [over.ics.list]/6 */
+    conversion_sequence list_array_sequence(SyntaxElement list,
+                                            qualified_type array,
+                                            bool user_defined);
     int compare_standard_conversions(const conversion_sequence &a,
                                      const conversion_sequence &b) const;
     /* [over.match.viable], [over.match.best]: the best viable function of
@@ -6636,7 +6686,8 @@ class semantic_analysis
                              owned_array<bool> &set, bool *failed);
     analysis_result deduce_from_function_type(
         SyntaxRef at, uint32_t function_template, qualified_type target,
-        owned_array<template_argument> &deduced, bool &failed);
+        owned_array<template_argument> &deduced, bool &failed,
+        const owned_array<template_argument> *explicit_arguments = nullptr);
     /* ... the token of that name and the function chosen, which
        named_entity takes it for (0 elsewhere) */
     token_index overload_target_token = 0;

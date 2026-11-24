@@ -479,7 +479,9 @@ analysis_result semantic_analysis::analyse_function_body_of(
        a constexpr function template ... would fail to satisfy the
        requirements for a constexpr function, that specialization is still
        a constexpr function, even though a call to such a function cannot
-       appear in a constant expression." */
+       appear in a constant expression."  (n4861: "constexpr function
+       template or member function of a class template": a member of a
+       class template's specialization, a class of it too) */
     bool specialization = entity_table[f].instantiation != 0;
     /* a member function of a class template's specialization is
        instantiated with it ([temp.inst]/3): [impl.clang] clang does not check /6's
@@ -490,6 +492,8 @@ analysis_result semantic_analysis::analyse_function_body_of(
          c = entity_table[c].enclosing)
         if (entity_table[c].instantiation)
             instantiated_member = true;
+    if (instantiated_member)
+        specialization = true;
     if (result == analysis_result::well_formed && entity_table[f].constexpr_ &&
         specialization) {
         const implementation_defined_behavior &b = tokens.files.behavior;

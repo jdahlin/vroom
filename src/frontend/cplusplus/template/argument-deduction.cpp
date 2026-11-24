@@ -964,7 +964,8 @@ analysis_result semantic_analysis::deduce_from_call(
  */
 analysis_result semantic_analysis::deduce_from_function_type(
     SyntaxRef at, uint32_t function_template, qualified_type target,
-    owned_array<template_argument> &deduced, bool &failed)
+    owned_array<template_argument> &deduced, bool &failed,
+    const owned_array<template_argument> *explicit_arguments)
 {
     failed = false;
     const struct function_template &ft =
@@ -975,10 +976,32 @@ analysis_result semantic_analysis::deduce_from_function_type(
         values.append(template_argument());
         set.append(false);
     }
+    /* [temp.deduct]/2: the explicit template arguments first */
+    if (explicit_arguments) {
+        if (explicit_arguments->size() > ft.parameter_count)
+            return not_supported(at, "temp.arg.explicit");
+        for (size_t i = 0; i < explicit_arguments->size(); i++) {
+            if ((*explicit_arguments)[i].kind ==
+                template_argument::kind_t::pack)
+                return not_supported(at, "temp.deduct.funcaddr");
+            values[i] = (*explicit_arguments)[i];
+            set[i] = true;
+        }
+    }
     uint32_t unknowns = deduction_unknowns;
-    if (!deduce_type(entity_table[ft.entity].type, target, values, set)) {
+    bool all_explicit =
+        explicit_arguments && explicit_arguments->size() == ft.parameter_count;
+    if (all_explicit) {
+        /* nothing left to deduce: the caller compares the
+           specialization's type with the target's */
+    } else if (!deduce_type(entity_table[ft.entity].type, target, values,
+                            set)) {
         if (deduction_unknowns != unknowns)
             return not_supported(at, "temp.deduct.type");
+        /* (P with the explicit arguments substituted, which reference
+           collapsing ([dcl.ref]/6) may change, is not formed here) */
+        if (explicit_arguments && !explicit_arguments->empty())
+            return not_supported(at, "temp.deduct.funcaddr");
         failed = true;
         return analysis_result::well_formed;
     }

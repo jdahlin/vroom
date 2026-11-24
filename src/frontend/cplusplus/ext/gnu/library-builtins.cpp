@@ -2037,4 +2037,40 @@ analysis_result semantic_analysis::builtin_complex(SyntaxRef n,
     return analysis_result::well_formed;
 }
 
+/*
+ * [ext.clang] clang's C++ library builtins (Builtins.td, CXX_LIB with
+ * namespace std): a specialization of a function template of the namespace
+ * std named move, move_if_noexcept, forward, forward_like, as_const,
+ * addressof or __addressof, with one parameter (clang: "Unrelated move
+ * functions are not the builtin", std::move(T, T))
+ */
+bool semantic_analysis::cxx_library_builtin(entity_index f) const
+{
+    const entity &x = entity_table[f];
+    if (x.kind != entity_kind::function || !x.instantiation)
+        return false;
+    entity_index t = specialized_template(f);
+    if (!std_namespace(entity_table[t].enclosing))
+        return false;
+    const struct type &shape = type_table[x.type.unqualified()];
+    if (shape.kind != type_kind::function || shape.parameter_count != 1)
+        return false;
+    /* std::forward<T &>(an rvalue), the overload of an rvalue reference
+       parameter for an lvalue reference: clang calls the function (whose
+       definition [forward]/3 has diagnose it) */
+    if (named(t, "forward") &&
+        type_table[shape.operand.unqualified()].kind ==
+            type_kind::lvalue_reference &&
+        type_table[type_table.parameters(x.type.unqualified())[0].unqualified()]
+                .kind == type_kind::rvalue_reference)
+        return false;
+    static const char *const names[] = {
+        "move",     "move_if_noexcept", "forward",    "forward_like",
+        "as_const", "addressof",        "__addressof"};
+    for (const char *name : names)
+        if (named(t, name))
+            return true;
+    return false;
+}
+
 } // namespace cplusplus

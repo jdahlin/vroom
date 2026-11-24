@@ -68,15 +68,19 @@ bool semantic_analysis::trivial_default_constructor(entity_index c,
     }
     /* not user-provided */
     bool user_declared = false;
+    bool deleted_default = false;
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor) {
         if (entity_table[k].implicit)
             continue;
         const struct type &f = type_table[entity_table[k].type.unqualified()];
         /* [ext:clang_type_traits] X() = delete is not user-provided
-           ([dcl.fct.def.default]/5): clang counts it trivial */
-        if (entity_table[k].deleted && !f.parameter_count)
+           ([dcl.fct.def.default]/5): clang counts it trivial, and the
+           class has a default constructor beside other constructors */
+        if (entity_table[k].deleted && !f.parameter_count) {
+            deleted_default = true;
             continue;
+        }
         user_declared = true;
         /* a user-provided default constructor ([class.default.ctor]/1: one
            "for which each parameter that is not a function parameter pack
@@ -86,7 +90,8 @@ bool semantic_analysis::trivial_default_constructor(entity_index c,
     }
     /* /1: a user-declared constructor and no X() = default: there is no
        default constructor to be trivial */
-    if (user_declared && !trivial_defaulted_default_constructor(c))
+    if (user_declared && !deleted_default &&
+        !trivial_defaulted_default_constructor(c))
         return false;
     /* (3.2) */
     for (uint32_t i = 0; i < x.member_count; i++)
@@ -288,12 +293,16 @@ bool semantic_analysis::trivial_special_members(entity_index c) const
 {
     const entity &x = entity_table[c];
     for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor)
-        if (!entity_table[k].implicit &&
-            (type_table[entity_table[k].type.unqualified()].parameter_count ==
-                 0 ||
-             copy_or_move_constructor(c, k)))
+         k = entity_table[k].next_constructor) {
+        if (entity_table[k].implicit)
+            continue;
+        const struct type &f = type_table[entity_table[k].type.unqualified()];
+        /* [ext:clang_type_traits] X() = delete is trivial for clang */
+        if (entity_table[k].deleted && !f.parameter_count)
+            continue;
+        if (!f.parameter_count || copy_or_move_constructor(c, k))
             return false;
+    }
     if (x.dynamic || x.destructor || x.user_copy_assignments)
         return false;
     for (uint32_t i = 0; i < x.member_count; i++)

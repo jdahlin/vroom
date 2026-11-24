@@ -475,8 +475,24 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
     bool qualified = false;
     owned_array<template_argument> specified;
     VTRY(parts, template_callee_parts(n, name, found, specified, qualified));
-    if (found != ft || overloaded_written_at)
+    if (name && name == overload_target_token) {
+        /* [over.over]: the specialization template_id_for_target chose */
+        overloaded_written.clear();
+        overloaded_written_expansion.clear();
+        overloaded_written_at = 0;
+        size_t uses_before = name_uses.size();
+        analysis_result named = named_entity(name, overload_target_choice, m);
+        name_uses.resize(uses_before);
+        return named;
+    }
+    if (found != ft || overloaded_written_at) {
+        /* (the written arguments template_callee_parts kept for a call's
+           template_call: no call follows) */
+        overloaded_written.clear();
+        overloaded_written_expansion.clear();
+        overloaded_written_at = 0;
         return not_supported(n, "over.over");
+    }
     if (specified.size() != function_templates[ft - 1].parameter_count)
         return not_supported(n, "over.over");
     for (const template_argument &a : specified)
@@ -487,7 +503,7 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
     VTRY(r, instantiate(n, function_templates[ft - 1].entity, specified.data(),
                         static_cast<uint32_t>(specified.size()), e));
     size_t uses_before = name_uses.size();
-    analysis_result named = named_entity(n[0].token(), e, m);
+    analysis_result named = named_entity(name, e, m);
     name_uses.resize(uses_before);
     return named;
 }

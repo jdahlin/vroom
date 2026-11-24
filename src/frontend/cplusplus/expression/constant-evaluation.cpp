@@ -1547,6 +1547,26 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             return CONST_UNKNOWN;
         return pointed_place(state, p, object);
     }
+    /* [expr.call]/14: a call of a function that returns a reference is a
+       glvalue, the object its result refers to ([dcl.ref]/5) */
+    case semantic_kind::call: {
+        if (x.category == value_category::prvalue)
+            break;
+        constant_value p;
+        c = evaluate_call(state, node, p);
+        if (c != constness::constant)
+            return c;
+        c = pointed_place(state, p, object);
+        /* [class.temporary]/6.9: a temporary an argument materialized
+           lives to the end of the caller's full-expression, which the
+           evaluation does not model (the call's frame held it) */
+        if (c != constness::constant)
+            for (uint32_t i = 0; i < x.count; i++)
+                if (semantics[semantics.items(x.first)[i]].category ==
+                    value_category::prvalue)
+                    return CONST_UNKNOWN;
+        return c;
+    }
     /* [expr.cond]/5: a glvalue conditional designates the object of the
        operand it selects ([ext:gnu_conditional_omitted]: d, the first
        operand, when b is none) */
@@ -3577,6 +3597,29 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
                     1)
             return evaluate_node(state, semantics.items(x.first)[0], v);
     }
+    /* [ext.clang] a C++ library builtin (std::move, std::addressof, ...)
+       is evaluated as clang's builtin, without its definition: the result
+       refers or points to the argument's object.  std::addressof and
+       std::__addressof are constexpr, the others when declared so */
+    if (!x.b && x.count == 1 && cxx_library_builtin(semantics[callee].a)) {
+        entity_index t = specialized_template(semantics[callee].a);
+        if (!entity_table[semantics[callee].a].constexpr_ &&
+            !named(t, "addressof") && !named(t, "__addressof"))
+            return CONST_NOT_CONSTANT_NOTE(
+                rule_note::call_non_constexpr_function);
+        uint32_t object = 0;
+        constness c =
+            evaluate_object(state, semantics.items(x.first)[0], object);
+        if (c != constness::constant)
+            return c;
+        v = constant_value();
+        v.kind = constant_value_kind::pointer;
+        v.first = object;
+        v.count = 1;
+        if (!(object & element_place))
+            v.stamp = state.objects[object].serial;
+        return constness::constant;
+    }
     /* [class.this]/1: a non-static member function's this, the address
        of the object expression */
     constant_value self;
@@ -3709,6 +3752,23 @@ constness semantic_analysis::evaluate_invocation(
             return CONST_UNKNOWN;
         /* [expr.const]/5.2: a call of a function that is not constexpr */
         return CONST_NOT_CONSTANT_NOTE(rule_note::call_non_constexpr_function);
+    }
+    /* [dcl.constexpr]/7: a specialization that fails the requirements of
+       a constexpr function (a parameter or return type that is not a
+       literal type, until C++23) is constexpr, and no call of it is a
+       constant expression (clang: "non-literal type ... cannot be used in
+       a constant expression") */
+    if (!tokens.files.behavior.has(
+            language_feature::constexpr_without_constant_result)) {
+        type_index ft = e.type.unqualified();
+        const qualified_type *parameters = type_table.parameters(ft);
+        bool literal =
+            literal_type(type_table[ft].operand) != constness::not_constant;
+        for (uint32_t i = 0; i < type_table[ft].parameter_count; i++)
+            if (literal_type(parameters[i]) == constness::not_constant)
+                literal = false;
+        if (!literal)
+            return CONST_NOT_CONSTANT;
     }
     /* a defaulted constructor's default member initializers with a
        location builtin were folded at the wrong place */

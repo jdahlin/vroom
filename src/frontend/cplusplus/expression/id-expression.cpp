@@ -1016,6 +1016,10 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
             return concept_id(id, ct, m);
         if (uint32_t vt = variable_template_of(named))
             return variable_template_id_of(id, vt, m);
+        /* [namespace.qual] N::f<A>: a function template's specialization,
+           as f<A> (function_template_id_value) */
+        if (uint32_t ft = function_template_of(x.unknown_entity))
+            return function_template_id_value(n, ft, m);
         return not_supported(n, "expr.prim.id.qual");
     }
     if (entity_table[scope.entity].kind != entity_kind::class_type)

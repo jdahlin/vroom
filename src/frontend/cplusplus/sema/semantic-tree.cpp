@@ -174,8 +174,12 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
         else if ((kind == semantic_kind::entity) && a &&
                  entity_table[a].kind == entity_kind::variable)
             function = a;
-        if (function)
+        if (function) {
+            if (!instantiation_depth &&
+                !entity_table[function].member_needed_by)
+                entity_table[function].member_needed_by = current_declaration;
             mark_needed(function);
+        }
         require_complete(m.type);
         if (m.category == value_category::prvalue)
             require_destructor_definition(m.type);

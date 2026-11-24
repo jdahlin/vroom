@@ -1262,6 +1262,13 @@ bool semantic_analysis::accessible_here(entity_index member,
     const entity &x = entity_table[member];
     if (!x.access)
         return true;
+    /* a class whose access clang does not check (access_unchecked) */
+    const entity &k = entity_table[x.enclosing];
+    if (k.kind == entity_kind::class_type &&
+        (k.access_unchecked ||
+         (k.instantiation &&
+          entity_table[specialized_template(x.enclosing)].access_unchecked)))
+        return true;
     /* [temp.spec]/6: "The usual access checking rules do not apply
        to names in a declaration of an explicit instantiation or explicit
        specialization, with the exception of names appearing in a function

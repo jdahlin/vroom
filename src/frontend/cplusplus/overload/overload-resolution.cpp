@@ -92,6 +92,66 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
     return true;
 }
 
+/*
+ * [over.ics.list]/6: "if the parameter type is 'array of N X' or 'array of
+ * unknown bound of X', if there exists an implicit conversion sequence
+ * from each element of the initializer list (and from {} in the former
+ * case if N exceeds the number of elements in the initializer list) to X,
+ * the implicit conversion sequence is the worst such implicit conversion
+ * sequence"; none when the list has more than N elements
+ * ([dcl.init.aggr]/9).  An element that is itself a braced-init-list, or
+ * {} to a class X, is not followed (unknown).
+ */
+semantic_analysis::conversion_sequence
+semantic_analysis::list_array_sequence(SyntaxElement list, qualified_type array,
+                                       bool user_defined)
+{
+    conversion_sequence unknown;
+    unknown.kind = conversion_sequence::form::unknown;
+    const struct type t = type_table[array.unqualified()];
+    if (t.variable_bound)
+        return unknown;
+    owned_array<SyntaxElement> clauses;
+    if (list_clauses(list, clauses) != analysis_result::well_formed)
+        return unknown;
+    conversion_sequence bad;
+    if (t.bound_known && clauses.size() > t.bound)
+        return bad;
+    type_kind element = type_table[t.operand.unqualified()].kind;
+    bool scalar = element == type_kind::pointer ||
+                  element == type_kind::enumeration ||
+                  (element == type_kind::fundamental &&
+                   fundamental_of(t.operand) != fundamental_type::void_);
+    if (!scalar)
+        return unknown;
+    conversion_sequence worst;
+    worst.kind = conversion_sequence::form::standard;
+    for (SyntaxElement clause : clauses) {
+        if (clause.is(syntax_kind::braced_init_list) ||
+            clause.is(syntax_kind::designated_initializer_clause))
+            return unknown;
+        substitution_mark mark = mark_substitution();
+        expression_meaning e;
+        substituting++;
+        analysis_result r = expression(clause, e);
+        conversion_sequence s;
+        if (r == analysis_result::well_formed && e.node)
+            s = implicit_conversion_sequence(e, t.operand, user_defined);
+        substituting--;
+        undo_substitution(mark);
+        if (r != analysis_result::well_formed || !e.node ||
+            s.kind == conversion_sequence::form::unknown)
+            return unknown;
+        if (s.kind == conversion_sequence::form::bad)
+            return bad;
+        if (compare_conversions(s, worst) > 0)
+            worst = s;
+    }
+    worst.from_list = true;
+    worst.to_array = true;
+    return worst;
+}
+
 void semantic_analysis::overload_set(entity_index e,
                                      owned_array<entity_index> &out) const
 {
@@ -214,9 +274,15 @@ analysis_result semantic_analysis::best_viable_function(
                     (*written_arguments)[k].is(syntax_kind::braced_init_list)) {
                     qualified_type list_target = target;
                     const struct type &tr = type_table[target.unqualified()];
+                    /* (an array's cv-qualifiers are its elements',
+                       [basic.type.qualifier]/3) */
+                    qualified_type referred = tr.operand;
+                    if (type_table[referred.unqualified()].kind ==
+                        type_kind::array)
+                        referred = type_table[referred.unqualified()].operand;
                     if (tr.kind == type_kind::rvalue_reference ||
                         (tr.kind == type_kind::lvalue_reference &&
-                         (tr.operand.cv() & cv_const)))
+                         (referred.cv() & cv_const)))
                         list_target = qualified_type::make(
                             tr.operand.unqualified(), cv_none);
                     if (type_table[list_target.unqualified()].kind ==
@@ -249,6 +315,10 @@ analysis_result semantic_analysis::best_viable_function(
                             a.kind = sequence::form::unknown;
                             a.user_defined_if_viable = true;
                         }
+                    } else if (type_table[list_target.unqualified()].kind ==
+                               type_kind::array) {
+                        a = list_array_sequence((*written_arguments)[k],
+                                                list_target, user_defined);
                     } else if (argument.node) {
                         a = implicit_conversion_sequence(argument, target,
                                                          user_defined);
@@ -300,6 +370,7 @@ analysis_result semantic_analysis::best_viable_function(
        than ICSj(F2)"; /1: "ICS1(F) is defined such that it is not a worse
        or better conversion sequence than ICS1(G) when F is a static member
        function" (compare_conversions) */
+    bool order_unknown = false;
     auto better = [&](size_t f1, size_t f2) {
         /* [impl.clang] a string literal converted to char* ([diff.lex]/3)
            makes a function worse than any that needs no such conversion */
@@ -328,6 +399,14 @@ analysis_result semantic_analysis::best_viable_function(
            to the partial ordering rules described in [temp.func.order]" */
         if (!x.template_index && y.template_index)
             return true;
+        /* [temp.func.order]/3 (CWG2445): with a synthesized candidate of
+           reversed parameters, "the order of the function parameters in
+           its template is reversed" for the ordering: not analysed */
+        if (x.template_index && y.template_index &&
+            x.template_index != y.template_index && x.reversed != y.reversed) {
+            order_unknown = true;
+            return false;
+        }
         if (x.template_index && y.template_index &&
             x.template_index != y.template_index) {
             /* (an order analysis cannot tell is neither: the final check
@@ -435,6 +514,14 @@ analysis_result semantic_analysis::best_viable_function(
                     conversion_sequence::form::user_defined &&
                 ics[w * width + k].function != ics[i * width + k].function)
                 user_defined = true;
+        bool to_arrays = false;
+        for (size_t k = 0; k < width; k++)
+            if (ics[w * width + k].to_array && ics[i * width + k].to_array)
+                to_arrays = true;
+        if (!better(w, i) && to_arrays)
+            /* /3.1: lists to arrays of different bounds (CWG1307), not
+               ranked here */
+            return not_supported(at, "over.ics.rank");
         if (!better(w, i) && user_defined)
             /* /3.3: two user-defined conversion sequences of different
                functions are indistinguishable; clang's ambiguity is not
@@ -450,6 +537,8 @@ analysis_result semantic_analysis::best_viable_function(
     for (size_t i = 0; i < candidates.size(); i++)
         if (state[i] == viability::unknown && !better(w, i))
             return not_supported(at, "over.best.ics");
+    if (order_unknown)
+        return not_supported(at, "temp.func.order");
     /* [over.best.ics]/10: "If a function that uses the ambiguous conversion
        sequence is selected as the best viable function, the call will be
        ill-formed" (clang's diagnostic names the conversions: not analysed) */
