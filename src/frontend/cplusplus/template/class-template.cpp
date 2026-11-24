@@ -30,6 +30,13 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     SyntaxElement head_name = class_head_name(head);
     bool specialization =
         head_name && head_name.is(syntax_kind::simple_template_id);
+    /* class-head-name: nested-name-specifier_opt class-name, the class-name
+       a simple-template-id: a partial specialization of a member of a
+       namespace or class ([temp.spec.partial]/1) */
+    if (head_name && head_name.qualified_class_head_name() &&
+        head_name.size() == 2 &&
+        head_name[1].is(syntax_kind::simple_template_id))
+        specialization = true;
     VTRY(r, template_head_parameters(n, parameters, true, true, specialization,
                                      true));
     /* a partial specialization's requires-clause is checked where it is
