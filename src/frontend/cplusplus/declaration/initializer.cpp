@@ -2094,9 +2094,11 @@ analysis_result semantic_analysis::omitted_element_checks(
 
 /* [dcl.init.aggr]/5.1, [class.mem]/6: a default member initializer that
    names members is a complete-class context whose `this` is the aggregate
-   being initialized: analysed in a function of the class that has a `this`
-   of its type (the function is not defined: nothing calls it), and the
-   value is not a constant, which the evaluator has no object for */
+   being initialized: analysed in the class's scope with a `this` of its
+   type (a variable of the class, which the lowering binds to the
+   aggregate), as a constructor analyses it ([class.base.init]/9.1,
+   default_member_initializer), and the value is not a constant, which the
+   evaluator has no object for */
 analysis_result semantic_analysis::member_default_in_aggregate(
     SyntaxRef list, entity_index owner, SyntaxRef default_initializer,
     qualified_type member_type, initialized_value &one)
@@ -2104,33 +2106,28 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     if (!owner || entity_table[owner].kind != entity_kind::class_type ||
         function_state.active || at_block_scope() || defining_class)
         return not_supported(list, "dcl.init.aggr");
+    /* (in a function body: the lowering has no rule for the
+       default_member_initializer node, whose `this` is the aggregate) */
     /* (in a default argument ([dcl.fct.default]/1): the lowering of the
        call that uses it has no object for its `this`) */
     if (call_site_depth)
         return not_supported(list, "dcl.init.aggr");
+    /* the class's scope with a `this` of its own: no function's */
     function_context outer = static_cast<function_context &&>(function_state);
     entity_index outer_scope = current_scope;
-    entity_index f = entity_table.make(entity_kind::function, 0, owner);
-    entity_table[f].type = qualified_type::make(
-        type_table.function(
-            qualified_type::make(
-                type_table.fundamental(fundamental_type::void_), cv_none),
-            nullptr, 0, false),
+    function_state = function_context();
+    entity_index this_object_entity =
+        entity_table.make(entity_kind::variable, 0, owner);
+    entity_table[this_object_entity].type = qualified_type::make(
+        type_table.pointer_to(qualified_type::make(
+            entity_table[owner].type.unqualified(), cv_none)),
         cv_none);
-    synthesized_function sf;
-    begin_synthesized(
-        sf, f,
-        qualified_type::make(type_table.fundamental(fundamental_type::void_),
-                             cv_none),
-        qualified_type::make(
-            type_table.pointer_to(qualified_type::make(
-                entity_table[owner].type.unqualified(), cv_none)),
-            cv_none));
-    entity_table[function_state.this_entity].defined = false;
+    entity_table[this_object_entity].automatic = true;
+    function_state.this_entity = this_object_entity;
+    function_state.this_class = owner;
+    current_scope = owner;
     uint32_t locations_before = source_location_uses;
     analysis_result r = initializer(default_initializer, member_type, one);
-    entity_index this_object_entity = function_state.this_entity;
-    current_scope = sf.outer_scope;
     function_state = static_cast<function_context &&>(outer);
     current_scope = outer_scope;
     if (r != analysis_result::well_formed)

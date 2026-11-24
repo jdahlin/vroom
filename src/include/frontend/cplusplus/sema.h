@@ -3217,6 +3217,9 @@ class semantic_analysis
        lambda_captures[first_capture ..] */
     struct lambda_context {
         entity_index closure = 0, call = 0, enclosing_function = 0;
+        /* with no enclosing function: the class of the default member
+           initializer it appears in (function_context::this_class) */
+        entity_index enclosing_class = 0;
         capture_default default_capture = capture_default::none;
         bool mutable_ = false, constexpr_ = false, immediate = false;
         /* the closure's members are made: a capture the body would add
@@ -3253,7 +3256,7 @@ class semantic_analysis
     /* a generic lambda's closure: what its specializations' bodies need of
        the lambda-expression, and the captures it made */
     struct generic_closure {
-        entity_index closure = 0, enclosing_function = 0;
+        entity_index closure = 0, enclosing_function = 0, enclosing_class = 0;
         capture_default default_capture = capture_default::none;
         bool mutable_ = false;
         qualified_type enclosing_this;
@@ -4895,6 +4898,10 @@ class semantic_analysis
         /* a non-static member function's `this` ([class.this]): the
            variable lowering makes its first parameter */
         entity_index this_entity = 0;
+        /* with this_entity and no function: the class whose
+           complete-class context this is ([class.mem]/6: an aggregate's
+           default member initializer, member_default_in_aggregate) */
+        entity_index this_class = 0;
         /* the function whose body it is */
         entity_index function = 0;
     } function_state;

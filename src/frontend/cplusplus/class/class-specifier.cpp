@@ -1191,7 +1191,7 @@ bool semantic_analysis::is_aggregate(entity_index c) const
 entity_index semantic_analysis::current_class() const
 {
     if (!function_state.active || !function_state.function)
-        return 0;
+        return function_state.this_class;
     /* [expr.prim.lambda.closure]/12: "The lambda-expression's
        compound-statement yields the function-body of the function call
        operator, but for purposes of name lookup, determining the type and
@@ -1199,12 +1199,14 @@ entity_index semantic_analysis::current_class() const
        non-static class members into class member access expressions using
        (*this), the compound-statement is considered in the context of the
        lambda-expression." */
-    entity_index f = function_state.function;
+    entity_index f = function_state.function, in_class = 0;
     for (size_t i = lambdas.size(); i-- > 0;)
-        if (lambdas[i].call == f)
+        if (lambdas[i].call == f) {
             f = lambdas[i].enclosing_function;
+            in_class = lambdas[i].enclosing_class;
+        }
     if (!f)
-        return 0;
+        return in_class;
     entity_index c = entity_table[f].enclosing;
     if (c && entity_table[c].kind == entity_kind::class_type)
         return c;
