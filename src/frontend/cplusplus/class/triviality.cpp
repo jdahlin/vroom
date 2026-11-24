@@ -136,6 +136,53 @@ bool semantic_analysis::trivial_copy_constructor(entity_index c) const
     return true;
 }
 
+semantic_analysis::copy_selection
+semantic_analysis::select_copy_constructor(entity_index c, bool rvalue,
+                                           bool source_const) const
+{
+    copy_selection selected;
+    const entity &x = entity_table[c];
+    if (x.constructor_template || x.constructor_templates) {
+        selected.known = false;
+        return selected;
+    }
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        if (!copy_or_move_constructor(c, k))
+            continue;
+        const struct type &p =
+            type_table[type_table
+                           .parameters(entity_table[k].type.unqualified())[0]
+                           .unqualified()];
+        bool is_rvalue = p.kind == type_kind::rvalue_reference;
+        uint8_t cv = p.operand.cv() & (cv_const | cv_volatile);
+        /* [dcl.init.ref]/5: the reference is at least as cv-qualified */
+        if (source_const && !(cv & cv_const))
+            continue;
+        /* [over.ics.rank]/3.2.3: an rvalue binds to an rvalue reference
+           in preference; an lvalue does not bind to one */
+        if (is_rvalue && !rvalue)
+            continue;
+        bool better = !selected.constructor;
+        if (selected.constructor) {
+            if (is_rvalue != selected.rvalue_reference)
+                better = rvalue && is_rvalue;
+            else if (cv != selected.cv)
+                better = (cv & selected.cv) == cv;
+            else {
+                selected.known = false;
+                return selected;
+            }
+        }
+        if (better) {
+            selected.constructor = k;
+            selected.rvalue_reference = is_rvalue;
+            selected.cv = cv;
+        }
+    }
+    return selected;
+}
+
 /*
  * Whether the constructor that [over.match.ctor] selects to construct a
  * class c object from one object of its own class is trivial
@@ -154,49 +201,15 @@ bool semantic_analysis::trivial_copy_selected(entity_index c, bool rvalue,
     const entity &x = entity_table[c];
     if (x.dynamic)
         return false;
-    if (x.constructor_template || x.constructor_templates) {
+    copy_selection selected = select_copy_constructor(c, rvalue, source_const);
+    if (!selected.known) {
         known = false;
         return false;
     }
-    entity_index best = 0;
-    bool best_rvalue = false;
-    uint8_t best_cv = 0;
-    bool have_best = false;
-    for (entity_index k = x.first_constructor; k;
-         k = entity_table[k].next_constructor) {
-        if (!copy_or_move_constructor(c, k))
-            continue;
-        const struct type &p =
-            type_table[type_table
-                           .parameters(entity_table[k].type.unqualified())[0]
-                           .unqualified()];
-        bool is_rvalue = p.kind == type_kind::rvalue_reference;
-        uint8_t cv = p.operand.cv() & (cv_const | cv_volatile);
-        /* [dcl.init.ref]/5: the reference is at least as cv-qualified */
-        if (source_const && !(cv & cv_const))
-            continue;
-        /* [over.ics.rank]/3.2.3: an rvalue binds to an rvalue reference
-           in preference; an lvalue does not bind to one */
-        if (is_rvalue && !rvalue)
-            continue;
-        bool better = !have_best;
-        if (have_best) {
-            if (is_rvalue != best_rvalue)
-                better = rvalue && is_rvalue;
-            else if (cv != best_cv)
-                better = (cv & best_cv) == cv;
-            else {
-                known = false;
-                return false;
-            }
-        }
-        if (better) {
-            best = k;
-            best_rvalue = is_rvalue;
-            best_cv = cv;
-            have_best = true;
-        }
-    }
+    entity_index best = selected.constructor;
+    bool have_best = best != 0;
+    bool best_rvalue = selected.rvalue_reference;
+    uint8_t best_cv = selected.cv;
     /* no user-declared copy or move constructor selected: X(const X&),
        defaulted or implicit ([class.copy.ctor]/6, /7) */
     if (have_best && !entity_table[best].implicit)

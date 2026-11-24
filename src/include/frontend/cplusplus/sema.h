@@ -1900,6 +1900,21 @@ class semantic_analysis
     bool trivial_copy_constructor(entity_index c) const;
     bool trivial_copy_selected(entity_index c, bool rvalue, bool source_const,
                                bool &known) const;
+    /* [over.match.ctor], [over.ics.rank]/3.2.3: the copy or move
+       constructor of class c that initializing a c object from one of its
+       own class (an rvalue or not, const or not) selects among the
+       declared ones (0: none binds, the implicit X(const X&) or nothing);
+       known false when analysis cannot tell (a constructor template, an
+       ambiguity) */
+    struct copy_selection {
+        entity_index constructor = 0;
+        bool known = true;
+        /* the selected one's parameter: X&& or X&, its cv */
+        bool rvalue_reference = false;
+        uint8_t cv = 0;
+    };
+    copy_selection select_copy_constructor(entity_index c, bool rvalue,
+                                           bool source_const) const;
     bool copies_bytes(entity_index c) const;
     /* [dcl.fct.def.delete]: which defaulted special member functions are
        defined as deleted (class/deleted-special-members.cpp) */
@@ -3468,7 +3483,7 @@ class semantic_analysis
     analysis_result clang_type_trait(SyntaxRef n, expression_meaning &m);
     /* [meta.rel] is_convertible; known false when analysis cannot tell */
     bool copy_constructible_from(entity_index c, value_category category,
-                                 bool &known);
+                                 bool source_const, bool &known);
     bool convertible_types(qualified_type from, qualified_type to, bool &known);
     /* [meta.unary.prop] is_constructible and is_nothrow_constructible
        (ext/clang/constructible-traits.cpp): the analysis of T t(declval<

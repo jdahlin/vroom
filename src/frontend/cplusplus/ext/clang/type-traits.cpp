@@ -493,46 +493,23 @@ bool semantic_analysis::unary_trait(int which, qualified_type t, int64_t &value)
    templates) */
 bool semantic_analysis::copy_constructible_from(entity_index c,
                                                 value_category category,
-                                                bool &known)
+                                                bool source_const, bool &known)
 {
-    if (entity_table[c].constructor_template ||
-        entity_table[c].constructor_templates) {
+    copy_selection selected = select_copy_constructor(
+        c, category != value_category::lvalue, source_const);
+    if (!selected.known) {
         known = false;
         return false;
     }
-    bool movable = false, copy_declared = false, copy_usable = false;
-    for (entity_index k = entity_table[c].first_constructor; k;
-         k = entity_table[k].next_constructor) {
-        const struct type &f = type_table[entity_table[k].type.unqualified()];
-        if (f.parameter_count == 0)
-            continue;
-        qualified_type p =
-            type_table.parameters(entity_table[k].type.unqualified())[0];
-        const struct type &r = type_table[p.unqualified()];
-        if (r.kind != type_kind::lvalue_reference &&
-            r.kind != type_kind::rvalue_reference)
-            continue;
-        const struct type &o = type_table[r.operand.unqualified()];
-        if (o.kind != type_kind::class_type || o.entity != c)
-            continue;
-        if (r.kind == type_kind::rvalue_reference) {
-            if (!entity_table[k].deleted)
-                movable = true;
-            continue;
-        }
-        copy_declared = true;
-        /* [class.access]/1: a private or protected copy constructor is
-           no candidate the trait's context can use */
-        if (!entity_table[k].deleted && !entity_table[k].access)
-            copy_usable = true;
-    }
-    if (category != value_category::lvalue && movable)
-        return true;
-    if (copy_declared)
-        return copy_usable;
-    /* [class.copy.ctor]/8: a declared move constructor deletes the
-       implicit copy constructor */
-    if (movable)
+    /* [over.match]/4: a deleted function selected makes the
+       initialization ill-formed; [class.access]/1: a private or protected
+       one is no candidate the trait's context can use */
+    if (selected.constructor)
+        return !entity_table[selected.constructor].deleted &&
+               !entity_table[selected.constructor].access;
+    /* none declared binds: the implicit X(const X&), which a declared move
+       constructor or assignment deletes ([class.copy.ctor]/6) */
+    if (declares_move_constructor(c) || declares_copy_constructor(c))
         return false;
     return !entity_table[c].implicit_copy_deleted;
 }
@@ -600,7 +577,8 @@ bool semantic_analysis::convertible_types(qualified_type from,
     if (!s.function && t.kind == type_kind::class_type &&
         type_table[value.type.unqualified()].kind == type_kind::class_type &&
         type_table[value.type.unqualified()].entity == t.entity)
-        return copy_constructible_from(t.entity, value.category, known);
+        return copy_constructible_from(
+            t.entity, value.category, (value.type.cv() & cv_const) != 0, known);
     return true;
 }
 
