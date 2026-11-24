@@ -786,8 +786,9 @@ analysis_result semantic_analysis::named_specialization(
                                      "a storage class, typedef or attribute");
     /* [temp.explicit]/3: "An explicit instantiation of a function
        template ... shall not use the inline, constexpr, or consteval
-       specifiers" */
-    if (!specialization && (s.inline_ || s.constexpr_))
+       specifiers"; a friend declaration naming a specialization
+       ([temp.friend]/1) is no explicit instantiation and may */
+    if (!specialization && !friend_of && (s.inline_ || s.constexpr_))
         return not_supported_because(
             n, rule, "an explicit instantiation with inline or constexpr");
     /* the template and the arguments given */
