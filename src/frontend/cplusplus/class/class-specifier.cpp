@@ -2726,6 +2726,27 @@ analysis_result semantic_analysis::static_member_definition(
                                    "declaration shall refer to a previously "
                                    "declared member of the class",
                                    "dcl.meaning");
+    /* [temp.expl.spec]/14: not a definition */
+    if (specialization_declares_member) {
+        if (type_table[type.unqualified()].kind == type_kind::array &&
+            type_table[type.unqualified()].bound_known)
+            entity_table[e].type = type;
+        entity_table.add_declaration(e, declaration);
+        /* the specialization is a declaration of its own, not a
+           redeclaration of the template's member: its chain starts here */
+        entity_table[e].first_declaration = entity_table[e].last_declaration;
+        declared_entity = e;
+        declared_name d;
+        d.declaration = declaration;
+        d.outermost = current_declaration;
+        d.entity = e;
+        d.id = id;
+        d.kind = entity_kind::variable;
+        d.type = type;
+        d.claimable = declarations_claimable;
+        declared.append(d);
+        return analysis_result::well_formed;
+    }
     /* [basic.def.odr]/1 */
     if (entity_table[e].defined)
         return ill_formed_at_token(id,

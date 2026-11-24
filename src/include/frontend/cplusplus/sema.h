@@ -5339,6 +5339,9 @@ class semantic_analysis
     /* the instantiation whose variable the declaration analysed now
        declares (its record's index plus one) */
     uint32_t variable_instantiating = 0;
+    /* the declaration analysed now is an explicit specialization of a static
+       data member without an initializer, a declaration ([temp.expl.spec]/14) */
+    bool specialization_declares_member = false;
     /* declare()'s part for it */
     analysis_result
     declare_variable_specialization(SyntaxRef declaration, qualified_type type,
