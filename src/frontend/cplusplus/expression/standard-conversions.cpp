@@ -831,7 +831,9 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                enumeration is none; no standard conversion makes one */
             if (fundamental_of(m.type) == fundamental_type::none &&
                 !is_pointer(m.type) &&
-                type_table[m.type.unqualified()].kind != type_kind::enumeration)
+                type_table[m.type.unqualified()].kind !=
+                    type_kind::enumeration &&
+                type_table[m.type.unqualified()].kind != type_kind::class_type)
                 return not_supported(at, "conv");
             return ill_formed(at, rule, "dcl.init");
         }
@@ -847,13 +849,12 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
     }
     fundamental_type from = fundamental_of(m.type);
     if (target.kind == type_kind::fundamental) {
-        if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
-            target.fundamental != fundamental_type::bool_ &&
-            target.fundamental != fundamental_type::std_nullptr_t) {
+        if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
             /* [conv]/1: the standard conversions are those of [conv.*];
                none takes a class type to an arithmetic, bool or
                std::nullptr_t type, and [over.best.ics]/4 leaves the
-               user-defined ones to the caller */
+               user-defined ones to the caller (a conversion function is
+               not analysed here) */
             return ill_formed(at, rule, "dcl.init");
         }
         fundamental_type t = target.fundamental;

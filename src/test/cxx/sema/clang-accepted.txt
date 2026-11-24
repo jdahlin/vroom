@@ -4325,7 +4325,6 @@ SemaTemplate/instantiate-field.cpp:3 -std=gnu++17
 SemaTemplate/instantiate-field.cpp:59 -std=gnu++17
 SemaTemplate/instantiate-field.cpp:86 -std=gnu++17
 SemaTemplate/instantiate-function-1.cpp:105 -std=gnu++17
-SemaTemplate/instantiate-function-1.cpp:114 -std=gnu++17
 SemaTemplate/instantiate-function-1.cpp:129 -std=gnu++17
 SemaTemplate/instantiate-function-1.cpp:13 -std=gnu++17
 SemaTemplate/instantiate-function-1.cpp:15 -std=gnu++17
