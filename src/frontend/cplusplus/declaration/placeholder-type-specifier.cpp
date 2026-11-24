@@ -585,6 +585,13 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
     uint32_t cv = function_cv, empty_pack = function_empty_pack;
     qualified_type returned;
     entity_index outer = current_scope;
+    /* [basic.lookup.qual]/3: names following the qualified declarator-id,
+       the trailing-return-type's among them, are looked up in the scope of
+       the member's class or namespace */
+    if (m.qualifier && entity_table[outer].enclosing != m.qualifier)
+        current_scope = m.qualifier;
+    else if (!m.qualifier && m.namespace_qualifier)
+        current_scope = m.namespace_qualifier;
     open_parameter_scope();
     r = type_id(trailing[1], returned);
     current_scope = outer;

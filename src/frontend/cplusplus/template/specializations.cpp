@@ -687,6 +687,7 @@ analysis_result semantic_analysis::named_specialization(
         return not_supported_because(
             n, rule, "a declaration of another form (no declarator)");
     if (!tail[has_spec].is(syntax_kind::noptr_declarator,
+                           syntax_kind::declarator,
                            syntax_kind::ptr_declarator))
         return not_supported_because(
             n, rule, "a declarator that is neither noptr nor ptr");
@@ -720,6 +721,9 @@ analysis_result semantic_analysis::named_specialization(
     if (has_spec) {
         bool outer_explicit = explicit_allowed;
         explicit_allowed = outer_explicit || conversion;
+        /* a friend's deduction would instantiate a template whose
+           argument is the class being defined: not yet */
+        placeholder_allowed = !friend_of;
         r = decl_specifier_seq(tail[0], s, false);
         explicit_allowed = outer_explicit;
     }
