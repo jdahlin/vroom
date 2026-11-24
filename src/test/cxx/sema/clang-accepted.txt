@@ -1858,6 +1858,7 @@ CXX/expr/expr.const/p2-0x.cpp:466 -std=c++11 -pedantic
 CXX/expr/expr.const/p2-0x.cpp:471 -std=c++11 -pedantic
 CXX/expr/expr.const/p3-0x.cpp:7 -std=c++11
 CXX/expr/expr.const/p3-0x.cpp:7 -std=c++17
+CXX/expr/expr.const/p6-2a.cpp:44 -std=c++2a
 CXX/expr/expr.const/p6.cpp:10 -std=c++17
 CXX/expr/expr.const/p6.cpp:11 -std=c++17
 CXX/expr/expr.const/p6.cpp:4 -std=c++17
@@ -2647,8 +2648,6 @@ SemaCXX/const-cast.cpp:81 -std=gnu++17
 SemaCXX/constant-expression-cxx11.cpp:127 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:127 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:127 -std=c++23 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
-SemaCXX/constant-expression-cxx11.cpp:1333 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
-SemaCXX/constant-expression-cxx11.cpp:1333 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:1796 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:1796 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:1796 -std=c++23 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
@@ -2670,6 +2669,9 @@ SemaCXX/constant-expression-cxx11.cpp:2530 -std=c++20 -isystem./Inputs -Wno-stri
 SemaCXX/constant-expression-cxx11.cpp:2539 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:2539 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:2654 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
+SemaCXX/constant-expression-cxx11.cpp:442 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
+SemaCXX/constant-expression-cxx11.cpp:442 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
+SemaCXX/constant-expression-cxx11.cpp:442 -std=c++23 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:748 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:748 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:748 -std=c++23 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
@@ -2681,11 +2683,6 @@ SemaCXX/constant-expression-cxx14.cpp:108 -std=c++20 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:1221 -std=c++14 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:1221 -std=c++20 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:1221 -std=c++23 -Werror=return-type
-SemaCXX/constant-expression-cxx14.cpp:1232 -std=c++14 -Werror=return-type
-SemaCXX/constant-expression-cxx14.cpp:1232 -std=c++20 -Werror=return-type
-SemaCXX/constant-expression-cxx14.cpp:1232 -std=c++23 -Werror=return-type
-SemaCXX/constant-expression-cxx14.cpp:1369 -std=c++14 -Werror=return-type
-SemaCXX/constant-expression-cxx14.cpp:1369 -std=c++20 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:187 -std=c++14 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:187 -std=c++20 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:243 -std=c++14 -Werror=return-type
