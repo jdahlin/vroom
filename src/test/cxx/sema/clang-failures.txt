@@ -560,7 +560,7 @@ verdict SemaCXX/constant-expression-cxx11.cpp -std=c++23 -isystem./Inputs -Wno-s
 verdict SemaCXX/constant-expression-cxx14.cpp -std=c++14 -Werror=return-type: ill-formed for us, accepted by clang: line 235 (3 declarations)
 verdict SemaCXX/constant-expression-cxx14.cpp -std=c++20 -Werror=return-type: ill-formed for us, accepted by clang: line 235 (3 declarations)
 verdict SemaCXX/constant-expression-cxx14.cpp -std=c++23 -Werror=return-type: ill-formed for us, accepted by clang: line 235 (3 declarations)
-verdict SemaCXX/constant-expression-cxx2a.cpp -std=c++2a -Wno-mismatched-new-delete: ill-formed for us, accepted by clang: line 42 (9 declarations)
+verdict SemaCXX/constant-expression-cxx2a.cpp -std=c++2a -Wno-mismatched-new-delete: ill-formed for us, accepted by clang: line 914 (4 declarations)
 verdict SemaCXX/constexpr-vectors-access-elements.cpp -Wno-uninitialized -std=c++17: ill-formed for us, accepted by clang: line 48 (1 declarations)
 verdict SemaCXX/constexpr-vectors-access-elements.cpp -Wno-uninitialized -std=c++20: ill-formed for us, accepted by clang: line 48 (1 declarations)
 verdict SemaCXX/constexpr-x86-avx-builtins.cpp -std=c++20 -isystem /usr/lib/llvm-23/lib/clang/23/include: ill-formed for us, accepted by clang: line 13 (1 declarations)

@@ -683,8 +683,23 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                 same = o;
         /* a function declared before by a friend declaration only
            ([namespace.memdef]/3), whose name is bound to others */
-        if (!same && !qualified && declared_unbound(scope, name, type))
-            return not_supported(declaration, "class.friend");
+        if (!same && !qualified) {
+            /* [namespace.memdef]/3, [class.friend]/6: the definition (or
+               redeclaration) in the namespace is of the function the friend
+               declaration declared there; it now joins the name's set */
+            entity_index u = declared_unbound(scope, name, type);
+            if (u) {
+                if (entity_table[prior].named_by_using ||
+                    entity_table[u].next_overload)
+                    return not_supported(declaration, "class.friend");
+                entity_index last = prior;
+                while (entity_table[last].next_overload)
+                    last = entity_table[last].next_overload;
+                entity_table[last].next_overload = u;
+                entity_table[u].hidden_type = entity_table[prior].hidden_type;
+                same = u;
+            }
+        }
         if (!same && qualified)
             /* [dcl.meaning]/1: "the declaration shall refer to a previously
                declared member of the class or namespace to which the
