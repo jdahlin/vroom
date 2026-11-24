@@ -722,8 +722,12 @@ analysis_result semantic_analysis::overloaded_operator(
            is interpreted as x . operator @ ( y )" */
         expression_meaning &e = ordered[0];
         if (e.category == value_category::prvalue &&
-            entity_table[object_class].destructor)
-            /* the temporary's destruction ([class.temporary]/4) */
+            entity_table[object_class].destructor &&
+            entity_table[entity_table[object_class].destructor]
+                .member_body_deferred)
+            /* the temporary's destructor is an instantiated member's
+               definition still to be made ([temp.inst]/4), whose errors
+               this expression's declaration owns: not analysed */
             return not_supported(n, "class.temporary");
         expression_meaning address;
         address.type =
