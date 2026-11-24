@@ -507,13 +507,19 @@ semantic_analysis::qualified_variable_specialization_id(SyntaxRef d,
                                                         entity_index &qualifier)
 {
     qualifier = 0;
-    if (!d.is(syntax_kind::simple_declaration) || d.size() != 3 ||
-        !d[1].is(syntax_kind::init_declarator))
+    if (!d.is(syntax_kind::simple_declaration) || d.size() != 3)
         return 0;
-    auto item = d[1];
-    if (item.size() != 2 || !item[0].qualified_id())
+    /* ... with an initializer or without one (a declaration) */
+    SyntaxRef id = d[1];
+    if (d[1].is(syntax_kind::init_declarator)) {
+        auto item = d[1];
+        if (item.size() != 2)
+            return 0;
+        id = item[0];
+    }
+    if (!id.qualified_id())
         return 0;
-    auto q = item[0].qualified_id();
+    auto q = id.qualified_id();
     if (q.size() != 2 || !q.nested_name_specifier() ||
         !q[1].is(syntax_kind::simple_template_id) || !q[1][0].is_identifier())
         return 0;
