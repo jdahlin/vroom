@@ -66,6 +66,8 @@ analysis_result semantic_analysis::function_this(token_index t,
                                    "initializer",
                                    "expr.prim.this");
     }
+    if (entity_table[e].argument_bound)
+        argument_named = true;
     m = expression_meaning();
     m.category = value_category::lvalue;
     m.type = entity_table[e].type;

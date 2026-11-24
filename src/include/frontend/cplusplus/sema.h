@@ -537,6 +537,11 @@ struct entity {
        template-declaration or explicit-specialization declared it: what
        it denotes needs [temp]'s rules */
     bool held_by_template = false;
+    /* [temp.dep]: in an instantiation, a name whose meaning came from the
+       template arguments: a template-parameter's name bound to its
+       argument, a local variable, parameter or this declared with one; a
+       construct that uses it is argument-dependent (argument_named) */
+    bool argument_bound = false;
     /* the subclause whose missing rules made the declaration that
        hold_names held this name not analysed (declaration() sets it from
        that declaration's first refusal): a use of the name is refused for
@@ -1102,6 +1107,9 @@ struct unsupported_construct {
        that declaration (-fcxx-dump=unsupported's held= field, its first
        token's place, which bench/cxx-sema.py --why follows), 0 if none */
     SyntaxRef holder = 0;
+    /* refused inside an instantiation in a construct that named a
+       template argument (semantic_analysis::argument_named) */
+    bool argument_dependent = false;
 };
 
 struct analysed_declaration {
@@ -2951,6 +2959,9 @@ class semantic_analysis
         /* [temp.variadic]/5: an element of the function parameter pack
            (an instantiation's) of this name, id 0 */
         uint32_t pack_name = 0;
+        /* in an instantiation: its declaration named a template argument
+           (argument_named) */
+        bool argument_dependent = false;
     };
     /* [dcl.fct.default]: the default arguments of function_parameters,
        which the declaration n of the function f gives it (specialization:
@@ -4601,6 +4612,7 @@ class semantic_analysis
     /* [class.access]: whether a member with this access can be named
        here */
     bool accessible(entity_index member, entity_index object_class = 0) const;
+    bool accessible_here(entity_index member, entity_index object_class) const;
     /* [temp.spec]/6: set while the names of the declaration of an explicit
        instantiation or explicit specialization are analysed (accessible()
        ignores access then); the parts the paragraph checks clear it:
@@ -4957,6 +4969,10 @@ class semantic_analysis
            statement replaced it in returns (deduced) */
         qualified_type declared_returns;
         bool deducing = false, deduced = false;
+        /* in an instantiation: the declarator named a template argument
+           (argument_named), so a return statement's checks against the
+           return type are argument-dependent */
+        bool returns_argument_dependent = false;
         unsigned loops = 0, breakable = 0;
         owned_array<label_record> labels;
         owned_array<goto_record> gotos;
@@ -5193,6 +5209,8 @@ class semantic_analysis
         function_context function;
         owned_array<parameter_meaning> parameters;
         size_t expressions_before = 0, uses_before = 0;
+        bool argument_named = false;
+        uint32_t dependent_errors = 0, independent_errors = 0;
     };
     void enter_instantiation(instantiation_context &c, entity_index scope,
                              SyntaxRef declaration);
@@ -5210,6 +5228,21 @@ class semantic_analysis
        definitions instantiated meanwhile are outside the immediate
        context, their failures counted */
     unsigned substituting = 0;
+    /* [temp.res]/6, /8: the statement (or parameter) analysed in an
+       instantiation has named a template argument (entity::argument_bound,
+       a member of a class specialization found from its scope, this): an
+       error there is argument-dependent, the instantiation's; one in a
+       construct that names none is the template's own, which clang
+       reports at the definition, with no note at the use.  The errors
+       issued (not in a substitution, [temp.deduct]/8) of each kind */
+    mutable bool argument_named = false;
+    uint32_t dependent_errors = 0, independent_errors = 0;
+    void count_error();
+    /* whether a variable of type t declared naming a template argument is
+       argument_bound: not one of pointer, array, function or
+       pointer-to-member type, whose form, which clang checks at the
+       definition (-p of a T*), is not the argument's */
+    bool argument_bound_type(qualified_type t) const;
     uint32_t definition_failures = 0;
     /* the specializations whose definitions wait for the end of the
        translation unit ([temp.point]/7) */
@@ -5913,6 +5946,10 @@ class semantic_analysis
         SyntaxRef declaration = 0;
         analysis_result verdict = analysis_result::well_formed;
         uint32_t failure = 0;
+        /* verdict ill-formed: an error of a construct that named a
+           template argument ([temp.res]/6, /8: one that names none is the
+           template's, reported at its definition) */
+        bool argument_dependent = false;
     };
     owned_array<explicit_instantiation_unit> explicit_instantiations;
     void explicit_instantiation_record(entity_index e, SyntaxRef declaration);
@@ -5921,7 +5958,8 @@ class semantic_analysis
     /* a definition the explicit instantiation of e instantiated was
        analysed: its result r, its first refusal body_failures[failure - 1] */
     void explicit_instantiation_verdict(entity_index e, analysis_result r,
-                                        uint32_t failure);
+                                        uint32_t failure,
+                                        bool argument_dependent);
     bool member_definition_wanted(const postponed_body &b);
     token_index member_definition_name(const template_member_definition &o);
     void define_waiting_members(entity_index scope, token_index name,

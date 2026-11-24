@@ -1228,8 +1228,36 @@ entity_index semantic_analysis::current_class() const
  * and protected members of the class granting friendship can be named in the
  * base-specifiers and member declarations of the befriended class."
  */
+/* [temp.res]/6, [temp.dep]/3: in a member of a class with a dependent
+   base, or of a member of a class template's specialization (which may be
+   the current instantiation, A<int> in A<T>), what may be accessed
+   depends on the arguments, so clang checks it at the instantiation: an
+   access error there is the instantiation's (argument_named) */
 bool semantic_analysis::accessible(entity_index member,
                                    entity_index object_class) const
+{
+    if (accessible_here(member, object_class))
+        return true;
+    if (!instantiation_depth)
+        return false;
+    entity_index naming = entity_table[member].enclosing;
+    if ((entity_table[naming].kind == entity_kind::class_type &&
+         entity_table[naming].instantiation) ||
+        (object_class && entity_table[object_class].instantiation))
+        argument_named = true;
+    for (entity_index k = current_class(); k; k = entity_table[k].enclosing) {
+        const entity &c = entity_table[k];
+        if (c.kind != entity_kind::class_type)
+            break;
+        for (uint32_t i = 0; i < c.base_count; i++)
+            if (entity_table[class_bases[c.first_base + i]].dependent_base)
+                argument_named = true;
+    }
+    return false;
+}
+
+bool semantic_analysis::accessible_here(entity_index member,
+                                        entity_index object_class) const
 {
     const entity &x = entity_table[member];
     if (!x.access)

@@ -588,8 +588,12 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         entity_index outer = current_scope;
         if (names_earlier_parameter(declarations[k], named))
             open_parameter_scope(named, 0);
+        bool named_before = argument_named;
+        argument_named = false;
         r = parameter_declaration(declarations[k], t, unnamed, id,
                                   default_argument);
+        bool parameter_dependent = argument_named;
+        argument_named = named_before || parameter_dependent;
         current_scope = outer;
         if (r != analysis_result::well_formed)
             return r;
@@ -656,6 +660,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         parameter.type = t;
         parameter.declaration = declarations[k];
         parameter.default_argument = default_argument;
+        parameter.argument_dependent = parameter_dependent;
         named.append(parameter);
     }
     /* [dcl.fct]/22: a trailing "..." after a parameter whose type is a

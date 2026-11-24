@@ -422,6 +422,13 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
         mark_unknown(r, "temp.variadic");
     if (r.unknown || r.ambiguous)
         r.entity = 0;
+    /* [temp.dep]: a template argument's name, or a member of the current
+       instantiation found from its scope ([temp.dep.type]/1) */
+    if (r.entity &&
+        (entity_table[r.entity].argument_bound ||
+         (entity_table[r.found_in].kind == entity_kind::class_type &&
+          entity_table[r.found_in].instantiation)))
+        argument_named = true;
     return r;
 }
 

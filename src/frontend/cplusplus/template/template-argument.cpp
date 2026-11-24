@@ -146,6 +146,7 @@ void semantic_analysis::bind_template_argument(entity_index scope,
             }
             entity_table[e].type = x.type;
             entity_table[e].defined = true;
+            entity_table[e].argument_bound = true;
             elements.append(e);
         }
         make_bound_pack(scope, name, elements.data(),
@@ -188,6 +189,7 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     }
     entity_table[e].type = a.type;
     entity_table[e].defined = true;
+    entity_table[e].argument_bound = true;
     entity_table.bind(scope, name, e);
 }
 

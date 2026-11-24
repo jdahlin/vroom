@@ -303,6 +303,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
         type_table[entity_table[f].type.unqualified()].operand;
     function_state.active = true;
     function_state.returns = returns;
+    function_state.returns_argument_dependent = argument_named;
     begin_return_deduction(returns);
     function_state.loops = 0;
     function_state.breakable = 0;
@@ -350,6 +351,9 @@ analysis_result semantic_analysis::analyse_function_body_of(
             qualified_type::make(type_table.pointer_to(object), cv_none);
         entity_table[t].defined = true;
         entity_table[t].automatic = true;
+        entity_table[t].argument_bound =
+            entity_table[c].kind == entity_kind::class_type &&
+            entity_table[c].instantiation;
         parameter_entities.append(t);
         function_state.this_entity = t;
     }
@@ -365,6 +369,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
             entity_table[e].type = parameter.type;
             entity_table[e].defined = true;
             entity_table[e].automatic = true;
+            entity_table[e].argument_bound = true;
             entity_table.add_declaration(e, definition);
             parameter_entities.back() = e;
             pack.append(e);
@@ -392,6 +397,8 @@ analysis_result semantic_analysis::analyse_function_body_of(
         entity_table[e].type = parameter.type;
         entity_table[e].defined = true;
         entity_table[e].automatic = true;
+        entity_table[e].argument_bound =
+            parameter.argument_dependent && argument_bound_type(parameter.type);
         entity_table.add_declaration(e, definition);
         /* (a defaulted comparison's unnamed parameters too: its body
            compares them, defaulted_equality) */
