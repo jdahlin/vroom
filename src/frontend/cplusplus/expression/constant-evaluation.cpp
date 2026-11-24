@@ -1963,11 +1963,21 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     /* (a member of a volatile object is volatile, [basic.type.qualifier]/5:
        `r.i` for a reference r to a volatile class) */
     uint32_t chain = node;
-    /* (a const_cast of it, which does not make the object non-volatile) */
-    while (semantics[chain].kind == semantic_kind::conversion &&
-           static_cast<conversion_kind>(semantics[chain].op) ==
-               conversion_kind::qualification_cast)
-        chain = semantics[chain].a;
+    /* (a const_cast of it, which does not make the object non-volatile:
+       the cast to a reference is `*const_cast<T *>(&e)`, whose object is
+       e's) */
+    for (;;) {
+        const semantic_node &c = semantics[chain];
+        if (c.kind != semantic_kind::indirection || !c.a ||
+            semantics[c.a].kind != semantic_kind::conversion ||
+            static_cast<conversion_kind>(semantics[c.a].op) !=
+                conversion_kind::qualification_cast)
+            break;
+        uint32_t inner = semantics[c.a].a;
+        if (!inner || semantics[inner].kind != semantic_kind::address)
+            break;
+        chain = semantics[inner].a;
+    }
     for (uint32_t m = chain; semantics[m].kind == semantic_kind::member;) {
         m = semantics[m].a;
         /* [expr.const]/5.8: a member of a volatile object variable */
