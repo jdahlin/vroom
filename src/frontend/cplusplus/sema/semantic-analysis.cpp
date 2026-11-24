@@ -251,10 +251,25 @@ analysis_result semantic_analysis::recoverable_extension_used(diagnostic_id id,
 {
     analysis_result r = extension_used(id, at, nullptr);
     if (r == analysis_result::ill_formed) {
-        recovered_error = true;
+        record_recovered_error();
         return analysis_result::well_formed;
     }
     return r;
+}
+
+analysis_result semantic_analysis::recovered_error_at(token_index at,
+                                                      const char *rule,
+                                                      const char *subclause)
+{
+    ill_formed_at_token(at, rule, subclause);
+    record_recovered_error();
+    return analysis_result::well_formed;
+}
+
+void semantic_analysis::record_recovered_error()
+{
+    if (analysing)
+        analysing->recovered = true;
 }
 
 bool semantic_analysis::in_system_header(token_index at) const
@@ -304,18 +319,18 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     declaration_refusals = unsupported_before;
     size_t held_before = held_pending.size();
     size_t scopes_before = unknown_scopes_pending.size();
-    bool outer_recovered = recovered_error;
-    bool outer_declares = recovered_declares;
-    recovered_error = false;
-    recovered_declares = false;
+    analysed_declaration *outer_analysing = analysing;
+    analysing = &d;
     if (is_namespace_definition(tree, n)) {
         /* the declarations of its body are analysed as declarations of
            their own: one of them not parsed does not make the namespace
            so, and the definition has no record unless it is not
            well-formed itself */
         d.result = namespace_definition(n);
-        if (d.result == analysis_result::well_formed)
+        if (d.result == analysis_result::well_formed && !d.recovered) {
+            analysing = outer_analysing;
             return d.result;
+        }
     } else if (tree[n].kind == syntax_kind::linkage_specification) {
         /* [dcl.link]: a linkage-specification is no scope of its own, its
            declarations are the enclosing scope's: one of them not parsed
@@ -328,12 +343,12 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
         declaration_not_parsed_seen = true;
     } else
         d.result = declaration_by_kind(n);
-    bool declares = recovered_declares && recovered_error &&
-                    d.result == analysis_result::well_formed;
-    if (recovered_error && d.result == analysis_result::well_formed)
+    analysing = outer_analysing;
+    /* a recovered error: ill-formed, what it declares declared all the
+       same (hold_names does not run) */
+    bool declares = d.recovered && d.result == analysis_result::well_formed;
+    if (declares)
         d.result = analysis_result::ill_formed;
-    recovered_error = outer_recovered;
-    recovered_declares = outer_declares;
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
     d.has_unsupported = unsupported.size() > unsupported_before;

@@ -675,8 +675,10 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
           defining_class && entity_table[defining_class].instantiation)) {
         /* [diff.cpp14.except]/1: removed from C++17; clang's error,
            -Wno-dynamic-exception-spec turns it off, and keeps the
-           function */
-        if (!tokens.files.behavior.has(
+           function; an error of the template's definition, whatever the
+           arguments, not of a specialization's */
+        if (analysing &&
+            !tokens.files.behavior.has(
                 language_feature::dynamic_exception_specifications)) {
             VTRY(r, recoverable_extension_used(
                         diagnostic_id::sema_dynamic_exception_specification,

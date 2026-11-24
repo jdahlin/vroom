@@ -1048,6 +1048,10 @@ struct analysed_declaration {
     uint32_t first_unsupported = 0;
     /* whether the analysis recorded a reason (first_unsupported is one) */
     bool has_unsupported = false;
+    /* an error clang recovers from was reported while it was analysed
+       (semantic_analysis::recovered_error_at): the declaration goes on,
+       declares what it declares, and is judged ill-formed at its end */
+    bool recovered = false;
 };
 
 /* a name a declaration declared, with the type analysis gave it: what
@@ -2006,6 +2010,12 @@ class semantic_analysis
     bool in_system_header(token_index at) const;
     analysis_result recoverable_extension_used(diagnostic_id id,
                                                token_index at);
+    /* [intro.compliance]: a violation clang diagnoses and recovers from,
+       recorded on the declaration being analysed (declaration() judges it
+       ill-formed, its entities declared): the analysis goes on, well-formed */
+    analysis_result recovered_error_at(token_index at, const char *rule,
+                                       const char *subclause);
+    void record_recovered_error();
     analysis_result extension_used(diagnostic_id id, token_index at,
                                    const char *argument);
 
@@ -6466,13 +6476,11 @@ class semantic_analysis
     /* hold_names runs for an ill-formed declaration: a function it
        redeclares stays known */
     bool hold_ill_formed = false;
-    /* an error clang recovers from was reported while the declaration was
-       analysed (an extension that is an error here): the declaration goes
-       on, declares what it declares, and is judged ill-formed at its end */
-    bool recovered_error = false;
-    /* ... where what the declaration declares is declared all the same (a
-       class template with a member's error: hold_names keeps it) */
-    bool recovered_declares = false;
+    /* the declaration declaration() analyses now, which a recoverable
+       error is recorded on (nullptr: none, or a specialization is
+       analysed: its errors are the template's, judged where it is
+       defined) */
+    analysed_declaration *analysing = nullptr;
     /* the first operator keyword of such a declaration (0: none), which a
        refused operator's detail names */
     token_index operators_held_at = 0;

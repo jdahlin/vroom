@@ -2200,12 +2200,10 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             /* [class.mem]/15: "The type of a non-static data member shall
                not be an incomplete type"; clang drops the member and
                goes on with the class complete */
-            recovered_error = true;
-            ill_formed_at_token(m.id,
-                                "the type of a non-static data member "
-                                "shall not be an incomplete type",
-                                "class.mem");
-            return analysis_result::well_formed;
+            return recovered_error_at(m.id,
+                                      "the type of a non-static data member "
+                                      "shall not be an incomplete type",
+                                      "class.mem");
         }
         /* [basic.def]/5 (a member's declaration defines it,
            [basic.def]/2) */

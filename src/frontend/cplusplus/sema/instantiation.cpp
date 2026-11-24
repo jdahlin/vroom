@@ -65,6 +65,8 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         size_t expressions_before = expressions.size();
         size_t uses_before = name_uses.size();
         current_scope = instantiations[index].scope;
+        analysed_declaration *saved_analysing = analysing;
+        analysing = nullptr;
         /* (a pack expansion's pattern that names the template: its own
            packs are not the pattern's) */
         bool saved_expanding = expanding;
@@ -183,6 +185,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             }
         }
         current_scope = saved_scope;
+        analysing = saved_analysing;
         expanding = saved_expanding;
         function_cv = saved_cv;
         function_parameters =

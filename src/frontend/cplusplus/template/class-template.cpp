@@ -139,7 +139,6 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
             VTRY(dr, recoverable_extension_used(
                          diagnostic_id::sema_dynamic_exception_specification,
                          dynamic));
-            recovered_declares = true;
         }
     }
     uint32_t index = 0, first = 0;
