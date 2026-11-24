@@ -412,8 +412,7 @@ analysis_result semantic_analysis::validate_template_parameters(
         for (size_t k = 0; k < inner.size(); k++) {
             template_parameter_parts y;
             if (!template_parameter_form(inner[k], y) || y.has_declarator ||
-                y.template_template || y.has_default ||
-                (y.pack && k + 1 != inner.size()))
+                y.template_template || (y.pack && k + 1 != inner.size()))
                 return not_supported(p, "temp.arg.template");
         }
     }
@@ -1098,6 +1097,52 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
     return analysis_result::well_formed;
 }
 
+/* the record (index plus one) of the template template-parameter whose
+   argument the unqualified template-name of the simple-template-id id
+   names now, when it has default template-arguments of its own
+   ([temp.param]/17); else 0 */
+uint32_t semantic_analysis::bound_template_template_of(SyntaxRef id) const
+{
+    SyntaxElement first = id[0];
+    while (!first.is_token() && first.size() == 1)
+        first = first[0];
+    if (!first.is_token() ||
+        tokens[first.token()].kind != token_kind::identifier)
+        return 0;
+    uint32_t name = tokens.identifier(first.token());
+    lookup_result x = lookup_unqualified(name, lookup_filter::any);
+    entity_index named = x.entity;
+    if (!named)
+        named = x.unknown_entity;
+    if (!named)
+        return 0;
+    for (size_t i = bound_template_templates.size(); i-- > 0;) {
+        const bound_template_template &b = bound_template_templates[i];
+        if (b.name != name || b.target != named)
+            continue;
+        uint32_t record = entity_table[b.parameter].instantiation;
+        if (!record)
+            return 0;
+        const function_template &formal = function_templates[record - 1];
+        /* (only within the template that declares the parameter: the
+           definition of its member outside it redeclares the parameter
+           without the defaults, [temp.param]/17) */
+        if (id.first_token() < formal.declaration.first_token() ||
+            id.first_token() >= formal.declaration.end_token())
+            return 0;
+        for (uint32_t k = 0; k < formal.parameter_count; k++) {
+            template_parameter_parts form;
+            if (template_parameter_form(
+                    template_parameter_nodes[formal.first_parameter + k],
+                    form) &&
+                form.has_default)
+                return record;
+        }
+        return 0;
+    }
+    return 0;
+}
+
 /*
  * [temp.names]/1: a simple-template-id's template-arguments for the class
  * template function_templates[ct - 1], in order, then [temp.arg]/4's
@@ -1106,6 +1151,12 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
 analysis_result semantic_analysis::template_id_arguments(
     SyntaxRef id, uint32_t ct, owned_array<template_argument> &arguments)
 {
+    /* [temp.param]/17: a template-id naming the argument of a template
+       template-parameter that has defaults takes them */
+    uint32_t formal = bound_template_template_of(id);
+    if (formal && function_templates[formal - 1].parameter_count ==
+                      function_templates[ct - 1].parameter_count)
+        ct = formal;
     const function_template ft = function_templates[ct - 1];
     uint32_t count = ft.parameter_count;
     /* [temp.inst]/2: the class a nested-name-specifier names is complete;
@@ -1434,6 +1485,17 @@ bool semantic_analysis::same_template_parameters(uint32_t first,
                 !same_template_parameters(x.first_parameter, y.first_parameter,
                                           x.parameter_count))
                 return false;
+            /* ([temp.param]/17: a default of an inner parameter that the
+               other head does not repeat is not judged) */
+            for (uint32_t k = 0; k < x.parameter_count; k++) {
+                template_parameter_parts p, q;
+                if (!template_parameter_form(
+                        template_parameter_nodes[x.first_parameter + k], p) ||
+                    !template_parameter_form(
+                        template_parameter_nodes[y.first_parameter + k], q) ||
+                    p.has_default != q.has_default)
+                    return false;
+            }
         }
     }
     return true;

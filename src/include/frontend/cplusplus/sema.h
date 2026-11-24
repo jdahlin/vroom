@@ -5345,6 +5345,15 @@ class semantic_analysis
        parameter names its default template-argument uses (its own
        template's, or an earlier declaration's after a merge) */
     owned_array<uint32_t> template_parameter_default_names;
+    /* [temp.param]/17: the template template-parameters bound to an
+       argument: the parameter's name, the template it names and its entity, whose
+       parameters' defaults complete a template-id naming the argument */
+    struct bound_template_template {
+        uint32_t name;
+        entity_index target;
+        entity_index parameter;
+    };
+    owned_array<bound_template_template> bound_template_templates;
     /* the instantiation whose specialization the declaration analysed
        now declares (its record's index plus one), and how deep
        instantiations nest ([temp.inst]/16) */
@@ -5806,6 +5815,7 @@ class semantic_analysis
     analysis_result class_template_definition(SyntaxRef n, SyntaxRef specifier);
     /* [temp.names]/1: a simple-template-id's arguments for the class
        template function_templates[ct - 1], defaults included */
+    uint32_t bound_template_template_of(SyntaxRef id) const;
     analysis_result
     template_id_arguments(SyntaxRef id, uint32_t ct,
                           owned_array<template_argument> &arguments);
