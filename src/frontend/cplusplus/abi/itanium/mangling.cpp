@@ -172,7 +172,6 @@ class itanium_mangler
     bool dependent_expression(SyntaxElement c);
     bool dependent_fold(SyntaxElement fold);
     bool named_variable(entity_index t, SyntaxElement name);
-    bool written_fallback(entity_index e);
     /* the dependent_written type being mangled: its bindings
        (sema.h: written_bindings), and the element of the packs among them
        a fold's pattern is mangled for */
@@ -1099,39 +1098,6 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
             return false;
     text("Li");
     vbuffer_append(out, spelling.data(), spelling.size());
-    text("E");
-    return true;
-}
-
-/*
- * A decltype whose operand has no encoding here yet (the tokens' digest
- * stands for it): cl <source-name> <bindings as st <type>> E.  The same
- * written operand with the same bindings is the same name in every
- * translation unit.
- */
-bool itanium_mangler::written_fallback(entity_index e)
-{
-    SyntaxRef n = SyntaxRef(
-        node_index(static_cast<uint32_t>(analysis.entity_table[e].value)));
-    uint32_t hash = 2166136261u;
-    for (token_index t = n[2].first_token(); t < n[2].end_token(); t++) {
-        owned_buffer spelling;
-        analysis.token_spelling(t, spelling.get());
-        for (size_t i = 0; i < spelling.size(); i++)
-            hash = (hash ^ static_cast<unsigned char>(spelling.data()[i])) *
-                   16777619u;
-        hash = (hash ^ 0xffu) * 16777619u;
-    }
-    char name[32];
-    snprintf(name, sizeof name, "14__vcc_%08x", hash);
-    text("cl");
-    text(name);
-    for (uint32_t i = 0; i < written_count; i++) {
-        const auto &b = analysis.written_bindings[written_first + i];
-        text("st");
-        if (!type(b.type))
-            return false;
-    }
     text("E");
     return true;
 }
@@ -2846,17 +2812,8 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
         uint32_t saved_first = written_first, saved_count = written_count;
         written_first = analysis.entity_table[r.entity].first_member;
         written_count = analysis.entity_table[r.entity].member_count;
-        size_t saved_length = out->n, saved_candidates = candidates.size();
         done = dependent_expression(operand);
-        if (!done) {
-            /* what the encoding above has no form for: the name vcc gives
-               it, <source-name> of a digest of the written tokens, with the
-               bindings as sizeof(type) operands (a valid <expression>) */
-            out->n = saved_length;
-            candidates.resize(saved_candidates);
-            pack_element = UINT32_MAX;
-            done = written_fallback(r.entity);
-        }
+        pack_element = UINT32_MAX;
         written_first = saved_first;
         written_count = saved_count;
         text("E");
