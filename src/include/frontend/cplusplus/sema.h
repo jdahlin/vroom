@@ -5907,6 +5907,10 @@ class semantic_analysis
     analysis_result template_type(SyntaxRef id, entity_index scope,
                                   bool qualified, type_index &type,
                                   uint32_t *cv = nullptr);
+    analysis_result
+    specialization_matching_in_progress(SyntaxRef at, uint32_t class_template,
+                                        const template_argument *arguments,
+                                        uint32_t count);
     /* [temp.inst]/2: the class template specialization, instantiated */
     analysis_result instantiate_class(SyntaxRef at, uint32_t class_template,
                                       const template_argument *arguments,
