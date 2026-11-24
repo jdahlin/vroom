@@ -62,6 +62,11 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
                 return member_definition_of_template(t, d, inner);
             /* [temp.mem]/1's member class template of a class template,
                defined outside it */
+            /* [temp.static]/1's static data member template, defined
+               outside the class template */
+            if (d.is(syntax_kind::simple_declaration) &&
+                out_of_class_variable_member(d))
+                return member_definition_of_template(t, d, inner);
             if (d.is(syntax_kind::simple_declaration)) {
                 SyntaxRef only = sole_decl_specifier(d);
                 if (only && only.is(syntax_kind::class_specifier) &&
@@ -248,7 +253,12 @@ analysis_result semantic_analysis::template_head_parameters(
         entity_table[current_scope].kind == entity_kind::class_type &&
         is_namespace(entity_table[current_scope].enclosing) &&
         n[1].is(syntax_kind::deduction_guide);
-    if (!member_alias && !member_class && !member_guide &&
+    /* ... and the template-head of a member variable template's definition
+       outside its class (define_template_member), in the scope that binds
+       the class's parameters */
+    bool member_definition =
+        template_member_scope && current_scope == template_member_scope;
+    if (!member_alias && !member_class && !member_guide && !member_definition &&
         (!is_namespace(current_scope) || (defining_class && !friend_allowed)))
         return not_supported(n, "temp.mem");
     /* template-head: template < template-parameter-list >; a

@@ -427,7 +427,10 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     const instantiation_record x = instantiations[index];
     if (instantiation_depth >= 64)
         return not_supported(o.declaration, "temp.inst");
-    if (o.inner)
+    bool member_variable_template =
+        o.inner && o.definition.is(syntax_kind::simple_declaration) &&
+        out_of_class_variable_member(o.definition);
+    if (o.inner && !member_variable_template)
         return define_member_template(member, index, recorded);
     function_template of =
         function_templates[entity_table[x.template_entity].instantiation - 1];
@@ -452,6 +455,15 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     instantiating = 0;
     class_instantiating = 0;
     analysis_result r = analysis_result::well_formed;
+    if (member_variable_template) {
+        /* [temp.static]/1: the member variable template of this
+           specialization takes the definition (variable_template_definition) */
+        r = variable_template_definition(o.inner, o.definition);
+        leave_instantiation(context);
+        if (r == analysis_result::well_formed)
+            return r;
+        return member_definition_unsupported(o.declaration, recorded);
+    }
     if (variable)
         r = simple_declaration(o.definition);
     else

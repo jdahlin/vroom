@@ -82,6 +82,15 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             }
             if (only && only.is(syntax_kind::class_specifier))
                 return not_supported(n, "temp.expl.spec");
+            /* [temp.expl.spec]/16: a member variable template of an
+               implicit instantiation (template<> template<int> constexpr
+               int A<int>::u = 3;) */
+            if (out_of_class_variable_member(def)) {
+                analysis_result vr = variable_template_definition(inner, def);
+                if (vr == analysis_result::well_formed)
+                    return vr;
+                return not_supported(n, "temp.expl.spec");
+            }
         }
         uint32_t lead_attr = leading_gnu_attributes(def);
         SyntaxTail tail(def, lead_attr);
