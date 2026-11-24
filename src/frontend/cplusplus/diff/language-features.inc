@@ -154,3 +154,6 @@ LANGUAGE_FEATURE(default_constructible_lambdas, cplusplus_20, never,
                  "default constructor and copy assignment operator")
 LANGUAGE_FEATURE(init_capture_packs, cplusplus_20, never,
                  "P0780R2: an init-capture pack, ...identifier initializer")
+LANGUAGE_FEATURE(constant_cast_from_void_pointer, cplusplus_26, never,
+                 "P2738R1: a cast from cv void* to a pointer to object is allowed in a "
+                 "constant expression")

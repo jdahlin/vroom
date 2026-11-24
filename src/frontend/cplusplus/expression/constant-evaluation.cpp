@@ -2352,6 +2352,31 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             v.kind = constant_value_kind::pointer;
             return constness::constant;
         }
+        /* [expr.const]/5.15 (before C++26): "a conversion from type
+           cv void* to a pointer-to-object type" is not a constant
+           expression", except the result of an allocation function called
+           by std::allocator<T>::allocate */
+        if (k == conversion_kind::pointer_cast &&
+            !tokens.files.behavior.has(
+                language_feature::constant_cast_from_void_pointer)) {
+            const struct type from =
+                type_table[semantics[x.a].type.unqualified()];
+            const struct type to = type_table[x.type.unqualified()];
+            if (from.kind == type_kind::pointer &&
+                to.kind == type_kind::pointer &&
+                fundamental_of(from.operand) == fundamental_type::void_ &&
+                type_table[to.operand.unqualified()].kind !=
+                    type_kind::function &&
+                fundamental_of(to.operand) != fundamental_type::void_) {
+                /* (the operand is evaluated first: an allocation function's
+                   result, which the evaluator has no rules for, is the
+                   exception) */
+                c = evaluate_node(state, x.a, v);
+                if (c != constness::constant)
+                    return c;
+                return CONST_NOT_CONSTANT_RULE;
+            }
+        }
         /* [conv.qual]: the same address, the pointed-to type differing
            in cv-qualification only */
         if (k == conversion_kind::pointer ||

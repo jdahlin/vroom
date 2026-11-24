@@ -31,6 +31,8 @@ const char *semantic_kind_name(semantic_kind kind)
         "entity",
         "conversion",
         "vector_shuffle",
+        "complex_value",
+        "complex_part",
         "compound_literal",
         "unary",
         "address",
@@ -76,6 +78,7 @@ const char *semantic_kind_name(semantic_kind kind)
         "for_statement",
         "switch_statement",
         "case_label",
+        "statement_expression",
         "default_label",
         "identifier_label",
         "goto_statement",
@@ -89,6 +92,9 @@ const char *semantic_kind_name(semantic_kind kind)
         "function_body",
     };
     size_t k = static_cast<size_t>(kind);
+    static_assert(sizeof names / sizeof names[0] ==
+                      static_cast<size_t>(semantic_kind::function_body) + 1,
+                  "one name for each semantic_kind");
     if (k >= sizeof names / sizeof names[0])
         return "?";
     return names[k];
