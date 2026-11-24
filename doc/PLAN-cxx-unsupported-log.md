@@ -926,3 +926,9 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   "requested here" note, and we analyse member bodies only at
   instantiation, so a failure needs an argument-dependent flag ([temp.res]/6)
   before the use may be marked.
+- 11.21 (e6239c804, 7b8ed4444): a member of a member class template
+  defined outside both (`X<T>::Y<U>::f`, also of a partial specialization
+  of X), checked up front; details for the nested simple-declaration
+  refusal (largest fixable: `A<T>::C::B<T2*>` 16; namespace-qualified
+  `N::X<T>::f` 8).  Unsupported 34275 -> 34256.  cxx-spec-refs had failed
+  on a [temp.spec.partial] citation since b677259b9 (11.14); fixed.
