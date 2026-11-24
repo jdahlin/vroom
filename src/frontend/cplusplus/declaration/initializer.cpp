@@ -513,7 +513,13 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
        one bound to a base class's reference needs the conversion to the
        base subobject, and at namespace scope the temporary has static
        storage ([class.temporary]/6): _ZGR<name>_ (lowering) */
+    /* (a scalar's or array's list temporary in an unevaluated operand,
+       [expr.context]/1, has no storage to give) */
+    bool scalar_in_unevaluated =
+        unevaluated &&
+        type_table[m.type.unqualified()].kind != type_kind::class_type;
     if (aggregate_prvalue(m) && !closure_prvalue_binding(m) &&
+        !scalar_in_unevaluated &&
         (type_table[m.type.unqualified()].kind != type_kind::class_type ||
          (!at_block_scope() && !binding_extends)))
         return not_supported_because(
