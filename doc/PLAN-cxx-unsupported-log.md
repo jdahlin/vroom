@@ -869,3 +869,9 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   (class member explicit instantiation), 714 and 750 (the template's own
   declaration is held by [temp.names]/[ext.gnu]; its instantiation is
   well-formed), cxx2b-deducing-this-coro.cpp:32.
+  Orchestrator on 11.15: comparing dependent bounds by first token makes
+  `[N + 1]` and `[N * 2]` the same type (a wrong redeclaration); 11.16
+  fixes it first.  The coroutine-only check of explicit function
+  instantiations is a special case of "an explicit instantiation whose
+  body is refused is refused" ([temp.explicit]/10); generalizing costs
+  +383 unsupported now, so it waits until fewer bodies are refused.
