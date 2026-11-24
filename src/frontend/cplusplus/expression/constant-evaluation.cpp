@@ -133,6 +133,9 @@ constexpr uint32_t zero_fill = UINT32_MAX - 1;
 /* constant_value::base of a pointer to a single object moved by one (its
    one past the end): there is no array whose elements to index */
 constexpr uint32_t single_object_base = UINT32_MAX;
+/* the base of a pointer to the first element of an array of unknown bound
+   ([expr.const]/5.8's "indexing of array without known bound") */
+constexpr uint32_t unknown_bound_base = UINT32_MAX - 1;
 
 /* a read of an indeterminate value ([basic.indet]/2) or of a volatile
    object ([expr.const]/5.8): not constant, but the check of a body for a
@@ -2315,6 +2318,12 @@ constness semantic_analysis::offset_pointer(const constant_value &p, __int128 n,
         return constness::constant;
     if (!p.count)
         return CONST_NOT_CONSTANT;
+    /* an array of unknown bound: any other element is not known to exist
+       (the wording of CWG direction, clang's note) */
+    if (p.base == unknown_bound_base)
+        return CONST_NOT_CONSTANT_NOTE(
+            "the expression is not a constant expression: indexing of array "
+            "without known bound is not allowed in a constant expression");
     if (!p.extent || p.base == single_object_base) {
         /* [expr.add]/4.2 ([basic.compound]/3.3): "an object that is not an
            array element is considered to belong to an array with one
@@ -2355,8 +2364,26 @@ constness semantic_analysis::evaluate_array_pointer(constant_evaluation &state,
         return c;
     /* (the decay of an array the evaluation has no value for: its address
        is not read, [expr.const]/5.8 does not apply) */
-    if (!(array & element_place) && state.objects[array].opaque)
+    if (!(array & element_place) && state.objects[array].opaque) {
+        /* a declared array of unknown bound (`extern int a[];`): its first
+           element's address ([conv.array]/1) */
+        const entity_index owner = state.objects[array].entity;
+        if (owner && entity_table[owner].kind == entity_kind::variable &&
+            !entity_table[owner].automatic) {
+            const struct type &t =
+                type_table[entity_table[owner].type.unqualified()];
+            if (t.kind == type_kind::array && !t.bound_known) {
+                v = constant_value();
+                v.kind = constant_value_kind::pointer;
+                v.count = 1;
+                v.base = unknown_bound_base;
+                v.first = array;
+                v.stamp = state.objects[array].serial;
+                return constness::constant;
+            }
+        }
         return CONST_UNKNOWN;
+    }
     const constant_value a = place_value(state, array);
     if (a.kind != constant_value_kind::array || !a.count)
         return CONST_UNKNOWN;
