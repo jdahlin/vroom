@@ -108,8 +108,13 @@ def run_one(job):
         if rc:
             return job, 'broken', 'clang++: ' + err.strip().split('\n')[0]
         objs.append(f'{wd}/cxx.o')
+    # a test whose first line says "vcc-only" uses a vcc extension: no clang build of the C half
+    with open(src) as f:
+        vcc_only = 'vcc-only' in f.readline()
     for side, cc in (('clang', [CL, f'--target={triple}', f'-O{level}']),
                      ('vcc', [VPP, f'--target={triple}', f'-O{level}'] + inc)):
+        if side == 'clang' and vcc_only:
+            continue
         rc, err = sh(cc + ['-fexceptions', '-c', src, '-o', f'{wd}/{side}.o'])
         if rc:
             if side == 'clang':

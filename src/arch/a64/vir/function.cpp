@@ -504,6 +504,7 @@ VPRIV bool a64_vir_function_lower(codegen_context *e, uint32_t s,
     e->loop_count = e->cleanup_count = 0;
     /* exceptions: the call sites and landing pads of the table (arch/a64/codegen/eh.cpp) */
     e->eh_site_count = e->eh_node_count = e->eh_terminate_pad = 0;
+    memset(&e->eh_lsda, 0, sizeof e->eh_lsda);
     e->eh_in_pads = false;
     e->eh_cleanup_limit = INT32_MAX;
     e->eh_function = (f->flags & VIR_FUNCTION_FLAG_EH) &&

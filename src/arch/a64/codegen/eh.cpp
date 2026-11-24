@@ -20,12 +20,14 @@ VPRIV void a64_eh_function_begin(codegen_context *e)
 
     e->eh_site_count = e->eh_node_count = e->eh_terminate_pad = 0;
     e->eh_cleanup_limit = INT32_MAX;
-    e->eh_in_pads = false;
+    e->eh_in_pads = e->eh_cover = false;
     e->eh_function = e->unit->options->eh && e->unit->options->cfi &&
                      !CODEGEN_IS_DARWIN(c) && c->eh_resume_sym;
     /* (now: a slot taken later is given back at the end of its scope, before the pads) */
+    memset(&e->eh_lsda, 0, sizeof e->eh_lsda);
     if (e->eh_function)
-        e->eh_slot = a64_frame_slot_allocate(e, 8, 8);
+        e->eh_slot = a64_frame_slot_allocate(e, 8, 8),
+        e->eh_selector_slot = a64_frame_slot_allocate(e, 8, 8);
 }
 
 /* the variable runs a cleanup function an exception must run too (not a VLA's stack restore) */
@@ -59,7 +61,7 @@ static uint32_t a64_eh_node_current(codegen_context *e)
                                      "exception table");
             k = ++e->eh_node_count;
             e->eh_nodes[k].symbol = s, e->eh_nodes[k].parent = node,
-            e->eh_nodes[k].pad = 0, e->eh_nodes[k].catch_all = false;
+            e->eh_nodes[k].pad = 0, e->eh_nodes[k].vir = false;
         }
         node = k;
     }
@@ -86,7 +88,9 @@ VPRIV uint32_t a64_eh_call_begin(codegen_context *e)
         node = UINT32_MAX;
     else
         node = a64_eh_node_current(e);
-    if (!node)
+    /* (a call that unwinds nowhere is a call site without a pad where the personality routine of C++
+       looks it up: _Unwind_Resume's, whose frame it enters again; an address in no call site terminates) */
+    if (!node && !e->eh_cover)
         return 0;
     if (e->eh_site_count >= e->label_capacity / 2)
         codegen_fatal_report(e, 0, "too many calls for the exception table");
@@ -100,7 +104,7 @@ VPRIV uint32_t a64_eh_call_begin(codegen_context *e)
 
 /* VIR's lowering: the node standing for the landing pad at label (made on first use) */
 VPRIV uint32_t a64_eh_pad_node(codegen_context *e, uint32_t label,
-                               bool catch_all)
+                               uint32_t action)
 {
     for (uint32_t k = 1; k <= e->eh_node_count; k++)
         if (e->eh_nodes[k].pad == label)
@@ -111,7 +115,7 @@ VPRIV uint32_t a64_eh_pad_node(codegen_context *e, uint32_t label,
 
     e->eh_nodes[k] =
         VCC_LITERAL(struct codegen_eh_node, .symbol = 0, .parent = 0,
-                    .pad = label, .catch_all = catch_all);
+                    .pad = label, .action = action, .vir = true);
     return k;
 }
 
@@ -171,6 +175,39 @@ static void a64_eh_call_slot(codegen_context *e, uint32_t fn, bool argument,
     (void)c;
 }
 
+/* a catch scope's dispatch at a landing pad: the exception pointer into the scope's variable, then the
+   handlers in order, the selector against the type table; falls out of it when none matches */
+static void a64_eh_dispatch(codegen_context *e, uint32_t scope)
+{
+    cc *c = e->compile_context;
+    uint32_t n = 0;
+    const uint32_t *h = codegen_catch_scope(c, scope, &n);
+    codegen_lvalue var = local_lval(
+        e, c->lists[codegen_symbol_attributes(c, scope)->catch_list]);
+    int r = treg(e);
+
+    a64_record_emit_memory(e, A64_OP_LD, 3, 0, r, A64_REGISTER_FRAME,
+                           e->eh_slot);
+    a64_record_emit_memory(e, A64_OP_ST, 3, 0, r, A64_REGISTER_FRAME,
+                           var.offset);
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t target = user_label(e, h[2 * i + 1]);
+
+        if (!h[2 * i]) {
+            a64_jump_emit(e, target);
+            tfree(e, r);
+            return;
+        }
+        uint32_t idx = codegen_eh_type_index(e, &e->eh_lsda, h[2 * i]);
+
+        a64_record_emit_memory(e, A64_OP_LD, 2, 0, r, A64_REGISTER_FRAME,
+                               e->eh_selector_slot);
+        a64_record_emit_immediate(e, A64_OP_SUBSI, 0, ZR, r, (int64_t)idx);
+        a64_branch_condition_emit(e, A64_CONDITION_EQ, target);
+    }
+    tfree(e, r);
+}
+
 /* the landing pads, at the end of the body (in front of the return label, jumped over) */
 VPRIV void a64_eh_pads(codegen_context *e)
 {
@@ -209,6 +246,8 @@ VPRIV void a64_eh_pads(codegen_context *e)
         e->is_reachable = true;
         e->eh_nodes[m].pad = a64_eh_label_place(e);
         a64_record_emit_memory(e, A64_OP_ST, 3, 0, 0, A64_REGISTER_FRAME, slot);
+        a64_record_emit_memory(e, A64_OP_ST, 3, 0, 1, A64_REGISTER_FRAME,
+                               e->eh_selector_slot);
         a64_jump_emit(e, run[m]);
     }
     /* each node's cleanup, then its parent's (the outermost's: resume) */
@@ -221,13 +260,21 @@ VPRIV void a64_eh_pads(codegen_context *e)
             next = run[p];
         e->label_reference_counts[run[m]]++;
         deflabel(e, run[m]);
-        a64_cleanup_run(e, e->eh_nodes[m].symbol);
+        {
+            uint32_t count;
+
+            if (codegen_catch_scope(c, e->eh_nodes[m].symbol, &count))
+                a64_eh_dispatch(e, e->eh_nodes[m].symbol);
+            else
+                a64_cleanup_run(e, e->eh_nodes[m].symbol);
+        }
         a64_jump_emit(e, next);
     }
     e->label_reference_counts[resume]++;
     deflabel(e, resume);
     e->eh_in_pads =
         false; /* (as clang: _Unwind_Resume and the terminate pad's calls have no pad) */
+    e->eh_cover = true;
     a64_eh_call_slot(e, c->eh_resume_sym, true, true);
     a64_record_emit(e, A64_OP_BRK); /* (_Unwind_Resume does not return) */
     /* the terminate pad, of a cleanup's call that throws ([except.terminate]) */
@@ -242,6 +289,7 @@ VPRIV void a64_eh_pads(codegen_context *e)
     }
     e->is_reachable = false;
     e->eh_in_pads = false;
+    e->eh_cover = false;
     free(run);
 }
 
@@ -270,8 +318,10 @@ VPRIV bool a64_eh_wanted(const codegen_context *e)
         const struct codegen_eh_site *t = &e->eh_sites[k];
         uint32_t pad = e->eh_terminate_pad;
 
-        if (t->node != UINT32_MAX)
+        if (t->node != UINT32_MAX && t->node)
             pad = e->eh_nodes[t->node].pad;
+        else if (t->node == 0)
+            pad = 0;
         any = pad && seen[pad] && seen[t->begin] && t->end && seen[t->end];
     }
     free(seen);
@@ -279,48 +329,52 @@ VPRIV bool a64_eh_wanted(const codegen_context *e)
 }
 
 /* the function's exception table, after its code: .cfi_lsda named it */
-VPRIV void a64_eh_table(const codegen_context *e, tbuf *b, uint32_t s)
+VPRIV void a64_eh_table(codegen_context *e, tbuf *b, uint32_t s)
 {
     cc *c = e->compile_context;
     uint8_t *seen = a64_eh_labels_present(e);
     bool term = e->eh_terminate_pad && seen[e->eh_terminate_pad];
+    uint32_t *action = (uint32_t *)calloc(e->eh_site_count + 1, sizeof *action),
+             *pads = (uint32_t *)calloc(e->eh_site_count + 1, sizeof *pads);
 
-    /* (a VIR catch-all pad needs the same type table as the terminate pad) */
-    for (uint32_t k = 0; k < e->eh_site_count && !term; k++) {
-        uint32_t m = e->eh_sites[k].node;
-
-        if (m != UINT32_MAX && e->eh_nodes[m].catch_all)
-            term = true;
-    }
-    vtext_string_append(
-        b,
-        "\t.pushsection\t.gcc_except_table,\"a\",@progbits\n\t.p2align\t2\n");
-    if (term) /* (a type table: one entry, 0, catch (...): the terminate pad's handler) */
-        vtext_format_append(
-            b,
-            ".Lvcclsda%u:\n\t.byte\t255\n\t.byte\t155\n\t.uleb128 "
-            ".Lvccttb%u-.Lvccttr%u\n.Lvccttr%u:\n\t.byte\t1\n\t.uleb128 "
-            ".Lvcccse%u-.Lvcccsb%u\n.Lvcccsb%u:\n",
-            s, s, s, s, s, s, s);
-    else
-        vtext_format_append(
-            b,
-            ".Lvcclsda%u:\n\t.byte\t255\n\t.byte\t255\n\t.byte\t1\n\t.uleb128 "
-            ".Lvcccse%u-.Lvcccsb%u\n.Lvcccsb%u:\n",
-            s, s, s, s);
     for (uint32_t k = 0; k < e->eh_site_count; k++) {
         const struct codegen_eh_site *t = &e->eh_sites[k];
         bool in_pad = t->node == UINT32_MAX;
         uint32_t pad = 0;
+        codegen_eh_chain chain;
 
+        memset(&chain, 0, sizeof chain);
         if (!seen[t->begin] || !t->end || !seen[t->end])
             continue;
         if (in_pad && term)
             pad = e->eh_terminate_pad;
-        else if (!in_pad)
+        else if (!in_pad && t->node)
             pad = e->eh_nodes[t->node].pad;
         if (pad && !seen[pad])
             pad = 0;
+        pads[k] = pad;
+        if (!pad)
+            continue;
+        if (!in_pad && e->eh_nodes[t->node].vir) {
+            action[k] = e->eh_nodes[t->node].action;
+            continue;
+        }
+        if (in_pad) {
+            chain.types[chain.count++] = 0; /* (catch (...)) */
+            chain.closed = true;
+        } else
+            for (uint32_t m = t->node; m; m = e->eh_nodes[m].parent)
+                codegen_eh_chain_node(&chain, c, e->eh_nodes[m].symbol);
+        action[k] = codegen_eh_action(e, &e->eh_lsda, &chain);
+    }
+    vtext_string_append(b,
+                        "\t.pushsection\t.gcc_except_table,\"a\",@progbits\n");
+    codegen_eh_table_begin(b, &e->eh_lsda, s);
+    for (uint32_t k = 0; k < e->eh_site_count; k++) {
+        const struct codegen_eh_site *t = &e->eh_sites[k];
+
+        if (!seen[t->begin] || !t->end || !seen[t->end])
+            continue;
         vtext_string_append(b, "\t.uleb128 ");
         a64_print_label(b, s, t->begin);
         vtext_char_append(b, '-');
@@ -330,26 +384,17 @@ VPRIV void a64_eh_table(const codegen_context *e, tbuf *b, uint32_t s)
         vtext_char_append(b, '-');
         a64_print_label(b, s, t->begin);
         vtext_char_append(b, '\n');
-        if (pad) {
+        if (pads[k]) {
             vtext_string_append(b, "\t.uleb128 ");
-            a64_print_label(b, s, pad);
+            a64_print_label(b, s, pads[k]);
             vtext_char_append(b, '-');
             codegen_symbol_name_append(c, b, s);
             vtext_char_append(b, '\n');
         } else
             vtext_string_append(b, "\t.byte\t0\n");
-        /* (action 0: a cleanup; 1: the catch (...) record) */
-        if ((in_pad || e->eh_nodes[t->node].catch_all) && pad)
-            vtext_string_append(b, "\t.byte\t1\n");
-        else
-            vtext_string_append(b, "\t.byte\t0\n");
+        vtext_format_append(b, "\t.uleb128 %u\n", action[k]);
     }
-    vtext_format_append(b, ".Lvcccse%u:\n", s);
-    if (term) /* the action record (filter 1: the type table's entry, no next), then the type table */
-        vtext_format_append(
-            b,
-            "\t.byte\t1\n\t.byte\t0\n\t.p2align\t2\n\t.long\t0\n.Lvccttb%u:\n",
-            s);
+    codegen_eh_table_end(b, c, &e->eh_lsda, s);
     vtext_string_append(b, "\t.popsection\n");
-    free(seen);
+    free(seen), free(action), free(pads);
 }

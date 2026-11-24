@@ -196,6 +196,9 @@ VPRIV void a64_cleanup_run(codegen_context *e, uint32_t s)
     a64_call_argument a;
     codegen_lvalue l;
 
+    if (codegen_symbol_attributes(c, s)->catch_count)
+        return; /* (a catch scope: nothing to run when its block is left) */
+
     if (T(c, c->syms[s].ty)->flags & AST_TYPE_FLAG_VLA) {
         const codegen_binding *b = codegen_symbol_binding_get(e, s);
         int r;

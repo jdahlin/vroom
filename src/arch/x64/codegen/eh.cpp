@@ -8,13 +8,54 @@
  */
 #include "x64-internal.h"
 
+/* a catch scope's dispatch at a landing pad: the exception pointer into the scope's variable, then
+   the handlers in order, the selector against the type table; falls out of it when none matches */
+static void x64_eh_dispatch(codegen_context *e, uint32_t scope, int64_t exc,
+                            int64_t selector)
+{
+    cc *c = e->compile_context;
+    walk_state *W = e->walk_state;
+    uint32_t n = 0;
+    const uint32_t *h = codegen_catch_scope(c, scope, &n);
+    codegen_lvalue
+        ex = {.kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = exc},
+        sl = {.kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = selector},
+        var = {
+            .kind = CODEGEN_LVALUE_FRAME,
+            .align = 8,
+            .offset = walk_local_slot(
+                e, c->lists[codegen_symbol_attributes(c, scope)->catch_list])};
+    int r = x64_treg(e);
+
+    x64_load(e, r, &ex, 8, false);
+    x64_store(e, r, &var, 8);
+    x64_tfree(e, r);
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t target = walk_user_label_find(e, h[2 * i + 1]);
+
+        if (!h[2 * i]) {
+            x64_jump(e, target);
+            return;
+        }
+        uint32_t idx = codegen_eh_type_index(e, &W->eh_lsda, h[2 * i]);
+
+        r = x64_treg(e);
+        x64_load(e, r, &sl, 4, false);
+        x64_cmpbr(e, LEX_TOKEN_EQUAL_EQUAL, 4, false,
+                  VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                              .register_number = (uint8_t)r),
+                  codegen_value_constant(idx), target);
+        x64_tfree(e, r);
+    }
+}
+
 VPRIV void x64_eh_pads(codegen_context *e)
 {
     walk_state *W = e->walk_state;
     cc *c = e->compile_context;
     uint32_t n = W->cleanup_node_count, *run, resume;
     uint8_t *need;
-    bool any = false;
+    bool any = false, catches = false;
 
     if (!W->eh_fn || W->eh_overflow || !c->eh_resume_sym)
         return;
@@ -32,9 +73,21 @@ VPRIV void x64_eh_pads(codegen_context *e)
     if (e->is_reachable)
         x64_jump(e, W->return_label);
     W->eh_in_pads = 1, W->eh_term = 0;
-    int64_t slot = walk_slot_permanent(e, 8, 8);
+    int64_t slot = walk_slot_permanent(e, 8, 8), selector = 0;
     codegen_lvalue sl = {
         .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = slot};
+
+    for (uint32_t m = 1; m <= n; m++) {
+        uint32_t count;
+
+        if (need[m] &&
+            codegen_catch_scope(c, W->cleanup_nodes[m].symbol, &count))
+            catches = true;
+    }
+    if (catches)
+        selector = walk_slot_permanent(e, 8, 8);
+    codegen_lvalue ss = {
+        .kind = CODEGEN_LVALUE_FRAME, .align = 8, .offset = selector};
 
     for (uint32_t m = 1; m <= n; m++)
         if (need[m])
@@ -48,6 +101,8 @@ VPRIV void x64_eh_pads(codegen_context *e)
         e->is_reachable = true;
         x64_record_emit(e, X64_OP_EHMARK)->label = W->eh_pad[m];
         x64_store(e, RAX, &sl, 8);
+        if (catches)
+            x64_store(e, RDX, &ss, 8);
         x64_jump(e, run[m]);
     }
     /* each node's cleanup, then its parent's (the outermost's: resume) */
@@ -56,10 +111,16 @@ VPRIV void x64_eh_pads(codegen_context *e)
             continue;
         uint32_t p = W->cleanup_nodes[m].parent;
 
+        uint32_t count;
+
         walk_label_place(e, run[m]);
-        W->eh_in_pads = 2;
-        walk_cleanup_call(e, W->cleanup_nodes[m].symbol);
-        W->eh_in_pads = 1;
+        if (codegen_catch_scope(c, W->cleanup_nodes[m].symbol, &count)) {
+            x64_eh_dispatch(e, W->cleanup_nodes[m].symbol, slot, selector);
+        } else {
+            W->eh_in_pads = 2;
+            walk_cleanup_call(e, W->cleanup_nodes[m].symbol);
+            W->eh_in_pads = 1;
+        }
         x64_jump(e, p && p <= n && need[p] ? run[p] : resume);
     }
     walk_label_place(e, resume);
@@ -117,62 +178,66 @@ VPRIV bool x64_eh_wanted(codegen_context *e)
     return false;
 }
 
+/* a call site's action: its node's chain of catch types, a cleanup flag */
+static uint32_t x64_eh_site_action(codegen_context *e, uint32_t node)
+{
+    walk_state *W = e->walk_state;
+    cc *c = e->compile_context;
+    codegen_eh_chain k;
+
+    memset(&k, 0, sizeof k);
+    if (W->eh_vir)
+        return W->eh_action[node];
+    if (node == UINT32_MAX) { /* (the terminate pad: catch (...)) */
+        k.types[k.count++] = 0;
+        k.closed = true;
+    } else
+        for (uint32_t m = node; m; m = W->cleanup_nodes[m].parent)
+            codegen_eh_chain_node(&k, c, W->cleanup_nodes[m].symbol);
+    return codegen_eh_action(e, &W->eh_lsda, &k);
+}
+
 VPRIV void x64_eh_table(codegen_context *e, tbuf *b, uint32_t s)
 {
     walk_state *W = e->walk_state;
     cc *c = e->compile_context;
     uint32_t f = W->function_symbol;
-
+    uint32_t action[WALK_EH_SITES], pads[WALK_EH_SITES];
     bool term = W->eh_term && W->eh_seen && W->eh_seen[W->eh_term];
 
-    vtext_string_append(b, "\t.p2align\t2\n");
-    if (term) /* (a type table: one entry, 0, catch (...): the terminate pad's handler) */
-        vtext_format_append(
-            b,
-            ".Lvcclsda%u:\n\t.byte\t255\n\t.byte\t155\n\t.uleb128 "
-            ".Lvccttb%u-.Lvccttr%u\n.Lvccttr%u:\n\t.byte\t1\n\t.uleb128 "
-            ".Lvcccse%u-.Lvcccsb%u\n.Lvcccsb%u:\n",
-            f, f, f, f, f, f, f);
-    else
-        vtext_format_append(
-            b,
-            ".Lvcclsda%u:\n\t.byte\t255\n\t.byte\t255\n\t.byte\t1\n\t.uleb128 "
-            ".Lvcccse%u-.Lvcccsb%u\n.Lvcccsb%u:\n",
-            f, f, f, f);
     for (uint32_t k = 0; k < W->eh_nsites; k++) {
         uint32_t m = W->eh_sites[k].node, pad = m == UINT32_MAX
                                                     ? (term ? W->eh_term : 0)
                                                 : m ? W->eh_pad[m]
                                                     : 0;
-        bool catch_all = m == UINT32_MAX && pad;
 
         /* (a call a later pass removed: not a call site; a pad that is gone: none) */
         if (!W->eh_seen || !W->eh_seen[W->eh_sites[k].begin] ||
             !W->eh_seen[W->eh_sites[k].end])
-            continue;
+            pad = 0, m = 0;
         if (pad && !W->eh_seen[pad])
             pad = 0;
+        pads[k] = pad;
+        action[k] = pad ? x64_eh_site_action(e, m) : 0;
+    }
+    codegen_eh_table_begin(b, &W->eh_lsda, f);
+    for (uint32_t k = 0; k < W->eh_nsites; k++) {
+        /* (a call a later pass removed: not a call site) */
+        if (!W->eh_seen || !W->eh_seen[W->eh_sites[k].begin] ||
+            !W->eh_seen[W->eh_sites[k].end])
+            continue;
         vtext_format_append(b, "\t.uleb128 .Lvcceh%u_%u-", f,
                             W->eh_sites[k].begin);
         codegen_symbol_name_append(c, b, s);
         vtext_format_append(b, "\n\t.uleb128 .Lvcceh%u_%u-.Lvcceh%u_%u\n", f,
                             W->eh_sites[k].end, f, W->eh_sites[k].begin);
-        if (pad) {
-            vtext_format_append(b, "\t.uleb128 .Lvcceh%u_%u-", f, pad);
+        if (pads[k]) {
+            vtext_format_append(b, "\t.uleb128 .Lvcceh%u_%u-", f, pads[k]);
             codegen_symbol_name_append(c, b, s);
             vtext_char_append(b, '\n');
         } else
             vtext_string_append(b, "\t.byte\t0\n");
-        vtext_string_append(
-            b,
-            catch_all
-                ? "\t.byte\t1\n"
-                : "\t.byte\t0\n"); /* (action 0: a cleanup; 1: the catch (...) record) */
+        vtext_format_append(b, "\t.uleb128 %u\n", action[k]);
     }
-    vtext_format_append(b, ".Lvcccse%u:\n", f);
-    if (term) /* the action record (filter 1: the type table's entry, no next), then the type table */
-        vtext_format_append(
-            b,
-            "\t.byte\t1\n\t.byte\t0\n\t.p2align\t2\n\t.long\t0\n.Lvccttb%u:\n",
-            f);
+    codegen_eh_table_end(b, c, &W->eh_lsda, f);
 }

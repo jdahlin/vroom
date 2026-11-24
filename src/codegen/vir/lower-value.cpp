@@ -445,7 +445,7 @@ VPRIV void virbuild_ext(codegen_context *e, int r, int from, bool sgn)
                              v, 0, 0));
 }
 
-static uint32_t virbuild_integer_condition_code(int op, bool sgn)
+VPRIV uint32_t virbuild_integer_condition_code(int op, bool sgn)
 {
     switch (op) {
     case LEX_TOKEN_EQUAL_EQUAL:
@@ -491,8 +491,8 @@ VPRIV codegen_value virbuild_cmp(codegen_context *e, int op, int size, bool sgn,
 }
 
 /* to lbl if c (an i32 or i64) is nonzero, else on */
-static void virbuild_branch_if(codegen_context *e, uint32_t c, uint32_t lbl,
-                               bool nz)
+VPRIV void virbuild_branch_if(codegen_context *e, uint32_t c, uint32_t lbl,
+                              bool nz)
 {
     virbuild_context *V = e->vir_builder;
     uint32_t t = virbuild_label_block(e, lbl), f = virbuild_block_new(e);
