@@ -582,12 +582,34 @@ analysis_result semantic_analysis::overloaded_operator(
                     declares_move = true;
             /* a copy assignment operator declared defaulted has no
                candidate here, and is no implicit one */
-            if (!declares_move || entity_table[c].defaulted_copy_assignment ||
-                operands.size() != 2 ||
-                operands[1].type.unqualified() !=
-                    operands[0].type.unqualified())
-                return not_supported(n, "class.copy.assign");
-            deleted_copy = true;
+            bool implicit_viable = true;
+            if (!declares_move && !entity_table[c].defaulted_copy_assignment &&
+                !entity_table[c].defaulted_move_assignment &&
+                operands.size() == 2 &&
+                type_table[operands[1].type.unqualified()].entity == 0) {
+                /* [over.match.viable]/4: the implicit X& operator=(const
+                   X&) (and X&&) is no candidate when the right operand, of
+                   no class type, has no implicit conversion sequence to
+                   the parameter ([over.best.ics]): one operator= taking
+                   another type is the only candidate */
+                qualified_type parameter = qualified_type::make(
+                    type_table.lvalue_reference_to(qualified_type::make(
+                        entity_table[c].type.unqualified(), cv_const)),
+                    cv_none);
+                conversion_sequence s =
+                    implicit_conversion_sequence(operands[1], parameter, true);
+                if (s.kind == conversion_sequence::form::bad)
+                    implicit_viable = false;
+            }
+            if (implicit_viable) {
+                if (!declares_move ||
+                    entity_table[c].defaulted_copy_assignment ||
+                    operands.size() != 2 ||
+                    operands[1].type.unqualified() !=
+                        operands[0].type.unqualified())
+                    return not_supported(n, "class.copy.assign");
+                deleted_copy = true;
+            }
         }
     }
     /* [over.match.oper]/2, Table 15: a@ is "(a).operator@ (0)" or
