@@ -905,8 +905,25 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
        changes what vcc generates (class_head_attributes_without_effect) */
     auto e = n;
     uint32_t at = 1;
-    if (e.size() > 2 && class_head_attributes_without_effect(e[1]))
+    bool hidden = false;
+    if (e.size() > 2 && class_head_attributes_without_effect(e[1])) {
         at = 2;
+    } else if (e.size() > 2 && e[1].is(syntax_kind::gnu_attribute_specifier)) {
+        /* [ext:gnu_attributes] visibility("hidden") (libc++'s
+           _LIBCPP_HIDDEN) in a class's forward or friend declaration: the
+           class's, which its definition keeps */
+        gnu_attributes gnu;
+        VTRY(g, gnu_attribute_specifier(e[1], gnu));
+        if (!gnu.aligned && !gnu.section && !gnu.priority && !gnu.cleanup &&
+            gnu.flags == gnu_hidden_visibility) {
+            at = 2;
+            hidden = true;
+        }
+    }
+    auto declared = [&](entity_index k) {
+        if (hidden)
+            entity_table[k].gnu_flags |= gnu_hidden_visibility;
+    };
     size_t count = e.size() - (at - 1);
     standard_keyword key = leading_keyword(n);
     if (!is_class_key(key))
@@ -1000,6 +1017,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
             entity_table[c].access = declaration_access;
             entity_table[c].linkage_of_name =
                 entity_table[defining_class].linkage_of_name;
+            declared(c);
             type = entity_table[c].type.unqualified();
             return analysis_result::well_formed;
         }
@@ -1029,6 +1047,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
             return not_supported(n, "basic.lookup.elab");
         } else {
             c = declare_class(target, name, is_union);
+            declared(c);
             type = entity_table[c].type.unqualified();
             return analysis_result::well_formed;
         }
@@ -1065,6 +1084,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
                       entity_table.bound_by_using(target, name)))
                 return not_supported(n, "basic.lookup.elab");
             c = declare_class(target, name, is_union);
+            declared(c);
             type = entity_table[c].type.unqualified();
             return analysis_result::well_formed;
         }
@@ -1088,6 +1108,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
     if (entity_table[c].union_ != is_union)
         return not_supported(n, "dcl.type.elab");
     used(id, c);
+    declared(c);
     type = entity_table[c].type.unqualified();
     return analysis_result::well_formed;
 }
