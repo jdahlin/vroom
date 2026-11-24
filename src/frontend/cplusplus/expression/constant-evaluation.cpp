@@ -265,6 +265,10 @@ constness semantic_analysis::evaluate_conversion(constant_value &v,
     arithmetic_value(m, to);
     if (m.evaluation == constness::constant)
         v = value_of(to, m.value);
+    /* [conv.fpint]/1: a value that cannot be represented in the integer
+       type is undefined behavior ([expr.const]/5.7) */
+    if (m.evaluation == constness::not_constant)
+        return CONST_NOT_CONSTANT_RULE;
     return m.evaluation;
 }
 
@@ -289,6 +293,11 @@ constness semantic_analysis::evaluate_binary(uint8_t op, fundamental_type t,
                     kept_of(t, x), kept_of(right, y), value);
     if (c == constness::constant)
         out = value_of(result, value);
+    /* [expr.const]/5.7: an integer operation whose result is undefined
+       (division by zero, an overflow, a shift out of range); a floating
+       one is not decided */
+    if (c == constness::not_constant && !fundamental_type_is_floating(t))
+        return CONST_NOT_CONSTANT_RULE;
     return c;
 }
 
