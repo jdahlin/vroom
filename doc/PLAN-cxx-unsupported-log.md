@@ -746,3 +746,13 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   classes with layout bugs (layout refuted +29); find the exponential walk
   first.  Open: [temp.deduct] stage counts unchanged (narrowing in
   sizeof((T){1.1}), cwg13xx:659, cwg14xx:124).
+- 11.5 (e1a9f44fc, 395a3d06a, 033d6b535, 00e6415e2): a cast from void* to
+  an object pointer is not constant before C++26; semantic_kind_name had
+  lost two kinds, so --why's "logical_or" was really `binary` (a read of a
+  constexpr variable whose usability is unknown; cwg28xx.cpp:77 open); a
+  call of an undefined constexpr function is not constant.  [temp.explicit]
+  :363 is one form (189): `template struct N::B<float>;`, needs qualified
+  template lookup in template_id_name.  [dcl.spec.auto]:514 split: variable
+  with unanalysed initializer 96, specialization 46, defined function 32.
+  Unsupported 34891 -> 34878; types/constants_verified -15/-14 blessed
+  (declarations clang also rejects).
