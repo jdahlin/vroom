@@ -443,6 +443,46 @@ uint32_t semantic_analysis::own_type_parameter_position(qualified_type t,
     return UINT32_MAX;
 }
 
+/* whether e is a template template-parameter ([temp.param]/1): a template
+   of its own parameters whose record is_parameter */
+bool semantic_analysis::is_template_template_parameter(entity_index e) const
+{
+    const entity &named = entity_table[e];
+    return named.kind == entity_kind::template_entity && named.instantiation &&
+           named.instantiation <= function_templates.size() &&
+           function_templates[named.instantiation - 1].is_parameter &&
+           function_templates[named.instantiation - 1].entity == e;
+}
+
+/* [temp.param]/1's template template-parameter e: a class template of its
+   own parameters (in a scope of their own), never defined */
+analysis_result semantic_analysis::template_template_record(SyntaxRef n,
+                                                            SyntaxRef parameter,
+                                                            entity_index e,
+                                                            entity_index scope)
+{
+    template_parameter_parts form;
+    template_parameter_form(parameter, form);
+    owned_array<SyntaxRef> inner;
+    template_head_list(form.head, inner);
+    uint32_t own = static_cast<uint32_t>(function_templates.size());
+    entity_index inner_scope =
+        entity_table.make(entity_kind::block_scope, 0, scope);
+    function_template record;
+    record.entity = e;
+    record.name = e;
+    record.declaration = n;
+    record.first_parameter =
+        static_cast<uint32_t>(template_parameter_entities.size());
+    record.parameter_count = static_cast<uint32_t>(inner.size());
+    record.is_class = true;
+    record.is_parameter = true;
+    VTRY(r, declare_template_parameters(n, inner, inner_scope, own, 0));
+    entity_table[e].instantiation = own + 1;
+    function_templates.append(record);
+    return analysis_result::well_formed;
+}
+
 /*
  * [temp.param]/2: "There is no semantic difference between class and
  * typename in a type-parameter-key."  A type parameter's name is a
@@ -457,6 +497,15 @@ analysis_result semantic_analysis::declare_template_parameters(
 {
     owned_array<uint32_t> template_templates;
     uint32_t first = static_cast<uint32_t>(template_parameter_entities.size());
+    /* the template's own parameters stay contiguous: their slots are
+       reserved first, a template template-parameter's inner parameters
+       (declared as it is met, so that a later parameter's type can use
+       it) come after them */
+    for (size_t i = 0; i < parameters.size(); i++) {
+        template_parameter_entities.append(0);
+        template_parameter_nodes.append(parameters[i]);
+        template_parameter_default_names.append(first);
+    }
     for (size_t i = 0; i < parameters.size(); i++) {
         SyntaxRef node = parameters[i];
         template_parameter_parts form;
@@ -478,9 +527,10 @@ analysis_result semantic_analysis::declare_template_parameters(
                                        "temp.local");
         entity_index e = 0;
         if (form.template_template) {
-            /* its record made below, after the template's parameters */
             e = entity_table.make(entity_kind::template_entity, name, scope);
             template_templates.append(static_cast<uint32_t>(i));
+            template_parameter_entities[first + i] = e;
+            VTRY(rr, template_template_record(n, node, e, scope));
         } else if (form.type) {
             e = entity_table.make(entity_kind::typedef_name, name, scope);
             entity_table[e].type = qualified_type::make(
@@ -560,40 +610,14 @@ analysis_result semantic_analysis::declare_template_parameters(
         }
         entity_table[e].value = i;
         entity_table[e].defined = true;
-        entity_table[e].instantiation = index + 1;
+        if (!form.template_template)
+            entity_table[e].instantiation = index + 1;
         if (name)
             entity_table.bind(scope, name, e);
-        template_parameter_entities.append(e);
-        template_parameter_nodes.append(node);
-        template_parameter_default_names.append(first);
+        template_parameter_entities[first + i] = e;
     }
     if (template_templates.empty())
         return analysis_result::well_formed;
-    /* [temp.param]/1's template template-parameter: a class template of
-       its own parameters (in a scope of their own), never defined; its
-       records come before the template's, which moves to the end */
-    for (uint32_t i : template_templates) {
-        entity_index e = template_parameter_entities[first + i];
-        template_parameter_parts form;
-        template_parameter_form(parameters[i], form);
-        owned_array<SyntaxRef> inner;
-        template_head_list(form.head, inner);
-        uint32_t own = static_cast<uint32_t>(function_templates.size());
-        entity_index inner_scope =
-            entity_table.make(entity_kind::block_scope, 0, scope);
-        function_template record;
-        record.entity = e;
-        record.name = e;
-        record.declaration = n;
-        record.first_parameter =
-            static_cast<uint32_t>(template_parameter_entities.size());
-        record.parameter_count = static_cast<uint32_t>(inner.size());
-        record.is_class = true;
-        record.is_parameter = true;
-        VTRY(r, declare_template_parameters(n, inner, inner_scope, own, 0));
-        entity_table[e].instantiation = own + 1;
-        function_templates.append(record);
-    }
     index = static_cast<uint32_t>(function_templates.size());
     for (size_t i = 0; i < parameters.size(); i++) {
         entity_index e = template_parameter_entities[first + i];

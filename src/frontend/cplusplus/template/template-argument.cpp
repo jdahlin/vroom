@@ -830,8 +830,10 @@ analysis_result semantic_analysis::template_argument_for(
             continue;
         const entity &named = entity_table[e];
         /* (or an alias template's parameter bound to such an argument) */
+        bool template_template = is_template_template_parameter(e);
         bool parameter = (named.kind == entity_kind::none &&
                           named.instantiation && !named.held_by_template) ||
+                         template_template ||
                          named.kind == entity_kind::dependent_value ||
                          bound_pack_is_dependent(e);
         if (!parameter && (named.kind == entity_kind::none ||

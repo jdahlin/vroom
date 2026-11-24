@@ -5623,6 +5623,10 @@ class semantic_analysis
     /* [temp.param]: the parameters' entities in scope, for the template
        function_templates[index] will be; reserved is a name they shall not
        have ([temp.local]/6) */
+    bool is_template_template_parameter(entity_index e) const;
+    analysis_result template_template_record(SyntaxRef n, SyntaxRef parameter,
+                                             entity_index e,
+                                             entity_index scope);
     analysis_result declare_template_parameters(
         SyntaxRef n, const owned_array<SyntaxRef> &parameters,
         entity_index scope, uint32_t &index, uint32_t reserved);
