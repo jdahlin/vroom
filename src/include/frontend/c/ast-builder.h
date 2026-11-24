@@ -133,6 +133,25 @@ void ast_builder_symbol_flags_add(cc *c, uint32_t s, uint32_t flags);
    routine (C++: __gxx_personality_v0, C: __gcc_personality_v0, as clang).  Once per TU, before a
    function with a cleanup variable is emitted; no effect without options->eh (doc/PLAN-vir-eh.md). */
 void ast_builder_exceptions_ready(cc *c, bool cxx);
+/* try/catch (doc/PLAN-vir-eh.md E3).  A handler's catch type is a symbol (the _ZTI object of the type,
+   AST_SYMBOL_VARIABLE) or 0 for catch (...). */
+typedef struct ast_builder_catch {
+    uint32_t type; /* _ZTI symbol, 0: catch (...) */
+    uint32_t body; /* the handler's statement */
+} ast_builder_catch;
+/* A try statement: body, then the handlers.  `exception` is a void * local the builder declares in the
+   statement's own block (the caller does not): when a handler is entered it holds the pointer the
+   unwinder delivered, the operand of __cxa_begin_catch.  The statement the handler runs to its end
+   continues after the try; a call in `body` that unwinds is matched against the handlers in order
+   (the selector against the type table, as [except.handle]), cleanup variables in between run, and none
+   matching continues the unwinding.  The back end matches types only through the LSDA: the handler's
+   body calls __cxa_begin_catch(exception) itself and keeps __cxa_end_catch on every exit by a
+   cleanup variable whose function is ast_builder_end_catch_function (the call [except.handle]
+   describes).  Returns the statement. */
+uint32_t ast_builder_try(cc *c, uint32_t body, uint32_t exception,
+                         const ast_builder_catch *handlers, uint32_t count);
+/* void __cxa_end_catch(void *): the cleanup function of a handler's variable (it ignores the argument) */
+uint32_t ast_builder_end_catch_function(cc *c);
 /* GNU C's __attribute__((section(name))): the section the symbol is
    placed in */
 void ast_builder_symbol_section(cc *c, uint32_t s, const char *name,

@@ -147,6 +147,8 @@ typedef struct walk_state {
     } eh_sites[WALK_EH_SITES];
     uint32_t eh_nsites, eh_marks, eh_term, eh_pad[WALK_CLEANUP_MAX];
     uint8_t eh_fn, eh_in_pads, eh_overflow;
+    codegen_eh_lsda
+        eh_lsda; /* the catch types and actions (codegen/eh-table.cpp) */
     uint8_t *
         eh_seen; /* the printer: per mark, written (passes after the walker may delete a call; calloc'ed) */
     uint32_t *cleanup_symbol_nodes, *cleanup_symbol_generations,

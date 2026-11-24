@@ -475,6 +475,27 @@ struct codegen_debug_row {
     uint32_t record_index, file, line, column;
 };
 
+/* The LSDA's type and action tables of one function (codegen/eh-table.cpp, doc/PLAN-vir-eh.md E3): the
+   catch types in first-use order (a filter value is the 1-based index; symbol 0 is catch (...)) and one
+   action chain per distinct list of catch types a call site can see. */
+#define CODEGEN_EH_TYPES 32
+#define CODEGEN_EH_CHAINS 32
+#define CODEGEN_EH_CHAIN_TYPES 8
+typedef struct codegen_eh_chain {
+    uint32_t types
+        [CODEGEN_EH_CHAIN_TYPES]; /* catch types, innermost first (0: catch (...), the chain's end) */
+    uint32_t count;
+    bool
+        cleanup; /* a cleanup runs on the way (the chain ends in filter 0 unless it ends in catch (...)) */
+    bool closed; /* a catch (...) was added: nothing outside it is reachable */
+    uint16_t offset; /* in the action table, of the first record */
+} codegen_eh_chain;
+typedef struct codegen_eh_lsda {
+    uint32_t types[CODEGEN_EH_TYPES], type_count;
+    codegen_eh_chain chains[CODEGEN_EH_CHAINS];
+    uint32_t chain_count, action_size;
+    uint8_t actions[CODEGEN_EH_CHAINS * (CODEGEN_EH_CHAIN_TYPES + 1) * 2];
+} codegen_eh_lsda;
 typedef struct codegen_context {
     codegen_unit *unit;
     cc *compile_context;
@@ -581,6 +602,8 @@ typedef struct codegen_context {
     uint32_t eh_site_count, eh_node_count, eh_node_capacity, eh_terminate_pad;
     int64_t
         eh_slot; /* the exception, at a landing pad (a slot of the whole function) */
+    int64_t eh_selector_slot; /* ... and the selector (catch scopes) */
+    codegen_eh_lsda eh_lsda;
     int eh_cleanup_limit; /* while cleanup k runs on the normal path: k (it no longer covers calls) */
     bool eh_function, eh_in_pads;
     codegen_function_instance *function_instance;
@@ -1106,6 +1129,32 @@ codegen_fatal_report(codegen_context *e, uint32_t loc, const char *fmt, ...);
 /* type.c */
 VPRIV uint32_t codegen_symbol_canonical(cc *c, uint32_t s);
 VPRIV const attrs *codegen_symbol_attributes(cc *c, uint32_t s);
+/* the scope symbol's handlers: (type symbol or 0, label) pairs; NULL when s is not a catch scope */
+static inline const uint32_t *codegen_catch_scope(cc *c, uint32_t s,
+                                                  uint32_t *count)
+{
+    const attrs *a = codegen_symbol_attributes(c, s);
+
+    if (!a->catch_count)
+        return NULL;
+    *count = a->catch_count;
+    return c->lists + a->catch_list + 1; /* [0] is the exception variable */
+}
+
+VPRIV uint32_t
+codegen_eh_type_index(codegen_context *e, codegen_eh_lsda *l,
+                      uint32_t symbol); /* 1-based; catch (...): symbol 0 */
+VPRIV void codegen_eh_chain_node(
+    codegen_eh_chain *k, cc *c,
+    uint32_t
+        symbol); /* the node (a cleanup variable or a catch scope) added, innermost first */
+VPRIV uint32_t
+codegen_eh_action(codegen_context *e, codegen_eh_lsda *l,
+                  const codegen_eh_chain *k); /* a call site's action field */
+VPRIV void codegen_eh_table_begin(tbuf *b, const codegen_eh_lsda *l,
+                                  uint32_t id); /* up to the call sites */
+VPRIV void codegen_eh_table_end(tbuf *b, cc *c, const codegen_eh_lsda *l,
+                                uint32_t id); /* after them: actions, types */
 
 /* memcpy/memmove/memset declared by a header (symbol s, na arguments): clang's builtin at -O1 and up (not
  * under -ffreestanding/-fno-builtin[-NAME]).  CC_LIBRARY_KIND_MEMCPY.., or 0 */

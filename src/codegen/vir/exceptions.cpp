@@ -38,6 +38,15 @@ static void virbuild_eh_node_slots_note(codegen_context *e, uint32_t node)
     virbuild_context *V = e->vir_builder;
     walk_state *W = e->walk_state;
 
+    for (uint32_t m = node; m && m < VIRBUILD_EH_NODES;
+         m = W->cleanup_nodes[m].parent) {
+        uint32_t count;
+
+        if (codegen_catch_scope(e->compile_context, W->cleanup_nodes[m].symbol,
+                                &count))
+            virbuild_fail(
+                e, VIRBUILD_FAILURE(exceptions)); /* (a try block: not yet) */
+    }
     for (uint32_t m = node; m && m < VIRBUILD_EH_NODES && !V->eh_node_slots[m];
          m = W->cleanup_nodes[m].parent) {
         int64_t rel;
