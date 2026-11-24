@@ -20,7 +20,10 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
                           line with its reason (the standard's paragraph
                           or the core issue)
              we accept    well-formed, clang rejects: a rule that is not
-                          enforced yet (counted)
+                          enforced yet, a failure unless
+                          src/test/cxx/sema/clang-accepted.txt lists the
+                          line (--check: a new one fails, a gone one is
+                          stale; --bless rewrites the list)
              unsupported  rules that are not written: nothing concluded
              not parsed   the parser's (an erroneous node, or one kept as
                           tokens), or clang's error there is one of syntax
@@ -121,6 +124,14 @@ WIDER_SUITES = ('CXX', 'SemaCXX', 'SemaTemplate', 'CodeGenCXX', 'Parser',
                 'Sema')
 KNOWN_FAILURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                               'src/test/cxx/sema/clang-failures.txt')
+# the declarations we accept and clang rejects (a rule not enforced yet), one
+# TEST:LINE OPTIONS line each: --check fails on a new one and on a stale one
+KNOWN_ACCEPTED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              'src/test/cxx/sema/clang-accepted.txt')
+ACCEPTED_HEADER = '''# declarations bench/cxx-sema.py's analysis finds well-formed and clang rejects (we accept): TEST:LINE OPTIONS.
+# A rule not enforced yet, known.  --check fails on a line not listed here (a new we-accept: name its
+# cause) and on a listed one that is gone (stale); `bench/cxx-sema.py --bless` rewrites the list.
+'''
 METRICS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'src/test/cxx/sema/clang-metrics.json')
 # a number that differs by this much or less from the baseline is host noise (CI's arm64 runner
@@ -1238,14 +1249,15 @@ def main():
         print(f'unsupported by subclause ({len(unsupported)}): {top}')
     if a.why is not None:
         why_report(results, a.why)
+    # every declaration we accept and clang rejects, one line each
+    accepted = sorted(f'{relative(r["test"])}:{first} {" ".join(r["opts"])}'
+                      for r in results for first in r.get('accepted', []))
     if not a.patterns:
-        # every declaration we accept and clang rejects, one line each:
         # a step's new ones are the diff against the previous run's file
         path = os.path.join(R, 'work', 'cxx-sema-accepted.txt')
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w') as f:
-            for line in sorted(f'{relative(r["test"])}:{first} {" ".join(r["opts"])}'
-                               for r in results for first in r.get('accepted', [])):
+            for line in accepted:
                 f.write(line + '\n')
     if missing:
         print(f'not fetched: clang/test/{", clang/test/".join(missing)} (bench/fetch-testsuites.sh llvm)')
@@ -1273,6 +1285,11 @@ def main():
             for key in sorted(failed):
                 f.write(key + '\n')
         print(f'{relative(KNOWN_FAILURES)}: {len(failed)} known failures')
+        with open(KNOWN_ACCEPTED, 'w') as f:
+            f.write(ACCEPTED_HEADER)
+            for line in accepted:
+                f.write(line + '\n')
+        print(f'{relative(KNOWN_ACCEPTED)}: {len(accepted)} declarations we accept and clang rejects')
         with open(METRICS, 'w') as f:
             json.dump(metrics, f, indent=1, sort_keys=True)
             f.write('\n')
@@ -1280,6 +1297,7 @@ def main():
         return 0
     if a.check:
         rc = check_known(failed, {relative(t) for t in seen})
+        rc |= check_accepted(accepted, {relative(t) for t in seen})
         if not a.patterns:
             rc |= check_metrics(metrics)
         return rc
@@ -1360,6 +1378,29 @@ def check_known(failed, ran):
         print(f'STALE  {k}')
     print(f'known failures: {len(known)} listed, {len(new)} new, {len(stale)} stale '
           f'(a fix removes its line: bench/cxx-sema.py --bless)')
+    return 1 if new or stale else 0
+
+
+def check_accepted(accepted, ran):
+    """The we-accept lines against src/test/cxx/sema/clang-accepted.txt (a
+    multiset: two declarations may start on one line): a new one fails, a
+    listed one that is gone is stale and fails too (--bless rewrites it)."""
+    known = collections.Counter()
+    if os.path.exists(KNOWN_ACCEPTED):
+        for line in open(KNOWN_ACCEPTED):
+            line = line.rstrip('\n')
+            if line and not line.startswith('#'):
+                known[line] += 1
+    now = collections.Counter(accepted)
+    new = sorted((now - known).elements())
+    # only a line of a test that ran can be stale (a PATTERN runs a part)
+    stale = sorted(k for k in (known - now).elements() if k.split(':', 1)[0] in ran)
+    for k in new:
+        print(f'NEW ACCEPT    {k}')
+    for k in stale:
+        print(f'STALE ACCEPT  {k}')
+    print(f'we accept, clang rejects: {sum(known.values())} listed, {len(new)} new, {len(stale)} stale '
+          f'({relative(KNOWN_ACCEPTED)}; bench/cxx-sema.py --bless rewrites it)')
     return 1 if new or stale else 0
 
 
