@@ -690,7 +690,20 @@ analysis_result semantic_analysis::template_argument_for(
             if (placeholder_to)
                 to = qualified_type::make(
                     entity_table[named].type.unqualified(), cv_none);
-            if (!(entity_table[named].type == to))
+            /* [dcl.type.auto.deduct]/2: the name of a parameter declared
+               with a placeholder (template <auto V>) has a type only once
+               V's argument is known, so the argument is value-dependent
+               and is checked against this parameter's type
+               ([temp.arg.nontype]/2) at the instantiation (a scalar
+               integral or enumeration type only: a reference or pointer
+               parameter's argument needs the deduced type now,
+               [temp.deduct.type]/ex 13) */
+            bool deferred =
+                type_table[entity_table[named].type.unqualified()].kind ==
+                    type_kind::placeholder &&
+                (is_integral(to) ||
+                 type_table[to.unqualified()].kind == type_kind::enumeration);
+            if (!deferred && !(entity_table[named].type == to))
                 return not_supported(at, "temp.arg.nontype");
             out.kind = template_argument::kind_t::value;
             out.type = to;
