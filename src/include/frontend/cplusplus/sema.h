@@ -3575,7 +3575,8 @@ class semantic_analysis
     /* [meta.rel] is_convertible; known false when analysis cannot tell */
     bool copy_constructible_from(entity_index c, value_category category,
                                  bool source_const, bool &known);
-    bool convertible_types(qualified_type from, qualified_type to, bool &known);
+    bool convertible_types(SyntaxRef n, qualified_type from, qualified_type to,
+                           bool &known);
     /* [meta.unary.prop] is_constructible and is_nothrow_constructible
        (ext/clang/constructible-traits.cpp): the analysis of T t(declval<
        Args>()...); */

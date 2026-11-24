@@ -520,7 +520,7 @@ bool semantic_analysis::copy_constructible_from(entity_index c,
    otherwise, and a To that is an array, a function or an abstract class
    (no object to return), is false.  declval<From>() is From&&: an xvalue,
    a function's lvalue.  unknown when the analysis cannot tell. */
-bool semantic_analysis::convertible_types(qualified_type from,
+bool semantic_analysis::convertible_types(SyntaxRef n, qualified_type from,
                                           qualified_type to, bool &known)
 {
     known = true;
@@ -576,9 +576,24 @@ bool semantic_analysis::convertible_types(qualified_type from,
     }
     if (!s.function && t.kind == type_kind::class_type &&
         type_table[value.type.unqualified()].kind == type_kind::class_type &&
-        type_table[value.type.unqualified()].entity == t.entity)
+        type_table[value.type.unqualified()].entity == t.entity) {
+        /* [dcl.init]/17.6.2: copy-initialization from the class's own type
+           considers all its constructors, [temp.mem]/1: the specializations
+           of its constructor templates too, which a template taking the
+           argument by forwarding reference can win over the copy
+           constructor ([over.match.best]/2.5, [over.ics.rank]/3.2.3) */
+        if (entity_table[t.entity].constructor_templates) {
+            initialized_value made;
+            bool ok = false;
+            analysis_result r =
+                try_initialization(n, value, to, false, made, ok);
+            if (r != analysis_result::well_formed)
+                known = false;
+            return ok;
+        }
         return copy_constructible_from(
             t.entity, value.category, (value.type.cv() & cv_const) != 0, known);
+    }
     return true;
 }
 
@@ -728,7 +743,7 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
     bool answer = t == u;
     if (convertible) {
         bool known = true;
-        answer = convertible_types(t, u, known);
+        answer = convertible_types(n, t, u, known);
         if (!known)
             return not_supported(n, "over.best.ics");
         /* a class's conversion functions and constructors may throw: not
