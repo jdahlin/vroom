@@ -1674,6 +1674,25 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             return base_subobject_place(state, from, x.b, object);
         return derived_object_place(state, from, x.b, object);
     }
+    /* [expr.call]/14: a call of a function that returns a reference is a
+       glvalue that designates the object its return statement bound the
+       result to ([stmt.return]/2), the address the call's value holds */
+    case semantic_kind::call: {
+        if (x.category == value_category::prvalue)
+            break;
+        /* clang's builtins std::move, std::move_if_noexcept,
+           std::forward, std::forward_like and std::as_const: the call
+           designates its argument's object, whatever the body */
+        if (uint32_t argument = std_identity_argument(node))
+            return evaluate_object(state, argument, object);
+        constant_value bound;
+        c = evaluate_call(state, node, bound);
+        if (c != constness::constant)
+            return c;
+        if (bound.kind != constant_value_kind::pointer || !bound.count)
+            return CONST_UNKNOWN;
+        return pointed_place(state, bound, object);
+    }
     case semantic_kind::construct: {
         if (!x.a)
             break;
@@ -3105,9 +3124,16 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         }
         if (c != constness::constant)
             return c;
+        uint32_t chosen = x.c;
         if (v.integer != 0)
-            return evaluate_node(state, second, v);
-        return evaluate_node(state, x.c, v);
+            chosen = second;
+        c = evaluate_node(state, chosen, v);
+        /* clang folds the arm a __builtin_constant_p condition chooses,
+           as GCC does (`__builtin_constant_p(x) ? x : x` of a
+           reinterpret_cast's value is a constant there): not modelled */
+        if (c == constness::not_constant && constant_p_call(x.a))
+            return CONST_UNKNOWN;
+        return c;
     }
     case semantic_kind::comma: {
         c = evaluate_node(state, x.a, v);
@@ -3424,6 +3450,61 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
     }
 }
 
+/* a call of __builtin_constant_p (converted to bool or not) */
+bool semantic_analysis::constant_p_call(uint32_t node) const
+{
+    while (node && semantics[node].kind == semantic_kind::conversion)
+        node = semantics[node].a;
+    if (!node || semantics[node].kind != semantic_kind::call)
+        return false;
+    uint32_t callee = semantics[node].a;
+    if (semantics[callee].kind == semantic_kind::conversion &&
+        static_cast<conversion_kind>(semantics[callee].op) ==
+            conversion_kind::function_to_pointer)
+        callee = semantics[callee].a;
+    if (semantics[callee].kind != semantic_kind::entity)
+        return false;
+    uint16_t row = entity_table[semantics[callee].a].gnu_builtin_row;
+    return row && gnu_builtin_at(row).fold == builtin_fold::constant_p;
+}
+
+/* a call of std::move, std::move_if_noexcept, std::forward,
+   std::forward_like or std::as_const (in std or an inline namespace of it,
+   libc++'s std::__1), which clang treats as builtins that return their
+   argument: that argument's node, else 0 */
+uint32_t semantic_analysis::std_identity_argument(uint32_t node) const
+{
+    const semantic_node &x = semantics[node];
+    if (x.count != 1 || x.b)
+        return 0;
+    uint32_t callee = x.a;
+    if (semantics[callee].kind == semantic_kind::conversion &&
+        static_cast<conversion_kind>(semantics[callee].op) ==
+            conversion_kind::function_to_pointer)
+        callee = semantics[callee].a;
+    if (semantics[callee].kind != semantic_kind::entity)
+        return 0;
+    entity_index f = semantics[callee].a;
+    if (entity_table[f].kind != entity_kind::function ||
+        !entity_table[f].instantiation)
+        return 0;
+    static const char *const names[] = {"move", "move_if_noexcept", "forward",
+                                        "forward_like", "as_const"};
+    bool found = false;
+    for (const char *name : names)
+        if (named(f, name))
+            found = true;
+    if (!found)
+        return 0;
+    entity_index scope = entity_table[f].enclosing;
+    while (scope && entity_table[scope].kind == entity_kind::namespace_entity &&
+           entity_table[scope].inline_)
+        scope = entity_table[scope].enclosing;
+    if (!std_namespace(scope))
+        return 0;
+    return semantics.items(x.first)[0];
+}
+
 /*
  * [expr.call]/7 with [dcl.constexpr]: the invocation of a constexpr
  * function.  [expr.const]/5.2: "an invocation of a non-constexpr function"
@@ -3664,11 +3745,42 @@ constness semantic_analysis::evaluate_invocation(
        parameter": in order, as none of them can see another.  The
        arguments are evaluated in the caller's frame and kept as the
        parameters of the new one. */
-    size_t saved = state.objects.size();
-    size_t saved_elements = state.elements.size();
+    size_t before_arguments = state.objects.size();
+    size_t before_argument_elements = state.elements.size();
     uint32_t frame = state.frames + 1;
     const uint32_t *items = semantics.items(first);
     const uint32_t *parameters = semantics.items(semantics[body].first);
+    /* the arguments first: a temporary one materializes (bound to a
+       reference parameter) is the caller's, and lives until the end of
+       the full-expression containing the call ([class.temporary]/6.9), so
+       a reference the call returns to it can be read there */
+    owned_array<constant_value> values;
+    constness arguments = constness::constant;
+    for (uint32_t i = 0; i < count; i++) {
+        constant_value value;
+        constness c = evaluate_node(state, items[i], value);
+        if (c == constness::unknown && state.potential)
+            arguments = c;
+        else if (c != constness::constant) {
+            restore(state, before_arguments,
+                    kept_elements(state, before_argument_elements, returned,
+                                  result));
+            return c;
+        }
+        /* clang: "null passed to a callee that requires a non-null
+           argument" is not a constant expression; which argument the
+           attribute names is not modelled */
+        else if ((e.gnu_flags & gnu_nonnull) &&
+                 value.kind == constant_value_kind::pointer && !value.count) {
+            restore(state, before_arguments,
+                    kept_elements(state, before_argument_elements, returned,
+                                  result));
+            return CONST_UNKNOWN;
+        }
+        values.append(value);
+    }
+    size_t saved = state.objects.size();
+    size_t saved_elements = state.elements.size();
     if (with_this) {
         constant_evaluation::object o;
         o.entity = parameters[0];
@@ -3676,28 +3788,9 @@ constness semantic_analysis::evaluate_invocation(
         o.value = self;
         append_object(state, o);
     }
-    constness arguments = constness::constant;
-    for (uint32_t i = 0; i < count; i++) {
+    for (uint32_t i = 0; i < count && arguments == constness::constant; i++) {
         constant_evaluation::object o;
-        constness c = evaluate_node(state, items[i], o.value);
-        if (c == constness::unknown && state.potential) {
-            arguments = c;
-            continue;
-        }
-        if (c != constness::constant) {
-            restore(state, saved,
-                    kept_elements(state, saved_elements, returned, result));
-            return c;
-        }
-        /* clang: "null passed to a callee that requires a non-null
-           argument" is not a constant expression; which argument the
-           attribute names is not modelled */
-        if ((e.gnu_flags & gnu_nonnull) &&
-            o.value.kind == constant_value_kind::pointer && !o.value.count) {
-            restore(state, saved,
-                    kept_elements(state, saved_elements, returned, result));
-            return CONST_UNKNOWN;
-        }
+        o.value = values[i];
         o.entity = parameters[i + with_this];
         o.frame = frame;
         append_object(state, o);
@@ -3711,8 +3804,9 @@ constness semantic_analysis::evaluate_invocation(
             add_destroyed(state, declared);
     }
     if (arguments != constness::constant) {
-        restore(state, saved,
-                kept_elements(state, saved_elements, returned, result));
+        restore(
+            state, before_arguments,
+            kept_elements(state, before_argument_elements, returned, result));
         return arguments;
     }
     uint32_t caller = state.frame;

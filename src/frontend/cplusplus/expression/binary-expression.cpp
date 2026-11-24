@@ -1228,6 +1228,10 @@ analysis_result semantic_analysis::conditional_operands(
         if (m.evaluation == constness::constant)
             m.evaluation = constness::unknown;
     }
+    /* clang folds the arm a __builtin_constant_p condition chooses (the
+       evaluator's conditional): not decided here */
+    if (m.evaluation == constness::not_constant && constant_p_call(c.node))
+        m.evaluation = constness::unknown;
     m.node = expression_node(semantic_kind::conditional, m, n.first_token(),
                              c.node, e2.node);
     semantics[m.node].c = e3.node;
