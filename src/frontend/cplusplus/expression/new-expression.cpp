@@ -705,9 +705,14 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         semantic_node &v = semantics[value.node];
         if (v.kind == semantic_kind::construct)
             v.a = object.node;
-        else if (c && v.kind != semantic_kind::initializer_list)
+        else if (c && v.kind != semantic_kind::initializer_list &&
+                 !(v.kind == semantic_kind::conversion &&
+                   v.op ==
+                       static_cast<uint8_t>(conversion_kind::lvalue_to_rvalue)))
             /* a prvalue of the class (a call), stored in the object it
-               initializes ([dcl.init]/17.6.1) */
+               initializes ([dcl.init]/17.6.1); an lvalue-to-rvalue copy of
+               a trivially copyable object ([dcl.init]/17.6.2, [conv.lval])
+               is lowered as an assignment into the allocated object */
             return not_supported(n, "expr.new");
     }
     m.node = expression_node(semantic_kind::new_object, m, at, call.node,
