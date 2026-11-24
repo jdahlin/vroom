@@ -297,6 +297,33 @@ entity_index semantic_analysis::value_parameter_named(SyntaxElement e)
     return 0;
 }
 
+/* [temp.dep.constexpr]/2: the first non-type template-parameter an
+   expression e (a node, not a bare name) names in a template's own
+   declaration (0 if none); a name after "::", "." or "->" is a member's */
+entity_index semantic_analysis::value_parameter_in(SyntaxElement e)
+{
+    if (e.is_token())
+        return 0;
+    SyntaxRef n = e;
+    for (token_index t = n.first_token(); t < n.end_token(); t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        if (t > n.first_token() &&
+            tokens[t - 1].kind == token_kind::operator_or_punctuator) {
+            preprocessing_op_or_punc op =
+                preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc);
+            if (op == preprocessing_op_or_punc::COLON_COLON ||
+                op == preprocessing_op_or_punc::DOT ||
+                op == preprocessing_op_or_punc::ARROW)
+                continue;
+        }
+        if (entity_index named =
+                value_parameter_named(SyntaxElement::from_token(t)))
+            return named;
+    }
+    return 0;
+}
+
 /*
  * [dcl.array]/1: "In a declaration T D where D has the form
  *     D1 [ constant-expression_opt ] attribute-specifier-seq_opt
@@ -350,6 +377,18 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
             return not_supported(at, "temp.dep.constexpr");
         type = qualified_type::make(
             type_table.array_of_parameter_bound(type, named), cv_none);
+        return analysis_result::well_formed;
+    }
+    /* ... and an expression of one (T (&)[N + 1]) is value-dependent too
+       ([temp.dep.constexpr]/2): the type records the parameter and the
+       expression's first token (a non-deduced context,
+       [temp.deduct.type]/5.3); each instantiation analyses the declarator
+       again */
+    if (entity_index named = value_parameter_in(bound)) {
+        type = qualified_type::make(
+            type_table.array_of_parameter_bound(
+                type, named, SyntaxRef(bound).first_token() + 1),
+            cv_none);
         return analysis_result::well_formed;
     }
     expression_meaning m;

@@ -147,7 +147,9 @@ struct type {
     uint32_t entity = 0;
     /* array: the bound N; in a template's own declaration a bound that is
        a non-type template-parameter's name (T[N], [temp.deduct.type]/8's
-       T[i]) is that parameter's entity, with bound_known and bound 0;
+       T[i]) is that parameter's entity, with bound_known and bound 0; an
+       expression naming one (T[N + 1]) has the expression's first token + 1
+       as bound (a non-deduced context);
        pointer to member of a dependent class ([temp.dep.type]/9): the
        class's type */
     uint64_t bound = 0;
@@ -180,7 +182,8 @@ class types
     type_index array_of(qualified_type element, uint64_t bound);
     type_index array_of_unknown_bound_of(qualified_type element);
     type_index array_of_parameter_bound(qualified_type element,
-                                        uint32_t parameter);
+                                        uint32_t parameter,
+                                        uint64_t expression = 0);
     /* [ext:clang_vla] element[node], node a run-time bound */
     type_index array_of_variable_bound(qualified_type element, uint32_t node);
     type_index function(qualified_type result, const qualified_type *parameters,
@@ -3541,6 +3544,7 @@ class semantic_analysis
     uint64_t ext_vector_layout(const type &record, bool alignment) const;
     uint64_t bit_int_layout(uint64_t width, bool alignment) const;
     entity_index value_parameter_named(SyntaxElement e);
+    entity_index value_parameter_in(SyntaxElement e);
     analysis_result potentially_throwing(SyntaxRef n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_void_operand(SyntaxRef n,

@@ -448,6 +448,20 @@ analysis_result semantic_analysis::declare_template_parameters(
                     type = qualified_type::make(type_table.pointer_to(type),
                                                 cv_none);
             }
+            /* [temp.dep.constexpr]/2: a parameter type whose array bound is
+               an expression of another parameter (int (*)[sizeof(f(V))]):
+               the arguments' conversions to it are not analysed */
+            for (qualified_type walk = type;;) {
+                const struct type &w = type_table[walk.unqualified()];
+                if (w.kind == type_kind::array && w.entity && w.bound)
+                    return not_supported(node, "temp.param");
+                if (w.kind != type_kind::pointer &&
+                    w.kind != type_kind::array &&
+                    w.kind != type_kind::lvalue_reference &&
+                    w.kind != type_kind::rvalue_reference)
+                    break;
+                walk = w.operand;
+            }
             bool own_parameter_type =
                 own_type_parameter_position(type, scope, first) != UINT32_MAX;
             bool placeholder = contains_placeholder(type);

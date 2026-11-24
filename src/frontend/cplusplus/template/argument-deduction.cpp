@@ -17,9 +17,9 @@ qualified_type semantic_analysis::remove_cv(qualified_type t, uint32_t cv)
         return qualified_type::make(t.unqualified(), t.cv() & ~cv);
     qualified_type element = remove_cv(record.operand, cv);
     if (record.entity)
-        return qualified_type::make(
-            type_table.array_of_parameter_bound(element, record.entity),
-            t.cv() & ~cv);
+        return qualified_type::make(type_table.array_of_parameter_bound(
+                                        element, record.entity, record.bound),
+                                    t.cv() & ~cv);
     if (record.bound_known)
         return qualified_type::make(type_table.array_of(element, record.bound),
                                     t.cv() & ~cv);
@@ -298,7 +298,14 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
     case type_kind::array:
         if (pr.entity && ar.entity && exact) {
             /* [temp.over.link]/7: the same parameter's position */
-            if (entity_table[pr.entity].value != entity_table[ar.entity].value)
+            if (entity_table[pr.entity].value !=
+                    entity_table[ar.entity].value ||
+                pr.bound != ar.bound)
+                return false;
+        } else if (pr.entity && pr.bound) {
+            /* [temp.deduct.type]/5.3: an expression naming a parameter in
+               an array bound is a non-deduced context */
+            if (!ar.bound_known)
                 return false;
         } else if (pr.entity) {
             /* [temp.deduct.type]/8's T[i]: i the bound of A's array,

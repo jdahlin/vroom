@@ -850,3 +850,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   cxx2b-deducing-this-coro.cpp lines (co_return in an instantiated body,
   newly analysed after the coroutine_traits partial specialization) kept as
   a known gap; -6 rejected as clang.
+- 11.15a: an array bound that is an expression naming a non-type template
+  parameter (`-> int (&)[N + 1]`, `int (&f())[N * 2]`) is value-dependent
+  ([temp.dep.constexpr]/2): the type keeps the parameter and the expression's
+  first token (a non-deduced context, [temp.deduct.type]/5.3), instantiation
+  analyses the declarator again.  A non-type parameter whose own type has such
+  a bound stays held (the argument conversion to it is not analysed).
+  Unsupported 34523 -> 34466, we reject 390, we accept 5311 -> 5312
+  (SemaTemplate/canonical-expr-type.cpp:36: f1(T(&)[M + N]) redefinition,
+  equivalence of expressions is by their token, not canonical).
