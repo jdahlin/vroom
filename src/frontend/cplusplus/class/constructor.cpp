@@ -1643,12 +1643,12 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     arguments[0].category == value_category::prvalue &&
                     arguments[0].type.unqualified() == type.unqualified();
                 initialized_value value;
-                if (elided && !trivial_class(record.entity)) {
+                if (elided) {
                     /* [class.copy.elision]/1.3 ([dcl.init]/17.6.1): the
                        prvalue initializes the member itself, whatever its
                        copy and move constructors do (as a variable's
-                       initializer, initialize_with); only a class that has
-                       a constructor reaches here */
+                       initializer, initialize_with), also for a trivially
+                       copyable class with a user-provided constructor */
                     VTRY(rv, initialize_with(item, arguments[0], type, true,
                                              false, value));
                     set_slot(
@@ -1768,6 +1768,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 union_default = i;
                 union_member_designated = true;
             }
+    /* (9.2) a variant member that is neither designated nor has a default
+       member initializer: "no initialization is performed" */
+    if (entity_table[c].union_)
+        union_member_designated = true;
     for (size_t i = 0; i < subobjects.size(); i++) {
         if (initialized[i])
             continue;
