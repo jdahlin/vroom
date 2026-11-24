@@ -612,3 +612,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   address comparison), "answered no value" (32), reserved placement new's
   proper evaluation (constants_refuted +5 when the object is initialized
   in place).
+- 10.1 (bee28e023, 7710443c6, 74fec7aef, 07a279ea8, 78fc55bbc, 427b99fb6,
+  e61056046): member template explicit specialization declarations,
+  specializations and explicit instantiations through inline namespaces,
+  qualified elaborated specialization declarations ([temp.expl.spec]/2),
+  variable template specializations without an initializer and explicit
+  instantiations of variable templates.  Unsupported 35616 -> 35428, we
+  reject unchanged, we accept -4.  Needs a design: an explicit
+  specialization of a member class or member class template of a class
+  template specialization (template<> struct S0<int>::S1;).
