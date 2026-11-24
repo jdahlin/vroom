@@ -2203,6 +2203,10 @@ class semantic_analysis
     /* the function type of a deduction-guide: its parameters returning the
        class template specialization it names (in the scope current) */
     analysis_result deduction_guide_type(SyntaxRef guide, qualified_type &type);
+    /* [over.match.class.deduct]/1.1: the implicit guides of the class
+       template ct made from its constructors (once) */
+    void implicit_deduction_guides(uint32_t ct);
+    analysis_result implicit_guide_member(uint32_t ct, SyntaxElement member);
     /* [over.match.class.deduct]/1, [dcl.type.class.deduct]/2: the class
        template specialization the placeholder for a deduced class type
        (the class template whose function_templates' index plus one is
@@ -5266,8 +5270,23 @@ class semantic_analysis
            guide's parameters returning the class template's
            specialization it names */
         uint32_t guide_of = 0;
+        /* an implicit deduction guide ([over.match.class.deduct]/1.1) made
+           from a constructor of the class template: its declarator is the
+           constructor's parameters-and-qualifiers; explicit_guide: the
+           constructor is explicit (or conditionally so) */
+        bool implicit_guide = false, explicit_guide = false;
+        /* ... of a constructor template */
+        bool guide_of_template = false;
+        /* a class template whose implicit guides are made */
+        bool guides_made = false;
     };
     owned_array<function_template> function_templates;
+    /* the function type of an implicit guide specialization: the
+       constructor's parameters returning the class specialization */
+    analysis_result implicit_guide_type(const function_template &ft,
+                                        const template_argument *arguments,
+                                        SyntaxRef at, qualified_type &type);
+    bool class_parameter_of_guide(qualified_type t) const;
     function_template new_template(uint32_t name, entity_index outer,
                                    SyntaxRef n, uint32_t index, uint32_t first,
                                    uint32_t count);
