@@ -1211,7 +1211,13 @@ analysis_result semantic_analysis::declare_variable_specialization(
     /* ([temp.expl.spec]/12: an explicit specialization's as declared) */
     entity_table[e].inline_ = !explicit_ || s.inline_;
     entity_table[e].constexpr_ = s.constexpr_;
-    entity_table[e].defined = true;
+    /* [temp.inst]/3: a specialization of a variable template whose
+       declaration is no definition (a static data member template not
+       defined) is an implicit instantiation of no definition: an external
+       reference */
+    entity_table[e].defined = explicit_ || t.defined;
+    if (!entity_table[e].defined)
+        entity_table[e].inline_ = false;
     entity_table[e].instantiation = index + 1;
     entity_table.add_declaration(e, declaration);
     instantiations[index].specialization = e;

@@ -1088,6 +1088,17 @@ analysis_result semantic_analysis::class_member_value(SyntaxRef n,
         return member_pointer_constant(t, e, m);
     if (x.nonstatic_member)
         return implicit_member_access(t, e, m);
+    /* [impl.clang]: -fms-compatibility takes a dependent type name without
+       typename */
+    if (instantiation_depth && !tokens.files.behavior.microsoft_compatibility &&
+        (x.kind == entity_kind::class_type ||
+         x.kind == entity_kind::enumeration ||
+         x.kind == entity_kind::typedef_name))
+        return ill_formed_at_token(t,
+                                   "a qualified-id naming a type is not an "
+                                   "id-expression (a dependent type name "
+                                   "needs typename)",
+                                   "temp.res.general");
     if (x.kind != entity_kind::function && x.kind != entity_kind::variable)
         return not_supported(n, "expr.prim.id.qual");
     if (!accessible(e))

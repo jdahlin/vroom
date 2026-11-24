@@ -375,7 +375,12 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     candidate c;
     c.scope = pattern_of;
     candidates.append(c);
-    if (!template_args(e, pattern_of))
+    /* [impl.clang]: only a function template's specialization has the
+       parameters' types ("Tn") before its arguments; a variable's has not */
+    entity_index typed_parameters = pattern_of;
+    if (table[e].kind != entity_kind::function)
+        typed_parameters = 0;
+    if (!template_args(e, typed_parameters))
         return false;
     /* [abi:mangle.template-arg]'s template-args, with [impl.clang]'s
        requires-clause: I, the template-args, Q and the requires-clause's
