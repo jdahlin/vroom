@@ -244,6 +244,10 @@ analysis_result semantic_analysis::allocation_functions(
         if (found.entity) {
             if (entity_table[found.entity].kind != entity_kind::function)
                 return not_supported(n, "class.free");
+            if (entity_table[found.entity].member_templates)
+                /* [class.free]/1: its member function templates are
+                   candidates too ([expr.new]/21), not weighed yet */
+                return not_supported(n, "class.free");
             overload_set(found.entity, set);
             in_class = true;
             return analysis_result::well_formed;

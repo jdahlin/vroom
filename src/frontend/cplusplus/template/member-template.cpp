@@ -114,13 +114,63 @@ analysis_result semantic_analysis::member_function_template(
             n, "temp.mem",
             "explicit on a member that is no constructor or "
             "conversion function");
-    if (m.allocation != allocation_function::none)
-        return not_supported_because(n, "temp.mem",
-                                     "an allocation or deallocation function");
     if (type_table[type.unqualified()].kind != type_kind::function)
         return not_supported_because(n, "temp.mem",
                                      "a declarator that is "
                                      "no function");
+    if (m.allocation != allocation_function::none) {
+        /* [basic.stc.dynamic.allocation]/1: a template allocation function
+           has a first parameter std::size_t (a dependent one is ill-formed
+           too, as is a dependent return type) and two or more parameters;
+           /3 (deallocation) the same with void* first.  What is not
+           exactly that is not judged here. */
+        bool allocation = m.allocation == allocation_function::new_ ||
+                          m.allocation == allocation_function::new_array;
+        const struct type &fn = type_table[type.unqualified()];
+        const qualified_type *ps = type_table.parameters(type.unqualified());
+        if (fn.parameter_count < 2 || fn.variadic)
+            return not_supported_because(n, "temp.mem",
+                                         "an allocation or deallocation "
+                                         "function template with fewer "
+                                         "than two parameters");
+        const struct type &result = type_table[fn.operand.unqualified()];
+        const struct type &first = type_table[ps[0].unqualified()];
+        bool fine = false;
+        if (allocation) {
+            fine = result.kind == type_kind::pointer && !fn.operand.cv() &&
+                   !result.operand.cv() &&
+                   fundamental_of(result.operand) == fundamental_type::void_ &&
+                   ps[0] == qualified_type::make(
+                                type_table.fundamental(
+                                    fundamental_type::unsigned_long_int),
+                                cv_none);
+        } else {
+            fine = result.kind == type_kind::fundamental &&
+                   result.fundamental == fundamental_type::void_ &&
+                   !fn.operand.cv() && first.kind == type_kind::pointer &&
+                   !ps[0].cv() && !first.operand.cv() &&
+                   fundamental_of(first.operand) == fundamental_type::void_;
+        }
+        if (!fine)
+            return not_supported_because(n, "temp.mem",
+                                         "an allocation or deallocation "
+                                         "function template of other form");
+        /* its body is instantiated at a new-expression's use, which does
+           not weigh member templates yet */
+        if (defines)
+            return not_supported_because(n, "temp.mem",
+                                         "the definition of an allocation "
+                                         "or deallocation function "
+                                         "template");
+        for (const parameter_meaning &p : function_parameters)
+            if (p.default_argument)
+                return not_supported_because(n, "temp.mem",
+                                             "an allocation function "
+                                             "template with a default "
+                                             "argument");
+        /* [class.free]/1, /3: a static member function */
+        s.static_ = true;
+    }
     if (s.static_ && function_cv)
         return ill_formed_at_token(m.id,
                                    "a static member function shall not be "
@@ -238,6 +288,7 @@ analysis_result semantic_analysis::member_function_template(
     entity_table[t].constexpr_ = s.constexpr_;
     entity_table[t].immediate = s.consteval_;
     entity_table[t].operator_function = m.operator_function;
+    entity_table[t].allocation = m.allocation;
     entity_table[t].conversion_function = conversion;
     entity_table[t].implemented = m.implemented;
     if (conversion) {
