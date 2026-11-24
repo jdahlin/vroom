@@ -958,3 +958,10 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   specification of a class template's member is an error of the template's
   definition in C++17.  We accept 5306 -> 5297 (8 of 11.22's 11 lines),
   unsupported 34194.  __declspec not started (the agent's session ended).
+  11.23, continued (0d86b74c7): __declspec(align(N)), empty_bases,
+  layout_version; a leading __declspec/__attribute__ before a
+  class-specifier is a decl-specifier.  Unsupported 34194 -> 34176, we
+  accept 5297 (8 of 11.22's 11 left: explicit-instantiation.cpp:154,156,
+  cwg13xx.cpp:293).  selectany/code_seg dropped (+22 we accept: their error
+  rules).  Open: __declspec(thread), selectany rules, class-head
+  __declspec, dllimport out-of-class member definitions (~30).
