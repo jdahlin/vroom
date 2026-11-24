@@ -3690,6 +3690,10 @@ class semantic_analysis
     owned_array<deferred_need> deferred_needs;
     void mark_needed(entity_index function);
     bool pass_deferred_needs();
+    /* set by a default member initializer that is ill-formed: an error of
+       the class itself ([class.mem]/6), not a reason a defaulted
+       constructor is deleted */
+    bool member_initializer_failed = false;
     token_index source_location_at = 0;
     uint32_t wrap_call_site(uint32_t node, token_index at,
                             uint32_t nodes_before);

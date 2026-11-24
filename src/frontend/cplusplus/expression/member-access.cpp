@@ -531,6 +531,12 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     if (!entity_table[c].size && entity_table[c].instantiation &&
         instantiations[entity_table[c].instantiation - 1].has_failure)
         return not_supported(n, "temp.inst");
+    if (!entity_table[c].size && entity_table[c].defined)
+        /* [expr.ref]/4: in the definition of the class, a complete-class
+           context ([class.mem]/6) whose layout is not known yet */
+        return not_supported_because(
+            n, "expr.ref",
+            "a member access of the class being defined before its layout");
     if (!entity_table[c].size)
         return ill_formed(n,
                           "the class type shall be complete unless the class "
