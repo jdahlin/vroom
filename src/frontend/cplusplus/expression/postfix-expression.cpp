@@ -2240,6 +2240,11 @@ analysis_result semantic_analysis::call_with(
         else if (!name.is(syntax_kind::qualified_id))
             return not_supported(n, "class.virtual");
     }
+    if (called) {
+        VTRY(dq,
+             diagnose_if_call(n.first_token(), called, argument_nodes.data(),
+                              argument_nodes.size()));
+    }
     m.node = expression_node(semantic_kind::call, m, n.first_token(), callee,
                              object);
     if (dispatched)

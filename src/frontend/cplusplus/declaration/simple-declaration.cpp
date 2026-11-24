@@ -1788,6 +1788,8 @@ analysis_result semantic_analysis::declare_with_initializer(
             x.alignment = static_cast<uint32_t>(aligned);
         if (object_alignment > x.alignment)
             x.alignment = object_alignment;
+        if (gnu_flags & gnu_diagnose_if)
+            diagnose_if_declared(declaration, declared_entity);
     }
     /* [ext:clang_c11_thread_local] _Thread_local: a variable of thread
        storage duration; clang: "'_Thread_local' variables must have global

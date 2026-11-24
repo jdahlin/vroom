@@ -769,6 +769,7 @@ analysis_result semantic_analysis::special_member_declarator(
     entity_table.add_declaration(e, declaration);
     if (has_defaults)
         defer_default_arguments(e, declaration, listed);
+    diagnose_if_declared(declaration, e);
     if (kind == special_member::destructor) {
         entity_table[c].destructor = e;
     } else if (!entity_table[c].first_constructor) {
@@ -1319,6 +1320,8 @@ analysis_result semantic_analysis::construct(
         constexpr_calls++;
     }
     result.value = 0;
+    VTRY(du, diagnose_if_call(at.first_token(), chosen, nodes.data(),
+                              nodes.size()));
     result.node = expression_node(semantic_kind::construct, made,
                                   at.first_token(), object, chosen);
     if (!nodes.empty()) {

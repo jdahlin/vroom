@@ -414,12 +414,15 @@ enum gnu_attribute_flag : uint32_t {
        or variable is an error, except inside an unavailable function
        (unavailable_use) */
     gnu_unavailable = 1u << 28,
+    /* [impl.clang] diagnose_if(condition, "message", "error" | "warning"):
+       a call where the condition holds is diagnosed (diagnose_if_call) */
+    gnu_diagnose_if = 524288,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
 const uint32_t gnu_function_symbol_flags =
     gnu_hidden_visibility | gnu_abi_tag |
-    gnu_exclude_from_explicit_instantiation;
+    gnu_exclude_from_explicit_instantiation | gnu_diagnose_if;
 /* noinline, always_inline and noreturn, which lowering gives a member
    function or function template's specialization as a non-member's */
 const uint32_t gnu_inline_flags =
@@ -4238,6 +4241,11 @@ class semantic_analysis
                              const semantic_node &call, constant_value &v);
     constness evaluate_call(constant_evaluation &state, uint32_t node,
                             constant_value &v);
+    /* [impl.clang] diagnose_if: whether the condition is a constant
+       expression with the value true when the parameters have the values of
+       the arguments (diagnose_if_call) */
+    bool diagnose_if_holds(uint32_t condition, const entity_index *parameters,
+                           size_t parameter_count, const uint32_t *arguments);
     constness evaluate_object(constant_evaluation &state, uint32_t node,
                               uint32_t &object);
     constness evaluate_read(constant_evaluation &state, uint32_t node,
@@ -6682,6 +6690,31 @@ class semantic_analysis
     analysis_result deleted_definition(SyntaxRef n, entity_index f);
     /* a use of an entity declared unavailable (clang: "'f' is unavailable") */
     analysis_result unavailable_use(token_index at, entity_index e);
+    /* [impl.clang] clang's diagnose_if(condition, message, type): written
+       in a declarator (diagnose_if_attribute), analysed once the function
+       is declared (diagnose_if_declared) with its parameters in scope
+       (parameters: their entities, 0 for an unnamed one), and evaluated at
+       its calls (diagnose_if_call) */
+    struct diagnose_if_condition {
+        token_index at = 0;
+        SyntaxElement source;
+        uint32_t condition = 0;
+        token_index message = 0;
+        bool error = false;
+        entity_index function = 0;
+        uint32_t first_parameter = 0, parameter_count = 0;
+    };
+    owned_array<diagnose_if_condition> pending_diagnose_ifs;
+    owned_array<diagnose_if_condition> diagnose_ifs;
+    owned_array<entity_index> diagnose_if_parameters;
+    bool plain_string_token(token_index t, owned_buffer &text) const;
+    analysis_result diagnose_if_attribute(SyntaxRef at, SyntaxElement a,
+                                          uint32_t count);
+    /* ... the function e declared by declaration, with its parameters in
+       function_parameters */
+    void diagnose_if_declared(SyntaxRef declaration, entity_index e);
+    analysis_result diagnose_if_call(token_index at, entity_index f,
+                                     const uint32_t *arguments, size_t count);
     analysis_result deleted_use(token_index at, entity_index f);
     /* [new.delete.placement]/1: f is a global allocation function
        taking (std::size_t, void *), the reserved placement form */
