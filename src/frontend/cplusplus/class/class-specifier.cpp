@@ -1744,6 +1744,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         return not_supported(declaration, "dcl.constinit");
     qualified_type type = s.type;
     declarator_meaning m;
+    m.alignas_allowed = true;
     function_cv = 0;
     in_member_declarator = true;
     function_parameters.clear();
@@ -1775,6 +1776,9 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     /* [ext:gnu_attributes] the declaration's and the declarator's */
     if (s.aligned > m.aligned)
         m.aligned = s.aligned;
+    /* clang's layout of a data member keeps alignments up to 2^28 only */
+    if (m.aligned > (uint64_t(1) << 28))
+        return not_supported(declaration, "dcl.align");
     m.gnu_flags |= s.gnu_flags;
     if (!m.section)
         m.section = s.section;
@@ -2909,9 +2913,16 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
     alignment = e.value;
     /* [basic.align]/4: "Every alignment value shall be a non-negative
        integral power of two"; clang's limit 2^29 */
-    if (alignment && ((alignment & (alignment - 1)) || alignment > (1u << 28)))
+    if (alignment & (alignment - 1))
         return ill_formed(n, "an alignment shall be a power of two",
                           "dcl.align");
+    /* clang: "requested alignment must be 4294967296 bytes or smaller"
+       (Linux); the entities keep 32 bits of alignment */
+    if (alignment > (uint64_t(1) << 32))
+        return ill_formed(n, "the requested alignment is too large",
+                          "dcl.align");
+    if (alignment > (uint64_t(1) << 31))
+        return not_supported(n, "dcl.align");
     return analysis_result::well_formed;
 }
 
