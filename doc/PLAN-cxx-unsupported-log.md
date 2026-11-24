@@ -797,3 +797,17 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   default-argument-pack deduction (cwg22xx.cpp:69).
   Decision: the last batches remove ~25 each; the next briefs aim at the
   largest generic keys (unqualified lookup, auto type-id, evaluator) again.
+- 11.10 (8d4202e49, 6c0f54eba, 36991b6b7): a class whose member function
+  bodies alone are ill-formed stays complete (the `ill-formed:
+  simple-declaration` key; class.access tests); a function declaration that
+  redeclares a known function ill-formed leaves it known; pointer-to-member
+  non-type template arguments (`&C::m`, nullptr; 184 declarations) and
+  details for the other integral-argument refusals.  Unsupported 34744 ->
+  34641, we reject 436 -> 441 (one more declaration after
+  source_location.cpp:119's existing bug), we accept 5304 -> 5305
+  (temp.mem.class/p1.cpp:17).  Open: operator new/delete ill-formed
+  declarations still hold the name `operator` (allocation/p1.cpp:13);
+  `evaluator kept no value (binary, 0)` is a follow-on of an aggregate whose
+  default member initializer names members (dcl.init.aggr/p7.cpp:6,
+  initializer.cpp omitted_element_value); a consteval member function is
+  not recorded as immediate (member_pointer_argument refuses constexpr ones).
