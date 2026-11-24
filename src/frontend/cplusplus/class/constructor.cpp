@@ -2813,11 +2813,25 @@ analysis_result semantic_analysis::define_defaulted_special_member(
                           "defaulting this function would delete it after "
                           "its first declaration",
                           "dcl.fct.def.default");
-    if (r == analysis_result::ill_formed)
+    if (r == analysis_result::ill_formed) {
         /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
            special member that would be ill-formed is defined as
            deleted (an error only where it is used): not analysed */
-        return not_supported(n, "class.default.ctor");
+        if (entity_table[f].special == special_member::destructor)
+            return not_supported_because(n, "class.default.ctor",
+                                         "a destructor that would be deleted");
+        if (entity_table[f].inherited_constructor)
+            return not_supported_because(
+                n, "class.default.ctor",
+                "an inheriting constructor that would be deleted");
+        if (source)
+            return not_supported_because(
+                n, "class.default.ctor",
+                "a copy or move that would be deleted");
+        return not_supported_because(n, "class.default.ctor",
+                                     "a default constructor that would be "
+                                     "deleted");
+    }
     return r;
 }
 

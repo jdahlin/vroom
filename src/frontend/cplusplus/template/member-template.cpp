@@ -100,11 +100,27 @@ analysis_result semantic_analysis::member_function_template(
                                    "a member function template shall not be "
                                    "virtual",
                                    "temp.mem");
-    if (!m.has_id || m.qualifier || m.qualified_namespace || m.destructor ||
-        m.literal_operator || (s.explicit_ && !constructor && !conversion) ||
-        m.allocation != allocation_function::none ||
-        type_table[type.unqualified()].kind != type_kind::function)
-        return not_supported(n, "temp.mem");
+    if (!m.has_id)
+        return not_supported_because(n, "temp.mem", "no declarator-id");
+    if (m.qualifier || m.qualified_namespace)
+        return not_supported_because(n, "temp.mem",
+                                     "a qualified declarator-id");
+    if (m.destructor)
+        return not_supported_because(n, "temp.mem", "a destructor");
+    if (m.literal_operator)
+        return not_supported_because(n, "temp.mem", "a literal operator");
+    if (s.explicit_ && !constructor && !conversion)
+        return not_supported_because(
+            n, "temp.mem",
+            "explicit on a member that is no constructor or "
+            "conversion function");
+    if (m.allocation != allocation_function::none)
+        return not_supported_because(n, "temp.mem",
+                                     "an allocation or deallocation function");
+    if (type_table[type.unqualified()].kind != type_kind::function)
+        return not_supported_because(n, "temp.mem",
+                                     "a declarator that is "
+                                     "no function");
     if (s.static_ && function_cv)
         return ill_formed_at_token(m.id,
                                    "a static member function shall not be "

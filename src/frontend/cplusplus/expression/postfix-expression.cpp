@@ -1769,7 +1769,9 @@ analysis_result semantic_analysis::template_call(
     bool given = !early.empty();
     for (const expression_meaning &e : early) {
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
-            return not_supported(n, "temp.deduct.call");
+            return not_supported_because(n, "temp.deduct.call",
+                                         "a function as an argument analysed "
+                                         "before the call (pack expansion)");
         types.append(e.type);
     }
     for (SyntaxElement a : arguments) {
@@ -1777,7 +1779,8 @@ analysis_result semantic_analysis::template_call(
             break;
         expression_meaning e;
         if (a.is(syntax_kind::braced_init_list))
-            return not_supported(n, "temp.deduct.call");
+            return not_supported_because(n, "temp.deduct.call",
+                                         "a braced-init-list as an argument");
         /* [temp.deduct.call]/6: "When P is a function type, function
            pointer type, or pointer-to-member-function type: If the argument
            is an overload set containing one or more function templates, the
@@ -1797,7 +1800,8 @@ analysis_result semantic_analysis::template_call(
         if (e.entity && entity_table[e.entity].kind == entity_kind::function &&
             entity_table[e.entity].next_overload) {
             name_uses.resize(uses_before);
-            return not_supported(n, "temp.deduct.call");
+            return not_supported_because(
+                n, "temp.deduct.call", "an overloaded function as an argument");
         }
         types.append(e.type);
         early.append(e);
