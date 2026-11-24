@@ -477,28 +477,17 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
 
 /* [class.temporary]/6, [basic.stc.static]: the prvalue a namespace-scope
    reference is initialized by, held in an object of static storage
-   _ZGR<the variable's name>_ constructed by the initialization, its
+   _ZGR<the variable's name>_ ([abi:mangling-special-temporaries]) constructed by the initialization, its
    destructor registered with __cxa_atexit */
 uint32_t c_lowering::static_temporary(const semantic_node &n,
                                       ast_qualified_type pointer)
 {
     const semantic_node &bound = node(n.a);
-    owned_buffer name;
-    if (!itanium_symbol_name(analysis, tokens.pp, static_owner, name.get(),
-                             0) ||
-        name.size() < 1)
-        return fail("an entity whose symbol is not mangled", n.at);
     owned_buffer zgr;
-    vbuffer_string_append(zgr.get(), "_ZGR");
-    if (name.size() > 2 && name.data()[0] == '_' && name.data()[1] == 'Z')
-        vbuffer_append(zgr.get(), name.data() + 2, name.size() - 2);
-    else {
-        /* a variable of the global namespace is mangled as its name; the
-           reference temporary's is <length><name> ([abi:mangling-special]) */
-        vbuffer_format_append(zgr.get(), "%zu", name.size());
-        vbuffer_append(zgr.get(), name.data(), name.size());
-    }
-    vbuffer_string_append(zgr.get(), "_");
+    if (!itanium_reference_temporary_name(analysis, tokens.pp, static_owner,
+                                          static_temporaries, zgr.get()))
+        return fail("an entity whose symbol is not mangled", n.at);
+    static_temporaries++;
     owned_buffer written;
     if (target == PP_DARWIN)
         vbuffer_string_append(written.get(), "_");

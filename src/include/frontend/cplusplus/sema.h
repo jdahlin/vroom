@@ -6698,6 +6698,12 @@ const char *itanium_class_layout(semantic_analysis &analysis, entity_index c);
 bool itanium_symbol_name(const semantic_analysis &analysis,
                          const preprocessor &pp, entity_index e, vbuffer *out,
                          int variant = 2);
+/* [abi:mangling-special-temporaries]: the symbol of the index-th
+   lifetime-extended temporary of variable e (from 0): GR <object name>
+   [<seq-id>] _, the first without a seq-id, the next 0, 1, ... */
+bool itanium_reference_temporary_name(const semantic_analysis &analysis,
+                                      const preprocessor &pp, entity_index e,
+                                      uint32_t index, vbuffer *out);
 /* [abi:mangling-special-vtables]: the symbol of class c's virtual table
    (_ZTV <type>) */
 bool itanium_vtable_name(const semantic_analysis &analysis,

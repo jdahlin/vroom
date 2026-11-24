@@ -77,6 +77,23 @@ class itanium_mangler
         text("_ZTI");
         return type(qualified_type::make(t, cv_none));
     }
+    /* [abi:mangling-special-temporaries]:
+           <special-name> ::= GR <object name> _
+                          ::= GR <object name> <seq-id> _
+       the object name a variable's encoding (its <data name>), the
+       first temporary without a seq-id, the next ones 0, 1, ... */
+    bool reference_temporary_name(entity_index e, uint32_t index)
+    {
+        if (analysis.entity_table[e].kind != entity_kind::variable)
+            return false;
+        text("_ZGR");
+        if (!encoding(e))
+            return false;
+        if (index)
+            seq_id(index - 1);
+        text("_");
+        return true;
+    }
     /* [abi:mangling-special-vtables]: <special-name> ::= TV <type> */
     bool vtable_name(entity_index c)
     {
@@ -2964,6 +2981,14 @@ bool itanium_symbol_name(const semantic_analysis &analysis,
 {
     itanium_mangler m(analysis, pp, out, variant);
     return m.mangled_name(e);
+}
+
+bool itanium_reference_temporary_name(const semantic_analysis &analysis,
+                                      const preprocessor &pp, entity_index e,
+                                      uint32_t index, vbuffer *out)
+{
+    itanium_mangler m(analysis, pp, out, 2);
+    return m.reference_temporary_name(e, index);
 }
 
 bool itanium_vtable_name(const semantic_analysis &analysis,

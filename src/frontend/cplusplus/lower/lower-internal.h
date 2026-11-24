@@ -593,6 +593,9 @@ class c_lowering
        ([class.temporary]/6), _ZGR<name>_ */
     entity_index static_owner = 0;
     uint32_t static_root = 0;
+    /* the temporaries of static_owner named so far (the discriminator of
+       the next one's symbol, itanium_reference_temporary_name) */
+    uint32_t static_temporaries = 0;
     /* the glvalue of that reference is being lowered: a temporary under it
        would be automatic, not extended */
     bool static_glvalue = false;

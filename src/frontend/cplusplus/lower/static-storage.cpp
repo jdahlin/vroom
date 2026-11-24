@@ -316,6 +316,7 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
     if (!only_destroy) {
         static_owner = e;
         static_root = x.definition;
+        static_temporaries = 0;
         static_initialization(e, x.definition, statements, init.at);
         static_owner = 0;
         static_root = 0;
