@@ -896,50 +896,6 @@ void semantic_analysis::instantiate_pending()
        function whose instantiated body the analysis does not follow */
     for (const explicit_function_instantiation &x :
          explicit_function_instantiations) {
-        /* (its template's own declaration the analysis does not follow:
-           the instantiation of what it means is not known) */
-        entity_index primary =
-            instantiations[entity_table[x.function].instantiation - 1]
-                .template_entity;
-        SyntaxRef template_node = 0;
-        for (const function_template &ft : function_templates)
-            if (ft.entity == primary)
-                template_node = ft.declaration;
-        /* (a coroutine's: its body is where the promise is looked up,
-           [dcl.fct.def.coroutine]; the other templates' instantiations
-           are judged by their own analysis) */
-        bool coroutine = false;
-        if (template_node)
-            for (token_index t = template_node.first_token();
-                 t < template_node.end_token(); t++) {
-                standard_keyword k = p.keyword_of(tokens[t]);
-                if (k == standard_keyword::co_await_ ||
-                    k == standard_keyword::co_return_ ||
-                    k == standard_keyword::co_yield_)
-                    coroutine = true;
-            }
-        if (template_node && coroutine) {
-            const analysed_declaration *held = nullptr;
-            for (const analysed_declaration &d : declarations)
-                if (d.node.first_token() <= template_node.first_token() &&
-                    template_node.end_token() <= d.node.end_token() &&
-                    d.result == analysis_result::unsupported &&
-                    d.has_unsupported)
-                    held = &d;
-            if (held) {
-                for (analysed_declaration &d : declarations) {
-                    if (d.node != x.declaration ||
-                        d.result == analysis_result::ill_formed)
-                        continue;
-                    unsupported.append(unsupported[held->first_unsupported]);
-                    d.result = analysis_result::unsupported;
-                    d.first_unsupported =
-                        static_cast<uint32_t>(unsupported.size() - 1);
-                    d.has_unsupported = true;
-                }
-                continue;
-            }
-        }
         uint32_t failure = entity_table[x.function].unsupported_body;
         if (!failure)
             continue;
