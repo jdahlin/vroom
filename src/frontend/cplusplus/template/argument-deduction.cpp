@@ -744,6 +744,13 @@ analysis_result semantic_analysis::deduce_from_call(
     if (fixed && type_table[parameters[fixed - 1].unqualified()].kind ==
                      type_kind::pack_expansion)
         fixed--;
+    /* a function parameter pack before the last parameter is a
+       non-deduced context ([temp.deduct.type]/11): not analysed */
+    for (uint32_t i = 0; i + 1 < fixed; i++)
+        if (type_table[parameters[i].unqualified()].kind ==
+            type_kind::pack_expansion)
+            return not_supported_because(at, "temp.deduct.call",
+                                         "a function parameter pack not last");
     /* [dcl.fct]/3's ellipsis: the arguments after the parameters match
        it, and deduce nothing ([temp.deduct.call]/1 for each parameter) */
     if (f.variadic && fixed != f.parameter_count)

@@ -1135,8 +1135,15 @@ analysis_result semantic_analysis::default_template_arguments(
             continue;
         SyntaxRef node = template_parameter_nodes[ft.first_parameter + i];
         template_parameter_parts form;
-        if (!template_parameter_form(node, form) || !form.has_default)
-            return not_supported(at, "temp.arg");
+        if (!template_parameter_form(node, form))
+            return not_supported_because(
+                at, "temp.arg", "a template parameter of no known form");
+        if (!form.has_default && form.pack)
+            return not_supported_because(
+                at, "temp.arg", "a pack parameter with no argument given");
+        if (!form.has_default)
+            return not_supported_because(
+                at, "temp.arg", "a parameter with no argument and no default");
         entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                                entity_table[t].enclosing);
         /* the names of the declaration that gave the default

@@ -2353,6 +2353,9 @@ class semantic_analysis
                                              uint32_t &elements,
                                              token_index &ellipsis);
     bool depends_on_template_parameter(qualified_type t) const;
+    /* [temp.deduct.type]/5.7: t names a function type or a specialization
+       with a pack expansion that is not the last parameter or argument */
+    bool pack_expansion_not_last(qualified_type t, uint32_t depth = 0) const;
     /* whether a type is made of a template-parameter type at position from
        or after */
     bool depends_on_parameter_from(qualified_type t, uint64_t from) const;

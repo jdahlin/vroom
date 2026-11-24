@@ -257,7 +257,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                     return not_supported(n, "temp.variadic");
                 continue;
             }
-            if (!pack || i + 1 != ft.parameter_count || ft.variadic ||
+            if (!pack || ft.variadic ||
                 !made_of_template_parameter(type_table, pt.operand,
                                             &entity_table, last))
                 return not_supported(n, "temp.variadic");
