@@ -578,19 +578,8 @@ constness semantic_analysis::evaluate_reference_binding(uint32_t node)
 {
     if (semantics[node].kind != semantic_kind::bind_reference)
         return constness::unknown;
-    constant_evaluation state;
-    last_not_constant_line = 0;
-    last_not_constant_certain = false;
-    last_rule_note = nullptr;
-    constant_value v;
-    constness c = evaluate_node(state, node, v);
-    if (c != constness::constant)
-        return c;
-    if (v.kind != constant_value_kind::pointer || !v.count)
-        return constness::unknown;
-    /* [expr.const]/13: the address of an object of static storage duration
-       is a constant (a subobject of one: a base class or a member); a
-       local variable's or a temporary's is not (not decided here) */
+    /* the object the reference is bound to: a variable, a subobject of one
+       (a base class, a member, an array element) */
     uint32_t root = semantics[node].a;
     for (;;) {
         const semantic_node &r = semantics[root];
@@ -620,11 +609,30 @@ constness semantic_analysis::evaluate_reference_binding(uint32_t node)
     const semantic_node &r = semantics[root];
     if (r.kind != semantic_kind::entity || !r.a ||
         entity_table[r.a].kind != entity_kind::variable ||
-        entity_table[r.a].automatic ||
         type_table[entity_table[r.a].type.unqualified()].kind ==
             type_kind::lvalue_reference ||
         type_table[entity_table[r.a].type.unqualified()].kind ==
             type_kind::rvalue_reference)
+        return constness::unknown;
+    /* [expr.const]/13.1 (/11 before C++23): a constant expression's result
+       does not refer to an object of automatic storage duration (a local
+       variable, a parameter; whose address differs per invocation) */
+    if (entity_table[r.a].automatic) {
+        last_not_constant_certain = true;
+        last_rule_note = nullptr;
+        return constness::not_constant;
+    }
+    /* the evaluation: a glvalue designating an object of static storage
+       duration, a constant ([expr.const]/13) */
+    constant_evaluation state;
+    last_not_constant_line = 0;
+    last_not_constant_certain = false;
+    last_rule_note = nullptr;
+    constant_value v;
+    constness c = evaluate_node(state, node, v);
+    if (c != constness::constant)
+        return c;
+    if (v.kind != constant_value_kind::pointer || !v.count)
         return constness::unknown;
     return constness::constant;
 }
