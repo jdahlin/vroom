@@ -287,6 +287,9 @@ uint64_t semantic_analysis::size_of_type(qualified_type t) const
         fundamental_type u = entity_table[record.entity].underlying;
         if (u == fundamental_type::none)
             return 0;
+        /* (bool's width is its one value bit, its size one byte) */
+        if (u == fundamental_type::bool_)
+            return 1;
         return fundamental_type_width(b, u) / 8;
     }
     default:

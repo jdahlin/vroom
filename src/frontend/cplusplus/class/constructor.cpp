@@ -306,8 +306,14 @@ bool semantic_analysis::aggregate_value_stored(entity_index c,
 {
     const semantic_node &n = semantics[value];
     if (n.kind != semantic_kind::initializer_list &&
-        n.kind != semantic_kind::zero)
-        return false;
+        n.kind != semantic_kind::zero) {
+        /* [dcl.init]/17.6.1: a prvalue of the class itself (a call's
+           result) initializes the member as the object; a trivial class's
+           copy of it is the same */
+        if (n.category != value_category::prvalue ||
+            n.type.unqualified() != entity_table[c].type.unqualified())
+            return false;
+    }
     return trivial_class(c);
 }
 
