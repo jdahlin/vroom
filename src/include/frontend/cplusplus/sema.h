@@ -553,6 +553,8 @@ struct entity {
        builtin, folded for a defaulted constructor defined where it is used
        and not where it is declared: the value is not clang's */
     bool initializer_located = false;
+    /* the default member initializer is being analysed ([class.mem]/6) */
+    bool initializer_active = false;
     /* ... and whether it can throw ([except.spec]/7), once a constructor
        using it is defined (semantic_analysis::default_member_initializer) */
     initializer_exception initializer_throws = initializer_exception::unknown;

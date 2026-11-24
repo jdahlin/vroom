@@ -356,9 +356,6 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     qualified_type type = entity_table[e].type;
     const struct type &record = type_table[type.unqualified()];
     SyntaxRef init = entity_table[e].default_initializer;
-    if (record.kind == type_kind::lvalue_reference ||
-        record.kind == type_kind::rvalue_reference)
-        return not_supported(init, "class.base.init");
     /* before the analysis, which may move the tables */
     bool constructed = record.kind == type_kind::class_type &&
                        entity_table[record.entity].first_constructor;
@@ -378,10 +375,30 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     entity_index outer_member = initialized_member;
     initialized_member = e;
     uint32_t locations_before = source_location_uses;
+    /* [class.mem]/6: a default member initializer needed while it is
+       being analysed (clang: "initializer for 'n' needed") */
+    if (entity_table[e].initializer_active)
+        return ill_formed(init,
+                          "the default member initializer is needed "
+                          "within itself",
+                          "class.mem");
+    entity_table[e].initializer_active = true;
     r = initializer(init, type, value);
+    entity_table[e].initializer_active = false;
     initialized_member = outer_member;
     if (r != analysis_result::well_formed)
         return r;
+    /* [class.base.init]/11: "A temporary expression bound to a reference
+       member from a default member initializer is ill-formed" */
+    if ((record.kind == type_kind::lvalue_reference ||
+         record.kind == type_kind::rvalue_reference) &&
+        semantics[value.node].kind == semantic_kind::bind_reference &&
+        semantics[value.node].category == value_category::prvalue)
+        return ill_formed(init,
+                          "a temporary expression bound to a reference "
+                          "member from a default member initializer is "
+                          "ill-formed",
+                          "class.base.init");
     /* [ext:clang_source_location] a builtin in the initializer is the
        constructor's place: a defaulted one is defined where it is first
        used or at the end of its class, whose place is not the
@@ -2250,6 +2267,16 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                 break;
             }
         }
+    }
+    /* [class.copy.ctor]/10.4: a non-static data member of rvalue
+       reference type makes the defaulted copy constructor deleted */
+    for (uint32_t i = 0; i < entity_table[c].member_count; i++) {
+        const entity &m =
+            entity_table[class_members[entity_table[c].first_member + i]];
+        if (m.kind == entity_kind::variable && m.nonstatic_member &&
+            type_table[m.type.unqualified()].kind ==
+                type_kind::rvalue_reference)
+            copy_deleted = true;
     }
     entity_table[c].implicit_copy_deleted = copy_deleted;
     if (copy && !user_copy && !copy_deleted) {
