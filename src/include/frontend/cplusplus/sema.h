@@ -2004,6 +2004,9 @@ class semantic_analysis
     /* whether the declarator may have a simple-template-id as its
        declarator-id */
     bool declarator_template_id = false;
+    /* [temp.expl.spec]/16: the explicit specialization being analysed is
+       the inner one of template<> template<> ... */
+    bool nested_explicit_specialization = false;
     analysis_result deduction_guide(DeductionGuide n);
     analysis_result deduction_guide(TemplateDeclaration t, DeductionGuide n);
     analysis_result deduction_guide_candidate(TemplateDeclaration t,

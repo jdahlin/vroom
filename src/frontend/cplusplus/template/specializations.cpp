@@ -50,8 +50,10 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     /* [temp.expl.spec]/16: template <> template <> ... (explicit
        specialization of a member function template of an explicitly or
        implicitly specialized class template) */
-    if (inner.is(syntax_kind::explicit_specialization))
+    if (inner.is(syntax_kind::explicit_specialization)) {
+        flag_set nested(nested_explicit_specialization, true);
         return explicit_specialization(inner.explicit_specialization());
+    }
     /* [temp.expl.spec]/16: template <> template <class T> R H<char>::h(T) */
     if (inner.is(syntax_kind::template_declaration) && inner.size() == 2 &&
         inner[1].is(syntax_kind::function_definition,
@@ -72,8 +74,27 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         return not_supported(n, "temp.expl.spec");
     }
     entity_index qualifier = 0;
-    if (SyntaxRef id = variable_specialization_id(inner))
+    if (SyntaxRef id = variable_specialization_id(inner)) {
+        /* (a specialization declared without an initializer: clang gives
+           an internal template's none of its own, and a nested template<>
+           is an error: not yet) */
+        if (inner[1].is(syntax_kind::simple_template_id)) {
+            lookup_result x;
+            entity_index named = 0;
+            template_id_name(id, x, named);
+            const function_template &primary =
+                function_templates[variable_template_of(named) - 1];
+            bool internal = false;
+            if (primary.declarator &&
+                primary.declarator[0].is(syntax_kind::decl_specifier_seq))
+                for (auto sp : primary.declarator[0].elements())
+                    if (sp.is(standard_keyword::static_))
+                        internal = true;
+            if (nested_explicit_specialization || internal)
+                return not_supported(n, "temp.expl.spec");
+        }
         return variable_specialization(n, inner, id, qualifier);
+    }
     if (SyntaxRef id = qualified_variable_specialization_id(inner, qualifier))
         return variable_specialization(n, inner, id, qualifier);
     if (!inner.is(syntax_kind::function_definition,
@@ -375,13 +396,18 @@ semantic_analysis::record_instantiation(const function_template &ft,
    explicit specialization), or 0 */
 SyntaxRef semantic_analysis::variable_specialization_id(SyntaxRef d) const
 {
-    if (!d.is(syntax_kind::simple_declaration) || d.size() != 3 ||
-        !d[1].is(syntax_kind::init_declarator))
+    if (!d.is(syntax_kind::simple_declaration) || d.size() != 3)
         return 0;
-    auto item = d[1];
-    if (item.size() != 2 || !item[0].is(syntax_kind::simple_template_id))
+    /* ... or without one (a declaration, [temp.expl.spec]/13) */
+    SyntaxRef id = d[1];
+    if (d[1].is(syntax_kind::init_declarator)) {
+        auto item = d[1];
+        if (item.size() != 2)
+            return 0;
+        id = item[0];
+    }
+    if (!id.is(syntax_kind::simple_template_id))
         return 0;
-    auto id = item[0];
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named) || x.ambiguous ||
