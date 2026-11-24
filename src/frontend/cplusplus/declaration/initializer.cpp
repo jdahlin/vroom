@@ -1990,6 +1990,26 @@ analysis_result semantic_analysis::aggregate_elements(
         }
         all = combined_constness(all, one.evaluation);
         elements.append(one.node);
+        /* [dcl.init.aggr]/8: "The destructor for each element of class type
+           is potentially invoked ([class.dtor]) from the context where the
+           aggregate initialization occurs": a deleted or inaccessible one
+           is ill-formed ([dcl.fct.def.delete]/2, [class.access]) */
+        qualified_type destroyed = element;
+        while (type_table[destroyed.unqualified()].kind == type_kind::array)
+            destroyed = type_table[destroyed.unqualified()].operand;
+        if (type_table[destroyed.unqualified()].kind == type_kind::class_type) {
+            entity_index sub = type_table[destroyed.unqualified()].entity;
+            if (entity_table[sub].kind == entity_kind::class_type &&
+                (destructor_deleted(sub) ||
+                 (entity_table[sub].destructor &&
+                  !accessible(entity_table[sub].destructor))))
+                return ill_formed(list,
+                                  "the destructor of an element of an "
+                                  "aggregate is potentially invoked by its "
+                                  "initialization and it is deleted or "
+                                  "inaccessible",
+                                  "dcl.init.aggr");
+        }
     }
     aggregate_value(list, type, all, elements, result);
     return analysis_result::well_formed;
