@@ -3907,6 +3907,9 @@ class semantic_analysis
     /* ... the evaluation alone: constant with the value in v, not_constant,
        or unknown (no refusal recorded) */
     constness evaluate_value(uint32_t node, constant_value &v);
+    /* [expr.const]/4: whether a reference's initializer (a binding) designates
+       an object of static storage duration, a core constant expression */
+    constness evaluate_reference_binding(uint32_t node);
     /* whether the last evaluation's not_constant was a rule of [expr.const]/5
        that clang applies as it is */
     bool evaluation_rule_applied() const;

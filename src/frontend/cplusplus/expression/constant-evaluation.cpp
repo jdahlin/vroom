@@ -73,6 +73,7 @@ thread_local const char *last_rule_note = nullptr;
    constness::unknown.  Compiled with -DVCC_TRACE_UNKNOWN each such answer
    prints "CXXUNK line" to stderr, which tells which refusal an input
    meets (count them: `... 2>&1 | grep CXXUNK | sort | uniq -c`). */
+
 #ifdef VCC_TRACE_UNKNOWN
 constness trace_unknown(int line)
 {
@@ -564,6 +565,61 @@ constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
         !value_kept_exactly(semantics[node].type, v))
         c = constness::unknown;
     return c;
+}
+
+constness semantic_analysis::evaluate_reference_binding(uint32_t node)
+{
+    if (semantics[node].kind != semantic_kind::bind_reference)
+        return constness::unknown;
+    constant_evaluation state;
+    last_not_constant_line = 0;
+    last_not_constant_certain = false;
+    last_rule_note = nullptr;
+    constant_value v;
+    constness c = evaluate_node(state, node, v);
+    if (c != constness::constant)
+        return c;
+    if (v.kind != constant_value_kind::pointer || !v.count)
+        return constness::unknown;
+    /* [expr.const]/13: the address of an object of static storage duration
+       is a constant (a subobject of one: a base class or a member); a
+       local variable's or a temporary's is not (not decided here) */
+    uint32_t root = semantics[node].a;
+    for (;;) {
+        const semantic_node &r = semantics[root];
+        if (r.kind == semantic_kind::member ||
+            (r.kind == semantic_kind::conversion &&
+             static_cast<conversion_kind>(r.op) ==
+                 conversion_kind::derived_to_base))
+            root = r.a;
+        else if (r.kind == semantic_kind::conversion &&
+                 static_cast<conversion_kind>(r.op) ==
+                     conversion_kind::array_to_pointer)
+            root = r.a;
+        else if (r.kind == semantic_kind::subscript) {
+            /* an element of an array object: the operand of array or
+               pointer type */
+            type_kind first =
+                type_table[semantics[r.a].type.unqualified()].kind;
+            if (first == type_kind::array || first == type_kind::pointer)
+                root = r.a;
+            else
+                root = r.b;
+        } else
+            break;
+        if (!root)
+            return constness::unknown;
+    }
+    const semantic_node &r = semantics[root];
+    if (r.kind != semantic_kind::entity || !r.a ||
+        entity_table[r.a].kind != entity_kind::variable ||
+        entity_table[r.a].automatic ||
+        type_table[entity_table[r.a].type.unqualified()].kind ==
+            type_kind::lvalue_reference ||
+        type_table[entity_table[r.a].type.unqualified()].kind ==
+            type_kind::rvalue_reference)
+        return constness::unknown;
+    return constness::constant;
 }
 
 analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
@@ -1248,6 +1304,35 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             pin_objects(state);
             return constness::constant;
         }
+        /* [expr.const]/4: a constexpr reference (one of static storage
+           duration or a local one read outside its function's
+           evaluation) is usable in constant expressions: it designates
+           the glvalue its initializer bound it to ([expr.type]/1) */
+        if (x.a && e.kind == entity_kind::variable && e.constexpr_ &&
+            e.definition &&
+            (tk == type_kind::lvalue_reference ||
+             tk == type_kind::rvalue_reference)) {
+            uint32_t reference = no_frame_object;
+            for (size_t i = 0; i < state.objects.size(); i++)
+                if (state.objects[i].entity == x.a && !state.objects[i].frame)
+                    reference = static_cast<uint32_t>(i);
+            if (reference == no_frame_object) {
+                constant_evaluation::object o;
+                o.entity = x.a;
+                reference = static_cast<uint32_t>(state.objects.size());
+                append_object(state, o);
+                c = evaluate_initialization(state, e.type, e.definition, false,
+                                            reference);
+                if (c != constness::constant)
+                    return CONST_UNKNOWN;
+                pin_objects(state);
+            }
+            const constant_evaluation::object &r = state.objects[reference];
+            if (r.opaque || r.value.kind != constant_value_kind::pointer ||
+                !r.value.count)
+                return CONST_UNKNOWN;
+            return pointed_place(state, r.value, object);
+        }
         if (x.a && e.kind == entity_kind::variable &&
             (!e.automatic || e.constexpr_) &&
             (tk == type_kind::array || tk == type_kind::class_type ||
@@ -1765,8 +1850,19 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
         tk == type_kind::pointer && x.kind == semantic_kind::entity && x.a &&
         entity_table[x.a].constexpr_ && entity_table[x.a].definition &&
         frame_object(state, x.a) == no_frame_object;
+    /* a constexpr reference designates the object it is bound to: the read
+       is of that object ([expr.const]/4) */
+    bool bound_reference = false;
+    if (x.kind == semantic_kind::entity && x.a) {
+        type_kind rk = type_table[entity_table[x.a].type.unqualified()].kind;
+        bound_reference = entity_table[x.a].kind == entity_kind::variable &&
+                          entity_table[x.a].constexpr_ &&
+                          entity_table[x.a].definition &&
+                          (rk == type_kind::lvalue_reference ||
+                           rk == type_kind::rvalue_reference);
+    }
     if ((scalar || tk == type_kind::pointer) && !lazy_pointer &&
-        x.kind == semantic_kind::entity &&
+        !bound_reference && x.kind == semantic_kind::entity &&
         frame_object(state, x.a) == no_frame_object) {
         /* [expr.const]/5.8.1: "a non-volatile glvalue that refers to an
            object that is usable in constant expressions" (a pointer
@@ -1841,8 +1937,24 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
         return opaque_access(state, state.objects[object]);
     /* [expr.const]/5.8: a variable that is not usable in constant
        expressions, read through a pointer or a reference */
-    if (!(object & element_place) && state.objects[object].unusable)
+    if (!(object & element_place) && state.objects[object].unusable) {
+        entity_index owner = state.objects[object].entity;
+        if (owner && !state.potential) {
+            const entity &u = entity_table[owner];
+            if (u.unusable_initializer)
+                return CONST_NOT_CONSTANT_NOTE(
+                    "the expression is not a constant expression: initializer "
+                    "of variable is not a constant expression");
+            if (u.kind == entity_kind::variable && !u.automatic &&
+                !u.constexpr_ && !(u.type.cv() & cv_const) &&
+                evaluated_type(u.type) != fundamental_type::none)
+                return CONST_NOT_CONSTANT_NOTE(
+                    "the expression is not a constant expression: read of "
+                    "non-const variable is not allowed in a constant "
+                    "expression");
+        }
         return CONST_NOT_CONSTANT;
+    }
     /* [basic.life]: the storage of a deleted object */
     if (!(object & element_place) && state.objects[object].freed)
         return CONST_NOT_CONSTANT;
@@ -2270,7 +2382,12 @@ constness semantic_analysis::evaluate_binding(constant_evaluation &state,
                                               uint32_t node, constant_value &v)
 {
     uint32_t bound = semantics[node].a;
-    if (semantics[bound].category == value_category::prvalue)
+    /* [dcl.init.ref]/5.4.2: a prvalue of class type is materialized as a
+       temporary the reference is bound to ([class.temporary]/2): outside
+       a function's invocation (a call's arguments and returns have their
+       own lifetimes, not modelled) */
+    if (semantics[bound].category == value_category::prvalue &&
+        (state.frame || !evaluated_class(semantics[bound].type)))
         return CONST_UNKNOWN;
     uint32_t object = 0;
     constness c = evaluate_object(state, bound, object);

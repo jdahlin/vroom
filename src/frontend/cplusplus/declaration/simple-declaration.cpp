@@ -2063,6 +2063,9 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (target && semantics[target].kind == semantic_kind::entity &&
             semantics[target].a && !entity_table[semantics[target].a].automatic)
             value.evaluation = constness::constant;
+        else if (target && semantics[target].kind != semantic_kind::entity &&
+                 evaluate_reference_binding(value.node) == constness::constant)
+            value.evaluation = constness::constant;
     }
     /* [expr.const]/3: a const integral local may be usable in constant
        expressions, which decides whether a lambda that names it captures
