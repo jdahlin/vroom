@@ -645,3 +645,10 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
 - Review of 10.2 (orchestrator): 54b1ed016 raised we reject by 1, fixed by
   59c1c8cb3 (left as is).  Pace: ~40-200 per agent now; the template causes
   cascade (a fix lets declarations reach the next gap).
+- 10.3 (eff4e5762, 85c813fea, beed41f6b, 69ea85861, 1437eab76): out-of-class
+  member class templates, member variable templates and partial
+  specializations of member templates; member templates of a
+  specialization.  Unsupported 35392 -> 35320, we accept +2 (access errors
+  in an out-of-class member template's definition, checked only at
+  instantiation).  The orchestrator fixed two citations cxx-spec-refs had
+  flagged since 9.4/9.5 (its gate run was missed): run it at every check.
