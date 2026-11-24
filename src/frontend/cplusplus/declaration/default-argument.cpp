@@ -183,6 +183,13 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
         default_argument_function = outer_function;
         if (r != analysis_result::well_formed)
             return r;
+        /* an argument that made no node (__builtin_source_location(), whose
+           object is not made yet) is not a default argument a call may
+           use: unknown, not absent ([over.match.viable]/2) */
+        if (!value.node) {
+            entity_table[f].unknown_defaults = true;
+            return analysis_result::well_formed;
+        }
         nodes[i] = wrap_call_site(value.node, first, site_nodes);
     }
     /* /4: "In a given function declaration, each parameter subsequent to a
