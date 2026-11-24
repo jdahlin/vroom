@@ -1554,10 +1554,17 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
     case semantic_kind::call: {
         if (x.category == value_category::prvalue)
             break;
+        /* clang's builtins std::move, std::move_if_noexcept,
+           std::forward, std::forward_like and std::as_const: the call
+           designates its argument's object, whatever the body */
+        if (uint32_t argument = std_identity_argument(node))
+            return evaluate_object(state, argument, object);
         constant_value p;
         c = evaluate_call(state, node, p);
         if (c != constness::constant)
             return c;
+        if (p.kind != constant_value_kind::pointer || !p.count)
+            return CONST_UNKNOWN;
         c = pointed_place(state, p, object);
         /* [class.temporary]/6.9: a temporary an argument materialized
            lives to the end of the caller's full-expression, which the
@@ -1695,25 +1702,6 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         if (k == conversion_kind::derived_to_base)
             return base_subobject_place(state, from, x.b, object);
         return derived_object_place(state, from, x.b, object);
-    }
-    /* [expr.call]/14: a call of a function that returns a reference is a
-       glvalue that designates the object its return statement bound the
-       result to ([stmt.return]/2), the address the call's value holds */
-    case semantic_kind::call: {
-        if (x.category == value_category::prvalue)
-            break;
-        /* clang's builtins std::move, std::move_if_noexcept,
-           std::forward, std::forward_like and std::as_const: the call
-           designates its argument's object, whatever the body */
-        if (uint32_t argument = std_identity_argument(node))
-            return evaluate_object(state, argument, object);
-        constant_value bound;
-        c = evaluate_call(state, node, bound);
-        if (c != constness::constant)
-            return c;
-        if (bound.kind != constant_value_kind::pointer || !bound.count)
-            return CONST_UNKNOWN;
-        return pointed_place(state, bound, object);
     }
     case semantic_kind::construct: {
         if (!x.a)
@@ -3509,8 +3497,10 @@ uint32_t semantic_analysis::std_identity_argument(uint32_t node) const
     if (semantics[callee].kind != semantic_kind::entity)
         return 0;
     entity_index f = semantics[callee].a;
+    /* (a declaration that is not constexpr stays a call of a function
+       that is not constexpr, [expr.const]/5.3, as clang has it) */
     if (entity_table[f].kind != entity_kind::function ||
-        !entity_table[f].instantiation)
+        !entity_table[f].instantiation || !entity_table[f].constexpr_)
         return 0;
     static const char *const names[] = {"move", "move_if_noexcept", "forward",
                                         "forward_like", "as_const"};
