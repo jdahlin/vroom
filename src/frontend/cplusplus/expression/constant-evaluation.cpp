@@ -2073,8 +2073,28 @@ semantic_analysis::derived_object_place(const constant_evaluation &state,
                                         uint32_t place, entity_index base,
                                         uint32_t &out) const
 {
-    if (!base || !(place & element_place))
+    if (!base)
         return CONST_UNKNOWN;
+    if (!(place & element_place)) {
+        /* [expr.static.cast]/11: the object is not a subobject of the class
+           it is cast to when it is a complete object of another class: the
+           cast has undefined behavior ([expr.const]/5.7, clang: cannot cast
+           object of dynamic type to type) */
+        if (place >= state.objects.size())
+            return CONST_UNKNOWN;
+        const constant_evaluation::object &whole = state.objects[place];
+        if (whole.opaque || whole.heap ||
+            whole.value.kind != constant_value_kind::class_object ||
+            !whole.value.designator)
+            return CONST_UNKNOWN;
+        const entity &held = entity_table[whole.value.designator];
+        for (uint32_t i = 0; i < held.member_count; i++)
+            if (class_members[held.first_member + i] == base)
+                return CONST_UNKNOWN;
+        return CONST_NOT_CONSTANT_NOTE(
+            "the expression is not a constant expression: cannot cast object "
+            "of dynamic type to type");
+    }
     uint32_t index = place & ~element_place;
     for (size_t pass = 0; pass < 2; pass++) {
         size_t n = state.objects.size();
