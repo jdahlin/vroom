@@ -630,8 +630,15 @@ node_index parser::alias_declaration()
     scope_index region = 0;
     if (facts.first == derivation::none)
         region = specifiers.type_region;
-    names.declare(name, declared_kind(name_kind::type_name), region,
-                  specifiers.dependent);
+    /* [temp.alias]/2: an alias template's specializations are dependent by
+       their arguments, not by its name: EL<int> in template<class T> using
+       EL = E<T> is no dependent type; where the parser knows the class the
+       alias names (its region), else its members stay opaque as dependent
+       ones */
+    name_kind alias_kind = declared_kind(name_kind::type_name);
+    names.declare(name, alias_kind, region,
+                  specifiers.dependent &&
+                      !(alias_kind == name_kind::template_name && region));
     return finish_node(syntax_kind::alias_declaration, mark, first);
 }
 

@@ -129,10 +129,22 @@ bool preprocessor::start(const char *path)
         files.add_text("<built-in>", text.data(), text.size(), false);
     predefines_file = built_in.index;
     execute_definitions(built_in);
-    if (!options.command_line.empty())
-        execute_definitions(files.add_text("<command line>",
-                                           options.command_line.data(),
-                                           options.command_line.size(), false));
+    /* [cpp.include]: clang reads -include FILE as an #include at the top of
+       the main file, so the file's tokens are the translation unit's (the
+       parser declares its names); the command line's text is then read
+       before the main file's, not executed and dropped.  Without an
+       #include it only defines macros: executed now. */
+    source_files::entry *command_line_file = nullptr;
+    if (!options.command_line.empty()) {
+        source_files::entry &command_line =
+            files.add_text("<command line>", options.command_line.data(),
+                           options.command_line.size(), false);
+        if (memmem(options.command_line.data(), options.command_line.size(),
+                   "#include", 8))
+            command_line_file = &command_line;
+        else
+            execute_definitions(command_line);
+    }
     main_file = files.open(path);
     if (!main_file)
         return false;
@@ -141,6 +153,9 @@ bool preprocessor::start(const char *path)
         entered_files.append({(uint64_t)st.st_dev, (uint64_t)st.st_ino});
     inclusions.append(
         {main_file, -1, 0, 0, false, false, preprocessing_token()});
+    if (command_line_file)
+        inclusions.append(
+            {command_line_file, -1, 0, 0, false, false, preprocessing_token()});
 
     /* [cpp.predefined]/1: "The date of translation of the source file" */
     time_t now = ::time(nullptr);
