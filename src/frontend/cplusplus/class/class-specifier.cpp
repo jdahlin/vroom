@@ -657,6 +657,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     auto spec = n.class_specifier().member_specification();
     token_index outer_members_first = defining_members_first;
     token_index outer_members_end = defining_members_end;
+    owned_array<SyntaxRef> *outer_bodies = defining_bodies;
+    entity_index outer_bodies_class = defining_bodies_class;
+    defining_bodies = &bodies;
+    defining_bodies_class = c;
     defining_members_first = spec.first_token();
     defining_members_end = spec.end_token();
     for (auto member : spec.elements()) {
@@ -702,6 +706,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     }
     defining_members_first = outer_members_first;
     defining_members_end = outer_members_end;
+    defining_bodies = outer_bodies;
+    defining_bodies_class = outer_bodies_class;
 
     /* [class.mem]/7: complete at the closing }, where its bases and
        members get their offsets and the class its size
@@ -819,7 +825,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            the complete-class context of the enclosing class too: analysed
            at its closing } */
         for (SyntaxRef body : bodies)
-            nested_bodies.append(deferred_body{c, body});
+            if (body)
+                nested_bodies.append(deferred_body{c, body});
     } else if (postpone) {
         /* [temp.inst]/4: a member function's definition is instantiated
            where it is used; the class that named this specialization
@@ -827,7 +834,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            }; struct d : base<d>) is complete only after it: the bodies
            wait for the end of the translation unit (instantiate_pending) */
         for (SyntaxRef body : bodies)
-            if (!queue_body_until_used(body))
+            if (body && !queue_body_until_used(body))
                 postponed_bodies.append(postponed_body{c, body, postponed_scope,
                                                        postponed_declaration});
         for (size_t i = nested_start; i < nested_bodies.size(); i++)
@@ -840,7 +847,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         bool quiet = entity_table[c].instantiation != 0;
         bodies_only_ill_formed = result == analysis_result::well_formed;
         for (SyntaxRef body : bodies) {
-            if (queue_body_until_used(body))
+            if (!body || queue_body_until_used(body))
                 continue;
             if (quiet)
                 instantiated_member_body(c, body);
@@ -2044,7 +2051,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                 continue;
             /* [basic.scope.declarative]/4, [over.load]/2: member functions
                with trailing requires-clauses can overload on constraints */
-            if (x.constraint_unsatisfied ||
+            if (x.constraint_unsatisfied || x.trailing_requires ||
                 (declaration.is(syntax_kind::function_definition) &&
                  declaration.size() >= 3 &&
                  declaration[declaration.size() - 2].is(
@@ -2118,6 +2125,11 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             deferred_noexcept = 0;
         }
         entity_table[e].placeholder_return = placeholder_return;
+        entity_table[e].trailing_requires =
+            declaration.is(syntax_kind::function_definition) &&
+            declaration.size() >= 3 &&
+            declaration[declaration.size() - 2].is(
+                syntax_kind::requires_clause);
         entity_table[e].nonstatic_member = !s.static_;
         entity_table[e].member_cv = function_cv;
         /* [class.mfct]/1: "A member function may be defined in its class

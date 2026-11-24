@@ -536,6 +536,9 @@ struct entity {
     bool inline_ = false;
     /* A constructor with an unsatisfied associated constraint. */
     bool constraint_unsatisfied = false;
+    /* [over.load]/2: a member function declared with a trailing
+       requires-clause (it overloads one that differs in it) */
+    bool trailing_requires = false;
     /* a scope: a declaration analysis did not follow may have brought
        names into it that are not held one by one (a using-directive whose
        namespace is not known, a using-enum-declaration): a name not found
@@ -3179,6 +3182,11 @@ class semantic_analysis
     /* [dcl.spec.auto]/11: a use of e, whose type may have an undeduced
        placeholder */
     analysis_result undeduced_use(token_index t, entity_index e);
+    /* the member function bodies of the class being defined that wait for
+       its closing brace (defining_bodies, of defining_bodies_class) */
+    owned_array<SyntaxRef> *defining_bodies = nullptr;
+    entity_index defining_bodies_class = 0;
+    bool deduce_member_body_now(entity_index e);
     /* [dcl.spec.auto]/8-9: a return statement's operand (or none) in a
        function whose declared return type has a placeholder */
     analysis_result deduce_return(SyntaxRef at, const expression_meaning *e,
@@ -4007,6 +4015,7 @@ class semantic_analysis
     };
     owned_array<pending_noexcept> pending_noexcepts;
     bool noexcept_needs_complete_class(SyntaxRef n);
+    bool names_parameter_of_class(SyntaxRef n, entity_index c);
     analysis_result member_noexcept_specifiers(entity_index c);
     /* the noexcept-specifiers left value-dependent in templates' own
        declarations */
