@@ -1099,8 +1099,11 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     /* (a declaration nested in an initializer has its own) */
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
-    scoped_value<entity_index> member_context(
-        access_class, declarator_access_class(declaration));
+    /* (a template's declaration being substituted keeps its context) */
+    entity_index declarator_context = declarator_access_class(declaration);
+    if (!declarator_context)
+        declarator_context = access_class;
+    scoped_value<entity_index> member_context(access_class, declarator_context);
     /* [dcl.type.class.deduct]/1: a placeholder for a deduced class type
        (C b(args); or O::C b(args);) */
     analysis_result r = analysis_result::well_formed;

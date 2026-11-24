@@ -96,6 +96,10 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             declare_stage
         };
         unsigned stage = specifier_stage;
+        /* [temp.deduct]/8: "Access checking is done as part of the
+           substitution process", in the template's context: the template
+           is a friend of the class that befriends it ([temp.friend]/3) */
+        scoped_value<entity_index> access(access_class, template_entity);
         if (guide) {
             stage = guide_type;
             r = deduction_guide_type(ft.declarator, lambda_type);
@@ -389,6 +393,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     } else {
         bool saved_friend = friend_allowed;
         friend_allowed = ft.friend_class != 0;
+        /* (its declarator again, in the template's context, as when the
+           declaration was substituted) */
+        scoped_value<entity_index> access(access_class, template_entity);
         r = function_definition(ft.definition);
         friend_allowed = saved_friend;
     }
