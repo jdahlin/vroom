@@ -999,6 +999,14 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
             entity_table[entity_table[source.entity].call_operator].kind ==
                 entity_kind::template_entity)
             return generic_closure_conversion(source.entity, to, at, m);
+        /* [conv]/1: no standard conversion takes another class type to a
+           pointer; a class with conversion functions is not analysed here, and
+           [over.best.ics]/4 leaves them to the
+           caller */
+        const struct type fc = type_table[m.type.unqualified()];
+        if (fc.kind == type_kind::class_type && fc.entity &&
+            !has_conversion_functions(fc.entity))
+            return ill_formed(at, rule, "dcl.init");
         return not_supported(at, "conv");
     }
     return ill_formed(at, rule, "dcl.init");
