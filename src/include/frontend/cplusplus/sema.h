@@ -6381,6 +6381,9 @@ class semantic_analysis
     /* a declaration analysis did not follow may declare an operator
        function (hold_names): what an operator means is not known */
     bool operators_held = false;
+    /* the last class definition was kept complete though a member
+       function body was ill-formed ([class.mem]/6) */
+    bool class_kept_ill_formed = false;
     /* the first operator keyword of such a declaration (0: none), which a
        refused operator's detail names */
     token_index operators_held_at = 0;

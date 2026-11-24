@@ -58,9 +58,12 @@ const char *semantic_analysis::local_class_rule(entity_index c) const
 analysis_result semantic_analysis::class_specifier(ClassSpecifier n,
                                                    type_index &type)
 {
+    class_kept_ill_formed = false;
     analysis_result r = class_definition(n, type);
+    bool kept = class_kept_ill_formed;
+    class_kept_ill_formed = false;
     auto head = n.class_specifier().class_head();
-    if (r == analysis_result::well_formed || !head)
+    if (r == analysis_result::well_formed || !head || kept)
         return r;
     /* a class whose definition is not analysed: its name is held in the
        scope it would be declared in, so that a later
@@ -711,6 +714,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
        body ... within the member-specification of the class": the bodies
        are analysed with the class complete */
     SyntaxRef outer_declaration = current_declaration;
+    bool bodies_only_ill_formed = false;
     /* [class.local]: a local class's member functions are analysed inside
        the enclosing function's body, whose state is kept aside meanwhile */
     function_context enclosing_function =
@@ -789,6 +793,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     } else {
         size_t nested_end = nested_bodies.size();
         bool quiet = entity_table[c].instantiation != 0;
+        bodies_only_ill_formed = result == analysis_result::well_formed;
         for (SyntaxRef body : bodies) {
             if (queue_body_until_used(body))
                 continue;
@@ -809,14 +814,25 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         }
         nested_bodies.resize(nested_start);
     }
-    if (result == analysis_result::well_formed)
-        result = implicit_definitions(c, n);
+    /* [dcl.meaning]: a class whose members are all declared and only
+       whose member function bodies are ill-formed is a complete class
+       the declarations after it use ([impl.clang] clang recovers) */
+    bodies_only_ill_formed =
+        bodies_only_ill_formed && result == analysis_result::ill_formed;
+    if (result == analysis_result::well_formed || bodies_only_ill_formed) {
+        analysis_result implicit = implicit_definitions(c, n);
+        if (result == analysis_result::well_formed ||
+            implicit != analysis_result::well_formed)
+            result = worse(result, implicit);
+    }
     current_declaration = outer_declaration;
     function_state = static_cast<function_context &&>(enclosing_function);
     block_variables =
         static_cast<owned_array<entity_index> &&>(enclosing_block_variables);
     current_scope = enclosing_scope;
-    if (result != analysis_result::well_formed) {
+    class_kept_ill_formed =
+        bodies_only_ill_formed && result == analysis_result::ill_formed;
+    if (result != analysis_result::well_formed && !class_kept_ill_formed) {
         entity_table[c].kind = entity_kind::none;
         note_held(c);
         entity_table[c].size = 0;
