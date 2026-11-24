@@ -589,3 +589,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   (a static member through an inactive member, anonymous member nesting, an
   implicit constructor's default member initializer), then the rejection
   (scratchpad rule-and-ctor.patch).
+- 9.10 (32993fcc3, 89b3732bb, 582ca3d31, 757768435, 568898cd4): union
+  evaluation: a static member's object expression is not read, anonymous
+  struct members' mem-initializers, a union's implicit constructor
+  initializes only the member with a default member initializer, an
+  unnamed bit-field is no first member; then reading an inactive member in
+  a static_assert is ill-formed as clang.  Unsupported 35856 -> 35701, we
+  reject unchanged, we accept -1, types/constants verified -20/-5 (claims of
+  the newly rejected static_asserts).  Next: the other not_constant rules
+  one at a time (CONST_NOT_CONSTANT_RULE).
