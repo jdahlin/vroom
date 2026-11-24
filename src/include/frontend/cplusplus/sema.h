@@ -7097,9 +7097,9 @@ class semantic_analysis
     /* ... of two: m the call when one is chosen (handled) */
     analysis_result binary_operator_function(
         SyntaxRef n, token_index at, preprocessing_op_or_punc op,
-        SyntaxElement left_syntax, const expression_meaning &left,
-        SyntaxElement right_syntax, const expression_meaning &right,
-        bool &handled, expression_meaning &m);
+        SyntaxElement left_syntax, expression_meaning &left,
+        SyntaxElement right_syntax, expression_meaning &right, bool &handled,
+        expression_meaning &m);
     /* the initialization of type from the analysed expression m */
     analysis_result initialize_with(SyntaxRef at, expression_meaning &m,
                                     qualified_type type, bool direct, bool list,
