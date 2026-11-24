@@ -918,3 +918,11 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   members before C++17 (the 11.18 patch, -142).  Unsupported 34415 ->
   34275, we accept 5296 -> 5295 (vector.cpp:508 -std=c++11 joins its 4
   other editions: use-site attribution of instantiation errors, known gap).
+- 11.20 (d38d380f6): [temp.mem] fallthrough split: member of a member class
+  template defined with a multi-component qualifier 88, other
+  simple-declaration 69, other 23.  Parked (scratchpad 11.20-1.patch):
+  use-site verdict for implicit instantiations, we accept -25 but we reject
+  +11: clang diagnoses non-dependent errors at the definition with no
+  "requested here" note, and we analyse member bodies only at
+  instantiation, so a failure needs an argument-dependent flag ([temp.res]/6)
+  before the use may be marked.
