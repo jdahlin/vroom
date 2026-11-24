@@ -460,9 +460,10 @@ struct entity {
     constness usable = constness::not_constant;
     uint64_t value = 0;
     /* a dependent_value that is an expression naming a non-type template
-       parameter (S<I + 1>): semantic_analysis::expression_digest of its
-       tokens, 0 for another */
-    uint64_t expression = 0;
+       parameter with no other structure (S<I + 1>): its structure
+       (semantic_analysis::expression_structure, hash-consed: one entity
+       per structure), 0 for another */
+    uint32_t expression = 0;
     /* [dcl.constexpr]/1 */
     bool constexpr_ = false;
     /* [dcl.constexpr]/2: "A function or function template declared with
@@ -3583,7 +3584,19 @@ class semantic_analysis
     uint64_t bit_int_layout(uint64_t width, bool alignment) const;
     entity_index value_parameter_named(SyntaxElement e);
     entity_index value_parameter_in(SyntaxElement e);
-    uint64_t expression_digest(SyntaxElement e);
+    /* [temp.over.link]/5: an expression's structure, hash-consed (equal
+       structures are one index, never 0): expression_nodes[index] */
+    struct structure_node {
+        uint64_t word;
+        uint32_t tag, a, b;
+        /* the dependent_value whose structure it is (0: none yet) */
+        entity_index dependent_value;
+    };
+    owned_array<structure_node> expression_nodes;
+    owned_array<uint32_t> expression_node_slots;
+    uint32_t expression_node_make(uint32_t tag, uint64_t word, uint32_t a,
+                                  uint32_t b);
+    uint32_t expression_structure(SyntaxElement e);
     analysis_result potentially_throwing(SyntaxRef n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_void_operand(SyntaxRef n,

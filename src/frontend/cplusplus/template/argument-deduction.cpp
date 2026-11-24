@@ -257,14 +257,10 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             if (entity_table[x.template_entity].kind ==
                 entity_kind::dependent_value) {
                 /* [temp.over.link]/5: two declarations' expressions
-                   naming parameters are equivalent when their tokens are
-                   (expression_digest) */
+                   naming parameters are equivalent when their structures
+                   are (expression_structure): the same entity */
                 if (exact && entity_table[x.template_entity].expression &&
-                    !(y.template_entity &&
-                      entity_table[y.template_entity].kind ==
-                          entity_kind::dependent_value &&
-                      entity_table[y.template_entity].expression ==
-                          entity_table[x.template_entity].expression))
+                    y.template_entity != x.template_entity)
                     return false;
                 continue;
             }

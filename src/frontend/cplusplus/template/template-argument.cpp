@@ -218,15 +218,15 @@ entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
     entity_index e = dependent_value_structure(written);
     /* [temp.over.link]/5: an expression naming a non-type template
        parameter that has no structure above (I + 1) is equivalent to
-       another of the same tokens, parameters by position */
+       another of the same structure (expression_structure): one entity */
     if (entity_table[e].value || entity_table[e].expression ||
         written.is_token() || !value_parameter_in(written))
         return e;
-    uint64_t digest = expression_digest(written);
-    for (entity_index d : dependent_values)
-        if (!entity_table[d].value && entity_table[d].expression == digest)
-            return d;
-    entity_table[e].expression = digest;
+    uint32_t structure = expression_structure(written);
+    if (entity_index d = expression_nodes[structure].dependent_value)
+        return d;
+    entity_table[e].expression = structure;
+    expression_nodes[structure].dependent_value = e;
     dependent_values.append(e);
     return e;
 }

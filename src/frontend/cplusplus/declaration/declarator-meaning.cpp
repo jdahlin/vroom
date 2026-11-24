@@ -324,46 +324,126 @@ entity_index semantic_analysis::value_parameter_in(SyntaxElement e)
     return 0;
 }
 
-/* [temp.over.link]/5: a digest of the token sequence of an expression in a
-   template's own declaration, a template parameter by its position, any
-   other name by its identifier; equal digests are equivalent expressions
-   (never 0) */
-uint64_t semantic_analysis::expression_digest(SyntaxElement e)
+/* [temp.over.link]/5: the node of tag and its operands, made once:
+   equal operands, one index (never 0) */
+uint32_t semantic_analysis::expression_node_make(uint32_t tag, uint64_t word,
+                                                 uint32_t a, uint32_t b)
 {
-    uint64_t h = 1469598103934665603ull;
-    SyntaxRef n = e;
-    token_index first = n.first_token();
-    token_index end = n.end_token();
-    for (token_index t = first; t < end; t++) {
-        const token &k = tokens[t];
-        uint64_t word = (uint64_t)k.kind << 32 |
-                        (uint64_t)(uint16_t)k.keyword << 8 |
-                        (uint64_t)k.op_or_punc;
-        bool member = false;
-        if (t > first &&
-            tokens[t - 1].kind == token_kind::operator_or_punctuator) {
+    if (!expression_nodes.size()) {
+        expression_nodes.append(structure_node{0, 0, 0, 0, 0});
+        expression_node_slots.resize(64);
+        for (size_t i = 0; i < 64; i++)
+            expression_node_slots[i] = 0;
+    }
+    uint64_t h =
+        (word ^ (uint64_t)tag << 59 ^ (uint64_t)a << 29 ^ (uint64_t)b) *
+        0x9e3779b97f4a7c15ull;
+    size_t mask = expression_node_slots.size() - 1;
+    size_t i = (h >> 32) & mask;
+    for (;; i = (i + 1) & mask) {
+        uint32_t k = expression_node_slots[i];
+        if (!k)
+            break;
+        const structure_node &n = expression_nodes[k];
+        if (n.tag == tag && n.word == word && n.a == a && n.b == b)
+            return k;
+    }
+    uint32_t made = static_cast<uint32_t>(expression_nodes.size());
+    expression_nodes.append(structure_node{word, tag, a, b, 0});
+    expression_node_slots[i] = made;
+    if (expression_nodes.size() * 2 > expression_node_slots.size()) {
+        size_t grown = expression_node_slots.size() * 2;
+        expression_node_slots.resize(grown);
+        for (size_t j = 0; j < grown; j++)
+            expression_node_slots[j] = 0;
+        for (uint32_t k = 1; k < expression_nodes.size(); k++) {
+            const structure_node &n = expression_nodes[k];
+            uint64_t g = (n.word ^ (uint64_t)n.tag << 59 ^ (uint64_t)n.a << 29 ^
+                          (uint64_t)n.b) *
+                         0x9e3779b97f4a7c15ull;
+            size_t j = (g >> 32) & (grown - 1);
+            while (expression_node_slots[j])
+                j = (j + 1) & (grown - 1);
+            expression_node_slots[j] = k;
+        }
+    }
+    return made;
+}
+
+/* [temp.over.link]/5: "Two expressions involving template parameters are
+   considered equivalent if two function definitions containing the
+   expressions would satisfy the one-definition rule": the structure of an
+   expression in a template's own declaration ([basic.def.odr]/13.1: "the
+   same sequence of tokens", so (N) + 1 is not N + 1, as clang has it), a
+   non-type template parameter by its position, another
+   name by the entity its lookup finds (a template's own type parameter,
+   a member after "::", "." or "->" and a name lookup does not find by
+   its identifier), a literal by its value, an operator by its token, a
+   node by its kind and children.  Equal structures are one index */
+uint32_t semantic_analysis::expression_structure(SyntaxElement e)
+{
+    enum : uint32_t {
+        tag_none = 1,
+        tag_token,
+        tag_parameter,
+        tag_entity,
+        tag_identifier,
+        tag_floating,
+        tag_node,
+        tag_children,
+        tag_literal = 16,
+    };
+    while (e.is_node() && SyntaxRef(e).size() == 1)
+        e = SyntaxRef(e)[0];
+    if (!e)
+        return expression_node_make(tag_none, 0, 0, 0);
+    if (e.is_node()) {
+        SyntaxRef n = e;
+        uint32_t children = 0;
+        for (uint32_t i = n.size(); i-- > 0;)
+            children = expression_node_make(
+                tag_children, 0, expression_structure(n[i]), children);
+        return expression_node_make(tag_node, (uint64_t)n.kind(), children, 0);
+    }
+    token_index t = e.token();
+    const token &k = tokens[t];
+    if (k.kind == token_kind::identifier) {
+        uint32_t identifier = tokens.identifier(t);
+        if (t > 0 && tokens[t - 1].kind == token_kind::operator_or_punctuator) {
             preprocessing_op_or_punc op =
                 preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc);
-            member = op == preprocessing_op_or_punc::COLON_COLON ||
-                     op == preprocessing_op_or_punc::DOT ||
-                     op == preprocessing_op_or_punc::ARROW;
+            if (op == preprocessing_op_or_punc::COLON_COLON ||
+                op == preprocessing_op_or_punc::DOT ||
+                op == preprocessing_op_or_punc::ARROW)
+                return expression_node_make(tag_identifier, 0, identifier, 0);
         }
-        if (k.kind == token_kind::identifier) {
-            entity_index named = 0;
-            if (!member)
-                named = value_parameter_named(SyntaxElement::from_token(t));
-            if (named)
-                word = (uint64_t)1 << 56 | entity_table[named].value;
-            else
-                word = (uint64_t)2 << 56 | tokens.identifier(t);
-        } else if (k.literal != literal_kind::none) {
-            const literal_value &v = tokens.files.value_of(k);
-            word ^= v.value * 0x9e3779b97f4a7c15ull ^ v.floating_bits_low;
-        }
-        h = (h ^ word) * 1099511628211ull;
-        h ^= h >> 29;
+        if (entity_index named = value_parameter_named(e))
+            return expression_node_make(tag_parameter,
+                                        entity_table[named].value, 0, 0);
+        lookup_result x = lookup_unqualified(identifier, lookup_filter::any);
+        if (x.entity && !entity_table[x.entity].instantiation)
+            return expression_node_make(tag_entity, 0, x.entity, 0);
+        return expression_node_make(tag_identifier, 0, identifier, 0);
     }
-    return h | 1;
+    if (k.literal != literal_kind::none) {
+        const literal_value &v = tokens.files.value_of(k);
+        uint32_t floating = 0;
+        if (k.literal == literal_kind::floating_point_literal)
+            floating = expression_node_make(
+                tag_floating, v.floating_bits_low,
+                static_cast<uint32_t>(v.floating_bits_high),
+                static_cast<uint32_t>(v.floating_bits_high >> 32));
+        else if (k.literal == literal_kind::string_literal ||
+                 k.literal == literal_kind::user_defined_literal)
+            floating = expression_node_make(tag_token, t, 0, 0);
+        return expression_node_make(tag_literal + (uint32_t)k.literal, v.value,
+                                    (uint32_t)k.type, floating);
+    }
+    return expression_node_make(tag_token,
+                                (uint64_t)k.kind << 48 |
+                                    (uint64_t)(uint16_t)k.keyword << 24 |
+                                    (uint64_t)k.op_or_punc,
+                                0, 0);
 }
 
 /*
@@ -423,13 +503,14 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
     }
     /* ... and an expression of one (T (&)[N + 1]) is value-dependent too
        ([temp.dep.constexpr]/2): the type records the parameter and the
-       expression's first token (a non-deduced context,
+       expression's structure (expression_structure; a non-deduced context,
        [temp.deduct.type]/5.3); each instantiation analyses the declarator
        again */
     if (entity_index named = value_parameter_in(bound)) {
-        type = qualified_type::make(type_table.array_of_parameter_bound(
-                                        type, named, expression_digest(bound)),
-                                    cv_none);
+        type =
+            qualified_type::make(type_table.array_of_parameter_bound(
+                                     type, named, expression_structure(bound)),
+                                 cv_none);
         return analysis_result::well_formed;
     }
     expression_meaning m;
