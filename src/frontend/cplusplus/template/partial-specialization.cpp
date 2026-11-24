@@ -77,6 +77,19 @@ analysis_result semantic_analysis::variable_partial_specialization(
     declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;
+    /* [temp.class.spec]/9.2: a parameter used only in an expression of
+       an argument (<I + 5, I * 2>) is not deducible: not judged */
+    for (const template_argument &a : arguments) {
+        if (a.template_entity && entity_table[a.template_entity].expression)
+            return not_supported(n, "temp.class.spec");
+        if (a.kind != template_argument::kind_t::pack || a.count == UINT32_MAX)
+            continue;
+        for (uint32_t k = 0; k < a.count; k++) {
+            entity_index d = pack_arguments[a.value + k].template_entity;
+            if (d && entity_table[d].expression)
+                return not_supported(n, "temp.class.spec");
+        }
+    }
     bool dependent = dependent_arguments(arguments);
     bool identity = primary_arguments(n, primary.declaration, arguments, first,
                                       parameters.size());
@@ -414,6 +427,20 @@ analysis_result semantic_analysis::class_specialization_definition(
     declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;
+    /* [temp.class.spec]/9.2: a parameter used only in expressions of the
+       arguments (<I + 5, I * 2>), a non-deduced context, is not
+       deducible: not judged when no argument deduces anything */
+    {
+        bool expressions = false, deduces = false;
+        for (const template_argument &a : arguments) {
+            if (a.template_entity && entity_table[a.template_entity].expression)
+                expressions = true;
+            else if (a.template_entity || depends_on_template_parameter(a.type))
+                deduces = true;
+        }
+        if (expressions && !deduces)
+            return not_supported(n, "temp.class.spec");
+    }
     bool dependent = dependent_arguments(arguments);
     bool identity = primary_arguments(n, primary.declaration, arguments, first,
                                       parameters.size());

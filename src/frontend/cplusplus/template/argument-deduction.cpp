@@ -255,8 +255,19 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                subexpression references a template parameter" is a
                non-deduced context */
             if (entity_table[x.template_entity].kind ==
-                entity_kind::dependent_value)
+                entity_kind::dependent_value) {
+                /* [temp.over.link]/5: two declarations' expressions
+                   naming parameters are equivalent when their tokens are
+                   (expression_digest) */
+                if (exact && entity_table[x.template_entity].expression &&
+                    !(y.template_entity &&
+                      entity_table[y.template_entity].kind ==
+                          entity_kind::dependent_value &&
+                      entity_table[y.template_entity].expression ==
+                          entity_table[x.template_entity].expression))
+                    return false;
                 continue;
+            }
             /* /8's TT<i>: a non-type parameter's value from A's (of the
                parameter's type: the template's parameter is the same) */
             uint64_t k = x.value;

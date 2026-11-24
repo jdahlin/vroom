@@ -456,6 +456,10 @@ struct entity {
        is not, or analysis could not tell (unknown) */
     constness usable = constness::not_constant;
     uint64_t value = 0;
+    /* a dependent_value that is an expression naming a non-type template
+       parameter (S<I + 1>): semantic_analysis::expression_digest of its
+       tokens, 0 for another */
+    uint64_t expression = 0;
     /* [dcl.constexpr]/1 */
     bool constexpr_ = false;
     /* [dcl.constexpr]/2: "A function or function template declared with
@@ -5250,6 +5254,7 @@ class semantic_analysis
                                           template_argument &out);
     /* [temp.param]/4: a non-type parameter's dependent type
        (typename enable_if<B, int>::type) with the arguments before it */
+    entity_index dependent_value_structure(SyntaxElement written);
     entity_index dependent_value_entity(SyntaxElement written);
     entity_index static_member_value_entity(entity_index c, uint32_t name,
                                             entity_index e, bool negated);
