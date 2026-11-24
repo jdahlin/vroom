@@ -1311,6 +1311,10 @@ bool semantic_analysis::equivalent_template(const function_template &f,
         !same_template_parameters(first, f.first_parameter, count) ||
         !same_constraints(f.declaration, n))
         return false;
+    /* two definitions: [impl.clang] clang reports a redefinition; analysis
+       does not claim it for a non-type parameter (a refusal holds the name) */
+    bool both_defined = f.definition && n.size() &&
+                        n[n.size() - 1].is(syntax_kind::function_definition);
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < count; i++) {
@@ -1337,7 +1341,7 @@ bool semantic_analysis::equivalent_template(const function_template &f,
                     el.count != UINT32_MAX || el.template_entity != pe)
                     return false;
             }
-        } else if ((f.friend_class || friend_allowed) &&
+        } else if ((f.friend_class || friend_allowed || !both_defined) &&
                    entity_table[pe].kind != entity_kind::typedef_name &&
                    values[i].kind == template_argument::kind_t::value &&
                    values[i].template_entity) {
