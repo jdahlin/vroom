@@ -159,6 +159,21 @@ void semantic_analysis::implicit_aligned_allocation_functions()
     }
 }
 
+/* std::align_val_t, when <new> declared it (and the aligned forms with it) */
+bool semantic_analysis::align_val_type(qualified_type &type)
+{
+    implicit_aligned_allocation_functions();
+    if (!aligned_allocation_declared)
+        return false;
+    entity_index std_ =
+        entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
+    lookup_result found = lookup_in_namespace(
+        std_, tokens.pp.identifier("align_val_t", 11) + 1, lookup_filter::any);
+    type = qualified_type::make(entity_table[found.entity].type.unqualified(),
+                                cv_none);
+    return true;
+}
+
 /*
  * [ext:gnu_library_builtins] clang's __builtin_operator_new and
  * __builtin_operator_delete (libc++'s <__new/allocate.h>): a call of the

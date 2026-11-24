@@ -117,6 +117,8 @@ LANGUAGE_FEATURE(multidimensional_subscript, cplusplus_23, never,
                  "P2128R6: postfix-expression [ expression-list_opt ]")
 LANGUAGE_FEATURE(sized_deallocation, cplusplus_14, never,
                  "N3778: operator delete(void*, std::size_t) ([basic.stc.dynamic]/2)")
+LANGUAGE_FEATURE(aligned_allocation, cplusplus_17, never,
+                 "P0035R4: operator new(std::size_t, std::align_val_t) for new-extended alignment ([expr.new]/19)")
 /* [cpp] */
 LANGUAGE_FEATURE(long_long, cplusplus_11, never, "N1811: long long, in #if too ([cpp.cond]/12)")
 LANGUAGE_FEATURE(variadic_macros, cplusplus_11, never,

@@ -6645,6 +6645,7 @@ class semantic_analysis
                                               const qualified_type *parameters,
                                               uint32_t count);
     void implicit_aligned_allocation_functions();
+    bool align_val_type(qualified_type &type);
     bool aligned_allocation_declared = false;
     /* the declarations of allocation and deallocation functions analysed;
        when the translation unit spells operator new or operator delete
@@ -6671,7 +6672,8 @@ class semantic_analysis
     analysis_result usual_deallocation(SyntaxRef n, entity_index c, bool global,
                                        bool array, entity_index &function,
                                        bool &sized, bool class_complete = false,
-                                       bool cookie = false);
+                                       bool cookie = false,
+                                       bool over_aligned = false);
     /* [abi:array-cookies]: the size of the cookie before an array of
        element (of class c, 0 if none) that a new[] or delete[] (::delete[]
        when global) gives, 0 if none */

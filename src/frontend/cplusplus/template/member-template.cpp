@@ -155,9 +155,10 @@ analysis_result semantic_analysis::member_function_template(
             return not_supported_because(n, "temp.mem",
                                          "an allocation or deallocation "
                                          "function template of other form");
-        /* its body is instantiated at a new-expression's use, whose
-           over-aligned form ([expr.new]/19) is not analysed: the body's
-           errors would go unseen */
+        /* its body is instantiated at a new-expression's use, and an error
+           in it rejects neither the class that holds the template nor the
+           use (instantiate() marks only a declaration that is the
+           template's own: p14.cpp:60), so a definition is not analysed */
         if (defines)
             return not_supported_because(n, "temp.mem",
                                          "the definition of an allocation "
