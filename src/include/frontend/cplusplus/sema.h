@@ -1865,6 +1865,8 @@ class semantic_analysis
     /* [namespace.std]: whether scope is ::std, the namespace std of the
        global namespace */
     bool std_namespace(entity_index scope) const;
+    uint32_t std_identity_argument(uint32_t call) const;
+    bool constant_p_call(uint32_t node) const;
     /* class c declares a constructor template not deleted on its first
        declaration (a user-declared constructor, [impl.clang]) */
     bool has_user_constructor_template(entity_index c) const;

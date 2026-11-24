@@ -474,6 +474,15 @@ analysis_result semantic_analysis::analyse_function_body_of(
        a constexpr function, even though a call to such a function cannot
        appear in a constant expression." */
     bool specialization = entity_table[f].instantiation != 0;
+    /* a member function of a class template's specialization is
+       instantiated with it ([temp.inst]/3): [impl.clang] clang does not check /6's
+       "no argument values" on it either */
+    bool instantiated_member = false;
+    for (entity_index c = entity_table[f].enclosing;
+         c && entity_table[c].kind == entity_kind::class_type;
+         c = entity_table[c].enclosing)
+        if (entity_table[c].instantiation)
+            instantiated_member = true;
     if (result == analysis_result::well_formed && entity_table[f].constexpr_ &&
         specialization) {
         const implementation_defined_behavior &b = tokens.files.behavior;
@@ -590,7 +599,7 @@ analysis_result semantic_analysis::analyse_function_body_of(
            on builtins [impl.clang] clang does not fold) */
         else if (!b.has(language_feature::constexpr_without_constant_result) &&
                  !in_system_header(first_token(compound)) &&
-                 !defaulted_comparison &&
+                 !defaulted_comparison && !instantiated_member &&
                  potential_constant(body) == constness::not_constant)
             result = worse(
                 result,
