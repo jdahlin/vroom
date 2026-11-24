@@ -55,10 +55,17 @@ def run(cc, src, level, tmp, clang):
     return 'REFUSED', (m.group(1) if m else p.stderr.strip()[:100])[:160]
 
 
+def default_bin():
+    for d in ('build/src', 'build/linux/src'):
+        if os.path.exists(f'{R}/{d}/vpp'):
+            return f'{R}/{d}'
+    return f'{R}/build/src'
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-j', type=int, default=6)
-    ap.add_argument('--bin-dir', default=os.environ.get('VCC_BIN', f'{R}/build/linux/src'))
+    ap.add_argument('--bin-dir', default=os.environ.get('VCC_BIN', default_bin()))
     ap.add_argument('--clang', action='store_true', help='clang++ instead of vpp (the reference)')
     ap.add_argument('-O', dest='level', type=int, default=0)
     ap.add_argument('-v', action='store_true')
@@ -73,8 +80,14 @@ def main():
     counts = {'OK': 0, 'REFUSED': 0, 'CRASH': 0}
     for s, (state, why) in zip(srcs, res):
         counts[state] += 1
-        if a.v or state != 'OK':
+        if a.v:
             print(f'{state:8} {os.path.relpath(s, SRC):40} {why}')
+    why = {}
+    for state, w in res:
+        if state != 'OK':
+            why[w] = why.get(w, 0) + 1
+    for w, n in sorted(why.items(), key=lambda x: -x[1])[:8]:
+        print(f'{n:5} {w}')
     print(f'OK {counts["OK"]}, REFUSED {counts["REFUSED"]}, CRASH {counts["CRASH"]}')
     return 1 if counts['CRASH'] else 0
 
