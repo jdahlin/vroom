@@ -929,7 +929,8 @@ analysis_result semantic_analysis::deduce_from_call(
                 continue;
             SyntaxRef node = template_parameter_nodes[ft.first_parameter + i];
             template_parameter_parts form;
-            if (!template_parameter_form(node, form) || !form.has_default) {
+            if (!template_parameter_form(node, form) ||
+                !(form.has_default || form.pack)) {
                 *failed = true;
                 return analysis_result::well_formed;
             }
