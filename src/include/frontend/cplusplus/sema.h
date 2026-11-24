@@ -6470,6 +6470,9 @@ class semantic_analysis
        analysed (an extension that is an error here): the declaration goes
        on, declares what it declares, and is judged ill-formed at its end */
     bool recovered_error = false;
+    /* ... where what the declaration declares is declared all the same (a
+       class template with a member's error: hold_names keeps it) */
+    bool recovered_declares = false;
     /* the first operator keyword of such a declaration (0: none), which a
        refused operator's detail names */
     token_index operators_held_at = 0;

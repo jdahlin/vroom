@@ -20,6 +20,22 @@ namespace cplusplus
  */
 namespace
 {
+/* the first token of a dynamic-exception-specification in n, UINT32_MAX if
+   none */
+token_index first_dynamic_specification(SyntaxElement n)
+{
+    if (n.is_token())
+        return UINT32_MAX;
+    if (n.dynamic_exception_specification())
+        return n.first_token();
+    for (auto c : n.elements()) {
+        token_index found = first_dynamic_specification(c);
+        if (found != UINT32_MAX)
+            return found;
+    }
+    return UINT32_MAX;
+}
+
 /* [class.friend]/2: while a class template's template-head and parameters
    are analysed, a friend class template of its name is the befriended
    entity (accessible) */
@@ -112,6 +128,20 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
                         "a member function template shall not be virtual",
                         "temp.mem");
         }
+    /* [diff.cpp14.except]/1: a dynamic-exception-specification of a member
+       is an error of the template's definition (clang diagnoses it
+       there), whatever the arguments; the members are analysed per
+       specialization */
+    if (!tokens.files.behavior.has(
+            language_feature::dynamic_exception_specifications)) {
+        token_index dynamic = first_dynamic_specification(specifier);
+        if (dynamic != UINT32_MAX) {
+            VTRY(dr, recoverable_extension_used(
+                         diagnostic_id::sema_dynamic_exception_specification,
+                         dynamic));
+            recovered_declares = true;
+        }
+    }
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,

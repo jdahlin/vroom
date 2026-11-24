@@ -305,7 +305,9 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     size_t held_before = held_pending.size();
     size_t scopes_before = unknown_scopes_pending.size();
     bool outer_recovered = recovered_error;
+    bool outer_declares = recovered_declares;
     recovered_error = false;
+    recovered_declares = false;
     if (is_namespace_definition(tree, n)) {
         /* the declarations of its body are analysed as declarations of
            their own: one of them not parsed does not make the namespace
@@ -326,14 +328,17 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
         declaration_not_parsed_seen = true;
     } else
         d.result = declaration_by_kind(n);
+    bool declares = recovered_declares && recovered_error &&
+                    d.result == analysis_result::well_formed;
     if (recovered_error && d.result == analysis_result::well_formed)
         d.result = analysis_result::ill_formed;
     recovered_error = outer_recovered;
+    recovered_declares = outer_declares;
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
     d.has_unsupported = unsupported.size() > unsupported_before;
     /* (a linkage-specification holds the names of its own declarations) */
-    if (d.result != analysis_result::well_formed &&
+    if (d.result != analysis_result::well_formed && !declares &&
         tree[n].kind != syntax_kind::linkage_specification) {
         /* [basic.scope.declarative]: a function redeclared ill-formed is
            still the function its first declaration declared */
