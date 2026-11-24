@@ -395,8 +395,28 @@ class c_lowering
            live[continue_mark ..] */
         uint32_t continue_label = 0;
         size_t continue_mark = 0;
+        /* with exceptions: the void * variable holding the object's address, a cleanup variable
+           whose function destroys the object when an exception unwinds past it ([except.ctor]/1);
+           set to null where the lowering destroys the object itself; 0 if none */
+        uint32_t guard = 0;
     };
     owned_array<scope_record> live;
+    /* [except]: the exception run-time functions, 0 until declared; in a handler, the void *
+       variable holding what __cxa_begin_catch returned; per destructor the function that
+       destroys the object its guard points to */
+    uint32_t cxa_allocate_exception = 0, cxa_throw = 0, cxa_rethrow = 0,
+             cxa_begin_catch = 0;
+    uint32_t exception_symbol = 0;
+    owned_array<entity_index> unwind_destructors;
+    owned_array<uint32_t> unwind_functions;
+    uint32_t throw_expression(const semantic_node &n);
+    uint32_t exception_object(const semantic_node &n);
+    uint32_t try_statement(const semantic_node &n);
+    uint32_t unwind_function(entity_index destructor, qualified_type object,
+                             token_index at);
+    uint32_t guard_object(uint32_t symbol, qualified_type object,
+                          entity_index destructor, token_index at,
+                          owned_array<uint32_t> &out);
     /* the declaration lowered now: the owner of what it makes live */
     entity_index declaring = 0;
     /* [stmt.dcl]/2 for a goto: per label of the function lowered, the

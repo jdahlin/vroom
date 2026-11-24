@@ -150,6 +150,8 @@ typedef struct ast_builder_catch {
    describes).  Returns the statement. */
 uint32_t ast_builder_try(cc *c, uint32_t body, uint32_t exception,
                          const ast_builder_catch *handlers, uint32_t count);
+/* whether the translation unit has exceptions (landing pads are made) */
+bool ast_builder_exceptions_enabled(cc *c);
 /* void __cxa_end_catch(void *): the cleanup function of a handler's variable (it ignores the argument) */
 uint32_t ast_builder_end_catch_function(cc *c);
 /* GNU C's __attribute__((section(name))): the section the symbol is

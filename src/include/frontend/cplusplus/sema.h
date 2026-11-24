@@ -1483,8 +1483,13 @@ enum class semantic_kind : uint8_t {
        element's destruction (last first), c is given the cookie's address
        as allocated and array_count is the cookie's count */
     delete_object,
-    /* [expr.throw]: a: the operand (0: none, a rethrow); not lowered */
+    /* [expr.throw]: a: the initialization of the exception object ([except.throw]/3: copy-initialized from
+       the operand), of *allocated, a pointer to the memory the lowering makes (0: none, a rethrow);
+       computation: the exception object's type */
     throw_exception,
+    /* [except.handle]/10: an lvalue of the handler's exception object, of the node's type: what a
+       handler's variable is initialized from */
+    exception_object,
     /* [ext:gnu_va_arg] __builtin_va_arg (a, T): a: the va_list (an
        lvalue); a prvalue of the node's type */
     va_arg_,
@@ -1562,6 +1567,13 @@ enum class semantic_kind : uint8_t {
        of asm goto, list[d .. d + value >> 8); value & 1: volatile, & 2:
        inline, & 4: goto, & 8: extended (a colon) */
     gnu_asm_statement,
+    /* [except.pre]: a: the compound-statement; the handlers (handler nodes) in list[first .. first + count) */
+    try_statement,
+    /* [except.handle]: a: the declaration_statement of the exception-declaration's variable, initialized
+       from the exception_object (0: catch (...) or an unnamed declaration), c: the compound-statement; computation: the
+       type the handler matches ([except.handle]/3: the declared type without a reference and top-level
+       cv, an array or function adjusted to a pointer) */
+    handler,
     /* ; */
     null_statement,
     /* a condition that declares: a: the declaration_statement, b: its
@@ -6139,6 +6151,9 @@ class semantic_analysis
                                          uint32_t &built);
     analysis_result selection_statement(SelectionStatement n, uint32_t &built);
     analysis_result iteration_statement(IterationStatement n, uint32_t &built);
+    /* [except.pre]: a try-block, and one of its handlers */
+    analysis_result try_block(TryBlock n, uint32_t &built);
+    analysis_result handler(Handler n, uint32_t &built);
     /* [stmt.ranged]: the range-based for statement n, whose
        for-range-declaration is its child declaration */
     analysis_result range_based_for(SyntaxRef n, uint32_t declaration,

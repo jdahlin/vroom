@@ -112,10 +112,12 @@ VPRIV bool codegen_target_supports_bitint(cc *c)
 typedef struct codegen_prepass_state {
     codegen_unit *E;
     cc *c;
-    uint32_t fn;       /* the function being walked */
-    uint32_t nodes;    /* nodes seen (inlining size) */
-    int cdepth;        /* cleanup variables in scope */
-    int loopd;         /* loops around the node */
+    uint32_t fn;    /* the function being walked */
+    uint32_t nodes; /* nodes seen (inlining size) */
+    int cdepth;     /* cleanup variables in scope */
+    bool
+        catches; /* a try block: the locals live in memory (a handler reads them where the unwinder left them) */
+    int loopd;   /* loops around the node */
     uint32_t llo, lhi; /* local syms seen (lspan) */
     bool discard_param;
     bool
@@ -613,6 +615,9 @@ VPRIV void codegen_function_walk_ensure(codegen_unit *E, cc *c, uint32_t s)
         for (uint32_t i = 0; i < b->aux; i++) /* params, used or not */
             codegen_prepass_local_note(&P, c->lists[b->a + i]);
         codegen_prepass_node_walk(&P, c->syms[s].body);
+        if (P.catches) /* (the allocators know no edge from a call to a landing pad) */
+            for (uint32_t l = P.llo; l <= P.lhi && l < c->nsym; l++)
+                E->local_needs_memory[l] = 1;
         E->function_local_span[2 * s] = P.llo,
                                    E->function_local_span[2 * s + 1] = P.lhi;
         E->function_node_counts[s] =
@@ -898,6 +903,8 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
         if (codegen_symbol_attributes(c, x->a)->catch_count) {
             /* a try block's handlers are entered from the landing pads, after the body */
             uint32_t count;
+
+            P->catches = true;
             const uint32_t *h = codegen_catch_scope(c, x->a, &count);
 
             for (uint32_t i = 0; i < count; i++)

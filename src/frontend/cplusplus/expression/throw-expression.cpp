@@ -56,17 +56,65 @@ node_index parser::throw_expression()
 /*
  * [expr.throw]/1: "A throw-expression is of type void."  It is a prvalue
  * ([basic.lval]/1: a void expression is one).  /4: without an operand it
- * rethrows.  Not analysed: the copy-initialization of the exception object
- * from the operand (/3) and [except.throw]/5's check of its destructor.
+ * rethrows.  /3: "Evaluating a throw-expression with an operand throws an
+ * exception object ... The type of the exception object is determined by
+ * removing any top-level cv-qualifiers from the static type of the operand
+ * and adjusting the type from 'array of T' or function type T to 'pointer
+ * to T'"; the object is "copy-initialized from the operand".  Not
+ * analysed: [except.throw]/5's check of the destructor.
  */
 analysis_result semantic_analysis::throw_expression(ThrowExpression n,
                                                     expression_meaning &m)
 {
-    uint32_t operand_node = 0;
+    uint32_t initialization = 0;
+    qualified_type object;
     if (n.size() > 1) {
         expression_meaning operand;
         VTRY(r, expression(n[1], operand));
-        operand_node = operand.node;
+        object = decayed(operand.type);
+        const struct type &k = type_table[object.unqualified()];
+        if (k.kind == type_kind::fundamental &&
+            k.fundamental == fundamental_type::void_)
+            return ill_formed(n, "cannot throw an object of type void",
+                              "expr.throw");
+        if (k.kind == type_kind::class_type) {
+            if (!require_complete(object))
+                return ill_formed(n,
+                                  "cannot throw an object of incomplete type",
+                                  "expr.throw");
+        } else {
+            VTRY_SET(r, operand_value(n, operand));
+        }
+        /* the object's memory, which the initialization is of */
+        expression_meaning pointer;
+        pointer.type =
+            qualified_type::make(type_table.pointer_to(object), cv_none);
+        pointer.category = value_category::prvalue;
+        pointer.evaluation = constness::not_constant;
+        pointer.node =
+            expression_node(semantic_kind::allocated, pointer, n.first_token());
+        expression_meaning place;
+        place.type = object;
+        place.category = value_category::lvalue;
+        place.evaluation = constness::not_constant;
+        place.node = expression_node(semantic_kind::indirection, place,
+                                     n.first_token(), pointer.node);
+        initialized_value value;
+        VTRY_SET(r, initialize_with(n, operand, object, false, false, value));
+        if (value.node) {
+            semantic_node &v = semantics[value.node];
+            if (v.kind == semantic_kind::construct)
+                v.a = place.node;
+            else if (k.kind == type_kind::class_type &&
+                     v.kind != semantic_kind::initializer_list &&
+                     !(v.kind == semantic_kind::conversion &&
+                       v.op == static_cast<uint8_t>(
+                                   conversion_kind::lvalue_to_rvalue)))
+                /* a prvalue of the class, stored in the object it
+                   initializes: not lowered */
+                return not_supported(n, "expr.throw");
+        }
+        initialization = value.node;
     }
     m = expression_meaning();
     m.type = qualified_type::make(
@@ -74,7 +122,10 @@ analysis_result semantic_analysis::throw_expression(ThrowExpression n,
     m.category = value_category::prvalue;
     m.evaluation = constness::not_constant;
     m.node = expression_node(semantic_kind::throw_exception, m, n.first_token(),
-                             operand_node);
+                             initialization);
+    semantics[m.node].computation = object;
+    if (n.size() > 1)
+        semantics[m.node].value = 1;
     return analysis_result::well_formed;
 }
 

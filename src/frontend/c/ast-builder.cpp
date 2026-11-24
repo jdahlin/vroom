@@ -825,3 +825,8 @@ uint32_t ast_builder_try(cc *c, uint32_t body, uint32_t exception,
     return ast_builder_node(c, AST_NODE_BLOCK, v, 0,
                             ast_builder_list(c, block, m), m, 0, 0);
 }
+
+bool ast_builder_exceptions_enabled(cc *c)
+{
+    return c->o->eh != 0;
+}

@@ -82,6 +82,13 @@ static uint32_t x64_vir_eh_pad_mark(x64_vir_context *L, uint32_t b,
     return W->eh_pad[node];
 }
 
+/* the pad's mark, before any edit of the block: the unwinder enters here, rax the exception, rdx the selector */
+VPRIV void x64_vir_landing_pad_enter(x64_vir_context *L, uint32_t b)
+{
+    x64_record_emit(L->context, X64_OP_EHMARK)->label =
+        x64_vir_eh_pad_mark(L, b, x64_vir_eh_pad_node(L, b));
+}
+
 static uint32_t x64_vir_eh_site_begin(x64_vir_context *L, const vir_insn *in)
 {
     walk_state *W = L->context->walk_state;
@@ -489,9 +496,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         }
         x64_record_emit(e, X64_OP_REP)->condition = i->op == VIR_OP_MEMSET;
         return;
-    case VIR_OP_LANDINGPAD: /* the pad's mark: the unwinder enters here, rax the exception, rdx the selector */
-        x64_record_emit(e, X64_OP_EHMARK)->label =
-            x64_vir_eh_pad_mark(L, b, x64_vir_eh_pad_node(L, b));
+    case VIR_OP_LANDINGPAD: /* (its mark is the block's first: x64_vir_landing_pad_enter) */
         return;
     case VIR_OP_RESUME: { /* _Unwind_Resume(exception) */
         cc *c = e->compile_context;

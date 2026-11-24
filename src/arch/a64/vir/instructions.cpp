@@ -609,6 +609,15 @@ VPRIV void a64_vir_insn_lower(a64_vir_context *L, uint32_t b, uint32_t i,
     case VIR_OP_PROJ:
         if (f->insns[in->a].op != VIR_OP_LANDINGPAD || in->b > 1)
             a64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+        /* a try block's selector: refused until an invoke's normal edge keeps its moves here (a value defined
+           by the invoke's result and live into a pad lost its move to the callee-saved register,
+           doc/PLAN-vir-eh.md E8); the direct emitter runs the function */
+        if (in->b == 1) {
+            snprintf(L->context->vir_builder->failure_detail,
+                     sizeof L->context->vir_builder->failure_detail,
+                     "a try block's selector");
+            a64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
+        }
         /* (the allocator put it in x0, the exception, or x1, the selector) */
         if (res != VIR_REGISTER_NONE && rd != (int)in->b)
             a64_record_emit_move(e, 1, rd, (int)in->b);

@@ -55,6 +55,8 @@ typedef struct x64_vir_context {
         drv; /* the shared driver's inputs (codegen/vir/lowering-driver.h) */
 } x64_vir_context;
 
+VPRIV void x64_vir_landing_pad_enter(x64_vir_context *L, uint32_t b);
+
 /* the function cannot be lowered: back to x64_vir_function_lower's _setjmp with the reason */
 static inline __attribute__((noreturn, cold)) void
 x64_vir_fail(x64_vir_context *L, const char *why)
