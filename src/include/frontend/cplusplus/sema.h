@@ -2337,6 +2337,10 @@ class semantic_analysis
     entity_index template_member_scope = 0;
     /* whether namespace inner is n or is enclosed by it */
     bool namespace_encloses(entity_index n, entity_index inner) const;
+    /* [namespace.memdef]/3: whether the entity e, a member of namespace n or
+       of an inline namespace n contains (transitively), is declared in
+       scope (a specialization of a template is declared there) */
+    bool declared_in_scope_of(entity_index e, entity_index scope) const;
     /* [namespace.udir]/2: "the nearest enclosing namespace which contains
        both the using-directive and the nominated namespace" */
     entity_index common_namespace(entity_index a, entity_index b) const;

@@ -220,14 +220,9 @@ analysis_result semantic_analysis::class_specialization_definition(
        primary template is, by its name (not an injected-class-name) */
     if (!ct || function_templates[ct - 1].name != named)
         return not_supported(n, rule);
-    /* ... or in a namespace the primary's inline namespaces are members of
+    /* ... or in the namespace its inline namespaces are members of
        ([namespace.memdef]/3, [temp.expl.spec]/2) */
-    entity_index home =
-        entity_table[function_templates[ct - 1].entity].enclosing;
-    while (home != outer && home && is_namespace(home) &&
-           entity_table[home].inline_)
-        home = entity_table[home].enclosing;
-    if (home != outer)
+    if (!declared_in_scope_of(function_templates[ct - 1].entity, outer))
         return not_supported(n, rule);
     const function_template primary = function_templates[ct - 1];
     uint32_t index = 0, first = 0;

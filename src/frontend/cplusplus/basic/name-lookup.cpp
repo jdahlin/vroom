@@ -48,6 +48,15 @@ bool semantic_analysis::namespace_encloses(entity_index n,
     }
 }
 
+bool semantic_analysis::declared_in_scope_of(entity_index e,
+                                             entity_index scope) const
+{
+    entity_index home = entity_table[e].enclosing;
+    while (home != scope && home && entity_table[home].inline_)
+        home = entity_table[home].enclosing;
+    return home == scope;
+}
+
 /* [namespace.udir]/2: "During unqualified name lookup, the names appear as
    if they were declared in the nearest enclosing namespace which contains
    both the using-directive and the nominated namespace." */

@@ -9,3 +9,4 @@ template <class T> struct C<T *> { static const int v = 2; };
 static_assert(C<char>::v == 0, "");
 static_assert(C<int>::v == 1, "");
 static_assert(C<int *>::v == 2, "");
+template struct C<char>;

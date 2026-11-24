@@ -777,8 +777,8 @@ analysis_result semantic_analysis::class_explicit_instantiation(SyntaxRef n,
     if (!template_id_name(id, x, named))
         return not_supported(n, "temp.explicit");
     uint32_t ct = class_template_of(named);
-    if (!ct || entity_table[function_templates[ct - 1].entity].enclosing !=
-                   current_scope)
+    if (!ct ||
+        !declared_in_scope_of(function_templates[ct - 1].entity, current_scope))
         return not_supported(n, "temp.explicit");
     entity_index t = function_templates[ct - 1].entity;
     /* whether the specialization was named before (/11: a declaration
