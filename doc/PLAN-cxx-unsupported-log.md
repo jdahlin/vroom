@@ -823,3 +823,11 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   read).  Unsupported 34641 -> 34689 (+51 newly refused instead of
   rejected), layout_verified -5 blessed.  Open: the evaluator binding `this`
   to the aggregate under construction (~200, dcl.init.aggr/p7.cpp).
+- 11.12 (7daf790d1, d8cbe4694): the evaluator binds `this` to the
+  aggregate under construction for a default member initializer naming
+  members (lowering still refuses); a nested class's default arguments are
+  analysed at the outermost class's closing brace.  Unsupported 34689 ->
+  34674, we reject 391 -> 390.  The 280 "no scope has it" names are mostly
+  names clang also calls undeclared; real groups: `using enum` through a
+  typedef, namespace-scope anonymous union, enumerators after a refused one,
+  a refused pointer-to-member constexpr.
