@@ -2052,8 +2052,15 @@ constness semantic_analysis::pointed_place(const constant_evaluation &state,
        that is static does not read the object) */
     if (!p.count)
         return CONST_NOT_CONSTANT_RULE;
-    if (p.extent && p.offset >= p.extent)
+    if (p.extent && p.offset >= p.extent) {
+        /* [expr.const]/5.8: the read of the (hypothetical) element one
+           past the end of an array designates no object (a pointer to one
+           object is not followed: it may be an element the evaluation
+           models as an object) */
+        if (state.reading && !state.potential && p.base != single_object_base)
+            return CONST_NOT_CONSTANT_RULE;
         return CONST_NOT_CONSTANT;
+    }
     uint32_t index = p.first;
     if (index & element_place) {
         if ((index & ~element_place) >= state.elements.size())
