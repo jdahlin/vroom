@@ -33,6 +33,14 @@ analysis_result semantic_analysis::variable_partial_specialization(
     /* [temp.param]/14: a partial specialization's packs are deduced,
        wherever they are */
     VTRY(r, template_head_parameters(n, parameters, true, true, true, true));
+    /* [temp.class.spec]/9: "The template parameter list of a
+       specialization shall not contain default template argument values." */
+    for (SyntaxRef parameter : parameters)
+        if (template_parameter_has_default(parameter))
+            return ill_formed(parameter,
+                              "default template arguments may not be used in "
+                              "partial specializations",
+                              "temp.class.spec");
     lookup_result x;
     entity_index named = 0;
     if (qualifier) {
@@ -243,6 +251,14 @@ analysis_result semantic_analysis::class_specialization_definition(
     const char *rule = "temp.class.spec";
     if (parameters.empty())
         rule = "temp.expl.spec";
+    /* [temp.class.spec]/9: no default template argument in a partial
+       specialization's template-parameter-list */
+    for (SyntaxRef parameter : parameters)
+        if (template_parameter_has_default(parameter))
+            return ill_formed(parameter,
+                              "default template arguments may not be used in "
+                              "partial specializations",
+                              "temp.class.spec");
     /* [temp.class.spec]/10: "The usual access checking rules do not apply
        to non-dependent names used to specify template arguments of the
        simple-template-id of the partial specialization" (as an explicit
@@ -329,8 +345,19 @@ analysis_result semantic_analysis::class_specialization_definition(
     uint32_t ct = class_template_of(named);
     /* [temp.class.spec]/6, [temp.expl.spec]/3: declared where the
        primary template is, by its name (not an injected-class-name) */
-    if (!ct || function_templates[ct - 1].name != named)
-        return not_supported(n, rule);
+    if (!ct) {
+        analysis_result refused = not_supported(n, rule);
+        SyntaxElement template_name =
+            written.simple_template_id().template_name();
+        if (qualified_head && written.size() && written[0].is_token())
+            template_name = written[0];
+        if (template_name)
+            template_name_detail(template_name.token(), x, named);
+        return refused;
+    }
+    if (function_templates[ct - 1].name != named)
+        return not_supported_because(
+            n, rule, "the name is a class template's injected-class-name");
     /* ... or in the namespace its inline namespaces are members of
        ([namespace.memdef]/3, [temp.expl.spec]/2) */
     if (!declared_in_scope_of(function_templates[ct - 1].entity, outer))

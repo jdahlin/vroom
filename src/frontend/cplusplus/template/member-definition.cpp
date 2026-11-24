@@ -165,10 +165,24 @@ analysis_result semantic_analysis::member_definition_of_template(
     if (!template_id_name(id, x, named))
         return not_supported(n, "temp.mem.func");
     uint32_t ct = class_template_of(named);
-    if (!ct || function_templates[ct - 1].name != named ||
-        function_templates[ct - 1].primary ||
-        !declared_in_scope_of(function_templates[ct - 1].entity, outer))
-        return not_supported(n, "temp.mem.func");
+    if (!ct) {
+        analysis_result refused = not_supported(n, "temp.mem.func");
+        if (SyntaxElement template_name =
+                id.simple_template_id().template_name())
+            template_name_detail(template_name.token(), x, named);
+        return refused;
+    }
+    if (function_templates[ct - 1].name != named)
+        return not_supported_because(
+            n, "temp.mem.func",
+            "the name is a class template's injected-class-name");
+    if (function_templates[ct - 1].primary)
+        return not_supported_because(n, "temp.mem.func",
+                                     "the class is a specialization's pattern");
+    if (!declared_in_scope_of(function_templates[ct - 1].entity, outer))
+        return not_supported_because(
+            n, "temp.mem.func",
+            "the class template is declared in another scope");
     /* [class.static.data]/1: "The declaration of a static data member
        ... static ... the keyword static shall appear only in its
        declaration in the class" ([dcl.stc]/1: the storage class specifier

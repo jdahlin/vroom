@@ -943,8 +943,13 @@ analysis_result semantic_analysis::class_explicit_instantiation(
     if (!template_id_name(id, x, named, qualifier))
         return not_supported(n, "temp.explicit");
     uint32_t ct = class_template_of(named);
-    if (!ct)
-        return not_supported(n, "temp.explicit");
+    if (!ct) {
+        analysis_result refused = not_supported(n, "temp.explicit");
+        if (SyntaxElement template_name =
+                id.simple_template_id().template_name())
+            template_name_detail(template_name.token(), x, named);
+        return refused;
+    }
     /* (a qualified name found the template in the nominated scope) */
     if (!qualifier &&
         !declared_in_scope_of(function_templates[ct - 1].entity, current_scope))
