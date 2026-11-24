@@ -157,6 +157,16 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                     saved_parameters);
             expressions.resize(expressions_before);
             name_uses.resize(uses_before);
+            /* [temp.expl.spec]/5: the members of an explicitly specialized
+               class are defined as a normal class's, without template<> */
+            if (mr == analysis_result::well_formed && m.has_id && m.qualifier &&
+                entity_table[m.qualifier].kind == entity_kind::class_type &&
+                explicitly_specialized_class(m.qualifier) && !m.template_id)
+                return ill_formed(n,
+                                  "extraneous 'template<>' in the "
+                                  "declaration of a member of an explicitly "
+                                  "specialized class",
+                                  "temp.expl.spec");
             if (mr == analysis_result::well_formed && m.has_id && m.qualifier &&
                 !m.template_id && !m.operator_function && !m.literal_operator &&
                 !defaults &&

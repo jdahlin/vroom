@@ -643,4 +643,3 @@ verdict SemaTemplate/default-expr-arguments.cpp -std=gnu++17: ill-formed for us,
 verdict SemaTemplate/instantiate-member-template.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 255 (1 declarations)
 verdict SemaTemplate/operator-template.cpp -std=c++2a: ill-formed for us, accepted by clang: line 25 (1 declarations)
 verdict SemaTemplate/temp_class_spec.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 314 (1 declarations)
-verdict src/test/cxx/sema/gram/temp.mem.class-outside-then-member.cpp -std=c++20: ill-formed for us, accepted by clang: line 10 (1 declarations)
