@@ -675,6 +675,26 @@ analysis_result semantic_analysis::instantiate_class(
     }
     if (instantiation_depth >= 64)
         return not_supported(at, "temp.inst");
+    /* [temp.inst]/2, [basic.def]/5: the specialization named while its own
+       pattern is being chosen (a partial specialization's argument that
+       needs the same specialization) is incomplete there; looked into, it
+       is a substitution failure ([impl.clang] clang has created the
+       specialization before it matches the pattern: libc++'s
+       __is_ostreamable, whose operator<< names it in a default argument) */
+    for (const class_matching &m : class_matchings) {
+        if (m.class_template != class_template || m.count != count)
+            continue;
+        bool same = true;
+        for (uint32_t i = 0; i < count && same; i++)
+            same = m.arguments[i] == arguments[i];
+        if (same)
+            return ill_formed(at,
+                              "the class template specialization is incomplete "
+                              "while its definition is chosen",
+                              "temp.inst");
+    }
+    class_matching_scope matching_scope(class_matchings, class_template,
+                                        arguments, count);
     instantiation_record record;
     record.template_entity = ft.entity;
     /* [temp.class.spec.match]: the definition instantiated, the

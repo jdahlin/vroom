@@ -6573,6 +6573,26 @@ class semantic_analysis
         entity_index specialization = 0;
     };
     owned_array<deferred_class_instantiation> deferred_class_instantiations;
+    /* instantiate_class choosing the definition of a specialization */
+    struct class_matching {
+        uint32_t class_template = 0;
+        const template_argument *arguments = nullptr;
+        uint32_t count = 0;
+    };
+    owned_array<class_matching> class_matchings;
+    struct class_matching_scope {
+        owned_array<class_matching> &list;
+        class_matching_scope(owned_array<class_matching> &l, uint32_t t,
+                             const template_argument *a, uint32_t n)
+            : list(l)
+        {
+            list.append(class_matching{t, a, n});
+        }
+        ~class_matching_scope()
+        {
+            list.resize(list.size() - 1);
+        }
+    };
     uint32_t require_complete_class = 0;
     /* deduce_type matches a function declaration's type to a function
        template's ([temp.deduct.decl]) */
