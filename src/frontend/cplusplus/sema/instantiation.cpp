@@ -1269,8 +1269,13 @@ bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
             continue;
         const entity &p =
             entity_table[template_parameter_entities[ft.first_parameter + i]];
+        /* [impl.clang]: a parameter declared with a placeholder
+           (template <auto V>) is mangled as one of a dependent type,
+           "Tn" "Da" ([dcl.type.auto.deduct]/2) */
+        bool placeholder =
+            type_table[p.type.unqualified()].kind == type_kind::placeholder;
         if (p.kind != entity_kind::none ||
-            !depends_on_template_parameter(p.type))
+            !(placeholder || depends_on_template_parameter(p.type)))
             return false;
         type = p.type;
         return true;
