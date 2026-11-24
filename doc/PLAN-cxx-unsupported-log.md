@@ -724,3 +724,10 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   destructor (cwg0xx.cpp:108), aggregate initialization's elements'
   destructors (aggregate-initialization.cpp:208), C++98's private-destructor
   errors at the member's class (new-delete.cpp:546); [temp.deduct] not done.
+- 11.2 (f6034574a, 2a9ed2d36; 90247deb2 by the orchestrator): attributes
+  after a declarator-id, destroying operator delete (declaration, delete
+  expression, lowering), and implicit special members deleted by an
+  inaccessible subobject destructor (the agent reverted it over we accept
+  +30; committed with the lines named, as the rules allow).  Unsupported
+  35158 -> 34909, we reject unchanged, we accept 5409 -> 5443.  Next: the
+  out-of-class `= default` that would be deleted (18 of the 30 lines).
