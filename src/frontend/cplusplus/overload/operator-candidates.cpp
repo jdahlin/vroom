@@ -603,7 +603,7 @@ analysis_result semantic_analysis::overloaded_operator(
             /* a copy assignment operator declared defaulted has no
                candidate here, and is no implicit one */
             bool implicit_viable = true;
-            if (!declares_move && !entity_table[c].defaulted_copy_assignment &&
+            if (!entity_table[c].defaulted_copy_assignment &&
                 !entity_table[c].defaulted_move_assignment &&
                 operands.size() == 2 &&
                 type_table[operands[1].type.unqualified()].entity == 0) {
