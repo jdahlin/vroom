@@ -2259,6 +2259,16 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                 copy = true;
                 continue;
             }
+            /* [class.copy.ctor]/6, /8: a user-provided X(X&&) beside
+               X(const X&) = default: the defaulted copy constructor is
+               the explicit declaration of the copy one, declared as the
+               implicit one is */
+            if (p.kind == type_kind::rvalue_reference &&
+                entity_table[c].defaulted_copy_constructor &&
+                !entity_table[c].defaulted_move_constructor) {
+                copy = true;
+                continue;
+            }
             user_copy = true;
         }
     /* [class.copy.ctor]/11: X(X&&) = default is trivial when each
@@ -2270,8 +2280,6 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         for (entity_index k : classes)
             if (!copies_bytes(k))
                 trivial_move = false;
-        if (y.defaulted_move_assignment && !trivial_move)
-            return not_supported(n, "class.copy.ctor");
         /* [class.default.ctor]/1: a user-declared constructor (a
            constructor template is one, [temp.mem]/1) and no default one:
            no default constructor (not analysed) */
@@ -2284,7 +2292,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             if (y.union_)
                 return not_supported(n, "class.copy.ctor");
             entity_table[c].defaulted_move_constructor = false;
-            declare_implicit(c, special_member::constructor, false, true);
+            /* [class.copy.ctor]/10: "A defaulted move constructor that
+               is defined as deleted is ignored by overload resolution"
+               ([over.match.funcs]/8) when a subobject can be neither
+               moved nor copied: none is declared */
+            if (!move_deleted)
+                declare_implicit(c, special_member::constructor, false, true);
             move_declared = false;
         }
     }
