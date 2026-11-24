@@ -5854,10 +5854,14 @@ class semantic_analysis
        cannot tell */
     int conversion_template_order(entity_index t1, entity_index t2);
     int function_template_order(uint32_t f, uint32_t g, size_t arguments,
-                                bool &unknown);
+                                bool &unknown, bool f_reversed = false,
+                                bool g_reversed = false);
     int constraint_subsumption_order(uint32_t f, uint32_t g) const;
+    /* a type partial ordering compares with deduce_type's rules alone */
+    bool orderable(qualified_type t, bool packs) const;
     bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
-                                 bool &unknown);
+                                 bool &unknown, bool f_reversed = false,
+                                 bool g_reversed = false);
     /* [temp.class.order]: whether partial specialization s (index plus
        one) is at least as specialized as t */
     bool class_at_least_as_specialized(uint32_t s, uint32_t t, bool &unknown);

@@ -414,12 +414,7 @@ analysis_result semantic_analysis::best_viable_function(
             return true;
         /* [temp.func.order]/3 (CWG2445): with a synthesized candidate of
            reversed parameters, "the order of the function parameters in
-           its template is reversed" for the ordering: not analysed */
-        if (x.template_index && y.template_index &&
-            x.template_index != y.template_index && x.reversed != y.reversed) {
-            order_unknown = true;
-            return false;
-        }
+           its template is reversed" for the ordering */
         if (x.template_index && y.template_index &&
             x.template_index != y.template_index) {
             /* (an order analysis cannot tell is neither: the final check
@@ -427,9 +422,13 @@ analysis_result semantic_analysis::best_viable_function(
             bool unknown = false;
             /* (two member candidates' first argument is the object's,
                the same class's implicit object parameter, [temp.func.order]/3) */
-            int order =
-                function_template_order(x.template_index, y.template_index,
-                                        n - (x.member && y.member), unknown);
+            int order = function_template_order(
+                x.template_index, y.template_index, n - (x.member && y.member),
+                unknown, x.reversed, y.reversed);
+            if (x.reversed != y.reversed && unknown) {
+                order_unknown = true;
+                return false;
+            }
             if (!unknown && order != 0)
                 return order > 0;
         }
