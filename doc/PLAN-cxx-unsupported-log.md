@@ -642,3 +642,6 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   variable templates of a specialization (`template<> template<class X> class
   A<int>::B`); partial specializations of member templates defined outside
   (still hold S, p6.cpp).
+- Review of 10.2 (orchestrator): 54b1ed016 raised we reject by 1, fixed by
+  59c1c8cb3 (left as is).  Pace: ~40-200 per agent now; the template causes
+  cascade (a fix lets declarations reach the next gap).
