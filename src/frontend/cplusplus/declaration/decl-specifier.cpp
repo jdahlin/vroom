@@ -907,6 +907,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
 {
     size_t mark = begin_node();
     token_index first = position;
+    bool union_key = at_word("union");
     add_token(); /* class-key */
     token_index attributes_at = position;
     node_index attributes = attribute_specifier_seq();
@@ -1024,7 +1025,9 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
            anonymous union declaration"; an unnamed struct so is clang's
            extension: a name in the enclosing class finds them */
         if (!name && !qualifier && at(preprocessing_op_or_punc::SEMICOLON) &&
-            names.kind_of(names.declaring_scope()) == scope_kind::class_)
+            (names.kind_of(names.declaring_scope()) == scope_kind::class_ ||
+             (union_key && names.kind_of(names.declaring_scope()) ==
+                               scope_kind::namespace_)))
             names.add_base(names.declaring_scope(), region);
         facts.declares_type = true;
         return finish_node(syntax_kind::class_specifier, mark, first);

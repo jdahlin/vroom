@@ -128,8 +128,15 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
                                                           uint8_t access)
 {
     const struct type record = type_table[s.type.unqualified()];
-    if (s.typedef_ || s.static_ || s.extern_ || s.mutable_ || s.inline_ ||
-        s.constexpr_ || s.type.cv() || s.aligned || s.gnu_flags ||
+    /* [class.union.anon]/3: an anonymous union declared in a namespace
+       shall be declared static (or be in an unnamed namespace, not
+       analysed): a variable of internal linkage, its members names of the
+       namespace */
+    bool in_namespace = is_namespace(c);
+    if (in_namespace && !s.static_)
+        return not_supported(n, "class.union.anon");
+    if (s.typedef_ || (s.static_ && !in_namespace) || s.extern_ || s.mutable_ ||
+        s.inline_ || s.constexpr_ || s.type.cv() || s.aligned || s.gnu_flags ||
         record.kind != type_kind::class_type)
         return not_supported(n, "class.union.anon");
     entity_index u = record.entity;
@@ -137,8 +144,30 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
     if ((!x.union_ && !trivial_special_members(u)) || x.base_count ||
         !size_of_type(s.type))
         return not_supported(n, "class.union.anon");
+    if (in_namespace && !x.union_)
+        return not_supported(n, "class.union.anon");
+    for (entity_index f = u + 1; f < entity_table.size(); f++) {
+        const entity &member = entity_table[f];
+        if (member.enclosing == u && member.kind == entity_kind::variable &&
+            !member.nonstatic_member)
+            /* [class.union.anon]/1: "Each member-declaration in the
+               member-specification of an anonymous union shall either
+               define a non-static data member or be a
+               static_assert-declaration" */
+            return ill_formed(n,
+                              "static data member not allowed in anonymous "
+                              "union",
+                              "class.union.anon");
+    }
     entity_index e = entity_table.make(entity_kind::variable, 0, c);
     entity_table[e].type = s.type;
+    if (in_namespace) {
+        entity_table[e].defined = true;
+        entity_table[e].linkage_of_name = linkage::internal;
+        entity_table.add_declaration(e, n);
+        entity_table[u].anonymous_object = e;
+        return bind_anonymous_members(c, n, u);
+    }
     entity_table[e].nonstatic_member = true;
     entity_table[e].defined = true;
     entity_table[e].field = entity_table[c].member_count;

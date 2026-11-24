@@ -1239,13 +1239,19 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
         /* [dcl.pre]/5: a class declared: a storage class or other
            specifier with it is [dcl.pre]/5's "ill-formed" or clang's
            warning, not analysed */
-        if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
-            s.type.cv())
+        bool anonymous = declares_unnamed_class(specifiers);
+        if (s.typedef_ ||
+            (s.static_ && !(anonymous && is_namespace(current_scope))) ||
+            s.extern_ || s.inline_ || s.constexpr_ || s.type.cv())
             return not_supported(declaration, "dcl.pre");
         /* [class.union.anon]/1: an anonymous union declares an unnamed
-           object (an unnamed struct so, clang's extension) */
-        if (declares_unnamed_class(specifiers))
+           object (an unnamed struct so, clang's extension); in a
+           namespace, a static one is a variable ([class.union.anon]/3) */
+        if (anonymous) {
+            if (is_namespace(current_scope))
+                return anonymous_union_member(current_scope, declaration, s, 0);
             return not_supported(declaration, "class.union.anon");
+        }
         return analysis_result::well_formed;
     }
     if (items.empty())
