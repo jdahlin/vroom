@@ -2317,8 +2317,14 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
     if (!p.count || !q.count) {
         /* [expr.eq]/3: null pointers compare equal; a pointer to an object
            is not null */
-        if (relational)
+        if (relational) {
+            /* [expr.rel]/4: a pointer and a null pointer: "neither pointer
+               is required to compare greater than the other", whose
+               result is unspecified ([expr.const]/5.24 of n4861) */
+            if (p.count != q.count && !state.potential)
+                return CONST_NOT_CONSTANT_RULE;
             return CONST_UNKNOWN;
+        }
         order = 0;
         if (p.count != q.count)
             order = 1;
@@ -2347,6 +2353,13 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
     } else if (!p.extent && !q.extent && equality) {
         if (p.first != q.first)
             order = 1;
+    } else if (relational && !p.extent && !q.extent &&
+               !(p.first & element_place) && !(q.first & element_place) &&
+               p.first != q.first && !state.potential) {
+        /* [expr.rel]/4: pointers to different complete objects that are
+           not members of one array or class: the result is unspecified,
+           which [expr.const]/5.24 (n4861) makes not a constant */
+        return CONST_NOT_CONSTANT_RULE;
     } else {
         return CONST_UNKNOWN;
     }
