@@ -3874,7 +3874,6 @@ SemaTemplate/concepts-friends.cpp:10 -std=c++20
 SemaTemplate/concepts-friends.cpp:141 -std=c++20
 SemaTemplate/concepts-friends.cpp:151 -std=c++20
 SemaTemplate/concepts-friends.cpp:163 -std=c++20
-SemaTemplate/concepts-friends.cpp:174 -std=c++20
 SemaTemplate/concepts-friends.cpp:225 -std=c++20
 SemaTemplate/concepts-friends.cpp:270 -std=c++20
 SemaTemplate/concepts-friends.cpp:29 -std=c++20

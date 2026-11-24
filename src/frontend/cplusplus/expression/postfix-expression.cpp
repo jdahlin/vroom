@@ -2055,11 +2055,13 @@ analysis_result semantic_analysis::call_function(
     return call_with(n, callee, x.type, 0, 0, syntax, arguments, m);
 }
 
-analysis_result semantic_analysis::call_with(
-    SyntaxRef n, expression_meaning &f, qualified_type function_type,
-    uint32_t object, entity_index member,
-    const owned_array<SyntaxElement> &arguments,
-    const owned_array<expression_meaning> &early, expression_meaning &m)
+analysis_result
+semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
+                             qualified_type function_type, uint32_t object,
+                             entity_index member,
+                             const owned_array<SyntaxElement> &arguments,
+                             const owned_array<expression_meaning> &early,
+                             expression_meaning &m, bool operator_expression)
 {
     analysis_result r = analysis_result::well_formed;
     const struct type function = type_table[function_type.unqualified()];
@@ -2235,7 +2237,14 @@ analysis_result semantic_analysis::call_with(
             (name[1].is(preprocessing_op_or_punc::DOT,
                         preprocessing_op_or_punc::ARROW)))
             name = name[2];
-        if (name.is_token() && name.is_identifier())
+        if (operator_expression)
+            /* [over.match.oper]/2: the expression is interpreted as the
+               call of the member x.operator@(y), a call of an
+               unqualified name */
+            dispatched = true;
+        else if (name.is(syntax_kind::operator_function_id))
+            dispatched = true;
+        else if (name.is_token() && name.is_identifier())
             dispatched = true;
         else if (!name.is(syntax_kind::qualified_id))
             return not_supported(n, "class.virtual");
