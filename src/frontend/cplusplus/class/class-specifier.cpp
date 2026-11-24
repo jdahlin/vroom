@@ -2196,13 +2196,17 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             }
             return not_supported(declaration, "class.mem");
         }
-        if (record.kind == type_kind::class_type && !size)
+        if (record.kind == type_kind::class_type && !size) {
             /* [class.mem]/15: "The type of a non-static data member shall
-               not be an incomplete type" */
-            return ill_formed_at_token(m.id,
-                                       "the type of a non-static data member "
-                                       "shall not be an incomplete type",
-                                       "class.mem");
+               not be an incomplete type"; clang drops the member and
+               goes on with the class complete */
+            recovered_error = true;
+            ill_formed_at_token(m.id,
+                                "the type of a non-static data member "
+                                "shall not be an incomplete type",
+                                "class.mem");
+            return analysis_result::well_formed;
+        }
         /* [basic.def]/5 (a member's declaration defines it,
            [basic.def]/2) */
         if (abstract_class(type))
