@@ -708,3 +708,19 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   use-site errors; scratchpad default-ctor-inaccessible-dtor.patch),
   destroying operator delete (needs the delete-expression semantics),
   attributes after a declarator-id, [temp.deduct].
+- 11.2 (f6034574a, 2a9ed2d36): attributes after a declarator-id appertain to
+  the entity (noreturn to a function, fallthrough/likely/unlikely refused on
+  a declaration); a destroying operator delete (member, C* and
+  std::destroying_delete_t) is declared and a delete-expression of its class
+  calls it with no destructor (a virtual destructor or an inherited one
+  stays unsupported).  Unsupported 35158 -> 35145 -> 35059, we reject 444,
+  we accept 5409 -> 5413 (clang's error at the destroying delete's
+  declaration comes from an unsupported delete).  Left: the inaccessible
+  subobject destructor patch (scratchpad default-ctor-inaccessible-dtor-v2.patch:
+  with friend access, [class.virtual]/17 for the implicit destructor and
+  array new of a class with a deleted destructor, unsupported -150 but we
+  accept +30): needs a defaulted-after-first-declaration "would delete"
+  error (cwg16xx.cpp:218-248, p11.0x.move.cpp:132), a virtual base's private
+  destructor (cwg0xx.cpp:108), aggregate initialization's elements'
+  destructors (aggregate-initialization.cpp:208), C++98's private-destructor
+  errors at the member's class (new-delete.cpp:546); [temp.deduct] not done.
