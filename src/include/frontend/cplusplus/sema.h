@@ -3751,6 +3751,9 @@ class semantic_analysis
            constructed in place) or for a read: a union's member that is
            not active is made so, or is not constant */
         uint32_t writing = 0, reading = 0;
+        /* an object expression evaluated and not read ([expr.ref]/6.1): an
+           inactive union member is designated without being read */
+        uint32_t designating = 0;
         /* the string literals evaluated, one object each, which stay for
            the whole evaluation: what lies below them stays too */
         struct literal_object {

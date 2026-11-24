@@ -1282,6 +1282,10 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 if (!state.writing) {
                     if (state.reading)
                         return CONST_NOT_CONSTANT;
+                    if (state.designating) {
+                        object = element_place | o.first;
+                        return constness::constant;
+                    }
                     return CONST_UNKNOWN;
                 }
                 place_value(state, whole).member = x.b;
@@ -1500,8 +1504,23 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         return evaluate_object(state, x.a, object);
     }
     case semantic_kind::comma: {
-        constant_value discarded;
-        c = evaluate_node(state, x.a, discarded);
+        /* [expr.ref]/6.1: the object expression of a static data member's
+           name is evaluated, not read ([expr.context]/2: a discarded-value
+           expression applies no lvalue-to-rvalue conversion to a glvalue),
+           so a member of an inactive union member breaks no rule
+           ([class.union]/2, [expr.const]/5.9) */
+        if (semantics[x.a].kind == semantic_kind::member) {
+            uint32_t outer_reading = state.reading;
+            uint32_t discarded_object = 0;
+            state.reading = 0;
+            state.designating++;
+            c = evaluate_object(state, x.a, discarded_object);
+            state.designating--;
+            state.reading = outer_reading;
+        } else {
+            constant_value discarded;
+            c = evaluate_node(state, x.a, discarded);
+        }
         if (c != constness::constant)
             return c;
         return evaluate_object(state, x.b, object);
