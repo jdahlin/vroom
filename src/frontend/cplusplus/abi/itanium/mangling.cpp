@@ -1433,7 +1433,9 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return false;
     /* [abi:mangling-compression]: a template's name seen before, with its
        prefix, is a <substitution> before the arguments */
-    if (x.instantiation && x.enclosing && !is_std(x.enclosing) && !local) {
+    if (x.instantiation && x.enclosing && !is_std(x.enclosing) && !local &&
+        !analysis.template_template_parameter(
+            analysis.specialized_template(c))) {
         /* [abi:mangle.name]:
 
                <nested-name> ::= N [<CV-qualifiers>] [<ref-qualifier>] <template-prefix> <template-args> E
@@ -1773,6 +1775,17 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
         }
         return source_name(spec.name) && template_args(q, 0, false);
     }
+    if (!x.enclosing && !(x.value >> 32) && spec.instantiation &&
+        analysis.template_template_parameter(
+            analysis.specialized_template(q))) {
+        /* D<args>::name with D a template template-parameter: clang
+           spells the qualifier as an <unresolved-type>, sr T_ I <args> E
+           name, with no E closing a level */
+        if (x.value & 2)
+            text("nt");
+        text("sr");
+        return class_enum_type(x.type) && source_name(x.name);
+    }
     if (x.value & 2)
         text("nt");
     text("sr");
@@ -1790,7 +1803,9 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
             if (!source_name(analysis.entity_table[chain[i]].name))
                 return false;
     }
-    if (!source_name(spec.name) || !template_args(q))
+    /* (clang flattens a pack expansion written among the arguments: the
+       substituted elements, no J ... E) */
+    if (!source_name(spec.name) || !template_args(q, 0, false))
         return false;
     /* a member class between the specialization and the name */
     if (x.value >> 32 && !source_name(static_cast<uint32_t>(x.value >> 32) - 1))
