@@ -397,6 +397,21 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
        already denotes here (/11: declarations of the set added later are
        not, which copies of its records give) */
     entity_index held = found.unknown_entity;
+    /* [namespace.udecl]/1: a class, alias or variable template's name (held
+       by its entity as a function template's is) is a synonym for it
+       here: the same entity bound in this scope */
+    if (found.unknown && !found.ambiguous && held && !defining_class &&
+        is_namespace(q.entity) && !function_template_of(held) &&
+        (class_template_of(held) || alias_template_of(held) ||
+         variable_template_of(held))) {
+        entity_index prior = entity_table.find(current_scope, name);
+        if (prior && prior != held)
+            return not_supported(n, "namespace.udecl");
+        if (!prior)
+            entity_table.bind(current_scope, name, held, true);
+        used(t, held);
+        return analysis_result::well_formed;
+    }
     if (found.unknown && !found.ambiguous && held && !defining_class &&
         is_namespace(q.entity) && function_template_of(held)) {
         entity_index scope = current_scope;

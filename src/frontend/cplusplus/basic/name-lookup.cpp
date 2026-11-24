@@ -379,8 +379,14 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
             if (ambiguous)
                 mark_unknown(r, "class.member.lookup");
             else if (e) {
-                /* the class or base the member is declared in */
+                /* the class or base the member is declared in; an
+                   injected-class-name ([class.pre]/2: this class's or a
+                   base's) is in that class's own scope, not the namespace
+                   the class is a member of */
                 entity_index in = entity_table[e].enclosing;
+                if (entity_table[e].kind == entity_kind::class_type &&
+                    entity_table.find(e, name) == e)
+                    in = e;
                 if (entity_table.find(in, name) == e)
                     e = declared_in(in, name, filter);
                 if (e)
