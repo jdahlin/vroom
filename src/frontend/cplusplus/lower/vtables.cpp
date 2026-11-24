@@ -7,7 +7,7 @@ namespace cplusplus::lowering
 /* ---- definitions ---------------------------------------------------- */
 
 /* [abi:vtable-components]: the array of class k's virtual table: the
-   offset to top, the RTTI pointer (null: -fno-rtti until S7), then a
+   offset to top, the RTTI pointer (null with -fno-rtti), then a
    function pointer per slot */
 ast_qualified_type c_lowering::vtable_type(entity_index k)
 {
@@ -41,10 +41,7 @@ uint32_t c_lowering::vtable(entity_index k, token_index at)
     uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;
     if (!d->key_function)
         flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
-    if (x.linkage_of_name == linkage::internal ||
-        x.linkage_of_name == linkage::none ||
-        (x.instantiation &&
-         analysis.type_without_external_linkage(x.type, true, true))) {
+    if (class_internal(k)) {
         storage = AST_STORAGE_STATIC;
         flags = AST_SYMBOL_FLAG_GLOBAL;
     }
@@ -478,7 +475,7 @@ uint32_t c_lowering::sub_vtt_index(entity_index k, entity_index b,
 /*
  * The definition of a virtual table: per included group, its vcall and
  * vbase offsets (furthest from the address point first), the offset to
- * top, the RTTI pointer (null: -fno-rtti until S7), then a function
+ * top, the RTTI pointer (null with -fno-rtti), then a function
  * pointer per slot ([abi:vtable-components]).  A construction virtual
  * table's offsets to top are from k's subobject ([abi:vtable-ctor-entries]:
  * "The offset-to-top fields refer to B").
@@ -516,6 +513,16 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
              i++, k++)
             integer(point - k, sh.offsets[i]);
         integer(point - 2, -group_location(t, g));
+        /* [abi:vtable-components]: "typeinfo pointer": the type_info
+           object of the class whose table this is ([impl.clang]: the same
+           in each of its groups) */
+        if (rtti) {
+            uint32_t ti = typeinfo_address(
+                analysis.entity_table[t.k].type.unqualified(), at);
+            if (!ti)
+                return false;
+            entry(point - 1, ti);
+        }
         for (uint32_t i = 0; i < group.slot_count; i++) {
             uint32_t slot = group.first_slot + i;
             entity_index f = analysis.vtable_slots[slot];

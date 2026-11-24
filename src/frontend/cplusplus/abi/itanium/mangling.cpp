@@ -72,9 +72,15 @@ class itanium_mangler
     bool mangled_name(entity_index e);
     /* [abi:mangling-special-vtables]: <special-name> ::= TI <type>, the
        std::type_info object of typeid(<type>) */
-    bool typeinfo_name(type_index t)
+    bool typeinfo_name(type_index t, int what = 0)
     {
-        text("_ZTI");
+        /* [abi:mangling-special-vtables]: TS <type>, the name string
+           the object points to; what 2: the <type> alone, the
+           string's characters */
+        if (what == 0)
+            text("_ZTI");
+        else if (what == 1)
+            text("_ZTS");
         return type(qualified_type::make(t, cv_none));
     }
     /* [abi:mangling-special-temporaries]:
@@ -3259,6 +3265,14 @@ bool itanium_reference_temporary_name(const semantic_analysis &analysis,
 {
     itanium_mangler m(analysis, pp, out, 2);
     return m.reference_temporary_name(e, index);
+}
+
+bool itanium_typeinfo_name(const semantic_analysis &analysis,
+                           const preprocessor &pp, type_index t, int what,
+                           vbuffer *out)
+{
+    itanium_mangler m(analysis, pp, out, 2);
+    return m.typeinfo_name(t, what);
 }
 
 bool itanium_vtable_name(const semantic_analysis &analysis,

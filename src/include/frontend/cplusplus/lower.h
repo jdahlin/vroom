@@ -43,11 +43,12 @@ bool analysis_complete(const semantic_analysis &analysis,
    all well-formed, added to c (ast_builder_open) with its definition;
    false, and why, at the first construct not lowered.  main_path is the
    main source file's path, which names the function that runs the
-   dynamic initializations */
+   dynamic initializations.  With rtti ([abi:rtti], -frtti) the type_info
+   objects of classes and the virtual tables' pointers to them are made */
 bool lower_translation_unit(const semantic_analysis &analysis,
                             token_stream &tokens, cc *c, int target,
                             lowering_failure &why,
-                            const char *main_path = nullptr);
+                            const char *main_path = nullptr, bool rtti = false);
 
 } // namespace cplusplus
 

@@ -64,9 +64,9 @@ class c_lowering
 {
   public:
     c_lowering(const semantic_analysis &analysis, token_stream &tokens, cc *c,
-               int target, const char *main_path)
+               int target, const char *main_path, bool rtti)
         : analysis(analysis), tokens(tokens), c(c), target(target),
-          main_path(main_path)
+          main_path(main_path), rtti(rtti)
     {
         symbols.resize(analysis.entity_table.size());
         for (uint32_t &s : symbols)
@@ -113,6 +113,8 @@ class c_lowering
     cc *c;
     int target;
     const char *main_path;
+    /* -frtti: classes' type_info objects are made */
+    bool rtti;
     /* [basic.start.dynamic]: the calls of the functions initializing the
        variables of namespace scope dynamically, in the order of their
        definitions ([basic.start.term]/1: or registering the destruction
@@ -183,6 +185,27 @@ class c_lowering
     /* __cxa_deleted_virtual, the slot of a destructor defined as deleted */
     uint32_t deleted_virtual = 0;
     uint32_t vtable(entity_index k, token_index at);
+    /* [abi:rtti]: type t's std::type_info object, the symbol _ZTI <type>
+       (the exception lowering's way to a thrown or caught type's: call
+       typeinfo_address for the void * a __cxa_throw or a handler's match
+       takes).  Defined when the translation unit is its owner (a class's
+       with its key function, else weak in every file using it) and declared
+       when it is the run-time library's or another file's; 0 and a failure
+       without -frtti (clang's -fno-rtti emits none) or for a type with no
+       rules yet.  The table of a class's virtual table uses it too */
+    uint32_t typeinfo(type_index t, token_index at);
+    uint32_t typeinfo_address(type_index t, token_index at);
+    bool typeinfo_internal(type_index t) const;
+    bool class_internal(entity_index k) const;
+    uint32_t typeinfo_class_vtable(const char *name);
+    uint32_t string_symbol_pointer(uint32_t s, ast_qualified_type array,
+                                   ast_qualified_type element);
+    owned_array<type_index> typeinfo_types;
+    owned_array<uint32_t> typeinfo_symbols;
+    owned_array<ast_qualified_type> typeinfo_arrays;
+    /* the library's virtual tables of the type_info classes, by name */
+    owned_array<const char *> runtime_vtable_names;
+    owned_array<uint32_t> runtime_vtables;
     ast_qualified_type vtable_type(entity_index k);
     /* the address point of class k's virtual table: &vtable[2]
        ([abi:vtable-general]: after the offset to top and the RTTI

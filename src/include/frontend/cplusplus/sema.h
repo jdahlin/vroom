@@ -7069,6 +7069,12 @@ bool itanium_symbol_name(const semantic_analysis &analysis,
 bool itanium_reference_temporary_name(const semantic_analysis &analysis,
                                       const preprocessor &pp, entity_index e,
                                       uint32_t index, vbuffer *out);
+/* [abi:mangling-special-vtables]: type t's std::type_info object (what 0:
+   _ZTI <type>), its name string (1: _ZTS <type>) or the characters of that
+   string (2: <type>) */
+bool itanium_typeinfo_name(const semantic_analysis &analysis,
+                           const preprocessor &pp, type_index t, int what,
+                           vbuffer *out);
 /* [abi:mangling-special-vtables]: the symbol of class c's virtual table
    (_ZTV <type>) */
 bool itanium_vtable_name(const semantic_analysis &analysis,
