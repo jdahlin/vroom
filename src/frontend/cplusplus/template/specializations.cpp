@@ -110,7 +110,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     if (SyntaxRef id = variable_specialization_id(inner)) {
         /* (a specialization declared without an initializer: clang gives
            an internal template's none of its own, and a nested template<>
-           is an error: not yet) */
+           is an error: not yet) [impl.clang] */
         if (inner[1].is(syntax_kind::simple_template_id)) {
             lookup_result x;
             entity_index named = 0;
@@ -636,7 +636,7 @@ analysis_result semantic_analysis::variable_explicit_instantiation(
                                   static_cast<uint32_t>(arguments.size()), e));
     /* (the type repeated; not a second explicit instantiation, a template
        with internal linkage or one outside the enclosing namespaces, which
-       clang reports: not yet) */
+       clang reports: not yet) [impl.clang] */
     const function_template &primary = function_templates[vt - 1];
     bool internal = false;
     if (primary.declarator &&

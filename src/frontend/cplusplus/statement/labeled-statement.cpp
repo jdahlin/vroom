@@ -85,7 +85,7 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
     /* [stmt.label]/1: the optional attribute-specifier-seq appertains to
        the label; [dcl.attr.grammar]/6, [dcl.attr.likelihood]/1: ones that
        change nothing vcc generates, and those clang does not know, are
-       passed over */
+       passed over [impl.clang] */
     uint32_t lead = 0;
     while (lead < n.size() && !n[lead].is_token()) {
         if (!n[lead].is(syntax_kind::attribute_specifier,

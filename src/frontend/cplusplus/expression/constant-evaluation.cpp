@@ -150,7 +150,7 @@ bool is_object_value(const constant_value &v)
    its life outside the evaluation and is not usable in constant expressions
    (the check of a body for a potential constant expression leaves a
    variable it cannot know unusable to the call that needs a value, as clang
-   does) */
+   does) [impl.clang] */
 template <class State, class Object>
 bool unusable_object_read(const State &state, const Object &o)
 {
@@ -617,7 +617,7 @@ const char *semantic_analysis::evaluation_rule_note() const
 /* the node the analysis folded as not constant without saying by which
    rule: the evaluator applies [expr.const]/5 to the tree itself (not
    taking the fold's word), and whether a rule of it holds as clang applies
-   it */
+   it [impl.clang] */
 bool semantic_analysis::refuted_by_rule(uint32_t node)
 {
     constness folded = semantics[node].evaluation;

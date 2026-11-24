@@ -20,10 +20,6 @@ c-only-callable __builtin_ms_va_end c++/x86_64 # the rules of [ext.gnu] are not 
 c-only-callable __builtin_ms_va_start c++/x86_64 # the C++ front end does not handle a declaration the parser kept as tokens yet
 c-only-callable __builtin_neon_vaddh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet
 c-only-callable __builtin_neon_vsubh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet
-c-only-callable __builtin_stdc_rotate_left c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-c-only-callable __builtin_stdc_rotate_left c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-c-only-callable __builtin_stdc_rotate_right c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
-c-only-callable __builtin_stdc_rotate_right c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
 c-only-callable __builtin_vsnprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
 c-only-callable __builtin_vsnprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
 c-only-callable __builtin_vsprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
@@ -36,10 +32,6 @@ claimed-not-callable __builtin_ia32_addcarryx_u64 c++/x86_64 # the rules of [ext
 claimed-not-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_mfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
-claimed-not-callable __builtin_stdc_rotate_left c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-claimed-not-callable __builtin_stdc_rotate_left c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_left has a signature whose parameter types are not supported
-claimed-not-callable __builtin_stdc_rotate_right c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
-claimed-not-callable __builtin_stdc_rotate_right c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_stdc_rotate_right has a signature whose parameter types are not supported
 claimed-not-callable __builtin_vsnprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
 claimed-not-callable __builtin_vsnprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
 claimed-not-callable __builtin_vsprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported

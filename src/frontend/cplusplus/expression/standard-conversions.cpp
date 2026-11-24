@@ -466,7 +466,7 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
            adjacent destination values, the result of the conversion is an
            implementation-defined choice of either of those values.
            Otherwise, the behavior is undefined." (a value beyond float's
-           range is the infinity, as clang folds it: no diagnostic) */
+           range is the infinity, as clang folds it: no diagnostic) [impl.clang] */
         float f = static_cast<float>(d);
         m.value = floating_kept(f);
     }

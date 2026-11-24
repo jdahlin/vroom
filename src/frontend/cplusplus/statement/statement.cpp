@@ -619,7 +619,7 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
             return not_supported(n, "dcl.attr");
         /* [dcl.attr.grammar]/6: the attributes that change nothing vcc
            generates, and those clang does not know (it ignores them), may
-           stand before any statement */
+           stand before any statement [impl.clang] */
         if (c.is(syntax_kind::attribute_specifier,
                  syntax_kind::attribute_specifier_seq) &&
             attributes_without_effect(c))

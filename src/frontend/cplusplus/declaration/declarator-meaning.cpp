@@ -379,7 +379,7 @@ uint32_t semantic_analysis::expression_node_make(uint32_t tag, uint64_t word,
    name by the entity its lookup finds (a template's own type parameter,
    a member after "::", "." or "->" and a name lookup does not find by
    its identifier), a literal by its value, an operator by its token, a
-   node by its kind and children.  Equal structures are one index */
+   node by its kind and children.  Equal structures are one index [impl.clang] */
 uint32_t semantic_analysis::expression_structure(SyntaxElement e)
 {
     enum : uint32_t {

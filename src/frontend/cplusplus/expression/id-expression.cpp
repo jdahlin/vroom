@@ -622,7 +622,7 @@ analysis_result semantic_analysis::id_expression(token_index t,
        has the name (no scope had names analysis did not follow); a call's
        argument-dependent lookup ([basic.lookup.argdep]/1) found nothing
        either: the program is ill-formed, as clang says "use of undeclared
-       identifier" */
+       identifier" [impl.clang] */
     bool callee = t && t == overloaded_callee;
     bool adl_applies = callee && callee_has_arguments;
     /* [lex.name]/3: a name of clang's builtins (by its __has_builtin

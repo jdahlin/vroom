@@ -18011,7 +18011,7 @@ static const uint64_t syntax_allowed_children[][4] = {
     {0x18000000u, 0x1c000000000000u, 0x3000000000u, 0xc00000u}, /* declarator_id */
     {0x4000000u, 0x200u, 0x40000000001c0000u, 0xc00000u}, /* ptr_operator */
     {0x0u, 0x200u, 0x0u, 0xc00000u}, /* cv_qualifier_seq */
-    {0x0u, 0x1e0200u, 0x40000000001c0000u, 0xc00000u}, /* parameters_and_qualifiers */
+    {0x0u, 0x3e0200u, 0x40000000001c0000u, 0xc00000u}, /* parameters_and_qualifiers */
     {0x0u, 0x1000u, 0x0u, 0xc00000u}, /* trailing_return_type */
     {0x100u, 0x1c100u, 0x0u, 0xc00000u}, /* type_id */
     {0x200u, 0x1c100u, 0x0u, 0xc00000u}, /* defining_type_id */

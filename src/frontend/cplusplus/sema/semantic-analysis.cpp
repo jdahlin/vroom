@@ -449,7 +449,7 @@ analysis_result semantic_analysis::declaration_by_kind(SyntaxRef n)
             /* [dcl.pre]/4: "An attribute-declaration has no effect" unless
                an attribute says otherwise: the ones that change nothing
                vcc generates, and those clang does not know (it ignores them,
-               [dcl.attr.grammar]/6), are passed over */
+               [dcl.attr.grammar]/6), are passed over [impl.clang] */
             SyntaxRef r = d;
             if (r.is(syntax_kind::attribute_declaration)) {
                 bool ignored = true;
