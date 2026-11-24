@@ -167,15 +167,15 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_stdc_trailing_zeros", bit_count, 5, bit_count),
 /* C23's <stdbit.h> functions and __builtin_bitreverseg, generated from
        clang's records (stdc-builtins.inc), one rule for the family: the
-       rotations are the C front end's nodes, a call of the others is refused
-       when lowered; the counts are the rows above */
+       rotations are the C front end's nodes, the others are lowered through
+       its bit counts; the counts are the rows above */
 #define STDC_NODE(name, op, id, flags, signature)                              \
     ROWL(name, stdc_bits, static_cast<uint8_t>(builtin_stdc_op::op),           \
          stdc_bits, node, nullptr, nullptr),
 #define STDC_BODY(name, op, flags, signature)
 #define STDC_OP(name, op)                                                      \
     ROWL(name, stdc_bits, static_cast<uint8_t>(builtin_stdc_op::op),           \
-         stdc_bits, refuse, nullptr, nullptr),
+         stdc_bits, stdc_bits, nullptr, nullptr),
 #include "frontend/stdc-builtins.inc"
 #undef STDC_NODE
 #undef STDC_BODY

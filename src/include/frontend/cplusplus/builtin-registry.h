@@ -185,6 +185,9 @@ enum class builtin_lowering : uint8_t {
     /* a call that analysis and constant evaluation know and lowering does
        not: refused with the reason */
     refuse,
+    /* C23's <stdbit.h> counts and bit_floor/bit_ceil, bitreverseg: through
+       the C front end's clzg, ctzg, popcountg and bitreverseN */
+    stdc_bits,
     /* __builtin_align_up, _down, is_aligned of an integer by a constant
        alignment, as arithmetic */
     align,

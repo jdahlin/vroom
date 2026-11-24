@@ -668,6 +668,9 @@ class c_lowering
         return block(items.data(), static_cast<uint32_t>(items.size()));
     }
     ast_qualified_type type_of(uint32_t n);
+    /* C23's <stdbit.h> functions and __builtin_bitreverseg at run time */
+    uint32_t stdc_bits(const semantic_node &n, ast_qualified_type t,
+                       uint32_t argument);
     uint32_t special_builtin(builtin_lowering lowering, const semantic_node &n,
                              ast_qualified_type t,
                              const owned_array<uint32_t> &arguments);

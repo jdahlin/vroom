@@ -2104,6 +2104,10 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     if (!owner || entity_table[owner].kind != entity_kind::class_type ||
         function_state.active || at_block_scope() || defining_class)
         return not_supported(list, "dcl.init.aggr");
+    /* (in a default argument ([dcl.fct.default]/1): the lowering of the
+       call that uses it has no object for its `this`) */
+    if (call_site_depth)
+        return not_supported(list, "dcl.init.aggr");
     function_context outer = static_cast<function_context &&>(function_state);
     entity_index outer_scope = current_scope;
     entity_index f = entity_table.make(entity_kind::function, 0, owner);
