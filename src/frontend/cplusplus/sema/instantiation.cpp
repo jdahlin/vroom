@@ -85,13 +85,27 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
            parameters returning the class template's specialization */
         bool guide = ft.guide_of != 0;
         qualified_type lambda_type;
-        if (guide)
+        /* the stage that failed, for the refusal's detail below */
+        enum {
+            guide_type,
+            lambda_stage,
+            constructor_stage,
+            specifier_stage,
+            conversion_stage,
+            declarator_stage,
+            declare_stage
+        };
+        unsigned stage = specifier_stage;
+        if (guide) {
+            stage = guide_type;
             r = deduction_guide_type(ft.declarator, lambda_type);
-        else if (lambda)
+        } else if (lambda) {
+            stage = lambda_stage;
             r = lambda_specialization(ft.declarator, false, lambda_type, 0);
-        else if (constructor && specifiers)
+        } else if (constructor && specifiers) {
+            stage = constructor_stage;
             r = constructor_specifiers(d_syntax[d_skip], s);
-        else if (specifiers) {
+        } else if (specifiers) {
             bool saved_friend = friend_allowed;
             bool outer_explicit = explicit_allowed;
             friend_allowed = ft.friend_class != 0;
@@ -101,8 +115,10 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             friend_allowed = saved_friend;
         }
         qualified_type type = s.type;
-        if (r == analysis_result::well_formed && conversion)
+        if (r == analysis_result::well_formed && conversion) {
+            stage = conversion_stage;
             r = conversion_type(conversion, type);
+        }
         if (guide)
             type = lambda_type;
         if (lambda) {
@@ -111,6 +127,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         }
         if (r == analysis_result::well_formed && !lambda && !guide) {
             function_cv = 0;
+            stage = declarator_stage;
             /* (a member function template's cv-qualifier-seq,
                [temp.mem]) */
             member_template_declarator(2 * !is_namespace(t.enclosing));
@@ -124,6 +141,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         }
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
+            stage = declare_stage;
             instantiating = index + 1;
             r = declare_specialization(ft.declarator, m.id, type, s, e);
             instantiating = 0;
@@ -175,9 +193,19 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             return r;
         }
         if (r != analysis_result::well_formed)
-            /* (an argument that makes the declaration ill-formed is a
-               deduction failure, [temp.deduct]/8: no candidate) */
-            return not_supported(at, "temp.deduct");
+        /* (an argument that makes the declaration ill-formed is a
+           deduction failure, [temp.deduct]/8: no candidate) */
+        {
+            static const char *const details[] = {
+                "a deduction guide's function type is ill-formed",
+                "a lambda's specialization is ill-formed",
+                "a constructor template's specifiers are ill-formed",
+                "a function template's decl-specifier-seq is ill-formed",
+                "a conversion function template's type is ill-formed",
+                "a function template's declarator is ill-formed",
+                "declaring the specialization is ill-formed"};
+            return not_supported_because(at, "temp.deduct", details[stage]);
+        }
     }
     if (instantiations[index].substitution_failed) {
         if (substituting)
