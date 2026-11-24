@@ -1995,6 +1995,8 @@ class semantic_analysis
        the warning (or nothing) */
     /* whether token at comes from a system header (# 1 "f" 3, -isystem) */
     bool in_system_header(token_index at) const;
+    analysis_result recoverable_extension_used(diagnostic_id id,
+                                               token_index at);
     analysis_result extension_used(diagnostic_id id, token_index at,
                                    const char *argument);
 
@@ -6441,6 +6443,10 @@ class semantic_analysis
     /* hold_names runs for an ill-formed declaration: a function it
        redeclares stays known */
     bool hold_ill_formed = false;
+    /* an error clang recovers from was reported while the declaration was
+       analysed (an extension that is an error here): the declaration goes
+       on, declares what it declares, and is judged ill-formed at its end */
+    bool recovered_error = false;
     /* the first operator keyword of such a declaration (0: none), which a
        refused operator's detail names */
     token_index operators_held_at = 0;

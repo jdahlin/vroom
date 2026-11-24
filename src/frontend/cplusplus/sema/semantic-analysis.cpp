@@ -243,6 +243,20 @@ analysis_result semantic_analysis::extension_used(diagnostic_id id,
     return analysis_result::well_formed;
 }
 
+/* extension_used for an error after which clang goes on as if the rule had
+   been met: a well-formed result, the declaration judged ill-formed when it
+   ends (declaration()), its entities declared */
+analysis_result semantic_analysis::recoverable_extension_used(diagnostic_id id,
+                                                              token_index at)
+{
+    analysis_result r = extension_used(id, at, nullptr);
+    if (r == analysis_result::ill_formed) {
+        recovered_error = true;
+        return analysis_result::well_formed;
+    }
+    return r;
+}
+
 bool semantic_analysis::in_system_header(token_index at) const
 {
     if (!diagnostics.files)
@@ -290,6 +304,8 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     declaration_refusals = unsupported_before;
     size_t held_before = held_pending.size();
     size_t scopes_before = unknown_scopes_pending.size();
+    bool outer_recovered = recovered_error;
+    recovered_error = false;
     if (is_namespace_definition(tree, n)) {
         /* the declarations of its body are analysed as declarations of
            their own: one of them not parsed does not make the namespace
@@ -310,6 +326,9 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
         declaration_not_parsed_seen = true;
     } else
         d.result = declaration_by_kind(n);
+    if (recovered_error && d.result == analysis_result::well_formed)
+        d.result = analysis_result::ill_formed;
+    recovered_error = outer_recovered;
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
     d.has_unsupported = unsupported.size() > unsupported_before;

@@ -676,9 +676,9 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
            function */
         if (!tokens.files.behavior.has(
                 language_feature::dynamic_exception_specifications)) {
-            VTRY(r, extension_used(
+            VTRY(r, recoverable_extension_used(
                         diagnostic_id::sema_dynamic_exception_specification,
-                        dynamic_exceptions.first_token(), nullptr));
+                        dynamic_exceptions.first_token()));
         }
         VTRY(r, dynamic_exception_types(dynamic_exceptions, may_qualify));
     }
