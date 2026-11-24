@@ -859,7 +859,7 @@ itanium_mangler::bound(SyntaxElement name) const
     return nullptr;
 }
 
-/* [abi:mangle.expression] of a unary fold over a pack bound by an alias
+/* [abi:expressions] of a unary fold over a pack bound by an alias
    template: expanded, as clang does, for the elements: ( pattern op ... )
    is op e0 (op e1 (... en)), ( ... op pattern ) is ((e0 op e1) op ...) */
 bool itanium_mangler::dependent_fold(SyntaxElement fold)
@@ -912,7 +912,7 @@ bool itanium_mangler::dependent_fold(SyntaxElement fold)
 
 bool itanium_mangler::dependent_expression(SyntaxElement expression)
 {
-    /* [abi:mangle.expression]: ( type-id ) cast-expression, cv <type>
+    /* [abi:expressions]: ( type-id ) cast-expression, cv <type>
        <expression>, the type analysed with the alias's names bound */
     if (expression.is(syntax_kind::cast_expression) && expression.size() == 4) {
         SyntaxRef r = expression;
@@ -927,7 +927,7 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
     }
     if (expression.is(syntax_kind::fold_expression))
         return dependent_fold(expression);
-    /* [abi:mangle.expression] <unary operator-name> <expression> */
+    /* [abi:expressions] <unary operator-name> <expression> */
     if (expression.is(syntax_kind::unary_expression) &&
         expression.size() == 2) {
         static const struct {
