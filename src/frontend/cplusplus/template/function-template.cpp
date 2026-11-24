@@ -330,8 +330,10 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             entity_table[f.entity].inline_ = true;
         entity_table.add_declaration(f.entity, n);
         last_function_template = earlier;
-        if (!s.friend_)
+        if (!s.friend_) {
             function_templates[earlier - 1].hidden_friend = false;
+            function_templates[earlier - 1].friend_declaration = false;
+        }
         if (defines) {
             if (renamed) {
                 VTRY(merged,

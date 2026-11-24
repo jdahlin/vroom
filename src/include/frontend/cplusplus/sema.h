@@ -5212,6 +5212,10 @@ class semantic_analysis
         entity_index entity = 0, name = 0;
         entity_index friend_class = 0;
         bool hidden_friend = false;
+        /* a friend declaration (not a definition) in a class: not found by
+           an ordinary lookup until a declaration at namespace scope
+           redeclares it ([namespace.memdef]/3) */
+        bool friend_declaration = false;
         SyntaxRef declaration = 0, definition = 0;
         /* a function template's function-definition or (declared, not
            yet defined: definition 0) simple-declaration, whose first two

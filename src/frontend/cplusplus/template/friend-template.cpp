@@ -722,8 +722,12 @@ analysis_result semantic_analysis::friend_function_template(
     friend_allowed = saved_friend;
     if (r != analysis_result::well_formed)
         return r;
-    if (inner.is(syntax_kind::function_definition))
-        function_templates[last_function_template - 1].friend_class = c;
+    /* (a declaration too: its specializations' declarations are analysed
+       with its friend specifier, instantiate) */
+    function_templates[last_function_template - 1].friend_class = c;
+    if (!inner.is(syntax_kind::function_definition))
+        function_templates[last_function_template - 1].friend_declaration =
+            true;
     befriend_template(c, function_templates[last_function_template - 1].entity);
     return analysis_result::well_formed;
 }
