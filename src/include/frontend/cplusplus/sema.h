@@ -2497,6 +2497,10 @@ class semantic_analysis
     bool defaulted_member_equality(entity_index c, SyntaxElement d,
                                    const specified &s, uint8_t access);
     entity_index defaulted_comparison = 0;
+    analysis_result
+    defaulted_inequality(token_index at,
+                         const owned_array<uint32_t> &parameters, bool of_class,
+                         uint32_t &block);
     analysis_result compare_subobjects(token_index at, qualified_type type,
                                        expression_meaning x,
                                        expression_meaning y,

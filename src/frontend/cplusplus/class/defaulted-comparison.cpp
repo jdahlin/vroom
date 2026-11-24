@@ -22,7 +22,8 @@ bool semantic_analysis::defaulted_equality_declared(entity_index c,
                                                     qualified_type type)
 {
     const struct type &f = type_table[type.unqualified()];
-    if (name != operator_name(preprocessing_op_or_punc::EQUAL_EQUAL) ||
+    if ((name != operator_name(preprocessing_op_or_punc::EQUAL_EQUAL) &&
+         name != operator_name(preprocessing_op_or_punc::EXCLAMATION_EQUAL)) ||
         f.kind != type_kind::function || f.variadic || f.parameter_count != 2 ||
         fundamental_of(f.operand) != fundamental_type::bool_)
         return false;
@@ -86,6 +87,63 @@ analysis_result semantic_analysis::compare_subobjects(
 }
 
 /*
+ * [class.compare.secondary]/1: "A secondary comparison operator @ for a
+ * class C ... a defaulted != operator function is defined as deleted if
+ * the == is not usable, otherwise x != y is !(x == y) ([class.compare.
+ * secondary]/2)": the body returns !(x == y) on the whole objects, as a
+ * bool prvalue; constexpr when that is potentially constant and the
+ * parameters are literal ([class.compare.default]/3).
+ */
+analysis_result
+semantic_analysis::defaulted_inequality(token_index at,
+                                        const owned_array<uint32_t> &parameters,
+                                        bool of_class, uint32_t &block)
+{
+    if (parameters.size() != 2u)
+        return not_supported(current_declaration, "class.compare.secondary");
+    expression_meaning sides[2], equal;
+    size_t issued = diagnostics.messages.size();
+    for (int k = 0; k < 2; k++) {
+        analysis_result r = analysis_result::well_formed;
+        if (of_class && k == 0)
+            r = this_object(at, sides[k]);
+        else
+            r = named_entity(at, parameters[k], sides[k], false);
+        VTRY(r2, r);
+    }
+    analysis_result compared = binary_of(
+        current_declaration, at, preprocessing_op_or_punc::EQUAL_EQUAL,
+        SyntaxElement(), sides[0], SyntaxElement(), sides[1], equal);
+    if (compared == analysis_result::ill_formed) {
+        diagnostics.discard_since(issued);
+        entity_table[last_declared].deleted = true;
+        owned_array<uint32_t> none;
+        block = block_statement(at, none);
+        return analysis_result::well_formed;
+    }
+    VTRY(r3, compared);
+    /* [expr.unary.op]/9: the contextually converted operand negated */
+    VTRY(r4, contextual_bool(current_declaration, equal));
+    equal.value = !equal.value;
+    equal.node = expression_node(
+        semantic_kind::unary, equal, at, equal.node, 0,
+        static_cast<uint8_t>(preprocessing_op_or_punc::EXCLAMATION));
+    bool literal = true;
+    for (size_t k = 0; k < parameters.size(); k++)
+        if (!(of_class && k == 0) &&
+            literal_type(entity_table[parameters[k]].type) !=
+                constness::constant)
+            literal = false;
+    if (literal && potential_constant(equal.node) != constness::not_constant)
+        entity_table[last_declared].constexpr_ = true;
+    owned_array<uint32_t> statements;
+    statements.append(
+        statement_node(semantic_kind::return_statement, at, equal.node));
+    block = block_statement(at, statements);
+    return analysis_result::well_formed;
+}
+
+/*
  * [class.eq]/3: "The return value V of a defaulted == operator function
  * with parameters x and y is determined by comparing corresponding
  * elements x_i and y_i in the expanded lists of subobjects for x and y
@@ -106,6 +164,9 @@ analysis_result semantic_analysis::defaulted_equality(
         entity_table[last_declared].enclosing == defaulted_comparison;
     if (!x.member_count || parameters.size() != 2u)
         return not_supported(current_declaration, "class.compare.default");
+    if (entity_table[last_declared].name ==
+        operator_name(preprocessing_op_or_punc::EXCLAMATION_EQUAL))
+        return defaulted_inequality(at, parameters, of_class, block);
     /* [class.eq]/3: the expanded list of subobjects: the direct base
        classes in order, then the members ([class.compare.default]/6) */
     if (x.virtual_base_count)
@@ -208,7 +269,8 @@ bool semantic_analysis::defaulted_member_equality(entity_index c,
     in_member_declarator = false;
     if (r != analysis_result::well_formed || !m.has_id || m.qualifier ||
         !m.operator_function || m.aligned ||
-        m.implemented != preprocessing_op_or_punc::EQUAL_EQUAL ||
+        (m.implemented != preprocessing_op_or_punc::EQUAL_EQUAL &&
+         m.implemented != preprocessing_op_or_punc::EXCLAMATION_EQUAL) ||
         function_cv != cv_const)
         return false;
     for (const parameter_meaning &parameter : function_parameters)
