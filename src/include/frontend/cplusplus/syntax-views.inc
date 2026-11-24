@@ -15007,7 +15007,7 @@ struct ElaboratedClassSpecifierNamed : SyntaxAlternative<4> {
         static const syntax_pattern_item a0[] = {
             {syntax_pattern_item::nonterminal, false, true, 0, 0, nullptr},
             {syntax_pattern_item::nonterminal, true, false, 0, 1, &AttributeSpecifierSeq::accepts},
-            {syntax_pattern_item::nonterminal, true, false, 0, 2, &NestedNameSpecifier::accepts},
+            {syntax_pattern_item::nonterminal, true, false, 0, 2, [](syntax_kind k) { return NestedNameSpecifier::accepts(k) || k == syntax_kind::alignment_specifier || k == syntax_kind::attribute_specifier || k == syntax_kind::attribute_specifier_seq || k == syntax_kind::gnu_attribute_specifier; }},
             {syntax_pattern_item::nonterminal, false, true, 0, 3, nullptr},
         };
         static const syntax_pattern_item *const alternatives[] = {a0};
@@ -15045,13 +15045,13 @@ struct ElaboratedClassSpecifierTemplated : SyntaxAlternative<4> {
     {
         static const syntax_pattern_item a0[] = {
             {syntax_pattern_item::nonterminal, false, true, 0, 0, nullptr},
-            {syntax_pattern_item::nonterminal, false, false, 0, 1, &NestedNameSpecifier::accepts},
+            {syntax_pattern_item::nonterminal, false, false, 0, 1, [](syntax_kind k) { return NestedNameSpecifier::accepts(k) || k == syntax_kind::alignment_specifier || k == syntax_kind::attribute_specifier || k == syntax_kind::attribute_specifier_seq || k == syntax_kind::gnu_attribute_specifier; }},
             {syntax_pattern_item::keyword, true, false, static_cast<uint8_t>(standard_keyword::template_), 2, nullptr},
-            {syntax_pattern_item::nonterminal, false, false, 0, 3, &SimpleTemplateId::accepts},
+            {syntax_pattern_item::nonterminal, false, false, 0, 3, [](syntax_kind k) { return SimpleTemplateId::accepts(k) || k == syntax_kind::alignment_specifier || k == syntax_kind::attribute_specifier || k == syntax_kind::attribute_specifier_seq || k == syntax_kind::gnu_attribute_specifier; }},
         };
         static const syntax_pattern_item a1[] = {
             {syntax_pattern_item::nonterminal, false, true, 0, 0, nullptr},
-            {syntax_pattern_item::nonterminal, false, false, 0, 3, &SimpleTemplateId::accepts},
+            {syntax_pattern_item::nonterminal, false, false, 0, 3, [](syntax_kind k) { return SimpleTemplateId::accepts(k) || k == syntax_kind::alignment_specifier || k == syntax_kind::attribute_specifier || k == syntax_kind::attribute_specifier_seq || k == syntax_kind::gnu_attribute_specifier; }},
         };
         static const syntax_pattern_item *const alternatives[] = {a0, a1};
         static const uint32_t counts[] = {4, 2};

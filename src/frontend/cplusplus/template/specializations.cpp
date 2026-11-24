@@ -358,7 +358,11 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
         auto e = tail[0][0];
         auto ec = e;
         uint32_t id = 1;
-        if (e.size() == 3 && ec[1].is(syntax_kind::gnu_attribute_specifier) &&
+        /* two or more of them make an attribute-specifier-seq (libc++
+           writes deprecated and visibility) */
+        if (e.size() == 3 &&
+            ec[1].is(syntax_kind::gnu_attribute_specifier,
+                     syntax_kind::attribute_specifier_seq) &&
             gnu_attributes_without_effect(ec[1]))
             id = 2;
         if (e.size() == id + 2 && ec[0].is_token() &&
