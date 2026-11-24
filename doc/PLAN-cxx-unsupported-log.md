@@ -560,3 +560,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   and the second took everything); left as is.  Left: the deleted
   destructor's vtable slot (__cxa_deleted_virtual, 197), the evaluator's
   value of a default-initialized constexpr object.
+- 9.7 (05474eab9, ba2af6b34): a constexpr object its default constructor
+  initializes is usable in constant expressions; a conversion function on
+  an aggregate prvalue in a namespace-scope static_assert.  Unsupported
+  35877 -> 35862.  Findings: "kept no value" is mostly an aggregate's default
+  member initializer naming another member refused (initializer.cpp:2085);
+  namespace-scope dynamic initialization has no temporaries in lowering
+  (170: design needed); the deleted destructor's vtable slot works
+  (scratchpad deleted-virtual-slot.patch) but needs [class.dtor]/6's error
+  for a constructor or variable that uses it.
