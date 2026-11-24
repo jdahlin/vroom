@@ -187,18 +187,36 @@ analysis_result semantic_analysis::class_specialization_definition(
     auto written = specifier[1];
     if (defines)
         written = class_head_name(specifier[0]);
-    if (!written.is_node())
-        return not_supported(n, rule);
     bool qualified_head = false;
-    if (written.qualified_class_head_name() && written.size() == 2 &&
-        written[0].is(syntax_kind::nested_name_specifier) &&
-        written[1].is(syntax_kind::simple_template_id)) {
+    /* class-key nested-name-specifier simple-template-id ; */
+    SyntaxRef nested_part;
+    if (!defines && specifier.size() == 3 &&
+        specifier[1].is(syntax_kind::nested_name_specifier) &&
+        specifier[2].is(syntax_kind::simple_template_id)) {
+        nested_part = specifier[1];
+        written = specifier[2];
+    } else if (!written.is_node()) {
+        return not_supported(n, rule);
+    } else if (written.qualified_class_head_name() && written.size() == 2 &&
+               written[0].is(syntax_kind::nested_name_specifier) &&
+               written[1].is(syntax_kind::simple_template_id)) {
+        nested_part = written[0];
+        written = written[1];
+    }
+    if (nested_part) {
         nominated_scope ns;
-        VTRY(nr, nested_name_specifier(written[0].index(), ns));
+        VTRY(nr, nested_name_specifier(nested_part.index(), ns));
         if (!is_class_entity(ns.entity) && !is_namespace(ns.entity))
             return not_supported(n, rule);
+        /* [temp.expl.spec]/2: in a namespace enclosing the primary's */
+        if (is_namespace(ns.entity) &&
+            !namespace_encloses(current_scope, ns.entity) &&
+            !tokens.files.behavior.microsoft_extensions)
+            return ill_formed(n,
+                              "a specialization shall be declared in a "
+                              "namespace enclosing the specialized template's",
+                              "temp.expl.spec");
         outer = ns.entity;
-        written = written[1];
         qualified_head = true;
     }
     lookup_result x;

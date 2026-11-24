@@ -27,8 +27,12 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         /* template<> class-key simple-template-id ; declared only */
         auto d = n[3];
         if (only && only.is(syntax_kind::elaborated_type_specifier) &&
-            d.size() == 2 && only.size() == 2 && only[0].is_token() &&
-            only[1].is(syntax_kind::simple_template_id) &&
+            d.size() == 2 && only[0].is_token() &&
+            ((only.size() == 2 &&
+              only[1].is(syntax_kind::simple_template_id)) ||
+             (only.size() == 3 &&
+              only[1].is(syntax_kind::nested_name_specifier) &&
+              only[2].is(syntax_kind::simple_template_id))) &&
             d[1].is(preprocessing_op_or_punc::SEMICOLON) &&
             !leading_gnu_attributes(d)) {
             standard_keyword key = only[0].keyword();
