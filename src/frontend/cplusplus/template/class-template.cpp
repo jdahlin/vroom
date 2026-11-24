@@ -230,8 +230,34 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         SyntaxElement seq =
             ElaboratedClassSpecifier(elaborated).attribute_specifier_seq();
         if (seq && class_head_attributes_without_effect(seq) &&
-            !attribute_argument_present(seq))
+            !attribute_argument_present(seq)) {
             at = 2;
+        } else if (seq && !seq.is_token()) {
+            /* [ext:gnu_attributes] visibility("hidden") (libc++'s
+               _LIBCPP_HIDDEN) on the declaration of a class template: it
+               names no member yet, and the partial specializations and the
+               definition carry their own attributes ([temp.class.spec]/1),
+               which class_specifier reads; nothing is generated here */
+            gnu_attributes gnu;
+            bool only_gnu = true;
+            if (seq.is(syntax_kind::gnu_attribute_specifier)) {
+                VTRY(g, gnu_attribute_specifier(seq, gnu));
+            } else if (seq.is(syntax_kind::attribute_specifier_seq)) {
+                for (auto each : seq.elements())
+                    only_gnu = only_gnu &&
+                               each.is(syntax_kind::gnu_attribute_specifier);
+                for (auto each : seq.elements()) {
+                    if (only_gnu) {
+                        VTRY(g, gnu_attribute_specifier(each, gnu));
+                    }
+                }
+            } else {
+                only_gnu = false;
+            }
+            if (only_gnu && !gnu.aligned && !gnu.section && !gnu.priority &&
+                !gnu.cleanup && gnu.flags == gnu_hidden_visibility)
+                at = 2;
+        }
     }
     if (elaborated.size() != at + 1 || !elaborated[0].is_token() ||
         !elaborated[at].is_identifier())
