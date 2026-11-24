@@ -985,6 +985,11 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     if (entity_table[scope].explicitly_instantiated ==
         instantiation_kind::definition)
         return true;
+    /* [temp.explicit]/11: an explicit instantiation declaration names a
+       class whose vtable another unit emits: its virtual functions are not
+       needed by one [impl.clang] */
+    bool vtable_elsewhere = entity_table[scope].explicitly_instantiated ==
+                            instantiation_kind::declaration;
     entity_index first = entity_table.find(scope, tokens.identifier(name));
     /* (a constructor, destructor or operator is found by no such name here:
        defined with the unit) */
@@ -993,7 +998,7 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
         return true;
     for (entity_index e = first; e; e = entity_table[e].next_overload) {
         if (entity_table[e].member_definition_needed ||
-            entity_table[e].virtual_ ||
+            (entity_table[e].virtual_ && !vtable_elsewhere) ||
             explicitly_instantiated(e) == instantiation_kind::definition)
             return true;
     }
