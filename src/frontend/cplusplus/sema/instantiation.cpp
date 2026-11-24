@@ -65,6 +65,12 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         size_t expressions_before = expressions.size();
         size_t uses_before = name_uses.size();
         current_scope = instantiations[index].scope;
+        /* [temp.res]/10: the declaration's names that do not depend on a
+           parameter are those in scope at the template's declaration, not
+           at the call (or the constraint) that asks for the
+           specialization */
+        token_index saved_horizon = lookup_horizon;
+        lookup_horizon = ft.declaration.first_token();
         analysed_declaration *saved_analysing = analysing;
         analysing = nullptr;
         /* (a pack expansion's pattern that names the template: its own
@@ -186,6 +192,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             }
         }
         current_scope = saved_scope;
+        lookup_horizon = saved_horizon;
         analysing = saved_analysing;
         expanding = saved_expanding;
         function_cv = saved_cv;
