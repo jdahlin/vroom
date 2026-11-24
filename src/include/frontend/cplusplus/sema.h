@@ -6613,6 +6613,9 @@ class semantic_analysis
         }
     };
     uint32_t require_complete_class = 0;
+    /* a nested-name-specifier's simple-template-id is being analysed: its
+       template-arguments are only named (template_id_arguments) */
+    bool nested_template_id = false;
     /* deduce_type matches a function declaration's type to a function
        template's ([temp.deduct.decl]) */
     bool matching_declaration = false;

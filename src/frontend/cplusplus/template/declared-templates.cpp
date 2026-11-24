@@ -1108,6 +1108,14 @@ analysis_result semantic_analysis::template_id_arguments(
 {
     const function_template ft = function_templates[ct - 1];
     uint32_t count = ft.parameter_count;
+    /* [temp.inst]/2: the class a nested-name-specifier names is complete;
+       a specialization named in its template-arguments
+       (And<B, E<U...>>::value) is only named */
+    uint32_t complete_needed = require_complete_class;
+    if (nested_template_id)
+        complete_needed = 0;
+    nested_template_id = false;
+    scoped_value<uint32_t> complete(require_complete_class, complete_needed);
     /* [temp.arg]/1: "When the parameter declared by the template is a
        template parameter pack, it will correspond to zero or more
        template-arguments": the last parameter's, the arguments from its
