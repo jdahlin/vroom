@@ -6,6 +6,7 @@
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
+#include "declared-templates.h"
 
 namespace cplusplus
 {
@@ -60,6 +61,28 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         inner[1].is(syntax_kind::function_definition,
                     syntax_kind::simple_declaration)) {
         SyntaxRef def = inner[1];
+        /* [temp.expl.spec]/16: template<> template<class X> class
+           A<int>::B { ... }; a member class template of an implicit
+           instantiation, defined for it alone */
+        if (def.is(syntax_kind::simple_declaration)) {
+            SyntaxRef only = sole_decl_specifier(def);
+            token_index class_name = 0;
+            SyntaxRef id = 0;
+            if (only && only.is(syntax_kind::class_specifier))
+                id = out_of_class_class_member(only, &class_name);
+            if (id) {
+                nominated_scope ns;
+                SyntaxRef head = only.class_specifier().class_head()[1][0];
+                VTRY(nr, nested_name_specifier(head.index(), ns));
+                if (is_class_entity(ns.entity) &&
+                    entity_table[ns.entity].instantiation &&
+                    !explicitly_specialized_class(ns.entity))
+                    return define_member_class_template_of(ns.entity, n, inner,
+                                                           def, false);
+            }
+            if (only && only.is(syntax_kind::class_specifier))
+                return not_supported(n, "temp.expl.spec");
+        }
         uint32_t lead_attr = leading_gnu_attributes(def);
         SyntaxTail tail(def, lead_attr);
         if (tail.size() >= 2 && !tail[1].is_token()) {
