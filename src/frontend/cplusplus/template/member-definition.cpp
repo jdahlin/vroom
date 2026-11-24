@@ -595,8 +595,13 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     }
     if (variable)
         r = simple_declaration(o.definition);
-    else
+    else {
+        /* [temp.inst]/4: a member nobody uses is not instantiated: what
+           this definition's body needs waits for its function's use */
+        defer_next_body_needs = true;
         r = function_definition(o.definition);
+        defer_next_body_needs = false;
+    }
     leave_instantiation(context);
     /* the member defined: the class's function this definition declares
        (last_declared may be a name its body declared) */

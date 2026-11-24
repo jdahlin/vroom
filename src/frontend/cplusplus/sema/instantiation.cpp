@@ -377,6 +377,10 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     diagnostics_suppressed_if hush(diagnostics, quiet);
     /* (what a quiet definition wants is as quiet) */
     quiet_member_bodies += quiet;
+    /* [temp.inst]/4: a specialization nobody uses is not instantiated, so
+       what a quiet definition needs is needed once the specialization is */
+    scoped_value<entity_index> deferring(needs_deferred_by, needs_deferred_by);
+    defer_next_body_needs = quiet;
     /* (leave_instantiation drops the claims of the template's expressions:
        they are about one specialization, which clang makes none of) */
     instantiation_context context;
@@ -454,6 +458,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     instantiations[index].defined = true;
     entity_table[instantiations[index].specialization].defined = true;
     quiet_member_bodies -= quiet;
+    defer_next_body_needs = false;
     if (r == analysis_result::well_formed)
         return r;
     if (quiet) {

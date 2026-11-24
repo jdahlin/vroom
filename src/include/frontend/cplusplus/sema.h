@@ -3755,6 +3755,11 @@ class semantic_analysis
         entity_index by = 0, needed = 0;
     };
     entity_index needs_deferred_by = 0;
+    /* the next function body analysed is one of an instantiation not known
+       to be used: its needs wait for its function's (analyse_function_body) */
+    bool defer_next_body_needs = false;
+    void defer_needs_of_instantiated_body(entity_index f);
+    bool virtual_table_needed(entity_index c) const;
     owned_array<deferred_need> deferred_needs;
     void mark_needed(entity_index function);
     bool pass_deferred_needs();

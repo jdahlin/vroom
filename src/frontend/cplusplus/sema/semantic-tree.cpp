@@ -140,6 +140,20 @@ void semantic_analysis::mark_needed(entity_index function)
     entity_table[function].member_definition_needed = true;
 }
 
+/* [class.virtual]/17 with [basic.def.odr]/5: a class's virtual functions
+   are needed by its virtual table, which an object of the class (or of a
+   class derived from it, whose constructor uses the base's) wants: some
+   constructor of the class is needed [impl.clang] (clang emits the table
+   where a constructor is defined) */
+bool semantic_analysis::virtual_table_needed(entity_index c) const
+{
+    for (entity_index k = entity_table[c].first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (entity_table[k].member_definition_needed)
+            return true;
+    return false;
+}
+
 /* the needs of a defaulted special member now needed (or virtual: its
    vtable needs it, [temp.inst]/11), passed on; whether any was */
 bool semantic_analysis::pass_deferred_needs()
@@ -147,7 +161,8 @@ bool semantic_analysis::pass_deferred_needs()
     bool passed = false;
     for (const deferred_need &d : deferred_needs) {
         const entity &by = entity_table[d.by];
-        if ((by.member_definition_needed || by.virtual_) &&
+        if ((by.member_definition_needed ||
+             (by.virtual_ && virtual_table_needed(by.enclosing))) &&
             !entity_table[d.needed].member_definition_needed) {
             entity_table[d.needed].member_definition_needed = true;
             passed = true;
