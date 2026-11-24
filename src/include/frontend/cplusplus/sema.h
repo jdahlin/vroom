@@ -2147,6 +2147,9 @@ class semantic_analysis
            and checks what it appertains to (alignas_suffix) */
         bool alignas_allowed = false;
         bool alignas_suffix = false;
+        /* a standard noreturn after the declarator-id ([dcl.attr.noreturn]/1):
+           the declared entity must be a function */
+        token_index noreturn_suffix = 0;
         uint64_t alignas_suffix_value = 0;
         uint32_t gnu_flags = 0;
         token_index section = 0, abi_tag = 0;
@@ -2745,6 +2748,10 @@ class semantic_analysis
     bool same_abi_tag(token_index a, token_index b) const;
     bool class_specifier_before(SyntaxRef seq, uint32_t i) const;
     bool gnu_or_without_effect(SyntaxRef n) const;
+    token_index statement_only_attribute(token_index first,
+                                         token_index end) const;
+    bool standard_attribute_token(token_index t, token_index first,
+                                  const char *name) const;
     /* [dcl.attr.grammar]: every attribute at n (an attribute-specifier,
        -seq or -list) changes nothing vcc generates */
     bool attributes_without_effect(SyntaxElement n) const;

@@ -795,6 +795,42 @@ analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
     return r;
 }
 
+/* [dcl.attr.fallthrough]/1, [dcl.attr.likelihood]/1: the token of a
+   standard fallthrough, likely or unlikely among the tokens [first, end) of
+   attributes, else 0; these "may be applied to" a null statement, a label
+   or a statement only (clang: "cannot be applied to a declaration") */
+token_index semantic_analysis::statement_only_attribute(token_index first,
+                                                        token_index end) const
+{
+    for (token_index t = first; t < end; t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        if (!standard_attribute_token(t, first, "fallthrough") &&
+            !standard_attribute_token(t, first, "likely") &&
+            !standard_attribute_token(t, first, "unlikely"))
+            continue;
+        return t;
+    }
+    return 0;
+}
+
+/* whether token t, which is no earlier than first, spells the unscoped
+   attribute-token NAME (not gnu::NAME, not a namespace) */
+bool semantic_analysis::standard_attribute_token(token_index t,
+                                                 token_index first,
+                                                 const char *name) const
+{
+    if (tokens[t].kind != token_kind::identifier || t <= first)
+        return false;
+    owned_buffer spelling;
+    tokens.spelling(t, spelling.get());
+    size_t length = strlen(name);
+    return spelling.size() == length &&
+           !memcmp(spelling.data(), name, length) &&
+           !is_operator(tokens[t - 1], preprocessing_op_or_punc::COLON_COLON) &&
+           !is_operator(tokens[t + 1], preprocessing_op_or_punc::COLON_COLON);
+}
+
 /*
  *     simple-declaration:
  *         decl-specifier-seq init-declarator-list_opt ;
@@ -838,27 +874,11 @@ analysis_result semantic_analysis::simple_declaration(SyntaxRef n)
                 attributes_end = n[i].first_token();
                 break;
             }
-        for (token_index t = n.first_token(); t < attributes_end; t++) {
-            if (tokens[t].kind != token_kind::identifier)
-                continue;
-            owned_buffer spelling;
-            tokens.spelling(t, spelling.get());
-            bool statement_only =
-                (spelling.size() == 11 &&
-                 !memcmp(spelling.data(), "fallthrough", 11)) ||
-                (spelling.size() == 6 &&
-                 !memcmp(spelling.data(), "likely", 6)) ||
-                (spelling.size() == 8 &&
-                 !memcmp(spelling.data(), "unlikely", 8));
-            if (statement_only && t > n.first_token() &&
-                !is_operator(tokens[t - 1],
-                             preprocessing_op_or_punc::COLON_COLON) &&
-                !is_operator(tokens[t + 1],
-                             preprocessing_op_or_punc::COLON_COLON))
-                return ill_formed_at_token(
-                    t, "this attribute cannot be applied to a declaration",
-                    "dcl.attr");
-        }
+        if (token_index t =
+                statement_only_attribute(n.first_token(), attributes_end))
+            return ill_formed_at_token(
+                t, "this attribute cannot be applied to a declaration",
+                "dcl.attr");
         return not_supported_because(
             n, "dcl.attr",
             "leading attributes that are not ones without effect");
@@ -1519,6 +1539,10 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* [ext:gnu_attributes] noreturn on what is no function (a pointer to
        function, a typedef-name): GCC and clang make it part of the
        function type pointed to */
+    if (m.noreturn_suffix && kind != entity_kind::function)
+        return ill_formed_at_token(m.noreturn_suffix,
+                                   "noreturn applies to a function only",
+                                   "dcl.attr.noreturn");
     if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
         return not_supported(declaration, "ext.gnu");
     /* [ext:gnu_attributes] require_constant_initialization: on a variable

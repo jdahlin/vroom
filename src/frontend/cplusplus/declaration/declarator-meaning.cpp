@@ -1297,6 +1297,30 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                 i++;
                 continue;
             }
+            {
+                /* [dcl.attr.grammar]/5: after the declarator-id the
+                   attributes appertain to the entity declared;
+                   [dcl.attr.noreturn]/1 noreturn to a function (GCC's
+                   noreturn flag says the same) */
+                uint32_t flags = 0;
+                /* clang: "'fallthrough' attribute cannot be applied to a
+                   declaration" */
+                if (token_index t = statement_only_attribute(c.first_token(),
+                                                             c.end_token()))
+                    return ill_formed_at_token(
+                        t, "this attribute cannot be applied to a declaration",
+                        "dcl.attr");
+                if (attributes_as_gnu(c, flags)) {
+                    for (token_index t = c.first_token(); t < c.end_token();
+                         t++)
+                        if (standard_attribute_token(t, c.first_token(),
+                                                     "noreturn"))
+                            m.noreturn_suffix = t;
+                    m.gnu_flags |= flags;
+                    i++;
+                    continue;
+                }
+            }
             return not_supported(n, "dcl.attr");
         }
         if (c.parameters_and_qualifiers()) {
