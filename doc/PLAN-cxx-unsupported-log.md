@@ -911,3 +911,10 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   access of a private name in a friend class template's template-head
   (access.cpp:84), static_cast of an out-of-range value to an unfixed enum
   is not constant (constant-expression-cxx11.cpp:2660).
+- 11.19 (f7fa34a94, 878ec6f3b, c5f49575f, d20600a9d): a cast to an unfixed
+  enum of an out-of-range value is not constant; access in a befriended
+  class template's head (we reject 390 -> 383); a double constant out of
+  float range times a float vector is ill-formed; constexpr static data
+  members before C++17 (the 11.18 patch, -142).  Unsupported 34415 ->
+  34275, we accept 5296 -> 5295 (vector.cpp:508 -std=c++11 joins its 4
+  other editions: use-site attribution of instantiation errors, known gap).
