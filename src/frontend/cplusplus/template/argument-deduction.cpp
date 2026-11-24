@@ -606,6 +606,25 @@ int semantic_analysis::deduce_from_base(qualified_type p, qualified_type a,
     return found;
 }
 
+/* [temp.deduct.call]/3: "A forwarding reference is an rvalue reference to a
+   cv-unqualified template parameter that does not represent a template
+   parameter of a class template (during class template argument
+   deduction ([over.match.class.deduct]))": whether the template parameter
+   type t is a parameter of the class template of an implicit guide */
+bool semantic_analysis::class_parameter_of_guide(qualified_type t) const
+{
+    const struct type &r = type_table[t.unqualified()];
+    if (r.kind != type_kind::template_parameter)
+        return false;
+    const entity &e = entity_table[r.entity];
+    if (!e.instantiation || e.instantiation > function_templates.size())
+        return false;
+    const function_template &guide = function_templates[e.instantiation - 1];
+    if (!guide.implicit_guide)
+        return false;
+    return e.value < function_templates[guide.guide_of - 1].parameter_count;
+}
+
 /* [temp.deduct.call]/2-3: the P and A deduce_type compares, for a
    parameter of type p and an argument of type a and value category c */
 void semantic_analysis::adjust_call_deduction(qualified_type &p,
@@ -617,7 +636,8 @@ void semantic_analysis::adjust_call_deduction(qualified_type &p,
     if (pr.kind == type_kind::rvalue_reference &&
         type_table[pr.operand.unqualified()].kind ==
             type_kind::template_parameter &&
-        !pr.operand.cv() && c == value_category::lvalue) {
+        !pr.operand.cv() && c == value_category::lvalue &&
+        !class_parameter_of_guide(pr.operand)) {
         /* [temp.deduct.call]/3: "A forwarding reference is an rvalue
            reference to a cv-unqualified template parameter ... If P
            is a forwarding reference and the argument is an lvalue,

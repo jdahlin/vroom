@@ -108,7 +108,10 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
            substitution process", in the template's context: the template
            is a friend of the class that befriends it ([temp.friend]/3) */
         scoped_value<entity_index> access(access_class, template_entity);
-        if (guide) {
+        if (guide && ft.implicit_guide) {
+            stage = guide_type;
+            r = implicit_guide_type(ft, arguments, at, lambda_type);
+        } else if (guide) {
             stage = guide_type;
             r = deduction_guide_type(ft.declarator, lambda_type);
         } else if (lambda) {

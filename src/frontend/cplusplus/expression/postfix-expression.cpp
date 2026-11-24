@@ -779,6 +779,7 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             class_template_of(argument.entity) == ct)
             return not_supported(n, "over.match.class.deduct");
     }
+    implicit_deduction_guides(ct);
     owned_array<uint32_t> group;
     for (size_t i = 0; i < function_templates.size(); i++)
         if (function_templates[i].guide_of == ct)
@@ -806,6 +807,8 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                 candidates[chosen].template_index) {
                 const function_template &guide =
                     function_templates[candidates[chosen].template_index - 1];
+                if (guide.explicit_guide)
+                    return not_supported(n, "over.match.class.deduct");
                 SyntaxElement first = guide.declarator[0];
                 if (first.is_token() &&
                     first.keyword() == standard_keyword::explicit_)
