@@ -731,3 +731,9 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   +30; committed with the lines named, as the rules allow).  Unsupported
   35158 -> 34909, we reject unchanged, we accept 5409 -> 5443.  Next: the
   out-of-class `= default` that would be deleted (18 of the 30 lines).
+- 11.3 (0c0c1429c, 894222fee, 060e1dbf9, 1a41a521c): an out-of-class
+  = default that would be deleted is ill-formed; a destructor definition
+  and aggregate initialization check the subobjects' destructors; the
+  [temp.deduct] refusal names its stage (declarator 104, decl-specifiers
+  61).  We accept 5443 -> 5407 (36 lines now rejected as clang does),
+  unsupported 34909 -> 34894, we reject unchanged.
