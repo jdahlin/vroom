@@ -4951,7 +4951,8 @@ class semantic_analysis
     /* the expressions of an expression-list, analysed */
     analysis_result
     expression_list_meanings(SyntaxElement list,
-                             owned_array<expression_meaning> &out);
+                             owned_array<expression_meaning> &out,
+                             owned_array<SyntaxElement> *written = nullptr);
     /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
     /* [class.access]/6: the class a member's qualified declarator-id

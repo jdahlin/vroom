@@ -1027,17 +1027,27 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
 }
 
 /* The expressions of an expression-list, with each pack expansion
-   analysed once per element ([temp.variadic]/5). */
+   analysed once per element ([temp.variadic]/5).  With `written`, a
+   braced-init-list argument is allowed: its meaning is empty and the
+   syntax of every argument is appended, for the overload resolution of
+   [over.match.ctor] and [over.ics.list] to initialize the parameter from it. */
 analysis_result semantic_analysis::expression_list_meanings(
-    SyntaxElement list, owned_array<expression_meaning> &out)
+    SyntaxElement list, owned_array<expression_meaning> &out,
+    owned_array<SyntaxElement> *written)
 {
     auto items = list.items(syntax_kind::initializer_list);
     auto end = items.end();
     for (auto i = items.begin(); i != end;) {
         SyntaxElement a = *i;
         ++i;
-        if (a.is(syntax_kind::braced_init_list))
-            return not_supported(a, "over.match.list");
+        if (a.is(syntax_kind::braced_init_list)) {
+            if (!written ||
+                (i != end && (*i).is(preprocessing_op_or_punc::ELLIPSIS)))
+                return not_supported(a, "over.match.list");
+            out.append(expression_meaning());
+            written->append(a);
+            continue;
+        }
         if (a.is(preprocessing_op_or_punc::ELLIPSIS))
             return not_supported(list, "temp.variadic");
         bool expands = i != end && (*i).is(preprocessing_op_or_punc::ELLIPSIS);
@@ -1045,6 +1055,8 @@ analysis_result semantic_analysis::expression_list_meanings(
             expression_meaning e;
             VTRY(r, expression(a, e));
             out.append(e);
+            if (written)
+                written->append(a);
             continue;
         }
         ++i;
@@ -1059,6 +1071,8 @@ analysis_result semantic_analysis::expression_list_meanings(
             expression_meaning e;
             VTRY(r, expansion_element_expression(a, k, e));
             out.append(e);
+            if (written)
+                written->append(a);
         }
     }
     return analysis_result::well_formed;
@@ -1386,13 +1400,16 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         SyntaxElement item = items[0];
         token_index id = item[0].token();
         owned_array<expression_meaning> arguments;
+        owned_array<SyntaxElement> listed_arguments;
         if (item.size() == 4) {
-            VTRY(r, expression_list_meanings(item[2], arguments));
+            VTRY(r, expression_list_meanings(item[2], arguments,
+                                             &listed_arguments));
         } else if (item.size() != 3) {
             return not_supported(item, "class.base.init");
         }
         initialized_value value;
-        VTRY(r, construct(item, entity_table[c].type, arguments, 0, value));
+        VTRY(r, construct(item, entity_table[c].type, arguments, 0, value,
+                          false, &listed_arguments));
         if (semantics[value.node].kind != semantic_kind::construct ||
             semantics[value.node].a)
             return not_supported(item, "class.base.init");
@@ -1577,8 +1594,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 entity_table[record.entity].first_constructor) {
                 /* [class.base.init]/7: direct-initialization: a constructor */
                 owned_array<expression_meaning> arguments;
+                owned_array<SyntaxElement> listed_arguments;
                 if (written.list)
-                    r = expression_list_meanings(written.list, arguments);
+                    r = expression_list_meanings(written.list, arguments,
+                                                 &listed_arguments);
                 else if (SyntaxElement braced = written.braced_list()) {
                     bool base = entity_table[e].base_subobject;
                     if (base && is_aggregate(record.entity))
@@ -1620,6 +1639,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                whose class copies its bytes is analysed (below) */
                 bool elided =
                     !entity_table[e].base_subobject && arguments.size() == 1 &&
+                    !listed_arguments[0].is(syntax_kind::braced_init_list) &&
                     arguments[0].category == value_category::prvalue &&
                     arguments[0].type.unqualified() == type.unqualified();
                 initialized_value value;
@@ -1637,7 +1657,8 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     continue;
                 }
                 constructing_base = entity_table[e].base_subobject;
-                r = construct(item, type, arguments, object.node, value);
+                r = construct(item, type, arguments, object.node, value, false,
+                              &listed_arguments);
                 constructing_base = false;
                 if (r != analysis_result::well_formed)
                     return r;
