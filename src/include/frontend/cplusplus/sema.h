@@ -5485,6 +5485,9 @@ class semantic_analysis
     owned_array<constant_value> instantiation_values;
     owned_array<instantiation_input> instantiation_inputs;
     owned_array<instantiation_record> instantiations;
+    /* the explicit specializations (function_templates indexes, one-based)
+       that an explicit instantiation named: a second is not judged */
+    owned_array<uint32_t> specializations_instantiated;
     void want_definition(instantiation_record &x, uint32_t index);
     analysis_result quiet_definition_failed(SyntaxRef at, uint32_t index,
                                             analysis_result r);

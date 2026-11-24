@@ -880,6 +880,27 @@ analysis_result semantic_analysis::class_explicit_instantiation(SyntaxRef n,
     if (ty.kind != type_kind::class_type)
         return not_supported(n, "temp.explicit");
     entity_index c = ty.entity;
+    /* [temp.explicit]: an explicit instantiation of a class that was
+       explicitly specialized, declared only or defined, has no effect
+       (clang warns, -Winstantiation-after-specialization) */
+    for (size_t k = 0; k < function_templates.size(); k++) {
+        const function_template &o = function_templates[k];
+        if (o.primary != ct || o.parameter_count ||
+            o.pattern_count != arguments.size())
+            continue;
+        bool same = true;
+        for (uint32_t i = 0; i < o.pattern_count && same; i++)
+            same = template_arguments[o.first_pattern + i] == arguments[i];
+        if (!same)
+            continue;
+        /* a second one: a duplicate or an extern one after it is an error
+           ([temp.spec]/5): not judged */
+        for (uint32_t done : specializations_instantiated)
+            if (done == k + 1)
+                return not_supported(n, "temp.explicit");
+        specializations_instantiated.append(static_cast<uint32_t>(k + 1));
+        return analysis_result::well_formed;
+    }
     /* [temp.explicit]/10: an explicit instantiation defines the class */
     require_complete(c);
     const entity &k = entity_table[c];
