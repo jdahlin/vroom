@@ -226,11 +226,13 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
        changes what vcc generates ([dcl.type.elab]/1), one without an
        argument (clang checks preferred_name's against the template) */
     uint32_t at = 1;
-    if (elaborated.size() == 3 &&
-        class_head_attributes_without_effect(elaborated[1]) &&
-        elaborated[1].size() == 5 &&
-        !elaborated[1][2].is(syntax_kind::attribute))
-        at = 2;
+    if (elaborated.is(syntax_kind::elaborated_type_specifier)) {
+        SyntaxElement seq =
+            ElaboratedClassSpecifier(elaborated).attribute_specifier_seq();
+        if (seq && class_head_attributes_without_effect(seq) &&
+            !attribute_argument_present(seq))
+            at = 2;
+    }
     if (elaborated.size() != at + 1 || !elaborated[0].is_token() ||
         !elaborated[at].is_identifier())
         return not_supported(n, "temp.class");

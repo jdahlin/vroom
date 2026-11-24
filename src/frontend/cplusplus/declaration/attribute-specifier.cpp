@@ -821,6 +821,20 @@ bool semantic_analysis::gnu_attributes_without_effect(SyntaxElement n) const
     return any;
 }
 
+/* whether an attribute in the attribute-specifier(-seq) at c has an
+   attribute-argument-clause ([dcl.attr.grammar]/1) */
+bool semantic_analysis::attribute_argument_present(SyntaxElement c) const
+{
+    if (c.is_token())
+        return false;
+    if (c.is(syntax_kind::attribute_argument_clause))
+        return true;
+    for (auto child : c.elements())
+        if (attribute_argument_present(child))
+            return true;
+    return false;
+}
+
 /* a class-head's attribute-specifier-seq, attribute-specifier or
    gnu-attribute-specifier at c of attributes without effect only */
 bool semantic_analysis::class_head_attributes_without_effect(

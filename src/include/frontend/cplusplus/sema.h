@@ -2872,6 +2872,7 @@ class semantic_analysis
     bool attributes_as_gnu(SyntaxElement n, uint32_t &flags) const;
     token_index scoped_gnu_abi_tag(SyntaxElement n) const;
     bool gnu_attributes_without_effect(SyntaxElement n) const;
+    bool attribute_argument_present(SyntaxElement c) const;
     bool class_head_attributes_without_effect(SyntaxElement c) const;
     uint32_t attributes_without_effect_before(SyntaxRef declaration) const;
     bool pack_only_expanded(uint32_t name, token_index first,
