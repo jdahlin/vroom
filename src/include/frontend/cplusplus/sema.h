@@ -5450,6 +5450,11 @@ class semantic_analysis
     };
     owned_array<template_member_definition> template_member_definitions;
     SyntaxRef out_of_class_member_class_function(SyntaxRef definition) const;
+    bool parameter_names_after_declarator(SyntaxRef definition,
+                                          token_index after, uint32_t mine,
+                                          uint32_t theirs,
+                                          uint32_t count) const;
+    analysis_result record_template_member(const template_member_definition &m);
     analysis_result define_member_of_member_class(uint32_t member,
                                                   uint32_t index,
                                                   bool recorded);

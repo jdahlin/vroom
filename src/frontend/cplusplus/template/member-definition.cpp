@@ -266,29 +266,13 @@ analysis_result semantic_analysis::member_definition_of_template(
         !same_template_parameters(first, of.first_parameter,
                                   of.parameter_count))
         return not_supported(n, "temp.mem.func");
-    for (uint32_t i = 0; i < mine_count; i++) {
-        entity_index pe = template_parameter_entities[first + i];
-        uint32_t mine_name = entity_table[pe].name;
-        uint32_t class_name =
-            entity_table[template_parameter_entities[of.first_parameter + i]]
-                .name;
-        if (!argument_is_parameter(mine[i], pe))
+    for (uint32_t i = 0; i < mine_count; i++)
+        if (!argument_is_parameter(mine[i],
+                                   template_parameter_entities[first + i]))
             return not_supported(n, "temp.mem.func");
-        if (mine_name == class_name)
-            continue;
-        /* [basic.lookup.qual]/3: "names following the qualified-id being
-           declared are looked up in the scope of the member's class", which
-           finds the class's template-parameter names, not this
-           definition's (its decl-specifiers and the template-id's
-           arguments do find them): a definition that writes either of the
-           two names after its declarator-id is not analysed */
-        for (token_index t = after_declarator_id; t < definition.end_token();
-             t++)
-            if (tokens[t].kind == token_kind::identifier &&
-                (tokens.identifier(t) == mine_name ||
-                 tokens.identifier(t) == class_name))
-                return not_supported(n, "basic.lookup.qual");
-    }
+    if (parameter_names_after_declarator(definition, after_declarator_id, first,
+                                         of.first_parameter, mine_count))
+        return not_supported(n, "basic.lookup.qual");
     if (!variable && !inner && of.definition.is(syntax_kind::class_specifier)) {
         /* [temp.mem]/1: "A member template of a class template that is
            defined outside of its class template definition shall be
@@ -434,23 +418,7 @@ analysis_result semantic_analysis::member_definition_of_template(
     record.pattern = pattern;
     record.member_class =
         !variable && inner && !out_of_class_member(definition);
-    uint32_t member = static_cast<uint32_t>(template_member_definitions.size());
-    template_member_definitions.append(record);
-    /* the specializations of the class defined before this */
-    analysis_result result = analysis_result::well_formed;
-    for (uint32_t k = 0; k < instantiations.size(); k++) {
-        const instantiation_record &y = instantiations[k];
-        if (y.template_entity != record.template_entity ||
-            y.pattern != pattern || !y.specialization || y.defining ||
-            entity_table[y.specialization].kind != entity_kind::class_type ||
-            !entity_table[y.specialization].defined)
-            continue;
-        analysis_result one = define_template_member(member, k, false);
-        if (one != analysis_result::well_formed &&
-            result == analysis_result::well_formed)
-            result = one;
-    }
-    return result;
+    return record_template_member(record);
 }
 
 /* the class (not a specialization of a class template) that a
@@ -660,11 +628,13 @@ semantic_analysis::define_member_of_member_class(uint32_t member,
         !nested[2].is(syntax_kind::simple_template_id) ||
         head_constraint(o.inner) || trailing_constraint(o.inner))
         return member_definition_unsupported(o.declaration, recorded);
+    /* [basic.lookup.qual]/1: Y, looked up in the specialization of X the
+       qualifier's X<T> names for these arguments */
     SyntaxRef y_id = nested[2];
-    SyntaxElement y_name = y_id.simple_template_id().template_name();
-    if (!y_name || !y_name.is_identifier())
+    lookup_result found;
+    entity_index held = 0;
+    if (!template_id_name(y_id, found, held, c))
         return member_definition_unsupported(o.declaration, recorded);
-    entity_index held = entity_table.find(c, tokens.identifier(y_name.token()));
     uint32_t yt = class_template_of(held);
     if (!yt || function_templates[yt - 1].name != held ||
         function_templates[yt - 1].primary ||
@@ -684,45 +654,33 @@ semantic_analysis::define_member_of_member_class(uint32_t member,
     if (r == analysis_result::well_formed)
         r = template_parameter_scope(o.inner, parameters, c, 0, number, scope,
                                      first);
+    /* [temp.mem]/1: Y<U>'s arguments, analysed in the scope of the second
+       template-head, are its own parameters in order ([temp.class]/3, as
+       member_definition_of_template's) */
+    owned_array<template_argument> arguments;
+    if (r == analysis_result::well_formed) {
+        partial_arguments++;
+        declaring_specializations++;
+        r = template_id_arguments_in(y_id, yt, scope, arguments);
+        declaring_specializations--;
+        partial_arguments--;
+    }
     leave_instantiation(context);
     if (r != analysis_result::well_formed ||
         d.parameter_count != parameters.size() ||
+        arguments.size() != parameters.size() ||
         !same_template_parameters(first, d.first_parameter, d.parameter_count))
         return member_definition_unsupported(o.declaration, recorded);
-    /* Y<U>: the member class template's own parameters, each one's name,
-       as the template-id's arguments */
-    token_index at = y_id.first_token();
-    if (y_id.end_token() - at != 2 * parameters.size() + 2)
-        return member_definition_unsupported(o.declaration, recorded);
-    for (uint32_t i = 0; i < parameters.size(); i++) {
-        token_index t = at + 2 + 2 * i;
-        if (tokens[t].kind != token_kind::identifier ||
-            tokens.identifier(t) !=
-                entity_table[template_parameter_entities[first + i]].name)
+    for (uint32_t i = 0; i < parameters.size(); i++)
+        if (!argument_is_parameter(arguments[i],
+                                   template_parameter_entities[first + i]))
             return member_definition_unsupported(o.declaration, recorded);
-    }
-    /* [basic.lookup.qual]/3: names after the declarator-id are looked up
-       in the member's class, which finds the member class's names, not
-       this definition's template-parameter names where they differ: a
-       definition that writes either name there is not analysed
-       (member_definition_of_template's rule) */
     token_index declarator_name = 0;
     out_of_class_nested(o.definition, &declarator_name);
-    for (uint32_t i = 0; i < parameters.size(); i++) {
-        uint32_t mine_name =
-            entity_table[template_parameter_entities[first + i]].name;
-        uint32_t class_name =
-            entity_table[template_parameter_entities[d.first_parameter + i]]
-                .name;
-        if (mine_name == class_name)
-            continue;
-        for (token_index t = declarator_name + 1; t < o.definition.end_token();
-             t++)
-            if (tokens[t].kind == token_kind::identifier &&
-                (tokens.identifier(t) == mine_name ||
-                 tokens.identifier(t) == class_name))
-                return not_supported(o.declaration, "basic.lookup.qual");
-    }
+    if (parameter_names_after_declarator(o.definition, declarator_name + 1,
+                                         first, d.first_parameter,
+                                         d.parameter_count))
+        return not_supported(o.declaration, "basic.lookup.qual");
     template_member_definition record;
     record.first_parameter = first;
     record.declaration = o.declaration;
@@ -730,17 +688,55 @@ semantic_analysis::define_member_of_member_class(uint32_t member,
     record.template_entity = d.entity;
     record.outer_record = member + 1;
     record.outer_instantiation = index + 1;
-    uint32_t made = static_cast<uint32_t>(template_member_definitions.size());
-    template_member_definitions.append(record);
+    return record_template_member(record);
+}
+
+/*
+ * [basic.lookup.qual]/3: "names following the qualified-id being declared
+ * are looked up in the scope of the member's class", which finds the
+ * class's template-parameter names (template_parameter_entities[theirs
+ * ..]), not this definition's (mine ..), where the two differ: whether the
+ * definition writes either name from token after on (such a definition is
+ * not analysed)
+ */
+bool semantic_analysis::parameter_names_after_declarator(SyntaxRef definition,
+                                                         token_index after,
+                                                         uint32_t mine,
+                                                         uint32_t theirs,
+                                                         uint32_t count) const
+{
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t mine_name =
+            entity_table[template_parameter_entities[mine + i]].name;
+        uint32_t class_name =
+            entity_table[template_parameter_entities[theirs + i]].name;
+        if (mine_name == class_name)
+            continue;
+        for (token_index t = after; t < definition.end_token(); t++)
+            if (tokens[t].kind == token_kind::identifier &&
+                (tokens.identifier(t) == mine_name ||
+                 tokens.identifier(t) == class_name))
+                return true;
+    }
+    return false;
+}
+
+/* a member definition of a class template recorded, and defined for the
+   specializations of the class (of its pattern) defined before it */
+analysis_result
+semantic_analysis::record_template_member(const template_member_definition &m)
+{
+    uint32_t member = static_cast<uint32_t>(template_member_definitions.size());
+    template_member_definitions.append(m);
     analysis_result result = analysis_result::well_formed;
     for (uint32_t k = 0; k < instantiations.size(); k++) {
         const instantiation_record &y = instantiations[k];
-        if (y.template_entity != record.template_entity || y.pattern ||
+        if (y.template_entity != m.template_entity || y.pattern != m.pattern ||
             !y.specialization || y.defining ||
             entity_table[y.specialization].kind != entity_kind::class_type ||
             !entity_table[y.specialization].defined)
             continue;
-        analysis_result one = define_template_member(made, k, false);
+        analysis_result one = define_template_member(member, k, false);
         if (one != analysis_result::well_formed &&
             result == analysis_result::well_formed)
             result = one;
