@@ -768,8 +768,20 @@ analysis_result semantic_analysis::named_specialization(
         entity_table[m.qualifier].kind != entity_kind::class_type)
         return not_supported_because(n, rule,
                                      "a qualifier that is not a class");
-    if (s.typedef_ || s.static_ || s.extern_ || s.gnu_flags || m.gnu_flags ||
-        s.aligned || m.aligned || s.section || m.section || m.asm_label)
+    /* [ext:gnu_attributes] a specialization's own symbol may carry
+       visibility, abi_tag and exclude_from_explicit_instantiation
+       (libc++'s _LIBCPP_HIDE_FROM_ABI); they are the specialization's */
+    uint32_t symbol_flags = 0;
+    token_index symbol_abi_tag = 0;
+    if (specialization) {
+        symbol_flags = (s.gnu_flags | m.gnu_flags) & gnu_function_symbol_flags;
+        symbol_abi_tag = s.abi_tag;
+        if (m.abi_tag)
+            symbol_abi_tag = m.abi_tag;
+    }
+    if (s.typedef_ || s.static_ || s.extern_ ||
+        ((s.gnu_flags | m.gnu_flags) & ~symbol_flags) || s.aligned ||
+        m.aligned || s.section || m.section || m.asm_label)
         return not_supported_because(n, rule,
                                      "a storage class, typedef or attribute");
     /* [temp.explicit]/3: "An explicit instantiation of a function
@@ -973,6 +985,9 @@ analysis_result semantic_analysis::named_specialization(
            ... specifier is implicitly an inline function") */
         entity_table[e].inline_ = s.inline_ || s.constexpr_;
         entity_table[e].constexpr_ = s.constexpr_;
+        entity_table[e].gnu_flags |= symbol_flags;
+        if (symbol_abi_tag)
+            entity_table[e].abi_tag = symbol_abi_tag;
         /* its first declaration is this one, not the template's
            (clang's name of it, which a lookup claim gives) */
         entity_table[e].first_declaration = 0;
