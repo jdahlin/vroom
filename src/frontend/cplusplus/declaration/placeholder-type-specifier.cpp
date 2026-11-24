@@ -510,8 +510,27 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
     else if (x.kind == entity_kind::function)
         undeduced = !x.defined ||
                     (function_state.active && function_state.function == e);
-    if (!undeduced)
-        return not_supported(current_declaration, "dcl.spec.auto");
+    if (!undeduced) {
+        if (x.kind == entity_kind::variable)
+            return not_supported_because(
+                current_declaration, "dcl.spec.auto",
+                "a variable whose placeholder type is not deduced "
+                "(its initializer was not analysed)");
+        if (x.kind == entity_kind::function && x.instantiation)
+            return not_supported_because(
+                current_declaration, "dcl.spec.auto",
+                "a function template's specialization whose placeholder "
+                "type is not deduced");
+        if (x.kind == entity_kind::function)
+            return not_supported_because(
+                current_declaration, "dcl.spec.auto",
+                "a defined function whose placeholder type is not deduced "
+                "(its body was not analysed)");
+        return not_supported_because(
+            current_declaration, "dcl.spec.auto",
+            "an entity that is no variable or function "
+            "with an undeduced placeholder type");
+    }
     return ill_formed_at_token(t,
                                "if the name of an entity with an undeduced "
                                "placeholder type appears in an expression, "
