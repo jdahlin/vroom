@@ -57,7 +57,7 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
             /* [temp.mem.func]/1: "A member function of a class template
                may be defined outside of the class template definition in
                which it is declared." */
-            if (out_of_class_member(f))
+            if (out_of_class_member(f) || out_of_class_member_class_function(f))
                 return member_definition_of_template(t, f);
             if (SyntaxRef nested = out_of_class_nested(f))
                 if (entity_index c = plain_class_nominated(nested))
