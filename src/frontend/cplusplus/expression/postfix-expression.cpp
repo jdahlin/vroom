@@ -779,6 +779,7 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             class_template_of(argument.entity) == ct)
             return not_supported(n, "over.match.class.deduct");
     }
+    implicit_deduction_guides(ct);
     owned_array<uint32_t> group;
     for (size_t i = 0; i < function_templates.size(); i++)
         if (function_templates[i].guide_of == ct)
@@ -806,6 +807,8 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                 candidates[chosen].template_index) {
                 const function_template &guide =
                     function_templates[candidates[chosen].template_index - 1];
+                if (guide.explicit_guide)
+                    return not_supported(n, "over.match.class.deduct");
                 SyntaxElement first = guide.declarator[0];
                 if (first.is_token() &&
                     first.keyword() == standard_keyword::explicit_)
@@ -1263,17 +1266,22 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
            the operator function is selected by overload resolution
            ([over.call.object])" and the expression "interpreted as
            postfix-expression . operator () (expression-list_opt)" */
-        if (!expanded.empty())
-            return not_supported(n, "temp.variadic");
         owned_array<SyntaxElement> operand_syntax;
         owned_array<expression_meaning> operands;
         operand_syntax.append(callee);
         operands.append(f);
-        for (SyntaxElement a : arguments) {
+        for (size_t i = 0; i < arguments.size(); i++) {
+            SyntaxElement a = arguments[i];
             if (a.is(syntax_kind::braced_init_list))
                 return not_supported(n, "over.ics.list");
             expression_meaning e;
-            VTRY_SET(r, expression(a, e));
+            if (i < expanded.size() && expanded.size() == arguments.size()) {
+                /* [temp.variadic]/5: an element of a pack expansion,
+                   analysed above */
+                e = expanded[i];
+            } else {
+                VTRY_SET(r, expression(a, e));
+            }
             operand_syntax.append(a);
             operands.append(e);
         }
@@ -2055,11 +2063,13 @@ analysis_result semantic_analysis::call_function(
     return call_with(n, callee, x.type, 0, 0, syntax, arguments, m);
 }
 
-analysis_result semantic_analysis::call_with(
-    SyntaxRef n, expression_meaning &f, qualified_type function_type,
-    uint32_t object, entity_index member,
-    const owned_array<SyntaxElement> &arguments,
-    const owned_array<expression_meaning> &early, expression_meaning &m)
+analysis_result
+semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
+                             qualified_type function_type, uint32_t object,
+                             entity_index member,
+                             const owned_array<SyntaxElement> &arguments,
+                             const owned_array<expression_meaning> &early,
+                             expression_meaning &m, bool operator_expression)
 {
     analysis_result r = analysis_result::well_formed;
     const struct type function = type_table[function_type.unqualified()];
@@ -2235,7 +2245,14 @@ analysis_result semantic_analysis::call_with(
             (name[1].is(preprocessing_op_or_punc::DOT,
                         preprocessing_op_or_punc::ARROW)))
             name = name[2];
-        if (name.is_token() && name.is_identifier())
+        if (operator_expression)
+            /* [over.match.oper]/2: the expression is interpreted as the
+               call of the member x.operator@(y), a call of an
+               unqualified name */
+            dispatched = true;
+        else if (name.is(syntax_kind::operator_function_id))
+            dispatched = true;
+        else if (name.is_token() && name.is_identifier())
             dispatched = true;
         else if (!name.is(syntax_kind::qualified_id))
             return not_supported(n, "class.virtual");

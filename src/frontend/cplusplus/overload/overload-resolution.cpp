@@ -432,6 +432,23 @@ analysis_result semantic_analysis::best_viable_function(
             if (!unknown && order != 0)
                 return order > 0;
         }
+        /* (2.10) "F1 is generated from a deduction-guide ([over.match.class.
+           deduct]) and F2 is not": a deduction-guide a program declares is
+           better than an implicit one of a constructor */
+        if (x.template_index && y.template_index) {
+            const function_template &fx =
+                function_templates[x.template_index - 1];
+            const function_template &fy =
+                function_templates[y.template_index - 1];
+            if (fx.guide_of && !fx.implicit_guide && fy.guide_of &&
+                fy.implicit_guide)
+                return true;
+            /* (2.11) "F1 is generated from a non-template constructor and
+               F2 is generated from a constructor template" */
+            if (fx.implicit_guide && fy.implicit_guide &&
+                !fx.guide_of_template && fy.guide_of_template)
+                return true;
+        }
         /* [ext:gnu_attributes] [impl.clang] a function with clang's
            enable_if (a true condition: libc++'s _LIBCPP_PREFERRED_OVERLOAD)
            is better than one without */

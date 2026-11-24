@@ -385,8 +385,12 @@ analysis_result semantic_analysis::overloaded_operator(
         if (found.unknown && !found.ambiguous &&
             function_template_of(found.unknown_entity))
             held_names.append(found.unknown_entity);
-        else if (found.unknown || found.ambiguous)
-            return not_supported(n, "over.match.oper");
+        else if (found.unknown || found.ambiguous) {
+            analysis_result refused = not_supported(n, "over.match.oper");
+            if (found.unknown_entity)
+                last_unsupported_held_by(found.unknown_entity);
+            return refused;
+        }
         owned_array<entity_index> set;
         if (found.entity) {
             const entity &x = entity_table[found.entity];
@@ -856,7 +860,7 @@ analysis_result semantic_analysis::overloaded_operator(
         call_syntax.append(ordered_syntax[i]);
     }
     VTRY_SET(r, call_with(n, callee, x.type, object, member, call_syntax,
-                          call_arguments, m));
+                          call_arguments, m, true));
     if (from_three_way) {
         /* /8: "If a rewritten operator<=> candidate is selected by overload
            resolution for an operator @, x @ y is interpreted as 0 @ (y <=>
