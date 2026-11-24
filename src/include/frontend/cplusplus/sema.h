@@ -422,7 +422,7 @@ enum gnu_attribute_flag : uint32_t {
    member functions and function templates */
 const uint32_t gnu_function_symbol_flags =
     gnu_hidden_visibility | gnu_abi_tag |
-    gnu_exclude_from_explicit_instantiation | gnu_diagnose_if;
+    gnu_exclude_from_explicit_instantiation | gnu_diagnose_if | gnu_nonnull;
 /* noinline, always_inline and noreturn, which lowering gives a member
    function or function template's specialization as a non-member's */
 const uint32_t gnu_inline_flags =
