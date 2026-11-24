@@ -396,8 +396,24 @@ analysis_result semantic_analysis::overloaded_operator(
             set.append(found.entity);
         }
         owned_array<qualified_type> types;
-        for (const expression_meaning &e : operands)
+        for (const expression_meaning &e : operands) {
+            /* [basic.lookup.argdep]/3: an overload set named with a
+               template-id: the function templates' parameter types are
+               not looked at, only the template-arguments' */
+            if (e.entity &&
+                entity_table[e.entity].kind == entity_kind::function &&
+                entity_table[e.entity].instantiation) {
+                const instantiation_record &q =
+                    instantiations[entity_table[e.entity].instantiation - 1];
+                for (uint32_t i = 0; i < q.argument_count; i++)
+                    if (template_arguments[q.first_argument + i].kind ==
+                        template_argument::kind_t::type)
+                        types.append(
+                            template_arguments[q.first_argument + i].type);
+                continue;
+            }
             types.append(e.type);
+        }
         entity_index known = 0;
         if (!held_names.empty())
             known = held_names[0];
