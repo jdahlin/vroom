@@ -95,8 +95,19 @@ bool semantic_analysis::friend_names(const friend_record &f,
     if (f.befriended)
         return f.befriended == e;
     const entity &x = entity_table[e];
-    return x.kind == entity_kind::class_type && x.enclosing == f.scope &&
-           x.name == f.name;
+    return x.kind == entity_kind::class_type &&
+           friend_names_class(f, x.enclosing, x.name);
+}
+
+/* whether f, a friend declaration by name, names the class called name in
+   scope: also a class template whose template-head is analysed before its
+   entity is declared ([class.friend]/2) */
+bool semantic_analysis::friend_names_class(const friend_record &f,
+                                           entity_index scope,
+                                           uint32_t name) const
+{
+    return !f.befriended && !f.template_entity && f.scope == scope &&
+           f.name == name;
 }
 
 /* whether class k declares e its friend.  [class.friend]/10: "Friendship is

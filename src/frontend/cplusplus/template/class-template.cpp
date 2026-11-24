@@ -36,25 +36,6 @@ token_index first_dynamic_specification(SyntaxElement n)
     return UINT32_MAX;
 }
 
-/* [class.friend]/2: while a class template's template-head and parameters
-   are analysed, a friend class template of its name is the befriended
-   entity (accessible) */
-struct friend_head_scope_guard {
-    entity_index &scope;
-    uint32_t &name;
-    friend_head_scope_guard(entity_index &s, uint32_t &n, entity_index in,
-                            uint32_t called)
-        : scope(s), name(n)
-    {
-        scope = in;
-        name = called;
-    }
-    ~friend_head_scope_guard()
-    {
-        scope = 0;
-        name = 0;
-    }
-};
 } // namespace
 
 analysis_result
@@ -80,8 +61,10 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     if (!specialization && head_name && head_name.is_token() &&
         tokens[head_name.token()].kind == token_kind::identifier)
         called = tokens.identifier(head_name.token());
-    friend_head_scope_guard guard(friend_head_scope, friend_head_name, outer,
-                                  called);
+    /* [class.friend]/2: while its template-head and parameters are
+       analysed, a friend class template of its name is the befriended
+       entity (restored after: a head may hold another) */
+    scoped_value<class_head_context> head_context(friend_head, {outer, called});
     VTRY(r, template_head_parameters(n, parameters, true, true, specialization,
                                      true));
     /* a partial specialization's requires-clause is checked where it is
@@ -258,8 +241,7 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
     owned_array<SyntaxRef> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
     uint32_t name = tokens.identifier(elaborated[at].token());
-    friend_head_scope_guard guard(friend_head_scope, friend_head_name, outer,
-                                  name);
+    scoped_value<class_head_context> head_context(friend_head, {outer, name});
     VTRY(r, template_head_parameters(n, parameters, true, true, false, true));
     uint32_t index = 0, first = 0;
     entity_index scope = 0;

@@ -4744,8 +4744,13 @@ class semantic_analysis
        template-head is analysed (its scope and name, 0: none): a friend
        class template of that name is the befriended entity, whose head may
        use the granting class's private names */
-    entity_index friend_head_scope = 0;
-    uint32_t friend_head_name = 0;
+    struct class_head_context {
+        entity_index scope = 0;
+        uint32_t name = 0;
+    };
+    class_head_context friend_head;
+    bool friend_names_class(const friend_record &f, entity_index scope,
+                            uint32_t name) const;
     entity_index declarator_access_class(SyntaxRef declaration) const;
     /* the tokens of the member-specification of the class being defined
        (class_specifier), 0 outside one */

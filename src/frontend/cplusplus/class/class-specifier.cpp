@@ -1262,10 +1262,9 @@ bool semantic_analysis::accessible(entity_index member,
     };
     /* [class.friend]/2, [class.access]/6: the template-head of a friend
        class template belongs to the befriended entity */
-    if (friend_head_name)
+    if (friend_head.name)
         for (const friend_record &f : friends)
-            if (!f.befriended && !f.template_entity &&
-                f.scope == friend_head_scope && f.name == friend_head_name &&
+            if (friend_names_class(f, friend_head.scope, friend_head.name) &&
                 as_member_of(f.granting))
                 return true;
     entity_index starts[4] = {0, defining_class, 0, access_class};
