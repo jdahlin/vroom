@@ -42,13 +42,15 @@ node_index parser::clang_bit_int_type_specifier()
    BITINT_MAXWIDTH.  In a template's own declaration N may be a non-type
    template-parameter ([temp.dep.constexpr]/2), as for an array's bound */
 analysis_result semantic_analysis::clang_bit_int_type(SyntaxRef n,
+                                                      bool is_unsigned,
                                                       qualified_type &type)
 {
     SyntaxElement width = n[2];
     if (entity_index named = value_parameter_named(width)) {
         if (!is_integral(entity_table[named].type))
             return not_supported(n, "temp.dep.constexpr");
-        type = qualified_type::make(type_table.bit_int(0, named), cv_none);
+        type = qualified_type::make(type_table.bit_int(0, named, is_unsigned),
+                                    cv_none);
         return analysis_result::well_formed;
     }
     expression_meaning m;
@@ -62,13 +64,18 @@ analysis_result semantic_analysis::clang_bit_int_type(SyntaxRef n,
         return not_supported(n, "ext.clang");
     __int128 bits =
         integer_value(tokens.files.behavior, fundamental_of(m.type), m.value);
-    if (bits < 2 || bits > tokens.files.behavior.bit_precise_maximum_width)
+    /* (an unsigned _BitInt may be one bit wide) */
+    __int128 least = 2;
+    if (is_unsigned)
+        least = 1;
+    if (bits < least || bits > tokens.files.behavior.bit_precise_maximum_width)
         return ill_formed(n,
                           "the width of a signed _BitInt shall be at least 2 "
                           "and at most BITINT_MAXWIDTH",
                           "ext.clang");
     type = qualified_type::make(
-        type_table.bit_int(static_cast<uint64_t>(bits), 0), cv_none);
+        type_table.bit_int(static_cast<uint64_t>(bits), 0, is_unsigned),
+        cv_none);
     return analysis_result::well_formed;
 }
 

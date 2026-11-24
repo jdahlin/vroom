@@ -188,8 +188,13 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
                                    uint32_t &node) {
             if (!discarded)
                 return substatement(s, statement_scope, node);
-            if (templated)
+            if (templated) {
+                /* (a statement of the tree that does nothing, not an
+                   absent one) */
+                node = statement_node(semantic_kind::null_statement,
+                                      s.first_token());
                 return analysis_result::well_formed;
+            }
             scoped_value<unsigned> unused(unevaluated, unevaluated + 1);
             uint32_t dropped = 0;
             return substatement(s, statement_scope, dropped);

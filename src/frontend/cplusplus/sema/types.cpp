@@ -257,10 +257,13 @@ type_index types::pack_expansion_of(qualified_type pattern)
 }
 
 /* [ext:clang_bit_int] _BitInt(width), or _BitInt(N) of the parameter N */
-type_index types::bit_int(uint64_t width, uint32_t parameter)
+type_index types::bit_int(uint64_t width, uint32_t parameter, bool is_unsigned)
 {
     type t;
     t.kind = type_kind::bit_int;
+    /* (fundamental_type::unsigned_int marks unsigned _BitInt) */
+    if (is_unsigned)
+        t.fundamental = fundamental_type::unsigned_int;
     t.bound = width;
     t.entity = parameter;
     return intern(t, nullptr);

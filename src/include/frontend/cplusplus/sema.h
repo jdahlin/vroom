@@ -201,7 +201,7 @@ class types
     type_index atomic_of(qualified_type value);
     type_index complex_of(qualified_type value);
     type_index block_pointer_to(qualified_type function);
-    type_index bit_int(uint64_t width, uint32_t parameter);
+    type_index bit_int(uint64_t width, uint32_t parameter, bool is_unsigned);
     type_index vector_of(qualified_type element, uint64_t count);
     type_index vector_mask_of(const type &vector, uint64_t element,
                               bool long_is_64);
@@ -3768,7 +3768,8 @@ class semantic_analysis
     uint32_t bind_call_site(uint32_t node, token_index call);
     analysis_result clang_atomic_type(SyntaxRef n, qualified_type &type);
     uint64_t atomic_layout(qualified_type value, bool alignment) const;
-    analysis_result clang_bit_int_type(SyntaxRef n, qualified_type &type);
+    analysis_result clang_bit_int_type(SyntaxRef n, bool is_unsigned,
+                                       qualified_type &type);
     /* [ext:gnu_typeof] the type typeof ( expression or type-id ) denotes */
     analysis_result gnu_typeof_type(SyntaxRef n, qualified_type &type);
     analysis_result clang_ext_vector_count(SyntaxRef at, SyntaxElement count,

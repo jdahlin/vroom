@@ -60,6 +60,7 @@ compile_behavior(const cplusplus_compile_options *o, const cc_options *co)
         b.long_double_fraction_bits = 63;
         b.vector_alignment_uncapped = true;
         b.va_list_is_array = true;
+        b.bit_precise_maximum_width = 8388608;
     }
     return b;
 }
