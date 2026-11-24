@@ -1276,7 +1276,12 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
         [&](MemberSimpleDeclaration d) {
             return member_declaration_with_specifiers(c, d, access, bodies);
         },
-        [&](MemberDeclaration other) { return not_supported(other); }});
+        [&](MemberDeclaration other) {
+            analysis_result refused = not_supported(other);
+            last_unsupported_detail(syntax_kind_name(other.kind()),
+                                    strlen(syntax_kind_name(other.kind())));
+            return refused;
+        }});
 }
 
 /*
