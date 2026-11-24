@@ -149,6 +149,64 @@ bool semantic_analysis::primary_arguments(
 }
 
 /*
+ * [temp.expl.spec]/17: "A member class of a class template may be
+ * explicitly specialized for a given implicit instantiation of the class
+ * template", template<> struct S<int>::M; or with a class body.  The
+ * implicit instantiation of the enclosing specialization has declared the
+ * member (its class-specifier analysed again, [temp.inst]/1); the
+ * specialization is the member's definition for that specialization only,
+ * found as an out-of-class definition of a member class is.  A member the
+ * template defines in its class is defined already there: not yet.
+ */
+bool semantic_analysis::member_class_specialization(SyntaxRef n,
+                                                    SyntaxRef specifier,
+                                                    analysis_result &result)
+{
+    SyntaxRef nested;
+    token_index id = 0;
+    bool defines = specifier.is(syntax_kind::class_specifier);
+    if (defines) {
+        auto head = class_head_name(specifier[0]);
+        if (head.is_node() && head.qualified_class_head_name() &&
+            head.size() == 2 &&
+            head[0].is(syntax_kind::nested_name_specifier) &&
+            head[1].is_token() && head[1].is_identifier()) {
+            nested = head[0];
+            id = head[1].token();
+        }
+    } else if (specifier.size() == 3 &&
+               specifier[1].is(syntax_kind::nested_name_specifier) &&
+               specifier[2].is_token() && specifier[2].is_identifier()) {
+        nested = specifier[1];
+        id = specifier[2].token();
+    }
+    if (!nested)
+        return false;
+    nominated_scope ns;
+    analysis_result nr = nested_name_specifier(nested.index(), ns);
+    if (nr != analysis_result::well_formed) {
+        result = nr;
+        return true;
+    }
+    if (!is_class_entity(ns.entity))
+        return false;
+    uint32_t record = entity_table[ns.entity].instantiation;
+    if (!record || instantiations[record - 1].specialization != ns.entity)
+        return false;
+    entity_index member = entity_table.find(ns.entity, tokens.identifier(id));
+    if (!member || entity_table[member].kind != entity_kind::class_type ||
+        entity_table[member].defined || entity_table[member].instantiation)
+        return false;
+    if (!defines) {
+        result = analysis_result::well_formed;
+        return true;
+    }
+    flag_set exempt(explicit_declaration_names, true);
+    result = simple_declaration(n[3]);
+    return true;
+}
+
+/*
  * [temp.class.spec]/1: "A partial specialization of a class template
  * provides an alternative definition of the template that is used instead
  * of the primary definition when the arguments in a specialization match
@@ -178,6 +236,14 @@ analysis_result semantic_analysis::class_specialization_definition(
     if ((!is_namespace(outer) && !(member && !parameters.empty())) ||
         defining_class)
         return not_supported(n, rule);
+    /* [temp.expl.spec]/17: a member class of a class template
+       specialization, template<> struct S<int>::M ... */
+    if (parameters.empty() && n.size() == 4 &&
+        n[3].is(syntax_kind::simple_declaration)) {
+        analysis_result mr = analysis_result::well_formed;
+        if (member_class_specialization(n, specifier, mr))
+            return mr;
+    }
     /* [temp.expl.spec]/1 also declares a specialization without defining
        it: class-key simple-template-id ; (an elaborated-type-specifier),
        whose definition may follow */

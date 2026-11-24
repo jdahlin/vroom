@@ -5212,6 +5212,9 @@ class semantic_analysis
        typedef-name of the type, or a constant of the value */
     void bind_template_argument(entity_index scope, entity_index parameter,
                                 const template_argument &a);
+    /* [temp.expl.spec]/17: a member class of a specialization */
+    bool member_class_specialization(SyntaxRef n, SyntaxRef specifier,
+                                     analysis_result &result);
     /* [temp.class.spec], [temp.expl.spec]: a class template's partial
        (parameters) or explicit specialization's definition */
     analysis_result

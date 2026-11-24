@@ -32,7 +32,8 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
               only[1].is(syntax_kind::simple_template_id)) ||
              (only.size() == 3 &&
               only[1].is(syntax_kind::nested_name_specifier) &&
-              only[2].is(syntax_kind::simple_template_id))) &&
+              (only[2].is(syntax_kind::simple_template_id) ||
+               only[2].is_identifier()))) &&
             d[1].is(preprocessing_op_or_punc::SEMICOLON) &&
             !leading_gnu_attributes(d)) {
             standard_keyword key = only[0].keyword();
