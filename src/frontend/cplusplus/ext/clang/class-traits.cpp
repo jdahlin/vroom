@@ -134,19 +134,103 @@ bool semantic_analysis::triviality_unknown(entity_index c) const
     return false;
 }
 
+/* whether member function f is declared = default in its class
+   ([dcl.fct.def.default]/5: not user-provided on its first declaration) */
+bool semantic_analysis::declared_defaulted(entity_index f) const
+{
+    uint32_t d = entity_table[f].first_declaration;
+    if (!d)
+        return false;
+    auto definition = entity_table.declaration(d).node.function_definition();
+    return definition && definition.function_body().defaulted();
+}
+
+/* [class.prop]/3 as clang answers __is_trivial: no user-provided
+   constructor of the default or the copy and move kinds, no user-provided
+   copy assignment or destructor, no virtual function, no default member
+   initializer, in the class and its subobjects; a special member declared
+   deleted or defaulted is trivial (trivial_special_members counts them) */
+bool semantic_analysis::clang_trivial_special_members(entity_index c)
+{
+    const entity &x = entity_table[c];
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        if (entity_table[k].implicit || declared_deleted(k) ||
+            declared_defaulted(k))
+            continue;
+        const struct type &f = type_table[entity_table[k].type.unqualified()];
+        if (!f.parameter_count || copy_or_move_constructor(c, k))
+            return false;
+    }
+    if (x.dynamic || (x.destructor && !declared_deleted(x.destructor) &&
+                      !declared_defaulted(x.destructor)))
+        return false;
+    lookup_result found = lookup_qualified(
+        c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
+    if (found.unknown || found.ambiguous)
+        return false;
+    for (entity_index o = found.entity; o; o = entity_table[o].next_overload)
+        if (entity_table[o].kind == entity_kind::function &&
+            (copy_assignment_operator(o, c) ||
+             move_assignment_operator(o, c)) &&
+            !declared_deleted(o) && !declared_defaulted(o))
+            return false;
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (entity_table[class_members[x.first_member + i]].default_initializer)
+            return false;
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (!clang_trivial_special_members(k))
+            return false;
+    return true;
+}
+
 /* [class.prop]/1: whether class c is trivially copyable; known is false
-   when the analysis cannot tell */
+   when the analysis cannot tell.  [ext:clang_type_traits] clang's answer
+   (CXXRecordDecl::isTriviallyCopyable): no non-trivial copy or move
+   constructor or assignment operator and a trivial destructor, where a
+   deleted special member is trivial (cwg1734 is not applied: a class whose
+   copy and move are all deleted is trivially copyable) */
 bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
 {
     known = true;
-    if (triviality_unknown(c)) {
+    const entity &x = entity_table[c];
+    if (x.dynamic)
+        return false;
+    /* a user-provided destructor (a deleted one is trivial) */
+    if (x.destructor && !declared_deleted(x.destructor) &&
+        !declared_defaulted(x.destructor))
+        return false;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (copy_or_move_constructor(c, k) && !entity_table[k].implicit &&
+            !declared_deleted(k) && !declared_defaulted(k) &&
+            !entity_table[k].constraint_unsatisfied)
+            return false;
+    lookup_result found = lookup_qualified(
+        c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
+    if (found.unknown || found.ambiguous) {
         known = false;
         return false;
     }
-    /* a virtual function or a user-provided destructor: not trivial */
-    if (entity_table[c].dynamic || destroys(c))
-        return false;
-    return copies_bytes(c) && assigned_bitwise(c);
+    for (entity_index o = found.entity; o; o = entity_table[o].next_overload)
+        if (entity_table[o].kind == entity_kind::function &&
+            (copy_assignment_operator(o, c) ||
+             move_assignment_operator(o, c)) &&
+            !declared_deleted(o) && !declared_defaulted(o))
+            return false;
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes) {
+        if (entity_table[k].kind != entity_kind::class_type) {
+            known = false;
+            return false;
+        }
+        if (!class_trivially_copyable(k, known) || !known)
+            return false;
+    }
+    return true;
 }
 
 /* [ext:clang_type_traits] __has_trivial_constructor and __is_trivial on a
@@ -506,7 +590,7 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
             if (clang_template_default_constructor_of(entity_table[c]))
                 return false;
             bool known_default = true;
-            answer = copyable && trivial_special_members(c) &&
+            answer = copyable && clang_trivial_special_members(c) &&
                      trivial_default_constructor(c, known_default);
             if (!known_default)
                 return false;

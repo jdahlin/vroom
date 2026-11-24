@@ -3686,6 +3686,8 @@ class semantic_analysis
     bool polymorphic_class(entity_index c) const;
     bool virtual_destructor(entity_index c) const;
     bool triviality_unknown(entity_index c) const;
+    bool declared_defaulted(entity_index f) const;
+    bool clang_trivial_special_members(entity_index c);
     bool class_trivially_copyable(entity_index c, bool &known);
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
