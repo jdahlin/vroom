@@ -599,6 +599,17 @@ analysis_result semantic_analysis::overloaded_operator(
            one viable ([over.match.oper]/3.3, [over.built]) is not analysed;
            a class with none has no built-in candidate */
         return not_supported(n, "over.match.oper");
+    if (r == analysis_result::well_formed && none_viable &&
+        op == preprocessing_op_or_punc::EQUAL &&
+        (operands[0].type.cv() & cv_const))
+        /* the copy assignment operator was found above, so the class
+           declares one and ([class.copy.assign]/2-3) no implicit operator=
+           is a candidate besides: with a const left operand, whose
+           implicit object parameter cannot bind ([over.match.viable]/4),
+           none viable is the expression's error; a built-in = has no class
+           left operand */
+        return ill_formed(n, "no viable overloaded operator= for the operands",
+                          "over.match.oper");
     if (r != analysis_result::well_formed || none_viable)
         /* /9: none viable, the built-in operator's meaning (whose rules
            reject an operand of class type) */
