@@ -88,10 +88,15 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
     uint32_t overrides = ~0u;
     if (!overridden && !specified)
         return analysis_result::well_formed;
-    if (entity_table[e].operator_function || entity_table[c].union_ ||
-        local_class_rule(c))
-        /* a virtual operator function's calls through operator expressions,
-           [class.union]/2's "A union shall not have virtual functions",
+    if ((entity_table[e].operator_function &&
+         (entity_table[e].implemented == preprocessing_op_or_punc::EQUAL ||
+          entity_table[e].implemented ==
+              preprocessing_op_or_punc::EQUAL_EQUAL)) ||
+        entity_table[c].union_ || local_class_rule(c))
+        /* a virtual assignment operator, which a derived class's implicit
+           copy assignment overrides ([class.copy.assign]), a virtual
+           operator==, which a defaulted operator<=> declares again
+           ([class.compare.default]/4), [class.union]/2's "A union shall not have virtual functions",
            a local class's virtual table: not analysed (a constexpr
            virtual function is an inline one, [dcl.constexpr]/1) */
         return not_supported(declaration, "class.virtual");

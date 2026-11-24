@@ -6800,7 +6800,8 @@ class semantic_analysis
                               entity_index member,
                               const owned_array<SyntaxElement> &arguments,
                               const owned_array<expression_meaning> &early,
-                              expression_meaning &m);
+                              expression_meaning &m,
+                              bool operator_expression = false);
     /* [expr.call]: the call of the function f, named at the token at
        (but not by its name: a literal operator, an allocation function),
        with the analysed arguments, each initialized as its parameter: m */
