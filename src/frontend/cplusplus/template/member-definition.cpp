@@ -154,7 +154,7 @@ analysis_result semantic_analysis::member_definition_of_template(
     uint32_t ct = class_template_of(named);
     if (!ct || function_templates[ct - 1].name != named ||
         function_templates[ct - 1].primary ||
-        entity_table[function_templates[ct - 1].entity].enclosing != outer)
+        !declared_in_scope_of(function_templates[ct - 1].entity, outer))
         return not_supported(n, "temp.mem.func");
     /* [class.static.data]/1: "The declaration of a static data member
        ... static ... the keyword static shall appear only in its
