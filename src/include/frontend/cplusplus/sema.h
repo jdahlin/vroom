@@ -443,6 +443,9 @@ struct entity {
        left undefined, and a use of it is refused (body_failures' index
        plus one) */
     uint32_t unsupported_body = 0;
+    /* [except.spec]/4: the function's exception specification, as
+       semantic_analysis::function_exception_key */
+    uint64_t exception_key = 0;
     /* [temp.inst]/4: a definition deferred until the function is used. */
     bool member_definition_needed = false, member_body_deferred = false;
     /* the preprocessor's identifier number, 0 for an unnamed entity */
@@ -1119,6 +1122,12 @@ struct constant_value {
    numbers: "Recursive constexpr function invocations [512]",
    "Full-expressions evaluated within a core constant expression
    [1048576]" */
+/* [except.spec]/4: an exception specification's key, as
+   semantic_analysis::function_exception_key says */
+constexpr uint64_t exception_key_unknown = 0;
+constexpr uint64_t exception_key_any = 1;
+constexpr uint64_t exception_key_none = 2;
+
 constexpr uint32_t constexpr_invocation_limit = 512;
 constexpr uint32_t constant_full_expression_limit = 1048576;
 
@@ -2860,6 +2869,15 @@ class semantic_analysis
     uint32_t function_cv = 0;
     /* ... and whether it had a noexcept-specifier ([except.spec]/2) */
     bool function_exceptions_specified = false;
+    /* ... and what it said ([except.spec]/4, compared by redeclarations):
+       exception_key_unknown (not known: a value-dependent noexcept, or not
+       analysed), exception_key_any (no specification, noexcept(false) or
+       throw(...): every exception allowed), exception_key_none
+       (noexcept(true), throw()), or 3 and up for a dynamic specification
+       (a digest of the set of its types) */
+    uint64_t function_exception_key = 0;
+    /* the types a dynamic-exception-specification names, as analysed */
+    owned_array<uint32_t> dynamic_exception_bits;
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
@@ -4603,6 +4621,8 @@ class semantic_analysis
        class */
     analysis_result constexpr_redeclaration(token_index id, entity_index prior,
                                             bool specified);
+    analysis_result compatible_exceptions(token_index id, entity_index prior,
+                                          const specified &s);
     analysis_result member_redeclaration(SyntaxRef declaration, token_index id,
                                          entity_index qualifier,
                                          qualified_type type,
@@ -5785,6 +5805,7 @@ class semantic_analysis
         uint32_t cv;
         uint32_t empty_pack;
         bool exceptions_specified;
+        uint64_t exception_key;
         bool member_declarator;
         explicit function_parameter_guard(semantic_analysis &s)
             : self(s),
@@ -5792,6 +5813,7 @@ class semantic_analysis
                   s.function_parameters)),
               cv(s.function_cv), empty_pack(s.function_empty_pack),
               exceptions_specified(s.function_exceptions_specified),
+              exception_key(s.function_exception_key),
               member_declarator(s.in_member_declarator)
         {
             s.function_parameters.clear();
@@ -5801,6 +5823,7 @@ class semantic_analysis
             self.function_cv = cv;
             self.function_empty_pack = empty_pack;
             self.function_exceptions_specified = exceptions_specified;
+            self.function_exception_key = exception_key;
             self.in_member_declarator = member_declarator;
             self.function_parameters =
                 static_cast<owned_array<parameter_meaning> &&>(parameters);

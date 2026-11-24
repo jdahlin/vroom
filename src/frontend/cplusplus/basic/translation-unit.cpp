@@ -811,6 +811,12 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                     e.type = type;
                 }
             }
+            /* [except.spec]/4: the specifications of two declarations are
+               compatible when both allow every exception or both name the
+               same set (a function with none, or a deallocation function,
+               taking the other's: [impl.clang]).  The type compares them
+               where it holds one (above) */
+            VTRY(r, compatible_exceptions(id, prior, s));
             /* [over.load]/2: "Function declarations that differ only in the
                return type, the exception specification, or both cannot be
                overloaded." */
@@ -901,6 +907,8 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
         entity_table[e].type = type;
         entity_table[e].linkage_of_name = implied;
         entity_table[e].defined = definition;
+        if (kind == entity_kind::function)
+            entity_table[e].exception_key = function_exception_key;
         entity_table.add_declaration(e, declaration);
         if (overloads) {
             /* another function of the set: last in its chain, the name
@@ -948,6 +956,53 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
     d.claimable = declarations_claimable && !qualified;
     declared.append(d);
     return analysis_result::well_formed;
+}
+
+/*
+ * [except.spec]/4: "If any declaration of a function has an exception
+ * specification that is not a noexcept-specification allowing all
+ * exceptions, all declarations, including the definition and any explicit
+ * specialization, of that function shall have a compatible exception
+ * specification."  Two are compatible when both allow every exception or
+ * both name the same set of types; a destructor and a deallocation function
+ * have an implicit one ([except.spec]/8, /12), which a declaration's own
+ * may differ from where clang allows it.  A declaration without one after
+ * a noexcept(true) one is checked by the function's type (above).
+ */
+analysis_result semantic_analysis::compatible_exceptions(token_index id,
+                                                         entity_index prior,
+                                                         const specified &s)
+{
+    entity &e = entity_table[prior];
+    uint64_t before = e.exception_key;
+    uint64_t now = function_exception_key;
+    if (before == exception_key_unknown || now == exception_key_unknown ||
+        before == now)
+        return analysis_result::well_formed;
+    if (e.allocation == allocation_function::delete_ ||
+        e.allocation == allocation_function::delete_array ||
+        e.special == special_member::destructor)
+        return analysis_result::well_formed;
+    /* [impl.clang] a declaration without one keeps the first's
+       (-Wmissing-exception-spec: an error clang recovers from, as the
+       type's check above does for noexcept) */
+    if (!function_exceptions_specified)
+        return analysis_result::well_formed;
+    bool nothrow = ((e.gnu_flags | s.gnu_flags) & gnu_nothrow);
+    if (nothrow || in_system_header(id) ||
+        tokens.files.behavior.microsoft_extensions)
+        return analysis_result::well_formed;
+    /* [impl.clang] before C++17 the specification is no part of the type:
+       an error clang recovers from without making the declaration invalid,
+       which redeclares the function */
+    if (!tokens.files.behavior.has(
+            language_feature::exception_specification_in_type)) {
+        return analysis_result::well_formed;
+    }
+    return ill_formed_at_token(id,
+                               "all declarations of a function shall have a "
+                               "compatible exception specification",
+                               "except.spec");
 }
 
 /* [dcl.constexpr]/1: every redeclaration must repeat constexpr. */
