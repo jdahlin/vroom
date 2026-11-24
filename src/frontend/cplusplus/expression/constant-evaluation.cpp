@@ -3107,6 +3107,14 @@ constness semantic_analysis::evaluate_invocation(
         (state.defined_before && semantics[body].at > state.defined_before)) {
         if (entity_table[f].held_because)
             evaluation_cause = entity_table[f].held_because;
+        /* [expr.const]/5.3: "an invocation of an undefined constexpr
+           function": declared, with no definition anywhere yet (not a
+           template's specialization, not one whose body failed analysis) */
+        if (!body && !state.potential && !entity_table[f].defined &&
+            !entity_table[f].definition && !entity_table[f].implicit &&
+            !entity_table[f].instantiation && !entity_table[f].held_because &&
+            !entity_table[f].immediate && !entity_table[f].gnu_flags)
+            return CONST_NOT_CONSTANT;
         return CONST_UNKNOWN;
     }
     /* [expr.call]/8: "The initialization of a parameter ... is
