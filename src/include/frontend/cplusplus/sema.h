@@ -2038,10 +2038,8 @@ class semantic_analysis
                                                  SyntaxRef definition);
     analysis_result explicit_specialization(ExplicitSpecialization n);
     analysis_result explicit_instantiation(ExplicitInstantiation n);
-    analysis_result member_class_explicit_instantiation(SyntaxRef n,
-                                                        entity_index outer,
-                                                        uint32_t name,
-                                                        bool extern_);
+    analysis_result explicitly_instantiate_class(SyntaxRef n, entity_index c,
+                                                 bool extern_, uint32_t prior);
     analysis_result class_explicit_instantiation(SyntaxRef n, SyntaxRef id,
                                                  bool extern_,
                                                  entity_index qualifier = 0);

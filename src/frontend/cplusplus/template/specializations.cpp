@@ -357,11 +357,21 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
         if (e.size() == 3 && ec[1].is(syntax_kind::gnu_attribute_specifier) &&
             gnu_attributes_without_effect(ec[1]))
             id = 2;
+        if (e.size() == id + 2 && ec[0].is_token() &&
+            ec[id].is(syntax_kind::nested_name_specifier) &&
+            ec[id + 1].is_token()) {
+            /* class-key nested-name-specifier identifier: a member class
+               ([temp.explicit]/3), the class ordinary lookup of the
+               elaborated-type-specifier finds ([basic.lookup.elab]/3) */
+            type_index type = 0;
+            VTRY(q, elaborated_type_specifier(e, type));
+            return explicitly_instantiate_class(n, type_table[type].entity,
+                                                extern_, 0);
+        }
         entity_index qualifier = 0;
         if (e.size() == id + 2 && ec[0].is_token() &&
             ec[id].is(syntax_kind::nested_name_specifier) &&
-            (ec[id + 1].is(syntax_kind::simple_template_id) ||
-             ec[id + 1].is_token())) {
+            ec[id + 1].is(syntax_kind::simple_template_id)) {
             /* [temp.explicit]/3: class-key nested-name-specifier
                simple-template-id; the template is looked up in the
                scope the qualifier nominates ([basic.lookup.qual]) */
@@ -374,13 +384,6 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
             qualifier = scope.entity;
             id++;
         }
-        if (qualifier && e.size() == id + 1 && ec[0].is_token() &&
-            ec[id].is_token() && !is_namespace(qualifier) &&
-            entity_table[qualifier].instantiation &&
-            (ec[0].keyword() == standard_keyword::struct_ ||
-             ec[0].keyword() == standard_keyword::class_))
-            return member_class_explicit_instantiation(
-                n, qualifier, tokens.identifier(ec[id].token()), extern_);
         if (e.size() != id + 1 || !ec[0].is_token())
             return not_supported_because(
                 n, "temp.explicit",
@@ -395,10 +398,6 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
                 "an explicit instantiation of a class that is not a "
                 "simple-template-id");
         }
-        if (ec[0].keyword() != standard_keyword::struct_ &&
-            ec[0].keyword() != standard_keyword::class_)
-            return not_supported_because(
-                n, "temp.explicit", "an explicit instantiation of a union");
         return class_explicit_instantiation(n, ec[id], extern_, qualifier);
     }
     /* a constructor or destructor: no decl-specifier-seq,
@@ -1057,26 +1056,71 @@ analysis_result semantic_analysis::class_explicit_instantiation(
         specializations_instantiated.append(static_cast<uint32_t>(k + 1));
         return analysis_result::well_formed;
     }
+    return explicitly_instantiate_class(n, c, extern_, prior);
+}
+
+/*
+ * [temp.explicit]/10: the class c that an explicit instantiation names is
+ * explicitly instantiated: a class template's specialization (prior: it
+ * was instantiated before, /11), or a member class of one ([temp.explicit]
+ * /3: class-key A<int>::B, defined with the specialization, [temp.inst]/1),
+ * its members defined ([temp.explicit]/10) or, for an explicit
+ * instantiation declaration, not.
+ */
+analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
+                                                                entity_index c,
+                                                                bool extern_,
+                                                                uint32_t prior)
+{
+    if (!c || entity_table[c].kind != entity_kind::class_type)
+        return not_supported(n, "temp.explicit");
+    entity_index outer = entity_table[c].enclosing;
+    bool member_class = !entity_table[c].instantiation;
+    if (member_class) {
+        /* (a member class of a class template's specialization) */
+        if (!outer || entity_table[outer].kind != entity_kind::class_type ||
+            !entity_table[outer].instantiation)
+            return not_supported(n, "temp.explicit");
+        /* [temp.explicit]/2: in a namespace enclosing the template's */
+        entity_index home = outer;
+        while (home && !is_namespace(home))
+            home = entity_table[home].enclosing;
+        if (!is_namespace(current_scope) ||
+            !namespace_encloses(current_scope, home))
+            return not_supported(n, "temp.explicit");
+        require_complete(outer);
+        if (!entity_table[outer].defined || entity_table[outer].union_ ||
+            entity_table[outer].explicitly_instantiated !=
+                instantiation_kind::none)
+            return not_supported(n, "temp.explicit");
+    }
     /* [temp.explicit]/10: an explicit instantiation defines the class */
     require_complete(c);
     const entity &k = entity_table[c];
-    if (!k.instantiation || !k.defined || k.union_)
+    if (!k.defined)
         return not_supported(n, "temp.explicit");
-    const instantiation_record record = instantiations[k.instantiation - 1];
-    /* [temp.expl.spec]: an explicit specialization's class is no
-       instantiation */
-    if (record.pattern &&
-        !function_templates[record.pattern - 1].parameter_count)
-        return not_supported(n, "temp.explicit");
-    /* /10's members defined outside the class: one that failed is not
-       known to be well-formed for this class */
-    for (const template_member_definition &m : template_member_definitions) {
-        if (m.template_entity != t)
-            continue;
-        for (const analysed_declaration &a : declarations)
-            if (a.node == m.declaration &&
-                a.result != analysis_result::well_formed)
-                return not_supported(n, "temp.explicit");
+    if (k.union_)
+        return not_supported_because(n, "temp.explicit",
+                                     "an explicit instantiation of a union");
+    if (!member_class) {
+        entity_index t = instantiations[k.instantiation - 1].template_entity;
+        const instantiation_record record = instantiations[k.instantiation - 1];
+        /* [temp.expl.spec]: an explicit specialization's class is no
+           instantiation */
+        if (record.pattern &&
+            !function_templates[record.pattern - 1].parameter_count)
+            return not_supported(n, "temp.explicit");
+        /* /10's members defined outside the class: one that failed is not
+           known to be well-formed for this class */
+        for (const template_member_definition &m :
+             template_member_definitions) {
+            if (m.template_entity != t)
+                continue;
+            for (const analysed_declaration &a : declarations)
+                if (a.node == m.declaration &&
+                    a.result != analysis_result::well_formed)
+                    return not_supported(n, "temp.explicit");
+        }
     }
     instantiation_kind was = entity_table[c].explicitly_instantiated;
     if (was == instantiation_kind::definition ||
@@ -1085,41 +1129,6 @@ analysis_result semantic_analysis::class_explicit_instantiation(
     mark_explicit_instantiation(c, extern_);
     if (!extern_)
         explicit_instantiation_record(c, n);
-    return analysis_result::well_formed;
-}
-
-/*
- * [temp.explicit]/3: "If the explicit instantiation is for a class or member
- * class, the elaborated-type-specifier in the declaration shall include a
- * simple-template-id": here class-key A<int>::B, a member class of a class
- * template's specialization, defined with the specialization ([temp.inst]/1)
- * and explicitly instantiated: its members are defined ([temp.explicit]/10).
- */
-analysis_result semantic_analysis::member_class_explicit_instantiation(
-    SyntaxRef n, entity_index outer, uint32_t name, bool extern_)
-{
-    /* [temp.explicit]/2: in a namespace enclosing the template's */
-    entity_index home = outer;
-    while (home && !is_namespace(home))
-        home = entity_table[home].enclosing;
-    if (!is_namespace(current_scope) ||
-        !namespace_encloses(current_scope, home))
-        return not_supported(n, "temp.explicit");
-    require_complete(outer);
-    if (!entity_table[outer].defined || entity_table[outer].union_)
-        return not_supported(n, "temp.explicit");
-    entity_index b = entity_table.find(outer, name);
-    if (!b || entity_table[b].kind != entity_kind::class_type ||
-        entity_table[b].enclosing != outer || !entity_table[b].defined ||
-        entity_table[b].union_ || entity_table[b].instantiation)
-        return not_supported(n, "temp.explicit");
-    instantiation_kind was = entity_table[b].explicitly_instantiated;
-    if (was == instantiation_kind::definition ||
-        entity_table[outer].explicitly_instantiated != instantiation_kind::none)
-        return not_supported(n, "temp.explicit");
-    mark_explicit_instantiation(b, extern_);
-    if (!extern_)
-        explicit_instantiation_record(b, n);
     return analysis_result::well_formed;
 }
 
