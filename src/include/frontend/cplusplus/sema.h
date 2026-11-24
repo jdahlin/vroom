@@ -2520,8 +2520,11 @@ class semantic_analysis
     analysis_result defaulted_three_way_end(
         token_index at, const owned_array<uint32_t> &parameters, bool of_class,
         qualified_type category, owned_array<uint32_t> &statements,
-        bool constant, uint32_t &block);
+        bool constant, bool equality_compatible, uint32_t &block);
     int comparison_category(qualified_type t);
+    /* whether the && chain of comparisons node calls a function that is not
+       constexpr ([dcl.fct.def.default]/3's constexpr-compatible) */
+    bool calls_non_constexpr(uint32_t node) const;
     analysis_result defaulted_equality(token_index at,
                                        const owned_array<uint32_t> &parameters,
                                        uint32_t &block);

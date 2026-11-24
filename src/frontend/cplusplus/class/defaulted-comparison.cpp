@@ -246,7 +246,7 @@ analysis_result semantic_analysis::three_way_step(
 analysis_result semantic_analysis::defaulted_three_way_end(
     token_index at, const owned_array<uint32_t> &parameters, bool of_class,
     qualified_type category, owned_array<uint32_t> &statements, bool constant,
-    uint32_t &block)
+    bool equality_compatible, uint32_t &block)
 {
     entity_index c = type_table[category.unqualified()].entity;
     const char *name = "equivalent";
@@ -274,8 +274,42 @@ analysis_result semantic_analysis::defaulted_three_way_end(
     VTRY(c3, constexpr_compatible(current_declaration,
                                   literal && literal_type(category) ==
                                                  constness::constant));
+    /* [class.compare.default]/5: the == declared with it is declared
+       constexpr as it is, and an explicitly-defaulted function that is not
+       constexpr-compatible shall not be ([dcl.fct.def.default]/3) */
+    if (declared_constexpr && !(literal && equality_compatible) &&
+        !tokens.files.behavior.has(
+            language_feature::constexpr_without_constant_result))
+        return ill_formed(current_declaration,
+                          "the implicitly declared == of a defaulted <=> is "
+                          "defaulted, and constexpr only if it is "
+                          "constexpr-compatible",
+                          "class.compare.default");
     block = block_statement(at, statements);
     return analysis_result::well_formed;
+}
+
+bool semantic_analysis::calls_non_constexpr(uint32_t node) const
+{
+    const semantic_node &x = semantics[node];
+    switch (x.kind) {
+    case semantic_kind::logical_and:
+        return calls_non_constexpr(x.a) || calls_non_constexpr(x.b);
+    case semantic_kind::conversion:
+        return calls_non_constexpr(x.a);
+    case semantic_kind::call: {
+        uint32_t callee = x.a;
+        if (semantics[callee].kind == semantic_kind::conversion)
+            callee = semantics[callee].a;
+        if (semantics[callee].kind != semantic_kind::entity)
+            return false;
+        const entity &f = entity_table[semantics[callee].a];
+        return f.kind == entity_kind::function && !f.constexpr_ &&
+               !f.instantiation;
+    }
+    default:
+        return false;
+    }
 }
 
 /*
@@ -344,6 +378,11 @@ analysis_result semantic_analysis::defaulted_equality(
     qualified_type category;
     owned_array<uint32_t> statements;
     bool constant = true;
+    /* [class.compare.default]/5: the == a defaulted <=> declares compares
+       the same subobjects by == */
+    expression_meaning equal_all;
+    bool equal_any = false, equal_deleted = false, equal_known = true;
+    bool equality_constant = true;
     if (three_way)
         category =
             type_table[entity_table[last_declared].type.unqualified()].operand;
@@ -395,10 +434,25 @@ analysis_result semantic_analysis::defaulted_equality(
             return analysis_result::well_formed;
         }
         VTRY(r3, r);
+        if (three_way && equal_known && !equal_deleted) {
+            size_t before = diagnostics.messages.size();
+            bool unused = true;
+            analysis_result q = compare_subobjects(
+                at, type, sides[0], sides[1], equal_all, equal_any,
+                equal_deleted, nullptr, category, unused);
+            diagnostics.discard_since(before);
+            if (q != analysis_result::well_formed)
+                equal_known = false;
+        }
     }
-    if (three_way)
+    if (three_way) {
+        if (equal_known && !equal_deleted && equal_any &&
+            calls_non_constexpr(equal_all.node))
+            equality_constant = false;
         return defaulted_three_way_end(at, parameters, of_class, category,
-                                       statements, constant, block);
+                                       statements, constant, equality_constant,
+                                       block);
+    }
     if (!any)
         return not_supported(current_declaration, "class.compare.default");
     /* [class.compare.default]/3: "A defaulted comparison operator function
