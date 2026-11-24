@@ -1442,6 +1442,14 @@ bool semantic_analysis::pack_only_expanded(uint32_t name, token_index first,
         if (tokens[t].kind != token_kind::identifier ||
             tokens.identifier(t) != name)
             continue;
+        /* sizeof...(A) names the pack and expands it ([expr.sizeof]/5) */
+        if (t >= first + 3 && t + 1 < end &&
+            tokens[t - 3].kind == token_kind::keyword &&
+            p.keyword_of(tokens[t - 3]) == standard_keyword::sizeof_ &&
+            is(t - 2, preprocessing_op_or_punc::ELLIPSIS) &&
+            is(t - 1, preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+            is(t + 1, preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            continue;
         /* depth of brackets from the name's; level the element the scan
            is in, sibling once a comma passed into the next element */
         int depth = 0, level = 0;
