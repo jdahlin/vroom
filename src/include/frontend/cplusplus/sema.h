@@ -4656,6 +4656,12 @@ class semantic_analysis
     /* [class.access]/6: the class a member's qualified declarator-id
        nominates while its declaration is analysed, 0 otherwise (declarator_access_class) */
     entity_index access_class = 0;
+    /* [class.friend]/2, [class.access]/6: the class template whose
+       template-head is analysed (its scope and name, 0: none): a friend
+       class template of that name is the befriended entity, whose head may
+       use the granting class's private names */
+    entity_index friend_head_scope = 0;
+    uint32_t friend_head_name = 0;
     entity_index declarator_access_class(SyntaxRef declaration) const;
     /* the tokens of the member-specification of the class being defined
        (class_specifier), 0 outside one */

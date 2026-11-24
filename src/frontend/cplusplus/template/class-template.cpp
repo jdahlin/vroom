@@ -18,6 +18,29 @@ namespace cplusplus
  * per specialization (instantiate_class), the template's name bound to a
  * held entity that a simple-template-id finds (template_type).
  */
+namespace
+{
+/* [class.friend]/2: while a class template's template-head and parameters
+   are analysed, a friend class template of its name is the befriended
+   entity (accessible) */
+struct friend_head_scope_guard {
+    entity_index &scope;
+    uint32_t &name;
+    friend_head_scope_guard(entity_index &s, uint32_t &n, entity_index in,
+                            uint32_t called)
+        : scope(s), name(n)
+    {
+        scope = in;
+        name = called;
+    }
+    ~friend_head_scope_guard()
+    {
+        scope = 0;
+        name = 0;
+    }
+};
+} // namespace
+
 analysis_result
 semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
 {
@@ -37,6 +60,12 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
         head_name.size() == 2 &&
         head_name[1].is(syntax_kind::simple_template_id))
         specialization = true;
+    uint32_t called = 0;
+    if (!specialization && head_name && head_name.is_token() &&
+        tokens[head_name.token()].kind == token_kind::identifier)
+        called = tokens.identifier(head_name.token());
+    friend_head_scope_guard guard(friend_head_scope, friend_head_name, outer,
+                                  called);
     VTRY(r, template_head_parameters(n, parameters, true, true, specialization,
                                      true));
     /* a partial specialization's requires-clause is checked where it is
@@ -199,8 +228,10 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         return not_supported(n, "temp.class");
     owned_array<SyntaxRef> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
-    VTRY(r, template_head_parameters(n, parameters, true, true, false, true));
     uint32_t name = tokens.identifier(elaborated[at].token());
+    friend_head_scope_guard guard(friend_head_scope, friend_head_name, outer,
+                                  name);
+    VTRY(r, template_head_parameters(n, parameters, true, true, false, true));
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,

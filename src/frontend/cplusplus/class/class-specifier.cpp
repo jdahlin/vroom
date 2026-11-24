@@ -1260,6 +1260,14 @@ bool semantic_analysis::accessible(entity_index member,
             return true;
         return base_step(object_class, k, ambiguous) != 0;
     };
+    /* [class.friend]/2, [class.access]/6: the template-head of a friend
+       class template belongs to the befriended entity */
+    if (friend_head_name)
+        for (const friend_record &f : friends)
+            if (!f.befriended && !f.template_entity &&
+                f.scope == friend_head_scope && f.name == friend_head_name &&
+                as_member_of(f.granting))
+                return true;
     entity_index starts[4] = {0, defining_class, 0, access_class};
     if (function_state.active)
         starts[0] = function_state.function;
