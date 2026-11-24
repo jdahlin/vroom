@@ -103,6 +103,13 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         return fail("a function whose body is not supported",
                     u.node.first_token());
     }
+    if (x.kind == entity_kind::variable && x.automatic && !x.defined &&
+        !declaring_symbols)
+        /* [dcl.init.aggr]/5.1: the `this` of a default member initializer
+           analysed for an aggregate's value: no object of it is made */
+        return fail("a default member initializer that names members of the "
+                    "aggregate it initializes",
+                    at);
     if (x.member_body_deferred && !declaring_symbols &&
         analysis.explicitly_instantiated(e) != instantiation_kind::declaration)
         return fail("a template member whose definition was not instantiated",

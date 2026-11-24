@@ -1986,7 +1986,7 @@ analysis_result semantic_analysis::aggregate_elements(
             if (!arraylike)
                 default_initializer = members[i].default_initializer;
             VTRY(r, omitted_element_value(list, element, default_initializer,
-                                          one));
+                                          target.entity, one));
         }
         all = combined_constness(all, one.evaluation);
         elements.append(one.node);
@@ -2089,11 +2089,56 @@ analysis_result semantic_analysis::omitted_element_checks(
     return analysis_result::well_formed;
 }
 
+/* [dcl.init.aggr]/5.1, [class.mem]/6: a default member initializer that
+   names members is a complete-class context whose `this` is the aggregate
+   being initialized: analysed in a function of the class that has a `this`
+   of its type (the function is not defined: nothing calls it), and the
+   value is not a constant, which the evaluator has no object for */
+analysis_result semantic_analysis::member_default_in_aggregate(
+    SyntaxRef list, entity_index owner, SyntaxRef default_initializer,
+    qualified_type member_type, initialized_value &one)
+{
+    if (!owner || entity_table[owner].kind != entity_kind::class_type ||
+        function_state.active || at_block_scope() || defining_class)
+        return not_supported(list, "dcl.init.aggr");
+    function_context outer = static_cast<function_context &&>(function_state);
+    entity_index outer_scope = current_scope;
+    entity_index f = entity_table.make(entity_kind::function, 0, owner);
+    entity_table[f].type = qualified_type::make(
+        type_table.function(
+            qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none),
+            nullptr, 0, false),
+        cv_none);
+    synthesized_function sf;
+    begin_synthesized(
+        sf, f,
+        qualified_type::make(type_table.fundamental(fundamental_type::void_),
+                             cv_none),
+        qualified_type::make(
+            type_table.pointer_to(qualified_type::make(
+                entity_table[owner].type.unqualified(), cv_none)),
+            cv_none));
+    entity_table[function_state.this_entity].defined = false;
+    uint32_t locations_before = source_location_uses;
+    analysis_result r = initializer(default_initializer, member_type, one);
+    current_scope = sf.outer_scope;
+    function_state = static_cast<function_context &&>(outer);
+    current_scope = outer_scope;
+    if (r != analysis_result::well_formed)
+        return r;
+    /* [ext:clang_source_location] a builtin in it is the place of the
+       aggregate's initialization, which is not the initializer's */
+    if (source_location_uses != locations_before)
+        return not_supported(list, "dcl.init.aggr");
+    one.evaluation = constness::not_constant;
+    return analysis_result::well_formed;
+}
+
 /* the value of an element no clause initializes ([dcl.init.aggr]/5) */
-analysis_result
-semantic_analysis::omitted_element_value(SyntaxRef list, qualified_type element,
-                                         SyntaxRef default_initializer,
-                                         initialized_value &one)
+analysis_result semantic_analysis::omitted_element_value(
+    SyntaxRef list, qualified_type element, SyntaxRef default_initializer,
+    entity_index owner, initialized_value &one)
 {
     if (default_initializer) {
         /* (5.1): "If the element has a default member initializer
@@ -2101,11 +2146,14 @@ semantic_analysis::omitted_element_value(SyntaxRef list, qualified_type element,
            initializer", whose this is the aggregate being initialized
            and whose names are looked up in the class: analysed here
            only when it names nothing (literals and operators) */
-        if (!initializer_names_nothing(default_initializer))
-            return not_supported(list, "dcl.init.aggr");
         qualified_type member_type = element;
         const struct type member = type_table[element.unqualified()];
-        VTRY(r, initializer(default_initializer, member_type, one));
+        if (initializer_names_nothing(default_initializer)) {
+            VTRY(r, initializer(default_initializer, member_type, one));
+        } else {
+            VTRY(r, member_default_in_aggregate(
+                        list, owner, default_initializer, member_type, one));
+        }
         if (member.kind == type_kind::class_type &&
             entity_table[member.entity].kind == entity_kind::class_type &&
             (entity_table[member.entity].first_constructor ||
@@ -2510,8 +2558,8 @@ analysis_result semantic_analysis::designated_elements(
         initialized_value one;
         VTRY(r, omitted_element_checks(list, element,
                                        static_cast<bool>(default_initializer)));
-        VTRY_SET(
-            r, omitted_element_value(list, element, default_initializer, one));
+        VTRY_SET(r, omitted_element_value(list, element, default_initializer,
+                                          target.entity, one));
         all = combined_constness(all, one.evaluation);
         elements.append(one.node);
     }

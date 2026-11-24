@@ -4170,9 +4170,15 @@ class semantic_analysis
     analysis_result omitted_element_checks(SyntaxRef list,
                                            qualified_type element,
                                            bool has_default);
+    analysis_result member_default_in_aggregate(SyntaxRef list,
+                                                entity_index owner,
+                                                SyntaxRef default_initializer,
+                                                qualified_type member_type,
+                                                initialized_value &one);
     analysis_result omitted_element_value(SyntaxRef list,
                                           qualified_type element,
                                           SyntaxRef default_initializer,
+                                          entity_index owner,
                                           initialized_value &one);
     void aggregate_value(SyntaxRef list, qualified_type type, constness all,
                          const owned_array<uint32_t> &elements,
