@@ -38,6 +38,31 @@ bool semantic_analysis::empty_class(entity_index c) const
     return true;
 }
 
+/* [class.copy.ctor]/14: a class whose implicit copy reads no value: no
+   union, no scalar or array subobject */
+bool semantic_analysis::copy_reads_nothing(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.union_ || x.dynamic || x.virtual_base_count)
+        return false;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.base_subobject || m.kind != entity_kind::variable ||
+            !m.nonstatic_member)
+            continue;
+        const struct type &t = type_table[m.type.unqualified()];
+        if (t.kind != type_kind::class_type || !copy_reads_nothing(t.entity))
+            return false;
+    }
+    for (uint32_t i = 0; i < x.base_count; i++)
+        if (!copy_reads_nothing(
+                type_table[entity_table[class_bases[x.first_base + i]]
+                               .type.unqualified()]
+                    .entity))
+            return false;
+    return true;
+}
+
 /* [class.virtual]/1 (polymorphic): a class that declares or inherits a
    virtual function (a virtual base alone does not make one) */
 bool semantic_analysis::polymorphic_class(entity_index c) const

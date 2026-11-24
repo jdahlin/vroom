@@ -484,6 +484,11 @@ constness semantic_analysis::evaluate_object_size_builtin(
         node = semantics[node].a;
     constant_value pointer, type;
     constness c = evaluate_node(state, node, pointer);
+    /* (the pointer is not evaluated for its value, as clang's: a pointer
+       that is no constant makes the answer one the compiler does not know,
+       not a program that is not constant) */
+    if (c == constness::not_constant)
+        return constness::unknown;
     if (c != constness::constant)
         return c;
     c = evaluate_node(state, items[1], type);

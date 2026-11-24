@@ -703,6 +703,13 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
     constant_only--;
     if (r != analysis_result::well_formed)
         return r;
+    if (!constant && constant_stop == 3 && evaluation_rule_note()) {
+        char text[256];
+        snprintf(text, sizeof text,
+                 "the expression is not a constant expression: %s",
+                 evaluation_rule_note());
+        return ill_formed(n, text, "expr.const");
+    }
     if (!constant && constant_stop == 3)
         return ill_formed(n,
                           "the expression is not a constant expression: the "
@@ -1921,8 +1928,12 @@ analysis_result semantic_analysis::declare_with_initializer(
                                                 semantics[value.node].at, data);
                 if (c == constness::constant && data)
                     value.node = data;
-                if (c != constness::constant && s.constexpr_)
+                if (c != constness::constant && s.constexpr_) {
+                    /* (a constexpr variable whose initialization is not
+                       followed is not known to be unusable) */
+                    entity_table[declared_entity].usable = constness::unknown;
                     return not_supported(declaration, "dcl.init");
+                }
                 /* [expr.const]/3: a constexpr variable is usable in constant
                    expressions; the evaluator reads the object's value from
                    its definition, as for an initialized class object */
@@ -2051,13 +2062,8 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (s.constexpr_ && value.evaluation == constness::unknown &&
         (type_table[type.unqualified()].kind == type_kind::lvalue_reference ||
          type_table[type.unqualified()].kind == type_kind::rvalue_reference) &&
-        value.node &&
-        semantics[value.node].kind == semantic_kind::bind_reference) {
-        uint32_t target = semantics[value.node].a;
-        if (target && semantics[target].kind == semantic_kind::entity &&
-            semantics[target].a && !entity_table[semantics[target].a].automatic)
-            value.evaluation = constness::constant;
-    }
+        value.node)
+        value.evaluation = evaluate_reference_binding(value.node);
     /* [expr.const]/3: a const integral local may be usable in constant
        expressions, which decides whether a lambda that names it captures
        it: evaluated, not refused if the evaluator cannot tell (it is then
@@ -2182,6 +2188,14 @@ analysis_result semantic_analysis::declare_with_initializer(
        full-expression of the initialization shall be a constant
        expression" */
     if (s.constexpr_) {
+        if (value.evaluation == constness::not_constant) {
+            entity_table[declared_entity].usable = constness::not_constant;
+            /* (only when the evaluator applies a rule of [expr.const]/5
+               to it: a not constant the analysis folded without one may
+               be an error of ours) */
+            if (value.node && refuted_by_rule(value.node))
+                entity_table[declared_entity].unusable_initializer = true;
+        }
         if (value.evaluation == constness::not_constant)
             return ill_formed_at_token(m.id,
                                        "in any constexpr variable "

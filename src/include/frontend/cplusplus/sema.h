@@ -565,6 +565,10 @@ struct entity {
     /* a variable: [dcl.constinit]/1 declared constinit (by any of its
        declarations) */
     bool constinit_ = false;
+    /* a constexpr variable whose initializer is not a constant expression
+       ([dcl.constexpr]/10): not usable in constant expressions, a read of
+       it is not constant ([expr.const]/5.8) */
+    bool unusable_initializer = false;
     /* a block_scope: the scope whose names it shall not redeclare (the
        function parameter scope for the outermost block of a function
        definition, the scope of a statement's condition for its
@@ -1896,6 +1900,9 @@ class semantic_analysis
        member but zero-width bit-fields, no virtual function or base, every
        base empty (ext/clang/class-traits.cpp) */
     bool empty_class(entity_index c) const;
+    /* a class whose implicit copy reads no value: no union, no scalar
+       or array subobject ([class.copy.ctor]/14) */
+    bool copy_reads_nothing(entity_index c) const;
     /* the explicit instantiation a function is the subject of, its own or
        its class's ([temp.explicit]/10) */
     instantiation_kind explicitly_instantiated(entity_index f) const;
@@ -3900,6 +3907,21 @@ class semantic_analysis
     /* ... the evaluation alone: constant with the value in v, not_constant,
        or unknown (no refusal recorded) */
     constness evaluate_value(uint32_t node, constant_value &v);
+    /* [expr.const]/4: whether a reference's initializer (a binding) designates
+       an object of static storage duration, a core constant expression */
+    constness evaluate_reference_binding(uint32_t node);
+    /* whether the last evaluation's not_constant was a rule of [expr.const]/5
+       that clang applies as it is */
+    bool evaluation_rule_applied() const;
+    /* ... and its message (clang's note), or null */
+    const char *evaluation_rule_note() const;
+    /* whether the evaluator finds a rule of [expr.const]/5 clang applies as
+       it is in a node the analysis folded as not constant (the fold's own
+       answer is not taken) */
+    bool refuted_by_rule(uint32_t node);
+    /* the read of a variable not usable in constant expressions: not_constant
+       with its rule, or unknown */
+    constness unusable_variable_read(const entity &e, bool potential) const;
     /* one evaluation's state: the objects of the evaluation (locals and
        parameters of the constexpr functions it calls, [expr.const]/5.8:
        their lifetime began within it), the depth of invocations and the
@@ -3939,6 +3961,9 @@ class semantic_analysis
                (its address is a constant), a read or a write is not a
                constant expression */
             bool outside = false;
+            /* ... a variable of static storage duration that is not
+               usable in constant expressions ([expr.const]/4) */
+            bool static_unusable = false;
             constant_value value;
         };
         owned_array<object> objects;
@@ -4047,7 +4072,8 @@ class semantic_analysis
     uint32_t pointer_tree(const constant_evaluation &state, qualified_type t,
                           const constant_value &v, token_index at);
     constness permitted_result(const constant_evaluation &state,
-                               const constant_value &v) const;
+                               const constant_value &v,
+                               bool reference = false) const;
     constness evaluate_node(constant_evaluation &state, uint32_t node,
                             constant_value &v);
     constness evaluate_statement(constant_evaluation &state, uint32_t node,
