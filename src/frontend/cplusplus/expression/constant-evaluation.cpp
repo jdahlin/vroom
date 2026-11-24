@@ -3325,9 +3325,31 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
     return c;
 }
 
-bool semantic_analysis::ordering_values(entity_index category, uint64_t &packed)
+const semantic_analysis::ordering_category *
+semantic_analysis::ordering_category_values(entity_index category) const
 {
-    packed = 0;
+    for (uint32_t i = 0; i < ordering_categories.size(); i++)
+        if (ordering_categories[i].category == category)
+            return &ordering_categories[i];
+    return nullptr;
+}
+
+const semantic_analysis::ordering_category &
+semantic_analysis::ordering_values(entity_index category)
+{
+    const ordering_category *known = ordering_category_values(category);
+    if (known)
+        return *known;
+    ordering_category record;
+    record.category = category;
+    record.known = ordering_values_evaluated(category, record.values);
+    ordering_categories.append(record);
+    return ordering_categories[ordering_categories.size() - 1];
+}
+
+bool semantic_analysis::ordering_values_evaluated(entity_index category,
+                                                  int8_t (&values)[4])
+{
     static const char *const names[4] = {"less", "equivalent", "greater",
                                          "unordered"};
     const entity &c = entity_table[category];
@@ -3363,9 +3385,8 @@ bool semantic_analysis::ordering_values(entity_index category, uint64_t &packed)
         __int128 value = static_cast<__int128>(state.elements[v.first].integer);
         if (value < -128 || value > 127)
             return false;
-        packed |= static_cast<uint64_t>(static_cast<uint8_t>(value)) << (8 * i);
+        values[i] = static_cast<int8_t>(value);
     }
-    packed |= ordering_values_known;
     return true;
 }
 
@@ -3382,11 +3403,12 @@ constness semantic_analysis::evaluate_spaceship(
     if (type_table[x.type.unqualified()].kind != type_kind::class_type)
         return CONST_UNKNOWN;
     entity_index category = type_table[x.type.unqualified()].entity;
-    if (!(x.value & ordering_values_known))
+    const ordering_category &known = ordering_values(category);
+    if (!known.known)
         return CONST_UNKNOWN;
     int64_t values[4];
     for (int i = 0; i < 4; i++)
-        values[i] = static_cast<int8_t>(x.value >> (8 * i));
+        values[i] = known.values[i];
     static const preprocessing_op_or_punc ops[3] = {
         preprocessing_op_or_punc::LESS, preprocessing_op_or_punc::EQUAL_EQUAL,
         preprocessing_op_or_punc::GREATER};

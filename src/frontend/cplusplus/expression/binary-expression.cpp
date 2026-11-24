@@ -607,17 +607,14 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
                           "the header <compare> shall be included before a "
                           "use of the built-in three-way comparison",
                           "expr.spaceship");
-    uint64_t packed = 0;
-    ordering_values(category, packed);
+    /* (the category's values, computed here once: the evaluator and the
+       lowering read them) */
+    ordering_values(category);
     m = expression_meaning();
     m.type = qualified_type::make(entity_table[category].type.unqualified(),
                                   cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::unknown;
-    /* (the node's value: the category's four values, evaluated at the
-       operation; none when the program's <compare> declares them in a way
-       not followed: the operation's value is not known) */
-    m.value = packed;
     return analysis_result::well_formed;
 }
 

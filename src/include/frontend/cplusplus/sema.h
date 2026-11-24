@@ -1589,9 +1589,6 @@ enum class increment_kind : uint8_t {
     post_decrement,
 };
 
-/* the bit of a built-in <=> node's value that says its four values are known */
-constexpr uint64_t ordering_values_known = 1ull << 63;
-
 struct semantic_node {
     semantic_kind kind = semantic_kind::none;
     uint8_t op = 0;
@@ -1984,6 +1981,21 @@ class semantic_analysis
        member initializer (value-initialization is more than zeros) */
     bool has_default_member_initializer(entity_index c) const;
     bool has_mutable_subobject(qualified_type type) const;
+    /* [cmp.categories]: the values of a comparison category's less,
+       equivalent, greater and unordered (a strong ordering's unordered:
+       0), as the program's <compare> declares them (the class has one
+       integral member); computed once per category, at its first built-in
+       <=> (ordering_values) */
+    struct ordering_category {
+        entity_index category = 0;
+        /* whether the four values are known: none when <compare> declares
+           them in a way not followed */
+        bool known = false;
+        int8_t values[4] = {};
+    };
+    /* the category's record, 0 before a built-in <=> of it is analysed */
+    const ordering_category *
+    ordering_category_values(entity_index category) const;
 
   private:
     /* the node needs rules that are not written: those of the subclause
@@ -4092,11 +4104,11 @@ class semantic_analysis
                                   constant_value &result);
     /* [dcl.constexpr]/10 for a constexpr variable of class type: whether
        its initialization init is a constant expression */
-    /* [cmp.categories]: the values of std::strong_ordering's (or weak's,
-       partial's) less, equivalent, greater and unordered, as the program's
-       <compare> declares them (the class has one integral member), a byte
-       each in packed: the value of a built-in <=>'s node */
-    bool ordering_values(entity_index category, uint64_t &packed);
+    /* [cmp.categories]: the category's ordering_category, computed at the
+       first call */
+    owned_array<ordering_category> ordering_categories;
+    const ordering_category &ordering_values(entity_index category);
+    bool ordering_values_evaluated(entity_index category, int8_t (&values)[4]);
     /* [expr.spaceship]/4-7: the category object of a built-in p <=> q */
     constness evaluate_spaceship(constant_evaluation &state,
                                  const semantic_node &x, fundamental_type t,

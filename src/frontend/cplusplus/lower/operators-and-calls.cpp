@@ -119,13 +119,13 @@ uint32_t c_lowering::vector_lane(const semantic_node &n)
 uint32_t c_lowering::spaceship(const semantic_node &n)
 {
     entity_index category = record(n.type).entity;
-    if (!(n.value & ordering_values_known))
+    const semantic_analysis::ordering_category *known =
+        analysis.ordering_category_values(category);
+    if (!known || !known->known)
         return fail("a three-way comparison of a category the program's "
                     "<compare> declares in a way not followed",
                     n.at);
-    int64_t values[4];
-    for (int i = 0; i < 4; i++)
-        values[i] = static_cast<int8_t>(n.value >> (8 * i));
+    const int8_t *values = known->values;
     const entity &x = analysis.entity_table[category];
     entity_index member = analysis.class_members[x.first_member];
     class_type(category, n.at);
