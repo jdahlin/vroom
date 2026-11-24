@@ -1748,6 +1748,40 @@ analysis_result semantic_analysis::template_candidates(
     return analysis_result::well_formed;
 }
 
+analysis_result
+semantic_analysis::braced_deduction_elements(SyntaxElement list,
+                                             expression_meaning &m)
+{
+    owned_array<SyntaxElement> clauses;
+    owned_array<uint32_t> packs;
+    designation_set designations;
+    VTRY(gathered, list_clauses(list, clauses, &packs, &designations));
+    if (designations.any)
+        return analysis_result::well_formed;
+    for (uint32_t x : packs)
+        if (x != no_expansion)
+            return analysis_result::well_formed;
+    owned_array<expression_meaning> found;
+    for (SyntaxElement c : clauses) {
+        if (c.is(syntax_kind::braced_init_list))
+            return analysis_result::well_formed;
+        expression_meaning e;
+        size_t uses_before = name_uses.size();
+        VTRY(r, passed_expression(c, e));
+        if (!e.node || e.overload_name) {
+            name_uses.resize(uses_before);
+            return analysis_result::well_formed;
+        }
+        found.append(e);
+    }
+    m.braced_known = true;
+    m.braced_first = static_cast<uint32_t>(braced_elements.size());
+    m.braced_count = static_cast<uint32_t>(found.size());
+    for (const expression_meaning &e : found)
+        braced_elements.append(e);
+    return analysis_result::well_formed;
+}
+
 analysis_result semantic_analysis::template_call(
     SyntaxRef n, token_index name, uint32_t function_template,
     owned_array<template_argument> &specified, bool qualified,
@@ -1778,9 +1812,16 @@ analysis_result semantic_analysis::template_call(
         if (given)
             break;
         expression_meaning e;
-        if (a.is(syntax_kind::braced_init_list))
-            return not_supported_because(n, "temp.deduct.call",
-                                         "a braced-init-list as an argument");
+        if (a.is(syntax_kind::braced_init_list)) {
+            /* [temp.deduct.call]/1: a braced-init-list is a non-deduced
+               context for a parameter that is not std::initializer_list
+               or an array: no type, no node (deduce_from_call skips it);
+               the list initializes the parameter after deduction */
+            VTRY(r, braced_deduction_elements(a, e));
+            types.append(e.type);
+            early.append(e);
+            continue;
+        }
         /* [temp.deduct.call]/6: "When P is a function type, function
            pointer type, or pointer-to-member-function type: If the argument
            is an overload set containing one or more function templates, the

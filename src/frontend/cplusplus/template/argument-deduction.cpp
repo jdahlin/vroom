@@ -649,6 +649,77 @@ void semantic_analysis::adjust_call_deduction(qualified_type &p,
     }
 }
 
+/*
+ * [temp.deduct.call]/1: "If removing references and cv-qualifiers from P
+ * gives std::initializer_list<P'> or P'[N] for some P' and N and the
+ * argument is a non-empty initializer list ([dcl.init.list]), then
+ * deduction is performed instead for each element of the initializer list
+ * independently, taking P' as separate function template parameter types
+ * P'i and the ith initializer element as the corresponding argument.  In
+ * the P'[N] case, if N is a non-type template parameter, N is deduced from
+ * the length of the initializer list."  Otherwise a non-deduced context.
+ */
+int semantic_analysis::deduce_from_braced_list(
+    qualified_type p, const expression_meaning &m,
+    owned_array<template_argument> &deduced, owned_array<bool> &set,
+    bool &unknown)
+{
+    unknown = false;
+    const struct type *pt = &type_table[p.unqualified()];
+    if (pt->kind == type_kind::lvalue_reference ||
+        pt->kind == type_kind::rvalue_reference)
+        pt = &type_table[pt->operand.unqualified()];
+    const struct type pr = *pt;
+    qualified_type element;
+    bool bound_parameter = false;
+    if (pr.kind == type_kind::dependent &&
+        entity_table[pr.entity].instantiation) {
+        entity_index t = specialized_template(pr.entity);
+        if (!named(t, "initializer_list") ||
+            !std_namespace(entity_table[t].enclosing) ||
+            specialization_argument_count(pr.entity) != 1)
+            return 0;
+        const template_argument &x =
+            specialization_template_argument(pr.entity, 0);
+        if (x.kind != template_argument::kind_t::type)
+            return 0;
+        element = x.type;
+    } else if (pr.kind == type_kind::array) {
+        element = pr.operand;
+        bound_parameter = pr.entity && !pr.bound;
+    } else {
+        return 0;
+    }
+    /* an empty list deduces nothing: the parameter is initialized from
+       it, T not deduced elsewhere is an error of the call */
+    if (m.braced_count == 0)
+        return 0;
+    for (uint32_t k = 0; k < m.braced_count; k++) {
+        const expression_meaning &e = braced_elements[m.braced_first + k];
+        qualified_type pp = element;
+        qualified_type a = e.type;
+        const struct type ar = type_table[a.unqualified()];
+        if (ar.kind == type_kind::none || ar.kind == type_kind::placeholder ||
+            ar.kind == type_kind::dependent) {
+            unknown = true;
+            return 0;
+        }
+        adjust_call_deduction(pp, a, e.category);
+        uint32_t unknowns = deduction_unknowns;
+        if (!deduce_type(pp, a, deduced, set)) {
+            if (deduction_unknowns != unknowns) {
+                unknown = true;
+                return 0;
+            }
+            return -1;
+        }
+    }
+    if (bound_parameter &&
+        !deduce_bound(pr.entity, m.braced_count, deduced, set))
+        return -1;
+    return 1;
+}
+
 analysis_result semantic_analysis::deduce_from_call(
     SyntaxRef at, uint32_t function_template,
     const expression_meaning *arguments, uint32_t count,
@@ -747,6 +818,20 @@ analysis_result semantic_analysis::deduce_from_call(
                                              failed));
             if (failed && *failed)
                 return analysis_result::well_formed;
+            continue;
+        }
+        if (arguments[i].braced_known) {
+            bool unknown = false;
+            int found =
+                deduce_from_braced_list(p, arguments[i], values, set, unknown);
+            if (unknown || (found && i >= fixed))
+                return not_supported(at, "temp.deduct.call");
+            if (found < 0) {
+                if (!failed)
+                    return not_supported(at, "temp.deduct.call");
+                *failed = true;
+                return analysis_result::well_formed;
+            }
             continue;
         }
         qualified_type a = arguments[i].type;

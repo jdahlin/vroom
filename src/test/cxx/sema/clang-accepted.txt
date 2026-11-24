@@ -2893,7 +2893,6 @@ SemaCXX/cxx0x-initializer-references.cpp:88 -std=c++11
 SemaCXX/cxx0x-initializer-references.cpp:89 -std=c++11
 SemaCXX/cxx0x-initializer-references.cpp:90 -std=c++11
 SemaCXX/cxx0x-initializer-stdinitializerlist.cpp:176 -std=c++11
-SemaCXX/cxx0x-initializer-stdinitializerlist.cpp:194 -std=c++11
 SemaCXX/cxx0x-initializer-stdinitializerlist.cpp:262 -std=c++11
 SemaCXX/cxx0x-initializer-stdinitializerlist.cpp:356 -std=c++11
 SemaCXX/cxx0x-initializer-stdinitializerlist.cpp:387 -std=c++11

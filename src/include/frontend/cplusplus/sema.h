@@ -1309,6 +1309,12 @@ struct expression_meaning {
        token of the name; node is 0, and the operand is analysed for the
        type of the parameter it is passed to (call_with) */
     token_index overload_name = 0;
+    /* [temp.deduct.call]/1: a braced-init-list argument whose elements are
+       known: braced_count of them, from braced_elements[braced_first] on
+       (braced_known); otherwise it deduces nothing */
+    bool braced_known = false;
+    uint32_t braced_first = 0;
+    uint32_t braced_count = 0;
 };
 
 /* ---- the semantic tree (sema/semantic-tree.cpp) ---- */
@@ -5850,6 +5856,17 @@ class semantic_analysis
        referenced, all of the template arguments shall have values"; the
        arguments deduced from a call's ([temp.deduct.call]); on entry
        those the call specifies ([temp.arg.explicit]) */
+    /* [temp.deduct.call]/1: the elements of a braced-init-list argument,
+       analysed for the deduction of std::initializer_list<P'> and P'[N]
+       (not known when they are not plain expressions) */
+    analysis_result braced_deduction_elements(SyntaxElement list,
+                                              expression_meaning &m);
+    owned_array<expression_meaning> braced_elements;
+    /* ... deduced from the argument m of parameter type p: 1 deduced, 0
+       a non-deduced context, -1 deduction failed */
+    int deduce_from_braced_list(qualified_type p, const expression_meaning &m,
+                                owned_array<template_argument> &deduced,
+                                owned_array<bool> &set, bool &unknown);
     analysis_result deduce_from_call(SyntaxRef at, uint32_t function_template,
                                      const expression_meaning *arguments,
                                      uint32_t count,
