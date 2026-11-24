@@ -148,7 +148,7 @@ struct type {
     /* array: the bound N; in a template's own declaration a bound that is
        a non-type template-parameter's name (T[N], [temp.deduct.type]/8's
        T[i]) is that parameter's entity, with bound_known and bound 0; an
-       expression naming one (T[N + 1]) has the expression's first token + 1
+       expression naming one (T[N + 1]) has a digest of the expression's tokens
        as bound (a non-deduced context);
        pointer to member of a dependent class ([temp.dep.type]/9): the
        class's type */
@@ -3545,6 +3545,7 @@ class semantic_analysis
     uint64_t bit_int_layout(uint64_t width, bool alignment) const;
     entity_index value_parameter_named(SyntaxElement e);
     entity_index value_parameter_in(SyntaxElement e);
+    uint64_t expression_digest(SyntaxElement e);
     analysis_result potentially_throwing(SyntaxRef n, uint32_t x,
                                          bool &throwing);
     analysis_result conditional_void_operand(SyntaxRef n,

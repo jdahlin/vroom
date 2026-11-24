@@ -324,6 +324,48 @@ entity_index semantic_analysis::value_parameter_in(SyntaxElement e)
     return 0;
 }
 
+/* [temp.over.link]/5: a digest of the token sequence of an expression in a
+   template's own declaration, a template parameter by its position, any
+   other name by its identifier; equal digests are equivalent expressions
+   (never 0) */
+uint64_t semantic_analysis::expression_digest(SyntaxElement e)
+{
+    uint64_t h = 1469598103934665603ull;
+    SyntaxRef n = e;
+    token_index first = n.first_token();
+    token_index end = n.end_token();
+    for (token_index t = first; t < end; t++) {
+        const token &k = tokens[t];
+        uint64_t word = (uint64_t)k.kind << 32 |
+                        (uint64_t)(uint16_t)k.keyword << 8 |
+                        (uint64_t)k.op_or_punc;
+        bool member = false;
+        if (t > first &&
+            tokens[t - 1].kind == token_kind::operator_or_punctuator) {
+            preprocessing_op_or_punc op =
+                preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc);
+            member = op == preprocessing_op_or_punc::COLON_COLON ||
+                     op == preprocessing_op_or_punc::DOT ||
+                     op == preprocessing_op_or_punc::ARROW;
+        }
+        if (k.kind == token_kind::identifier) {
+            entity_index named = 0;
+            if (!member)
+                named = value_parameter_named(SyntaxElement::from_token(t));
+            if (named)
+                word = (uint64_t)1 << 56 | entity_table[named].value;
+            else
+                word = (uint64_t)2 << 56 | tokens.identifier(t);
+        } else if (k.literal != literal_kind::none) {
+            const literal_value &v = tokens.files.value_of(k);
+            word ^= v.value * 0x9e3779b97f4a7c15ull ^ v.floating_bits_low;
+        }
+        h = (h ^ word) * 1099511628211ull;
+        h ^= h >> 29;
+    }
+    return h | 1;
+}
+
 /*
  * [dcl.array]/1: "In a declaration T D where D has the form
  *     D1 [ constant-expression_opt ] attribute-specifier-seq_opt
@@ -385,10 +427,9 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
        [temp.deduct.type]/5.3); each instantiation analyses the declarator
        again */
     if (entity_index named = value_parameter_in(bound)) {
-        type = qualified_type::make(
-            type_table.array_of_parameter_bound(
-                type, named, SyntaxRef(bound).first_token() + 1),
-            cv_none);
+        type = qualified_type::make(type_table.array_of_parameter_bound(
+                                        type, named, expression_digest(bound)),
+                                    cv_none);
         return analysis_result::well_formed;
     }
     expression_meaning m;

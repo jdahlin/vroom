@@ -875,3 +875,10 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   instantiations is a special case of "an explicit instantiation whose
   body is refused is refused" ([temp.explicit]/10); generalizing costs
   +383 unsupported now, so it waits until fewer bodies are refused.
+- 11.16a: the bound expression of 11.15a is compared by a digest of its
+  tokens (template parameters by position, other names by identifier,
+  literals by value), not by its first token ([temp.over.link]/5):
+  `[N + 1]` and `[N * 2]` are two overloads, `[N + 1]` twice one function.
+  Unsupported 34495 -> 34498 (canonical-expr-type.cpp:36 now sees the
+  redefinition and stays unsupported, basic.def.odr), we reject 390,
+  we accept 5297 -> 5296.
