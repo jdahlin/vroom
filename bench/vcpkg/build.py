@@ -13,9 +13,19 @@ import argparse, glob, os, re, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 R = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-W = os.environ.get('VROOM_WORK', os.path.join(R, 'work'))
-if not os.path.isdir(W):
-    W = '/source/vroom/work'
+def find_work():
+    """VROOM_WORK, else the nearest work/ above (a worktree has none of its own)"""
+    if os.environ.get('VROOM_WORK'):
+        return os.environ['VROOM_WORK']
+    d = R
+    while d != '/':
+        if os.path.isdir(f'{d}/work/vcpkg-tool'):
+            return f'{d}/work'
+        d = os.path.dirname(d)
+    return f'{R}/work'
+
+
+W = find_work()
 SRC = f'{W}/vcpkg-tool'
 LIBCXX = os.environ.get('LIBCXX_INC', '/usr/lib/llvm-23/include/c++/v1')
 
