@@ -1381,8 +1381,25 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
            quoted here); its type in the template's own terms (T_), as
            clang 17 and later mangle it */
         qualified_type declared;
-        if (function &&
-            analysis.dependent_parameter_type(function, i, declared)) {
+        bool is_pack = false;
+        qualified_type value_type;
+        if (function && pack &&
+            analysis.template_parameter_kind(function, i, is_pack,
+                                             value_type) ==
+                semantic_analysis::template_parameter_form_kind::value) {
+            /* [impl.clang]: a non-type parameter pack's template-param-decl,
+               "Tp" "Tn" and its type (a later revision of
+               [abi:mangle.template-arg] than the one quoted here), when the
+               pack is empty or its type depends on a template parameter:
+               the type is then not deduced from the arguments */
+            if (pack == 1 ||
+                analysis.dependent_parameter_type(function, i, declared)) {
+                text("TpTn");
+                if (!type(value_type))
+                    return false;
+            }
+        } else if (function &&
+                   analysis.dependent_parameter_type(function, i, declared)) {
             if (pack)
                 return false;
             text("Tn");
