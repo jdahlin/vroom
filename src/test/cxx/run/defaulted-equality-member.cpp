@@ -12,6 +12,22 @@ struct segment {
     const char *name;
     bool operator==(const segment &) const = default;
 };
+/* [class.eq]/3: the base classes first, then the members, an array's
+   elements one by one */
+struct line : point {
+    int steps[3];
+    int grid[2][2];
+    bool operator==(const line &) const = default;
+};
+struct tagged : point {
+    int tag;
+    friend bool operator==(const tagged &, const tagged &) = default;
+};
+constexpr line l0{{1, 2}, {1, 2, 3}, {{1, 2}, {3, 4}}},
+    l1{{1, 2}, {1, 2, 3}, {{1, 2}, {3, 4}}},
+    l2{{1, 2}, {1, 2, 3}, {{1, 2}, {3, 5}}};
+static_assert(l0 == l1);
+static_assert(!(l0 == l2));
 constexpr point p0{1, 2}, p1{1, 2}, p2{1, 3};
 static_assert(p0 == p1);
 static_assert(!(p0 == p2));
@@ -19,5 +35,6 @@ int main()
 {
     point p{1, 2}, q{1, 2}, r{1, 3};
     segment a{p, "a"}, b{q, a.name}, c{r, a.name};
-    return !(p == q) + (p == r) + !(a == b) + (a == c);
+    tagged t{{1, 2}, 3}, u{{1, 2}, 3}, v{{1, 3}, 3};
+    return !(t == u) + (t == v) + !(p == q) + (p == r) + !(a == b) + (a == c);
 }
