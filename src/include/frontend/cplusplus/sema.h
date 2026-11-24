@@ -2007,6 +2007,11 @@ class semantic_analysis
     /* [temp.expl.spec]/16: the explicit specialization being analysed is
        the inner one of template<> template<> ... */
     bool nested_explicit_specialization = false;
+    /* the class specialization a member class template's partial
+       specialization, defined outside the class template
+       (template<class T> template<class U> struct S<T>::X<U*> {...}),
+       is analysed for: its nested-name-specifier names it */
+    entity_index member_partial_class = 0;
     analysis_result deduction_guide(DeductionGuide n);
     analysis_result deduction_guide(TemplateDeclaration t, DeductionGuide n);
     analysis_result deduction_guide_candidate(TemplateDeclaration t,

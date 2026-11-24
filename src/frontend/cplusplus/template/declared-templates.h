@@ -17,7 +17,8 @@ VPRIV bool made_of_template_parameter(const types &table, qualified_type t,
    class template defined outside it, and optionally the member class
    name's token (declared-templates.cpp) */
 VPRIV SyntaxRef out_of_class_class_member(SyntaxRef only,
-                                          token_index *name = nullptr);
+                                          token_index *name = nullptr,
+                                          bool partial = false);
 
 } // namespace cplusplus
 

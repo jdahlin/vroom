@@ -292,7 +292,13 @@ analysis_result semantic_analysis::class_specialization_definition(
     }
     if (nested_part) {
         nominated_scope ns;
-        VTRY(nr, nested_name_specifier(nested_part.index(), ns));
+        if (member_partial_class)
+            ns.entity = member_partial_class;
+        else {
+            analysis_result nr = nested_name_specifier(nested_part.index(), ns);
+            if (nr != analysis_result::well_formed)
+                return nr;
+        }
         if (!is_class_entity(ns.entity) && !is_namespace(ns.entity))
             return not_supported(n, rule);
         /* [temp.expl.spec]/2: in a namespace enclosing the primary's */
@@ -477,7 +483,18 @@ analysis_result semantic_analysis::substitute_specialization(
             id = s.declarator[1][0].qualified_id()[1].index();
     } else {
         SyntaxRef head = s.definition[0].index();
-        id = class_head_name(head).index();
+        auto written = class_head_name(head);
+        id = written.index();
+        /* a member class template's partial specialization defined outside
+           its class (template<class T> template<class U> struct
+           S<T>::X<U*>): the arguments are the last template-id's, S<T> being
+           bound where the specialization was declared */
+        if (written.qualified_class_head_name() && written.size() == 2 &&
+            written[0].is(syntax_kind::nested_name_specifier) &&
+            written[0].size() == 2 &&
+            written[0][0].is(syntax_kind::simple_template_id) &&
+            written[1].is(syntax_kind::simple_template_id))
+            id = written[1].index();
     }
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[s.entity].enclosing);

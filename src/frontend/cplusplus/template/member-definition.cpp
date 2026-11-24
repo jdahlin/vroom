@@ -153,7 +153,8 @@ analysis_result semantic_analysis::member_definition_of_template(
     SyntaxRef id = 0;
     token_index class_member_name = 0;
     if (class_member) {
-        id = out_of_class_class_member(class_member, &class_member_name);
+        id = out_of_class_class_member(class_member, &class_member_name,
+                                       static_cast<bool>(inner));
     } else if (variable) {
         id = out_of_class_variable_member(definition);
     } else {
@@ -569,7 +570,8 @@ analysis_result semantic_analysis::define_member_class_template_of(
     enter_instantiation(context, entity_table[c].enclosing, declaration);
     SyntaxRef only = sole_decl_specifier(definition);
     token_index name_token = 0;
-    if (!only || !out_of_class_class_member(only, &name_token) ||
+    analysis_result r = analysis_result::well_formed;
+    if (!only || !out_of_class_class_member(only, &name_token, true) ||
         template_head_parameters(inner, parameters, true, true, true, true) !=
             analysis_result::well_formed ||
         head_constraint(inner) || trailing_constraint(inner)) {
@@ -578,10 +580,26 @@ analysis_result semantic_analysis::define_member_class_template_of(
     }
     uint32_t name = tokens.identifier(name_token);
     current_scope = c;
+    /* [temp.class.spec]/5: a partial specialization of the member class
+       template, X<U*>: declared in the specialization as one written in
+       its class is */
+    if (only.class_specifier().class_head()[1][1].is(
+            syntax_kind::simple_template_id)) {
+        entity_index saved_class = defining_class;
+        defining_class = 0;
+        member_partial_class = c;
+        r = class_specialization_definition(inner, only, parameters);
+        member_partial_class = 0;
+        defining_class = saved_class;
+        leave_instantiation(context);
+        if (r != analysis_result::well_formed)
+            return member_definition_unsupported(declaration, recorded);
+        return r;
+    }
     uint32_t number = 0, first = 0;
     entity_index scope = 0;
-    analysis_result r = template_parameter_scope(inner, parameters, c, name,
-                                                 number, scope, first);
+    r = template_parameter_scope(inner, parameters, c, name, number, scope,
+                                 first);
     leave_instantiation(context);
     entity_index held = entity_table.find(c, name);
     uint32_t declared = class_template_of(held);

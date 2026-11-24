@@ -65,7 +65,7 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
             if (d.is(syntax_kind::simple_declaration)) {
                 SyntaxRef only = sole_decl_specifier(d);
                 if (only && only.is(syntax_kind::class_specifier) &&
-                    out_of_class_class_member(only))
+                    out_of_class_class_member(only, nullptr, true))
                     return member_definition_of_template(t, d, inner);
             }
             return not_supported(t, "temp.mem");
@@ -83,7 +83,8 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
 /* [temp.mem.class]/1: a member class of a class template defined outside
    it (template<class T> class O<T>::S { ... };): returns the
    simple-template-id O<T> and optionally the member class name token S */
-VPRIV SyntaxRef out_of_class_class_member(SyntaxRef only, token_index *name)
+VPRIV SyntaxRef out_of_class_class_member(SyntaxRef only, token_index *name,
+                                          bool partial)
 {
     if (!only || !only.is(syntax_kind::class_specifier))
         return 0;
@@ -92,8 +93,16 @@ VPRIV SyntaxRef out_of_class_class_member(SyntaxRef only, token_index *name)
         head[1].size() != 2 ||
         !head[1][0].is(syntax_kind::nested_name_specifier) ||
         head[1][0].size() != 2 ||
-        !head[1][0][0].is(syntax_kind::simple_template_id) ||
-        !head[1][1].is_identifier())
+        !head[1][0][0].is(syntax_kind::simple_template_id))
+        return 0;
+    /* ... or a partial specialization's simple-template-id, O<T>::X<U*>
+       ([temp.class.spec]/5) */
+    if (partial && head[1][1].is(syntax_kind::simple_template_id)) {
+        if (name)
+            *name = head[1][1].first_token();
+        return head[1][0][0].index();
+    }
+    if (!head[1][1].is_identifier())
         return 0;
     if (name)
         *name = head[1][1].token();
