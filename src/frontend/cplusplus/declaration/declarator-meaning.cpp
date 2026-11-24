@@ -771,13 +771,37 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
        parsed still has its decl-specifier-seq and declarator: it declares
        the declarator-id and only uses the names of the rest (a return
        type) */
-    if (!by_declarator && declaration.is(syntax_kind::function_definition)) {
-        bool head_parsed = true;
-        for (auto c : declaration.elements())
+    auto function_head_parsed = [&](SyntaxRef f) {
+        for (auto c : f.elements())
             if (c.is_node() && !c.is(syntax_kind::function_body) &&
                 !parsed_completely(c.index()))
-                head_parsed = false;
-        by_declarator = head_parsed;
+                return false;
+        return true;
+    };
+    if (!by_declarator && declaration.is(syntax_kind::function_definition))
+        by_declarator = function_head_parsed(declaration);
+    /* the same for a function template's definition: its template-head
+       and declarator parsed, its body not (a _BitInt type in it): the
+       declarator-id is what it declares, not the names its return type
+       uses (size_t) */
+    bool template_head_declares = false;
+    if (!by_declarator && declaration.is(syntax_kind::template_declaration)) {
+        SyntaxRef last = declaration;
+        bool heads_parsed = true;
+        while (
+            (last.template_declaration() || last.explicit_specialization()) &&
+            last.size() && last.back().is_node()) {
+            for (auto c : last.elements())
+                if (c.is_node() && c.index() != last.back().index() &&
+                    !parsed_completely(c.index()))
+                    heads_parsed = false;
+            last = last.back();
+        }
+        if (heads_parsed && last.function_definition() &&
+            function_head_parsed(last)) {
+            by_declarator = true;
+            template_head_declares = true;
+        }
     }
     /* a template of a function or of declarators: what its declarator-ids
        name (below), not the types its declaration names (an explicit
@@ -1026,7 +1050,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         if ((inner.is(syntax_kind::simple_declaration,
                       syntax_kind::member_declaration,
                       syntax_kind::function_definition)) &&
-            parsed_completely(inner))
+            (parsed_completely(inner) ||
+             (template_head_declares &&
+              inner.is(syntax_kind::function_definition))))
             declarator_ids(inner);
     }
     for (token_index id : ids) {
