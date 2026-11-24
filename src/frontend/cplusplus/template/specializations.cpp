@@ -823,9 +823,42 @@ analysis_result semantic_analysis::named_specialization(
            declaration refers to is partial ordering's: not analysed */
         owned_array<uint32_t> group;
         function_template_overloads(function_templates[ft - 1].name, group);
-        if (group.size() > 1)
-            return not_supported_because(
-                n, rule, "overloaded function templates (partial ordering)");
+        if (group.size() > 1) {
+            /* [temp.deduct.decl]/1: without template arguments given, the
+               templates whose deduction from the declared type succeeds;
+               exactly one of them is the one named (more than one is
+               partial ordering's) */
+            uint32_t chosen = 0;
+            bool unique = !m.template_id && !m.qualifier;
+            for (uint32_t g : group) {
+                if (!unique)
+                    break;
+                const function_template &c = function_templates[g - 1];
+                if (entity_table[c.entity].enclosing != owner_scope ||
+                    c.primary || entity_table[c.entity].member_cv)
+                    continue;
+                owned_array<template_argument> trial;
+                owned_array<bool> trial_set;
+                for (uint32_t i = 0; i < c.parameter_count; i++) {
+                    trial.append(template_argument());
+                    trial_set.append(false);
+                }
+                matching_declaration = true;
+                bool deduces = deduce_type(entity_table[c.entity].type, type,
+                                           trial, trial_set, true);
+                matching_declaration = false;
+                if (!deduces)
+                    continue;
+                if (chosen)
+                    unique = false;
+                chosen = g;
+            }
+            if (!unique || !chosen)
+                return not_supported_because(
+                    n, rule,
+                    "overloaded function templates (partial ordering)");
+            ft = chosen;
+        }
     }
     const function_template f = function_templates[ft - 1];
     const entity t = entity_table[f.entity];
