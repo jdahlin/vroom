@@ -705,8 +705,11 @@ analysis_result semantic_analysis::instantiate_class(
         }
         /* named again where no complete type is needed: the use that needs
            it defines it (complete_instantiation) */
-        if (defined_by && lazy_return)
+        if (defined_by && lazy_return) {
             instantiations[k].lazy = true;
+            if (!instantiations[k].lazy_at)
+                instantiations[k].lazy_at = at;
+        }
         return analysis_result::well_formed;
     }
     if (instantiation_depth >= 64)
@@ -760,8 +763,12 @@ analysis_result semantic_analysis::instantiate_class(
             type_table.of_entity(type_kind::class_type, c), cv_none);
         entity_table[c].instantiation = index + 1;
         instantiations[index].specialization = c;
-        if (lazy_return && defined_by)
+        /* (declared while the specializations of a class are declared:
+           the use that needs it complete defines it) */
+        if ((lazy_return || declaring_specializations) && defined_by) {
             instantiations[index].lazy = true;
+            instantiations[index].lazy_at = at;
+        }
         if (defining_argument && defined_by && !declaring_specializations)
             deferred_class_instantiations.append(
                 deferred_class_instantiation{defining_class, at, index, c});
@@ -782,7 +789,7 @@ void semantic_analysis::complete_instantiation(entity_index c)
         return;
     instantiations[index].lazy = false;
     entity_index done = 0;
-    define_class_outside(SyntaxRef(), index, done);
+    define_class_outside(instantiations[index].lazy_at, index, done);
 }
 
 bool semantic_analysis::require_complete(entity_index c) const
@@ -985,6 +992,11 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     if (entity_table[scope].explicitly_instantiated ==
         instantiation_kind::definition)
         return true;
+    /* [temp.explicit]/11: an explicit instantiation declaration names a
+       class whose vtable another unit emits: its virtual functions are not
+       needed by one [impl.clang] */
+    bool vtable_elsewhere = entity_table[scope].explicitly_instantiated ==
+                            instantiation_kind::declaration;
     entity_index first = entity_table.find(scope, tokens.identifier(name));
     /* (a constructor, destructor or operator is found by no such name here:
        defined with the unit) */
@@ -993,7 +1005,7 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
         return true;
     for (entity_index e = first; e; e = entity_table[e].next_overload) {
         if (entity_table[e].member_definition_needed ||
-            entity_table[e].virtual_ ||
+            (entity_table[e].virtual_ && !vtable_elsewhere) ||
             explicitly_instantiated(e) == instantiation_kind::definition)
             return true;
     }

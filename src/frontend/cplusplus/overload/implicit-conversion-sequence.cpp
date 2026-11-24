@@ -584,8 +584,12 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
             x.kind == type_kind::none || y.kind == type_kind::none)
             return of_form(sequence::form::unknown);
         bool ambiguous = false;
-        /* a base needs the complete derived class */
-        require_complete(c2);
+        /* a base needs the complete derived class; the same class is
+           reference-related to itself as it is ([dcl.init.ref]/5.1: a
+           direct binding, no constructor: libc++'s concepts name
+           pair<const string, J>& while J is being defined) */
+        if (c1 != c2)
+            require_complete(c2);
         bool related = c1 && c2 && (c1 == c2 || entity_table[c2].size) &&
                        reference_related(t1, t2, ambiguous);
         if (ambiguous)
@@ -706,9 +710,23 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
 {
     /* [temp.inst]/2: the constructors and conversion functions a
        conversion uses: a specialization named only is defined here */
-    require_complete(parameter);
-    require_complete(a.type);
     const struct type p = type_table[parameter.unqualified()];
+    /* ([dcl.init.ref]/5.1: a reference bound to the same class needs no
+       complete class, reference_sequence) */
+    bool direct = false;
+    if (p.kind == type_kind::lvalue_reference ||
+        p.kind == type_kind::rvalue_reference) {
+        const struct type &r =
+            type_table[referenced_type(parameter).unqualified()];
+        const struct type &y =
+            type_table[referenced_type(a.type).unqualified()];
+        direct = r.kind == type_kind::class_type &&
+                 y.kind == type_kind::class_type && y.entity == r.entity;
+    }
+    if (!direct) {
+        require_complete(parameter);
+        require_complete(a.type);
+    }
     if (p.kind == type_kind::lvalue_reference ||
         p.kind == type_kind::rvalue_reference)
         return reference_sequence(a, parameter, user_defined);

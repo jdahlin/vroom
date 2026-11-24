@@ -1037,6 +1037,22 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                        instantiations[k].argument_count, done));
             }
         }
+        /* [temp.inst]/2: a specialization named only (lazy) is defined
+           where its members are looked up */
+        if (entity_table[e].kind == entity_kind::class_type &&
+            !incomplete_allowed) {
+            complete_instantiation(e);
+            /* (one that waits for the class being defined, named in its
+               member-specification: its members are needed now, [impl.clang] clang
+               instantiates it here) */
+            uint32_t record = entity_table[e].instantiation;
+            if (record && !entity_table[e].defined && !entity_table[e].size &&
+                !instantiations[record - 1].defining &&
+                instantiations[record - 1].specialization == e) {
+                entity_index done = e;
+                VTRY(dr, define_class_outside(n, record - 1, done));
+            }
+        }
         const entity &x = entity_table[e];
         if (x.kind == entity_kind::class_type) {
             /* [basic.lookup.qual]/1 with [class.qual]: the class's members

@@ -140,8 +140,8 @@ bool semantic_analysis::converts_to_lvalue_reference(entity_index c) const
          f = entity_table[f].next_overload) {
         if (!entity_table[f].conversion_function)
             return true;
-        qualified_type to = conversion_function_result(f).type;
-        if (type_table[to.unqualified()].kind == type_kind::lvalue_reference)
+        /* (the result's type is the referenced type, its category lvalue) */
+        if (conversion_function_result(f).category == value_category::lvalue)
             return true;
     }
     return false;
@@ -281,12 +281,35 @@ analysis_result semantic_analysis::overloaded_operator(
        takes the operand by a standard conversion beats them all (checked
        below once it is chosen) */
     bool unary_prefix = operands.size() == 1 && !postfix;
-    if (converts && !logical && !unary_prefix &&
-        (operands.size() != 2 || member_only ||
+    bool subscript =
+        op == preprocessing_op_or_punc::LEFT_BRACKET && operands.size() == 2;
+    bool incdec = (op == preprocessing_op_or_punc::PLUS_PLUS ||
+                   op == preprocessing_op_or_punc::MINUS_MINUS) &&
+                  operands.size() == 1;
+    bool modifying = incdec;
+    switch (op) {
+    case preprocessing_op_or_punc::PLUS_EQUAL:
+    case preprocessing_op_or_punc::MINUS_EQUAL:
+    case preprocessing_op_or_punc::STAR_EQUAL:
+    case preprocessing_op_or_punc::SLASH_EQUAL:
+    case preprocessing_op_or_punc::PERCENT_EQUAL:
+    case preprocessing_op_or_punc::LESS_LESS_EQUAL:
+    case preprocessing_op_or_punc::GREATER_GREATER_EQUAL:
+    case preprocessing_op_or_punc::AMPERSAND_EQUAL:
+    case preprocessing_op_or_punc::CARET_EQUAL:
+    case preprocessing_op_or_punc::BAR_EQUAL:
+        modifying = operands.size() == 2;
+        break;
+    default:
+        break;
+    }
+    if (converts && !logical && !unary_prefix && !incdec &&
+        (operands.size() != 2 || (member_only && !subscript) ||
          op == preprocessing_op_or_punc::SPACESHIP))
         return not_supported(n, "over.built");
-    if (member_only && type_table[operands[0].type.unqualified()].kind !=
-                           type_kind::class_type)
+    if (member_only && !(subscript && converts) &&
+        type_table[operands[0].type.unqualified()].kind !=
+            type_kind::class_type)
         return analysis_result::well_formed;
     if (operators_held) {
         /* (the detail names the first declaration not analysed that may
@@ -532,10 +555,31 @@ analysis_result semantic_analysis::overloaded_operator(
     if (r == analysis_result::well_formed && three_way)
         VTRY_SET(r, collect(spaceship, true, true));
     if (candidates.empty()) {
-        if (converts && !logical && !member_only && operands.size() == 2) {
+        bool unary_builtin = false;
+        if (converts && (unary_prefix || incdec)) {
+            switch (op) {
+            case preprocessing_op_or_punc::PLUS_PLUS:
+            case preprocessing_op_or_punc::MINUS_MINUS:
+            case preprocessing_op_or_punc::STAR:
+            case preprocessing_op_or_punc::PLUS:
+            case preprocessing_op_or_punc::MINUS:
+            case preprocessing_op_or_punc::TILDE:
+                unary_builtin = true;
+                break;
+            default:
+                break;
+            }
+        }
+        /* a comma takes no conversion for its built-in operator
+           ([expr.comma]) */
+        bool no_conversion = op == preprocessing_op_or_punc::COMMA;
+        if (converts && !logical && (!member_only || subscript) &&
+            !no_conversion && (operands.size() == 2 || unary_builtin)) {
             /* [over.built]: no user-defined operator was found; convert class
                operands via their unique non-class conversion target and apply
-               the built-in binary operator */
+               the built-in operator (a unary one: the caller does, with the
+               converted operand in result) */
+            bool left_of_modifying = false;
             auto convert_operand =
                 [&](expression_meaning &op_val) -> analysis_result {
                 const struct type &ot = type_table[op_val.type.unqualified()];
@@ -548,7 +592,13 @@ analysis_result semantic_analysis::overloaded_operator(
                 for (entity_index f : fns) {
                     if (entity_table[f].explicit_)
                         continue;
-                    qualified_type rt = conversion_function_result(f).type;
+                    expression_meaning result = conversion_function_result(f);
+                    qualified_type rt = result.type;
+                    if (left_of_modifying &&
+                        result.category != value_category::lvalue)
+                        /* a modified operand binds to a function that
+                           returns an lvalue reference alone */
+                        continue;
                     const struct type &rtr = type_table[rt.unqualified()];
                     if (rtr.kind == type_kind::class_type)
                         continue;
@@ -569,9 +619,24 @@ analysis_result semantic_analysis::overloaded_operator(
                 return analysis_result::well_formed;
             };
             expression_meaning lhs = operands[0];
+            left_of_modifying = modifying;
+            if (unary_builtin) {
+                VTRY(ur, convert_operand(lhs));
+                m = lhs;
+                return analysis_result::well_formed;
+            }
             expression_meaning rhs = operands[1];
             VTRY(lr, convert_operand(lhs));
+            left_of_modifying = false;
             VTRY(rr, convert_operand(rhs));
+            if (subscript || modifying) {
+                /* [over.sub], [over.built]/18-19: no operator function: the
+                   built-in subscript or compound assignment (the caller's)
+                   takes the converted operands */
+                operands[0] = lhs;
+                operands[1] = rhs;
+                return analysis_result::well_formed;
+            }
             VTRY(br, builtin_binary(n, at, op, lhs, rhs, m));
             handled = true;
         }
@@ -603,7 +668,7 @@ analysis_result semantic_analysis::overloaded_operator(
             /* a copy assignment operator declared defaulted has no
                candidate here, and is no implicit one */
             bool implicit_viable = true;
-            if (!declares_move && !entity_table[c].defaulted_copy_assignment &&
+            if (!entity_table[c].defaulted_copy_assignment &&
                 !entity_table[c].defaulted_move_assignment &&
                 operands.size() == 2 &&
                 type_table[operands[1].type.unqualified()].entity == 0) {
@@ -925,15 +990,17 @@ analysis_result semantic_analysis::unary_operator_function(
     expression_meaning result;
     analysis_result r = overloaded_operator(n, at, op, postfix, syntax,
                                             operands, handled, result);
-    if (r == analysis_result::well_formed && handled)
+    /* not handled with a result: the operand converted for the built-in
+       operator ([over.built]) */
+    if (r == analysis_result::well_formed && (handled || result.node))
         operand = result;
     return r;
 }
 
 analysis_result semantic_analysis::binary_operator_function(
     SyntaxRef n, token_index at, preprocessing_op_or_punc op,
-    SyntaxElement left_syntax, const expression_meaning &left,
-    SyntaxElement right_syntax, const expression_meaning &right, bool &handled,
+    SyntaxElement left_syntax, expression_meaning &left,
+    SyntaxElement right_syntax, expression_meaning &right, bool &handled,
     expression_meaning &m)
 {
     owned_array<SyntaxElement> syntax;
@@ -942,7 +1009,17 @@ analysis_result semantic_analysis::binary_operator_function(
     operands.append(left);
     syntax.append(right_syntax);
     operands.append(right);
-    return overloaded_operator(n, at, op, false, syntax, operands, handled, m);
+    analysis_result r =
+        overloaded_operator(n, at, op, false, syntax, operands, handled, m);
+    if (r == analysis_result::well_formed && !handled &&
+        (op == preprocessing_op_or_punc::LEFT_BRACKET ||
+         compound_assignment_operator(op) != preprocessing_op_or_punc::count)) {
+        /* a subscript's or compound assignment's operands converted for the
+           built-in operator */
+        left = operands[0];
+        right = operands[1];
+    }
+    return r;
 }
 
 } // namespace cplusplus

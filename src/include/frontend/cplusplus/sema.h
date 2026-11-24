@@ -422,7 +422,7 @@ enum gnu_attribute_flag : uint32_t {
    member functions and function templates */
 const uint32_t gnu_function_symbol_flags =
     gnu_hidden_visibility | gnu_abi_tag |
-    gnu_exclude_from_explicit_instantiation | gnu_diagnose_if;
+    gnu_exclude_from_explicit_instantiation | gnu_diagnose_if | gnu_nonnull;
 /* noinline, always_inline and noreturn, which lowering gives a member
    function or function template's specialization as a non-member's */
 const uint32_t gnu_inline_flags =
@@ -1508,6 +1508,11 @@ enum class semantic_kind : uint8_t {
        is written in (0: none); a prvalue of type unsigned int or const
        char*.  Inside a default_argument it is the call's */
     source_location,
+    /* [dcl.fct.def.general]/8 __func__, and [ext:clang_predefined_names]'s
+       __FUNCTION__ and __PRETTY_FUNCTION__: op: a predefined_name_form; b:
+       the function it is written in (0: none); an lvalue of type const
+       char[N], the function's name as a string constant */
+    predefined_name,
     /* [dcl.fct.default]/5: a default argument whose value depends on the
        call that uses it (source_location nodes inside): a: the argument's
        initialization; at: the call (the constructor of a default member
@@ -1590,6 +1595,9 @@ enum class semantic_kind : uint8_t {
        well-formed (a tree in part, which the evaluator does not run) */
     function_body,
 };
+
+/* [dcl.fct.def.general]/8, [ext:clang_predefined_names]: which name */
+enum class predefined_name_form : uint8_t { func, function, pretty };
 
 /* [ext:clang_source_location]: the value a source_location node has */
 enum class source_location_builtin : uint8_t {
@@ -3678,6 +3686,8 @@ class semantic_analysis
     bool polymorphic_class(entity_index c) const;
     bool virtual_destructor(entity_index c) const;
     bool triviality_unknown(entity_index c) const;
+    bool declared_defaulted(entity_index f) const;
+    bool clang_trivial_special_members(entity_index c);
     bool class_trivially_copyable(entity_index c, bool &known);
     analysis_result gnu_offsetof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_bit_cast(SyntaxRef n, expression_meaning &m);
@@ -3748,6 +3758,8 @@ class semantic_analysis
                                           qualified_type &result);
     analysis_result builtin_addressof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_source_location(SyntaxRef n, expression_meaning &m);
+    /* [dcl.fct.def.general]/8: __func__, __FUNCTION__, __PRETTY_FUNCTION__ */
+    analysis_result predefined_name(token_index t, expression_meaning &m);
     analysis_result clang_source_location_object(SyntaxRef n,
                                                  expression_meaning &m);
     /* a default argument's value is the call's: its source_location nodes
@@ -5224,6 +5236,8 @@ class semantic_analysis
            ([temp.inst]/2: no completely-defined type is needed there):
            declared, defined by complete_instantiation when a use needs it */
         bool lazy = false;
+        /* ... and where it was named, for what its definition reports */
+        SyntaxRef lazy_at = 0;
     };
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,
@@ -5335,6 +5349,15 @@ class semantic_analysis
        parameter names its default template-argument uses (its own
        template's, or an earlier declaration's after a merge) */
     owned_array<uint32_t> template_parameter_default_names;
+    /* [temp.param]/17: the template template-parameters bound to an
+       argument: the parameter's name, the template it names and its entity, whose
+       parameters' defaults complete a template-id naming the argument */
+    struct bound_template_template {
+        uint32_t name;
+        entity_index target;
+        entity_index parameter;
+    };
+    owned_array<bound_template_template> bound_template_templates;
     /* the instantiation whose specialization the declaration analysed
        now declares (its record's index plus one), and how deep
        instantiations nest ([temp.inst]/16) */
@@ -5796,6 +5819,7 @@ class semantic_analysis
     analysis_result class_template_definition(SyntaxRef n, SyntaxRef specifier);
     /* [temp.names]/1: a simple-template-id's arguments for the class
        template function_templates[ct - 1], defaults included */
+    uint32_t bound_template_template_of(SyntaxRef id) const;
     analysis_result
     template_id_arguments(SyntaxRef id, uint32_t ct,
                           owned_array<template_argument> &arguments);
@@ -6331,6 +6355,19 @@ class semantic_analysis
     /* the invented template-parameters of lambda-expression n
        ([expr.prim.lambda.closure]/3) */
     uint32_t invented_parameter_count(SyntaxRef n) const;
+    /* [dcl.fct.def.general]/8, [ext:clang_predefined_names]: the characters
+       (no NUL) of the name `form` of function f, as clang spells it; false
+       when it cannot be (a typedef-name clang prints is lost) */
+    bool predefined_name_text(entity_index f, predefined_name_form form,
+                              owned_buffer &out) const;
+    /* the name of template-parameter i of template entity t (0: none) */
+    uint32_t template_parameter_name(entity_index t, uint32_t i) const
+    {
+        const function_template &f =
+            function_templates[entity_table[t].instantiation - 1];
+        return entity_table[template_parameter_entities[f.first_parameter + i]]
+            .name;
+    }
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
     {
@@ -6378,6 +6415,10 @@ class semantic_analysis
     /* [abi:mangle.function-param]: the position plus one of function
        template t's parameter named by token i (0: none) */
     uint32_t function_parameter_position(entity_index t, token_index i) const;
+    const char *identifier_text(uint32_t id, size_t *length) const
+    {
+        return tokens.pp.identifier_spelling(id - 1, length);
+    }
     uint32_t token_identifier(token_index i) const
     {
         return tokens.identifier(i);
@@ -6668,6 +6709,9 @@ class semantic_analysis
         }
     };
     uint32_t require_complete_class = 0;
+    /* an explicit instantiation directive is being analysed: the
+       specialization it names is defined ([temp.explicit]/10), not named */
+    bool explicit_instantiating = false;
     /* a nested-name-specifier's simple-template-id is being analysed: its
        template-arguments are only named (template_id_arguments) */
     bool nested_template_id = false;
@@ -7060,9 +7104,9 @@ class semantic_analysis
     /* ... of two: m the call when one is chosen (handled) */
     analysis_result binary_operator_function(
         SyntaxRef n, token_index at, preprocessing_op_or_punc op,
-        SyntaxElement left_syntax, const expression_meaning &left,
-        SyntaxElement right_syntax, const expression_meaning &right,
-        bool &handled, expression_meaning &m);
+        SyntaxElement left_syntax, expression_meaning &left,
+        SyntaxElement right_syntax, expression_meaning &right, bool &handled,
+        expression_meaning &m);
     /* the initialization of type from the analysed expression m */
     analysis_result initialize_with(SyntaxRef at, expression_meaning &m,
                                     qualified_type type, bool direct, bool list,

@@ -166,6 +166,8 @@ void semantic_analysis::bind_template_argument(entity_index scope,
             if (t.entity == static_cast<entity_index>(a.value) &&
                 (t.is_class || t.is_alias) && !t.primary) {
                 entity_table.bind(scope, name, t.name);
+                if (is_template_template_parameter(parameter))
+                    bound_template_templates.append({name, t.name, parameter});
                 return;
             }
         return;

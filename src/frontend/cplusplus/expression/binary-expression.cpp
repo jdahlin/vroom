@@ -778,6 +778,15 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
         return is_object_pointer(x.type) &&
                size_of_type(type_table[x.type.unqualified()].operand) != 0;
     };
+    auto incomplete_class_pointer = [&](const expression_meaning &x) {
+        if (!is_object_pointer(x.type))
+            return false;
+        const struct type &p =
+            type_table[type_table[x.type.unqualified()].operand.unqualified()];
+        return p.kind == type_kind::class_type &&
+               entity_table[p.entity].kind == entity_kind::class_type &&
+               !entity_table[p.entity].size;
+    };
     const char *rule = "one operand shall be a pointer to a "
                        "completely-defined object type and the other shall "
                        "have integral or unscoped enumeration type";
@@ -797,8 +806,15 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
         qualified_type y = type_table[right.type.unqualified()].operand;
         if (op == preprocessing_op_or_punc::PLUS)
             return ill_formed(n, rule, "expr.add");
-        if (!complete_object(left) || !complete_object(right))
+        if (!complete_object(left) || !complete_object(right)) {
+            /* [expr.add]/2: a pointer to an incomplete class (one being
+               defined) is no completely-defined object type: in a
+               substitution, a deduction failure ([temp.deduct]/8) */
+            if (substituting && incomplete_class_pointer(left) &&
+                incomplete_class_pointer(right))
+                return analysis_result::ill_formed;
             return not_supported(n, "expr.add");
+        }
         if (x.unqualified() != y.unqualified())
             return ill_formed(n,
                               "both operands shall be pointers to "

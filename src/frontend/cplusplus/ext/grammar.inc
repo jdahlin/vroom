@@ -266,6 +266,12 @@ PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin
 PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_LINE ( )")
 PRODUCTION(clang_source_location, "clang-source-location-expression", "__builtin_COLUMN ( )")
 
+/* ---- [dcl.fct.def.general]/8 predefined names ---- */
+
+PRODUCTION(clang_predefined_names, "primary-expression", "__func__")
+PRODUCTION(clang_predefined_names, "primary-expression", "__FUNCTION__")
+PRODUCTION(clang_predefined_names, "primary-expression", "__PRETTY_FUNCTION__")
+
 /* ---- clang Language Extensions, Type Trait Primitives ---- */
 
 PRODUCTION(clang_type_traits, "primary-expression", "clang-type-trait-expression")

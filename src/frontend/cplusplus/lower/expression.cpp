@@ -19,6 +19,8 @@ uint32_t c_lowering::expression(uint32_t index)
         return string_literal(n);
     case semantic_kind::source_location:
         return source_location(n);
+    case semantic_kind::predefined_name:
+        return predefined_name(n);
     case semantic_kind::default_argument:
         return default_argument(n);
     case semantic_kind::statement_expression: {

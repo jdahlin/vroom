@@ -318,6 +318,23 @@ uint32_t c_lowering::source_location(const semantic_node &n)
     return cast(array, t, AST_CAST_ARRAY_DECAY);
 }
 
+/* [dcl.fct.def.general]/8: the function's name as a string constant */
+uint32_t c_lowering::predefined_name(const semantic_node &n)
+{
+    owned_buffer text;
+    analysis.predefined_name_text(n.b, static_cast<predefined_name_form>(n.op),
+                                  text);
+    owned_array<uint8_t> bytes;
+    bytes.resize(text.size() + 1);
+    for (size_t i = 0; i < text.size(); i++)
+        bytes[i] = static_cast<uint8_t>(text.data()[i]);
+    bytes[text.size()] = 0;
+    qualified_type element = record(n.type).operand;
+    return ast_builder_string(c, type(element, n.at), bytes.data(),
+                              static_cast<uint32_t>(bytes.size()), 1,
+                              LEX_TOKEN_STRING);
+}
+
 /* [dcl.fct.default]/5: the argument's builtins are those of the call */
 uint32_t c_lowering::default_argument(const semantic_node &n)
 {

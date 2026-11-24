@@ -755,8 +755,20 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             if (!entity_table[d.specialization].defined &&
                 !instantiations[d.index].defining) {
                 entity_index done = d.specialization;
-                result =
-                    worse(result, define_class_outside(d.at, d.index, done));
+                size_t mark = unsupported.size();
+                analysis_result defined =
+                    define_class_outside(d.at, d.index, done);
+                /* [temp.inst]/2: named where no complete type was needed
+                   (a pointer to it): what the analysis cannot define yet
+                   is no refusal of this class; the use that needs the
+                   specialization complete defines it again */
+                if (defined == analysis_result::unsupported) {
+                    unsupported.resize(mark);
+                    instantiations[d.index].lazy = true;
+                    instantiations[d.index].has_failure = false;
+                    continue;
+                }
+                result = worse(result, defined);
             }
         }
     }

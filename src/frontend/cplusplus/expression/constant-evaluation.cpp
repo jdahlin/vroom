@@ -1468,8 +1468,6 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             return CONST_UNKNOWN;
         if (x.a && e.kind == entity_kind::variable && e.name && !e.automatic &&
             scalar_variable && !(e.constexpr_ && e.definition)) {
-            if (e.usable == constness::unknown)
-                return CONST_UNKNOWN;
             for (size_t i = 0; i < state.objects.size(); i++)
                 if (state.objects[i].entity == x.a && !state.objects[i].frame) {
                     object = static_cast<uint32_t>(i);
@@ -1478,8 +1476,13 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             constant_evaluation::object o;
             o.entity = x.a;
             o.read_only = true;
-            if (e.usable == constness::constant && tk != type_kind::pointer &&
-                !(e.type.cv() & cv_volatile))
+            /* (a variable not classified yet, as one named in its own
+               initializer: its address is a permitted result, a read of
+               it is not decided) */
+            if (e.usable == constness::unknown)
+                o.opaque = true;
+            else if (e.usable == constness::constant &&
+                     tk != type_kind::pointer && !(e.type.cv() & cv_volatile))
                 o.value = value_of(evaluated_type(e.type), e.value);
             else
                 o.unusable = true;

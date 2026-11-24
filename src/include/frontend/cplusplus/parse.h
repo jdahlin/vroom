@@ -581,6 +581,8 @@ enum class extension_keyword : uint8_t {
     bit_int,
     source_location,
     source_location_value,
+    /* [dcl.fct.def.general]/8 __func__, __FUNCTION__, __PRETTY_FUNCTION__ */
+    predefined_name,
     typeof_,
     c11_thread_local,
     /* [ext:microsoft_declspec] __declspec, _declspec */

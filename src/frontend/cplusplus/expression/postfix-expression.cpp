@@ -1182,7 +1182,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             if (!argument_dependent_lookup(name, types, set, 0, &held))
                 return not_supported(n, "basic.lookup.argdep");
             if (!held.empty()) {
-                if (held.size() != 1 || !set.empty())
+                /* (the other templates ADL found join the first's, the
+                   candidates of template_call) */
+                if (!set.empty())
                     return not_supported(n, "basic.lookup.argdep");
                 uint32_t found_template = function_template_of(held[0]);
                 if (!found_template)
@@ -1923,9 +1925,8 @@ analysis_result semantic_analysis::template_call(
     owned_array<entity_index> adl_templates;
     if (!qualified &&
         (!argument_dependent_lookup(
-             tokens.identifier(name), types, others,
-             function_templates[function_template - 1].name, &adl_templates) ||
-         !others.empty()))
+            tokens.identifier(name), types, others,
+            function_templates[function_template - 1].name, &adl_templates)))
         return not_supported(n, "basic.lookup.argdep");
     owned_array<template_argument> &deduced = specified;
     const expression_meaning *meanings = nullptr;
@@ -1976,6 +1977,17 @@ analysis_result semantic_analysis::template_call(
         if (x.name == function_templates[function_template - 1].name &&
             !template_id)
             functions.append(x.function);
+    /* [basic.lookup.argdep]/3: the non-template functions argument-dependent
+       lookup found are candidates too */
+    if (!template_id)
+        for (entity_index e : others) {
+            bool present = false;
+            for (entity_index g : functions)
+                if (g == e)
+                    present = true;
+            if (!present)
+                functions.append(e);
+        }
     entity_index specialization = 0;
     if (group.empty() && functions.empty())
         return ill_formed_at_token(name, "use of an undeclared identifier",

@@ -67,6 +67,7 @@ const char *semantic_kind_name(semantic_kind kind)
         "label_address",
         "gnu_asm_operand",
         "source_location",
+        "predefined_name",
         "default_argument",
         "vtable_pointer_store",
         "variable_size",

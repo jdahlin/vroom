@@ -131,6 +131,7 @@ bool parser::at_expression_extension_keyword()
     case extension_keyword::datasizeof_:
     case extension_keyword::source_location:
     case extension_keyword::source_location_value:
+    case extension_keyword::predefined_name:
         return true;
     default:
         return false;

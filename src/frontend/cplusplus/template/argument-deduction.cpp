@@ -476,6 +476,13 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
         return pr.kind == type_kind::dependent;
     if (ar.kind == type_kind::dependent)
         return true;
+    /* [temp.deduct.call]/4.3: only a class (or a pointer to one) has a
+       base to deduce from: P a template-id never matches an array or a
+       scalar A */
+    if (pr.kind == type_kind::dependent &&
+        (ar.kind == type_kind::array || ar.kind == type_kind::fundamental ||
+         ar.kind == type_kind::enumeration))
+        return false;
     if (ar.kind == type_kind::pointer) {
         type_kind k = table[ar.operand.unqualified()].kind;
         if (k == type_kind::class_type || k == type_kind::function ||

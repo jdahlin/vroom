@@ -164,6 +164,10 @@ EXTENSION(clang_source_location, clang,
           "std::source_location::current's primitive, and __builtin_FILE(), __builtin_FILE_NAME(), "
           "__builtin_FUNCTION(), __builtin_LINE() and __builtin_COLUMN(), which in a default "
           "argument are the call's")
+EXTENSION(clang_predefined_names, clang,
+          "[dcl.fct.def.general]/8's __func__ (a keyword here, as clang lexes it) and "
+          "clang's __FUNCTION__ and __PRETTY_FUNCTION__: the function's name as a "
+          "static const char array")
 EXTENSION(clang_bit_cast, clang,
           "clang Language Extensions: __builtin_bit_cast (type, expression), "
           "std::bit_cast ([bit.cast]) as a primitive")
