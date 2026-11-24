@@ -695,3 +695,8 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   D<int>::f with `typename T::error` is no error; a std-compare.h from
   clang's tests stays refused at its out-of-class friend definitions
   ([class.friend], std-compare.h:90).
+- 10.9 (20e2115bc, 6b5fe4f74): a friend defined at namespace scope joins the
+  name's overloads (std-compare.h analyses); a used member function body of
+  a specialization reports its errors.  We reject 449 -> 444, unsupported
+  -1.  Left: the use's declaration is not marked rejected (its result is
+  recorded before instantiate_pending), so we accept does not fall yet.
