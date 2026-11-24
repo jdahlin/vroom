@@ -1290,6 +1290,33 @@ bool semantic_analysis::accessible(entity_index member,
                 return true;
         }
     }
+    /* [class.friend]/6: "A function can be defined in a friend declaration
+       of a class if ... Such a function is implicitly an inline function
+       and is in the (lexical) scope of the class": the body of an
+       instantiated friend function template has the access of the class
+       that declares it [impl.clang] */
+    if (function_state.active) {
+        uint32_t i = entity_table[function_state.function].instantiation;
+        if (i) {
+            entity_index t = instantiations[i - 1].template_entity;
+            for (const function_template &f : function_templates)
+                if (f.entity == t && f.friend_class) {
+                    for (entity_index here = f.friend_class;
+                         !is_namespace(here);
+                         here = entity_table[here].enclosing) {
+                        for (const friend_record &g : friends)
+                            if (friend_names(g, here) &&
+                                as_member_of(g.granting))
+                                return true;
+                        if (entity_table[here].kind ==
+                                entity_kind::class_type &&
+                            as_member_of(here))
+                            return true;
+                    }
+                    break;
+                }
+        }
+    }
     return false;
 }
 
