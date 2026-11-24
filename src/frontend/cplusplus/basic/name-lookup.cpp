@@ -413,15 +413,38 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
        template, which the template's lookup would not find, makes what
        the name denotes not known (a dependent call's lookup at the point
        of instantiation, [temp.dep.candidate], is not told apart) */
-    if (lookup_horizon && r.entity && is_namespace(r.found_in))
+    if (lookup_horizon && r.entity && is_namespace(r.found_in)) {
+        bool late = false, early = false, functions = true;
         for (entity_index o = r.entity; o; o = entity_table[o].next_overload) {
             uint32_t d = entity_table[o].first_declaration;
             if (d &&
                 entity_table.declaration(d).node.first_token() > lookup_horizon)
-                mark_unknown(r, "temp.dep");
-            if (entity_table[o].kind != entity_kind::function)
+                late = true;
+            else
+                early = true;
+            if (entity_table[o].kind != entity_kind::function) {
+                functions = false;
                 break;
+            }
         }
+        /* [temp.dep.candidate]/1: functions all declared after the
+           template are not found from its definition; argument-dependent
+           lookup at the point of instantiation decides (when no enclosing
+           namespace declares the name, which the definition's lookup
+           would find instead) */
+        bool outer = false;
+        for (entity_index ns = entity_table[r.found_in].enclosing; ns;
+             ns = entity_table[ns].enclosing)
+            if (entity_table.find(ns, name))
+                outer = true;
+        if (late && !early && functions && !outer && !r.unknown &&
+            !r.ambiguous) {
+            r.entity = 0;
+            r.found_in = 0;
+            horizon_hidden++;
+        } else if (late)
+            mark_unknown(r, "temp.dep");
+    }
     /* a pack named outside a pack expansion's pattern: ill-formed
        ([temp.variadic]/7) unless it is one analysis has no rules for */
     if (r.entity && entity_table[r.entity].kind == entity_kind::pack)
