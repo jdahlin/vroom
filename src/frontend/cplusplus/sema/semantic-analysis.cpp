@@ -83,6 +83,14 @@ void semantic_analysis::name_lookup_detail(token_index t,
 {
     if (found.unknown && found.unknown_by != held_cause::refused)
         name_held_detail(t, found.unknown_by);
+    else if (found.unknown_entity &&
+             entity_table[found.unknown_entity].instantiation &&
+             !entity_table[found.unknown_entity].held_by_template)
+        /* [temp.dep.constexpr]/2: in a template's own declaration, only
+           the parameter's bare name as an array bound is represented
+           (value_parameter_named) */
+        name_unsupported_detail(t, "is a non-type template parameter in an "
+                                   "expression of a declarator's type");
     else if (found.unknown_entity)
         name_unsupported_detail(t, "is declared by a declaration with no "
                                    "rules yet");
