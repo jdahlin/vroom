@@ -787,3 +787,13 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   class-template.cpp:179) and class-specifier.cpp:1280 (125: in-class
   explicit specialization, CWG727).  Unsupported 34791 -> 34766, we accept
   5318 -> 5312.  1002af8f2 also carries detail-only changes (hook abort).
+- 11.9 (74945851c, 36e0e5adb, 338268b35): in-class explicit
+  specialization (CWG727; a member template's cv mismatch is refused, not
+  accepted); a class template declaration with an argument-less attribute;
+  an explicit specialization without arguments among overloads names the
+  one template that deduces.  Unsupported 34766 -> 34744, we accept 5312 ->
+  5304.  Open: partial ordering for explicit specializations; attribute on
+  a partial-specialization forward declaration (class-template.cpp:185);
+  default-argument-pack deduction (cwg22xx.cpp:69).
+  Decision: the last batches remove ~25 each; the next briefs aim at the
+  largest generic keys (unqualified lookup, auto type-id, evaluator) again.
