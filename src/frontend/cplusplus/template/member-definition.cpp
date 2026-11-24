@@ -903,7 +903,7 @@ analysis_result semantic_analysis::define_member_template_of(
         r = function_template_declarator(definition, lead, c, scope, s, m,
                                          type);
     uint32_t cv = function_cv;
-    bool exceptions_specified = function_exceptions_specified;
+    bool exceptions_specified = m.exceptions.written;
     leave_instantiation(context);
     bool constructor = (lead < definition.size() &&
                         declares_special_member(c, definition[lead])) ||

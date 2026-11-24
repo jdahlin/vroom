@@ -149,7 +149,8 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         if (r == analysis_result::well_formed) {
             stage = declare_stage;
             instantiating = index + 1;
-            r = declare_specialization(ft.declarator, m.id, type, s, e);
+            r = declare_specialization(ft.declarator, m.id, type, s,
+                                       m.exceptions, e);
             instantiating = 0;
             if (r == analysis_result::well_formed && constructor)
                 entity_table[e].explicit_ = s.explicit_;
@@ -984,7 +985,8 @@ void semantic_analysis::instantiate_pending()
  */
 analysis_result semantic_analysis::declare_specialization(
     SyntaxRef declaration, token_index id, qualified_type type,
-    const specified &s, entity_index &declared_entity)
+    const specified &s, exception_specification exceptions,
+    entity_index &declared_entity)
 {
     uint32_t index = instantiating - 1;
     instantiating = 0;
@@ -1006,6 +1008,10 @@ analysis_result semantic_analysis::declare_specialization(
     entity_index e =
         entity_table.make(entity_kind::function, t.name, t.enclosing);
     entity_table[e].type = type;
+    /* [temp.inst]/15: the specification its declarator's substitution
+       gave */
+    entity_table[e].exceptions =
+        resolved_exceptions(exceptions, type, s.gnu_flags);
     entity_table[e].linkage_of_name = t.linkage_of_name;
     if (type_without_external_linkage(type, false, true))
         entity_table[e].linkage_of_name = linkage::internal;

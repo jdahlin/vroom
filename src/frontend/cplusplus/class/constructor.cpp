@@ -708,6 +708,7 @@ analysis_result semantic_analysis::special_member_declarator(
         entity_table.make(entity_kind::function, entity_table[c].name, c);
     entity &x = entity_table[e];
     x.type = type;
+    x.exceptions = resolved_exceptions(m.exceptions, type, m.gnu_flags);
     x.nonstatic_member = true;
     x.special = kind;
     /* [ext:gnu_attributes] its symbol's */
@@ -2670,6 +2671,11 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
     f.type = type;
     f.nonstatic_member = true;
     f.special = kind;
+    /* [except.spec]/8: an implicitly declared destructor's is non-throwing
+       (its subobjects' are, of the classes analysed); /7's of the other
+       special members is left unrecorded */
+    if (kind == special_member::destructor)
+        f.exceptions.allows = exception_allowance::none;
     f.inline_ = true;
     f.defined = true;
     f.implicit = true;
@@ -3190,7 +3196,7 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
         s.constexpr_ = constexpr_specified;
         s.inline_ = inline_specified;
         entity_index e = 0;
-        VTRY_SET(r, declare_specialization(n, m.id, type, s, e));
+        VTRY_SET(r, declare_specialization(n, m.id, type, s, m.exceptions, e));
         if (!body.plain())
             return not_supported(n, "dcl.fct.def.general");
         last_declared = e;
@@ -3223,6 +3229,8 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
                                    "declared member of the class",
                                    "dcl.meaning");
     VTRY_SET(r, constexpr_redeclaration(m.id, e, constexpr_specified));
+    VTRY_SET(r, compatible_exceptions(
+                    m.id, e, resolved_exceptions(m.exceptions, type, 0)));
     /* [basic.def.odr]/1 */
     if (entity_table[e].defined)
         return ill_formed_at_token(m.id,

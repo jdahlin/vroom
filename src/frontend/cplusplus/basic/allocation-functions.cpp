@@ -95,6 +95,12 @@ void semantic_analysis::declare_implicit_allocation_function(
     x.operator_function = true;
     x.allocation = kind;
     x.implicit = true;
+    /* [except.spec]/12: a deallocation function with no explicit
+       noexcept-specifier has a non-throwing exception specification; an
+       allocation function's (C++03's throw(std::bad_alloc)) is left
+       unrecorded */
+    if (!allocation)
+        x.exceptions.allows = exception_allowance::none;
     entity_index first = entity_table.find(0, name);
     if (!first) {
         entity_table.bind(0, name, e);

@@ -662,9 +662,10 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         function_parameters.append(parameter);
     function_empty_pack = empty_pack;
     function_cv = cv;
-    function_exceptions_specified = specified_exceptions;
-    function_exception_key = exception_key_any;
-    dynamic_exception_bits.clear();
+    /* [except.spec]/1: none written, the function's implicit one
+       (resolved_exceptions) */
+    exception_specification value;
+    value.written = specified_exceptions;
     /* [temp.inst]/15: the exception specification of a specialization's
        member function is instantiated when it is needed, not with the class:
        its types are not analysed with the member's declaration (C++98
@@ -684,44 +685,26 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                         diagnostic_id::sema_dynamic_exception_specification,
                         dynamic_exceptions.first_token()));
         }
-        VTRY(r, dynamic_exception_types(dynamic_exceptions, may_qualify));
-        /* [except.spec]/4's "compatible": the same set of types (throw(...)
-           allows every exception, throw() none) */
-        if (dynamic_exception_bits.empty()) {
-            if (dynamic_exceptions.end_token() -
-                    dynamic_exceptions.first_token() >
-                3)
-                function_exception_key = exception_key_any;
-            else
-                function_exception_key = exception_key_none;
-        } else {
-            uint32_t *bits = dynamic_exception_bits.data();
-            size_t count = dynamic_exception_bits.size();
-            for (size_t i = 1; i < count; i++)
-                for (size_t j = i; j > 0 && bits[j - 1] > bits[j]; j--) {
-                    uint32_t t = bits[j];
-                    bits[j] = bits[j - 1];
-                    bits[j - 1] = t;
-                }
-            uint64_t digest = 3;
-            for (size_t i = 0; i < count; i++)
-                if (i == 0 || bits[i] != bits[i - 1])
-                    digest = (digest * 0x100000001b3ull) ^ (bits[i] + 1ull);
-            function_exception_key = digest | 4;
-        }
+        owned_array<uint32_t> types;
+        VTRY(r,
+             dynamic_exception_types(dynamic_exceptions, may_qualify, types));
+        value = dynamic_exception_value(dynamic_exceptions, types);
     } else if (dynamic_exceptions) {
         /* not analysed with the declaration ([temp.inst]/15) */
-        function_exception_key = exception_key_unknown;
+        value.allows = exception_allowance::unknown;
     }
     if (exceptions) {
         size_t dependent_before = dependent_exception_specifications.size();
         VTRY(r,
              parameter_scope_noexcept(exceptions, may_qualify, non_throwing));
         if (dependent_exception_specifications.size() != dependent_before)
-            function_exception_key = exception_key_unknown;
+            value.allows = exception_allowance::unknown;
         else if (non_throwing)
-            function_exception_key = exception_key_none;
+            value.allows = exception_allowance::none;
+        else
+            value.allows = exception_allowance::all;
     }
+    function_exceptions = value;
     if (abstract_class(type))
         /* a return type of abstract class type: as a parameter's */
         return not_supported(parameters, "class.abstract");
@@ -749,19 +732,20 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
  * The exception specification is not part of the type before C++17 and a
  * dynamic one is potentially throwing after it.
  */
-analysis_result semantic_analysis::dynamic_exception_types(SyntaxRef n,
-                                                           bool member)
+analysis_result
+semantic_analysis::dynamic_exception_types(SyntaxRef n, bool member,
+                                           owned_array<uint32_t> &types)
 {
     for (auto c : n.elements()) {
         if (c.is(syntax_kind::type_id_list)) {
-            VTRY(r, dynamic_exception_types(c, member));
+            VTRY(r, dynamic_exception_types(c, member, types));
             continue;
         }
         if (!c.is(syntax_kind::type_id))
             continue;
         qualified_type type;
         VTRY(r, type_id(c, type));
-        dynamic_exception_bits.append(type.unqualified());
+        types.append(type.unqualified());
         qualified_type base = type;
         const struct type *t = &type_table[base.unqualified()];
         bool through = false;

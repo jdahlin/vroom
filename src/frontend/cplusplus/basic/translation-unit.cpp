@@ -245,12 +245,10 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
  * "it contains the extern specifier or a linkage-specification and neither
  * an initializer nor a function-body"); a typedef declaration is none.
  */
-analysis_result semantic_analysis::declare(SyntaxRef declaration,
-                                           token_index id, entity_kind kind,
-                                           qualified_type type,
-                                           const specified &s, bool definition,
-                                           bool initialized,
-                                           entity_index &declared_entity)
+analysis_result semantic_analysis::declare(
+    SyntaxRef declaration, token_index id, entity_kind kind,
+    qualified_type type, const specified &s, exception_specification exceptions,
+    bool definition, bool initialized, entity_index &declared_entity)
 {
     declared_entity = 0;
     if (kind != entity_kind::typedef_name) {
@@ -260,8 +258,10 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
         return declare_variable_specialization(declaration, type, s,
                                                declared_entity);
     if (instantiating && kind == entity_kind::function)
-        return declare_specialization(declaration, id, type, s,
+        return declare_specialization(declaration, id, type, s, exceptions,
                                       declared_entity);
+    if (kind == entity_kind::function)
+        exceptions = resolved_exceptions(exceptions, type, s.gnu_flags);
     uint32_t name = tokens.identifier(id);
     entity_index scope = current_scope;
     entity_index prior = 0;
@@ -791,22 +791,15 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                    (-Wmissing-exception-spec), as one in a system header or
                    with Microsoft's extensions does */
                 bool missing = type_table[e.type.unqualified()].non_throwing &&
-                               !function_exceptions_specified;
+                               !exceptions.written;
                 if (missing) {
                     type = e.type;
                 } else {
-                    /* [ext:gnu_attributes] nothrow: a non-throwing
-                       exception specification of its own, clang's
-                       compatible with noexcept */
-                    bool nothrow = ((e.gnu_flags | s.gnu_flags) & gnu_nothrow);
-                    if (!nothrow && !in_system_header(id) &&
-                        !tokens.files.behavior.microsoft_extensions)
-                        return ill_formed_at_token(id,
-                                                   "all declarations of a "
-                                                   "function shall have a "
-                                                   "compatible exception "
-                                                   "specification",
-                                                   "except.spec");
+                    /* (a function declared nothrow: its implicit
+                       specification is non-throwing, as noexcept's) */
+                    if (!same_exceptions(e.exceptions, exceptions)) {
+                        VTRY(r, mismatched_exceptions(id));
+                    }
                     /* the later declaration's, [impl.clang] as clang's */
                     e.type = type;
                 }
@@ -816,7 +809,7 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                same set (a function with none, or a deallocation function,
                taking the other's: [impl.clang]).  The type compares them
                where it holds one (above) */
-            VTRY(r, compatible_exceptions(id, prior, s));
+            VTRY(r, compatible_exceptions(id, prior, exceptions));
             /* [over.load]/2: "Function declarations that differ only in the
                return type, the exception specification, or both cannot be
                overloaded." */
@@ -908,7 +901,7 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
         entity_table[e].linkage_of_name = implied;
         entity_table[e].defined = definition;
         if (kind == entity_kind::function)
-            entity_table[e].exception_key = function_exception_key;
+            entity_table[e].exceptions = exceptions;
         entity_table.add_declaration(e, declaration);
         if (overloads) {
             /* another function of the set: last in its chain, the name
@@ -964,33 +957,28 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
  * exceptions, all declarations, including the definition and any explicit
  * specialization, of that function shall have a compatible exception
  * specification."  Two are compatible when both allow every exception or
- * both name the same set of types; a destructor and a deallocation function
- * have an implicit one ([except.spec]/8, /12), which a declaration's own
- * may differ from where clang allows it.  A declaration without one after
- * a noexcept(true) one is checked by the function's type (above).
+ * both name the same set of types (same_exceptions); a declaration without
+ * one has its implicit specification (resolved_exceptions: a destructor's
+ * and a deallocation function's are non-throwing, [except.spec]/8, /12).
+ * A declaration without one after a noexcept(true) one is checked by the
+ * function's type (above).
  */
-analysis_result semantic_analysis::compatible_exceptions(token_index id,
-                                                         entity_index prior,
-                                                         const specified &s)
+analysis_result
+semantic_analysis::compatible_exceptions(token_index id, entity_index prior,
+                                         exception_specification now)
 {
-    entity &e = entity_table[prior];
-    uint64_t before = e.exception_key;
-    uint64_t now = function_exception_key;
-    if (before == exception_key_unknown || now == exception_key_unknown ||
-        before == now)
-        return analysis_result::well_formed;
-    if (e.allocation == allocation_function::delete_ ||
-        e.allocation == allocation_function::delete_array ||
-        e.special == special_member::destructor)
+    exception_specification before = entity_table[prior].exceptions;
+    /* (an entity whose specification is not recorded: an implicitly
+       declared one but a deallocation function) */
+    if (before.allows == exception_allowance::implicit ||
+        before.allows == exception_allowance::unknown ||
+        now.allows == exception_allowance::unknown ||
+        same_exceptions(before, now))
         return analysis_result::well_formed;
     /* [impl.clang] a declaration without one keeps the first's
        (-Wmissing-exception-spec: an error clang recovers from, as the
        type's check above does for noexcept) */
-    if (!function_exceptions_specified)
-        return analysis_result::well_formed;
-    bool nothrow = ((e.gnu_flags | s.gnu_flags) & gnu_nothrow);
-    if (nothrow || in_system_header(id) ||
-        tokens.files.behavior.microsoft_extensions)
+    if (!now.written)
         return analysis_result::well_formed;
     /* [impl.clang] before C++17 the specification is no part of the type:
        an error clang recovers from without making the declaration invalid,
@@ -999,6 +987,17 @@ analysis_result semantic_analysis::compatible_exceptions(token_index id,
             language_feature::exception_specification_in_type)) {
         return analysis_result::well_formed;
     }
+    return mismatched_exceptions(id);
+}
+
+/* [except.spec]/4 not met at id: an error, or [impl.clang] with Microsoft's
+   extensions or in a system header clang's warning (-Wmicrosoft-exception-
+   spec), the later declaration's specification taken */
+analysis_result semantic_analysis::mismatched_exceptions(token_index id)
+{
+    if (in_system_header(id) || tokens.files.behavior.microsoft_extensions)
+        return recoverable_extension_used(
+            diagnostic_id::sema_mismatched_exception_specification, id);
     return ill_formed_at_token(id,
                                "all declarations of a function shall have a "
                                "compatible exception specification",

@@ -2018,6 +2018,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "class.static.mfct");
         e = entity_table.make(entity_kind::function, name, c);
         entity_table[e].type = type;
+        entity_table[e].exceptions =
+            resolved_exceptions(m.exceptions, type, m.gnu_flags);
         entity_table[e].placeholder_return = placeholder_return;
         entity_table[e].nonstatic_member = !s.static_;
         entity_table[e].member_cv = function_cv;
@@ -2513,7 +2515,8 @@ semantic_analysis::member_function_definition(entity_index c,
  */
 analysis_result semantic_analysis::member_redeclaration(
     SyntaxRef declaration, token_index id, entity_index qualifier,
-    qualified_type type, const specified &s, bool definition)
+    qualified_type type, const specified &s, exception_specification exceptions,
+    bool definition)
 {
     last_declared = 0;
     if (at_block_scope() || function_state.active)
@@ -2552,6 +2555,9 @@ analysis_result semantic_analysis::member_redeclaration(
                                    "declared member of the class",
                                    "dcl.meaning");
     VTRY(r, constexpr_redeclaration(id, e, s.constexpr_));
+    VTRY(compatible,
+         compatible_exceptions(
+             id, e, resolved_exceptions(exceptions, type, s.gnu_flags)));
     /* [basic.def.odr]/1 */
     if (entity_table[e].defined)
         return ill_formed_at_token(id,

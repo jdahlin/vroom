@@ -321,6 +321,92 @@ analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
     return r;
 }
 
+/*
+ * [except.spec]/1: the value of the dynamic-exception-specification n, whose
+ * analysed types are types: throw ( ... ) allows every exception (the
+ * ellipsis is a token of n's own), throw ( ) none, and otherwise the set of
+ * the types, kept in exception_types sorted, each type once, so that two
+ * specifications naming the same set ([except.spec]/4's "compatible") have
+ * equal lists.
+ */
+exception_specification
+semantic_analysis::dynamic_exception_value(SyntaxRef n,
+                                           owned_array<uint32_t> &types)
+{
+    exception_specification value;
+    value.written = true;
+    value.allows = exception_allowance::none;
+    for (auto c : n.elements())
+        if (c.is(preprocessing_op_or_punc::ELLIPSIS))
+            value.allows = exception_allowance::all;
+    if (value.allows == exception_allowance::all || types.empty())
+        return value;
+    uint32_t *list = types.data();
+    size_t count = types.size();
+    for (size_t i = 1; i < count; i++)
+        for (size_t j = i; j > 0 && list[j - 1] > list[j]; j--) {
+            uint32_t moved = list[j];
+            list[j] = list[j - 1];
+            list[j - 1] = moved;
+        }
+    value.allows = exception_allowance::types;
+    value.first_type = static_cast<uint32_t>(exception_types.size());
+    size_t distinct = 0;
+    for (size_t i = 0; i < count; i++)
+        if (i == 0 || list[i] != list[i - 1]) {
+            exception_types.append(list[i]);
+            distinct++;
+        }
+    if (distinct > UINT16_MAX) {
+        /* (more types than a specification records: not compared) */
+        value.allows = exception_allowance::unknown;
+        return value;
+    }
+    value.type_count = static_cast<uint16_t>(distinct);
+    return value;
+}
+
+/*
+ * [except.spec]/1: a function declared without an exception-specification
+ * has its implicit one: /8 a destructor's and /12 a deallocation function's
+ * are non-throwing (implicitly_non_throwing, which sees the declarator-id),
+ * as is a function whose type says so (a typedef-name's noexcept function
+ * type, [except.spec]/2) or [ext:gnu_attributes] one declared nothrow
+ * (clang's: compatible with noexcept); /13 any other potentially-throwing.
+ */
+exception_specification
+semantic_analysis::resolved_exceptions(exception_specification exceptions,
+                                       qualified_type type,
+                                       uint32_t gnu_flags) const
+{
+    if (exceptions.allows != exception_allowance::implicit)
+        return exceptions;
+    const struct type &f = type_table[type.unqualified()];
+    exceptions.allows = exception_allowance::all;
+    if ((f.kind == type_kind::function && f.non_throwing) ||
+        (gnu_flags & gnu_nothrow))
+        exceptions.allows = exception_allowance::none;
+    return exceptions;
+}
+
+/* [except.spec]/4's "compatible": both allow every exception, both none, or
+   both the same set of types */
+bool semantic_analysis::same_exceptions(exception_specification a,
+                                        exception_specification b) const
+{
+    if (a.allows != b.allows)
+        return false;
+    if (a.allows != exception_allowance::types)
+        return true;
+    if (a.type_count != b.type_count)
+        return false;
+    for (uint32_t i = 0; i < a.type_count; i++)
+        if (exception_types[a.first_type + i] !=
+            exception_types[b.first_type + i])
+            return false;
+    return true;
+}
+
 /* whether the function template t's declaration has a noexcept-specifier
    left value-dependent */
 bool semantic_analysis::dependent_exception_specification(entity_index t) const

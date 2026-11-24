@@ -308,7 +308,10 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             (s.static_ && old.linkage_of_name != linkage::internal))
             return not_supported(n, "temp.over.link");
         /* [except.spec]/4 */
-        VTRY(compatible, compatible_exceptions(m.id, f.entity, s));
+        VTRY(compatible,
+             compatible_exceptions(
+                 m.id, f.entity,
+                 resolved_exceptions(m.exceptions, type, gnu_flags)));
         /* different names: the definition's are the ones its body uses
            (instantiate_definition binds the template's own), so a
            definition takes the record's parameters; a declaration leaves
@@ -356,7 +359,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     entity_index t = record.entity;
     entity_table[t].type = type;
     entity_table[t].defined = defines;
-    entity_table[t].exception_key = function_exception_key;
+    entity_table[t].exceptions =
+        resolved_exceptions(m.exceptions, type, gnu_flags);
     entity_table[t].inline_ = s.inline_;
     entity_table[t].constexpr_ = s.constexpr_;
     entity_table[t].immediate = s.consteval_;

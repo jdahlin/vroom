@@ -796,7 +796,7 @@ analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
     s.has_type = true;
     entity_index declared = 0;
     r = declare(n, n.first_token() + 1, entity_kind::typedef_name, type, s,
-                false, false, declared);
+                exception_specification{}, false, false, declared);
     last_declared = declared;
     return r;
 }
@@ -1507,7 +1507,8 @@ analysis_result semantic_analysis::declare_with_initializer(
            function template's specialization declares the specialization
            (instantiate_definition) */
         entity_index declared = 0;
-        VTRY(r, declare_specialization(declaration, m.id, type, s, declared));
+        VTRY(r, declare_specialization(declaration, m.id, type, s, m.exceptions,
+                                       declared));
         last_declared = declared;
         return r;
     }
@@ -1516,7 +1517,7 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (initialized)
             return not_supported(declaration, "dcl.init");
         return member_redeclaration(declaration, m.id, m.qualifier, type, s,
-                                    definition);
+                                    m.exceptions, definition);
     }
     /* [dcl.fct]/6: "A function type with a cv-qualifier-seq or a
        ref-qualifier ... shall appear only as the function type for a
@@ -1653,10 +1654,10 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (m.qualifier && (instantiating || variable_instantiating)) {
         bool var_inst = variable_instantiating != 0;
         if (var_inst)
-            r = declare(declaration, m.id, kind, type, s, definition,
-                        initialized, declared_entity);
+            r = declare(declaration, m.id, kind, type, s, m.exceptions,
+                        definition, initialized, declared_entity);
         else
-            r = declare_specialization(declaration, m.id, type, s,
+            r = declare_specialization(declaration, m.id, type, s, m.exceptions,
                                        declared_entity);
         if (r == analysis_result::well_formed && !var_inst)
             current_scope = m.qualifier;
@@ -1680,8 +1681,8 @@ analysis_result semantic_analysis::declare_with_initializer(
         qualified_scope = m.namespace_qualifier;
         declarator_dllimport = (m.gnu_flags & gnu_dllimport) != 0;
         declarator_constinit = require_constant_initialization;
-        r = declare(declaration, m.id, kind, type, s, definition, initialized,
-                    declared_entity);
+        r = declare(declaration, m.id, kind, type, s, m.exceptions, definition,
+                    initialized, declared_entity);
         declarator_dllimport = false;
         declarator_constinit = false;
         qualified_declarator = false;

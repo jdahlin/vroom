@@ -21,6 +21,8 @@ DIAGNOSTIC(sema_variable_length_array, EXTENSION, IGNORE, "vla-cxx-extension",
 DIAGNOSTIC(sema_no_declarator, EXTENSION_WARNING, WARNING, "missing-declarations",
            "the declaration declares nothing: the init-declarator-list can be omitted only when declaring a class or enumeration ([dcl.pre]/5)")
 /* [intro.compliance]/8: Microsoft's extensions (-fms-extensions) */
+DIAGNOSTIC(sema_mismatched_exception_specification, EXTENSION_WARNING, WARNING, "microsoft-exception-spec",
+           "all declarations of a function shall have a compatible exception specification ([except.spec]/4)")
 DIAGNOSTIC(sema_static_after_non_static, EXTENSION_WARNING, WARNING, "microsoft-redeclare-static",
            "a name declared static after a declaration with external linkage: the linkages implied by successive declarations shall agree ([dcl.stc]/6)")
 /* [dcl.init.list]/7: an error by default in C++11 and later, as clang's

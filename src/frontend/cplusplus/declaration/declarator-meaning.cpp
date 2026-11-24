@@ -1210,9 +1210,12 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             return not_supported(n, "dcl.decl");
         return declarator(declaration, d[1], type, m);
     }
-    case syntax_kind::parameters_and_qualifiers:
+    case syntax_kind::parameters_and_qualifiers: {
         /* an abstract declarator that is only its parameters */
-        return function(n, type);
+        analysis_result r = function(n, type);
+        m.exceptions = function_exceptions;
+        return r;
+    }
     case syntax_kind::noptr_declarator:
     case syntax_kind::noptr_abstract_declarator:
         break;
@@ -1513,6 +1516,7 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         if (x.function) {
             scoped_value<bool> parameters(variable_length_declarator, false);
             r = function(d[x.child], type);
+            m.exceptions = function_exceptions;
         } else if (x.has_bound)
             r = array(n, d[x.child], type);
         else
@@ -1536,15 +1540,22 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
    potentially-throwing if and only if any of the destructors for any of its
    potentially constructed subobjects is potentially-throwing" (none is, of
    the classes analysed); /12: "A deallocation function with no explicit
-   noexcept-specifier has a non-throwing exception specification." */
-void semantic_analysis::implicitly_non_throwing(const declarator_meaning &m,
+   noexcept-specifier has a non-throwing exception specification."  The
+   specification of either without one is non-throwing too, as is
+   [ext:gnu_attributes] that of a function declared nothrow (clang's:
+   compatible with noexcept). */
+void semantic_analysis::implicitly_non_throwing(declarator_meaning &m,
                                                 qualified_type &type)
 {
     const struct type &f = type_table[type.unqualified()];
     bool deallocation = m.allocation == allocation_function::delete_ ||
                         m.allocation == allocation_function::delete_array;
+    if (f.kind == type_kind::function &&
+        m.exceptions.allows == exception_allowance::implicit &&
+        (deallocation || m.destructor || (m.gnu_flags & gnu_nothrow)))
+        m.exceptions.allows = exception_allowance::none;
     if (f.kind == type_kind::function && !f.non_throwing &&
-        !function_exceptions_specified && (deallocation || m.destructor) &&
+        !m.exceptions.written && (deallocation || m.destructor) &&
         tokens.files.behavior.has(
             language_feature::exception_specification_in_type)) {
         owned_array<qualified_type> parameters;
