@@ -47,6 +47,13 @@ enum : uint8_t { jump_none, jump_break, jump_continue };
    only when an evaluation answers unknown */
 thread_local uint32_t last_unknown_line = 0;
 
+/* the line of the last answer "not a constant expression" (a rule of
+   [expr.const]/5), for the detail of the refusal that follows when the
+   analysis could not decide */
+thread_local uint32_t last_not_constant_line = 0;
+#define CONST_NOT_CONSTANT                                                     \
+    (last_not_constant_line = __LINE__, constness::not_constant)
+
 /* The answer "the evaluator has no rules for this": normally just
    constness::unknown.  Compiled with -DVCC_TRACE_UNKNOWN each such answer
    prints "CXXUNK line" to stderr, which tells which refusal an input
@@ -78,7 +85,7 @@ bool is_object_value(const constant_value &v)
 template <class Object> constness opaque_access(const Object &o)
 {
     if (o.outside)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     return CONST_UNKNOWN;
 }
 
@@ -111,7 +118,7 @@ template <class state_type> constness undefined_value(const state_type &state)
 {
     if (state.potential)
         return CONST_UNKNOWN;
-    return constness::not_constant;
+    return CONST_NOT_CONSTANT;
 }
 
 /* an object of the evaluation, with the serial that tells it from the
@@ -333,7 +340,7 @@ constness semantic_analysis::evaluate_wide_binary(
             r = a * b;
         }
         if (is_signed && overflow)
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         break;
     }
     case preprocessing_op_or_punc::SLASH:
@@ -341,12 +348,12 @@ constness semantic_analysis::evaluate_wide_binary(
         /* [expr.mul]/4: a zero divisor, or a quotient not representable,
            is undefined */
         if (b == 0)
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         if (is_signed) {
             __int128 least =
                 static_cast<__int128>(static_cast<unsigned __int128>(1) << 127);
             if (sa == least && sb == -1)
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
             if (o == preprocessing_op_or_punc::SLASH)
                 r = static_cast<unsigned __int128>(sa / sb);
             else
@@ -376,7 +383,7 @@ constness semantic_analysis::evaluate_wide_binary(
         __int128 n =
             integer_value(tokens.files.behavior, right, kept_of(right, y));
         if (n < 0 || n >= 128)
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         if (o == preprocessing_op_or_punc::GREATER_GREATER) {
             /* [expr.shift]/3: E1/2^E2, rounded down */
             if (is_signed)
@@ -447,6 +454,9 @@ void semantic_analysis::evaluator_stop_detail()
         snprintf(text, sizeof text, "no semantic node for the evaluator");
     else if (last_unknown_line)
         snprintf(text, sizeof text, "evaluator met L%u", last_unknown_line);
+    else if (last_not_constant_line)
+        snprintf(text, sizeof text, "evaluator not_constant L%u",
+                 last_not_constant_line);
     last_unsupported_detail(text, strlen(text));
 }
 
@@ -470,8 +480,9 @@ void semantic_analysis::evaluation_detail(uint32_t node, bool gave_up,
 constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
 {
     if (semantics[node].evaluation == constness::not_constant)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     constant_evaluation state;
+    last_not_constant_line = 0;
     constness c = evaluate_node(state, node, v);
     /* [expr.const]/5.18: an allocation not deallocated in the evaluation:
        whether this expression is the whole of the constant expression is
@@ -1191,7 +1202,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             entity_table[e.enclosing].parameter_scope &&
             (tk == type_kind::lvalue_reference ||
              tk == type_kind::rvalue_reference))
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         /* an automatic variable whose lifetime did not begin within the
            evaluation: [expr.const]/5.8 forbids an lvalue-to-rvalue
            conversion of it, not designating it (the object expression of
@@ -1255,7 +1266,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                ([expr.const]/5.8) */
             const auto &w = state.objects[whole];
             if (w.outside && entity_table[w.entity].automatic)
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
             return constness::unknown;
         }
         constant_value o = place_value(state, whole);
@@ -1270,7 +1281,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             if (o.member != x.b) {
                 if (!state.writing) {
                     if (state.reading)
-                        return constness::not_constant;
+                        return CONST_NOT_CONSTANT;
                     return CONST_UNKNOWN;
                 }
                 place_value(state, whole).member = x.b;
@@ -1373,7 +1384,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         /* [expr.const]/5.16: the modification of an object whose lifetime
            did not begin within the evaluation */
         if (place_read_only(state, target))
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         constant_value y;
         c = evaluate_node(state, x.b, y);
         if (c != constness::constant)
@@ -1403,7 +1414,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 return undefined_value(state);
             __int128 n;
             if (!pointer_offset_count(semantics[x.b].type, y, n))
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
             if (op == preprocessing_op_or_punc::MINUS_EQUAL)
                 n = -n;
             constant_value moved;
@@ -1610,7 +1621,7 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
             if (e.automatic ||
                 (!e.constexpr_ && !(e.type.cv() & cv_const) &&
                  evaluated_type(e.type) != fundamental_type::none))
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
             return CONST_UNKNOWN;
         }
         fundamental_type t = evaluated_type(e.type);
@@ -1633,7 +1644,7 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
             if (e.kind == entity_kind::variable && e.automatic &&
                 !e.constexpr_ &&
                 type_table[e.type.unqualified()].kind == type_kind::class_type)
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
         }
     }
     uint32_t object = 0;
@@ -1652,10 +1663,10 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     /* [expr.const]/5.8: a variable that is not usable in constant
        expressions, read through a pointer or a reference */
     if (!(object & element_place) && state.objects[object].unusable)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     /* [basic.life]: the storage of a deleted object */
     if (!(object & element_place) && state.objects[object].freed)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     v = place_value(state, object);
     /* [expr.const]/5.8: the object's value must be one it was given; an
        indeterminate value is undefined behavior ([basic.indet]/2) */
@@ -1668,7 +1679,7 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
            members of an object usable in constant expressions */
         if (!(object & element_place) && state.objects[object].read_only &&
             has_mutable_subobject(x.type))
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         v = copy_value(state, v, false);
     }
     return constness::constant;
@@ -1900,7 +1911,7 @@ constness semantic_analysis::evaluate_subscript_pointer(
         return CONST_UNKNOWN;
     __int128 n;
     if (!pointer_offset_count(semantics[index_node].type, index, n))
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     return offset_pointer(p, n, moved);
 }
 
@@ -1916,9 +1927,9 @@ constness semantic_analysis::pointed_place(const constant_evaluation &state,
     if (p.kind != constant_value_kind::pointer)
         return CONST_UNKNOWN;
     if (!p.count)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     if (p.extent && p.offset >= p.extent)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     uint32_t index = p.first;
     if (index & element_place) {
         if ((index & ~element_place) >= state.elements.size())
@@ -1995,7 +2006,7 @@ constness semantic_analysis::offset_pointer(const constant_value &p, __int128 n,
     if (n == 0)
         return constness::constant;
     if (!p.count)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     if (!p.extent || p.base == single_object_base) {
         /* [expr.add]/4.2 ([basic.compound]/3.3): "an object that is not an
            array element is considered to belong to an array with one
@@ -2004,7 +2015,7 @@ constness semantic_analysis::offset_pointer(const constant_value &p, __int128 n,
         if (p.extent)
             j += static_cast<__int128>(p.offset);
         if (j < 0 || j > 1)
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         moved.offset = static_cast<uint64_t>(j);
         moved.extent = 0;
         moved.base = 0;
@@ -2016,7 +2027,7 @@ constness semantic_analysis::offset_pointer(const constant_value &p, __int128 n,
     }
     __int128 i = static_cast<__int128>(p.offset) + n;
     if (i < 0 || i > static_cast<__int128>(p.extent))
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     moved.offset = static_cast<uint64_t>(i);
     moved.first = element_place | (p.base + static_cast<uint32_t>(i));
     return constness::constant;
@@ -2123,7 +2134,7 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
                    check) */
                 if (state.potential)
                     return CONST_UNKNOWN;
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
             }
             /* [expr.add]/5.2: both point to elements of the same array */
             if (!p.count || !q.count || !p.extent || p.extent != q.extent ||
@@ -2152,7 +2163,7 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
             integer_node = x.b;
         __int128 n;
         if (!pointer_offset_count(semantics[integer_node].type, integer, n))
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         if (op == preprocessing_op_or_punc::MINUS)
             n = -n;
         return offset_pointer(pointer, n, v);
@@ -2176,7 +2187,7 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
         !(p.literal && q.literal && p.stamp == q.stamp && p.base == q.base)) {
         if (state.potential)
             return CONST_UNKNOWN;
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     }
     if (!p.count || !q.count) {
         /* [expr.eq]/3: null pointers compare equal; a pointer to an object
@@ -2372,7 +2383,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
            unless it is 0 or 1 */
         if (k == conversion_kind::integral && to == fundamental_type::bool_ &&
             v.kind == constant_value_kind::integer && v.integer > 1)
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         return evaluate_conversion(v, evaluated_type(semantics[x.a].type), to);
     }
     case semantic_kind::unary: {
@@ -2401,7 +2412,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             if (op == preprocessing_op_or_punc::MINUS) {
                 if (t == fundamental_type::int128 &&
                     v.integer == (static_cast<unsigned __int128>(1) << 127))
-                    return constness::not_constant;
+                    return CONST_NOT_CONSTANT;
                 v.integer = 0 - v.integer;
                 return constness::constant;
             }
@@ -2430,7 +2441,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         c = evaluate_node(state, x.a, p);
         if (c == constness::unknown && state.potential &&
             evaluate_node(state, x.b, q) == constness::not_constant)
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         if (c != constness::constant)
             return c;
         c = evaluate_node(state, x.b, q);
@@ -2464,7 +2475,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             constant_value arm;
             if (evaluate_node(state, second, arm) == constness::not_constant &&
                 evaluate_node(state, x.c, arm) == constness::not_constant)
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
             return c;
         }
         if (c != constness::constant)
@@ -2539,7 +2550,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         if (c != constness::constant)
             return c;
         if (place_read_only(state, object))
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         if (!(object & element_place) && state.objects[object].opaque)
             return opaque_access(state.objects[object]);
         constant_value old = place_value(state, object);
@@ -2746,7 +2757,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             return c;
         if ((place & element_place) || !state.objects[place].heap ||
             state.objects[place].freed)
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         if (x.b) {
             state.allocations.append(place);
             constant_value discarded;
@@ -2820,7 +2831,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         const gnu_builtin &b = gnu_builtin_at(row);
         /* the fold table says whether it is evaluated at all */
         if (b.fold != builtin_fold::none && !gnu_builtin_folds(b))
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
         switch (b.fold) {
         case builtin_fold::bit_count:
             return evaluate_bit_count(state, b.which, x, v);
@@ -2866,14 +2877,14 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         /* [expr.ref]/2: the object expression is `*(this)`: a null pointer
            or one past the end designates no object */
         if (!self.count || (self.extent && self.offset >= self.extent))
-            return constness::not_constant;
+            return CONST_NOT_CONSTANT;
     }
     entity_index function = semantics[callee].a;
     /* [expr.const]/5.4 (C++20 allowed it): an invocation of a virtual
        function, called through its dynamic type or not */
     if (entity_table[function].virtual_ &&
         tokens.files.behavior.edition < standard_edition::cplusplus_20)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     if (x.c == 1 && x.b) {
         /* [class.virtual]/16: the final overrider in the object's dynamic
            class, called on its own subobject */
@@ -2894,7 +2905,7 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
     /* [stmt.return]/2: "flowing off the end of a function other than main
        ... results in undefined behavior" for one that returns a value */
     if (!returned)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     /* a pointer to what the call made is gone with it: its stamp tells */
     if (!is_value(result) && !is_object_value(result) &&
         result.kind != constant_value_kind::pointer)
@@ -2984,7 +2995,7 @@ constness semantic_analysis::evaluate_invocation(
            conversion function and the function it returns (/11) too */
         if (e.enclosing && entity_table[e.enclosing].lambda)
             return CONST_UNKNOWN;
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     }
     /* a defaulted constructor's default member initializers with a
        location builtin were folded at the wrong place */
@@ -3139,7 +3150,7 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
                 return CONST_UNKNOWN;
             if (!(from & element_place) && state.objects[from].read_only &&
                 has_mutable_subobject(semantics[argument].type))
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
             constant_value copied = copy_value(state, v, false);
             place_value(state, place) = copied;
             return constness::constant;
@@ -3218,7 +3229,7 @@ constness semantic_analysis::permitted_result(const constant_evaluation &state,
             if (o.entity && entity_table[o.entity].automatic &&
                 o.value.kind == constant_value_kind::array &&
                 index >= o.value.first && index < o.value.first + o.value.count)
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
         }
         return constness::constant;
     }
@@ -3226,11 +3237,11 @@ constness semantic_analysis::permitted_result(const constant_evaluation &state,
         return CONST_UNKNOWN;
     /* [expr.const]/13.? : storage a new-expression made has to be freed */
     if (state.objects[place].heap)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     /* a local constexpr variable: its address differs per invocation */
     if (state.objects[place].entity &&
         entity_table[state.objects[place].entity].automatic)
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     return constness::constant;
 }
 
@@ -3555,7 +3566,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
            expressions" */
         if (!e.automatic) {
             if (!e.constexpr_ && !(e.type.cv() & cv_const))
-                return constness::not_constant;
+                return CONST_NOT_CONSTANT;
             return CONST_UNKNOWN;
         }
         /* [basic.scope.pdecl]/1: the variable is in scope in its own
@@ -3715,7 +3726,7 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
     case semantic_kind::goto_statement:
         if (state.potential)
             return CONST_UNKNOWN;
-        return constness::not_constant;
+        return CONST_NOT_CONSTANT;
     default:
         return CONST_UNKNOWN;
     }
