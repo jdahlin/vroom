@@ -150,12 +150,17 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
        function of a class template specialization (template<> R C<T>::f(...)) */
     {
         SyntaxTail tail(inner, lead);
-        if (tail.size() == 3 && tail[0].is(syntax_kind::decl_specifier_seq) &&
-            !tail[1].is_token() &&
-            tail[1].is(syntax_kind::noptr_declarator,
-                       syntax_kind::ptr_declarator) &&
-            ((defines && inner.function_definition().plain()) ||
-             (!defines && tail[2].is(preprocessing_op_or_punc::SEMICOLON))) &&
+        /* (a constructor or destructor has no decl-specifier-seq) */
+        uint32_t has_spec =
+            tail.size() > 0 && tail[0].is(syntax_kind::decl_specifier_seq);
+        if (tail.size() == 2 + has_spec && !tail[has_spec].is_token() &&
+            tail[has_spec].is(syntax_kind::noptr_declarator,
+                              syntax_kind::ptr_declarator) &&
+            ((defines && has_spec && inner.function_definition().plain()) ||
+             (defines && !has_spec &&
+              inner.function_definition().function_body().plain()) ||
+             (!defines &&
+              tail[1 + has_spec].is(preprocessing_op_or_punc::SEMICOLON))) &&
             is_namespace(current_scope) && !defining_class &&
             !function_state.active) {
             size_t expressions_before = expressions.size();
@@ -168,14 +173,16 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             specified ms;
             declarator_meaning m;
             qualified_type type;
-            analysis_result mr = decl_specifier_seq(tail[0], ms, false);
+            analysis_result mr = analysis_result::well_formed;
+            if (has_spec)
+                mr = decl_specifier_seq(tail[0], ms, false);
             uint32_t cv = 0;
             if (mr == analysis_result::well_formed) {
                 type = ms.type;
                 function_cv = 0;
                 function_parameters.clear();
                 declarator_template_id = true;
-                mr = declarator(inner, tail[1], type, m);
+                mr = declarator(inner, tail[has_spec], type, m);
                 declarator_template_id = false;
                 cv = function_cv;
             }
@@ -214,6 +221,21 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                     !entity_table[e].next_overload)
                     define_waiting_members(m.qualifier, m.id, false);
                 entity_index match = overload_of_type(e, type, cv);
+                /* a constructor or destructor: the class's own, found by
+                   its parameters ([temp.expl.spec]/1 has no return type
+                   to compare) */
+                if (!has_spec && !match) {
+                    entity_index o =
+                        entity_table[m.qualifier].first_constructor;
+                    if (m.destructor)
+                        o = entity_table[m.qualifier].destructor;
+                    for (; o && !match; o = entity_table[o].next_constructor)
+                        if (entity_table[o].kind == entity_kind::function &&
+                            same_parameters(type_table,
+                                            entity_table[o].type.unqualified(),
+                                            type.unqualified()))
+                            match = o;
+                }
                 if (match) {
                     entity_table[match].member_body_deferred = false;
                     /* the template's body, queued with the class, is no
