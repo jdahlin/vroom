@@ -465,12 +465,9 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
            exact representation.  If the source value is between two
            adjacent destination values, the result of the conversion is an
            implementation-defined choice of either of those values.
-           Otherwise, the behavior is undefined." */
+           Otherwise, the behavior is undefined." (a value beyond float's
+           range is the infinity, as clang folds it: no diagnostic) */
         float f = static_cast<float>(d);
-        if (isinf(f) && !isinf(d)) {
-            m.evaluation = constness::not_constant;
-            return;
-        }
         m.value = floating_kept(f);
     }
 }

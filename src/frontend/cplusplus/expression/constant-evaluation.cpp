@@ -282,10 +282,15 @@ constness semantic_analysis::evaluate_conversion(constant_value &v,
     arithmetic_value(m, to);
     if (m.evaluation == constness::constant)
         v = value_of(to, m.value);
-    /* [conv.fpint]/1: a value that cannot be represented in the integer
-       type is undefined behavior ([expr.const]/5.7) */
-    if (m.evaluation == constness::not_constant)
-        return CONST_NOT_CONSTANT_RULE;
+    if (m.evaluation == constness::not_constant) {
+        /* [conv.fpint]/1: a value that cannot be represented in the integer
+           type is undefined behavior ([expr.const]/5.7) */
+        if (fundamental_type_is_floating(from) &&
+            fundamental_type_is_integral(to))
+            return CONST_NOT_CONSTANT_RULE;
+        /* (any other answer is not a rule the evaluator knows) */
+        return CONST_UNKNOWN;
+    }
     return m.evaluation;
 }
 
