@@ -764,3 +764,17 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   instantiate-expr-3.cpp:46, instantiate-member-expr.cpp:50) are errors in
   member bodies clang reports at an explicit instantiation; accepted as the
   queued "use-site verdict for instantiated-member-body errors" gap.
+- 11.7 (6eb4d1fce, 857556611, 71610f23e): an explicit instantiation
+  definition of a class is ill-formed when a member body is ill-formed for
+  its arguments ([temp.explicit]/10: instantiate_pending marks the
+  declaration in explicit_class_instantiations); `template struct
+  A<int>::B;` instantiates the member class
+  (member_class_explicit_instantiation).  Prerequisites (own commit): `v->xy`
+  on a pointer to a vector and `&T::operator=` of a trivial implicit
+  assignment are refused (their errors were hushed before, now visible).
+  We reject 444 -> 436, we accept 5395 -> 5318 (-78; +1 the new test's
+  template line, clang's error is in its body), unsupported 34785 -> 34791;
+  types/constants_verified -32 blessed (declarations clang also rejects).
+  Left: a used (not explicit) member body's errors do not reject the use's
+  declaration; trivial implicit assignment operators are not declared
+  (class.copy.assign refusal in id-expression.cpp).
