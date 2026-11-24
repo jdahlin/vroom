@@ -50,7 +50,8 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         return explicit_specialization(inner.explicit_specialization());
     /* [temp.expl.spec]/16: template <> template <class T> R H<char>::h(T) */
     if (inner.is(syntax_kind::template_declaration) && inner.size() == 2 &&
-        inner[1].is(syntax_kind::function_definition)) {
+        inner[1].is(syntax_kind::function_definition,
+                    syntax_kind::simple_declaration)) {
         SyntaxRef def = inner[1];
         uint32_t lead_attr = leading_gnu_attributes(def);
         SyntaxTail tail(def, lead_attr);

@@ -541,6 +541,7 @@ analysis_result semantic_analysis::define_member_template_of(
         r = function_template_declarator(definition, lead, c, scope, s, m,
                                          type);
     uint32_t cv = function_cv;
+    bool exceptions_specified = function_exceptions_specified;
     leave_instantiation(context);
     bool constructor = (lead < definition.size() &&
                         declares_special_member(c, definition[lead])) ||
@@ -583,6 +584,18 @@ analysis_result semantic_analysis::define_member_template_of(
             VTRY(merged,
                  merge_template_defaults(declaration, f.first_parameter, first,
                                          f.parameter_count, false));
+        }
+        /* a declaration (template<> template<class U> R C<int>::f(U);)
+           redeclares the member template: nothing to define */
+        if (definition.is(syntax_kind::simple_declaration)) {
+            /* (a deleted template's redeclaration un-deletes it, and the
+               exception specifications are not compared: not yet) */
+            if (old.deleted || exceptions_specified ||
+                (f.definition &&
+                 f.definition.is(syntax_kind::function_definition) &&
+                 !f.definition.function_definition().function_body().plain()))
+                return member_definition_unsupported(declaration, recorded);
+            return analysis_result::well_formed;
         }
         function_template &record = function_templates[g - 1];
         record.declaration = declaration;
