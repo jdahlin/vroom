@@ -1173,8 +1173,7 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
         }
     }
     instantiation_kind was = entity_table[c].explicitly_instantiated;
-    if (was == instantiation_kind::definition ||
-        (extern_ && (was == instantiation_kind::none) && prior))
+    if (was == instantiation_kind::definition)
         return not_supported(n, "temp.explicit");
     mark_explicit_instantiation(c, extern_);
     if (!extern_)
