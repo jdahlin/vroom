@@ -3657,6 +3657,19 @@ class semantic_analysis
     uint32_t source_location_uses = 0;
     /* define_defaulted_special_member is analysing a definition */
     bool defining_defaulted_member = false;
+    /* [class.dtor]/11, [class.default.ctor]/4, [class.copy.ctor]/12: a
+       special member defaulted on its first declaration is defined only
+       when odr-used, so what its synthesized body uses is needed only
+       once it is: while it is analysed (needs_deferred_by), the functions
+       its body would need are kept here, and instantiate_pending passes
+       each on when its member is needed */
+    struct deferred_need {
+        entity_index by = 0, needed = 0;
+    };
+    entity_index needs_deferred_by = 0;
+    owned_array<deferred_need> deferred_needs;
+    void mark_needed(entity_index function);
+    bool pass_deferred_needs();
     token_index source_location_at = 0;
     uint32_t wrap_call_site(uint32_t node, token_index at,
                             uint32_t nodes_before);

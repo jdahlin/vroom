@@ -890,7 +890,7 @@ void semantic_analysis::instantiate_pending()
     size_t next_definition = 0;
     bool progress;
     do {
-        progress = false;
+        progress = pass_deferred_needs();
         for (size_t i = 0; i < postponed_bodies.size(); i++) {
             const postponed_body b = postponed_bodies[i];
             if (b.c && b.member_definition) {
