@@ -11,6 +11,8 @@ DIAGNOSTIC(sema_violation, ERROR, ERROR, "", "%0 ([%1])")
    -pedantic-errors): its extensions, mapped as its own diagnostics are */
 DIAGNOSTIC(sema_duplicate_specifier, EXTENSION_WARNING, WARNING, "duplicate-decl-specifier",
            "'%0' appears more than once in the decl-specifier-seq ([dcl.spec]/2)")
+DIAGNOSTIC(sema_dynamic_exception_specification, EXTENSION_WARNING, ERROR, "dynamic-exception-spec",
+           "ISO C++17 does not allow dynamic exception specifications ([except.spec])")
 DIAGNOSTIC(sema_zero_length_array, EXTENSION, IGNORE, "zero-length-array",
            "an array bound shall be greater than zero ([dcl.array]/1)")
 /* [ext:clang_vla] clang's -Wvla-cxx-extension, off unless asked */

@@ -671,6 +671,15 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         !(may_qualify &&
           tokens.files.behavior.has(language_feature::rvalue_references) &&
           defining_class && entity_table[defining_class].instantiation)) {
+        /* [diff.cpp14.except]/1: removed from C++17; clang's error,
+           -Wno-dynamic-exception-spec turns it off, and keeps the
+           function */
+        if (!tokens.files.behavior.has(
+                language_feature::dynamic_exception_specifications)) {
+            VTRY(r, extension_used(
+                        diagnostic_id::sema_dynamic_exception_specification,
+                        dynamic_exceptions.first_token(), nullptr));
+        }
         VTRY(r, dynamic_exception_types(dynamic_exceptions, may_qualify));
     }
     if (exceptions) {

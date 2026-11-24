@@ -46,7 +46,8 @@ node_index parser::noexcept_specifier()
  * [diff.cpp17.except]/1: C++20 removed that too ("Remove throw()
  * exception specification"), which clang still accepts in every edition,
  * without a diagnostic.  Other dynamic-exception-specifications are
- * clang's extension in the later editions, P9's; throw ( ... ) is
+ * parsed in every edition; the analysis diagnoses them as clang does
+ * (semantic_analysis::dynamic_exception_types); throw ( ... ) is
  * Microsoft's in every edition.  C++03 has no pack expansion: the
  * ... after a type-id is C++11's (variadic templates, P7's).
  */
@@ -61,11 +62,8 @@ node_index parser::dynamic_exception_specification()
         at(preprocessing_op_or_punc::ELLIPSIS, 2) &&
         at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 3))
         return beyond_this_step();
-    if (!b.has(language_feature::dynamic_exception_specifications)) {
-        /* clang's extension of the later editions (an error unless
-           -Wno-dynamic-exception-spec) */
-        if (!empty)
-            return beyond_this_step();
+    if (!b.has(language_feature::dynamic_exception_specifications) && empty) {
+        /* [diff.cpp17.except]/1: throw ( ) still means noexcept(true) */
         add_token(); /* throw */
         add_token(); /* ( */
         add_token(); /* ) */
