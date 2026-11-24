@@ -281,6 +281,113 @@ analysis_result semantic_analysis::select_for_target(
 }
 
 /*
+ * [over.over]/1: "The function name can be preceded by the & operator";
+ * /3: "if the name is a function template, template argument deduction is
+ * done ([temp.deduct.funcaddr]), and if the argument deduction succeeds,
+ * the resulting template argument list is used to generate a single
+ * function template specialization, which is added to the set of selected
+ * functions considered"; /2: when the name is a template-id, only the
+ * specializations of the templates it names are selected (a non-template
+ * function is none).  Each template's explicit template arguments
+ * ([temp.arg.explicit]/2-6) then deduction from ft (template_candidates);
+ * one specialization selected is the one named, none is ill-formed, and
+ * several are chosen among by partial ordering (/5), not analysed.
+ */
+analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
+                                                          qualified_type ft,
+                                                          expression_meaning &m,
+                                                          bool &handled)
+{
+    handled = false;
+    auto name = without_parentheses(e);
+    if (name.is(syntax_kind::unary_expression) && name.size() == 2 &&
+        name[0].is(preprocessing_op_or_punc::AMPERSAND))
+        name = without_parentheses(name[1]);
+    SyntaxElement id = name;
+    if (name.is(syntax_kind::qualified_id) && name.size() == 2 &&
+        name[0].is(syntax_kind::nested_name_specifier))
+        id = name[1];
+    if (!id.is(syntax_kind::simple_template_id) ||
+        !id.simple_template_id().template_name())
+        return analysis_result::well_formed;
+    if (depends_on_template_parameter(ft))
+        return analysis_result::well_formed;
+    token_index at = 0;
+    uint32_t found = 0;
+    bool qualified = false;
+    owned_array<template_argument> specified;
+    size_t uses_before = name_uses.size();
+    VTRY(parts, template_callee_parts(name, at, found, specified, qualified));
+    name_uses.resize(uses_before);
+    owned_array<SyntaxElement> written;
+    owned_array<bool> expansion;
+    SyntaxRef written_at = overloaded_written_at;
+    for (SyntaxElement a : overloaded_written)
+        written.append(a);
+    for (bool x : overloaded_written_expansion)
+        expansion.append(x);
+    overloaded_written.clear();
+    overloaded_written_expansion.clear();
+    overloaded_written_at = 0;
+    if (!found ||
+        entity_table[function_templates[found - 1].entity].nonstatic_member)
+        return analysis_result::well_formed;
+    handled = true;
+    owned_array<uint32_t> group;
+    if (written_at)
+        function_template_overloads(function_templates[found - 1].name, group);
+    else
+        group.append(found);
+    for (uint32_t g : group)
+        if (entity_table[function_templates[g - 1].entity].nonstatic_member)
+            return not_supported(id.index(), "over.over");
+    owned_array<overload_candidate> candidates;
+    owned_array<uint32_t> first;
+    owned_array<template_argument> all;
+    if (written_at) {
+        VTRY_SET(parts,
+                 template_candidates(id.index(), group, nullptr, 0, candidates,
+                                     &first, &all, &written, written_at,
+                                     nullptr, &expansion, &ft));
+    } else {
+        VTRY_SET(parts, template_candidates(id.index(), group, nullptr, 0,
+                                            candidates, &first, &all, nullptr,
+                                            0, &specified, nullptr, &ft));
+    }
+    if (candidates.empty())
+        return ill_formed_at_token(at,
+                                   "no specialization of the function "
+                                   "templates named has the type of the "
+                                   "target",
+                                   "over.over");
+    if (candidates.size() > 1)
+        return not_supported(id.index(), "temp.func.order");
+    uint32_t g = candidates[0].template_index;
+    uint32_t begin = first[0];
+    uint32_t count = static_cast<uint32_t>(all.size()) - begin;
+    entity_index chosen = 0;
+    VTRY_SET(parts, instantiate(id.index(), function_templates[g - 1].entity,
+                                all.data() + begin, count, chosen));
+    overload_target_token = at;
+    overload_target_choice = chosen;
+    uses_before = name_uses.size();
+    size_t expressions_before = expressions.size();
+    parts = expression(e, m);
+    overload_target_token = 0;
+    overload_target_choice = 0;
+    name_uses.resize(uses_before);
+    /* (no claim: alone, without the target, a template-id of several
+       templates or with arguments left to deduce may name another
+       specialization or none) */
+    bool alone =
+        !written_at &&
+        specified.size() == function_templates[found - 1].parameter_count;
+    for (size_t i = expressions_before; !alone && i < expressions.size(); i++)
+        expressions[i].placeable = false;
+    return parts;
+}
+
+/*
  * [over.ics.scs]: an overload set converts to a parameter of function
  * pointer or function reference type when [over.over] finds one function
  * for it, by an Exact Match; to a parameter of another type (a class's
@@ -356,8 +463,15 @@ analysis_result semantic_analysis::target_expression(SyntaxElement e,
     if (!function_target(target, ft, &member_class))
         return expression(e, m);
     function_set set;
-    if (!named_function_set(e, set))
+    if (!named_function_set(e, set)) {
+        if (!member_class) {
+            bool handled = false;
+            VTRY(r, template_id_for_target(e, ft, m, handled));
+            if (handled)
+                return r;
+        }
         return expression(e, m);
+    }
     /* whether &f or f fits the target (&f initializes no reference) is
        the initialization's rules, of the function chosen */
     SyntaxRef at = current_declaration;

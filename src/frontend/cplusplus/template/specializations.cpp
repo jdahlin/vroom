@@ -247,15 +247,11 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         if (SyntaxRef sid = out_of_class_variable_member(inner, &member_name)) {
             nominated_scope ns;
             SyntaxRef item = inner[1];
-            /* [temp.expl.spec]/13: without an initializer it declares, and
-               the class's instantiation has instantiated the template's
-               definition already: not yet */
-            if (!item.is(syntax_kind::init_declarator))
-                return not_supported_because(
-                    n, "temp.expl.spec",
-                    "a static data member's declaration without "
-                    "an initializer");
-            item = item[0];
+            /* [temp.expl.spec]/14: without an initializer it is a
+               declaration, not a definition */
+            bool declares_only = !item.is(syntax_kind::init_declarator);
+            if (!declares_only)
+                item = item[0];
             VTRY(nr, nested_name_specifier(item[0].index(), ns));
             entity_index v = 0;
             if (is_class_entity(ns.entity)) {
@@ -277,6 +273,14 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                 entity_table[v].definition = 0;
                 /* (not the template's weak, inline copy) */
                 entity_table[v].inline_ = false;
+                if (declares_only) {
+                    /* a declaration: no definition, so no initialization
+                       of the object here either */
+                    specialization_declares_member = true;
+                    analysis_result dr = simple_declaration(inner);
+                    specialization_declares_member = false;
+                    return dr;
+                }
                 return simple_declaration(inner);
             }
             return not_supported_because(

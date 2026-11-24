@@ -492,6 +492,9 @@ node_index parser::substatement()
  */
 analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
 {
+    /* [temp.res]/6: whether a statement's construct names a template
+       argument is its own, not its enclosing statement's */
+    scoped_value<bool> named(argument_named, false);
     built = 0;
     if (s.is_token())
         return not_supported(current_declaration, "stmt.pre");
@@ -528,6 +531,13 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
                new names into a block" */
             size_t first = block_variables.size();
             analysis_result r = simple_declaration(d);
+            /* (a variable whose initializer named a template argument,
+               auto x = t: its uses are dependent) */
+            if (argument_named)
+                for (size_t i = first; i < block_variables.size(); i++)
+                    entity_table[block_variables[i]].argument_bound =
+                        argument_bound_type(
+                            entity_table[block_variables[i]].type);
             built = declaration_statements(first, d.first_token());
             if (r != analysis_result::well_formed)
                 hold_names(d);

@@ -225,6 +225,8 @@ entity_index semantic_analysis::make_bound_pack(entity_index scope,
     entity_table[e].value = pack_elements.size();
     entity_table[e].member_count = count;
     entity_table[e].defined = true;
+    /* (its elements are an instantiation's arguments) */
+    entity_table[e].argument_bound = true;
     for (uint32_t i = 0; i < count; i++)
         pack_elements.append(elements[i]);
     entity_table.bind(scope, name, e);
@@ -240,9 +242,11 @@ entity_index semantic_analysis::find_pack(uint32_t name) const
     for (entity_index s = start;; s = entity_table[s].enclosing) {
         entity_index e = entity_table.find(s, name);
         if (e) {
-            if (entity_table[e].kind == entity_kind::pack)
-                return e;
-            return 0;
+            if (entity_table[e].kind != entity_kind::pack)
+                return 0;
+            if (entity_table[e].argument_bound)
+                argument_named = true;
+            return e;
         }
         if (!s)
             return 0;
@@ -470,9 +474,23 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
         /* /10: "If N is zero for a unary fold-expression, the value of
            the expression is shown in Table 15; if the operator is not
            listed in Table 15, the instantiation is ill-formed." */
+        if (comma) {
+            /* Table 15: "," gives void() */
+            m = expression_meaning();
+            m.type = qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none);
+            m.category = value_category::prvalue;
+            m.evaluation = constness::constant;
+            m.value = 0;
+            m.node = expression_node(semantic_kind::constant, m, at);
+            return analysis_result::well_formed;
+        }
         if (op != preprocessing_op_or_punc::AMPERSAND_AMPERSAND &&
             op != preprocessing_op_or_punc::BAR_BAR)
-            return not_supported(n, "temp.variadic");
+            return ill_formed(n,
+                              "an empty expansion for an operator with no "
+                              "fallback value",
+                              "temp.variadic");
         m = integer_constant(fundamental_type::bool_,
                              op ==
                                  preprocessing_op_or_punc::AMPERSAND_AMPERSAND,

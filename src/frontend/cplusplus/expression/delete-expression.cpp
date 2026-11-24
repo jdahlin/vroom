@@ -106,7 +106,18 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
             return not_supported(n, "expr.delete");
     }
     uint64_t size = size_of_type(object_type);
-    if (!size || alignment_of_type(object_type) > 16)
+    if (!size)
+        return not_supported(n, "expr.delete");
+    /* [basic.align]/3: new-extended alignment: the deallocation function
+       with std::align_val_t is preferred ([expr.delete]/10) */
+    bool over_aligned =
+        alignment_of_type(object_type) > 16 &&
+        tokens.files.behavior.has(language_feature::aligned_allocation);
+    qualified_type align_type;
+    if (alignment_of_type(object_type) > 16 &&
+        (!over_aligned || !align_val_type(align_type) ||
+         (c && entity_table[c].destructor &&
+          entity_table[entity_table[c].destructor].virtual_)))
         return not_supported(n, "expr.delete");
     /* the operand's value, which the destructor and the deallocation
        function are given; /11 (a note): "Any cv-qualifiers in the type of
@@ -198,7 +209,7 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     entity_index function = 0;
     bool sized = false;
     VTRY_SET(r, usual_deallocation(n, c, global, array, function, sized, false,
-                                   cookie != 0));
+                                   cookie != 0, over_aligned));
     owned_array<expression_meaning> arguments;
     arguments.append(deleted);
     if (sized)
@@ -226,6 +237,22 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
         } else {
             arguments.append(integer_constant(
                 fundamental_type::unsigned_long_int, size, at));
+        }
+    }
+    if (over_aligned) {
+        /* [expr.delete]/11: "If a deallocation function with a parameter of
+           type std::align_val_t is used, the alignment of the type of the
+           deleted object is passed as the corresponding argument." */
+        type_index ft = entity_table[function].type.unqualified();
+        uint32_t last = type_table[ft].parameter_count;
+        if (last > 1 && type_table.parameters(ft)[last - 1] == align_type) {
+            expression_meaning a;
+            a.type = align_type;
+            a.category = value_category::prvalue;
+            a.evaluation = constness::constant;
+            a.value = alignment_of_type(object_type);
+            a.node = expression_node(semantic_kind::constant, a, at);
+            arguments.append(a);
         }
     }
     expression_meaning call;
@@ -308,7 +335,8 @@ analysis_result semantic_analysis::array_cookie(SyntaxRef n, entity_index c,
  */
 analysis_result semantic_analysis::usual_deallocation(
     SyntaxRef n, entity_index c, bool global, bool array,
-    entity_index &function, bool &is_sized, bool class_complete, bool cookie)
+    entity_index &function, bool &is_sized, bool class_complete, bool cookie,
+    bool over_aligned, bool at_definition)
 {
     /* /9: "When the keyword delete in a delete-expression is preceded by
        the unary :: operator, the deallocation function's name is looked up
@@ -334,18 +362,68 @@ analysis_result semantic_analysis::usual_deallocation(
         type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
     entity_index unsized = 0, sized = 0;
     bool other = false;
+    /* a destroying delete's first parameter is the class, not void*
+       ([basic.stc.dynamic.deallocation]/2): not followed */
+    bool all_void_first = true;
     for (entity_index f : set) {
         const struct type &ft = type_table[entity_table[f].type.unqualified()];
         const qualified_type *parameters =
             type_table.parameters(entity_table[f].type.unqualified());
-        if (ft.variadic)
-            other = true;
-        else if (ft.parameter_count == 1)
-            unsized = f;
-        else if (ft.parameter_count == 2 && parameters[1] == size_type)
-            sized = f;
-        else
-            other = true;
+        bool void_pointer = false;
+        if (ft.parameter_count && parameters[0].unqualified() &&
+            type_table[parameters[0].unqualified()].kind ==
+                type_kind::pointer) {
+            const struct type &pointee =
+                type_table[type_table[parameters[0].unqualified()]
+                               .operand.unqualified()];
+            void_pointer = pointee.kind == type_kind::fundamental &&
+                           pointee.fundamental == fundamental_type::void_;
+        }
+        if (!void_pointer)
+            all_void_first = false;
+    }
+    /* [expr.delete]/10: "If the type has new-extended alignment, a function
+       with a parameter of type std::align_val_t is preferred; otherwise a
+       function without such a parameter is preferred. If exactly one
+       preferred function is found, that function is selected. If no
+       preferred function is found, all non-preferred functions are
+       considered." */
+    qualified_type align_type;
+    bool have_align = align_val_type(align_type);
+    for (int pass = 0; pass < 2; pass++) {
+        unsized = sized = 0;
+        other = false;
+        bool any = false;
+        for (entity_index f : set) {
+            const struct type &ft =
+                type_table[entity_table[f].type.unqualified()];
+            const qualified_type *parameters =
+                type_table.parameters(entity_table[f].type.unqualified());
+            uint32_t count = ft.parameter_count;
+            bool has_align =
+                have_align && count >= 2 && parameters[count - 1] == align_type;
+            bool preferred = has_align == over_aligned;
+            if (pass == 0 && !preferred)
+                continue;
+            if (pass == 1 && preferred)
+                continue;
+            any = true;
+            if (has_align)
+                count--;
+            if (ft.variadic)
+                other = true;
+            else if (count == 1)
+                unsized = f;
+            else if (count == 2 && parameters[1] == size_type)
+                sized = f;
+            else
+                other = true;
+        }
+        if (pass == 0 && (unsized || sized))
+            break;
+        if (pass == 1 && !any) {
+            unsized = sized = 0;
+        }
     }
     if (class_complete && in_class && other)
         /* a class's deallocation functions that are not all usual ones:
@@ -369,9 +447,13 @@ analysis_result semantic_analysis::usual_deallocation(
     if (!unsized || (sized && !in_class && (!array || cookie)))
         function = sized;
     is_sized = function && function == sized;
+    if (!function && in_class && !at_definition && all_void_first)
+        /* [expr.delete]/9 finds the class's deallocation functions, and
+           none is usual ([basic.stc.dynamic.deallocation]/2): clang's "no
+           suitable member 'operator delete' in 'C'" */
+        return ill_formed(n, "no suitable member 'operator delete'",
+                          "expr.delete");
     if (!function)
-        /* a deallocation function that is no usual one: clang's "no
-           suitable member 'operator delete'" */
         return not_supported(n, "expr.delete");
     return analysis_result::well_formed;
 }

@@ -129,6 +129,8 @@ analysis_result semantic_analysis::jump_statement(JumpStatement n,
 analysis_result semantic_analysis::return_statement(SyntaxRef n,
                                                     uint32_t &operand_node)
 {
+    if (function_state.returns_argument_dependent)
+        argument_named = true;
     qualified_type returns = function_state.returns;
     bool returns_void = fundamental_of(returns) == fundamental_type::void_;
     if (function_state.deducing && n.size() == 2) {

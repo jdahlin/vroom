@@ -294,6 +294,15 @@ analysis_result semantic_analysis::dependent_member_friend(
     for (const template_argument &a : arguments)
         template_arguments.append(a);
     member_friends.append(f);
+    /* clang: a friend class of this form "is not supported; turning off
+       access control for" the granting class, every specialization of
+       it (Sema::ActOnTemplatedFriendTag, FriendDecl's unsupported
+       friend) */
+    if (declaration.is(syntax_kind::elaborated_type_specifier)) {
+        entity_table[c].access_unchecked = true;
+        if (entity_table[c].instantiation)
+            entity_table[specialized_template(c)].access_unchecked = true;
+    }
     /* the specializations complete already */
     uint32_t added = static_cast<uint32_t>(member_friends.size() - 1);
     for (uint32_t i = 0; i < instantiations.size(); i++) {

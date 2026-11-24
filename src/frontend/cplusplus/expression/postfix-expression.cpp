@@ -747,6 +747,10 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
         parts = InitializerParts::after(n, 1);
     if (SyntaxElement list = parts.braced_list()) {
         VTRY(gathered, list_clauses(list, clauses, nullptr));
+    } else if (parts.form == InitializerParts::syntax_form::equals) {
+        /* [dcl.type.class.deduct]/1: C x = e; the guides are resolved
+           for the argument e ([over.match.class.deduct]/3) */
+        clauses.append(parts.clause);
     } else if (parts.form == InitializerParts::syntax_form::parenthesized &&
                parts.list) {
         for (SyntaxElement a : parts.list.items(syntax_kind::initializer_list))
@@ -764,6 +768,16 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
             return not_supported(n, "over.match.class.deduct");
         arguments.append(e);
+    }
+    /* [over.match.class.deduct]/1.2: a lone argument of the template's own
+       specialization selects the copy deduction candidate (not a guide
+       here) */
+    if (arguments.size() == 1) {
+        const struct type &argument =
+            type_table[arguments[0].type.unqualified()];
+        if (argument.kind == type_kind::class_type &&
+            class_template_of(argument.entity) == ct)
+            return not_supported(n, "over.match.class.deduct");
     }
     owned_array<uint32_t> group;
     for (size_t i = 0; i < function_templates.size(); i++)
@@ -784,6 +798,19 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             /* (the arguments are analysed again by the initialization) */
             expressions.resize(expressions_before);
             name_uses.resize(uses_before);
+            /* [over.match.copy]/1, [over.match.list]/1: "In copy-list-
+               initialization, if an explicit constructor is chosen, the
+               initialization is ill-formed", and an explicit guide is no
+               candidate of copy-initialization: not analysed here */
+            if (parts.form == InitializerParts::syntax_form::equals &&
+                candidates[chosen].template_index) {
+                const function_template &guide =
+                    function_templates[candidates[chosen].template_index - 1];
+                SyntaxElement first = guide.declarator[0];
+                if (first.is_token() &&
+                    first.keyword() == standard_keyword::explicit_)
+                    return not_supported(n, "over.match.class.deduct");
+            }
             qualified_type function =
                 entity_table[candidates[chosen].function].type;
             const struct type &returned =
@@ -1060,8 +1087,11 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             owned_array<expression_meaning> early;
             for (const expression_meaning &e : expanded)
                 early.append(e);
-            VTRY_SET(r, template_call(n, name, ft, specified, qualified,
-                                      arguments, early, f));
+            {
+                resolving_call scope(resolving_calls);
+                VTRY_SET(r, template_call(n, name, ft, specified, qualified,
+                                          arguments, early, f));
+            }
             return call_with(n, f, f.type, 0, 0, arguments, early, m);
         }
     }
@@ -1155,8 +1185,11 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 if (!found_template)
                     return not_supported(n, "basic.lookup.argdep");
                 owned_array<template_argument> specified;
-                VTRY_SET(r, template_call(n, t, found_template, specified,
-                                          false, arguments, early, f));
+                {
+                    resolving_call scope(resolving_calls);
+                    VTRY_SET(r, template_call(n, t, found_template, specified,
+                                              false, arguments, early, f));
+                }
                 return call_with(n, f, f.type, 0, 0, arguments, early, m);
             }
             /* the functions of the sets found: [over.call.func]/3's
@@ -1303,10 +1336,19 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
     for (entity_index e : found_by_adl)
         overload_set(e, set);
     if (set.size() > 1) {
-        VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
+        {
+            resolving_call scope(resolving_calls);
+            VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
+        }
         function_type = f.type;
         if (member)
             member = semantics[f.node].b;
+    } else if (set.size() == 1 && f.node) {
+        /* the one function the name names is the function called (its use
+           is not the name's, a callee's); [dcl.fct.def.delete]/2's deleted
+           calls of it are not diagnosed here yet (a template argument's
+           substitution error is attributed to the use) */
+        VTRY(du, unavailable_use(semantics[f.node].at, set[0]));
     }
     return call_with(n, f, function_type, object, member, arguments, early, m);
 }
@@ -1643,7 +1685,8 @@ analysis_result semantic_analysis::template_candidates(
     owned_array<uint32_t> *first_arguments, owned_array<template_argument> *all,
     const owned_array<SyntaxElement> *written, SyntaxRef written_at,
     const owned_array<template_argument> *specified,
-    const owned_array<bool> *written_expansion)
+    const owned_array<bool> *written_expansion,
+    const qualified_type *target_function)
 {
     for (uint32_t g : group) {
         /* the explicit template arguments ([temp.arg.explicit]), if given */
@@ -1711,8 +1754,18 @@ analysis_result semantic_analysis::template_candidates(
                     break;
             }
         }
-        if (r == analysis_result::well_formed && !failed)
-            r = deduce_from_call(n, g, meanings, count, d, &failed);
+        if (r == analysis_result::well_formed && !failed) {
+            if (target_function) {
+                /* [temp.deduct.funcaddr]/1 */
+                owned_array<template_argument> given;
+                for (const template_argument &a : d)
+                    given.append(a);
+                r = deduce_from_function_type(n, g, *target_function, d, failed,
+                                              &given);
+            } else {
+                r = deduce_from_call(n, g, meanings, count, d, &failed);
+            }
+        }
         entity_index e = 0;
         const struct function_template ft = function_templates[g - 1];
         if (r == analysis_result::well_formed && !failed) {
@@ -1720,6 +1773,16 @@ analysis_result semantic_analysis::template_candidates(
             r = instantiate(n, ft.entity, d.data(),
                             static_cast<uint32_t>(d.size()), e);
             unevaluated--;
+        }
+        if (r == analysis_result::well_formed && !failed && target_function) {
+            /* [over.over]/3: selected when the specialization's type is
+               the target's, after the [conv.fctptr] conversion */
+            qualified_type t = entity_table[e].type;
+            bool compatible = type_table[t.unqualified()].non_throwing &&
+                              differ_in_exceptions(t, *target_function);
+            if (t.unqualified() != target_function->unqualified() &&
+                !compatible)
+                failed = true;
         }
         substituting--;
         if (r == analysis_result::ill_formed && undo_substitution(mark))
@@ -1739,6 +1802,40 @@ analysis_result semantic_analysis::template_candidates(
                 all->append(x);
         }
     }
+    return analysis_result::well_formed;
+}
+
+analysis_result
+semantic_analysis::braced_deduction_elements(SyntaxElement list,
+                                             expression_meaning &m)
+{
+    owned_array<SyntaxElement> clauses;
+    owned_array<uint32_t> packs;
+    designation_set designations;
+    VTRY(gathered, list_clauses(list, clauses, &packs, &designations));
+    if (designations.any)
+        return analysis_result::well_formed;
+    for (uint32_t x : packs)
+        if (x != no_expansion)
+            return analysis_result::well_formed;
+    owned_array<expression_meaning> found;
+    for (SyntaxElement c : clauses) {
+        if (c.is(syntax_kind::braced_init_list))
+            return analysis_result::well_formed;
+        expression_meaning e;
+        size_t uses_before = name_uses.size();
+        VTRY(r, passed_expression(c, e));
+        if (!e.node || e.overload_name) {
+            name_uses.resize(uses_before);
+            return analysis_result::well_formed;
+        }
+        found.append(e);
+    }
+    m.braced_known = true;
+    m.braced_first = static_cast<uint32_t>(braced_elements.size());
+    m.braced_count = static_cast<uint32_t>(found.size());
+    for (const expression_meaning &e : found)
+        braced_elements.append(e);
     return analysis_result::well_formed;
 }
 
@@ -1763,15 +1860,25 @@ analysis_result semantic_analysis::template_call(
     bool given = !early.empty();
     for (const expression_meaning &e : early) {
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
-            return not_supported(n, "temp.deduct.call");
+            return not_supported_because(n, "temp.deduct.call",
+                                         "a function as an argument analysed "
+                                         "before the call (pack expansion)");
         types.append(e.type);
     }
     for (SyntaxElement a : arguments) {
         if (given)
             break;
         expression_meaning e;
-        if (a.is(syntax_kind::braced_init_list))
-            return not_supported(n, "temp.deduct.call");
+        if (a.is(syntax_kind::braced_init_list)) {
+            /* [temp.deduct.call]/1: a braced-init-list is a non-deduced
+               context for a parameter that is not std::initializer_list
+               or an array: no type, no node (deduce_from_call skips it);
+               the list initializes the parameter after deduction */
+            VTRY(r, braced_deduction_elements(a, e));
+            types.append(e.type);
+            early.append(e);
+            continue;
+        }
         /* [temp.deduct.call]/6: "When P is a function type, function
            pointer type, or pointer-to-member-function type: If the argument
            is an overload set containing one or more function templates, the
@@ -1791,7 +1898,8 @@ analysis_result semantic_analysis::template_call(
         if (e.entity && entity_table[e.entity].kind == entity_kind::function &&
             entity_table[e.entity].next_overload) {
             name_uses.resize(uses_before);
-            return not_supported(n, "temp.deduct.call");
+            return not_supported_because(
+                n, "temp.deduct.call", "an overloaded function as an argument");
         }
         types.append(e.type);
         early.append(e);

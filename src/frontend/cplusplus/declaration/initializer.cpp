@@ -1937,6 +1937,7 @@ analysis_result semantic_analysis::aggregate_elements(
         target.kind == type_kind::array || target.kind == type_kind::vector;
     owned_array<aggregate_class_element> members;
     uint64_t count = 0;
+    size_t union_default = 0, first_element = 0;
     bool unknown_bound = false;
     if (arraylike) {
         count = target.bound;
@@ -1949,15 +1950,21 @@ analysis_result semantic_analysis::aggregate_elements(
             count = 1;
         /* [dcl.init.aggr]/5.4.2 (C++20 /5.4): an empty list initializes a
            union's member that has a default member initializer, not its
-           first member: not analysed */
+           first member: that member is the active one, as a designator
+           makes it */
         if (x.union_ && next >= clauses.size())
-            for (size_t i = 1; i < members.size(); i++)
-                if (members[i].default_initializer)
-                    return not_supported(list, "dcl.init.aggr");
+            for (size_t i = 1; i < members.size() && !union_default; i++)
+                if (members[i].default_initializer &&
+                    !members[0].default_initializer)
+                    union_default = i;
+        if (union_default) {
+            first_element = union_default;
+            count = union_default + 1;
+        }
     }
     owned_array<uint32_t> elements;
     constness all = constness::constant;
-    for (uint64_t i = 0; i < count || unknown_bound; i++) {
+    for (uint64_t i = first_element; i < count || unknown_bound; i++) {
         if (unknown_bound && next == clauses.size())
             break;
         qualified_type element = target.operand;
@@ -2015,6 +2022,8 @@ analysis_result semantic_analysis::aggregate_elements(
         }
     }
     aggregate_value(list, type, all, elements, result);
+    if (union_default)
+        semantics[result.node].a = members[union_default].member;
     return analysis_result::well_formed;
 }
 

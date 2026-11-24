@@ -410,6 +410,10 @@ enum gnu_attribute_flag : uint32_t {
     /* clang's require_constant_initialization: on a variable with static
        or thread storage duration, constinit's rule ([dcl.constinit]/2) */
     gnu_require_constant_initialization = 1u << 27,
+    /* clang's unavailable, with or without a message: a use of the function
+       or variable is an error, except inside an unavailable function
+       (unavailable_use) */
+    gnu_unavailable = 1u << 28,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -490,6 +494,11 @@ struct entity {
     exception_specification exceptions;
     /* [temp.inst]/4: a definition deferred until the function is used. */
     bool member_definition_needed = false, member_body_deferred = false;
+    /* the declaration of the translation unit whose use first needed the
+       definition ([temp.inst]/4), 0 if none: an argument-dependent error
+       of the instantiated body makes it ill-formed (clang: "in
+       instantiation of ... requested here") */
+    SyntaxRef member_needed_by = 0;
     /* the preprocessor's identifier number, 0 for an unnamed entity */
     uint32_t name = 0;
     /* the entity whose scope the name is declared in (a namespace, a
@@ -533,6 +542,11 @@ struct entity {
        template-declaration or explicit-specialization declared it: what
        it denotes needs [temp]'s rules */
     bool held_by_template = false;
+    /* [temp.dep]: in an instantiation, a name whose meaning came from the
+       template arguments: a template-parameter's name bound to its
+       argument, a local variable, parameter or this declared with one; a
+       construct that uses it is argument-dependent (argument_named) */
+    bool argument_bound = false;
     /* the subclause whose missing rules made the declaration that
        hold_names held this name not analysed (declaration() sets it from
        that declaration's first refusal): a use of the name is refused for
@@ -677,6 +691,11 @@ struct entity {
        base-specifier depends on a template-parameter: [temp.dep]/3, its
        class's members are not found by unqualified lookup */
     bool dependent_base = false;
+    /* a class (a class template's pattern or specialization) with a
+       template friend class that is a member of a dependent type
+       ([temp.friend]/4): clang does not check access to its members
+       (-Wunsupported-friend, "turning off access control") */
+    bool access_unchecked = false;
     /* a class: its alignment; a non-static data member: the alignment
        its aligned attribute asks for, 0 if none ([ext:gnu_attributes]) */
     uint32_t alignment = 0;
@@ -1098,6 +1117,9 @@ struct unsupported_construct {
        that declaration (-fcxx-dump=unsupported's held= field, its first
        token's place, which bench/cxx-sema.py --why follows), 0 if none */
     SyntaxRef holder = 0;
+    /* refused inside an instantiation in a construct that named a
+       template argument (semantic_analysis::argument_named) */
+    bool argument_dependent = false;
 };
 
 struct analysed_declaration {
@@ -1305,6 +1327,12 @@ struct expression_meaning {
        token of the name; node is 0, and the operand is analysed for the
        type of the parameter it is passed to (call_with) */
     token_index overload_name = 0;
+    /* [temp.deduct.call]/1: a braced-init-list argument whose elements are
+       known: braced_count of them, from braced_elements[braced_first] on
+       (braced_known); otherwise it deduces nothing */
+    bool braced_known = false;
+    uint32_t braced_first = 0;
+    uint32_t braced_count = 0;
 };
 
 /* ---- the semantic tree (sema/semantic-tree.cpp) ---- */
@@ -2343,6 +2371,9 @@ class semantic_analysis
                                              uint32_t &elements,
                                              token_index &ellipsis);
     bool depends_on_template_parameter(qualified_type t) const;
+    /* [temp.deduct.type]/5.7: t names a function type or a specialization
+       with a pack expansion that is not the last parameter or argument */
+    bool pack_expansion_not_last(qualified_type t, uint32_t depth = 0) const;
     /* whether a type is made of a template-parameter type at position from
        or after */
     bool depends_on_parameter_from(qualified_type t, uint64_t from) const;
@@ -2938,6 +2969,9 @@ class semantic_analysis
         /* [temp.variadic]/5: an element of the function parameter pack
            (an instantiation's) of this name, id 0 */
         uint32_t pack_name = 0;
+        /* in an instantiation: its declaration named a template argument
+           (argument_named) */
+        bool argument_dependent = false;
     };
     /* [dcl.fct.default]: the default arguments of function_parameters,
        which the declaration n of the function f gives it (specialization:
@@ -3680,6 +3714,10 @@ class semantic_analysis
     owned_array<deferred_need> deferred_needs;
     void mark_needed(entity_index function);
     bool pass_deferred_needs();
+    /* set by a default member initializer that is ill-formed: an error of
+       the class itself ([class.mem]/6), not a reason a defaulted
+       constructor is deleted */
+    bool member_initializer_failed = false;
     token_index source_location_at = 0;
     uint32_t wrap_call_site(uint32_t node, token_index at,
                             uint32_t nodes_before);
@@ -3892,6 +3930,11 @@ class semantic_analysis
                                                   bool &constant);
     /* [expr.const]/10: a contextually converted constant expression of
        type bool, from the expression e */
+    /* set by the evaluator when it answered "not constant" for a call of a
+       specialization whose definition is ill-formed ([temp.inst]/1): an
+       error there is not a substitution failure ([temp.deduct]/8), which
+       the caller that drops a candidate for one does not tell apart */
+    bool invalid_specialization_called = false;
     analysis_result bool_constant_expression(SyntaxRef at, SyntaxElement e,
                                              bool &constant, bool &value);
     /* [except.spec]/2: whether the noexcept-specifier n makes the exception
@@ -4584,6 +4627,7 @@ class semantic_analysis
     /* [class.access]: whether a member with this access can be named
        here */
     bool accessible(entity_index member, entity_index object_class = 0) const;
+    bool accessible_here(entity_index member, entity_index object_class) const;
     /* [temp.spec]/6: set while the names of the declaration of an explicit
        instantiation or explicit specialization are analysed (accessible()
        ignores access then); the parts the paragraph checks clear it:
@@ -4940,6 +4984,10 @@ class semantic_analysis
            statement replaced it in returns (deduced) */
         qualified_type declared_returns;
         bool deducing = false, deduced = false;
+        /* in an instantiation: the declarator named a template argument
+           (argument_named), so a return statement's checks against the
+           return type are argument-dependent */
+        bool returns_argument_dependent = false;
         unsigned loops = 0, breakable = 0;
         owned_array<label_record> labels;
         owned_array<goto_record> gotos;
@@ -5052,6 +5100,9 @@ class semantic_analysis
            bodies analysed quietly (quiet_member_bodies), no use of the
            specialization known: instantiated quietly too */
         bool quiet = false;
+        /* the translation unit's declaration whose use first wanted the
+           definition (want_definition), 0 if none */
+        SyntaxRef wanted_by = 0;
         /* a class's: the partial or explicit specialization whose
            class-specifier defines it (function_templates' index plus one;
            0 the primary template's) and its parameters' arguments
@@ -5063,6 +5114,10 @@ class semantic_analysis
         /* a function template's declaration whose substitution failed
            while a candidate was considered ([temp.deduct]/8) */
         bool substitution_failed = false;
+        /* a function template's specialization whose definition is
+           ill-formed for these arguments ([temp.inst]/1): clang marks it
+           invalid, so a call of it is not a constant expression */
+        bool body_ill_formed = false;
         /* a class's definition that failed ([temp.inst]/1): the first
            construct it could not analyse, for the uses that follow */
         bool has_failure = false;
@@ -5176,6 +5231,8 @@ class semantic_analysis
         function_context function;
         owned_array<parameter_meaning> parameters;
         size_t expressions_before = 0, uses_before = 0;
+        bool argument_named = false;
+        uint32_t dependent_errors = 0, independent_errors = 0;
     };
     void enter_instantiation(instantiation_context &c, entity_index scope,
                              SyntaxRef declaration);
@@ -5193,6 +5250,42 @@ class semantic_analysis
        definitions instantiated meanwhile are outside the immediate
        context, their failures counted */
     unsigned substituting = 0;
+    /* [temp.res]/6, /8: the statement (or parameter) analysed in an
+       instantiation has named a template argument (entity::argument_bound,
+       a member of a class specialization found from its scope, this): an
+       error there is argument-dependent, the instantiation's; one in a
+       construct that names none is the template's own, which clang
+       reports at the definition, with no note at the use.  The errors
+       issued (not in a substitution, [temp.deduct]/8) of each kind */
+    mutable bool argument_named = false;
+    uint32_t dependent_errors = 0, independent_errors = 0;
+    void count_error();
+    /* [temp.inst]/4, [temp.point]: the use at declaration d instantiated a
+       definition whose argument-dependent error makes it ill-formed */
+    void use_ill_formed(SyntaxRef d);
+    /* [ext.clang] clang's C++ library builtins (Builtins.td's std::move,
+       std::forward, ...): a call of one is the builtin's, whose definition
+       is not instantiated.  resolving_calls counts the overload
+       resolutions of calls under way (call): a specialization instantiated
+       there is a called function's candidate, not a use of its name */
+    bool cxx_library_builtin(entity_index f) const;
+    uint32_t resolving_calls = 0;
+    struct resolving_call {
+        uint32_t &count;
+        explicit resolving_call(uint32_t &c) : count(c)
+        {
+            count++;
+        }
+        ~resolving_call()
+        {
+            count--;
+        }
+    };
+    /* whether a variable of type t declared naming a template argument is
+       argument_bound: not one of pointer, array, function or
+       pointer-to-member type, whose form, which clang checks at the
+       definition (-p of a T*), is not the argument's */
+    bool argument_bound_type(qualified_type t) const;
     uint32_t definition_failures = 0;
     /* the specializations whose definitions wait for the end of the
        translation unit ([temp.point]/7) */
@@ -5339,6 +5432,9 @@ class semantic_analysis
     /* the instantiation whose variable the declaration analysed now
        declares (its record's index plus one) */
     uint32_t variable_instantiating = 0;
+    /* the declaration analysed now is an explicit specialization of a static
+       data member without an initializer, a declaration ([temp.expl.spec]/14) */
+    bool specialization_declares_member = false;
     /* declare()'s part for it */
     analysis_result
     declare_variable_specialization(SyntaxRef declaration, qualified_type type,
@@ -5843,6 +5939,17 @@ class semantic_analysis
        referenced, all of the template arguments shall have values"; the
        arguments deduced from a call's ([temp.deduct.call]); on entry
        those the call specifies ([temp.arg.explicit]) */
+    /* [temp.deduct.call]/1: the elements of a braced-init-list argument,
+       analysed for the deduction of std::initializer_list<P'> and P'[N]
+       (not known when they are not plain expressions) */
+    analysis_result braced_deduction_elements(SyntaxElement list,
+                                              expression_meaning &m);
+    owned_array<expression_meaning> braced_elements;
+    /* ... deduced from the argument m of parameter type p: 1 deduced, 0
+       a non-deduced context, -1 deduction failed */
+    int deduce_from_braced_list(qualified_type p, const expression_meaning &m,
+                                owned_array<template_argument> &deduced,
+                                owned_array<bool> &set, bool &unknown);
     analysis_result deduce_from_call(SyntaxRef at, uint32_t function_template,
                                      const expression_meaning *arguments,
                                      uint32_t count,
@@ -5882,6 +5989,10 @@ class semantic_analysis
         SyntaxRef declaration = 0;
         analysis_result verdict = analysis_result::well_formed;
         uint32_t failure = 0;
+        /* verdict ill-formed: an error of a construct that named a
+           template argument ([temp.res]/6, /8: one that names none is the
+           template's, reported at its definition) */
+        bool argument_dependent = false;
     };
     owned_array<explicit_instantiation_unit> explicit_instantiations;
     void explicit_instantiation_record(entity_index e, SyntaxRef declaration);
@@ -5890,7 +6001,8 @@ class semantic_analysis
     /* a definition the explicit instantiation of e instantiated was
        analysed: its result r, its first refusal body_failures[failure - 1] */
     void explicit_instantiation_verdict(entity_index e, analysis_result r,
-                                        uint32_t failure);
+                                        uint32_t failure,
+                                        bool argument_dependent);
     bool member_definition_wanted(const postponed_body &b);
     token_index member_definition_name(const template_member_definition &o);
     void define_waiting_members(entity_index scope, token_index name,
@@ -6233,6 +6345,9 @@ class semantic_analysis
            it converts to std::initializer_list<X> */
         bool from_list = false;
         bool to_initializer_list = false;
+        /* [over.ics.list]/6: a list to an array, whose bound /3.1 (C++20,
+           CWG1307) ranks: not compared here */
+        bool to_array = false;
         /* [diff.lex]/3: a string literal to char* (clang's extension since
            C++11): a function that needs one is worse than any viable
            function that needs none ([impl.clang]) */
@@ -6341,7 +6456,16 @@ class semantic_analysis
         const owned_array<SyntaxElement> *written = nullptr,
         SyntaxRef written_at = 0,
         const owned_array<template_argument> *specified = nullptr,
-        const owned_array<bool> *written_expansion = nullptr);
+        const owned_array<bool> *written_expansion = nullptr,
+        const qualified_type *target_function = nullptr);
+    /* [over.over]/3 with [temp.deduct.funcaddr]: the expression e, a
+       template-id (qualified or not) of function templates not called,
+       initializing a target of function type ft: the one specialization
+       whose type is ft, then e analysed naming it; handled false when e
+       is no such template-id */
+    analysis_result template_id_for_target(SyntaxElement e, qualified_type ft,
+                                           expression_meaning &m,
+                                           bool &handled);
     /* a call's template-id naming several function templates: its
        template-arguments as written, checked against each template by
        template_candidates ([temp.over]/1), from template_callee_parts to
@@ -6443,6 +6567,10 @@ class semantic_analysis
        sequence, more than 0 when b is, 0 when neither is */
     int compare_conversions(const conversion_sequence &a,
                             const conversion_sequence &b) const;
+    /* [over.ics.list]/6 */
+    conversion_sequence list_array_sequence(SyntaxElement list,
+                                            qualified_type array,
+                                            bool user_defined);
     int compare_standard_conversions(const conversion_sequence &a,
                                      const conversion_sequence &b) const;
     /* [over.match.viable], [over.match.best]: the best viable function of
@@ -6471,6 +6599,8 @@ class semantic_analysis
     bool explicit_body(SyntaxElement body, standard_keyword k) const;
     bool deleted_body(SyntaxElement body) const;
     analysis_result deleted_definition(SyntaxRef n, entity_index f);
+    /* a use of an entity declared unavailable (clang: "'f' is unavailable") */
+    analysis_result unavailable_use(token_index at, entity_index e);
     analysis_result deleted_use(token_index at, entity_index f);
     /* [new.delete.placement]/1: f is a global allocation function
        taking (std::size_t, void *), the reserved placement form */
@@ -6565,7 +6695,8 @@ class semantic_analysis
                              owned_array<bool> &set, bool *failed);
     analysis_result deduce_from_function_type(
         SyntaxRef at, uint32_t function_template, qualified_type target,
-        owned_array<template_argument> &deduced, bool &failed);
+        owned_array<template_argument> &deduced, bool &failed,
+        const owned_array<template_argument> *explicit_arguments = nullptr);
     /* ... the token of that name and the function chosen, which
        named_entity takes it for (0 elsewhere) */
     token_index overload_target_token = 0;
@@ -6615,6 +6746,7 @@ class semantic_analysis
                                               const qualified_type *parameters,
                                               uint32_t count);
     void implicit_aligned_allocation_functions();
+    bool align_val_type(qualified_type &type);
     bool aligned_allocation_declared = false;
     /* the declarations of allocation and deallocation functions analysed;
        when the translation unit spells operator new or operator delete
@@ -6630,7 +6762,8 @@ class semantic_analysis
                                          entity_index c,
                                          owned_array<entity_index> &set,
                                          bool &in_class,
-                                         bool class_complete = false);
+                                         bool class_complete = false,
+                                         entity_index *templates = nullptr);
 
     /* [expr.new] and [expr.delete]: the expressions */
     analysis_result new_expression(NewExpression n, expression_meaning &m);
@@ -6640,7 +6773,9 @@ class semantic_analysis
     analysis_result usual_deallocation(SyntaxRef n, entity_index c, bool global,
                                        bool array, entity_index &function,
                                        bool &sized, bool class_complete = false,
-                                       bool cookie = false);
+                                       bool cookie = false,
+                                       bool over_aligned = false,
+                                       bool at_definition = false);
     /* [abi:array-cookies]: the size of the cookie before an array of
        element (of class c, 0 if none) that a new[] or delete[] (::delete[]
        when global) gives, 0 if none */

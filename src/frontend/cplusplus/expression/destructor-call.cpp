@@ -207,6 +207,24 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
                     x = lookup_qualified(scope, id, filter);
                 else
                     x = lookup_unqualified(id, filter);
+                if (last && !x.entity && !x.ambiguous && !x.unknown) {
+                    /* N::~T with N a namespace: [basic.lookup.qual]/6's
+                       form wants a type-name before ::~, and a namespace
+                       has no destructor to name (clang: no member named
+                       '~T' in namespace N) */
+                    lookup_result space;
+                    if (in_scope)
+                        space =
+                            lookup_qualified(scope, id, lookup_filter::scopes);
+                    else
+                        space = lookup_unqualified(id, lookup_filter::scopes);
+                    if (space.entity && is_namespace(space.entity))
+                        return ill_formed(n,
+                                          "the name before :: ~ in a "
+                                          "qualified destructor name shall "
+                                          "be a type-name",
+                                          "basic.lookup.qual");
+                }
                 if (x.ambiguous || x.unknown || !x.entity)
                     return not_supported(n, "basic.lookup.qual");
                 if (last) {

@@ -209,6 +209,22 @@ Gates (scratch: /tmp/claude-1000/-source-vroom/e06c51d9-10c8-4ffa-8ec6-0c01872e5
   bench/cxx-sema.py -j 8 --check   (unsupported falls; no refuted or we-reject rise; --bless when only improvements; explain any fall of a *_verified)
   diff BEFORE.txt work/cxx-sema-accepted.txt   (name each new we-accept line's cause)
   bench/cxx-run.py -j 8;  python3 bench/cxx-spec-refs.py;  bench/cxx-fe-bench.py --against BASE.json (+0.5 %)
+Blessing (decided 2026-11-24, after the user asked for standing rules).
+Agents never run `--bless` and never edit clang-metrics.json,
+clang-accepted.txt, clang-failures.txt or known-differences.txt; they leave
+an improving change uncommitted and report the `--check` output.  The
+orchestrator blesses and commits it, without asking, when all of these hold:
+  - no metric row is WORSE, except a *_verified fall whose declarations are
+    now rejected as clang rejects them (named in the commit message);
+  - `--check` reports 0 new known failures and 0 new we-accept lines;
+  - unsupported, we reject and we accept did not rise;
+  - every new known-differences.txt entry was re-run against clang by the
+    orchestrator, and every new test is accepted or rejected by clang as the
+    test says;
+  - cxx-run, cplusplus-check and cxx-spec-refs pass, fe-bench within +0.5 %.
+Anything else is fixed or dropped, never blessed; a harness change that
+moves metrics on purpose goes to the user first.
+
 Commit message: what changed and the numbers, ending with
 `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
 

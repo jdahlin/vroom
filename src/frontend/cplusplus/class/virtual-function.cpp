@@ -541,7 +541,8 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
            destructor's class": the deleting destructor's
            ([abi:mangling-special-ctor-dtor] D0) */
         VTRY(r, usual_deallocation(n, c, false, false, d.deallocation,
-                                   d.deallocation_sized, true));
+                                   d.deallocation_sized, true, false, false,
+                                   true));
         if (entity_table[d.deallocation].access ||
             entity_table[d.deallocation].deleted)
             /* [class.dtor]/6: the destructor is deleted when the lookup

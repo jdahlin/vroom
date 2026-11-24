@@ -225,7 +225,8 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
 
 analysis_result semantic_analysis::allocation_functions(
     SyntaxRef n, allocation_function kind, entity_index c,
-    owned_array<entity_index> &set, bool &in_class, bool class_complete)
+    owned_array<entity_index> &set, bool &in_class, bool class_complete,
+    entity_index *templates)
 {
     implicit_allocation_functions();
     uint32_t name = allocation_function_name(kind);
@@ -239,11 +240,27 @@ analysis_result semantic_analysis::allocation_functions(
         return not_supported(n, "class.free");
     if (c) {
         lookup_result found = lookup_qualified(c, name, lookup_filter::any);
+        if (templates && found.unknown && !found.ambiguous && !found.entity &&
+            member_function_template_of(found.unknown_entity)) {
+            /* only member function templates of the name: [class.free]/1,
+               candidates by deduction ([expr.new]/21) */
+            *templates = found.unknown_entity;
+            in_class = true;
+            return analysis_result::well_formed;
+        }
         if (found.ambiguous || found.unknown)
             return not_supported(n, "class.free");
         if (found.entity) {
             if (entity_table[found.entity].kind != entity_kind::function)
                 return not_supported(n, "class.free");
+            if (entity_table[found.entity].member_templates) {
+                /* [class.free]/1: its member function templates are
+                   candidates too ([expr.new]/21), by deduction from the
+                   arguments of the new-expression; not for a delete */
+                if (!templates)
+                    return not_supported(n, "class.free");
+                *templates = member_templates_of(found.entity);
+            }
             overload_set(found.entity, set);
             in_class = true;
             return analysis_result::well_formed;
@@ -373,8 +390,18 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     /* [basic.align]/3: "A type having an extended alignment requirement
        is an over-aligned type", new-extended above
        __STDCPP_DEFAULT_NEW_ALIGNMENT__ (16) */
-    if (alignment_of_type(type) > 16)
-        return not_supported(n, "expr.new");
+    uint64_t alignment = alignment_of_type(type);
+    bool over_aligned = alignment > 16;
+    qualified_type align_type;
+    bool with_alignment = false;
+    if (over_aligned &&
+        tokens.files.behavior.has(language_feature::aligned_allocation)) {
+        /* /19: "If the allocated type has new-extended alignment, the
+           alignment is passed as std::align_val_t" */
+        if (!align_val_type(align_type))
+            return not_supported(n, "expr.new");
+        with_alignment = true;
+    }
     qualified_type size_type = qualified_type::make(
         type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
     expression_meaning requested;
@@ -484,11 +511,12 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
        syntax is used, the initializer-clauses in its expression-list are
        the succeeding arguments." */
     owned_array<expression_meaning> arguments;
-    arguments.append(requested);
+    owned_array<expression_meaning> placement_arguments;
     if (placement) {
         if (placement.size() != 3)
             return not_supported(placement.index(), "expr.new");
-        VTRY_SET(r, expression_list_meanings(placement[1], arguments));
+        VTRY_SET(r,
+                 expression_list_meanings(placement[1], placement_arguments));
     }
     allocation_function kind = allocation_function::new_;
     if (array)
@@ -498,18 +526,56 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     entity_index scope = c;
     if (global)
         scope = 0;
-    VTRY_SET(r, allocation_functions(n, kind, scope, set, in_class));
+    entity_index templates = 0;
+    VTRY_SET(r, allocation_functions(n, kind, scope, set, in_class, false,
+                                     &templates));
     owned_array<overload_candidate> candidates;
-    for (entity_index f : set) {
-        overload_candidate k;
-        k.function = f;
-        k.type = entity_table[f].type;
-        candidates.append(k);
-    }
+    owned_array<uint32_t> first_arguments;
+    owned_array<template_argument> all;
     size_t chosen = 0;
     bool none_viable = false;
-    VTRY_SET(r, best_viable_function(n, candidates, nullptr, arguments, chosen,
-                                     &none_viable));
+    /* /19: with a new-extended alignment the first lookup passes
+       std::align_val_t after the size; "If no matching function is found
+       ... overload resolution is performed again without it" */
+    for (;;) {
+        arguments.clear();
+        candidates.clear();
+        first_arguments.clear();
+        all.clear();
+        arguments.append(requested);
+        if (with_alignment) {
+            expression_meaning a;
+            a.type = align_type;
+            a.category = value_category::prvalue;
+            a.evaluation = constness::constant;
+            a.value = alignment;
+            a.node = expression_node(semantic_kind::constant, a, at);
+            arguments.append(a);
+        }
+        for (const expression_meaning &e : placement_arguments)
+            arguments.append(e);
+        for (entity_index f : set) {
+            overload_candidate k;
+            k.function = f;
+            k.type = entity_table[f].type;
+            candidates.append(k);
+            first_arguments.append(0);
+        }
+        /* [expr.new]/21, [temp.over]/1: the specializations of the class's
+           allocation function templates deduced from the arguments,
+           [static] candidates without an object */
+        if (templates)
+            VTRY_SET(r, member_template_candidates(
+                            n, templates, false, arguments.data(),
+                            static_cast<uint32_t>(arguments.size()), candidates,
+                            &first_arguments, &all));
+        none_viable = false;
+        VTRY_SET(r, best_viable_function(n, candidates, nullptr, arguments,
+                                         chosen, &none_viable));
+        if (!none_viable || !with_alignment)
+            break;
+        with_alignment = false;
+    }
     if (none_viable) {
         if (allocation_names_spelled() != allocation_declarations_analysed ||
             tokens.files.behavior.microsoft_extensions)
@@ -522,7 +588,15 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                           "ill-formed",
                           "over.match");
     }
-    entity_index function = set[chosen];
+    entity_index function = candidates[chosen].function;
+    if (candidates[chosen].template_index) {
+        /* [temp.inst]/4: the specialization chosen is referenced: its
+           definition is instantiated */
+        const struct function_template ft =
+            function_templates[candidates[chosen].template_index - 1];
+        VTRY_SET(r, instantiate(n, ft.entity, &all[first_arguments[chosen]],
+                                ft.parameter_count, function));
+    }
     expression_meaning call;
     VTRY_SET(r, call_function(n, at, function, arguments, call));
     bool reserved = reserved_placement(function) && !array;

@@ -146,6 +146,7 @@ void semantic_analysis::bind_template_argument(entity_index scope,
             }
             entity_table[e].type = x.type;
             entity_table[e].defined = true;
+            entity_table[e].argument_bound = true;
             elements.append(e);
         }
         make_bound_pack(scope, name, elements.data(),
@@ -188,6 +189,7 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     }
     entity_table[e].type = a.type;
     entity_table[e].defined = true;
+    entity_table[e].argument_bound = true;
     entity_table.bind(scope, name, e);
 }
 
@@ -1135,8 +1137,33 @@ analysis_result semantic_analysis::default_template_arguments(
             continue;
         SyntaxRef node = template_parameter_nodes[ft.first_parameter + i];
         template_parameter_parts form;
-        if (!template_parameter_form(node, form) || !form.has_default)
-            return not_supported(at, "temp.arg");
+        if (!template_parameter_form(node, form))
+            return not_supported_because(
+                at, "temp.arg", "a template parameter of no known form");
+        if (!form.has_default && form.pack) {
+            /* [temp.arg.explicit]/4: a trailing pack with no argument
+               is an empty pack; a non-type pack of the same template
+               that has elements may be typed by it (T ...A), and its
+               length is then the pack's ([temp.deduct.type]/10) */
+            for (uint32_t j = 0; j < ft.parameter_count; j++) {
+                template_parameter_parts other;
+                if (j != i && set[j] &&
+                    template_parameter_form(
+                        template_parameter_nodes[ft.first_parameter + j],
+                        other) &&
+                    other.pack && !other.type && !other.template_template &&
+                    arguments[j].kind == template_argument::kind_t::pack &&
+                    arguments[j].count)
+                    return not_supported_because(
+                        at, "temp.arg",
+                        "a pack with no argument beside a non-type pack");
+            }
+            arguments[i] = make_pack(nullptr, 0);
+            continue;
+        }
+        if (!form.has_default)
+            return not_supported_because(
+                at, "temp.arg", "a parameter with no argument and no default");
         entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                                entity_table[t].enclosing);
         /* the names of the declaration that gave the default

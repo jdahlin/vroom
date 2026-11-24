@@ -54,6 +54,7 @@ analysis_result semantic_analysis::not_supported(SyntaxRef n,
     u.file = where.file;
     u.line = where.line;
     u.function = where.function;
+    u.argument_dependent = argument_named;
     /* an extension's construct is named by its source text (the first
        tokens), so the error says what it is */
     if (!strncmp(subclause, "ext.", 4) && n.index()) {
@@ -236,7 +237,35 @@ analysis_result semantic_analysis::ill_formed_at_token(token_index at,
 {
     diagnostics.issue(diagnostic_id::sema_violation, tokens.location(at))
         << rule << subclause;
+    count_error();
     return analysis_result::ill_formed;
+}
+
+bool semantic_analysis::argument_bound_type(qualified_type t) const
+{
+    const struct type *x = &type_table[t.unqualified()];
+    if (x->kind == type_kind::lvalue_reference ||
+        x->kind == type_kind::rvalue_reference)
+        x = &type_table[x->operand.unqualified()];
+    switch (x->kind) {
+    case type_kind::pointer:
+    case type_kind::array:
+    case type_kind::function:
+    case type_kind::pointer_to_member:
+        return false;
+    default:
+        return true;
+    }
+}
+
+void semantic_analysis::count_error()
+{
+    if (substituting)
+        return;
+    if (argument_named)
+        dependent_errors++;
+    else
+        independent_errors++;
 }
 
 analysis_result semantic_analysis::extension_used(diagnostic_id id,
@@ -248,8 +277,10 @@ analysis_result semantic_analysis::extension_used(diagnostic_id id,
     if (argument)
         m << argument;
     if (severity == diagnostic_severity::error ||
-        severity == diagnostic_severity::fatal)
+        severity == diagnostic_severity::fatal) {
+        count_error();
         return analysis_result::ill_formed;
+    }
     return analysis_result::well_formed;
 }
 

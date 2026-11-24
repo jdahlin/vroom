@@ -100,11 +100,81 @@ analysis_result semantic_analysis::member_function_template(
                                    "a member function template shall not be "
                                    "virtual",
                                    "temp.mem");
-    if (!m.has_id || m.qualifier || m.qualified_namespace || m.destructor ||
-        m.literal_operator || (s.explicit_ && !constructor && !conversion) ||
-        m.allocation != allocation_function::none ||
-        type_table[type.unqualified()].kind != type_kind::function)
-        return not_supported(n, "temp.mem");
+    if (!m.has_id)
+        return not_supported_because(n, "temp.mem", "no declarator-id");
+    if (m.qualifier || m.qualified_namespace)
+        return not_supported_because(n, "temp.mem",
+                                     "a qualified declarator-id");
+    if (m.destructor)
+        return not_supported_because(n, "temp.mem", "a destructor");
+    if (m.literal_operator)
+        return not_supported_because(n, "temp.mem", "a literal operator");
+    if (s.explicit_ && !constructor && !conversion)
+        return not_supported_because(
+            n, "temp.mem",
+            "explicit on a member that is no constructor or "
+            "conversion function");
+    if (type_table[type.unqualified()].kind != type_kind::function)
+        return not_supported_because(n, "temp.mem",
+                                     "a declarator that is "
+                                     "no function");
+    if (m.allocation != allocation_function::none) {
+        /* [basic.stc.dynamic.allocation]/1: a template allocation function
+           has a first parameter std::size_t (a dependent one is ill-formed
+           too, as is a dependent return type) and two or more parameters;
+           /3 (deallocation) the same with void* first.  What is not
+           exactly that is not judged here. */
+        bool allocation = m.allocation == allocation_function::new_ ||
+                          m.allocation == allocation_function::new_array;
+        const struct type &fn = type_table[type.unqualified()];
+        const qualified_type *ps = type_table.parameters(type.unqualified());
+        if (fn.parameter_count < 2 || fn.variadic)
+            return not_supported_because(n, "temp.mem",
+                                         "an allocation or deallocation "
+                                         "function template with fewer "
+                                         "than two parameters");
+        const struct type &result = type_table[fn.operand.unqualified()];
+        const struct type &first = type_table[ps[0].unqualified()];
+        bool fine = false;
+        if (allocation) {
+            fine = result.kind == type_kind::pointer && !fn.operand.cv() &&
+                   !result.operand.cv() &&
+                   fundamental_of(result.operand) == fundamental_type::void_ &&
+                   ps[0] == qualified_type::make(
+                                type_table.fundamental(
+                                    fundamental_type::unsigned_long_int),
+                                cv_none);
+        } else {
+            fine = result.kind == type_kind::fundamental &&
+                   result.fundamental == fundamental_type::void_ &&
+                   !fn.operand.cv() && first.kind == type_kind::pointer &&
+                   !ps[0].cv() && !first.operand.cv() &&
+                   fundamental_of(first.operand) == fundamental_type::void_;
+        }
+        if (!fine)
+            return not_supported_because(n, "temp.mem",
+                                         "an allocation or deallocation "
+                                         "function template of other form");
+        /* its body is instantiated at a new-expression's use, and an error
+           in it rejects neither the class that holds the template nor the
+           use (instantiate() marks only a declaration that is the
+           template's own: p14.cpp:60), so a definition is not analysed */
+        if (defines)
+            return not_supported_because(n, "temp.mem",
+                                         "the definition of an allocation "
+                                         "or deallocation function "
+                                         "template");
+        for (const parameter_meaning &p : function_parameters)
+            if (p.default_argument)
+                return not_supported_because(n, "temp.mem",
+                                             "an allocation function "
+                                             "template with a default "
+                                             "argument");
+        /* [class.free]/1, /3: a static member function; the declaration is
+           analysed (a new-expression's overload resolution may rely on it) */
+        s.static_ = true;
+        allocation_declarations_analysed++;
+    }
     if (s.static_ && function_cv)
         return ill_formed_at_token(m.id,
                                    "a static member function shall not be "
@@ -222,6 +292,7 @@ analysis_result semantic_analysis::member_function_template(
     entity_table[t].constexpr_ = s.constexpr_;
     entity_table[t].immediate = s.consteval_;
     entity_table[t].operator_function = m.operator_function;
+    entity_table[t].allocation = m.allocation;
     entity_table[t].conversion_function = conversion;
     entity_table[t].implemented = m.implemented;
     if (conversion) {

@@ -427,6 +427,19 @@ analysis_result semantic_analysis::class_specialization_definition(
     declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;
+    /* [temp.param]/14: a template parameter pack of a partial
+       specialization followed by another parameter is ill-formed unless
+       that one is deducible from the arguments (clang: "cannot be
+       deduced"); a pack expansion that is not the last of a function
+       type's parameters or of a specialization's arguments is a
+       non-deduced context ([temp.deduct.type]/5.7): not judged */
+    for (const template_argument &a : arguments)
+        if (a.kind == template_argument::kind_t::type &&
+            pack_expansion_not_last(a.type))
+            return not_supported_because(
+                n, "temp.deduct.type",
+                "a partial specialization's argument with a pack expansion "
+                "that is not last");
     /* [temp.class.spec]/9.2: a parameter used only in expressions of the
        arguments (<I + 5, I * 2>), a non-deduced context, is not
        deducible: not judged when no argument deduces anything */
@@ -622,6 +635,48 @@ analysis_result semantic_analysis::substitute_specialization(
             return analysis_result::well_formed;
     substituted = true;
     return analysis_result::well_formed;
+}
+
+bool semantic_analysis::pack_expansion_not_last(qualified_type t,
+                                                uint32_t depth) const
+{
+    if (depth > 8)
+        return false;
+    const struct type &r = type_table[t.unqualified()];
+    if (r.kind == type_kind::function) {
+        const qualified_type *list = type_table.parameters(t.unqualified());
+        for (uint32_t i = 0; i < r.parameter_count; i++) {
+            if (type_table[list[i].unqualified()].kind ==
+                    type_kind::pack_expansion &&
+                i + 1 != r.parameter_count)
+                return true;
+            if (pack_expansion_not_last(list[i], depth + 1))
+                return true;
+        }
+        return pack_expansion_not_last(r.operand, depth + 1);
+    }
+    if (r.kind == type_kind::pack_expansion)
+        return pack_expansion_not_last(r.operand, depth + 1);
+    if (r.kind == type_kind::dependent &&
+        entity_table[r.entity].instantiation) {
+        uint32_t count = specialization_argument_count(r.entity);
+        for (uint32_t i = 0; i < count; i++) {
+            const template_argument &a =
+                specialization_template_argument(r.entity, i);
+            if (a.kind == template_argument::kind_t::type &&
+                pack_expansion_not_last(a.type, depth + 1))
+                return true;
+            if (a.kind != template_argument::kind_t::pack)
+                continue;
+            for (uint32_t k = 0; k < a.count; k++) {
+                const template_argument &e = pack_arguments[a.value + k];
+                if (e.kind == template_argument::kind_t::pack &&
+                    e.count == UINT32_MAX && k + 1 != a.count)
+                    return true;
+            }
+        }
+    }
+    return false;
 }
 
 /* [temp.deduct.type]/8: a partial specialization's argument x against

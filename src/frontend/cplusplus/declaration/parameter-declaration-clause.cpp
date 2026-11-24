@@ -588,8 +588,12 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         entity_index outer = current_scope;
         if (names_earlier_parameter(declarations[k], named))
             open_parameter_scope(named, 0);
+        bool named_before = argument_named;
+        argument_named = false;
         r = parameter_declaration(declarations[k], t, unnamed, id,
                                   default_argument);
+        bool parameter_dependent = argument_named;
+        argument_named = named_before || parameter_dependent;
         current_scope = outer;
         if (r != analysis_result::well_formed)
             return r;
@@ -599,9 +603,21 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                (function_template_definition checks which), the last
                parameter; [dcl.fct]/22's T... of a type that names none is
                the clause's ellipsis, not analysed */
-            if (k + 1 != declarations.size() || variadic || default_argument ||
-                !depends_on_template_parameter(t))
-                return not_supported(declarations[k], "temp.variadic");
+            /* ([dcl.fct]/? a pack need not be last: it is then a
+               non-deduced context, which calls and ordering do not yet
+               analyse) */
+            if (variadic)
+                return not_supported_because(
+                    declarations[k], "temp.variadic",
+                    "a parameter pack before the ellipsis");
+            if (default_argument)
+                return not_supported_because(
+                    declarations[k], "temp.variadic",
+                    "a parameter pack with a default argument");
+            if (!depends_on_template_parameter(t))
+                return not_supported_because(
+                    declarations[k], "temp.variadic",
+                    "a parameter pack of a type naming no template parameter");
             t = qualified_type::make(
                 type_table.pack_expansion_of(
                     qualified_type::make(t.unqualified(), cv_none)),
@@ -644,6 +660,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         parameter.type = t;
         parameter.declaration = declarations[k];
         parameter.default_argument = default_argument;
+        parameter.argument_dependent = parameter_dependent;
         named.append(parameter);
     }
     /* [dcl.fct]/22: a trailing "..." after a parameter whose type is a

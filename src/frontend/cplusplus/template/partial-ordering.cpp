@@ -122,6 +122,17 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
         unknown = true;
         return false;
     }
+    /* a function parameter pack before the last parameter: not analysed */
+    for (uint32_t i = 0; i + 1 < ffixed; i++)
+        if (type_table[fp[i].unqualified()].kind == type_kind::pack_expansion) {
+            unknown = true;
+            return false;
+        }
+    for (uint32_t i = 0; i + 1 < gfixed; i++)
+        if (type_table[gp[i].unqualified()].kind == type_kind::pack_expansion) {
+            unknown = true;
+            return false;
+        }
     /* the template parameter pack G's function parameter pack expands
        (its last template parameter) */
     uint32_t pack = gg.parameter_count;

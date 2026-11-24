@@ -113,8 +113,9 @@ R = cxxpp.R
 OURS = os.path.join(R, 'src', 'test', 'cxx', 'sema')
 LLVM_TEST = cxxparse.LLVM_TEST
 # clang -cc1 has plain char signed unless told otherwise; the driver tells
-# it so for aarch64 Linux, the target vpp analyses for
-TARGET = cxxparse.TRIPLE + ['-fno-signed-char']
+# it so for aarch64 Linux, the target vpp analyses for; likewise clang -cc1
+# has C++ exceptions off unless told, and the driver (and vpp) has them on
+TARGET = cxxparse.TRIPLE + ['-fno-signed-char', '-fcxx-exceptions', '-fexceptions']
 ALIASES = ['-mconstructor-aliases']
 SUITES = ('CXX', 'SemaCXX', 'SemaTemplate')
 # --suites NAME,...: clang's other directories with C++ tests (CodeGenCXX,
@@ -456,9 +457,17 @@ def parse_record_layouts(text):
     return records
 
 
+def without_warnings(opts):
+    """the test's options without its -W ones: a claim's check must not
+    depend on a warning's analysis (clang 23's -Wthread-safety crashes on
+    SemaCXX/warn-thread-safety-analysis.cpp)"""
+    return [o for o in opts if not o.startswith('-W')]
+
+
 def clang_record_layouts(test, opts, clang, cache=True):
     """parse_record_layouts of clang's dump for the test (cached), or None"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
+    opts = without_warnings(opts)
 
     def compute():
         r = cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
@@ -594,6 +603,7 @@ def layout_selftest(clang):
 def clang_defined(test, opts, clang):
     """the symbols clang -O0's object of the test defines (cached), or None"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
+    opts = without_warnings(opts)
 
     def compile_and_list():
         with tempfile.TemporaryDirectory() as d:
@@ -618,6 +628,7 @@ def clang_references(test, opts, clang):
     redeclaration chains of what it refers to, first declaration first
     (cached)"""
     cwd, name = os.path.dirname(test), os.path.basename(test)
+    opts = without_warnings(opts)
 
     def compute():
         r = cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
@@ -787,6 +798,13 @@ def object_symbols(nm, obj, cwd):
     return {s for s in listed[1].split() if not s.startswith(('$', '.L'))}
 
 
+def exception_handling_symbol(symbol):
+    """a symbol clang -O0 defines only for exception handling: the
+    personality's reference, the call-site tables and the terminate helper"""
+    return (symbol in ('DW.ref.__gxx_personality_v0', '__clang_call_terminate') or
+            symbol.startswith('GCC_except_table'))
+
+
 def check_lowering(test, opts, clang, vpp):
     """vpp -S -O0 on a file clang compiles: the assembly assembles and
     the object defines what clang -O0's does.  A Counter (lowered, refuted,
@@ -833,6 +851,12 @@ def check_lowering(test, opts, clang, vpp):
         return counts, refuted
     made = set(made)
     expected = {s for s in defined if not s.startswith(('$', '.L'))}
+    # vpp emits no landing pads: clang's symbols for them are no difference
+    # of what lowering does, and the rest is compared without them
+    if made != expected and made == {s for s in expected if not exception_handling_symbol(s)}:
+        counts['not: exception handling (landing pads)'] += 1
+        return counts, refuted
+    expected = {s for s in expected if s in made or not exception_handling_symbol(s)}
     if made != expected:
         counts['refuted'] += 1
         refuted.append(f'vpp -S defines {sorted(made - expected)[:3]} clang -O0 does not, '
@@ -854,10 +878,23 @@ def check(test, opts, clang, vpp):
     if analysed[0] not in (0, 1):
         res['fail'].append(('crash', f'status {analysed[0]}: {analysed[2].strip().splitlines()[-1:]}'))
         return res
-    c = cxxparse.cached('diagnostics' + ''.join(TARGET), clang, test, opts, lambda: list(
-        cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + opts +
-                     ['-fsyntax-only', '-fdiagnostics-show-category', 'name', '-ferror-limit', '0', name],
-                     cwd, timeout=60)))
+    def diagnostics(o):
+        return cxxparse.cached('diagnostics' + ''.join(TARGET), clang, test, o, lambda: list(
+            cxxparse.run([clang, '-cc1'] + TARGET + ['-x', 'c++'] + o +
+                         ['-fsyntax-only', '-fdiagnostics-show-category', 'name', '-ferror-limit', '0', name],
+                         cwd, timeout=60)))
+
+    def crashed(r):
+        return isinstance(r[0], int) and (r[0] < 0 or r[0] >= 128)
+    c = diagnostics(opts)
+    # clang crashed in a warning's analysis (SemaCXX/warn-thread-safety-
+    # analysis.cpp: -Wthread-safety): its verdicts without the -W options
+    # are the reference, the run counted as one where clang crashed
+    if crashed(c) and without_warnings(opts) != opts:
+        retry = diagnostics(without_warnings(opts))
+        if retry[0] != 'timeout' and not crashed(retry):
+            c = retry
+            res['clang_crash_retried'] = True
     if c[0] == 'timeout':
         res['skip'] = 'clang timed out'
         return res
@@ -866,7 +903,7 @@ def check(test, opts, clang, vpp):
     # place it crashed at, which is compared like the part before a fatal
     # error; the claims' checks run clang on the file again and are not
     crash_line = None
-    if isinstance(c[0], int) and (c[0] < 0 or c[0] >= 128):
+    if crashed(c):
         crash_line = clang_crash_line(c[2], name)
         if crash_line is None:
             res['skip'] = f'clang crashed (status {c[0]}) at no place in the file'
@@ -1229,7 +1266,7 @@ def main():
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
     declared, symbols, lowering = collections.Counter(), collections.Counter(), collections.Counter()
     lookup, layout = collections.Counter(), collections.Counter()
-    crashes = failures = skipped = clang_crashed = 0
+    crashes = failures = skipped = clang_crashed = clang_retried = 0
     seen = set()
     failed = set()
     for r in results:
@@ -1247,6 +1284,7 @@ def main():
         failures += bool(kinds)
         skipped += bool(r.get('skip'))
         clang_crashed += 'clang_crash' in r
+        clang_retried += 'clang_crash_retried' in r
         for k, why in r['fail']:
             failed.add(failure_key(r, k, why))
         if r['fail'] or a.v:
@@ -1259,7 +1297,8 @@ def main():
                   f'lines {" ".join(str(n) for n in r["accepted"])}')
     runs = len(jobs)
     print(f'{runs} runs of {len(seen)} tests ({unrunnable} not run, {skipped} skipped, '
-          f'{clang_crashed} compared up to where clang crashed): '
+          f'{clang_crashed} compared up to where clang crashed, '
+          f'{clang_retried} where clang crashed compared without the -W options): '
           f'no crash {runs - crashes}/{runs}')
     print(f'declarations: {verdict["agree"]} as clang, {verdict["we_reject"]} we reject and clang accepts '
           f'({verdict["known"]} known differences), {verdict["we_accept"]} we accept and clang rejects, '

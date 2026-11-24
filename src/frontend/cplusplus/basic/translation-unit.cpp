@@ -1339,6 +1339,8 @@ analysis_result semantic_analysis::declare_local(
     entity_index e = entity_table.make(kind, name, scope);
     entity_table[e].hidden_type = hides;
     entity_table[e].type = type;
+    entity_table[e].argument_bound =
+        argument_named && argument_bound_type(type);
     entity_table[e].linkage_of_name = linkage::none;
     entity_table[e].defined = kind == entity_kind::variable;
     /* [basic.stc.auto]/1: "Variables that belong to a block or parameter

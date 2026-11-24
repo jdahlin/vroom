@@ -1228,11 +1228,46 @@ entity_index semantic_analysis::current_class() const
  * and protected members of the class granting friendship can be named in the
  * base-specifiers and member declarations of the befriended class."
  */
+/* [temp.res]/6, [temp.dep]/3: in a member of a class with a dependent
+   base, or of a member of a class template's specialization (which may be
+   the current instantiation, A<int> in A<T>), what may be accessed
+   depends on the arguments, so clang checks it at the instantiation: an
+   access error there is the instantiation's (argument_named) */
 bool semantic_analysis::accessible(entity_index member,
                                    entity_index object_class) const
 {
+    if (accessible_here(member, object_class))
+        return true;
+    if (!instantiation_depth)
+        return false;
+    entity_index naming = entity_table[member].enclosing;
+    if ((entity_table[naming].kind == entity_kind::class_type &&
+         entity_table[naming].instantiation) ||
+        (object_class && entity_table[object_class].instantiation))
+        argument_named = true;
+    for (entity_index k = current_class(); k; k = entity_table[k].enclosing) {
+        const entity &c = entity_table[k];
+        if (c.kind != entity_kind::class_type)
+            break;
+        for (uint32_t i = 0; i < c.base_count; i++)
+            if (entity_table[class_bases[c.first_base + i]].dependent_base)
+                argument_named = true;
+    }
+    return false;
+}
+
+bool semantic_analysis::accessible_here(entity_index member,
+                                        entity_index object_class) const
+{
     const entity &x = entity_table[member];
     if (!x.access)
+        return true;
+    /* [impl.clang] a class whose access clang does not check (access_unchecked) */
+    const entity &k = entity_table[x.enclosing];
+    if (k.kind == entity_kind::class_type &&
+        (k.access_unchecked ||
+         (k.instantiation &&
+          entity_table[specialized_template(x.enclosing)].access_unchecked)))
         return true;
     /* [temp.spec]/6: "The usual access checking rules do not apply
        to names in a declaration of an explicit instantiation or explicit
@@ -1744,6 +1779,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         return not_supported(declaration, "dcl.constinit");
     qualified_type type = s.type;
     declarator_meaning m;
+    m.alignas_allowed = true;
     function_cv = 0;
     in_member_declarator = true;
     function_parameters.clear();
@@ -1775,6 +1811,9 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
     /* [ext:gnu_attributes] the declaration's and the declarator's */
     if (s.aligned > m.aligned)
         m.aligned = s.aligned;
+    /* clang's layout of a data member keeps alignments up to 2^28 only */
+    if (m.aligned > (uint64_t(1) << 28))
+        return not_supported(declaration, "dcl.align");
     m.gnu_flags |= s.gnu_flags;
     if (!m.section)
         m.section = s.section;
@@ -2726,6 +2765,27 @@ analysis_result semantic_analysis::static_member_definition(
                                    "declaration shall refer to a previously "
                                    "declared member of the class",
                                    "dcl.meaning");
+    /* [temp.expl.spec]/14: not a definition */
+    if (specialization_declares_member) {
+        if (type_table[type.unqualified()].kind == type_kind::array &&
+            type_table[type.unqualified()].bound_known)
+            entity_table[e].type = type;
+        entity_table.add_declaration(e, declaration);
+        /* the specialization is a declaration of its own, not a
+           redeclaration of the template's member: its chain starts here */
+        entity_table[e].first_declaration = entity_table[e].last_declaration;
+        declared_entity = e;
+        declared_name d;
+        d.declaration = declaration;
+        d.outermost = current_declaration;
+        d.entity = e;
+        d.id = id;
+        d.kind = entity_kind::variable;
+        d.type = type;
+        d.claimable = declarations_claimable;
+        declared.append(d);
+        return analysis_result::well_formed;
+    }
     /* [basic.def.odr]/1 */
     if (entity_table[e].defined)
         return ill_formed_at_token(id,
@@ -2888,9 +2948,16 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
     alignment = e.value;
     /* [basic.align]/4: "Every alignment value shall be a non-negative
        integral power of two"; clang's limit 2^29 */
-    if (alignment && ((alignment & (alignment - 1)) || alignment > (1u << 28)))
+    if (alignment & (alignment - 1))
         return ill_formed(n, "an alignment shall be a power of two",
                           "dcl.align");
+    /* clang: "requested alignment must be 4294967296 bytes or smaller"
+       (Linux); the entities keep 32 bits of alignment */
+    if (alignment > (uint64_t(1) << 32))
+        return ill_formed(n, "the requested alignment is too large",
+                          "dcl.align");
+    if (alignment > (uint64_t(1) << 31))
+        return not_supported(n, "dcl.align");
     return analysis_result::well_formed;
 }
 

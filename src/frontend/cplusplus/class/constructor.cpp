@@ -243,7 +243,12 @@ analysis_result semantic_analysis::constructor_specifiers(SyntaxRef seq,
                 continue;
             }
             bool constant = false, value = false;
+            invalid_specialization_called = false;
             VTRY(r, bool_constant_expression(x, x[2], constant, value));
+            /* (an error in a function's instantiation is a hard error, not
+               a candidate dropped: not told apart here) */
+            if (!constant && invalid_specialization_called)
+                return not_supported(x, "temp.deduct");
             if (!constant)
                 return ill_formed(x,
                                   "the constant-expression of an "
@@ -387,6 +392,8 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     r = initializer(init, type, value);
     entity_table[e].initializer_active = false;
     initialized_member = outer_member;
+    if (r == analysis_result::ill_formed)
+        member_initializer_failed = true;
     if (r != analysis_result::well_formed)
         return r;
     /* [class.base.init]/11: "A temporary expression bound to a reference
@@ -394,12 +401,21 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     if ((record.kind == type_kind::lvalue_reference ||
          record.kind == type_kind::rvalue_reference) &&
         semantics[value.node].kind == semantic_kind::bind_reference &&
-        semantics[value.node].category == value_category::prvalue)
+        semantics[value.node].category == value_category::prvalue) {
+        /* [impl.clang] clang reports it where a constructor using the initializer is
+           defined, and none is when the class is only declared: the
+           implicit definition's is not reported here */
+        if (defining_defaulted_member)
+            return not_supported_because(
+                init, "class.base.init",
+                "a temporary bound to a reference member in a defaulted "
+                "constructor that may be unused");
         return ill_formed(init,
                           "a temporary expression bound to a reference "
                           "member from a default member initializer is "
                           "ill-formed",
                           "class.base.init");
+    }
     /* [ext:clang_source_location] a builtin in the initializer is the
        constructor's place: a defaulted one is defined where it is first
        used or at the end of its class, whose place is not the
@@ -2781,6 +2797,7 @@ analysis_result semantic_analysis::define_defaulted_special_member(
             sf, type_table.parameters(entity_table[f].type.unqualified())[0],
             true);
     analysis_result r = analysis_result::well_formed;
+    member_initializer_failed = false;
     uint32_t members = 0, destructions = 0;
     if (entity_table[f].special == special_member::destructor) {
         /* [class.cdtor]/4: the destructor's virtual table pointer */
@@ -2813,11 +2830,30 @@ analysis_result semantic_analysis::define_defaulted_special_member(
                           "defaulting this function would delete it after "
                           "its first declaration",
                           "dcl.fct.def.default");
-    if (r == analysis_result::ill_formed)
+    if (r == analysis_result::ill_formed) {
         /* [class.default.ctor]/2, [class.copy.ctor]/10: a defaulted
            special member that would be ill-formed is defined as
            deleted (an error only where it is used): not analysed */
-        return not_supported(n, "class.default.ctor");
+        if (entity_table[f].special == special_member::destructor)
+            return not_supported_because(n, "class.default.ctor",
+                                         "a destructor that would be deleted");
+        if (entity_table[f].inherited_constructor)
+            return not_supported_because(
+                n, "class.default.ctor",
+                "an inheriting constructor that would be deleted");
+        if (source)
+            return not_supported_because(
+                n, "class.default.ctor",
+                "a copy or move that would be deleted");
+        /* [class.mem]/6: an ill-formed default member initializer is
+           an error of the class (reported there), whether the constructor
+           is deleted or not */
+        if (member_initializer_failed)
+            return r;
+        return not_supported_because(n, "class.default.ctor",
+                                     "a default constructor that would be "
+                                     "deleted");
+    }
     return r;
 }
 
