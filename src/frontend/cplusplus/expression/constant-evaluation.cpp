@@ -3028,7 +3028,8 @@ constness semantic_analysis::evaluate_invocation(
            conversion function and the function it returns (/11) too */
         if (e.enclosing && entity_table[e.enclosing].lambda)
             return CONST_UNKNOWN;
-        return CONST_NOT_CONSTANT;
+        /* [expr.const]/5.2: a call of a function that is not constexpr */
+        return CONST_NOT_CONSTANT_RULE;
     }
     /* a defaulted constructor's default member initializers with a
        location builtin were folded at the wrong place */
