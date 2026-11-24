@@ -862,10 +862,15 @@ def check(test, opts, clang, vpp):
         res['skip'] = 'clang timed out'
         return res
     # clang killed by a signal (SemaCXX/using-decl-templates.cpp: a
-    # segmentation fault): its diagnostics are no reference
+    # segmentation fault): its diagnostics are a reference only before the
+    # place it crashed at, which is compared like the part before a fatal
+    # error; the claims' checks run clang on the file again and are not
+    crash_line = None
     if isinstance(c[0], int) and (c[0] < 0 or c[0] >= 128):
-        res['skip'] = f'clang crashed (status {c[0]})'
-        return res
+        crash_line = clang_crash_line(c[2], name)
+        if crash_line is None:
+            res['skip'] = f'clang crashed (status {c[0]}) at no place in the file'
+            return res
     syntax_lines, error_lines = set(), set()
     for m in CLANG_ERROR.finditer(c[2]):
         if m.group(1) != name:
@@ -922,6 +927,8 @@ def check(test, opts, clang, vpp):
             rejected_lines.update(lines)
         if fatal_line is not None and first > fatal_line:
             res['verdict']['after_fatal'] += 1
+        elif crash_line is not None and last >= crash_line:
+            res['verdict']['after_crash'] += 1
         elif result == 'not-parsed' or any(n in syntax_lines for n in lines):
             res['verdict']['not_parsed'] += 1
         elif result == 'unsupported':
@@ -941,6 +948,12 @@ def check(test, opts, clang, vpp):
             else:
                 res['verdict']['we_accept'] += 1
                 res.setdefault('accepted', []).append(first)
+    if crash_line is not None:
+        res['clang_crash'] = crash_line
+        if rejected:
+            res['fail'].append(('verdict', f'ill-formed for us, accepted by clang: line {rejected[0]}'
+                                           f' ({len(rejected)} declarations)'))
+        return res
     every_error_line = set()
     for m in CLANG_ERROR.finditer(c[2]):
         if m.group(1) == name:
@@ -969,6 +982,28 @@ def check(test, opts, clang, vpp):
         res['fail'].append(('verdict', f'ill-formed for us, accepted by clang: line {rejected[0]}'
                                        f' ({len(rejected)} declarations)'))
     return res
+
+
+# clang's stack dump: "N.\tFILE:LINE:COL: what it was doing"
+CRASH_FRAME = re.compile(r'^\d+\.\t(?:<eof> parser at end of file|([^:\n]+):(\d+):\d+: .*)$', re.M)
+
+
+def clang_crash_line(stderr, name):
+    """The line of the test file clang crashed at: the innermost place of
+    its stack dump in the file (frame 1 is the current token, the rest the
+    declarations it is in); at the end of the file (a pending instantiation),
+    or with no place, the last diagnostic's line in the file, since what
+    follows it may have been left unsaid; None when there is neither"""
+    dump = stderr.find('Stack dump:')
+    if dump < 0:
+        return None
+    lines = [int(m.group(2)) for m in CRASH_FRAME.finditer(stderr, dump) if m.group(1) == name]
+    if lines:
+        return max(lines)
+    said = [int(m.group(2)) for m in CLANG_DIAGNOSTIC.finditer(stderr[:dump]) if m.group(1) == name]
+    if said:
+        return max(said)
+    return None
 
 
 # --why: the root causes of the unsupported declarations, by how many
@@ -1213,7 +1248,7 @@ def main():
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
     declared, symbols, lowering = collections.Counter(), collections.Counter(), collections.Counter()
     lookup, layout = collections.Counter(), collections.Counter()
-    crashes = failures = skipped = 0
+    crashes = failures = skipped = clang_crashed = 0
     seen = set()
     failed = set()
     for r in results:
@@ -1230,6 +1265,7 @@ def main():
         crashes += 'crash' in kinds
         failures += bool(kinds)
         skipped += bool(r.get('skip'))
+        clang_crashed += 'clang_crash' in r
         for k, why in r['fail']:
             failed.add(failure_key(r, k, why))
         if r['fail'] or a.v:
@@ -1241,12 +1277,13 @@ def main():
             print(f'accepts {relative(r["test"])} {" ".join(r["opts"])}: '
                   f'lines {" ".join(str(n) for n in r["accepted"])}')
     runs = len(jobs)
-    print(f'{runs} runs of {len(seen)} tests ({unrunnable} not run, {skipped} skipped): '
+    print(f'{runs} runs of {len(seen)} tests ({unrunnable} not run, {skipped} skipped, '
+          f'{clang_crashed} compared up to where clang crashed): '
           f'no crash {runs - crashes}/{runs}')
     print(f'declarations: {verdict["agree"]} as clang, {verdict["we_reject"]} we reject and clang accepts '
           f'({verdict["known"]} known differences), {verdict["we_accept"]} we accept and clang rejects, '
           f'{verdict["unsupported"]} unsupported, {verdict["not_parsed"]} not parsed, '
-          f'{verdict["after_fatal"]} after a fatal error')
+          f'{verdict["after_fatal"]} after a fatal error, {verdict["after_crash"]} from where clang crashed')
     print(f'declared types: {declared["verified"]} verified, {declared["overload"]} as one of a name\'s overloads, '
           f'{declared["refuted"]} refuted, {declared["rejected"]} in declarations clang rejects, '
           f'{declared["unchecked"]} not checkable')
