@@ -42,6 +42,17 @@ analysis_result semantic_analysis::function_this(token_index t,
                                                  expression_meaning &m)
 {
     entity_index e = function_state.this_entity;
+    /* a generic lambda's specialization: its lambda-declarator analysed
+       again, away from the member function the lambda-expression is in,
+       whose this it names ([expr.prim.this]/2); in an unevaluated operand
+       (decltype(f(this))) only its type matters */
+    if (!e && unevaluated && specializing_lambda_this.unqualified()) {
+        m = expression_meaning();
+        m.category = value_category::prvalue;
+        m.type = specializing_lambda_this;
+        m.evaluation = constness::not_constant;
+        return analysis_result::well_formed;
+    }
     if (!e) {
         if (current_class())
             return ill_formed_at_token(t,

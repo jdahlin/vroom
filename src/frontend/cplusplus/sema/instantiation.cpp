@@ -431,6 +431,12 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     explicit_instantiation_verdict(
         instantiations[index].specialization, r,
         entity_table[instantiations[index].specialization].unsupported_body);
+    /* a generic lambda's specialization is no declaration of its own: an
+       ill-formed body is the enclosing declaration's error (its use there
+       instantiated it, [temp.point]; [impl.clang] reports it there) */
+    if (r == analysis_result::ill_formed &&
+        ft.definition.is(syntax_kind::lambda_expression))
+        lambda_error_in_enclosing(ft.definition);
     for (analysed_declaration &d : declarations) {
         if (d.node != ft.declaration || d.result == analysis_result::ill_formed)
             continue;
@@ -441,6 +447,27 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     }
     /* the use names a function all the same */
     return analysis_result::well_formed;
+}
+
+void semantic_analysis::lambda_error_in_enclosing(SyntaxRef lambda)
+{
+    token_index at = lambda.first_token();
+    analysed_declaration *innermost = nullptr;
+    for (analysed_declaration &d : declarations) {
+        if (!d.node || at < d.node.first_token() || at >= d.node.end_token())
+            continue;
+        if (!innermost ||
+            d.node.end_token() - d.node.first_token() <
+                innermost->node.end_token() - innermost->node.first_token())
+            innermost = &d;
+    }
+    /* (being analysed: judged at its end, as a recovered error) */
+    if (analysing && (!innermost || analysing == innermost)) {
+        record_recovered_error();
+        return;
+    }
+    if (innermost && innermost->result == analysis_result::well_formed)
+        innermost->result = analysis_result::ill_formed;
 }
 
 /*

@@ -537,6 +537,17 @@ analysis_result semantic_analysis::closure_member(token_index t,
  * is odr-used in a declarative region in which it is not odr-usable, the
  * program is ill-formed."
  */
+/* whether the current lambda has a capture of e already (an explicit
+   capture, or an implicit one made by an earlier use) */
+bool semantic_analysis::captured_by_name(entity_index e)
+{
+    lambda_context &l = *current_lambda();
+    for (size_t i = l.first_capture; i < lambda_captures.size(); i++)
+        if (lambda_captures[i].variable == e)
+            return true;
+    return false;
+}
+
 analysis_result semantic_analysis::captured_entity(token_index t,
                                                    entity_index e,
                                                    expression_meaning &m,
