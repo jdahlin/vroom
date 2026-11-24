@@ -90,8 +90,14 @@ bool is_object_value(const constant_value &v)
    [expr.const]/5.8, /5.16 make it not constant when the object began its
    life outside the evaluation, unknown otherwise (a parameter of the body a
    potential-constant check looks at) */
-template <class Object> constness opaque_access(const Object &o)
+template <class State, class Object>
+constness opaque_access(const State &state, const Object &o)
 {
+    /* (the check of a body for a potential constant expression leaves a
+       variable it cannot know unusable to the call that needs a value,
+       as clang does) */
+    if (o.outside && o.static_unusable && !state.potential)
+        return CONST_NOT_CONSTANT_RULE;
     if (o.outside)
         return CONST_NOT_CONSTANT;
     return CONST_UNKNOWN;
@@ -483,6 +489,34 @@ void semantic_analysis::evaluation_detail(uint32_t node, bool gave_up,
                  semantic_kind_name(semantics[node].kind));
     }
     last_unsupported_detail(text, strlen(text));
+}
+
+bool semantic_analysis::copy_reads_nothing(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.union_ || x.dynamic || x.virtual_base_count)
+        return false;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.base_subobject || m.kind != entity_kind::variable ||
+            !m.nonstatic_member)
+            continue;
+        const struct type &t = type_table[m.type.unqualified()];
+        if (t.kind != type_kind::class_type || !copy_reads_nothing(t.entity))
+            return false;
+    }
+    for (uint32_t i = 0; i < x.base_count; i++)
+        if (!copy_reads_nothing(
+                type_table[entity_table[class_bases[x.first_base + i]]
+                               .type.unqualified()]
+                    .entity))
+            return false;
+    return true;
+}
+
+bool semantic_analysis::evaluation_rule_applied() const
+{
+    return last_not_constant_certain;
 }
 
 constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
@@ -1215,6 +1249,17 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                ([expr.const]/13) and its value is not known (opaque) */
             if (!e.constexpr_ || !e.definition) {
                 o.opaque = true;
+                /* [expr.const]/5.8: a class or array object that is not
+                   constexpr is not usable in constant expressions, and
+                   began its life outside the evaluation */
+                /* (an empty class's copy reads no value,
+                   [class.copy.ctor]/14) */
+                o.static_unusable =
+                    !e.constexpr_ && e.usable == constness::not_constant &&
+                    (tk == type_kind::array ||
+                     !copy_reads_nothing(
+                         type_table[e.type.unqualified()].entity));
+                o.outside = o.static_unusable;
                 append_object(state, o);
                 return constness::constant;
             }
@@ -1316,6 +1361,10 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             const auto &w = state.objects[whole];
             if (w.outside && entity_table[w.entity].automatic)
                 return CONST_NOT_CONSTANT;
+            /* [expr.const]/5.8: the read of a member of a static object
+               that is not usable in constant expressions */
+            if (w.static_unusable && state.reading && !state.potential)
+                return CONST_NOT_CONSTANT_RULE;
             return constness::unknown;
         }
         constant_value o = place_value(state, whole);
@@ -1508,7 +1557,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 right == fundamental_type::none)
                 return CONST_UNKNOWN;
             if (!(target & element_place) && state.objects[target].opaque)
-                return opaque_access(state.objects[target]);
+                return opaque_access(state, state.objects[target]);
             constant_value old = place_value(state, target);
             if (old.kind == constant_value_kind::none)
                 return undefined_value(state);
@@ -1686,9 +1735,13 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
                usable; another variable (a reference, a const one) may be
                one analysis could not classify (a later definition, a
                template's) */
-            if (e.automatic ||
-                (!e.constexpr_ && !(e.type.cv() & cv_const) &&
-                 evaluated_type(e.type) != fundamental_type::none))
+            if (!e.automatic && !e.constexpr_ && !(e.type.cv() & cv_const) &&
+                evaluated_type(e.type) != fundamental_type::none) {
+                if (state.potential)
+                    return CONST_NOT_CONSTANT;
+                return CONST_NOT_CONSTANT_RULE;
+            }
+            if (e.automatic)
                 return CONST_NOT_CONSTANT;
             return CONST_UNKNOWN;
         }
@@ -1727,7 +1780,7 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     if (c != constness::constant)
         return c;
     if (!(object & element_place) && state.objects[object].opaque)
-        return opaque_access(state.objects[object]);
+        return opaque_access(state, state.objects[object]);
     /* [expr.const]/5.8: a variable that is not usable in constant
        expressions, read through a pointer or a reference */
     if (!(object & element_place) && state.objects[object].unusable)
@@ -2686,7 +2739,7 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         if (place_read_only(state, object))
             return CONST_NOT_CONSTANT;
         if (!(object & element_place) && state.objects[object].opaque)
-            return opaque_access(state.objects[object]);
+            return opaque_access(state, state.objects[object]);
         constant_value old = place_value(state, object);
         if (old.kind == constant_value_kind::none)
             return undefined_value(state);

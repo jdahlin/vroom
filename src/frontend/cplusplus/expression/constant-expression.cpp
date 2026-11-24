@@ -191,8 +191,21 @@ analysis_result semantic_analysis::constant_expression(SyntaxRef at,
         return r;
     }
     constant = m.evaluation == constness::constant;
-    if (m.evaluation == constness::not_constant)
+    if (m.evaluation == constness::not_constant) {
         constant_stop = 1;
+        /* the analysis folded it as not constant without saying by which
+           rule: the evaluator applies [expr.const]/5 to the tree, and when
+           a rule of it holds as clang applies it the expression is not a
+           constant expression */
+        if (m.node && semantics[m.node].evaluation == constness::not_constant) {
+            constant_value v;
+            semantics[m.node].evaluation = constness::unknown;
+            constness c = evaluate_value(m.node, v);
+            semantics[m.node].evaluation = constness::not_constant;
+            if (c == constness::not_constant && evaluation_rule_applied())
+                constant_stop = 3;
+        }
+    }
     return analysis_result::well_formed;
 }
 
