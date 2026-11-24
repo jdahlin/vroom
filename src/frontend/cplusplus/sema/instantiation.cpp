@@ -592,6 +592,14 @@ analysis_result semantic_analysis::instantiate_class(
                 entity_table[arg.entity].size)
                 continue;
             bool self = defining_class && arg.entity == defining_class;
+            /* a specialization that is itself waiting for the class being
+               defined (an iterator of it, named in its member-specification)
+               is incomplete for as long as that class is */
+            if (defining_class && !self && !entity_table[arg.entity].defined)
+                for (const deferred_class_instantiation &d :
+                     deferred_class_instantiations)
+                    self |= d.specialization == arg.entity &&
+                            d.owner == defining_class;
             incomplete_argument |= self || member_return_type;
             defining_argument |= self;
         }
@@ -646,6 +654,19 @@ analysis_result semantic_analysis::instantiate_class(
             defined_by = function_templates[pattern - 1].definition;
         if (defined_by && !declaring_specializations && !incomplete_argument)
             return define_class_outside(at, k, c);
+        /* declared before (a friend of the class being defined, whose
+           argument is that class: declaring_specializations) and named
+           again with the class still being defined: defined with the class,
+           as a specialization named so first is */
+        if (defined_by && defining_argument && !declaring_specializations) {
+            bool deferred = false;
+            for (const deferred_class_instantiation &d :
+                 deferred_class_instantiations)
+                deferred |= d.index == k;
+            if (!deferred)
+                deferred_class_instantiations.append(
+                    deferred_class_instantiation{defining_class, at, k, c});
+        }
         /* named again where no complete type is needed: the use that needs
            it defines it (complete_instantiation) */
         if (defined_by && lazy_return)
@@ -1387,6 +1408,8 @@ void semantic_analysis::enter_instantiation(instantiation_context &c,
     c.expressions_before = expressions.size();
     c.uses_before = name_uses.size();
     c.argument_named = argument_named;
+    c.require_complete = require_complete_class;
+    require_complete_class = 0;
     c.dependent_errors = dependent_errors;
     c.independent_errors = independent_errors;
     argument_named = false;
@@ -1414,6 +1437,7 @@ void semantic_analysis::leave_instantiation(instantiation_context &c)
         independent_errors = c.independent_errors;
     }
     argument_named = c.argument_named;
+    require_complete_class = c.require_complete;
     current_scope = c.scope;
     defining_class = c.defining_class;
     explicit_declaration_names = c.explicit_declaration_names;

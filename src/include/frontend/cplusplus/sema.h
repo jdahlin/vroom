@@ -5265,6 +5265,8 @@ class semantic_analysis
         owned_array<parameter_meaning> parameters;
         size_t expressions_before = 0, uses_before = 0;
         bool argument_named = false;
+        /* the use's require_complete_class: not the instantiated body's */
+        uint32_t require_complete = 0;
         uint32_t dependent_errors = 0, independent_errors = 0;
     };
     void enter_instantiation(instantiation_context &c, entity_index scope,
@@ -5291,6 +5293,10 @@ class semantic_analysis
        reports at the definition, with no note at the use.  The errors
        issued (not in a substitution, [temp.deduct]/8) of each kind */
     mutable bool argument_named = false;
+    /* the simple-template-id analysed is a destructor's type-name, where
+       the injected-class-name of the nominated class is a type
+       ([class.dtor]/1), not a constructor name ([class.qual]/2) */
+    bool in_destructor_name = false;
     uint32_t dependent_errors = 0, independent_errors = 0;
     void count_error();
     /* [temp.inst]/4, [temp.point]: the use at declaration d instantiated a

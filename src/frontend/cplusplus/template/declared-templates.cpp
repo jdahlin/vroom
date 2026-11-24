@@ -1004,6 +1004,21 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
+    if (qualified && !in_destructor_name && named && scope &&
+        !is_namespace(scope) &&
+        entity_table[scope].kind == entity_kind::class_type &&
+        entity_table[scope].name == name &&
+        entity_table[named].kind == entity_kind::class_type &&
+        entity_table[named].name == name)
+        /* [class.qual]/2: the injected-class-name of the nominated class C
+           after C:: "is instead considered to name the constructor of class
+           C", which is not a template-name: [impl.clang] clang's "qualified
+           reference to 'X' is a constructor name rather than a template
+           name" */
+        return ill_formed_at_token(template_name.token(),
+                                   "a constructor name is not a template "
+                                   "name: C::C names the constructor of C",
+                                   "class.qual");
     if (!named && qualified && !x.unknown) {
         VTRY(m, missing_member(template_name.token(), scope));
     }
