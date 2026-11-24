@@ -75,6 +75,9 @@ EXTENSION_KEYWORD(source_location_value, "__builtin_FILE_NAME", clang_source_loc
 EXTENSION_KEYWORD(source_location_value, "__builtin_FUNCTION", clang_source_location)
 EXTENSION_KEYWORD(source_location_value, "__builtin_LINE", clang_source_location)
 EXTENSION_KEYWORD(source_location_value, "__builtin_COLUMN", clang_source_location)
+EXTENSION_KEYWORD(predefined_name, "__func__", clang_predefined_names)
+EXTENSION_KEYWORD(predefined_name, "__FUNCTION__", clang_predefined_names)
+EXTENSION_KEYWORD(predefined_name, "__PRETTY_FUNCTION__", clang_predefined_names)
 
 /* [ext:clang_type_traits] (clang Language Extensions, Type Trait
  * Primitives): an expression trait ( type-id, ... ) and a type

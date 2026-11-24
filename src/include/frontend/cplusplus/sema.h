@@ -1508,6 +1508,11 @@ enum class semantic_kind : uint8_t {
        is written in (0: none); a prvalue of type unsigned int or const
        char*.  Inside a default_argument it is the call's */
     source_location,
+    /* [dcl.fct.def.general]/8 __func__, and [ext:clang_predefined_names]'s
+       __FUNCTION__ and __PRETTY_FUNCTION__: op: a predefined_name_form; b:
+       the function it is written in (0: none); an lvalue of type const
+       char[N], the function's name as a string constant */
+    predefined_name,
     /* [dcl.fct.default]/5: a default argument whose value depends on the
        call that uses it (source_location nodes inside): a: the argument's
        initialization; at: the call (the constructor of a default member
@@ -1590,6 +1595,9 @@ enum class semantic_kind : uint8_t {
        well-formed (a tree in part, which the evaluator does not run) */
     function_body,
 };
+
+/* [dcl.fct.def.general]/8, [ext:clang_predefined_names]: which name */
+enum class predefined_name_form : uint8_t { func, function, pretty };
 
 /* [ext:clang_source_location]: the value a source_location node has */
 enum class source_location_builtin : uint8_t {
@@ -3748,6 +3756,8 @@ class semantic_analysis
                                           qualified_type &result);
     analysis_result builtin_addressof(SyntaxRef n, expression_meaning &m);
     analysis_result clang_source_location(SyntaxRef n, expression_meaning &m);
+    /* [dcl.fct.def.general]/8: __func__, __FUNCTION__, __PRETTY_FUNCTION__ */
+    analysis_result predefined_name(token_index t, expression_meaning &m);
     analysis_result clang_source_location_object(SyntaxRef n,
                                                  expression_meaning &m);
     /* a default argument's value is the call's: its source_location nodes
@@ -6331,6 +6341,19 @@ class semantic_analysis
     /* the invented template-parameters of lambda-expression n
        ([expr.prim.lambda.closure]/3) */
     uint32_t invented_parameter_count(SyntaxRef n) const;
+    /* [dcl.fct.def.general]/8, [ext:clang_predefined_names]: the characters
+       (no NUL) of the name `form` of function f, as clang spells it; false
+       when it cannot be (a typedef-name clang prints is lost) */
+    bool predefined_name_text(entity_index f, predefined_name_form form,
+                              owned_buffer &out) const;
+    /* the name of template-parameter i of template entity t (0: none) */
+    uint32_t template_parameter_name(entity_index t, uint32_t i) const
+    {
+        const function_template &f =
+            function_templates[entity_table[t].instantiation - 1];
+        return entity_table[template_parameter_entities[f.first_parameter + i]]
+            .name;
+    }
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
     {
@@ -6378,6 +6401,10 @@ class semantic_analysis
     /* [abi:mangle.function-param]: the position plus one of function
        template t's parameter named by token i (0: none) */
     uint32_t function_parameter_position(entity_index t, token_index i) const;
+    const char *identifier_text(uint32_t id, size_t *length) const
+    {
+        return tokens.pp.identifier_spelling(id - 1, length);
+    }
     uint32_t token_identifier(token_index i) const
     {
         return tokens.identifier(i);

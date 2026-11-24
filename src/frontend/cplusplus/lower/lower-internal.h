@@ -740,6 +740,8 @@ class c_lowering
        default argument whose are those of the call that uses it (the call,
        and the function it is in, while the argument is lowered) */
     uint32_t source_location(const semantic_node &n);
+    /* [dcl.fct.def.general]/8 __func__ and clang's __FUNCTION__, __PRETTY_FUNCTION__ */
+    uint32_t predefined_name(const semantic_node &n);
     uint32_t default_argument(const semantic_node &n);
     token_index call_site_at = 0;
     entity_index call_site_function = 0;

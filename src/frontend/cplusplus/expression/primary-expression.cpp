@@ -91,6 +91,10 @@ node_index parser::primary_expression()
         return clang_bit_cast_expression();
     if (at(extension_keyword::convertvector)) /* [ext.clang] */
         return clang_convertvector_expression();
+    if (at(extension_keyword::predefined_name)) { /* [ext.clang] */
+        add_token();
+        return 0;
+    }
     if (at(extension_keyword::source_location) || /* [ext.clang] */
         at(extension_keyword::source_location_value))
         return clang_source_location_expression();

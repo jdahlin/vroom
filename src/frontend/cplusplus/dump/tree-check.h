@@ -321,6 +321,7 @@ struct tree_checker {
                 problem(n, "an asm output is not an lvalue");
             break;
         case semantic_kind::source_location:
+        case semantic_kind::predefined_name:
         case semantic_kind::label_address:
         case semantic_kind::variable_size:
             break;
