@@ -1664,10 +1664,19 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         for (size_t i = 0; i < subobjects.size(); i++)
             if (initialized[i])
                 union_member_designated = true;
+    /* (9.1) the variant member with a default member initializer is the
+       one initialized; (9.2) no other variant member is */
+    size_t union_default = subobjects.size();
+    if (entity_table[c].union_ && !union_member_designated)
+        for (size_t i = subobjects.size(); i-- > 0;)
+            if (entity_table[subobjects[i]].default_initializer) {
+                union_default = i;
+                union_member_designated = true;
+            }
     for (size_t i = 0; i < subobjects.size(); i++) {
         if (initialized[i])
             continue;
-        if (union_member_designated)
+        if (union_member_designated && i != union_default)
             continue;
         const dynamic_class *dynamic = dynamic_of(c);
         if (entity_table[subobjects[i]].virtual_base && dynamic &&
