@@ -76,7 +76,7 @@ analysis_result semantic_analysis::unavailable_use(token_index at,
 analysis_result semantic_analysis::deleted_use(token_index at, entity_index f)
 {
     VTRY(u, unavailable_use(at, f));
-    if (!entity_table[f].deleted)
+    if (!declared_deleted(f))
         return analysis_result::well_formed;
     /* /2 */
     return ill_formed_at_token(at,
