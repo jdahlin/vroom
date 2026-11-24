@@ -1337,7 +1337,7 @@ bool semantic_analysis::equivalent_template(const function_template &f,
                     el.count != UINT32_MAX || el.template_entity != pe)
                     return false;
             }
-        } else if (f.friend_class &&
+        } else if ((f.friend_class || friend_allowed) &&
                    entity_table[pe].kind != entity_kind::typedef_name &&
                    values[i].kind == template_argument::kind_t::value &&
                    values[i].template_entity) {
