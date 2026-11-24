@@ -83,6 +83,11 @@ analysis_result semantic_analysis::variable_partial_specialization(
     /* [temp.class.spec]/9: more specialized than the primary */
     if (!dependent || identity)
         return not_supported(n, "temp.class.spec");
+    if (permuted_arguments(n, arguments, first, parameters.size()))
+        return ill_formed(n,
+                          "variable template partial specialization is not "
+                          "more specialized than the primary template",
+                          "temp.class.spec");
     /* [temp.class.spec]/1: prior instantiations for other arguments are
        unaffected. If this partial specialization would be selected for a
        prior use, no diagnostic is required. Keep the result cached at that
@@ -132,6 +137,38 @@ void semantic_analysis::equivalent_partial_specializations(uint32_t added)
         if (forward && backward && !unknown)
             function_templates[a.primary - 1].unusable = true;
     }
+}
+
+/*
+ * [temp.class.spec]/9, [temp.class.order]: whether a partial
+ * specialization's arguments are its own parameters, each once, in another
+ * order than the primary's (template<class T, class U> struct S<U, T>):
+ * deduction succeeds both ways, so it is not more specialized than the
+ * primary template (a constrained one may be, [temp.constr.order]).
+ */
+bool semantic_analysis::permuted_arguments(
+    SyntaxRef n, const owned_array<template_argument> &arguments,
+    uint32_t first, size_t count)
+{
+    if (arguments.size() != count || count > 32 || template_head_constrained(n))
+        return false;
+    uint32_t seen = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (arguments[i].kind == template_argument::kind_t::pack)
+            return false;
+        bool found = false;
+        for (uint32_t j = 0; j < count && !found; j++)
+            if (argument_is_parameter(arguments[i],
+                                      template_parameter_entities[first + j])) {
+                if (seen & (1u << j))
+                    return false;
+                seen |= 1u << j;
+                found = true;
+            }
+        if (!found)
+            return false;
+    }
+    return true;
 }
 
 /*
@@ -385,6 +422,12 @@ analysis_result semantic_analysis::class_specialization_definition(
        (primary_arguments) */
     if (parameters.empty() == dependent || identity)
         return not_supported(n, rule);
+    if (!parameters.empty() &&
+        permuted_arguments(n, arguments, first, parameters.size()))
+        return ill_formed(n,
+                          "class template partial specialization is not more "
+                          "specialized than the primary template",
+                          "temp.class.spec");
     /* [temp.expl.spec]/7, [temp.class.spec]/1: one declared after a
        specialization it would be used for was instantiated makes the
        program ill-formed (no diagnostic required); any instantiation

@@ -5169,6 +5169,9 @@ class semantic_analysis
     bool primary_arguments(SyntaxRef n, SyntaxRef primary,
                            const owned_array<template_argument> &arguments,
                            uint32_t first, size_t count);
+    bool permuted_arguments(SyntaxRef n,
+                            const owned_array<template_argument> &arguments,
+                            uint32_t first, size_t count);
     bool dependent_arguments(const owned_array<template_argument> &a) const;
     bool same_token_spelling(token_index a, token_index b);
     bool same_tokens(SyntaxRef a, SyntaxRef b);
