@@ -2346,6 +2346,41 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
         !(p.literal && q.literal && p.stamp == q.stamp && p.base == q.base)) {
         if (state.potential)
             return CONST_UNKNOWN;
+        /* [lex.string]/9: two literals whose characters differ somewhere
+           in what both still have cannot overlap, so their addresses
+           differ ([expr.eq]/3.1: the others are unspecified) */
+        if (equality && p.literal && q.literal && p.extent && q.extent &&
+            p.offset <= p.extent && q.offset <= q.extent &&
+            tokens.files.behavior.has(language_feature::rvalue_references)) {
+            /* (equal addresses lay the second literal over the first at
+               the difference of the offsets: the bytes both have there
+               must be equal) */
+            const constant_value *a = &p, *b = &q;
+            if (q.offset > p.offset) {
+                a = &q;
+                b = &p;
+            }
+            uint64_t shift = a->offset - b->offset;
+            uint64_t common = b->extent;
+            if (shift > a->extent)
+                common = 0;
+            else if (a->extent - shift < common)
+                common = a->extent - shift;
+            for (uint64_t i = 0; i < common; i++) {
+                if (a->base + shift + i >= state.elements.size() ||
+                    b->base + i >= state.elements.size())
+                    return CONST_NOT_CONSTANT;
+                if (state.elements[a->base + shift + i].integer !=
+                    state.elements[b->base + i].integer) {
+                    v = value_of(
+                        result,
+                        op == preprocessing_op_or_punc::EXCLAMATION_EQUAL);
+                    return constness::constant;
+                }
+            }
+            /* (the same literal read twice has two versions here: equal
+               bytes are not known to be a rule) */
+        }
         return CONST_NOT_CONSTANT;
     }
     if (!p.count || !q.count) {
