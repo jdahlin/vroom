@@ -896,6 +896,18 @@ semantic_analysis::elaborated_enum_specifier(ElaboratedEnumSpecifier n,
     if (n.size() != 2 || !n[1].is_identifier())
         return not_supported(n, "dcl.type.elab");
     entity_index e = lookup(tokens.identifier(n[1].token()));
+    /* [enum.udecl]/1: "The using-enum-declarator ... shall name a
+       non-dependent previously declared enumeration type": a typedef-name
+       of one is (elaborated by a using-enum-declaration, [enum.udecl]/1's
+       "typedef-name that denotes an enumeration type") */
+    if (e && entity_table[e].kind == entity_kind::typedef_name) {
+        const qualified_type named = entity_table[e].type;
+        if (!named.cv() &&
+            type_table[named.unqualified()].kind == type_kind::enumeration) {
+            type = named.unqualified();
+            return analysis_result::well_formed;
+        }
+    }
     if (!e || entity_table[e].kind != entity_kind::enumeration)
         return not_supported(n, "basic.lookup.elab");
     type = entity_table[e].type.unqualified();
