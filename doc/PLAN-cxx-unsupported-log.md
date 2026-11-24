@@ -700,3 +700,11 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   a specialization reports its errors.  We reject 449 -> 444, unsupported
   -1.  Left: the use's declaration is not marked rejected (its result is
   recorded before instantiate_pending), so we accept does not fall yet.
+- 11.1 (2489f2456): a reference member's default member initializer bound by
+  the constructor ([class.base.init]/9.1, /11; [class.copy.ctor]/10 for an
+  rvalue-reference member).  Unsupported 35198 -> 35158, we accept +1
+  (member-init.cpp:16, recursion through an implicit constructor).  Left:
+  inaccessible subobject destructors deleting implicit members (needs the
+  use-site errors; scratchpad default-ctor-inaccessible-dtor.patch),
+  destroying operator delete (needs the delete-expression semantics),
+  attributes after a declarator-id, [temp.deduct].
