@@ -307,8 +307,15 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     d.has_unsupported = unsupported.size() > unsupported_before;
     /* (a linkage-specification holds the names of its own declarations) */
     if (d.result != analysis_result::well_formed &&
-        tree[n].kind != syntax_kind::linkage_specification)
+        tree[n].kind != syntax_kind::linkage_specification) {
+        /* [basic.scope.declarative]: a function redeclared ill-formed is
+           still the function its first declaration declared */
+        hold_ill_formed = d.result == analysis_result::ill_formed &&
+                          !d.has_unsupported &&
+                          tree[n].kind != syntax_kind::function_definition;
         hold_names(n);
+        hold_ill_formed = false;
+    }
     /* the names a template-declaration held while it was refused say why */
     held_cause cause = held_cause::refused;
     if (!d.has_unsupported && d.result == analysis_result::ill_formed)

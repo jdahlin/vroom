@@ -6384,6 +6384,9 @@ class semantic_analysis
     /* the last class definition was kept complete though a member
        function body was ill-formed ([class.mem]/6) */
     bool class_kept_ill_formed = false;
+    /* hold_names runs for an ill-formed declaration: a function it
+       redeclares stays known */
+    bool hold_ill_formed = false;
     /* the first operator keyword of such a declaration (0: none), which a
        refused operator's detail names */
     token_index operators_held_at = 0;

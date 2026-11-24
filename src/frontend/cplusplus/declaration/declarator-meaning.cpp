@@ -914,7 +914,9 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
             /* a declaration of the name that analysis could not follow
                (an overload, a redeclaration with default arguments ...):
                what the name denotes is not known from here on */
-            if (!declared_by(found, declaration)) {
+            if (!declared_by(found, declaration) &&
+                !(hold_ill_formed &&
+                  entity_table[found].kind == entity_kind::function)) {
                 entity_table[found].kind = entity_kind::none;
                 if (by_template)
                     entity_table[found].held_by_template = true;
