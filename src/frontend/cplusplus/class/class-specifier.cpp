@@ -2150,7 +2150,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "only to the declaration or definition "
                                        "of a variable or function",
                                        "dcl.inline");
-        const struct type &record = type_table[type.unqualified()];
+        /* a copy: size_of_type and define_class_instantiation can grow type_table */
+        const struct type record = type_table[type.unqualified()];
         if (entity_table[c].union_ &&
             (record.kind == type_kind::lvalue_reference ||
              record.kind == type_kind::rvalue_reference) &&

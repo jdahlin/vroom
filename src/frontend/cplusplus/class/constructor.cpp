@@ -354,7 +354,8 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
                                               uint32_t &statement)
 {
     qualified_type type = entity_table[e].type;
-    const struct type &record = type_table[type.unqualified()];
+    /* a copy: the initializer below can grow type_table */
+    const struct type record = type_table[type.unqualified()];
     SyntaxRef init = entity_table[e].default_initializer;
     /* before the analysis, which may move the tables */
     bool constructed = record.kind == type_kind::class_type &&
