@@ -58,10 +58,11 @@ node_index parser::dynamic_exception_specification()
     const implementation_defined_behavior &b = tokens.files.behavior;
     bool empty = at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) &&
                  at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 2);
-    if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) &&
-        at(preprocessing_op_or_punc::ELLIPSIS, 2) &&
-        at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 3))
-        return beyond_this_step();
+    /* throw ( ... ): Microsoft's, which clang parses in every edition and
+       the analysis treats as any other dynamic specification */
+    bool any = at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) &&
+               at(preprocessing_op_or_punc::ELLIPSIS, 2) &&
+               at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 3);
     if (!b.has(language_feature::dynamic_exception_specifications) && empty) {
         /* [diff.cpp17.except]/1: throw ( ) still means noexcept(true) */
         add_token(); /* throw */
@@ -72,7 +73,9 @@ node_index parser::dynamic_exception_specification()
     add_token(); /* throw */
     if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return expected("'(' after throw", "except.spec");
-    if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+    if (any)
+        add_token(); /* ... */
+    else if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
         size_t list_mark = begin_node();
         token_index list_first = position;
         unsigned count = 0;
