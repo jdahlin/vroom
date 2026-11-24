@@ -326,7 +326,6 @@ tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:174:3: if_state
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:213:3: if_statement: no substatement
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:228:3: if_statement: no substatement
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:245:5: if_statement: no substatement
-tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:252:5: if_statement: no substatement
 tree CXX/stmt.stmt/stmt.select/stmt.if/p2.cpp -std=c++1z: p2.cpp:58:5: if_statement: no substatement
 tree CXX/temp/temp.deduct/p9.cpp -std=c++20: p9.cpp:17:45: expression_statement: no expression
 tree CXX/temp/temp.deduct/p9.cpp -std=c++20: p9.cpp:9:30: expression_statement: no expression

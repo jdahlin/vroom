@@ -899,8 +899,23 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             require_complete(st.entity);
             const entity &x = entity_table[st.entity];
             if (!incomplete_allowed && !x.size && st.entity != defining_class &&
-                !x.defined)
+                !x.defined) {
+                /* a specialization of a class template that has no
+                   definition for it (no primary definition, no matching
+                   partial specialization) is incomplete: a name looked up
+                   in it is not found ([impl.clang] "incomplete type named
+                   in nested name specifier"); in a requires-expression's
+                   substitution that is the requirement not satisfied
+                   ([expr.prim.req]/5) */
+                if (undefined_specialization(st.entity))
+                    return ill_formed(n,
+                                      "a name cannot be looked up in an "
+                                      "incomplete class: the class template "
+                                      "has no definition for this "
+                                      "specialization",
+                                      "basic.lookup.qual");
                 return not_supported(n, "basic.lookup.qual");
+            }
             scope.entity = st.entity;
             scope.global = false;
             qualified = true;
@@ -1007,6 +1022,24 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
     if (!qualified)
         return not_supported(n, "basic.lookup.qual");
     return analysis_result::well_formed;
+}
+
+/* c, a class template's specialization, has no definition to instantiate:
+   neither its template nor a partial or explicit specialization matching
+   it defines a class-specifier ([temp.class.spec.match]) */
+bool semantic_analysis::undefined_specialization(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.kind != entity_kind::class_type || !x.instantiation || x.defined ||
+        x.size)
+        return false;
+    const instantiation_record &record = instantiations[x.instantiation - 1];
+    if (record.defining || record.lazy || record.has_failure || record.pattern)
+        return false;
+    uint32_t t = class_template_of(c);
+    if (!t)
+        return false;
+    return !function_templates[t - 1].definition;
 }
 
 } // namespace cplusplus

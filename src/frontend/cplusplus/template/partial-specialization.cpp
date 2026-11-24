@@ -727,6 +727,11 @@ analysis_result semantic_analysis::matching_specialization(
         matching_partial = false;
         if (deduction_unknowns != unknowns)
             return not_supported(at, "temp.deduct.type");
+        /* [temp.deduct.type]/8: noexcept(B) of a function type in the
+           pattern, value-dependent: the type keeps no B to deduce, so a
+           mismatch is not known to be one */
+        if (!match && value_dependent_noexcept_in(s.declaration))
+            return not_supported(at, "temp.deduct.type");
         if (!match)
             continue;
         if (!s.parameter_count) {
@@ -793,6 +798,19 @@ analysis_result semantic_analysis::matching_specialization(
          i++)
         deduced.append(all[first_deduced[chosen] + i]);
     return analysis_result::well_formed;
+}
+
+/* a value-dependent noexcept-specifier (dependent_exception_specifications)
+   inside the declaration n */
+bool semantic_analysis::value_dependent_noexcept_in(SyntaxRef n) const
+{
+    if (!n)
+        return false;
+    token_index first = n.first_token(), end = n.end_token();
+    for (SyntaxRef d : dependent_exception_specifications)
+        if (d.first_token() >= first && d.first_token() < end)
+            return true;
+    return false;
 }
 
 } // namespace cplusplus

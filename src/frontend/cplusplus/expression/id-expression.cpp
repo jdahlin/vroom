@@ -767,6 +767,12 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
             if (has_variable_bound(x.type))
                 return not_supported(current_declaration,
                                      "expr.prim.lambda.capture");
+            /* [basic.def.odr]/5: a reference usable in constant
+               expressions is not odr-used: the name designates the
+               variable it is bound to (unless the lambda captures it by
+               name) */
+            if (x.constant_referent && !forced_odr_use && !captured_by_name(e))
+                return named_entity(t, x.constant_referent, m, record_use);
             bool plain = false;
             VTRY(r, captured_entity(t, e, m, deferred_use, plain));
             if (!plain)

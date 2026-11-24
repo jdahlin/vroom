@@ -981,7 +981,12 @@ analysis_result semantic_analysis::lambda_specialization(
         }
     l.sealed = true;
     owned_array<parameter_meaning> parameters;
-    analysis_result r = lambda_call_type(n, declarator, l, type, parameters);
+    analysis_result r = analysis_result::well_formed;
+    {
+        scoped_value<qualified_type> enclosing(specializing_lambda_this,
+                                               l.enclosing_this);
+        r = lambda_call_type(n, declarator, l, type, parameters);
+    }
     if (r != analysis_result::well_formed || !body) {
         lambda_captures.resize(l.first_capture);
         return r;

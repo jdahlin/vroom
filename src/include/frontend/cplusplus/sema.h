@@ -501,6 +501,11 @@ struct entity {
        is not, or analysis could not tell (unknown) */
     constness usable = constness::not_constant;
     uint64_t value = 0;
+    /* [expr.const]/3-4: a reference (potentially-constant) whose
+       initializer names a variable of static storage duration is usable
+       in constant expressions; that variable, which a name of the
+       reference designates where it is not odr-used ([basic.def.odr]/5) */
+    entity_index constant_referent = 0;
     /* a dependent_value that is an expression naming a non-type template
        parameter with no other structure (S<I + 1>): its structure
        (semantic_analysis::expression_structure, hash-consed: one entity
@@ -2105,6 +2110,7 @@ class semantic_analysis
     analysis_result recovered_error_at(token_index at, const char *rule,
                                        const char *subclause);
     void record_recovered_error();
+    void lambda_error_in_enclosing(SyntaxRef lambda);
     analysis_result extension_used(diagnostic_id id, token_index at,
                                    const char *argument);
 
@@ -3283,6 +3289,9 @@ class semantic_analysis
         uint32_t first_capture = 0, capture_count = 0;
     };
     owned_array<generic_closure> generic_closures;
+    /* the enclosing member function's this type while a generic lambda's
+       specialization's lambda-declarator is analysed (function_this) */
+    qualified_type specializing_lambda_this;
     owned_array<capture_record> generic_closure_captures;
     /* [expr.prim.lambda.capture]/7: the entities and this a generic
        lambda's body names that its capture-default captures */
@@ -3372,6 +3381,7 @@ class semantic_analysis
     entity_index capture_member_of(entity_index closure, qualified_type type);
     /* the entity e of an enclosing function named at t in the body: its
        capture's member ([expr.prim.lambda.capture]/11) */
+    bool captured_by_name(entity_index e);
     analysis_result captured_entity(token_index t, entity_index e,
                                     expression_meaning &m, bool &deferred,
                                     bool &plain);
@@ -3913,6 +3923,7 @@ class semantic_analysis
        declarations */
     owned_array<SyntaxRef> dependent_exception_specifications;
     bool dependent_exception_specification(entity_index t) const;
+    bool value_dependent_noexcept_in(SyntaxRef n) const;
     /* [expr.const]/5: the evaluation of the semantic tree node as a core
        constant expression (expression/constant-evaluation.cpp): well_formed
        with its value in v and constant true; constant false if it is not one;
@@ -5221,6 +5232,7 @@ class semantic_analysis
     /* the class template the entity names (its held name, or one of its
        specializations as its injected-class-name), plus one */
     uint32_t class_template_of(entity_index e) const;
+    bool undefined_specialization(entity_index c) const;
     /* the alias template the held name e is, plus one */
     uint32_t alias_template_of(entity_index e) const;
     uint32_t template_of_form(entity_index e,

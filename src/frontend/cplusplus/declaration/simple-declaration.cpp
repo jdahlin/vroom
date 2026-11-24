@@ -2223,6 +2223,28 @@ analysis_result semantic_analysis::declare_with_initializer(
         e.value = value.value;
         e.constexpr_ = s.constexpr_;
     }
+    /* [expr.const]/3: a variable of reference type is potentially-constant
+       too; bound to a variable of static storage duration, its
+       initialization is a constant expression ([expr.const]/11: that
+       object's address is a permitted result) */
+    if ((record.kind == type_kind::lvalue_reference ||
+         record.kind == type_kind::rvalue_reference) &&
+        !(e.gnu_flags & gnu_weak)) {
+        uint32_t bound = value.node;
+        if (bound && semantics[bound].kind == semantic_kind::bind_reference)
+            bound = semantics[bound].a;
+        if (bound && semantics[bound].kind == semantic_kind::entity) {
+            entity_index referent = semantics[bound].a;
+            const entity &r = entity_table[referent];
+            if (r.kind == entity_kind::variable && !r.automatic &&
+                !r.c11_thread_local &&
+                type_table[r.type.unqualified()].kind !=
+                    type_kind::lvalue_reference &&
+                type_table[r.type.unqualified()].kind !=
+                    type_kind::rvalue_reference)
+                entity_table[declared_entity].constant_referent = referent;
+        }
+    }
     return analysis_result::well_formed;
 }
 
