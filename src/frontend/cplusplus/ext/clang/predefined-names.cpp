@@ -360,6 +360,9 @@ static void spell_bindings(const semantic_analysis &a, entity_index tmpl,
 {
     uint32_t count = a.specialization_argument_count(spec);
     for (uint32_t i = 0; i < count; i++) {
+        /* [impl.clang] clang leaves an unnamed template-parameter out */
+        if (!a.template_parameter_name(tmpl, i))
+            continue;
         if (any)
             append(out, ", ");
         else
