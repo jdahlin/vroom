@@ -1167,6 +1167,10 @@ constexpr uint32_t constant_full_expression_limit = 1048576;
    has no rules for them yet) */
 bool fundamental_type_is_integral(fundamental_type t);
 bool fundamental_type_is_floating(fundamental_type t);
+/* [dcl.enum]/8: whether n is a value of the enumeration e, defined and
+   its underlying type not fixed: in the smallest bit-field that holds
+   every enumerator value (enum-specifier.cpp; [expr.static.cast]/10) */
+bool enumeration_holds(const struct entity &e, __int128 n);
 /* [conv.integral]/3: "the unique value of the destination type that is
    congruent to the source integer modulo 2^N": as an expression_meaning
    keeps it, sign-extended for a signed type ([conv.bool] for bool) */

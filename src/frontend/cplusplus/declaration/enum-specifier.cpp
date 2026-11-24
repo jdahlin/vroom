@@ -409,6 +409,23 @@ unsigned signed_bits(__int128 v)
 
 } // namespace
 
+bool enumeration_holds(const struct entity &e, __int128 n)
+{
+    unsigned neg = e.negative_bits;
+    unsigned width = e.positive_bits;
+    __int128 low = 0;
+    if (neg) {
+        if (width + 1 > neg)
+            width = width + 1;
+        else
+            width = neg;
+        low = -(static_cast<__int128>(1) << (width - 1));
+        width = width - 1;
+    }
+    __int128 high = (static_cast<__int128>(1) << width) - 1;
+    return n >= low && n <= high;
+}
+
 /*
  * [dcl.enum]/1: "An enumeration is a distinct type ([basic.compound]) with
  * named constants.  Its name becomes an enum-name within its scope."

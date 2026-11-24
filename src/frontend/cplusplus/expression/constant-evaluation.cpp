@@ -2481,6 +2481,28 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         if (k == conversion_kind::integral && to == fundamental_type::bool_ &&
             v.kind == constant_value_kind::integer && v.integer > 1)
             return CONST_NOT_CONSTANT;
+        /* [expr.static.cast]/10: a cast's integral value outside the
+           range of an enumeration without a fixed underlying type
+           ([dcl.enum]/8) is undefined behavior, no core constant
+           expression ([expr.const]/5); a floating operand converted to the
+           underlying type first is not checked (cast-expression.cpp) */
+        if (k == conversion_kind::integral &&
+            v.kind == constant_value_kind::integer &&
+            type_table[x.type.unqualified()].kind == type_kind::enumeration) {
+            entity_index e = enumeration_of(x.type);
+            fundamental_type from = evaluated_type(semantics[x.a].type);
+            const semantic_node &operand = semantics[x.a];
+            bool from_floating = operand.kind == semantic_kind::conversion &&
+                                 static_cast<conversion_kind>(operand.op) ==
+                                     conversion_kind::floating_integral;
+            if (e && !entity_table[e].fixed_underlying &&
+                entity_table[e].defined && !from_floating &&
+                fundamental_type_is_integral(from) &&
+                !enumeration_holds(entity_table[e],
+                                   integer_value(tokens.files.behavior, from,
+                                                 kept_of(from, v))))
+                return CONST_NOT_CONSTANT;
+        }
         return evaluate_conversion(v, evaluated_type(semantics[x.a].type), to);
     }
     case semantic_kind::unary: {
