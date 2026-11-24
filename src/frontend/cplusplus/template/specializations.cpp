@@ -342,6 +342,8 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
          named_declarator.size() &&
          named_declarator[0].is(syntax_kind::qualified_id)))
         return member_explicit_instantiation(n, d, lead, extern_);
+    if (SyntaxRef id = variable_specialization_id(d))
+        return variable_explicit_instantiation(n, d, lead, id, extern_);
     specified s;
     uint32_t index = 0;
     VTRY(r, named_specialization(n, d, lead, false, extern_, s, index));
@@ -513,6 +515,54 @@ semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
     if (!instantiations[index].specialization)
         return not_supported(n, "temp.expl.spec");
     instantiations[index].defined = true;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.explicit]/1: template T name<args>; instantiates the variable
+ * template's specialization (as its use does, instantiate_variable), whose
+ * type the declaration shall repeat.
+ */
+analysis_result semantic_analysis::variable_explicit_instantiation(
+    SyntaxRef n, SyntaxRef d, uint32_t lead, SyntaxRef id, bool extern_)
+{
+    if (lead || !d[0].is(syntax_kind::decl_specifier_seq))
+        return not_supported(n, "temp.explicit");
+    lookup_result x;
+    entity_index named = 0;
+    template_id_name(id, x, named);
+    uint32_t vt = variable_template_of(named);
+    owned_array<template_argument> arguments;
+    VTRY(r, template_id_arguments(id, vt, arguments));
+    if (dependent_arguments(arguments))
+        return not_supported(n, "temp.explicit");
+    for (const template_argument &a : arguments)
+        if (a.kind == template_argument::kind_t::pack || a.template_entity)
+            return not_supported(n, "temp.explicit");
+    specified s;
+    VTRY_SET(r, decl_specifier_seq(d[0], s, false));
+    if (s.static_ || s.extern_ || s.typedef_ || s.constexpr_ || s.inline_)
+        return not_supported(n, "temp.explicit");
+    entity_index e = 0;
+    VTRY_SET(r,
+             instantiate_variable(n, vt, arguments.data(),
+                                  static_cast<uint32_t>(arguments.size()), e));
+    /* (the type repeated; not a second explicit instantiation, a template
+       with internal linkage or one outside the enclosing namespaces, which
+       clang reports: not yet) */
+    const function_template &primary = function_templates[vt - 1];
+    bool internal = false;
+    if (primary.declarator &&
+        primary.declarator[0].is(syntax_kind::decl_specifier_seq))
+        for (auto sp : primary.declarator[0].elements())
+            if (sp.is(standard_keyword::static_))
+                internal = true;
+    if (!(entity_table[e].type == s.type) || internal ||
+        entity_table[e].explicitly_instantiated != instantiation_kind::none ||
+        !namespace_encloses(current_scope,
+                            entity_table[primary.entity].enclosing))
+        return not_supported(n, "temp.explicit");
+    mark_explicit_instantiation(e, extern_);
     return analysis_result::well_formed;
 }
 

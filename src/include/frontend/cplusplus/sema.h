@@ -5023,6 +5023,10 @@ class semantic_analysis
     /* [temp.inst]/7: a simple-template-id naming a variable template's
        specialization, as an id-expression */
     analysis_result variable_template_id(SyntaxRef n, expression_meaning &m);
+    /* [temp.explicit]/1: template T name<args>; for a variable template */
+    analysis_result variable_explicit_instantiation(SyntaxRef n, SyntaxRef d,
+                                                    uint32_t lead, SyntaxRef id,
+                                                    bool extern_);
     analysis_result variable_template_id_of(SyntaxRef n, uint32_t vt,
                                             expression_meaning &m);
     analysis_result function_template_id_value(SyntaxRef n, uint32_t ft,
