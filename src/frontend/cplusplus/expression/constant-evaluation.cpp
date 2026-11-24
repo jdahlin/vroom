@@ -870,6 +870,12 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
         record.kind == type_kind::rvalue_reference) {
         /* [dcl.init.ref]: the reference is the pointer to the object it
            is bound to */
+        /* (a member the constructor's mem-initializer binds later: no
+           binding yet, as an indeterminate value, [basic.indet]/1) */
+        if (!init && !zero) {
+            place_value(state, place) = constant_value();
+            return constness::constant;
+        }
         if (!init || zero)
             return CONST_UNKNOWN;
         constant_value v;
@@ -1551,6 +1557,9 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 /* [expr.type]/1: a member of reference type designates
                    the object it is bound to */
                 const constant_value r = place_value(state, object);
+                /* (not bound yet: the mem-initializer binds it) */
+                if (r.kind == constant_value_kind::none && state.writing)
+                    return constness::constant;
                 if (r.kind != constant_value_kind::pointer || !r.count)
                     return CONST_UNKNOWN;
                 return pointed_place(state, r, object);
@@ -1624,6 +1633,21 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         c = evaluate_node(state, x.b, y);
         if (c != constness::constant)
             return c;
+        /* [dcl.init.ref]: a mem-initializer binds a reference member that has
+           no binding yet (it is the pointer to the object) */
+        if (semantics[x.a].kind == semantic_kind::member && x.a &&
+            y.kind == constant_value_kind::pointer && y.count &&
+            place_value(state, target).kind == constant_value_kind::none) {
+            type_kind mk =
+                type_table[entity_table[semantics[x.a].b].type.unqualified()]
+                    .kind;
+            if (mk == type_kind::lvalue_reference ||
+                mk == type_kind::rvalue_reference) {
+                place_value(state, target) = y;
+                object = target;
+                return constness::constant;
+            }
+        }
         fundamental_type t = evaluated_type(semantics[x.a].type);
         if (t == fundamental_type::none &&
             type_table[semantics[x.a].type.unqualified()].kind ==
@@ -1845,6 +1869,35 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
     if (x.type.cv() & cv_volatile)
         /* [expr.const]/5.8: "a non-volatile glvalue" */
         return undefined_value(state);
+    /* (a member of a volatile object is volatile, [basic.type.qualifier]/5:
+       `r.i` for a reference r to a volatile class) */
+    uint32_t chain = node;
+    /* (a const_cast of it, which does not make the object non-volatile) */
+    while (semantics[chain].kind == semantic_kind::conversion &&
+           static_cast<conversion_kind>(semantics[chain].op) ==
+               conversion_kind::qualification_cast)
+        chain = semantics[chain].a;
+    for (uint32_t m = chain; semantics[m].kind == semantic_kind::member;) {
+        m = semantics[m].a;
+        /* [expr.const]/5.8: a member of a volatile object variable */
+        if (semantics[m].kind == semantic_kind::entity && semantics[m].a &&
+            entity_table[semantics[m].a].kind == entity_kind::variable &&
+            (entity_table[semantics[m].a].type.cv() & cv_volatile) &&
+            !state.potential)
+            return CONST_NOT_CONSTANT_NOTE(
+                "the expression is not a constant expression: read of "
+                "volatile object is not allowed in a constant expression");
+        if (semantics[m].type.cv() & cv_volatile)
+            return undefined_value(state);
+        if (semantics[m].kind == semantic_kind::entity && semantics[m].a) {
+            const struct type &rt =
+                type_table[entity_table[semantics[m].a].type.unqualified()];
+            if ((rt.kind == type_kind::lvalue_reference ||
+                 rt.kind == type_kind::rvalue_reference) &&
+                (rt.operand.cv() & cv_volatile))
+                return undefined_value(state);
+        }
+    }
     type_kind tk = type_table[x.type.unqualified()].kind;
     bool scalar = evaluated_type(x.type) != fundamental_type::none;
     if (!scalar && tk != type_kind::pointer && tk != type_kind::class_type)
@@ -2413,11 +2466,30 @@ constness semantic_analysis::evaluate_binding(constant_evaluation &state,
        temporary the reference is bound to ([class.temporary]/2): outside
        a function's invocation (a call's arguments and returns have their
        own lifetimes, not modelled) */
-    if (semantics[bound].category == value_category::prvalue &&
-        (state.frame || !evaluated_class(semantics[bound].type)))
-        return CONST_UNKNOWN;
     uint32_t object = 0;
-    constness c = evaluate_object(state, bound, object);
+    constness c;
+    if (semantics[bound].category == value_category::prvalue && state.frame)
+        return CONST_UNKNOWN;
+    if (semantics[bound].category == value_category::prvalue &&
+        !evaluated_class(semantics[bound].type)) {
+        /* a scalar prvalue: the temporary holds its value */
+        type_kind bk = type_table[semantics[bound].type.unqualified()].kind;
+        if (bk != type_kind::pointer &&
+            evaluated_type(semantics[bound].type) == fundamental_type::none)
+            return CONST_UNKNOWN;
+        constant_value u;
+        c = evaluate_node(state, bound, u);
+        if (c != constness::constant)
+            return c;
+        constant_evaluation::object o;
+        o.frame = state.frame;
+        o.value = u;
+        object = static_cast<uint32_t>(state.objects.size());
+        append_object(state, o);
+        pin_objects(state);
+    } else {
+        c = evaluate_object(state, bound, object);
+    }
     if (c != constness::constant)
         return c;
     v = constant_value();
@@ -3769,7 +3841,12 @@ constness semantic_analysis::evaluate_variable(qualified_type t, uint32_t init,
     constness c = evaluate_initialization(state, t, init, false, 0);
     if (c == constness::constant && state.heap_live)
         c = constness::not_constant;
-    if (c == constness::constant)
+    /* (a reference variable's own binding to a temporary extends the
+       temporary's lifetime to the static variable's) */
+    type_kind variable_kind = type_table[t.unqualified()].kind;
+    if (c == constness::constant &&
+        variable_kind != type_kind::lvalue_reference &&
+        variable_kind != type_kind::rvalue_reference)
         c = permitted_result(state, state.objects[0].value);
     if (c == constness::constant)
         value = value_tree(state, t, state.objects[0].value, at);
@@ -3782,11 +3859,32 @@ constness semantic_analysis::evaluate_variable(qualified_type t, uint32_t init,
    pointer into this evaluation's own temporaries and locals is not one.
    Every other value is. */
 constness semantic_analysis::permitted_result(const constant_evaluation &state,
-                                              const constant_value &v) const
+                                              const constant_value &v,
+                                              bool reference) const
 {
     if (v.kind == constant_value_kind::array || is_object_value(v)) {
         for (uint32_t i = 0; i < v.count; i++) {
-            constness c = permitted_result(state, state.elements[v.first + i]);
+            bool member_reference = false, extended = false;
+            /* (a class with a constructor: a reference member of an
+               aggregate bound to a temporary extends its lifetime to the
+               object's, static for a variable, [class.temporary]/6) */
+            if (v.kind == constant_value_kind::class_object && v.designator &&
+                i < entity_table[v.designator].member_count) {
+                type_kind mk =
+                    type_table
+                        [entity_table[class_members[entity_table[v.designator]
+                                                        .first_member +
+                                                    i]]
+                             .type.unqualified()]
+                            .kind;
+                member_reference = mk == type_kind::lvalue_reference ||
+                                   mk == type_kind::rvalue_reference;
+                extended = member_reference && is_aggregate(v.designator);
+            }
+            if (extended)
+                continue;
+            constness c = permitted_result(state, state.elements[v.first + i],
+                                           member_reference);
             if (c != constness::constant)
                 return c;
         }
@@ -3818,6 +3916,19 @@ constness semantic_analysis::permitted_result(const constant_evaluation &state,
     }
     if (place >= state.objects.size() || state.objects[place].frame)
         return CONST_UNKNOWN;
+    /* [expr.const]/13.1 (/11.1 before C++23): a temporary the evaluation made
+       is an object of automatic storage duration, whose address (a reference
+       is one) a constant expression's result is not */
+    if (!state.objects[place].entity && !state.objects[place].literal &&
+        !state.objects[place].heap && !state.objects[place].opaque) {
+        if (reference)
+            return CONST_NOT_CONSTANT_NOTE(
+                "the expression is not a constant expression: reference to "
+                "temporary is not a constant expression");
+        return CONST_NOT_CONSTANT_NOTE(
+            "the expression is not a constant expression: pointer to "
+            "temporary is not a constant expression");
+    }
     /* [expr.const]/13.? : storage a new-expression made has to be freed */
     if (state.objects[place].heap)
         return CONST_NOT_CONSTANT;

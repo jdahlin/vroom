@@ -4065,7 +4065,8 @@ class semantic_analysis
     uint32_t pointer_tree(const constant_evaluation &state, qualified_type t,
                           const constant_value &v, token_index at);
     constness permitted_result(const constant_evaluation &state,
-                               const constant_value &v) const;
+                               const constant_value &v,
+                               bool reference = false) const;
     constness evaluate_node(constant_evaluation &state, uint32_t node,
                             constant_value &v);
     constness evaluate_statement(constant_evaluation &state, uint32_t node,
