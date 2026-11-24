@@ -276,7 +276,12 @@ analysis_result semantic_analysis::overloaded_operator(
                        op == preprocessing_op_or_punc::LEFT_BRACKET ||
                        op == preprocessing_op_or_punc::LEFT_PARENTHESIS ||
                        op == preprocessing_op_or_punc::ARROW;
-    if (converts && !logical &&
+    /* a prefix unary operator: the built-in candidates' only argument needs a
+       user-defined conversion, so a user-defined candidate whose parameter
+       takes the operand by a standard conversion beats them all (checked
+       below once it is chosen) */
+    bool unary_prefix = operands.size() == 1 && !postfix;
+    if (converts && !logical && !unary_prefix &&
         (operands.size() != 2 || member_only ||
          op == preprocessing_op_or_punc::SPACESHIP))
         return not_supported(n, "over.built");
@@ -552,7 +557,7 @@ analysis_result semantic_analysis::overloaded_operator(
         }
         return analysis_result::well_formed;
     }
-    if (converts)
+    if (converts && (!unary_prefix || candidates.empty()))
         return not_supported(n, "over.built");
     if (op == preprocessing_op_or_punc::EQUAL) {
         /* [class.copy.assign]/2: "If the class definition does not
@@ -584,6 +589,9 @@ analysis_result semantic_analysis::overloaded_operator(
     bool none_viable = false;
     r = best_viable_function(n, candidates, nullptr, arguments, chosen,
                              &none_viable);
+    if (r == analysis_result::well_formed && none_viable && converts)
+        /* a built-in candidate may be viable through the conversion */
+        return not_supported(n, "over.built");
     if (r == analysis_result::well_formed && none_viable && member_only)
         /* no built-in operator either: whether a conversion makes one
            viable is not analysed */
@@ -594,6 +602,17 @@ analysis_result semantic_analysis::overloaded_operator(
         return r;
     const overload_candidate &c = candidates[chosen];
     entity_index f = c.function;
+    if (converts && !c.member) {
+        /* [over.match.best]/2: a non-member's parameter reached by a
+           user-defined conversion is no better than the built-in's */
+        if (c.template_index)
+            return not_supported(n, "over.built");
+        conversion_sequence s = implicit_conversion_sequence(
+            arguments[0],
+            type_table.parameters(entity_table[f].type.unqualified())[0], true);
+        if (s.kind != conversion_sequence::form::standard)
+            return not_supported(n, "over.built");
+    }
     if (c.template_index) {
         /* [temp.inst]/4: the specialization chosen is referenced: its
            definition is instantiated (a candidate's declaration only was,
