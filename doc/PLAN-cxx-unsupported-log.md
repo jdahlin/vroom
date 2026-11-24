@@ -652,3 +652,13 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   in an out-of-class member template's definition, checked only at
   instantiation).  The orchestrator fixed two citations cxx-spec-refs had
   flagged since 9.4/9.5 (its gate run was missed): run it at every check.
+- 10.4 (dropped once) -> 10.5 (65564ddd2): a defaulted member operator==
+  ([class.eq]), constexpr only if its comparisons can be ([class.compare.
+  default]/3); fixes on the way: current_declaration restored after it (the
+  claims after it had been dropped), a constructor's initializer list with
+  unnamed bit-fields in the evaluator.  Unsupported 35320 -> 35291, we
+  reject unchanged, we accept +1 (class.eq/p2.cpp:49: an implicitly deleted
+  operator== used before its body is analysed).  Left: base classes, array
+  members, !=, <=>, the implicit == of a defaulted <=>; a local constexpr
+  object default-initialized by a user constructor (scratchpad
+  local-constexpr.patch).
