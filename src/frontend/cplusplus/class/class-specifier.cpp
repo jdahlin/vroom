@@ -286,6 +286,17 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 VTRY(r, gnu_attribute_specifier(c, gnu));
             }
         } else {
+            /* [dcl.attr.fallthrough]/1, [dcl.attr.likelihood]/1: an
+               attribute after the class-key appertains to the class; these
+               "may be applied to" a statement only (clang: "cannot be
+               applied to a declaration") */
+            if (c.is_node() && (c.is(syntax_kind::attribute_specifier_seq) ||
+                                c.is(syntax_kind::attribute_specifier)))
+                if (token_index t = statement_only_attribute(c.first_token(),
+                                                             c.end_token()))
+                    return ill_formed_at_token(
+                        t, "this attribute cannot be applied to a declaration",
+                        "dcl.attr");
             head_list.append(c);
         }
     }
@@ -329,8 +340,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             return not_supported(n, "temp.spec");
         }
     } else if (!unnamed) {
-        /* attributes */
-        return not_supported(n, "class.pre");
+        return not_supported_because(
+            n, "class.pre",
+            "the class-head-name is not an identifier or a "
+            "qualified name (an attribute that is not one "
+            "without effect, or another form)");
     }
     bool is_final = false;
     uint32_t next = 2;
