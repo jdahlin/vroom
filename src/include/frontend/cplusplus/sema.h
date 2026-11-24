@@ -5026,6 +5026,9 @@ class semantic_analysis
     entity_index current_scope = 0;
     /* the entity the last declarator declared */
     entity_index last_declared = 0;
+    /* [except.throw]: the first entity made inside the innermost try-block being analysed (an implicitly movable
+       operand of a throw-expression is one declared since), 0: none */
+    size_t try_entities = 0;
     /* where claims about the expressions analysed now go
        (analysed_expression::place), the scope there, and whether
        declarations analysed now can have claims after them */

@@ -905,12 +905,18 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
             uint32_t count;
 
             P->catches = true;
+            /* (a handler's label is the function's own: the landing pads are made at its end) */
+            P->E->symbol_flags[P->fn] |= CODEGEN_SYMBOL_NO_INLINE;
             const uint32_t *h = codegen_catch_scope(c, x->a, &count);
 
             for (uint32_t i = 0; i < count; i++)
                 P->E->label_flags[h[2 * i + 1]] |=
                     CODEGEN_LABEL_REFERENCED | CODEGEN_LABEL_BACKWARD;
         }
+        if (codegen_symbol_attributes(c, x->a)->cleanup && c->o->eh)
+            /* (the landing pads are made at the end of the function that runs them: a cleanup
+               variable of an inlined copy is out of scope there) */
+            P->E->symbol_flags[P->fn] |= CODEGEN_SYMBOL_NO_INLINE;
         if (codegen_symbol_attributes(c, x->a)->cleanup ||
             (y->kind == AST_SYMBOL_VARIABLE &&
              (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)))

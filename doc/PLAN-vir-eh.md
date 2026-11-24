@@ -325,3 +325,41 @@ at E2 (needs clang++ and qemu, which CI has).
   tables on origin/main too (E1 makes `-fexceptions` turn them on); no
   nounwind inference, so landing pads are kept for calls clang proves
   cannot throw.
+- E8 (2026-11-24): the C++ front end's exceptions, first part.  Analysis
+  (`exception/try-block.cpp`, `expression/throw-expression.cpp`):
+  `try_statement`, `handler` (the exception-declaration's variable declared
+  and initialized from an `exception_object` lvalue, [except.handle]/10; its
+  type adjusted as /3; a declaration of an abstract class and a class type
+  by value without a name are refused), `throw_exception` (the exception
+  object copy-initialized into `*allocated`, [except.throw]/3; an implicitly
+  movable operand declared in the innermost try-block is an xvalue,
+  [class.copy.elision]/3), `throw;`.  A try-block holding a label is not
+  analysed.  Lowering (`lower/exceptions.cpp`): `__cxa_allocate_exception`,
+  the initialization, `__cxa_throw` with the type's `_ZTI` and destructor;
+  `ast_builder_try` with a handler that is `__cxa_begin_catch`, the
+  variable, the body, `__cxa_end_catch` by a cleanup variable;
+  `catch (...)`; `throw;` is `__cxa_rethrow`.  Destructors on unwind: an
+  automatic object with a destructor has a guard, a `void *` cleanup
+  variable holding its address whose function (`.Lcxx_unwind`, an
+  assembler-local symbol, one per destructor) destroys it; the lowering
+  nulls the guard where it destroys the object itself, so the normal
+  paths run the function without effect.  Arrays, temporaries, parameters,
+  members and bases of a constructor that throws are not guarded.  Back
+  ends: a function with a try-block keeps its locals in memory (the direct
+  emitter's allocators know no edge from a call to a pad), and a function
+  with a try-block or, with exceptions, a cleanup variable is not inlined
+  (the pads are made at the function's end: an inlined copy's labels and
+  slots are out of scope there); x86-64's VIR lowering puts a landing
+  pad's mark before the block's edits (an allocator spill ahead of it was
+  skipped by the unwinder: wrong values after a catch at -O2); arm64's VIR
+  refuses a landing pad's selector, so a function with a typed handler runs
+  in the direct emitter (an invoke's result live into a pad lost its move
+  into the callee-saved register).  Tests: `src/test/eh/cxx_throw_catch.cpp`
+  and `cxx_exceptions.cpp` (by value, reference, pointer, base class,
+  `catch (...)`, rethrow, destructors while unwinding, nested try, a handler
+  that throws, a handler that continues a loop), built whole by vcc and
+  clang++ and run by `bench/vcc-eh.py`: 56/56 (both targets, -O0..3).
+  Not done: function-try-blocks, `noexcept` terminate, exception
+  specifications, `std::uncaught_exceptions`-style bookkeeping, constructors
+  that throw (members and bases destroyed), temporaries on unwind.
+

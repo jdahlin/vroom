@@ -5,7 +5,7 @@ namespace cplusplus::lowering
 {
 
 /*
- * [except.throw]/3, [abi:throw]: ({ T *p = (T *)__cxa_allocate_exception(sizeof (T)); the initialization
+ * [except.throw]/3, [abi:eh-2.4.3]: ({ T *p = (T *)__cxa_allocate_exception(sizeof (T)); the initialization
  * of *p; __cxa_throw(p, &_ZTI<T>, the destructor or null); }).  /4: without an operand,
  * __cxa_rethrow().
  */
@@ -70,7 +70,7 @@ uint32_t c_lowering::throw_expression(const semantic_node &n)
 }
 
 /* [except.handle]/10: the exception object a handler's variable is initialized from: *(T *)p, p what
-   __cxa_begin_catch returned; a pointer is that value itself ([abi:begin-catch]), so *(T *)&p */
+   __cxa_begin_catch returned; a pointer is that value itself ([abi:eh-2.5.1]), so *(T *)&p */
 uint32_t c_lowering::exception_object(const semantic_node &n)
 {
     if (!exception_symbol)
@@ -152,7 +152,7 @@ uint32_t c_lowering::unwind_function(entity_index destructor,
     ast_qualified_type t = type(object, at), pointer = pointer_to(t);
     ast_qualified_type ft = ast_builder_type_function(c, v, &vpp, 1, false);
     owned_buffer name;
-    vbuffer_string_append(name.get(), "__cxx_unwind");
+    vbuffer_string_append(name.get(), ".Lcxx_unwind");
     if (!unwind_functions.empty())
         vbuffer_format_append(name.get(), ".%u",
                               static_cast<unsigned>(unwind_functions.size()));

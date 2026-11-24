@@ -77,11 +77,27 @@ analysis_result semantic_analysis::throw_expression(ThrowExpression n,
             k.fundamental == fundamental_type::void_)
             return ill_formed(n, "cannot throw an object of type void",
                               "expr.throw");
+        if (k.kind == type_kind::pointer &&
+            type_table[k.operand.unqualified()].kind == type_kind::class_type &&
+            !require_complete(k.operand))
+            return ill_formed(n,
+                              "cannot throw a pointer to an object of "
+                              "incomplete type",
+                              "except.throw");
         if (k.kind == type_kind::class_type) {
             if (!require_complete(object))
                 return ill_formed(n,
                                   "cannot throw an object of incomplete type",
                                   "expr.throw");
+            /* [class.copy.elision]/3: "An implicitly movable entity ... If the expression in a throw-expression
+               is an id-expression that names an implicitly movable entity ... overload resolution to select the
+               constructor for the copy is first performed as if the expression were an rvalue" */
+            entity_index movable = implicitly_movable(n[1]);
+            if (movable && movable >= try_entities &&
+                operand.category == value_category::lvalue &&
+                operand.type.unqualified() == object.unqualified() &&
+                declares_move_constructor(k.entity))
+                operand.category = value_category::xvalue;
         } else {
             VTRY_SET(r, operand_value(n, operand));
         }

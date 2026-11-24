@@ -131,13 +131,33 @@ node_index parser::exception_declaration()
  * handler."  The try-block's compound-statement and each handler are
  * block scopes ([basic.scope.block]/1).
  */
+/* a labeled-statement (a label, case or default) anywhere in n: a jump may enter the try-block or a handler
+   ([stmt.dcl]/3, [except.handle]/2), which is not analysed */
+static bool has_label(SyntaxElement n)
+{
+    if (n.is_token())
+        return false;
+    if (n.is(syntax_kind::labeled_statement))
+        return true;
+    for (auto c : n.elements())
+        if (has_label(c))
+            return true;
+    return false;
+}
+
 analysis_result semantic_analysis::try_block(TryBlock n, uint32_t &built)
 {
+    if (has_label(n))
+        return not_supported(n, "except.handle");
     /* try compound-statement handler-seq (one handler alone is a child) */
     if (n.size() < 3 || !n[1].is(syntax_kind::compound_statement))
         return not_supported(n, "except.pre");
     uint32_t body = 0;
-    analysis_result result = statement(n[1], body);
+    analysis_result result;
+    {
+        scoped_value<size_t> inside(try_entities, entity_table.size());
+        result = statement(n[1], body);
+    }
     owned_array<uint32_t> handlers;
     owned_array<SyntaxElement> items;
     for (uint32_t i = 2; i < n.size(); i++) {
@@ -230,6 +250,19 @@ analysis_result semantic_analysis::handler(Handler n, uint32_t &built)
         } else if (result == analysis_result::well_formed) {
             caught = s.type;
         }
+        /* [except.handle]/10: "if the exception-declaration does not specify a name, a temporary is
+           copy-initialized from the exception object": a class type by value is not analysed */
+        if (result == analysis_result::well_formed && !variable &&
+            type_table[caught.unqualified()].kind == type_kind::class_type) {
+            current_scope = outer;
+            return not_supported(n, "except.handle");
+        }
+        if (result == analysis_result::well_formed &&
+            abstract_class(decayed(caught)))
+            result = ill_formed(declaration,
+                                "the exception-declaration shall not denote "
+                                "an abstract class type",
+                                "except.handle");
         if (result == analysis_result::well_formed &&
             type_table[caught.unqualified()].kind ==
                 type_kind::rvalue_reference)
@@ -240,8 +273,13 @@ analysis_result semantic_analysis::handler(Handler n, uint32_t &built)
         caught = decayed(caught);
     }
     uint32_t body = 0;
-    if (result == analysis_result::well_formed)
-        result = worse(result, statement(n[4], body));
+    if (result == analysis_result::well_formed) {
+        /* [basic.scope.block]/2: the handler's outermost block shall not redeclare the exception-declaration's name */
+        entity_index handler_scope = current_scope;
+        current_scope = handler_scope;
+        result = worse(result, compound_statement(CompoundStatement(n[4]),
+                                                  handler_scope, body));
+    }
     current_scope = outer;
     (void)variable;
     built = statement_node(semantic_kind::handler, n.first_token(), declared, 0,

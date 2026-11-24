@@ -2389,6 +2389,12 @@ lines:
   the walker and in VIR's lowerings; `bench/vcc-cfi.py` extended.
 - Until then `-fno-exceptions` is the only mode: `throw` and `try` are
   errors as clang's.
+- Status (2026-11-24): try-blocks with handlers, throw-expressions and
+  `throw;` are analysed and lowered ([except.pre], [except.handle],
+  [except.throw]; doc/PLAN-vir-eh.md E8): `bench/vcc-eh.py` runs
+  `src/test/eh/cxx_*.cpp` against clang++ under libstdc++'s unwinder.
+  Left: function-try-blocks, exception specifications and `noexcept`
+  ([except.spec]), constructors that throw, `typeid`, `dynamic_cast`.
 - Gate: C5.3 with exceptions across compilers; C5.4.
 
 ### S8. Real code
