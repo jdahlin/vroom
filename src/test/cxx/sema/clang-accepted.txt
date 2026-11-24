@@ -3109,6 +3109,7 @@ SemaCXX/dllexport.cpp:781 -std=c++1y -Wunsupported-dll-base-class-template
 SemaCXX/elaborated-type-specifier.cpp:60 -std=gnu++17
 SemaCXX/embed-init-list.cpp:105 -std=gnu++17 -Wno-c++26-extensions
 SemaCXX/embed-init-list.cpp:109 -std=gnu++17 -Wno-c++26-extensions
+SemaCXX/embed-init-list.cpp:119 -std=gnu++17 -Wno-c++26-extensions
 SemaCXX/embed-init-list.cpp:129 -std=gnu++17 -Wno-c++26-extensions
 SemaCXX/embed-init-list.cpp:84 -std=gnu++17 -Wno-c++26-extensions
 SemaCXX/embed-init-list.cpp:85 -std=gnu++17 -Wno-c++26-extensions
