@@ -61,6 +61,12 @@ int semantic_analysis::compare_conversions(const conversion_sequence &a,
        parameter matches any object, and is no better or worse */
     if (a.any_object || b.any_object)
         return 0;
+    /* [over.ics.rank]/3.1.1: "List-initialization sequence L1 is a better
+       conversion sequence than list-initialization sequence L2 if L1
+       converts to std::initializer_list<X> for some X and L2 does not" */
+    if (a.from_list && b.from_list &&
+        a.to_initializer_list != b.to_initializer_list)
+        return prefer(a.to_initializer_list, b.to_initializer_list);
     int fa = form_order(a.kind), fb = form_order(b.kind);
     if (fa != fb)
         return prefer(fa < fb, fb < fa);

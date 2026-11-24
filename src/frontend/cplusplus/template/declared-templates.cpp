@@ -26,6 +26,20 @@
 namespace cplusplus
 {
 
+/* a nested-name-specifier's components' kinds into out: i an identifier,
+   t a simple-template-id */
+static void qualifier_form(SyntaxRef nested, char (&out)[16])
+{
+    size_t n = 0;
+    for (size_t k = 0; k < nested.size() && n < 12; k++) {
+        if (nested[k].is(syntax_kind::simple_template_id))
+            out[n++] = 't';
+        else if (nested[k].is_identifier())
+            out[n++] = 'i';
+    }
+    out[n] = 0;
+}
+
 /*
  * [temp.pre]/1: "A template defines a family of classes, functions, or
  * variables, an alias for a family of types, or a concept."
@@ -58,9 +72,84 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
                defined outside it */
             SyntaxRef d = inner.declaration();
             if (d.is(syntax_kind::function_definition) &&
-                out_of_class_member(d))
+                (out_of_class_member(d) ||
+                 out_of_class_member_class_function(d)))
                 return member_definition_of_template(t, d, inner);
-            return not_supported(t, "temp.mem");
+            /* [temp.mem]/1's member class template of a class template,
+               defined outside it */
+            /* [temp.static]/1's static data member template, defined
+               outside the class template */
+            if (d.is(syntax_kind::simple_declaration) &&
+                out_of_class_variable_member(d))
+                return member_definition_of_template(t, d, inner);
+            if (d.is(syntax_kind::simple_declaration)) {
+                SyntaxRef only = sole_decl_specifier(d);
+                if (only && only.is(syntax_kind::class_specifier) &&
+                    out_of_class_class_member(only, nullptr, true))
+                    return member_definition_of_template(t, d, inner);
+            }
+            /* what the nested template declaration is, for the detail */
+            if (d.is(syntax_kind::function_definition)) {
+                SyntaxRef nested = out_of_class_nested(d);
+                if (!nested)
+                    return not_supported_because(
+                        t, "temp.mem",
+                        "a member template function definition without a "
+                        "nested-name-specifier");
+                if (nested.size() != 2) {
+                    char form[16];
+                    qualifier_form(nested, form);
+                    char why[160];
+                    snprintf(why, sizeof why,
+                             "a member template function definition of a "
+                             "member class (the nested-name-specifier has "
+                             "more than one component: %s)",
+                             form);
+                    return not_supported_because(t, "temp.mem", why);
+                }
+                return not_supported_because(
+                    t, "temp.mem",
+                    "a member template function definition whose "
+                    "nested-name-specifier is not a simple-template-id");
+            }
+            if (d.is(syntax_kind::simple_declaration)) {
+                /* by form: the qualifier's components (i an identifier, t a
+                   simple-template-id) of a class definition or of a
+                   variable's declarator-id */
+                char form[16] = "";
+                const char *kind = "other";
+                SyntaxRef only = sole_decl_specifier(d);
+                if (only && only.is(syntax_kind::class_specifier)) {
+                    kind = "a class definition";
+                    auto head = only.class_specifier().class_head();
+                    if (head && head.size() == 2 &&
+                        head[1].is(syntax_kind::class_head_name) &&
+                        head[1].size() == 2 &&
+                        head[1][0].is(syntax_kind::nested_name_specifier))
+                        qualifier_form(head[1][0], form);
+                    else
+                        kind = "a class definition without a qualifier";
+                } else if (d.size() == 3) {
+                    SyntaxElement q = d[1];
+                    if (q.is(syntax_kind::init_declarator) && q.size())
+                        q = q[0];
+                    if (q.is(syntax_kind::qualified_id) && q.size() == 2 &&
+                        q[0].is(syntax_kind::nested_name_specifier)) {
+                        kind = "a variable";
+                        qualifier_form(q[0], form);
+                    }
+                }
+                char why[160];
+                snprintf(why, sizeof why,
+                         "a member template simple-declaration that is no "
+                         "variable or class definition outside its class: %s "
+                         "(qualifier %s)",
+                         kind, form);
+                return not_supported_because(t, "temp.mem", why);
+            }
+            return not_supported_because(t, "temp.mem",
+                                         "a member template of another kind of "
+                                         "declaration");
         },
         /* [temp.alias]/1: "A template-declaration in which the declaration
            is an alias-declaration declares the identifier to be an alias
@@ -75,7 +164,8 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
 /* [temp.mem.class]/1: a member class of a class template defined outside
    it (template<class T> class O<T>::S { ... };): returns the
    simple-template-id O<T> and optionally the member class name token S */
-VPRIV SyntaxRef out_of_class_class_member(SyntaxRef only, token_index *name)
+VPRIV SyntaxRef out_of_class_class_member(SyntaxRef only, token_index *name,
+                                          bool partial)
 {
     if (!only || !only.is(syntax_kind::class_specifier))
         return 0;
@@ -84,8 +174,16 @@ VPRIV SyntaxRef out_of_class_class_member(SyntaxRef only, token_index *name)
         head[1].size() != 2 ||
         !head[1][0].is(syntax_kind::nested_name_specifier) ||
         head[1][0].size() != 2 ||
-        !head[1][0][0].is(syntax_kind::simple_template_id) ||
-        !head[1][1].is_identifier())
+        !head[1][0][0].is(syntax_kind::simple_template_id))
+        return 0;
+    /* ... or a partial specialization's simple-template-id, O<T>::X<U*>
+       ([temp.class.spec]/5) */
+    if (partial && head[1][1].is(syntax_kind::simple_template_id)) {
+        if (name)
+            *name = head[1][1].first_token();
+        return head[1][0][0].index();
+    }
+    if (!head[1][1].is_identifier())
         return 0;
     if (name)
         *name = head[1][1].token();
@@ -139,14 +237,40 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
             return member_definition_of_template(t, s);
         return variable_template_definition(t, s);
     }
+    /* [temp.class.spec]/1: a partial specialization of a variable
+       template declared without an initializer (template<class T> int
+       v<T*>;), named plainly or through its namespace */
+    if (s.size() == 3 && !lead && s.is(s[0], syntax_kind::decl_specifier_seq)) {
+        if (SyntaxRef id = variable_specialization_id(s))
+            return variable_partial_specialization(t, s, id, 0);
+        entity_index qualifier = 0;
+        if (SyntaxRef id = qualified_variable_specialization_id(s, qualifier))
+            return variable_partial_specialization(t, s, id, qualifier);
+    }
+    /* [temp.static]/1: a static data member of a class template defined
+       outside it without an initializer (template<class T> int S<T>::m;) */
+    if (s.size() == 3 && !lead && out_of_class_variable_member(s))
+        return member_definition_of_template(t, s);
     /* [temp.fct]/1: a function template's declaration (template<class T>
        T f(T);), one declarator not in an init-declarator-list */
+    /* [temp.pre]/1: a variable template without an initializer
+       (template<class T> int v;), its one declarator not an
+       init-declarator; [basic.def]/2: a definition */
+    if (s.size() == 3 + lead && !lead &&
+        s.is(s[0], syntax_kind::decl_specifier_seq) && s[1].is_identifier())
+        return variable_template_definition(t, s);
     uint32_t gnu = leading_gnu_attributes(s);
+    /* a declarator with a trailing-return-type is a function's
+       ([dcl.fct]/1; template<class T> auto f() -> T;) */
     if (s.size() == 3 + gnu &&
         (s.is(s[1 + gnu], syntax_kind::noptr_declarator) ||
-         s.is(s[1 + gnu], syntax_kind::ptr_declarator)))
+         s.is(s[1 + gnu], syntax_kind::ptr_declarator) ||
+         s.is(s[1 + gnu], syntax_kind::declarator)))
         return function_template_definition(t, s);
-    return not_supported(t, "temp.class");
+    char shape[160];
+    snprintf(shape, sizeof shape, "%u parts, part 1 is %s", s.size(),
+             syntax_kind_name(s[1 + gnu].kind()));
+    return not_supported_because(t, "temp.class", shape);
 }
 
 /*
@@ -215,7 +339,12 @@ analysis_result semantic_analysis::template_head_parameters(
         entity_table[current_scope].kind == entity_kind::class_type &&
         is_namespace(entity_table[current_scope].enclosing) &&
         n[1].is(syntax_kind::deduction_guide);
-    if (!member_alias && !member_class && !member_guide &&
+    /* ... and the template-head of a member variable template's definition
+       outside its class (define_template_member), in the scope that binds
+       the class's parameters */
+    bool member_definition =
+        template_member_scope && current_scope == template_member_scope;
+    if (!member_alias && !member_class && !member_guide && !member_definition &&
         (!is_namespace(current_scope) || (defining_class && !friend_allowed)))
         return not_supported(n, "temp.mem");
     /* template-head: template < template-parameter-list >; a
@@ -383,6 +512,32 @@ analysis_result semantic_analysis::declare_template_parameters(
                type, or typename enable_if<B, int>::type = 0 (libc++'s
                SFINAE), analysed again with the arguments
                (template_argument_for) */
+            /* [temp.param]/8: "A non-type template-parameter of type
+               'array of T' or 'function type T' is adjusted to be of type
+               'pointer to T'." */
+            {
+                const struct type &adjusted = type_table[type.unqualified()];
+                if (adjusted.kind == type_kind::array)
+                    type = qualified_type::make(
+                        type_table.pointer_to(adjusted.operand), cv_none);
+                else if (adjusted.kind == type_kind::function)
+                    type = qualified_type::make(type_table.pointer_to(type),
+                                                cv_none);
+            }
+            /* [temp.dep.constexpr]/2: a parameter type whose array bound is
+               an expression of another parameter (int (*)[sizeof(f(V))]):
+               the arguments' conversions to it are not analysed */
+            for (qualified_type walk = type;;) {
+                const struct type &w = type_table[walk.unqualified()];
+                if (w.kind == type_kind::array && w.entity && w.bound)
+                    return not_supported(node, "temp.param");
+                if (w.kind != type_kind::pointer &&
+                    w.kind != type_kind::array &&
+                    w.kind != type_kind::lvalue_reference &&
+                    w.kind != type_kind::rvalue_reference)
+                    break;
+                walk = w.operand;
+            }
             bool own_parameter_type =
                 own_type_parameter_position(type, scope, first) != UINT32_MAX;
             bool placeholder = contains_placeholder(type);
@@ -390,8 +545,12 @@ analysis_result semantic_analysis::declare_template_parameters(
                  !made_of_template_parameter(type_table, type) &&
                  !structural_parameter_type(type)) ||
                 sp.typedef_ || sp.static_ || sp.extern_ || sp.constexpr_ ||
-                sp.inline_ || sp.gnu_flags)
-                return not_supported(node, "temp.param");
+                sp.inline_ || sp.gnu_flags) {
+                analysis_result refused = not_supported(node, "temp.param");
+                const char *why = parameter_refusal_reason(type, sp);
+                last_unsupported_detail(why, strlen(why));
+                return refused;
+            }
             e = entity_table.make(entity_kind::none, name, scope);
             /* /6: "the top-level cv-qualifiers on the template-parameter
                are ignored when determining its type" */
@@ -543,16 +702,22 @@ semantic_analysis::template_of_form(entity_index e,
 }
 
 /* the simple-template-id id's template-name, an identifier, looked up
-   unqualified (x), the entity it names or holds (named); false for another
+   unqualified or in the qualifier's scope (x), the entity it names or holds (named); false for another
    form */
 bool semantic_analysis::template_id_name(SyntaxRef id, lookup_result &x,
-                                         entity_index &named) const
+                                         entity_index &named,
+                                         entity_index qualifier) const
 {
     SyntaxElement template_name = id.simple_template_id().template_name();
     if (!template_name)
         return false;
-    x = lookup_unqualified(tokens.identifier(template_name.token()),
-                           lookup_filter::any);
+    uint32_t name = tokens.identifier(template_name.token());
+    /* [basic.lookup.qual]: after a nested-name-specifier, in the scope it
+       nominates */
+    if (qualifier)
+        x = lookup_qualified(qualifier, name, lookup_filter::any);
+    else
+        x = lookup_unqualified(name, lookup_filter::any);
     named = x.entity;
     if (!named)
         named = x.unknown_entity;
@@ -852,7 +1017,9 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
         uint32_t at = alias_template_of(named);
         if (at)
             return alias_template_type(id, at, type, cv);
-        return not_supported(id, "temp.names");
+        analysis_result refused = not_supported(id, "temp.names");
+        template_name_detail(template_name.token(), x, named);
+        return refused;
     }
     owned_array<template_argument> arguments;
     VTRY(filled, template_id_arguments(id, ct, arguments));
@@ -885,7 +1052,8 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
     }
     entity_index c = 0;
     VTRY(r, instantiate_class(id, ct, &arguments[0],
-                              static_cast<uint32_t>(arguments.size()), c));
+                              static_cast<uint32_t>(arguments.size()), c,
+                              !qualified));
     type = entity_table[c].type.unqualified();
     return analysis_result::well_formed;
 }

@@ -318,6 +318,7 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
         record.kind == type_kind::rvalue_reference)
         operand = record.operand;
     const struct type shape = type_table[operand.unqualified()];
+    require_complete(shape.entity);
     if (shape.kind == type_kind::class_type && !entity_table[shape.entity].size)
         return not_supported(n, "expr.typeid");
     entity_index std_ =
@@ -330,8 +331,10 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
             return not_supported(n, "namespace.qual");
         info = found.entity;
     }
-    if (!info || entity_table[info].kind != entity_kind::class_type ||
-        !entity_table[info].size)
+    /* [expr.typeid]/1: an lvalue of type const std::type_info, which may be
+       incomplete here (clang asks only for its declaration; a use of a
+       member needs the class complete, [expr.ref]) */
+    if (!info || entity_table[info].kind != entity_kind::class_type)
         return ill_formed(n,
                           "the header <typeinfo> shall be included before a "
                           "use of typeid",
@@ -1177,9 +1180,11 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             early.append(e);
     if (!looked_up) {
         overloaded_callee = callee_name(callee);
+        callee_has_arguments = !arguments.empty();
         member_template_name = 0;
         r = expression(callee, f);
         overloaded_callee = 0;
+        callee_has_arguments = false;
     }
     if (entity_index held = member_template_name) {
         member_template_name = 0;
@@ -1505,8 +1510,11 @@ analysis_result semantic_analysis::template_callee_parts(
     if (!function_template) {
         /* a template-id of no function template analysis knows: what it
            was before */
-        if (!written.empty() || !qualified)
-            return not_supported(id.index(), "temp.names");
+        if (!written.empty() || !qualified) {
+            analysis_result refused = not_supported(id.index(), "temp.names");
+            template_name_detail(name, x, x.entity);
+            return refused;
+        }
         return analysis_result::well_formed;
     }
     if (!written.empty()) {

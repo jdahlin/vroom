@@ -13,6 +13,7 @@
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
+#include "../template/declared-templates.h"
 
 namespace cplusplus
 {
@@ -64,6 +65,8 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         size_t expressions_before = expressions.size();
         size_t uses_before = name_uses.size();
         current_scope = instantiations[index].scope;
+        analysed_declaration *saved_analysing = analysing;
+        analysing = nullptr;
         /* (a pack expansion's pattern that names the template: its own
            packs are not the pattern's) */
         bool saved_expanding = expanding;
@@ -84,13 +87,31 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
            parameters returning the class template's specialization */
         bool guide = ft.guide_of != 0;
         qualified_type lambda_type;
-        if (guide)
+        /* the stage that failed, for the refusal's detail below */
+        enum {
+            guide_type,
+            lambda_stage,
+            constructor_stage,
+            specifier_stage,
+            conversion_stage,
+            declarator_stage,
+            declare_stage
+        };
+        unsigned stage = specifier_stage;
+        /* [temp.deduct]/8: "Access checking is done as part of the
+           substitution process", in the template's context: the template
+           is a friend of the class that befriends it ([temp.friend]/3) */
+        scoped_value<entity_index> access(access_class, template_entity);
+        if (guide) {
+            stage = guide_type;
             r = deduction_guide_type(ft.declarator, lambda_type);
-        else if (lambda)
+        } else if (lambda) {
+            stage = lambda_stage;
             r = lambda_specialization(ft.declarator, false, lambda_type, 0);
-        else if (constructor && specifiers)
+        } else if (constructor && specifiers) {
+            stage = constructor_stage;
             r = constructor_specifiers(d_syntax[d_skip], s);
-        else if (specifiers) {
+        } else if (specifiers) {
             bool saved_friend = friend_allowed;
             bool outer_explicit = explicit_allowed;
             friend_allowed = ft.friend_class != 0;
@@ -100,8 +121,10 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             friend_allowed = saved_friend;
         }
         qualified_type type = s.type;
-        if (r == analysis_result::well_formed && conversion)
+        if (r == analysis_result::well_formed && conversion) {
+            stage = conversion_stage;
             r = conversion_type(conversion, type);
+        }
         if (guide)
             type = lambda_type;
         if (lambda) {
@@ -110,6 +133,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         }
         if (r == analysis_result::well_formed && !lambda && !guide) {
             function_cv = 0;
+            stage = declarator_stage;
             /* (a member function template's cv-qualifier-seq,
                [temp.mem]) */
             member_template_declarator(2 * !is_namespace(t.enclosing));
@@ -123,8 +147,10 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         }
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
+            stage = declare_stage;
             instantiating = index + 1;
-            r = declare_specialization(ft.declarator, m.id, type, s, e);
+            r = declare_specialization(ft.declarator, m.id, type, s,
+                                       m.exceptions, e);
             instantiating = 0;
             if (r == analysis_result::well_formed && constructor)
                 entity_table[e].explicit_ = s.explicit_;
@@ -160,6 +186,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             }
         }
         current_scope = saved_scope;
+        analysing = saved_analysing;
         expanding = saved_expanding;
         function_cv = saved_cv;
         function_parameters =
@@ -174,9 +201,19 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             return r;
         }
         if (r != analysis_result::well_formed)
-            /* (an argument that makes the declaration ill-formed is a
-               deduction failure, [temp.deduct]/8: no candidate) */
-            return not_supported(at, "temp.deduct");
+        /* (an argument that makes the declaration ill-formed is a
+           deduction failure, [temp.deduct]/8: no candidate) */
+        {
+            static const char *const details[] = {
+                "a deduction guide's function type is ill-formed",
+                "a lambda's specialization is ill-formed",
+                "a constructor template's specifiers are ill-formed",
+                "a function template's decl-specifier-seq is ill-formed",
+                "a conversion function template's type is ill-formed",
+                "a function template's declarator is ill-formed",
+                "declaring the specialization is ill-formed"};
+            return not_supported_because(at, "temp.deduct", details[stage]);
+        }
     }
     if (instantiations[index].substitution_failed) {
         if (substituting)
@@ -360,6 +397,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     } else {
         bool saved_friend = friend_allowed;
         friend_allowed = ft.friend_class != 0;
+        /* (its declarator again, in the template's context, as when the
+           declaration was substituted) */
+        scoped_value<entity_index> access(access_class, template_entity);
         r = function_definition(ft.definition);
         friend_allowed = saved_friend;
     }
@@ -388,6 +428,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         entity_table[f].unsupported_body =
             static_cast<uint32_t>(body_failures.size());
     }
+    explicit_instantiation_verdict(
+        instantiations[index].specialization, r,
+        entity_table[instantiations[index].specialization].unsupported_body);
     for (analysed_declaration &d : declarations) {
         if (d.node != ft.declaration || d.result == analysis_result::ill_formed)
             continue;
@@ -413,10 +456,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
  * functions defined in it are analysed with it (/4 would instantiate a
  * member's definition only when used).
  */
-analysis_result
-semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
-                                     const template_argument *arguments,
-                                     uint32_t count, entity_index &c)
+analysis_result semantic_analysis::instantiate_class(
+    SyntaxRef at, uint32_t class_template, const template_argument *arguments,
+    uint32_t count, entity_index &c, bool named_only)
 {
     c = 0;
     const function_template ft = function_templates[class_template - 1];
@@ -446,6 +488,11 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
        without bound through libc++'s expression templates (valarray). */
     bool lazy_return = member_return_type && !require_complete_class &&
                        !defining_argument && !declaring_specializations;
+    /* named_only: a template-id that needs no completely-defined type
+       ([temp.inst]/2); the uses that do call require_complete */
+    if (named_only && !require_complete_class && !defining_argument &&
+        !declaring_specializations)
+        lazy_return = true;
     if (lazy_return)
         incomplete_argument = true;
     if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
@@ -485,6 +532,10 @@ semantic_analysis::instantiate_class(SyntaxRef at, uint32_t class_template,
             defined_by = function_templates[pattern - 1].definition;
         if (defined_by && !declaring_specializations && !incomplete_argument)
             return define_class_outside(at, k, c);
+        /* named again where no complete type is needed: the use that needs
+           it defines it (complete_instantiation) */
+        if (defined_by && lazy_return)
+            instantiations[k].lazy = true;
         return analysis_result::well_formed;
     }
     if (instantiation_depth >= 64)
@@ -553,9 +604,21 @@ void semantic_analysis::complete_instantiation(entity_index c)
     define_class_outside(SyntaxRef(), index, done);
 }
 
-void semantic_analysis::complete_class_type(qualified_type t)
+bool semantic_analysis::require_complete(entity_index c) const
 {
-    complete_instantiation(element_class(referenced_type(t)));
+    if (!c || entity_table[c].kind != entity_kind::class_type)
+        return true;
+    const_cast<semantic_analysis *>(this)->complete_instantiation(c);
+    const entity &x = entity_table[c];
+    return x.size || x.defined;
+}
+
+bool semantic_analysis::require_complete(qualified_type t) const
+{
+    entity_index c = element_class(referenced_type(t));
+    if (!c)
+        return true;
+    return require_complete(c);
 }
 
 /* [temp.deduct]/8: "Only invalid types and expressions in the immediate
@@ -626,7 +689,7 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
             if (template_member_definitions[m].template_entity ==
                     record.template_entity &&
                 template_member_definitions[m].pattern == record.pattern)
-                define_template_member(m, index, true);
+                defer_or_define_member(m, index);
     /* a class being defined named the specialization: its members so far
        again after the specialization's, as after a nested class
        (class_definition) */
@@ -643,7 +706,181 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
         instantiations[index].has_failure = true;
     }
     c = 0;
-    return not_supported(at, "temp.inst");
+    analysis_result refused = not_supported(at, "temp.inst");
+    if (instantiations[index].has_failure)
+        instantiation_detail(instantiations[index].failure);
+    else if (r == analysis_result::ill_formed) {
+        const char *why = "the specialization is ill-formed";
+        last_unsupported_detail(why, strlen(why));
+    } else {
+        const char *why = "no specialization was made";
+        last_unsupported_detail(why, strlen(why));
+    }
+    return refused;
+}
+
+/* [temp.inst]/2-4: an out-of-class definition of a member of a class
+   template's specialization is defined when a member it may define is needed
+   (postponed_bodies, instantiate_pending); a member template's, a nested
+   class's and one in a specialization defined within another class now */
+void semantic_analysis::defer_or_define_member(uint32_t m, uint32_t index)
+{
+    const template_member_definition o = template_member_definitions[m];
+    bool now = o.inner || !instantiations[index].specialization;
+    if (!now && o.definition.is(syntax_kind::simple_declaration) &&
+        out_of_class_class_member(sole_decl_specifier(o.definition), nullptr))
+        now = true;
+    /* [temp.inst]/3: a constexpr or const static data member is usable in
+       constant expressions: defined with the class */
+    if (!now && o.definition.is(syntax_kind::simple_declaration)) {
+        token_index name = member_definition_name(o);
+        entity_index v = 0;
+        if (name)
+            v = entity_table.find(instantiations[index].specialization,
+                                  tokens.identifier(name));
+        if (v && entity_table[v].kind == entity_kind::variable &&
+            (entity_table[v].constexpr_ ||
+             (entity_table[v].type.cv() & cv_const)))
+            now = true;
+    }
+    if (now) {
+        define_template_member(m, index, true);
+        return;
+    }
+    postponed_body b = {};
+    b.c = instantiations[index].specialization;
+    b.member_definition = m + 1;
+    b.instantiation = index;
+    postponed_bodies.append(b);
+}
+
+token_index
+semantic_analysis::member_definition_name(const template_member_definition &o)
+{
+    token_index name = 0;
+    if (o.definition.is(syntax_kind::simple_declaration))
+        out_of_class_variable_member(o.definition, &name);
+    else
+        out_of_class_member(o.definition, &name);
+    return name;
+}
+
+/* [temp.explicit]/10: an explicit instantiation of a member names it: the
+   definitions waiting for it are made now; [temp.expl.spec]/7: an explicit
+   specialization of it replaces them (define false) */
+void semantic_analysis::define_waiting_members(entity_index scope,
+                                               token_index name, bool define)
+{
+    for (size_t i = 0; i < postponed_bodies.size(); i++) {
+        const postponed_body b = postponed_bodies[i];
+        if (!b.c || !b.member_definition ||
+            instantiations[b.instantiation].specialization != scope)
+            continue;
+        token_index n = member_definition_name(
+            template_member_definitions[b.member_definition - 1]);
+        /* (only the definitions of that member: one whose name is not a
+           token, an operator's or a conversion's, is no member so named) */
+        if (!n || tokens.identifier(n) != tokens.identifier(name))
+            continue;
+        postponed_bodies[i].c = 0;
+        if (define)
+            define_template_member(b.member_definition - 1, b.instantiation,
+                                   true);
+    }
+}
+
+/* whether a member the definition may define is needed: one named so in the
+   specialization with its definition needed, or explicitly instantiated */
+bool semantic_analysis::member_definition_wanted(const postponed_body &b)
+{
+    const template_member_definition o =
+        template_member_definitions[b.member_definition - 1];
+    token_index name = member_definition_name(o);
+    if (!name)
+        return true;
+    entity_index scope = instantiations[b.instantiation].specialization;
+    /* (a virtual function is needed by the vtable, [temp.inst]/11; an
+       explicit instantiation of the class defines its members, /10) */
+    if (entity_table[scope].explicitly_instantiated ==
+        instantiation_kind::definition)
+        return true;
+    entity_index first = entity_table.find(scope, tokens.identifier(name));
+    /* (a constructor, destructor or operator is found by no such name here:
+       defined with the unit) */
+    if (!first || (entity_table[first].kind != entity_kind::function &&
+                   entity_table[first].kind != entity_kind::variable))
+        return true;
+    for (entity_index e = first; e; e = entity_table[e].next_overload) {
+        if (entity_table[e].member_definition_needed ||
+            entity_table[e].virtual_ ||
+            explicitly_instantiated(e) == instantiation_kind::definition)
+            return true;
+    }
+    return false;
+}
+
+void semantic_analysis::explicit_instantiation_record(entity_index e,
+                                                      SyntaxRef declaration)
+{
+    explicit_instantiation_unit x;
+    x.entity = e;
+    x.declaration = declaration;
+    explicit_instantiations.append(x);
+}
+
+/* (ill-formed outranks not analysed: the first of each is kept) */
+void semantic_analysis::explicit_instantiation_verdict(entity_index e,
+                                                       analysis_result r,
+                                                       uint32_t failure)
+{
+    if (r == analysis_result::well_formed)
+        return;
+    for (explicit_instantiation_unit &x : explicit_instantiations) {
+        if (x.entity != e || x.verdict == analysis_result::ill_formed)
+            continue;
+        if (r == analysis_result::ill_formed) {
+            x.verdict = r;
+            continue;
+        }
+        if (x.verdict == analysis_result::well_formed) {
+            x.verdict = r;
+            x.failure = failure;
+        }
+    }
+}
+
+/*
+ * Whether the explicit instantiation's declaration takes the verdict of
+ * the definitions it instantiated.  An ill-formed member body of a class
+ * makes it ill-formed (clang's error is at the member, its note "in
+ * instantiation ... requested here" at the explicit instantiation).  A
+ * function's ill-formed body is the template's: instantiate_definition
+ * gave the template's declaration its verdict, as clang reports an error
+ * it finds before instantiation (a non-dependent one, [temp.res]/8) there
+ * and no note; the analysis cannot tell the two kinds apart yet, and
+ * taking it here makes declarations clang accepts ill-formed
+ * (+33 we reject: CXX/drs/cwg2xx.cpp:753's pseudo-destructor, ...).  A
+ * body the analysis does not
+ * follow leaves the explicit instantiation not known to be well-formed;
+ * taking every such body costs +464 unsupported against 163 agreeing
+ * declarations, bodies refused for rules not written yet (over.match.oper,
+ * temp.dep, temp.names, expr.type.conv, ...), so it is taken only for a
+ * coroutine's, whose promise's members are looked up in the instantiated
+ * body only ([dcl.fct.def.coroutine]/5, /6), until fewer bodies are
+ * refused.
+ */
+bool semantic_analysis::explicit_instantiation_takes_verdict(
+    const explicit_instantiation_unit &x) const
+{
+    if (x.verdict == analysis_result::ill_formed)
+        return entity_table[x.entity].kind == entity_kind::class_type;
+    if (x.verdict != analysis_result::unsupported || !x.failure)
+        return false;
+    const char *rule = body_failures[x.failure - 1].subclause;
+    return !strncmp(rule, "stmt.return.coroutine", 21) ||
+           !strncmp(rule, "expr.await", 10) ||
+           !strncmp(rule, "expr.yield", 10) ||
+           !strncmp(rule, "dcl.fct.def.coroutine", 21);
 }
 
 /* [temp.point]/7: the definitions of the specializations used, after the
@@ -656,6 +893,15 @@ void semantic_analysis::instantiate_pending()
         progress = false;
         for (size_t i = 0; i < postponed_bodies.size(); i++) {
             const postponed_body b = postponed_bodies[i];
+            if (b.c && b.member_definition) {
+                if (!member_definition_wanted(b))
+                    continue;
+                postponed_bodies[i].c = 0;
+                define_template_member(b.member_definition - 1, b.instantiation,
+                                       true);
+                progress = true;
+                continue;
+            }
             if (!b.c || (b.function &&
                          !entity_table[b.function].member_definition_needed &&
                          explicitly_instantiated(b.function) !=
@@ -666,8 +912,26 @@ void semantic_analysis::instantiate_pending()
                 entity_table[b.function].member_body_deferred = false;
             instantiation_context context;
             enter_instantiation(context, b.scope, b.declaration);
-            instantiated_member_body(b.c, b.body);
+            /* [temp.explicit]/10: an explicit instantiation definition
+               of the class instantiates the members defined at that
+               point: one ill-formed for these arguments makes the
+               explicit instantiation ill-formed, not the template */
+            entity_index explicit_class = b.c;
+            while (explicit_class &&
+                   entity_table[explicit_class].kind ==
+                       entity_kind::class_type &&
+                   entity_table[explicit_class].explicitly_instantiated !=
+                       instantiation_kind::definition)
+                explicit_class = entity_table[explicit_class].enclosing;
+            bool explicit_ =
+                explicit_class &&
+                entity_table[explicit_class].kind == entity_kind::class_type;
+            uint32_t failure = 0;
+            analysis_result r = instantiated_member_body(
+                b.c, b.body, b.function != 0 || explicit_, &failure);
             leave_instantiation(context);
+            if (explicit_)
+                explicit_instantiation_verdict(explicit_class, r, failure);
             progress = true;
         }
         for (; next_definition < pending_definitions.size();
@@ -686,6 +950,26 @@ void semantic_analysis::instantiate_pending()
             progress = true;
         }
     } while (progress);
+    /* [temp.explicit]/10, /12: an explicit instantiation definition
+       instantiated the definitions it names, and takes their verdict */
+    for (const explicit_instantiation_unit &x : explicit_instantiations) {
+        if (!explicit_instantiation_takes_verdict(x))
+            continue;
+        for (analysed_declaration &d : declarations) {
+            if (d.node != x.declaration ||
+                d.result == analysis_result::ill_formed)
+                continue;
+            if (x.verdict == analysis_result::ill_formed) {
+                d.result = analysis_result::ill_formed;
+                continue;
+            }
+            unsupported.append(body_failures[x.failure - 1]);
+            d.result = analysis_result::unsupported;
+            d.first_unsupported = static_cast<uint32_t>(unsupported.size() - 1);
+            d.has_unsupported = true;
+        }
+    }
+    explicit_instantiations.clear();
     postponed_bodies.clear();
     pending_definitions.clear();
 }
@@ -701,7 +985,8 @@ void semantic_analysis::instantiate_pending()
  */
 analysis_result semantic_analysis::declare_specialization(
     SyntaxRef declaration, token_index id, qualified_type type,
-    const specified &s, entity_index &declared_entity)
+    const specified &s, exception_specification exceptions,
+    entity_index &declared_entity)
 {
     uint32_t index = instantiating - 1;
     instantiating = 0;
@@ -723,6 +1008,10 @@ analysis_result semantic_analysis::declare_specialization(
     entity_index e =
         entity_table.make(entity_kind::function, t.name, t.enclosing);
     entity_table[e].type = type;
+    /* [temp.inst]/15: the specification its declarator's substitution
+       gave */
+    entity_table[e].exceptions =
+        resolved_exceptions(exceptions, type, s.gnu_flags);
     entity_table[e].linkage_of_name = t.linkage_of_name;
     if (type_without_external_linkage(type, false, true))
         entity_table[e].linkage_of_name = linkage::internal;
@@ -940,6 +1229,7 @@ void semantic_analysis::enter_instantiation(instantiation_context &c,
 {
     c.scope = current_scope;
     c.defining_class = defining_class;
+    c.explicit_declaration_names = explicit_declaration_names;
     c.last_declared = last_declared;
     c.member_scope = template_member_scope;
     c.declaration = current_declaration;
@@ -964,6 +1254,9 @@ void semantic_analysis::enter_instantiation(instantiation_context &c,
     current_declaration = declaration;
     lookup_horizon = declaration.first_token();
     defining_class = 0;
+    /* [temp.spec]/6 exempts the names of the explicit declaration itself,
+       not those of the declarations it instantiates */
+    explicit_declaration_names = false;
     in_condition = false;
     overloaded_callee = 0;
     declarations_claimable = false;
@@ -976,6 +1269,7 @@ void semantic_analysis::leave_instantiation(instantiation_context &c)
     instantiation_depth--;
     current_scope = c.scope;
     defining_class = c.defining_class;
+    explicit_declaration_names = c.explicit_declaration_names;
     last_declared = c.last_declared;
     template_member_scope = c.member_scope;
     current_declaration = c.declaration;

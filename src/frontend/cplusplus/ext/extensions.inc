@@ -65,6 +65,9 @@ EXTENSION(gnu_complex, gnu,
 EXTENSION(gnu_vector_size, gnu,
           "GCC manual 6.37, Using Vector Instructions through Built-in Functions: "
           "__attribute__((vector_size(N))) on a typedef or variable, a vector of N bytes")
+EXTENSION(gnu_zero_length_array, gnu,
+          "GCC manual 6.18, Arrays of Length Zero: T[0], which clang's __is_array and "
+          "__is_bounded_array do not count as an array")
 EXTENSION(gnu_typeof, gnu,
           "GCC manual 6.7, Referring to a Type with typeof: typeof, __typeof and __typeof__ "
           "(expression) or (type-id), a type-specifier (glibc's <math.h> casts through it)")
@@ -174,6 +177,9 @@ EXTENSION(clang_lambda_template_parameters, clang,
           "accepted before C++20 (libc++'s <__algorithm/simd_utils.h> uses it in C++17)")
 
 /* Microsoft (-fms-extensions) */
+EXTENSION(microsoft_declspec, microsoft,
+          "MSVC: __declspec(attribute-list) among the declaration specifiers (clang's "
+          "ParseMicrosoftDeclSpecs)")
 EXTENSION(microsoft_pragma_operator, microsoft, "MSVC: __pragma(pp-tokens), the #pragma operator")
 EXTENSION(microsoft_operator_name_macros, microsoft,
           "MSVC: and, or, ... can be macro names")

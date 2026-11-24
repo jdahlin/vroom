@@ -51,17 +51,23 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
     for (int i = 0; i < size; i++) {
         keyword_kinds[i] = standard_keyword::extension;
         extension_kinds[i] = extension_keyword::none;
-        for (const named &n : standard)
-            if (!strcmp(n.spelling, keyword_spelling(i)))
-                keyword_kinds[i] = n.keyword;
-        for (const alternate &a : alternates)
-            if (!strcmp(a.spelling, keyword_spelling(i)) &&
-                behavior.has(a.from))
-                keyword_kinds[i] = a.keyword;
-        for (const own &o : owns)
-            if (!strcmp(o.spelling, keyword_spelling(i)) &&
-                behavior.has(o.from))
-                extension_kinds[i] = o.keyword;
+    }
+    /* (each row found in the lexer's table by its spelling, in the rows'
+       order: a later row of the same spelling wins, as before) */
+    for (const named &n : standard) {
+        int i = keyword_of_spelling(n.spelling);
+        if (i >= 0)
+            keyword_kinds[i] = n.keyword;
+    }
+    for (const alternate &a : alternates) {
+        int i = keyword_of_spelling(a.spelling);
+        if (i >= 0 && behavior.has(a.from))
+            keyword_kinds[i] = a.keyword;
+    }
+    for (const own &o : owns) {
+        int i = keyword_of_spelling(o.spelling);
+        if (i >= 0 && behavior.has(o.from))
+            extension_kinds[i] = o.keyword;
     }
     /* [ext:clang_type_trait_names]: the token stream makes a trait's
        keyword an identifier when no '(' follows */
@@ -224,8 +230,12 @@ bool parser::nesting_within_limit(const char *what)
     return false;
 }
 
-node_index parser::beyond_this_step()
+/* (where: the parsing function that met it, which -fcxx-debug-fallbacks
+   names) */
+node_index parser::beyond_this_step(const char *where)
 {
+    if (!failure.failed)
+        failure.beyond_where = where;
     failure.beyond_step = true;
     return expected("grammar of a later step", "");
 }

@@ -177,10 +177,13 @@ analysis_result semantic_analysis::constant_expression(SyntaxRef at,
                                                        bool &constant)
 {
     constant = false;
+    constant_stop = 0;
     if (m.evaluation == constness::unknown) {
         /* what the operators could not fold: the evaluator's */
-        if (!m.node)
+        if (!m.node) {
+            constant_stop = 2;
             return not_supported(at, expr_const_reason());
+        }
         constant_value v;
         analysis_result r = evaluate_constant(at, m.node, v, constant);
         if (r == analysis_result::well_formed && constant)
@@ -188,6 +191,8 @@ analysis_result semantic_analysis::constant_expression(SyntaxRef at,
         return r;
     }
     constant = m.evaluation == constness::constant;
+    if (m.evaluation == constness::not_constant)
+        constant_stop = 1;
     return analysis_result::well_formed;
 }
 

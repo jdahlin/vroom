@@ -105,6 +105,7 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
         lk.kind == type_kind::function || lk.kind == type_kind::array;
     if (!void_operand && !unassignable) {
         if (lk.kind == type_kind::class_type) {
+            require_complete(lk.entity);
             if (!entity_table[lk.entity].size)
                 return not_supported(n, "expr.ass");
             /* [over.match.funcs]/5: an operator= without a reference
@@ -137,6 +138,88 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
             }
         } else {
             return r;
+        }
+    }
+    m = integer_constant(fundamental_type::bool_, value, n.first_token());
+    return analysis_result::well_formed;
+}
+
+/* ( type-id , type-id ): [meta.unary.prop] reference_constructs_from_temporary
+   (which 0) and reference_converts_from_temporary (which 2): "T is a
+   reference type, and the initialization T t(declval<U>()) (T t =
+   declval<U>()) is well-formed and binds t to a temporary object whose
+   lifetime is not extended"; clang takes U as a prvalue when it is no
+   reference.  The binding is analysed as the program's: a temporary is a
+   bind_reference whose operand is a prvalue ([dcl.init.ref]/5.4). */
+analysis_result
+semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
+                                                   expression_meaning &m)
+{
+    qualified_type t, u;
+    VTRY(r, type_id(n[2], t));
+    VTRY_SET(r, type_id(n[4], u));
+    if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
+        return not_supported(n, "temp.dep.constexpr");
+    bool value = false;
+    const struct type tk = type_table[t.unqualified()];
+    const struct type uk = type_table[u.unqualified()];
+    bool reference = tk.kind == type_kind::lvalue_reference ||
+                     tk.kind == type_kind::rvalue_reference;
+    bool u_reference = uk.kind == type_kind::lvalue_reference ||
+                       uk.kind == type_kind::rvalue_reference;
+    if (reference && fundamental_of(u) != fundamental_type::void_ &&
+        uk.kind != type_kind::function && uk.kind != type_kind::array) {
+        expression_meaning from = declval_meaning(u);
+        if (!u_reference) {
+            from.category = value_category::prvalue;
+            /* [expr.type]/2: a non-class prvalue has no cv-qualifiers */
+            if (type_table[from.type.unqualified()].kind !=
+                type_kind::class_type)
+                from.type =
+                    qualified_type::make(from.type.unqualified(), cv_none);
+        }
+        if (from.type.unqualified() &&
+            type_table[from.type.unqualified()].kind == type_kind::class_type) {
+            require_complete(type_table[from.type.unqualified()].entity);
+            entity_index uc = type_table[from.type.unqualified()].entity;
+            if (!entity_table[uc].size)
+                return not_supported(n, "dcl.init.ref");
+            /* before C++17 a class prvalue is copied or moved: not
+               followed for a class that cannot be */
+            if (!u_reference)
+                for (entity_index k = entity_table[uc].first_constructor; k;
+                     k = entity_table[k].next_constructor)
+                    if (entity_table[k].deleted &&
+                        copy_or_move_constructor(uc, k))
+                        return not_supported(n, "dcl.init.ref");
+            /* [over.match.ref]/1: a direct-initialization also considers
+               the explicit conversion functions, which the binding does
+               not */
+            for (entity_index f = own_conversion_functions(uc); f;
+                 f = entity_table[f].next_overload)
+                if (which != 2 && entity_table[f].explicit_)
+                    return not_supported(n, "over.match.ref");
+        }
+        from.node =
+            expression_node(semantic_kind::constant, from, n.first_token());
+        initialized_value made;
+        bool ok = false;
+        VTRY_SET(r, try_initialization(n, from, t, which != 2, made, ok));
+        if (ok) {
+            if (!made.node ||
+                semantics[made.node].kind != semantic_kind::bind_reference)
+                return not_supported(n, "dcl.init.ref");
+            uint32_t target = semantics[made.node].a;
+            /* a derived-to-base conversion of a temporary binds to it */
+            while (target &&
+                   (semantics[target].kind == semantic_kind::conversion ||
+                    semantics[target].kind == semantic_kind::member) &&
+                   semantics[target].category != value_category::prvalue &&
+                   type_table[semantics[target].type.unqualified()].kind ==
+                       type_kind::class_type)
+                target = semantics[target].a;
+            value =
+                target && semantics[target].category == value_category::prvalue;
         }
     }
     m = integer_constant(fundamental_type::bool_, value, n.first_token());

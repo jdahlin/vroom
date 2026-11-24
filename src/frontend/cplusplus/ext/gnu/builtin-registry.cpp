@@ -68,7 +68,14 @@ static const gnu_builtin builtin_registry[] = {
     ROW("__builtin_conj", complex_conjugate, 0, none),
     ROW("__builtin_conjf", complex_conjugate, 0, none),
     ROW("__builtin_conjl", complex_conjugate, 0, none),
-    ROWL("__builtin_invoke", invoke, 0, none, node, nullptr, nullptr),
+/* the builtins of clang's records the C++ front end type checks itself,
+       generated (cxx-builtins.inc): the alignment builtins (a call outside
+       a constant expression of a pointer is refused when lowered),
+       __builtin_get_vtable_pointer, __builtin_invoke */
+#define CXX_BUILTIN(name, form, which, fold, lowering)                         \
+    ROWL(name, form, which, fold, lowering, nullptr, nullptr),
+#include "frontend/cxx-builtins.inc"
+#undef CXX_BUILTIN
     ROWL("__builtin_bswapg", bswapg, 0, bswap, bswap, nullptr, nullptr),
 /* the builtins a constant expression folds: the integer operations,
        the floating ones, the string functions; a `library` row is a call
@@ -158,6 +165,21 @@ static const gnu_builtin builtin_registry[] = {
        result is the table's unsigned int, a zero value has no fallback */
     ROW("__builtin_stdc_count_ones", bit_count, 4, bit_count),
     ROW("__builtin_stdc_trailing_zeros", bit_count, 5, bit_count),
+/* C23's <stdbit.h> functions and __builtin_bitreverseg, generated from
+       clang's records (stdc-builtins.inc), one rule for the family: the
+       rotations are the C front end's nodes, the others are lowered through
+       its bit counts; the counts are the rows above */
+#define STDC_NODE(name, op, id, flags, signature)                              \
+    ROWL(name, stdc_bits, static_cast<uint8_t>(builtin_stdc_op::op),           \
+         stdc_bits, node, nullptr, nullptr),
+#define STDC_BODY(name, op, flags, signature)
+#define STDC_OP(name, op)                                                      \
+    ROWL(name, stdc_bits, static_cast<uint8_t>(builtin_stdc_op::op),           \
+         stdc_bits, stdc_bits, nullptr, nullptr),
+#include "frontend/stdc-builtins.inc"
+#undef STDC_NODE
+#undef STDC_BODY
+#undef STDC_OP
     /* the type-generic classifications and comparisons of <math.h> (C17
        7.12.3, 7.12.14): the arguments as they are, unpromoted */
     ROW("__builtin_fpclassify", generic, 6, floating),
@@ -236,6 +258,10 @@ bool gnu_builtin_untyped(uint16_t row)
     case builtin_form::launder:
     case builtin_form::clear_padding:
     case builtin_form::bswapg:
+    case builtin_form::align:
+    case builtin_form::vtable_pointer:
+    case builtin_form::within_lifetime:
+    case builtin_form::stdc_bits:
     case builtin_form::invoke:
     case builtin_form::unsupported:
         return true;

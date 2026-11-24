@@ -18,6 +18,26 @@ namespace cplusplus
  * per specialization (instantiate_class), the template's name bound to a
  * held entity that a simple-template-id finds (template_type).
  */
+namespace
+{
+/* the first token of a dynamic-exception-specification in n, UINT32_MAX if
+   none */
+token_index first_dynamic_specification(SyntaxElement n)
+{
+    if (n.is_token())
+        return UINT32_MAX;
+    if (n.dynamic_exception_specification())
+        return n.first_token();
+    for (auto c : n.elements()) {
+        token_index found = first_dynamic_specification(c);
+        if (found != UINT32_MAX)
+            return found;
+    }
+    return UINT32_MAX;
+}
+
+} // namespace
+
 analysis_result
 semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
 {
@@ -30,6 +50,21 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     SyntaxElement head_name = class_head_name(head);
     bool specialization =
         head_name && head_name.is(syntax_kind::simple_template_id);
+    /* class-head-name: nested-name-specifier_opt class-name, the class-name
+       a simple-template-id: a partial specialization of a member of a
+       namespace or class ([temp.class.spec]/1) */
+    if (head_name && head_name.qualified_class_head_name() &&
+        head_name.size() == 2 &&
+        head_name[1].is(syntax_kind::simple_template_id))
+        specialization = true;
+    uint32_t called = 0;
+    if (!specialization && head_name && head_name.is_token() &&
+        tokens[head_name.token()].kind == token_kind::identifier)
+        called = tokens.identifier(head_name.token());
+    /* [class.friend]/2: while its template-head and parameters are
+       analysed, a friend class template of its name is the befriended
+       entity (restored after: a head may hold another) */
+    scoped_value<class_head_context> head_context(friend_head, {outer, called});
     VTRY(r, template_head_parameters(n, parameters, true, true, specialization,
                                      true));
     /* a partial specialization's requires-clause is checked where it is
@@ -76,6 +111,19 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
                         "a member function template shall not be virtual",
                         "temp.mem");
         }
+    /* [diff.cpp14.except]/1: a dynamic-exception-specification of a member
+       is an error of the template's definition (clang diagnoses it
+       there), whatever the arguments; the members are analysed per
+       specialization */
+    if (!tokens.files.behavior.has(
+            language_feature::dynamic_exception_specifications)) {
+        token_index dynamic = first_dynamic_specification(specifier);
+        if (dynamic != UINT32_MAX) {
+            VTRY(dr, recoverable_extension_used(
+                         diagnostic_id::sema_dynamic_exception_specification,
+                         dynamic));
+        }
+    }
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
@@ -174,8 +222,19 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         VTRY(r, template_head_parameters(n, list, true, true, true, true));
         return class_specialization_definition(n, elaborated, list);
     }
-    if (elaborated.size() != 2 || !elaborated[0].is_token() ||
-        !elaborated[1].is_identifier())
+    /* the attribute-specifier-seq after the class-key, left out when none
+       changes what vcc generates ([dcl.type.elab]/1), one without an
+       argument (clang checks preferred_name's against the template) */
+    uint32_t at = 1;
+    if (elaborated.is(syntax_kind::elaborated_type_specifier)) {
+        SyntaxElement seq =
+            ElaboratedClassSpecifier(elaborated).attribute_specifier_seq();
+        if (seq && class_head_attributes_without_effect(seq) &&
+            !attribute_argument_present(seq))
+            at = 2;
+    }
+    if (elaborated.size() != at + 1 || !elaborated[0].is_token() ||
+        !elaborated[at].is_identifier())
         return not_supported(n, "temp.class");
     standard_keyword key = elaborated[0].keyword();
     if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
@@ -183,8 +242,9 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         return not_supported(n, "temp.class");
     owned_array<SyntaxRef> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
+    uint32_t name = tokens.identifier(elaborated[at].token());
+    scoped_value<class_head_context> head_context(friend_head, {outer, name});
     VTRY(r, template_head_parameters(n, parameters, true, true, false, true));
-    uint32_t name = tokens.identifier(elaborated[1].token());
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,

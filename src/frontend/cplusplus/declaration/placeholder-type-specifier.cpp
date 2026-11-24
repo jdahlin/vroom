@@ -379,6 +379,8 @@ analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
+    /* [temp.spec]/6: an initializer is checked */
+    flag_set checked(explicit_declaration_names, false);
     SyntaxElement clause;
     bool direct = false, list = false;
     if (!initializer_form(init, clause, direct, list))
@@ -510,8 +512,27 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
     else if (x.kind == entity_kind::function)
         undeduced = !x.defined ||
                     (function_state.active && function_state.function == e);
-    if (!undeduced)
-        return not_supported(current_declaration, "dcl.spec.auto");
+    if (!undeduced) {
+        if (x.kind == entity_kind::variable)
+            return not_supported_because(
+                current_declaration, "dcl.spec.auto",
+                "a variable whose placeholder type is not deduced "
+                "(its initializer was not analysed)");
+        if (x.kind == entity_kind::function && x.instantiation)
+            return not_supported_because(
+                current_declaration, "dcl.spec.auto",
+                "a function template's specialization whose placeholder "
+                "type is not deduced");
+        if (x.kind == entity_kind::function)
+            return not_supported_because(
+                current_declaration, "dcl.spec.auto",
+                "a defined function whose placeholder type is not deduced "
+                "(its body was not analysed)");
+        return not_supported_because(
+            current_declaration, "dcl.spec.auto",
+            "an entity that is no variable or function "
+            "with an undeduced placeholder type");
+    }
     return ill_formed_at_token(t,
                                "if the name of an entity with an undeduced "
                                "placeholder type appears in an expression, "
@@ -547,7 +568,13 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
         return not_supported(n, "dcl.fct");
     VTRY(r, declarator(declaration, n[0], type, m));
     const struct type f = type_table[type.unqualified()];
-    if (f.kind != type_kind::function || !(f.operand == auto_type))
+    /* (a type-id's abstract declarator has a derived-declarator-type-list:
+       auto(*)() -> void is "pointer to function returning auto") */
+    bool abstract = n.is(syntax_kind::abstract_declarator);
+    if (abstract && !contains_placeholder(type))
+        return not_supported(n, "dcl.fct");
+    if (!abstract &&
+        (f.kind != type_kind::function || !(f.operand == auto_type)))
         return not_supported(n, "dcl.fct");
     auto trailing = n[1];
     if (trailing.size() != 2 || !trailing[1].is(syntax_kind::type_id))
@@ -560,6 +587,13 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
     uint32_t cv = function_cv, empty_pack = function_empty_pack;
     qualified_type returned;
     entity_index outer = current_scope;
+    /* [basic.lookup.qual]/3: names following the qualified declarator-id,
+       the trailing-return-type's among them, are looked up in the scope of
+       the member's class or namespace */
+    if (m.qualifier && entity_table[outer].enclosing != m.qualifier)
+        current_scope = m.qualifier;
+    else if (!m.qualifier && m.namespace_qualifier)
+        current_scope = m.namespace_qualifier;
     open_parameter_scope();
     r = type_id(trailing[1], returned);
     current_scope = outer;

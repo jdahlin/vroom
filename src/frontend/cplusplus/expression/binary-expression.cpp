@@ -542,7 +542,7 @@ analysis_result semantic_analysis::comparison(SyntaxRef n,
  * [expr.spaceship]/3-7: p <=> q of arithmetic, enumeration or object
  * pointer operands, a prvalue of std::strong_ordering or
  * std::partial_ordering (/9: <compare> shall have been included).  Its
- * value is not modelled; operand types the rules judge by a narrowing
+ * value is the category's own constants; operand types the rules judge by a narrowing
  * conversion or by a composite type that is not an object pointer type
  * are refused.
  */
@@ -591,7 +591,8 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
         entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
     entity_index category = 0;
     if (std_ && is_namespace(std_) && std_namespace(std_)) {
-        lookup_result found = lookup_in_namespace(
+        /* (a name of an inline namespace of std too, [namespace.def]/5) */
+        lookup_result found = lookup_qualified(
             std_,
             tokens.pp.identifier(name, static_cast<uint32_t>(strlen(name))) + 1,
             lookup_filter::any);
@@ -599,12 +600,16 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
             return not_supported(n, "namespace.qual");
         category = found.entity;
     }
+    require_complete(category);
     if (!category || entity_table[category].kind != entity_kind::class_type ||
         !entity_table[category].size)
         return ill_formed(n,
                           "the header <compare> shall be included before a "
                           "use of the built-in three-way comparison",
                           "expr.spaceship");
+    /* (the category's values, computed here once: the evaluator and the
+       lowering read them) */
+    ordering_values(category);
     m = expression_meaning();
     m.type = qualified_type::make(entity_table[category].type.unqualified(),
                                   cv_none);
@@ -1073,8 +1078,13 @@ analysis_result semantic_analysis::conditional_operands(
         fundamental_of(e3.type) == fundamental_type::void_)
         return conditional_void_operand(n, c, e2, e3, m);
     if (e2.type.unqualified() != e3.type.unqualified() &&
-        (is_class_type(e2.type) || is_class_type(e3.type)))
+        (is_class_type(e2.type) || is_class_type(e3.type))) {
+        /* [expr.cond]/4: the conversions look at the class's members:
+           a class only named is completed ([temp.inst]/2) */
+        require_complete(e2.type);
+        require_complete(e3.type);
         VTRY_SET(r, conditional_class_operands(n, e2, e3));
+    }
     bool chosen_known = c.evaluation == constness::constant;
     expression_meaning *chosen_operand = &e3;
     if (c.value)
@@ -1261,8 +1271,18 @@ analysis_result semantic_analysis::comma(SyntaxRef n, expression_meaning &m)
             /* the discarded left operand's temporary */
             return not_supported(n, "class.temporary");
         uint32_t previous = m.node;
-        if (any)
-            so_far = combined_constness(so_far, m.evaluation);
+        if (any) {
+            /* a discarded class prvalue is not "constant" as a value
+               (class_prvalue), though it may be evaluated in a constant
+               expression: the evaluator's */
+            constness left = m.evaluation;
+            if (m.category == value_category::prvalue && m.node &&
+                type_table[m.type.unqualified()].kind ==
+                    type_kind::class_type &&
+                left == constness::not_constant)
+                left = constness::unknown;
+            so_far = combined_constness(so_far, left);
+        }
         m = e;
         /* the left operand is evaluated first ([expr.comma]/1) */
         if (any)

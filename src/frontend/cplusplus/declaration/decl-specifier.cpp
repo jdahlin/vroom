@@ -668,7 +668,7 @@ node_index parser::decl_specifier_seq(decl_specifier_facts &facts,
                 (at(standard_keyword::auto_, length) ||
                  at(standard_keyword::decltype_, length))) {
                 /* placeholder-type-specifier: type-constraint auto,
-                   type-constraint decltype(auto) ([dcl.spec.auto.general]) */
+                   type-constraint decltype(auto) ([dcl.spec.auto]) */
                 size_t placeholder_mark = begin_node();
                 token_index placeholder_first = position;
                 type_constraint();
@@ -907,6 +907,7 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
 {
     size_t mark = begin_node();
     token_index first = position;
+    bool union_key = at_word("union");
     add_token(); /* class-key */
     token_index attributes_at = position;
     node_index attributes = attribute_specifier_seq();
@@ -1024,7 +1025,9 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
            anonymous union declaration"; an unnamed struct so is clang's
            extension: a name in the enclosing class finds them */
         if (!name && !qualifier && at(preprocessing_op_or_punc::SEMICOLON) &&
-            names.kind_of(names.declaring_scope()) == scope_kind::class_)
+            (names.kind_of(names.declaring_scope()) == scope_kind::class_ ||
+             (union_key && names.kind_of(names.declaring_scope()) ==
+                               scope_kind::namespace_)))
             names.add_base(names.declaring_scope(), region);
         facts.declares_type = true;
         return finish_node(syntax_kind::class_specifier, mark, first);
@@ -1610,11 +1613,38 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 named_at = t;
                 break;
             }
-            /* [dcl.spec.auto]/1: a placeholder-type-specifier */
-            if (!allow_placeholder ||
-                !tokens.files.behavior.has(
-                    language_feature::auto_type_specifier))
-                return not_supported(seq, specifier_subclause(kw));
+            /* [dcl.spec.auto]/1: a placeholder-type-specifier; where the
+               context does not take one, the detail says which */
+            if (!allow_placeholder) {
+                const char *context = "in a declaration that takes none";
+                if (parameter)
+                    context = "in a parameter-declaration";
+                else if (seq.is(syntax_kind::type_specifier_seq))
+                    context = "in a type-id";
+                return not_supported_because(seq, specifier_subclause(kw),
+                                             context);
+            }
+            if (!tokens.files.behavior.has(
+                    language_feature::auto_type_specifier)) {
+                /* [ext.clang] before C++11: auto with no other type
+                   specifier is the placeholder, as [dcl.spec.auto]/1;
+                   with one it is [dcl.stc]'s (C++03) storage class */
+                bool other_type = false;
+                for (auto child : seq.elements()) {
+                    if (!child.is_token()) {
+                        if (!child.is(syntax_kind::gnu_attribute_specifier,
+                                      syntax_kind::attribute_specifier_seq))
+                            other_type = true;
+                        continue;
+                    }
+                    const token &o = tokens[child.token()];
+                    if (o.kind == token_kind::identifier ||
+                        is_simple_type_keyword(p.keyword_of(o)))
+                        other_type = true;
+                }
+                if (other_type)
+                    return not_supported(seq, specifier_subclause(kw));
+            }
             if (named)
                 k.alone++;
             named = placeholder_type(false).unqualified();

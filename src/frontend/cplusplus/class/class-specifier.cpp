@@ -58,9 +58,12 @@ const char *semantic_analysis::local_class_rule(entity_index c) const
 analysis_result semantic_analysis::class_specifier(ClassSpecifier n,
                                                    type_index &type)
 {
+    class_kept_ill_formed = false;
     analysis_result r = class_definition(n, type);
+    bool kept = class_kept_ill_formed;
+    class_kept_ill_formed = false;
     auto head = n.class_specifier().class_head();
-    if (r == analysis_result::well_formed || !head)
+    if (r == analysis_result::well_formed || !head || kept)
         return r;
     /* a class whose definition is not analysed: its name is held in the
        scope it would be declared in, so that a later
@@ -125,8 +128,15 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
                                                           uint8_t access)
 {
     const struct type record = type_table[s.type.unqualified()];
-    if (s.typedef_ || s.static_ || s.extern_ || s.mutable_ || s.inline_ ||
-        s.constexpr_ || s.type.cv() || s.aligned || s.gnu_flags ||
+    /* [class.union.anon]/3: an anonymous union declared in a namespace
+       shall be declared static (or be in an unnamed namespace, not
+       analysed): a variable of internal linkage, its members names of the
+       namespace */
+    bool in_namespace = is_namespace(c);
+    if (in_namespace && !s.static_)
+        return not_supported(n, "class.union.anon");
+    if (s.typedef_ || (s.static_ && !in_namespace) || s.extern_ || s.mutable_ ||
+        s.inline_ || s.constexpr_ || s.type.cv() || s.aligned || s.gnu_flags ||
         record.kind != type_kind::class_type)
         return not_supported(n, "class.union.anon");
     entity_index u = record.entity;
@@ -134,8 +144,30 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
     if ((!x.union_ && !trivial_special_members(u)) || x.base_count ||
         !size_of_type(s.type))
         return not_supported(n, "class.union.anon");
+    if (in_namespace && !x.union_)
+        return not_supported(n, "class.union.anon");
+    for (entity_index f = u + 1; f < entity_table.size(); f++) {
+        const entity &member = entity_table[f];
+        if (member.enclosing == u && member.kind == entity_kind::variable &&
+            !member.nonstatic_member)
+            /* [class.union.anon]/1: "Each member-declaration in the
+               member-specification of an anonymous union shall either
+               define a non-static data member or be a
+               static_assert-declaration" */
+            return ill_formed(n,
+                              "static data member not allowed in anonymous "
+                              "union",
+                              "class.union.anon");
+    }
     entity_index e = entity_table.make(entity_kind::variable, 0, c);
     entity_table[e].type = s.type;
+    if (in_namespace) {
+        entity_table[e].defined = true;
+        entity_table[e].linkage_of_name = linkage::internal;
+        entity_table.add_declaration(e, n);
+        entity_table[u].anonymous_object = e;
+        return bind_anonymous_members(c, n, u);
+    }
     entity_table[e].nonstatic_member = true;
     entity_table[e].defined = true;
     entity_table[e].field = entity_table[c].member_count;
@@ -145,7 +177,32 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
     class_members.append(e);
     entity_table[c].member_count++;
     entity_table[u].anonymous_object = e;
+    if (entity_table[c].union_ && variant_initialized(e))
+        /* [class.union]/2: a variant member of an anonymous union within
+           the union counts among its variant members */
+        for (uint32_t i = 0; i + 1 < entity_table[c].member_count; i++)
+            if (variant_initialized(
+                    class_members[entity_table[c].first_member + i]))
+                return ill_formed(n, "initializing multiple members of union",
+                                  "class.union");
     return bind_anonymous_members(c, n, u);
+}
+
+/* whether member m has a default member initializer, or is an anonymous
+   union's (or struct's) object holding a member that has one */
+bool semantic_analysis::variant_initialized(entity_index m) const
+{
+    if (entity_table[m].default_initializer)
+        return true;
+    const struct type &t = type_table[entity_table[m].type.unqualified()];
+    if (t.kind != type_kind::class_type ||
+        entity_table[t.entity].anonymous_object != m)
+        return false;
+    const entity &x = entity_table[t.entity];
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (variant_initialized(class_members[x.first_member + i]))
+            return true;
+    return false;
 }
 
 /* the names of the members of anonymous union u, and of the anonymous
@@ -229,6 +286,17 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 VTRY(r, gnu_attribute_specifier(c, gnu));
             }
         } else {
+            /* [dcl.attr.fallthrough]/1, [dcl.attr.likelihood]/1: an
+               attribute after the class-key appertains to the class; these
+               "may be applied to" a statement only (clang: "cannot be
+               applied to a declaration") */
+            if (c.is_node() && (c.is(syntax_kind::attribute_specifier_seq) ||
+                                c.is(syntax_kind::attribute_specifier)))
+                if (token_index t = statement_only_attribute(c.first_token(),
+                                                             c.end_token()))
+                    return ill_formed_at_token(
+                        t, "this attribute cannot be applied to a declaration",
+                        "dcl.attr");
             head_list.append(c);
         }
     }
@@ -236,7 +304,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
        the closing brace; aligned in the class-head is not analysed) */
     if (gnu.aligned || gnu.section || gnu.priority || gnu.cleanup ||
         (gnu.flags & ~(gnu_hidden_visibility | gnu_abi_tag |
-                       gnu_exclude_from_explicit_instantiation | gnu_packed)))
+                       gnu_exclude_from_explicit_instantiation | gnu_packed |
+                       gnu_dllimport)))
         return not_supported(n, "ext.gnu");
     const SyntaxElement *head_children = head_list.data();
     uint32_t head_count = static_cast<uint32_t>(head_list.size());
@@ -271,8 +340,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             return not_supported(n, "temp.spec");
         }
     } else if (!unnamed) {
-        /* attributes */
-        return not_supported(n, "class.pre");
+        return not_supported_because(
+            n, "class.pre",
+            "the class-head-name is not an identifier or a "
+            "qualified name (an attribute that is not one "
+            "without effect, or another form)");
     }
     bool is_final = false;
     uint32_t next = 2;
@@ -542,6 +614,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         access = 2;
     uint8_t outer_access = declaration_access;
     defining_class = c;
+    /* [temp.spec]/6: a member-specification is checked */
+    flag_set checked(explicit_declaration_names, false);
     /* the enclosing class's analysis goes on after this one: its state
        back, and its members so far again after this class's, so that they
        stay one range of class_members */
@@ -613,8 +687,19 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             result = worse(result, not_supported(member));
             continue;
         }
-        result =
-            worse(result, member_declaration(c, declaration, access, bodies));
+        entity_index before_member = entity_table.size();
+        analysis_result declared =
+            member_declaration(c, declaration, access, bodies);
+        /* [temp.inst]/3: a specialization's member class is declared, not
+           defined, until its definition is needed: a nested class whose
+           definition is ill-formed does not make the specialization so */
+        if (declared == analysis_result::ill_formed &&
+            entity_table[c].instantiation)
+            for (entity_index e = before_member; e < entity_table.size(); e++)
+                if (entity_table[e].enclosing == c &&
+                    entity_table[e].kind == entity_kind::none)
+                    declared = not_supported(declaration, "temp.inst");
+        result = worse(result, declared);
     }
     defining_members_first = outer_members_first;
     defining_members_end = outer_members_end;
@@ -674,6 +759,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
        body ... within the member-specification of the class": the bodies
        are analysed with the class complete */
     SyntaxRef outer_declaration = current_declaration;
+    bool bodies_only_ill_formed = false;
     /* [class.local]: a local class's member functions are analysed inside
        the enclosing function's body, whose state is kept aside meanwhile */
     function_context enclosing_function =
@@ -693,7 +779,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 template_arguments[instantiation.first_argument + i];
             if (arg.kind != template_argument::kind_t::type)
                 continue;
-            const auto &type = type_table[arg.type.unqualified()];
+            const auto type = type_table[arg.type.unqualified()];
+            /* no require_complete: an argument named only stays so
+               ([temp.inst]/2) */
             if (type.kind == type_kind::class_type &&
                 !entity_table[type.entity].size) {
                 incomplete_argument = true;
@@ -750,6 +838,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     } else {
         size_t nested_end = nested_bodies.size();
         bool quiet = entity_table[c].instantiation != 0;
+        bodies_only_ill_formed = result == analysis_result::well_formed;
         for (SyntaxRef body : bodies) {
             if (queue_body_until_used(body))
                 continue;
@@ -770,14 +859,25 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         }
         nested_bodies.resize(nested_start);
     }
-    if (result == analysis_result::well_formed)
-        result = implicit_definitions(c, n);
+    /* [dcl.meaning]: a class whose members are all declared and only
+       whose member function bodies are ill-formed is a complete class
+       the declarations after it use ([impl.clang] clang recovers) */
+    bodies_only_ill_formed =
+        bodies_only_ill_formed && result == analysis_result::ill_formed;
+    if (result == analysis_result::well_formed || bodies_only_ill_formed) {
+        analysis_result implicit = implicit_definitions(c, n);
+        if (result == analysis_result::well_formed ||
+            implicit != analysis_result::well_formed)
+            result = worse(result, implicit);
+    }
     current_declaration = outer_declaration;
     function_state = static_cast<function_context &&>(enclosing_function);
     block_variables =
         static_cast<owned_array<entity_index> &&>(enclosing_block_variables);
     current_scope = enclosing_scope;
-    if (result != analysis_result::well_formed) {
+    class_kept_ill_formed =
+        bodies_only_ill_formed && result == analysis_result::ill_formed;
+    if (result != analysis_result::well_formed && !class_kept_ill_formed) {
         entity_table[c].kind = entity_kind::none;
         note_held(c);
         entity_table[c].size = 0;
@@ -1091,7 +1191,7 @@ bool semantic_analysis::is_aggregate(entity_index c) const
 entity_index semantic_analysis::current_class() const
 {
     if (!function_state.active || !function_state.function)
-        return 0;
+        return function_state.this_class;
     /* [expr.prim.lambda.closure]/12: "The lambda-expression's
        compound-statement yields the function-body of the function call
        operator, but for purposes of name lookup, determining the type and
@@ -1099,12 +1199,14 @@ entity_index semantic_analysis::current_class() const
        non-static class members into class member access expressions using
        (*this), the compound-statement is considered in the context of the
        lambda-expression." */
-    entity_index f = function_state.function;
+    entity_index f = function_state.function, in_class = 0;
     for (size_t i = lambdas.size(); i-- > 0;)
-        if (lambdas[i].call == f)
+        if (lambdas[i].call == f) {
             f = lambdas[i].enclosing_function;
+            in_class = lambdas[i].enclosing_class;
+        }
     if (!f)
-        return 0;
+        return in_class;
     entity_index c = entity_table[f].enclosing;
     if (c && entity_table[c].kind == entity_kind::class_type)
         return c;
@@ -1132,6 +1234,14 @@ bool semantic_analysis::accessible(entity_index member,
     const entity &x = entity_table[member];
     if (!x.access)
         return true;
+    /* [temp.spec]/6: "The usual access checking rules do not apply
+       to names in a declaration of an explicit instantiation or explicit
+       specialization, with the exception of names appearing in a function
+       body, default argument, base-clause, member-specification,
+       enumerator-list, or static data member or variable template
+       initializer." */
+    if (explicit_declaration_names && !function_state.active)
+        return true;
     /* the classes the name is used in a member of: the class of the
        function analysed, the class whose member-specification is
        analysed, the class of a static data member's definition
@@ -1154,6 +1264,13 @@ bool semantic_analysis::accessible(entity_index member,
             return true;
         return base_step(object_class, k, ambiguous) != 0;
     };
+    /* [class.friend]/2, [class.access]/6: the template-head of a friend
+       class template belongs to the befriended entity */
+    if (friend_head.name)
+        for (const friend_record &f : friends)
+            if (friend_names_class(f, friend_head.scope, friend_head.name) &&
+                as_member_of(f.granting))
+                return true;
     entity_index starts[4] = {0, defining_class, 0, access_class};
     if (function_state.active)
         starts[0] = function_state.function;
@@ -1219,6 +1336,11 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
         [&](TemplateDeclaration t) {
             return member_template_declaration(c, t, access);
         },
+        [&](ExplicitSpecialization s) {
+            /* [temp.expl.spec]/2 (CWG727): an explicit specialization of a
+               member template in the class's own scope */
+            return explicit_specialization(s);
+        },
         [&](StaticAssertDeclaration s) {
             /* [class.mem]/1: a member-declaration */
             return static_assert_declaration(s);
@@ -1229,7 +1351,12 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
         [&](MemberSimpleDeclaration d) {
             return member_declaration_with_specifiers(c, d, access, bodies);
         },
-        [&](MemberDeclaration other) { return not_supported(other); }});
+        [&](MemberDeclaration other) {
+            analysis_result refused = not_supported(other);
+            last_unsupported_detail(syntax_kind_name(other.kind()),
+                                    strlen(syntax_kind_name(other.kind())));
+            return refused;
+        }});
 }
 
 /*
@@ -1467,10 +1594,15 @@ analysis_result semantic_analysis::member_declarators(
             VTRY(cr, constraint_satisfied(n[body_at][1], current_scope,
                                           lookup_horizon, satisfied));
         }
-        if (body_at == first + 1 && body.defaulted())
+        bool compared = false;
+        if (body_at == first + 1 && body.defaulted() && !constrained) {
+            scoped_value<SyntaxRef> member_declaration(current_declaration, n);
+            compared = defaulted_member_equality(c, n[first], s, access);
+        }
+        if (body_at == first + 1 && body.defaulted() && !compared)
             return defaulted_copy_assignment(c, n, n[first], s, access);
         /* = delete: member_function_definition's deleted_definition */
-        if (!body.deleted() && !body.plain())
+        if (!body.deleted() && !body.plain() && !compared)
             /* a ctor-initializer, a function-try-block, = default */
             return not_supported(n, "dcl.fct.def.general");
         virt_override = override_;
@@ -1575,17 +1707,13 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         if (!e || entity_table[e].kind != entity_kind::variable)
             /* a pure-specifier ([class.abstract]) */
             return not_supported(d.index(), "class.abstract");
-        if (!entity_table[c].name)
-            /* an unnamed class's members are initialized by no constructor
-               of its own */
-            return not_supported(d.index(), "class.union");
         if (entity_table[c].union_) {
             /* [class.union]/2: "At most one variant member of a union may
                have a default member initializer" */
             const entity &x = entity_table[c];
             for (uint32_t i = 0; i < x.member_count; i++) {
                 entity_index o = class_members[x.first_member + i];
-                if (o != e && entity_table[o].default_initializer)
+                if (o != e && variant_initialized(o))
                     return ill_formed(declaration,
                                       "initializing multiple members of "
                                       "union",
@@ -1625,6 +1753,13 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         r = misplaced_function_qualifiers(declaration, type, true);
     if (r != analysis_result::well_formed)
         return r;
+    /* C++11 [dcl.constexpr]/8: "A constexpr specifier for a non-static
+       member function that is not a constructor declares that member
+       function to be const" (C++14 dropped it) */
+    if (s.constexpr_ && !s.static_ &&
+        tokens.files.behavior.edition < standard_edition::cplusplus_14 &&
+        type_table[type.unqualified()].kind == type_kind::function)
+        function_cv |= cv_const;
     /* [dcl.fct.default]: a member function's default arguments are a
        complete-class context ([class.mem]/6): analysed with the class
        complete (member_default_arguments) */
@@ -1711,8 +1846,18 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             (m.operator_function && m.allocation != allocation_function::none))
             return not_supported(declaration, "dcl.spec.auto");
     }
-    if (!is_function && contains_placeholder(type))
-        return not_supported(declaration, "dcl.spec.auto");
+    if (!is_function && contains_placeholder(type)) {
+        /* [dcl.spec.auto]/6: the subclause lists where a placeholder type may
+           appear: a non-static data member is none of them
+           ("'auto' not allowed in non-static struct member") */
+        if (!s.static_)
+            return ill_formed_at_token(m.id,
+                                       "a placeholder type is not allowed in "
+                                       "a non-static data member",
+                                       "dcl.spec.auto");
+        return not_supported_because(declaration, "dcl.spec.auto",
+                                     "in a static data member");
+    }
     /* [dcl.fct.spec]/2: "The virtual specifier shall be used only in the
        initial declaration of a non-static class member function" */
     if (s.virtual_ && !is_function)
@@ -1728,7 +1873,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
        a static data member's, a data member's function attributes) are not
        analysed yet; on a non-static data member they are GCC's error */
     if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section | gnu_mode |
-                        gnu_constructor | gnu_destructor | gnu_cleanup)) ||
+                        gnu_constructor | gnu_destructor | gnu_cleanup |
+                        gnu_require_constant_initialization)) ||
         (!is_function &&
          (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))))
         return not_supported(declaration, "ext.gnu");
@@ -1875,17 +2021,14 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "class.static.mfct");
         e = entity_table.make(entity_kind::function, name, c);
         entity_table[e].type = type;
+        entity_table[e].exceptions =
+            resolved_exceptions(m.exceptions, type, m.gnu_flags);
         entity_table[e].placeholder_return = placeholder_return;
         entity_table[e].nonstatic_member = !s.static_;
         entity_table[e].member_cv = function_cv;
         /* [class.mfct]/1: "A member function may be defined in its class
            definition, in which case it is an inline member function
            ([dcl.inline])" */
-        /* C++11's [dcl.constexpr]/8 made a constexpr non-static member
-           function const, which C++14 dropped: not analysed */
-        if (s.constexpr_ && !s.static_ &&
-            tokens.files.behavior.edition < standard_edition::cplusplus_14)
-            return not_supported(declaration, "dcl.constexpr");
         /* [dcl.constexpr]/3 (and clang before C++20 for any non-static
            member function): not in a class with virtual bases */
         if (s.constexpr_ && !s.static_ && entity_table[c].virtual_base_count)
@@ -2007,7 +2150,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "only to the declaration or definition "
                                        "of a variable or function",
                                        "dcl.inline");
-        const struct type &record = type_table[type.unqualified()];
+        /* a copy: size_of_type and define_class_instantiation can grow type_table */
+        const struct type record = type_table[type.unqualified()];
         if (entity_table[c].union_ &&
             (record.kind == type_kind::lvalue_reference ||
              record.kind == type_kind::rvalue_reference) &&
@@ -2020,6 +2164,25 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "data member of reference type",
                                        "class.union");
         uint64_t size = size_of_type(type);
+        if (record.kind == type_kind::class_type && !size &&
+            entity_table[record.entity].kind == entity_kind::class_type &&
+            entity_table[record.entity].instantiation &&
+            !entity_table[record.entity].defined &&
+            !instantiations[entity_table[record.entity].instantiation - 1]
+                 .defining) {
+            /* [temp.inst]/2: a member of class template specialization type
+               needs a completely-defined type, so the specialization is
+               defined here, though its argument is the class being defined
+               (an incomplete argument is fine: D<E> in E, with D's member
+               function bodies instantiated only when used, /4) */
+            entity_index done = 0;
+            analysis_result r = define_class_outside(
+                SyntaxRef(), entity_table[record.entity].instantiation - 1,
+                done);
+            if (r != analysis_result::well_formed)
+                return r;
+            size = size_of_type(type);
+        }
         bool is_reference = record.kind == type_kind::lvalue_reference ||
                             record.kind == type_kind::rvalue_reference;
         if (is_reference)
@@ -2039,13 +2202,15 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
             }
             return not_supported(declaration, "class.mem");
         }
-        if (record.kind == type_kind::class_type && !size)
+        if (record.kind == type_kind::class_type && !size) {
             /* [class.mem]/15: "The type of a non-static data member shall
-               not be an incomplete type" */
-            return ill_formed_at_token(m.id,
-                                       "the type of a non-static data member "
-                                       "shall not be an incomplete type",
-                                       "class.mem");
+               not be an incomplete type"; clang drops the member and
+               goes on with the class complete */
+            return recovered_error_at(m.id,
+                                      "the type of a non-static data member "
+                                      "shall not be an incomplete type",
+                                      "class.mem");
+        }
         /* [basic.def]/5 (a member's declaration defines it,
            [basic.def]/2) */
         if (abstract_class(type))
@@ -2190,9 +2355,16 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
  * left undefined, so that no code is made for it; one that is unsupported
  * also makes a use of the function a refusal.
  */
-void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n)
+analysis_result semantic_analysis::instantiated_member_body(entity_index c,
+                                                            SyntaxRef n,
+                                                            bool used,
+                                                            uint32_t *failure)
 {
-    diagnostics_suppressed hush(diagnostics);
+    /* [temp.inst]/1, /4: a member function used is instantiated, and an
+       ill-formed instantiation makes the program ill-formed: its errors
+       are reported (in the instantiation's context, as clang's "in
+       instantiation of member function ... requested here") */
+    diagnostics_suppressed_if hush(diagnostics, !used);
     size_t unsupported_before = unsupported.size();
     quiet_member_bodies++;
     analysis_result r = member_function_body(c, n);
@@ -2200,7 +2372,8 @@ void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n)
     /* ill-formed for these arguments (its diagnostics hushed, or a
        definition it wanted failed quietly): a use of the member is
        refused, never a call of a function without code */
-    if (r == analysis_result::ill_formed && last_declared)
+    bool failed = used && r == analysis_result::ill_formed;
+    if (r == analysis_result::ill_formed && last_declared && !used)
         r = not_supported(n, "temp.inst");
     if (r == analysis_result::ill_formed)
         entity_table[last_declared].defined = false;
@@ -2213,8 +2386,15 @@ void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n)
             body_failures.append(unsupported[unsupported_before]);
             entity_table[last_declared].unsupported_body =
                 static_cast<uint32_t>(body_failures.size());
+            if (failure)
+                *failure = static_cast<uint32_t>(body_failures.size());
         }
     }
+    if (failed)
+        return analysis_result::ill_formed;
+    if (used && r == analysis_result::unsupported)
+        return r;
+    return analysis_result::well_formed;
 }
 
 analysis_result
@@ -2315,6 +2495,12 @@ semantic_analysis::member_function_definition(entity_index c,
     auto body = definition.function_body();
     if (body.deleted())
         return deleted_definition(definition, last_declared);
+    if (body.defaulted()) {
+        /* [class.compare.default]: the member operator== member_declarators
+           declared */
+        scoped_value<entity_index> compared(defaulted_comparison, c);
+        return analyse_function_body(definition, body);
+    }
     if (!body.plain())
         return not_supported(definition, "dcl.fct.def.general");
     return analyse_function_body(definition, body.compound_statement());
@@ -2333,7 +2519,8 @@ semantic_analysis::member_function_definition(entity_index c,
  */
 analysis_result semantic_analysis::member_redeclaration(
     SyntaxRef declaration, token_index id, entity_index qualifier,
-    qualified_type type, const specified &s, bool definition)
+    qualified_type type, const specified &s, exception_specification exceptions,
+    bool definition)
 {
     last_declared = 0;
     if (at_block_scope() || function_state.active)
@@ -2347,7 +2534,21 @@ analysis_result semantic_analysis::member_redeclaration(
     if (e && entity_table[e].kind == entity_kind::none)
         return not_supported(declaration, "over");
     /* [dcl.meaning]/1: the member function of the set it declares again */
-    if (entity_index o = overload_of_type(e, type, function_cv))
+    entity_index o = 0;
+    if (s.constexpr_ &&
+        tokens.files.behavior.edition < standard_edition::cplusplus_14) {
+        /* C++11 [dcl.constexpr]/8: the in-class declaration's constexpr
+           made it const; the definition's own constexpr does as well (a
+           static member function is not) */
+        o = overload_of_type(e, type, function_cv | cv_const);
+        if (o && entity_table[o].nonstatic_member)
+            function_cv |= cv_const;
+        else
+            o = 0;
+    }
+    if (!o)
+        o = overload_of_type(e, type, function_cv);
+    if (o)
         e = o;
     if (!e || entity_table[e].kind != entity_kind::function ||
         !(entity_table[e].type == type) ||
@@ -2358,6 +2559,9 @@ analysis_result semantic_analysis::member_redeclaration(
                                    "declared member of the class",
                                    "dcl.meaning");
     VTRY(r, constexpr_redeclaration(id, e, s.constexpr_));
+    VTRY(compatible,
+         compatible_exceptions(
+             id, e, resolved_exceptions(exceptions, type, s.gnu_flags)));
     /* [basic.def.odr]/1 */
     if (entity_table[e].defined)
         return ill_formed_at_token(id,
@@ -2460,11 +2664,15 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
            function or variable"; this declaration (of it or of an inline
            one) is its definition ([basic.def]/2.3), and an odr-use emits it
            (COMDAT, [impl.clang] as clang) */
-        if (tokens.files.behavior.edition < standard_edition::cplusplus_17)
-            return not_supported(declarator, "class.static.data");
-        x.inline_ = true;
         x.constexpr_ = s.constexpr_;
-        x.defined = true;
+        /* before C++17 it is not inline: the declaration in the class is not
+           a definition, as for a const integral member ([class.static.data]/3,
+           C++14) */
+        if (s.inline_ ||
+            tokens.files.behavior.edition >= standard_edition::cplusplus_17) {
+            x.inline_ = true;
+            x.defined = true;
+        }
     }
     return analysis_result::well_formed;
 }

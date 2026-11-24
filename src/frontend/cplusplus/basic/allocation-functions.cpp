@@ -95,6 +95,12 @@ void semantic_analysis::declare_implicit_allocation_function(
     x.operator_function = true;
     x.allocation = kind;
     x.implicit = true;
+    /* [except.spec]/12: a deallocation function with no explicit
+       noexcept-specifier has a non-throwing exception specification; an
+       allocation function's (C++03's throw(std::bad_alloc)) is left
+       unrecorded */
+    if (!allocation)
+        x.exceptions.allows = exception_allowance::none;
     entity_index first = entity_table.find(0, name);
     if (!first) {
         entity_table.bind(0, name, e);
@@ -299,13 +305,52 @@ semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
             fundamental_of(first.operand) == fundamental_type::void_ &&
             !first.operand.cv();
     }
+    /* (clang: one that is no member is "just a placement delete") */
+    if (member && function.parameter_count >= 2 &&
+        destroying_delete_tag(parameters[1])) {
+        /* [basic.stc.dynamic.deallocation]/2: "A destroying operator
+           delete shall be a class member function named operator
+           delete."; /3: "If the function is a destroying operator delete
+           declared in class type C, the type of its first parameter shall
+           be C*" */
+        const struct type &first = type_table[parameters[0].unqualified()];
+        if (first.kind != type_kind::pointer || parameters[0].cv() ||
+            first.operand.cv() ||
+            type_table[first.operand.unqualified()].kind !=
+                type_kind::class_type ||
+            type_table[first.operand.unqualified()].entity != x.enclosing)
+            return ill_formed(n,
+                              "the first parameter of a destroying "
+                              "operator delete shall be C*",
+                              subclause);
+        if (function.parameter_count != 2 || x.default_arguments ||
+            x.unknown_defaults || function.variadic)
+            return not_supported(n, subclause);
+        allocation_declarations_analysed++;
+        return analysis_result::well_formed;
+    }
     if (!void_pointer)
-        /* a destroying operator delete's first parameter is C* (/3) */
         return not_supported(n, subclause);
     if (x.default_arguments || x.unknown_defaults)
         return not_supported(n, subclause);
     allocation_declarations_analysed++;
     return analysis_result::well_formed;
+}
+
+/* whether t is std::destroying_delete_t ([support.types.byteops] <new>) */
+bool semantic_analysis::destroying_delete_tag(qualified_type t) const
+{
+    const struct type &c = type_table[t.unqualified()];
+    if (c.kind != type_kind::class_type)
+        return false;
+    entity_index std_ =
+        entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
+    if (!std_ || !is_namespace(std_) || !std_namespace(std_))
+        return false;
+    lookup_result found = lookup_in_namespace(
+        std_, tokens.pp.identifier("destroying_delete_t", 19) + 1,
+        lookup_filter::any);
+    return !found.ambiguous && found.entity && found.entity == c.entity;
 }
 
 /*

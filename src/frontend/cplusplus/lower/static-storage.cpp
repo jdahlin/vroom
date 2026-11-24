@@ -313,8 +313,14 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
     labels.clear();
     live.clear();
     owned_array<uint32_t> statements;
-    if (!only_destroy)
+    if (!only_destroy) {
+        static_owner = e;
+        static_root = x.definition;
+        static_temporaries = 0;
         static_initialization(e, x.definition, statements, init.at);
+        static_owner = 0;
+        static_root = 0;
+    }
     /* [basic.start.term]/3: registered with __cxa_atexit once
        constructed ([abi:dso-dtor]) */
     if (!failure.what)

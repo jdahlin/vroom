@@ -234,6 +234,7 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
             entity_table[tp.entity].kind != entity_kind::class_type)
             return of_form(sequence::form::unknown);
         bool ambiguous = false;
+        require_complete(fp.entity);
         if (!entity_table[fp.entity].size || !cv_kept ||
             !base_step(fp.entity, tp.entity, ambiguous))
             return of_form(sequence::form::bad);
@@ -431,6 +432,7 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         if (c1 == c2)
             return s;
         bool ambiguous = false;
+        require_complete(c2);
         if (entity_table[c2].size && base_step(c2, c1, ambiguous)) {
             if (ambiguous)
                 return of_form(sequence::form::unknown);
@@ -583,6 +585,7 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
             return of_form(sequence::form::unknown);
         bool ambiguous = false;
         /* a base needs the complete derived class */
+        require_complete(c2);
         bool related = c1 && c2 && (c1 == c2 || entity_table[c2].size) &&
                        reference_related(t1, t2, ambiguous);
         if (ambiguous)
@@ -678,6 +681,10 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
                                                 qualified_type parameter,
                                                 bool user_defined)
 {
+    /* [temp.inst]/2: the constructors and conversion functions a
+       conversion uses: a specialization named only is defined here */
+    require_complete(parameter);
+    require_complete(a.type);
     const struct type p = type_table[parameter.unqualified()];
     if (p.kind == type_kind::lvalue_reference ||
         p.kind == type_kind::rvalue_reference)

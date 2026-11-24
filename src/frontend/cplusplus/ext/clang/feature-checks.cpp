@@ -328,6 +328,12 @@ bool has_builtin(const implementation_defined_behavior &b, const char *name,
     return answer(b, check_kind::builtin, name, length) != 0;
 }
 
+bool clang_has_builtin(const implementation_defined_behavior &b,
+                       const char *name, size_t length)
+{
+    return answer(b, check_kind::builtin, name, length) != 0;
+}
+
 /* whether the front end implements the builtin: the C front end's table,
    the registry of this front end, or a C library function's builtin */
 static bool builtin_is_implemented(const char *name, size_t length)

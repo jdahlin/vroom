@@ -382,7 +382,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     bool may_qualify = in_member_declarator;
     /* [except.spec]/1: the noexcept-specifier */
     bool specified_exceptions = false, non_throwing = false;
-    SyntaxRef exceptions = 0;
+    SyntaxRef exceptions = 0, dynamic_exceptions = 0;
     for (uint32_t i = parameters.size(); i-- > 0;) {
         auto c = parameters[i];
         if (c.is(punct::RIGHT_PARENTHESIS)) {
@@ -466,12 +466,28 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 exceptions = c;
                 continue;
             }
+            /* [except.spec]/1 (C++14): a dynamic-exception-specification;
+               analysed once the parameters are known */
+            if (c.dynamic_exception_specification() && !specified_exceptions) {
+                specified_exceptions = true;
+                dynamic_exceptions = c;
+                continue;
+            }
             /* a generic lambda's requires-clause (lambda_constraint) */
             if (c.requires_clause())
                 continue;
             /* a ref-qualifier, attributes, a cv-qualifier-seq of a type
                that is not a member function's */
-            return not_supported(parameters, "dcl.fct");
+            {
+                auto r = not_supported(parameters, "dcl.fct");
+                char text[96];
+                const char *what = "a token";
+                if (c.is_node())
+                    what = syntax_kind_name(c.kind());
+                snprintf(text, sizeof text, "after the parameters: %s", what);
+                last_unsupported_detail(text, strlen(text));
+                return r;
+            }
         }
     }
     /* a function declarator of the parameters is not the member's */
@@ -566,8 +582,17 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 variadic = false;
             continue;
         }
-        VTRY_SET(r, parameter_declaration(declarations[k], t, unnamed, id,
-                                          default_argument));
+        /* [basic.scope.param]/1: a parameter's name is in scope from its
+           point of declaration ([basic.scope.pdecl]/1), so a later
+           parameter's declaration (an array bound, a decltype) finds it */
+        entity_index outer = current_scope;
+        if (names_earlier_parameter(declarations[k], named))
+            open_parameter_scope(named, 0);
+        r = parameter_declaration(declarations[k], t, unnamed, id,
+                                  default_argument);
+        current_scope = outer;
+        if (r != analysis_result::well_formed)
+            return r;
         if (declared_pack) {
             /* [temp.variadic]/5: a template's own function parameter
                pack, of a type that names a template parameter pack
@@ -637,11 +662,49 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         function_parameters.append(parameter);
     function_empty_pack = empty_pack;
     function_cv = cv;
-    function_exceptions_specified = specified_exceptions;
+    /* [except.spec]/1: none written, the function's implicit one
+       (resolved_exceptions) */
+    exception_specification value;
+    value.written = specified_exceptions;
+    /* [temp.inst]/15: the exception specification of a specialization's
+       member function is instantiated when it is needed, not with the class:
+       its types are not analysed with the member's declaration (C++98
+       made it with the class) */
+    if (dynamic_exceptions &&
+        !(may_qualify &&
+          tokens.files.behavior.has(language_feature::rvalue_references) &&
+          defining_class && entity_table[defining_class].instantiation)) {
+        /* [diff.cpp14.except]/1: removed from C++17; clang's error,
+           -Wno-dynamic-exception-spec turns it off, and keeps the
+           function; an error of the template's definition, whatever the
+           arguments, not of a specialization's */
+        if (analysing &&
+            !tokens.files.behavior.has(
+                language_feature::dynamic_exception_specifications)) {
+            VTRY(r, recoverable_extension_used(
+                        diagnostic_id::sema_dynamic_exception_specification,
+                        dynamic_exceptions.first_token()));
+        }
+        owned_array<uint32_t> types;
+        VTRY(r,
+             dynamic_exception_types(dynamic_exceptions, may_qualify, types));
+        value = dynamic_exception_value(dynamic_exceptions, types);
+    } else if (dynamic_exceptions) {
+        /* not analysed with the declaration ([temp.inst]/15) */
+        value.allows = exception_allowance::unknown;
+    }
     if (exceptions) {
+        size_t dependent_before = dependent_exception_specifications.size();
         VTRY(r,
              parameter_scope_noexcept(exceptions, may_qualify, non_throwing));
+        if (dependent_exception_specifications.size() != dependent_before)
+            value.allows = exception_allowance::unknown;
+        else if (non_throwing)
+            value.allows = exception_allowance::none;
+        else
+            value.allows = exception_allowance::all;
     }
+    function_exceptions = value;
     if (abstract_class(type))
         /* a return type of abstract class type: as a parameter's */
         return not_supported(parameters, "class.abstract");
@@ -654,6 +717,58 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         type_table.function(type, list.data(), list.size(), variadic,
                             non_throwing, type_cv, type_ref),
         cv_none);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [except.spec]/1 (C++14): "type-id-list: type-id ..._opt ...", and
+ * /3 of C++14: "A type cv T, 'array of T', or 'function returning T' in an
+ * exception-specification is adjusted to T, pointer to T, or pointer to
+ * function returning T, respectively.  A type denoted in an
+ * exception-specification shall not denote an incomplete type, a pointer or
+ * reference to an incomplete type other than cv void*, or an rvalue
+ * reference type."  A member function's specification is a complete-class
+ * context ([class.mem]/6): a class being defined is not incomplete there.
+ * The exception specification is not part of the type before C++17 and a
+ * dynamic one is potentially throwing after it.
+ */
+analysis_result
+semantic_analysis::dynamic_exception_types(SyntaxRef n, bool member,
+                                           owned_array<uint32_t> &types)
+{
+    for (auto c : n.elements()) {
+        if (c.is(syntax_kind::type_id_list)) {
+            VTRY(r, dynamic_exception_types(c, member, types));
+            continue;
+        }
+        if (!c.is(syntax_kind::type_id))
+            continue;
+        qualified_type type;
+        VTRY(r, type_id(c, type));
+        types.append(type.unqualified());
+        qualified_type base = type;
+        const struct type *t = &type_table[base.unqualified()];
+        bool through = false;
+        if (t->kind == type_kind::pointer ||
+            t->kind == type_kind::lvalue_reference) {
+            through = true;
+            base = t->operand;
+            t = &type_table[base.unqualified()];
+        }
+        if (t->kind == type_kind::fundamental &&
+            (t->fundamental != fundamental_type::void_ || through))
+            continue;
+        if (t->kind == type_kind::enumeration ||
+            t->kind == type_kind::pointer_to_member ||
+            t->kind == type_kind::template_parameter ||
+            t->kind == type_kind::dependent)
+            continue;
+        if (t->kind == type_kind::class_type &&
+            entity_table[t->entity].kind == entity_kind::class_type &&
+            (member || size_of_type(base)))
+            continue;
+        return not_supported(c, "except.spec");
+    }
     return analysis_result::well_formed;
 }
 

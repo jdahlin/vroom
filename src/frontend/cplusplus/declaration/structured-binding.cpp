@@ -293,6 +293,7 @@ analysis_result semantic_analysis::tuple_trait_member(
     a[count - 1].type = type;
     entity_index c = 0;
     VTRY_SET(r, instantiate_class(n, ct, a, count, c));
+    require_complete(c);
     if (entity_table[c].kind != entity_kind::class_type ||
         !entity_table[c].size)
         return analysis_result::well_formed;
@@ -466,6 +467,7 @@ analysis_result semantic_analysis::binding_members_class(SyntaxRef n,
                                                          entity_index c,
                                                          entity_index &holder)
 {
+    require_complete(c);
     const entity &x = entity_table[c];
     if (x.kind != entity_kind::class_type || !x.size || x.virtual_base_count)
         return not_supported(n, "dcl.struct.bind");

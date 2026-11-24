@@ -62,11 +62,17 @@ namespace cplusplus
 
 bool parser::at_gnu_attribute(unsigned ahead)
 {
-    return at(extension_keyword::attribute, ahead);
+    /* [ext:microsoft_declspec] clang takes __declspec where an
+       attribute-specifier goes */
+    extension_keyword k = extension_keyword_of(peek(ahead));
+    return k == extension_keyword::attribute ||
+           k == extension_keyword::declspec;
 }
 
 node_index parser::gnu_attribute_specifier()
 {
+    if (at(extension_keyword::declspec))
+        return microsoft_declspec();
     size_t mark = begin_node();
     token_index first = position;
     add_token(); /* __attribute__ */
@@ -122,6 +128,56 @@ node_index parser::gnu_attribute_specifier()
     if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS) ||
         !accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
         return expected("'))' to end the attribute-specifier", "ext.gnu");
+    return finish_node(syntax_kind::gnu_attribute_specifier, mark, first);
+}
+
+/*
+ * [ext:microsoft_declspec]
+ *
+ *     microsoft-declspec:
+ *         __declspec ( gnu-attribute-list )
+ *     attribute-specifier:
+ *         microsoft-declspec
+ *     decl-specifier:
+ *         microsoft-declspec
+ *
+ * clang's ParseMicrosoftDeclSpecs: the attributes are separated by white
+ * space (commas are skipped); each is an identifier, with an
+ * expression-list in parentheses.  The node is a gnu-attribute-specifier
+ * whose first token is the keyword __declspec (extension_keyword::declspec),
+ * so the analysis of the attributes (gnu_attribute_rules) is shared.
+ */
+node_index parser::microsoft_declspec()
+{
+    size_t mark = begin_node();
+    token_index first = position;
+    add_token(); /* __declspec */
+    if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        return expected("'(' after __declspec", "ext.gnu");
+    while (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        if (accept(preprocessing_op_or_punc::COMMA))
+            continue;
+        if (!at_attribute_identifier())
+            return expected("an attribute", "ext.gnu");
+        size_t attribute_mark = begin_node();
+        token_index attribute_first = position;
+        add_token();
+        if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+            add_token();
+            flag_set greater(greater_is_operator, true);
+            if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+                expression_list();
+                if (failed())
+                    return 0;
+            }
+            if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+                return expected("')' to end the attribute's parameters",
+                                "ext.gnu");
+            finish_node(syntax_kind::gnu_attribute, attribute_mark,
+                        attribute_first);
+        }
+    }
+    add_token(); /* ) */
     return finish_node(syntax_kind::gnu_attribute_specifier, mark, first);
 }
 
@@ -277,6 +333,19 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        function uses: an optimization hint) and GCC's target("features")
        (<immintrin.h>'s intrinsics: the features the function's
        instructions need, which -m options of the compilation give) */
+    /* [ext:microsoft_declspec] __declspec's dllexport: on clang's target
+       (-triple aarch64-unknown-linux-gnu) "__declspec attribute
+       'dllexport' is not supported" (-Wignored-attributes), accepted with
+       no effect (dllimport has one: a variable it declares without an
+       initializer is not a definition, gnu_dllimport); novtable (no vtable stores in an abstract
+       class's constructors), restrict and noalias (results or accesses
+       that do not alias) and allocator change no code vcc generates */
+    {"dllexport", 0},
+    {"dllimport", gnu_dllimport},
+    {"novtable", 0},
+    {"restrict", 0},
+    {"noalias", 0},
+    {"allocator", 0},
     {"nodebug", 0},
     {"min_vector_width", 0},
     {"target", 0},
@@ -358,8 +427,41 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"lock_returned", 0},
     {"assert_exclusive_lock", 0},
     {"assert_shared_lock", 0},
+    /* [ext:gnu_attributes] x86's interrupt and no_caller_saved_registers:
+       on clang's target (-triple aarch64-unknown-linux-gnu) "unknown
+       attribute 'interrupt' ignored" (-Wunknown-attributes), accepted with
+       no effect */
+    {"interrupt", 0},
+    {"no_caller_saved_registers", 0},
+    /* [ext:gnu_attributes] attributes clang accepts and that change no code
+       vcc generates: optnone (no optimization), the consumed analysis
+       (consumable, callable_when, param_typestate, test_typestate),
+       reentrant_capability (thread-safety analysis) and preferred_type (a
+       debugger's hint for a bit-field).  Not yet: set_typestate and
+       return_typestate (an argument count and kind to check),
+       pass_object_size */
+    {"optnone", 0},
+    {"consumable", 0},
+    {"callable_when", 0},
+    {"param_typestate", 0},
+    {"test_typestate", 0},
+    {"reentrant_capability", 0},
+    /* clang's require_constant_initialization: "This attribute specifies
+       that the variable to which it is attached is intended to have a
+       constant initializer" (constinit's rule, as the declarator's) */
+    {"require_constant_initialization", gnu_require_constant_initialization},
     /* clang's enable_if(condition, message) (below) */
     {"enable_if", gnu_enable_if},
+};
+
+/* [ext:microsoft_declspec] the attributes only __declspec has: on clang's
+   target (-triple aarch64-unknown-linux-gnu) align(N) is aligned's, and
+   empty_bases and layout_version are accepted with no effect on what vcc
+   generates (selectany and code_seg have rules of their own to check) */
+static const gnu_attribute_rule microsoft_declspec_rules[] = {
+    {"align", gnu_aligned},
+    {"empty_bases", 0},
+    {"layout_version", 0},
 };
 
 /* the rule of an attribute's spelling, nullptr if analysis has none */
@@ -528,6 +630,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                 attributes.append(c);
         }
     }
+    /* [ext:microsoft_declspec] (the keyword, extension_keyword::declspec) */
+    bool declspec = p.extension_keyword_of(tokens[n.first_token()]) ==
+                    extension_keyword::declspec;
     for (SyntaxElement a : attributes) {
         token_index name_token = a.token();
         uint32_t count = a.size();
@@ -548,11 +653,16 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                              (spelling.size() == 11 &&
                               !memcmp(spelling.data(), "__attribute", 11))))
             continue;
-        if (!rule && g.ext_vector_allowed && count == 4 &&
+        if (!rule && g.ext_vector.allowed && count == 4 &&
             spelling_is_ext_vector_type(spelling)) {
             VTRY(r, clang_ext_vector_count(at, a[2], g));
             continue;
         }
+        if (!rule && declspec)
+            for (const gnu_attribute_rule &r : microsoft_declspec_rules)
+                if (strlen(r.name) == spelling.size() &&
+                    !memcmp(r.name, spelling.data(), spelling.size()))
+                    rule = &r;
         if (!rule)
             return not_supported(at, "ext.gnu");
         /* clang's enable_if: the function a candidate only where the
@@ -878,6 +988,10 @@ semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
     g.abi_tag = m.abi_tag;
     g.mode = m.mode;
     g.vector_bytes = m.vector_bytes;
+    g.ext_vector = m.ext_vector;
+    g.ext_vector.allowed =
+        m.ext_vector.allowed &&
+        tokens.files.behavior.has(extension::clang_ext_vector_type);
     g.priority = m.gnu_priority;
     g.cleanup = m.gnu_cleanup;
     analysis_result r = gnu_attribute_specifier(n, g);
@@ -885,6 +999,7 @@ semantic_analysis::gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m)
     m.gnu_cleanup = g.cleanup;
     m.mode = g.mode;
     m.vector_bytes = g.vector_bytes;
+    m.ext_vector = g.ext_vector;
     m.aligned = g.aligned;
     m.gnu_flags = g.flags;
     m.section = g.section;
@@ -902,7 +1017,12 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     g.abi_tag = s.abi_tag;
     g.priority = s.gnu_priority;
     g.cleanup = s.gnu_cleanup;
+    g.ext_vector = s.ext_vector;
+    g.ext_vector.allowed =
+        s.ext_vector.allowed &&
+        tokens.files.behavior.has(extension::clang_ext_vector_type);
     analysis_result r = gnu_attribute_specifier(n, g);
+    s.ext_vector = g.ext_vector;
     s.gnu_priority = g.priority;
     s.gnu_cleanup = g.cleanup;
     if (g.mode || g.vector_bytes)

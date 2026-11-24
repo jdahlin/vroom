@@ -82,13 +82,27 @@ void semantic_analysis::collect_labels(SyntaxElement s)
 analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
                                                      uint32_t &built)
 {
-    if (!n.size() || !n[0].is_token())
-        return not_supported(n, "dcl.attr");
-    token_index first = n[0].token();
+    /* [stmt.label]/1: the optional attribute-specifier-seq appertains to
+       the label; [dcl.attr.grammar]/6, [dcl.attr.likelihood]/1: ones that
+       change nothing vcc generates, and those clang does not know, are
+       passed over */
+    uint32_t lead = 0;
+    while (lead < n.size() && !n[lead].is_token()) {
+        if (!n[lead].is(syntax_kind::attribute_specifier,
+                        syntax_kind::attribute_specifier_seq) ||
+            !attributes_without_effect(n[lead]))
+            return not_supported_because(
+                n, "dcl.attr", "attributes of a label that change something");
+        lead++;
+    }
+    if (lead >= n.size())
+        return not_supported(n, "stmt.label");
+    SyntaxTail m(n, lead);
+    token_index first = m[0].token();
     const token &t = tokens[first];
     SyntaxElement last = n[n.size() - 1];
     if (t.kind == token_kind::identifier) {
-        if (n.size() != 3)
+        if (m.size() != 3)
             return not_supported(n, "stmt.label");
         for (label_record &l : function_state.labels)
             if (l.point.at == first) {
@@ -124,7 +138,7 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
     uint64_t lo = 0, hi = 0;
     bool is_range = false;
     if (k == standard_keyword::default_) {
-        if (n.size() != 3)
+        if (m.size() != 3)
             return not_supported(n, "stmt.label");
         /* [stmt.switch]/3: "There shall be at most one label of the form
            default : within a switch statement." */
@@ -138,13 +152,13 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
         /* case constant-expression : statement, or GNU case lo ... hi :
            statement */
         SyntaxElement high;
-        if (n.size() == 6 && n[2].is(preprocessing_op_or_punc::ELLIPSIS)) {
-            high = n[3];
+        if (m.size() == 6 && m[2].is(preprocessing_op_or_punc::ELLIPSIS)) {
+            high = m[3];
             is_range = true;
-        } else if (n.size() != 4) {
+        } else if (m.size() != 4) {
             return not_supported(n, "stmt.switch");
         }
-        result = case_label(n, n[1], high, innermost, lo, hi);
+        result = case_label(n, m[1], high, innermost, lo, hi);
         kind = semantic_kind::case_label;
     }
     if (result != analysis_result::ill_formed &&

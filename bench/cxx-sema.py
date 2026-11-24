@@ -20,7 +20,10 @@ them (work/testsuites), and src/test/cxx/sema/{spec,gram}/*.cpp.  For each
                           line with its reason (the standard's paragraph
                           or the core issue)
              we accept    well-formed, clang rejects: a rule that is not
-                          enforced yet (counted)
+                          enforced yet, a failure unless
+                          src/test/cxx/sema/clang-accepted.txt lists the
+                          line (--check: a new one fails, a gone one is
+                          stale; --bless rewrites the list)
              unsupported  rules that are not written: nothing concluded
              not parsed   the parser's (an erroneous node, or one kept as
                           tokens), or clang's error there is one of syntax
@@ -121,6 +124,14 @@ WIDER_SUITES = ('CXX', 'SemaCXX', 'SemaTemplate', 'CodeGenCXX', 'Parser',
                 'Sema')
 KNOWN_FAILURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                               'src/test/cxx/sema/clang-failures.txt')
+# the declarations we accept and clang rejects (a rule not enforced yet), one
+# TEST:LINE OPTIONS line each: --check fails on a new one and on a stale one
+KNOWN_ACCEPTED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              'src/test/cxx/sema/clang-accepted.txt')
+ACCEPTED_HEADER = '''# declarations bench/cxx-sema.py's analysis finds well-formed and clang rejects (we accept): TEST:LINE OPTIONS.
+# A rule not enforced yet, known.  --check fails on a line not listed here (a new we-accept: name its
+# cause) and on a listed one that is gone (stale); `bench/cxx-sema.py --bless` rewrites the list.
+'''
 METRICS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'src/test/cxx/sema/clang-metrics.json')
 # a number that differs by this much or less from the baseline is host noise (CI's arm64 runner
@@ -176,6 +187,16 @@ ANALYSIS_LINE = re.compile(r'^(\S+) (.*?):(\d+):(\d+) (.*?):(\d+):(\d+) '
                            r'(well-formed|ill-formed|not-parsed|unsupported)(?:=\[([^\]]*)\])?$')
 CLANG_ERROR = re.compile(r'^([^:\n]+):(\d+):\d+: (?:error|fatal error): .*?(?:\[([^\]]+)\])?$', re.M)
 SYNTAX_CATEGORIES = ('Parse Issue', 'Lexical or Preprocessor Issue')
+CLANG_DIAGNOSTIC = re.compile(r'^([^:\n]+):(\d+):\d+: (error|fatal error|warning|note): (.*)$', re.M)
+# the notes of clang's instantiation stack (Sema::PrintInstantiationStack;
+# DiagnosticSemaKinds.td's note_template_*_here, note_*_substitution_here,
+# note_checking_constraints_*, note_member_synthesized_at, ...), each a link of a
+# chain
+INSTANTIATION_NOTE = re.compile(r'^(?:in instantiation of .* (?:requested|required) here'
+                                r'|in instantiation of requirement(?: parameters)? here'
+                                r'|in evaluation of exception specification for .* needed here'
+                                r'|in (?:implicit|defaulted) .* first required here'
+                                r'|while (?:substituting|checking|building|declaring|rewriting)\b)')
 
 
 TYPES_FILE = 'cxx-type-claims'
@@ -840,6 +861,16 @@ def check(test, opts, clang, vpp):
     if c[0] == 'timeout':
         res['skip'] = 'clang timed out'
         return res
+    # clang killed by a signal (SemaCXX/using-decl-templates.cpp: a
+    # segmentation fault): its diagnostics are a reference only before the
+    # place it crashed at, which is compared like the part before a fatal
+    # error; the claims' checks run clang on the file again and are not
+    crash_line = None
+    if isinstance(c[0], int) and (c[0] < 0 or c[0] >= 128):
+        crash_line = clang_crash_line(c[2], name)
+        if crash_line is None:
+            res['skip'] = f'clang crashed (status {c[0]}) at no place in the file'
+            return res
     syntax_lines, error_lines = set(), set()
     for m in CLANG_ERROR.finditer(c[2]):
         if m.group(1) != name:
@@ -848,6 +879,27 @@ def check(test, opts, clang, vpp):
             syntax_lines.add(int(m.group(2)))
         else:
             error_lines.add(int(m.group(2)))
+    # an error in an instantiation is clang's at the template's line; the
+    # use that asked for the instantiation has its note ("in instantiation
+    # of ... requested here"), and that declaration is rejected too
+    # ([temp.inst]/1): a note of an error's, not of a warning's.  The notes
+    # are a chain, innermost first: only its last link, the outermost use,
+    # is a declaration clang rejects; a middle link is the place inside
+    # another template that asked for the next instantiation, and that
+    # template is not rejected for it
+    outermost, last_is_error = None, False
+
+    def end_chain():
+        if outermost is not None and outermost[0] == name:
+            error_lines.add(outermost[1])
+    for m in CLANG_DIAGNOSTIC.finditer(c[2]):
+        if m.group(3) != 'note':
+            end_chain()
+            outermost = None
+            last_is_error = m.group(3) in ('error', 'fatal error')
+        elif last_is_error and INSTANTIATION_NOTE.search(m.group(4)):
+            outermost = (m.group(1), int(m.group(2)))
+    end_chain()
     # a fatal error (-Wfatal-errors, a missing include) ends clang's
     # analysis there: what follows it is not compared
     fatal = re.search(r'^[^:\n]+:(\d+):\d+: fatal error:', c[2], re.M)
@@ -875,11 +927,14 @@ def check(test, opts, clang, vpp):
             rejected_lines.update(lines)
         if fatal_line is not None and first > fatal_line:
             res['verdict']['after_fatal'] += 1
+        elif crash_line is not None and last >= crash_line:
+            res['verdict']['after_crash'] += 1
         elif result == 'not-parsed' or any(n in syntax_lines for n in lines):
             res['verdict']['not_parsed'] += 1
         elif result == 'unsupported':
             res['verdict']['unsupported'] += 1
             res['unsupported'][m.group(9)] += 1
+            res.setdefault('counted', []).append((first, int(m.group(4))))
         else:
             clang_rejects = any(n in error_lines for n in lines)
             if (result == 'ill-formed') == clang_rejects:
@@ -893,6 +948,12 @@ def check(test, opts, clang, vpp):
             else:
                 res['verdict']['we_accept'] += 1
                 res.setdefault('accepted', []).append(first)
+    if crash_line is not None:
+        res['clang_crash'] = crash_line
+        if rejected:
+            res['fail'].append(('verdict', f'ill-formed for us, accepted by clang: line {rejected[0]}'
+                                           f' ({len(rejected)} declarations)'))
+        return res
     every_error_line = set()
     for m in CLANG_ERROR.finditer(c[2]):
         if m.group(1) == name:
@@ -923,6 +984,184 @@ def check(test, opts, clang, vpp):
     return res
 
 
+# clang's stack dump: "N.\tFILE:LINE:COL: what it was doing"
+CRASH_FRAME = re.compile(r'^\d+\.\t(?:<eof> parser at end of file|([^:\n]+):(\d+):\d+: .*)$', re.M)
+
+
+def clang_crash_line(stderr, name):
+    """The line of the test file clang crashed at: the innermost place of
+    its stack dump in the file (frame 1 is the current token, the rest the
+    declarations it is in); at the end of the file (a pending instantiation),
+    or with no place, the last diagnostic's line in the file, since what
+    follows it may have been left unsaid; None when there is neither"""
+    dump = stderr.find('Stack dump:')
+    if dump < 0:
+        return None
+    lines = [int(m.group(2)) for m in CRASH_FRAME.finditer(stderr, dump) if m.group(1) == name]
+    if lines:
+        return max(lines)
+    said = [int(m.group(2)) for m in CLANG_DIAGNOSTIC.finditer(stderr[:dump]) if m.group(1) == name]
+    if said:
+        return max(said)
+    return None
+
+
+# --why: the root causes of the unsupported declarations, by how many
+# counted declarations each blocks (doc/PLAN-cxx-unsupported.md, step 0)
+# -fcxx-dump=unsupported: [SUB] NODE FILE:L:C <tab> DETAIL <tab> SITE, and for a
+# name held by a declaration not analysed <tab> held=FILE:L:C, that declaration
+UNSUPPORTED_LINE = re.compile(r'^\[([^\]]*)\] (\S+) (.*?):(\d+):(\d+)\t(.*?)\t([^\t]*)'
+                              r'(?:\theld=(.*?):(\d+):(\d+))?$')
+INSTANTIATION = re.compile(r'^instantiation refused: \[([^\]]*)\] (\S+:\d+) ?(.*)$')
+
+
+def unwrap_instantiation(sub, detail, site):
+    """an instantiation's refusal is its own analysis's: (SUB, DETAIL, SITE)
+    of the innermost failure ("instantiation refused: [SUB] FILE:LINE
+    DETAIL"; the detail itself may be another instantiation's)"""
+    while True:
+        i = INSTANTIATION.match(detail)
+        if not i:
+            return sub, detail, site
+        sub, site, detail = i.group(1), i.group(2), i.group(3)
+        site = os.path.relpath(site, R) if os.path.isabs(site) else site
+
+
+def why_key(sub, detail, site):
+    """(subclause, vcc's site, the detail with the name generic unless it is
+    a builtin's)"""
+    site = os.path.relpath(site, R) if os.path.isabs(site) else site
+    sub, detail, site = unwrap_instantiation(sub, detail, site)
+    if detail.startswith('evaluator '):
+        # "evaluator met L1234 (KIND)": the line is the cause
+        return f'[{sub}] {site} {detail}'
+    m = re.match(r'^(\S+) (.*)$', detail)
+    # (an extension's name, an attribute's or a builtin's, is the cause itself)
+    if m and not m.group(2).startswith('is a compiler builtin') and not sub.startswith('ext.'):
+        detail = 'NAME ' + m.group(2)
+    detail = re.sub(r'\d+', 'N', detail)
+    return f'[{sub}] {site} {detail}'.rstrip()
+
+
+def root_causes(test, opts, vpp, counted):
+    """{root key: [count, example]} for the counted unsupported declarations
+    of one run"""
+    cwd, name = os.path.dirname(test), os.path.basename(test)
+    ours = cxxparse.run(cxxpp.vpp_command(vpp, 'analysis,unsupported', opts, name,
+                                          ['-fcxx-debug-fallbacks']), cwd)
+    decls, refusals = [], []
+    # why the parser kept a declaration as tokens or erroneous: its fallback
+    # line, else its first error, by (file, line)
+    parse_why = {}
+    for line in (ours[2] or '').splitlines():
+        f = re.match(r'^vcc: declaration at (.*?):(\d+):\d+: (.*)$', line)
+        if not f:
+            f = re.match(r'^(.*?):(\d+):\d+: error: (.*)$', line)
+        if f:
+            reason = re.sub(r' at \d+:\d+', '', f.group(3))
+            if not reason.startswith('later step'):
+                reason = re.sub(r'`[^`]*`', '`X`', reason)
+            parse_why.setdefault((f.group(1), int(f.group(2))), reason)
+    for line in ours[1].splitlines():
+        u = UNSUPPORTED_LINE.match(line)
+        if u:
+            held = None
+            if u.group(8):
+                held = (u.group(8), int(u.group(9)), int(u.group(10)))
+            refusals.append({'sub': u.group(1), 'node': u.group(2), 'path': u.group(3),
+                             'pos': (int(u.group(4)), int(u.group(5))),
+                             'detail': u.group(6), 'site': u.group(7), 'held': held})
+            continue
+        m = ANALYSIS_LINE.match(line)
+        if m:
+            decls.append({'kind': m.group(1), 'path': m.group(2), 'l1': int(m.group(3)),
+                          'c1': int(m.group(4)), 'l2': int(m.group(6)), 'c2': int(m.group(7)),
+                          'result': m.group(8), 'sub': m.group(9)})
+
+    def first_refusal(d):
+        lo, hi = (d['l1'], d['c1']), (d['l2'], d['c2'])
+        inside = [r for r in refusals if r['path'] == d['path'] and lo <= r['pos'] <= hi]
+        same = [r for r in inside if r['sub'] == d['sub']]
+        if same:
+            return same[0]
+        if inside:
+            return inside[0]
+        return None
+
+    def holder(i, held):
+        """the declaration the refusal's held= field names: the innermost
+        one of the dump that has that place, before decls[i]"""
+        path, pos = held[0], held[1:]
+        best = None
+        for j in range(i - 1, -1, -1):
+            dj = decls[j]
+            if dj['path'] == path and (dj['l1'], dj['c1']) <= pos <= (dj['l2'], dj['c2']):
+                if best is None or (dj['l1'], dj['c1']) >= (decls[best]['l1'], decls[best]['c1']):
+                    best = j
+        return best
+
+    def root(i):
+        """the cause of decls[i]: its first refusal's, or, for a name held
+        by a declaration not analysed, that declaration's (a holder is
+        always an earlier declaration, so the chain ends)"""
+        while True:
+            d = decls[i]
+            if d['result'] != 'unsupported':
+                reason = ''
+                if d['result'] == 'not-parsed':
+                    for n in range(d['l1'], d['l2'] + 1):
+                        if (d['path'], n) in parse_why:
+                            reason = ' ' + parse_why[(d['path'], n)]
+                            break
+                if d['result'] == 'well-formed':
+                    # (it holds the name all the same: a deduction guide)
+                    return f'held by a well-formed {d["kind"]}', d
+                return f'{d["result"]}: {d["kind"]}{reason}', d
+            r = first_refusal(d)
+            if r is None:
+                return f'[{d["sub"]}] (no refusal line in the declaration)', d
+            j = None
+            if r['held']:
+                j = holder(i, r['held'])
+            if j is None:
+                return why_key(r['sub'], r['detail'], r['site']), d
+            i = j
+
+    out = {}
+    index = {(d['l1'], d['c1']): i for i, d in enumerate(decls) if d['path'] == name}
+    for pos in counted:
+        i = index.get(pos)
+        if i is None:
+            key, d = '(declaration not in the dump)', None
+        else:
+            key, d = root(i)
+        e = out.setdefault(key, [0, None])
+        e[0] += 1
+        if e[1] is None and d is not None:
+            e[1] = f'{relative(test)}:{pos[0]} {" ".join(opts[:2])} (root {os.path.basename(d["path"])}:{d["l1"]})'
+    return out
+
+
+def why_report(results, n):
+    total, examples = collections.Counter(), collections.defaultdict(list)
+    for r in results:
+        for key, (count, example) in r.get('why', {}).items():
+            total[key] += count
+            test = (example or '').split(':')[0]
+            if example and len(examples[key]) < 3 and all(not e.startswith(test + ':') for e in examples[key]):
+                examples[key].append(example)
+    path = os.path.join(R, 'work', 'cxx-sema-why.json')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump([{'key': k, 'declarations': c, 'examples': examples[k]}
+                   for k, c in total.most_common()], f, indent=1)
+    print(f'root causes ({len(total)} keys, {sum(total.values())} declarations; {relative(path)}):')
+    for k, c in total.most_common(n):
+        print(f'{c:7d}  {k}')
+        for e in examples[k]:
+            print(f'           {e}')
+
+
 def main():
     if sys.argv[1:] == ['selftest']:
         return selftest(cxxpp.find_clang()) | layout_selftest(cxxpp.find_clang())
@@ -941,6 +1180,9 @@ def main():
                     help='clang test directories to run (default CXX,SemaCXX,'
                          'SemaTemplate; "all": also CodeGenCXX, Parser, Sema; '
                          '--check and --bless are of the default only)')
+    ap.add_argument('--why', type=int, nargs='?', const=40, metavar='N',
+                    help='also the root causes of the unsupported declarations, top N '
+                         '(work/cxx-sema-why.json; doc/PLAN-cxx-unsupported.md)')
     ap.add_argument('patterns', nargs='*')
     a = ap.parse_args()
     if a.suites:
@@ -978,10 +1220,16 @@ def main():
     with concurrent.futures.ProcessPoolExecutor(a.j) as ex:
         results = list(ex.map(check, [j[0] for j in jobs], [j[1] for j in jobs],
                               [clang] * len(jobs), [vpp] * len(jobs), chunksize=8))
+        if a.why is not None:
+            counted = [r for r in results if r.get('counted')]
+            whys = ex.map(root_causes, [r['test'] for r in counted], [r['opts'] for r in counted],
+                          [vpp] * len(counted), [r['counted'] for r in counted], chunksize=8)
+            for r, w in zip(counted, whys):
+                r['why'] = w
     verdict, unsupported, types = collections.Counter(), collections.Counter(), collections.Counter()
     declared, symbols, lowering = collections.Counter(), collections.Counter(), collections.Counter()
     lookup, layout = collections.Counter(), collections.Counter()
-    crashes = failures = skipped = 0
+    crashes = failures = skipped = clang_crashed = 0
     seen = set()
     failed = set()
     for r in results:
@@ -998,6 +1246,7 @@ def main():
         crashes += 'crash' in kinds
         failures += bool(kinds)
         skipped += bool(r.get('skip'))
+        clang_crashed += 'clang_crash' in r
         for k, why in r['fail']:
             failed.add(failure_key(r, k, why))
         if r['fail'] or a.v:
@@ -1009,12 +1258,13 @@ def main():
             print(f'accepts {relative(r["test"])} {" ".join(r["opts"])}: '
                   f'lines {" ".join(str(n) for n in r["accepted"])}')
     runs = len(jobs)
-    print(f'{runs} runs of {len(seen)} tests ({unrunnable} not run, {skipped} skipped): '
+    print(f'{runs} runs of {len(seen)} tests ({unrunnable} not run, {skipped} skipped, '
+          f'{clang_crashed} compared up to where clang crashed): '
           f'no crash {runs - crashes}/{runs}')
     print(f'declarations: {verdict["agree"]} as clang, {verdict["we_reject"]} we reject and clang accepts '
           f'({verdict["known"]} known differences), {verdict["we_accept"]} we accept and clang rejects, '
           f'{verdict["unsupported"]} unsupported, {verdict["not_parsed"]} not parsed, '
-          f'{verdict["after_fatal"]} after a fatal error')
+          f'{verdict["after_fatal"]} after a fatal error, {verdict["after_crash"]} from where clang crashed')
     print(f'declared types: {declared["verified"]} verified, {declared["overload"]} as one of a name\'s overloads, '
           f'{declared["refuted"]} refuted, {declared["rejected"]} in declarations clang rejects, '
           f'{declared["unchecked"]} not checkable')
@@ -1034,6 +1284,18 @@ def main():
     if unsupported and a.unsupported:
         top = ', '.join(f'[{label}] {n}' for label, n in unsupported.most_common(a.unsupported))
         print(f'unsupported by subclause ({len(unsupported)}): {top}')
+    if a.why is not None:
+        why_report(results, a.why)
+    # every declaration we accept and clang rejects, one line each
+    accepted = sorted(f'{relative(r["test"])}:{first} {" ".join(r["opts"])}'
+                      for r in results for first in r.get('accepted', []))
+    if not a.patterns:
+        # a step's new ones are the diff against the previous run's file
+        path = os.path.join(R, 'work', 'cxx-sema-accepted.txt')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            for line in accepted:
+                f.write(line + '\n')
     if missing:
         print(f'not fetched: clang/test/{", clang/test/".join(missing)} (bench/fetch-testsuites.sh llvm)')
     metrics = {
@@ -1060,6 +1322,11 @@ def main():
             for key in sorted(failed):
                 f.write(key + '\n')
         print(f'{relative(KNOWN_FAILURES)}: {len(failed)} known failures')
+        with open(KNOWN_ACCEPTED, 'w') as f:
+            f.write(ACCEPTED_HEADER)
+            for line in accepted:
+                f.write(line + '\n')
+        print(f'{relative(KNOWN_ACCEPTED)}: {len(accepted)} declarations we accept and clang rejects')
         with open(METRICS, 'w') as f:
             json.dump(metrics, f, indent=1, sort_keys=True)
             f.write('\n')
@@ -1067,6 +1334,7 @@ def main():
         return 0
     if a.check:
         rc = check_known(failed, {relative(t) for t in seen})
+        rc |= check_accepted(accepted, {relative(t) for t in seen})
         if not a.patterns:
             rc |= check_metrics(metrics)
         return rc
@@ -1147,6 +1415,29 @@ def check_known(failed, ran):
         print(f'STALE  {k}')
     print(f'known failures: {len(known)} listed, {len(new)} new, {len(stale)} stale '
           f'(a fix removes its line: bench/cxx-sema.py --bless)')
+    return 1 if new or stale else 0
+
+
+def check_accepted(accepted, ran):
+    """The we-accept lines against src/test/cxx/sema/clang-accepted.txt (a
+    multiset: two declarations may start on one line): a new one fails, a
+    listed one that is gone is stale and fails too (--bless rewrites it)."""
+    known = collections.Counter()
+    if os.path.exists(KNOWN_ACCEPTED):
+        for line in open(KNOWN_ACCEPTED):
+            line = line.rstrip('\n')
+            if line and not line.startswith('#'):
+                known[line] += 1
+    now = collections.Counter(accepted)
+    new = sorted((now - known).elements())
+    # only a line of a test that ran can be stale (a PATTERN runs a part)
+    stale = sorted(k for k in (known - now).elements() if k.split(':', 1)[0] in ran)
+    for k in new:
+        print(f'NEW ACCEPT    {k}')
+    for k in stale:
+        print(f'STALE ACCEPT  {k}')
+    print(f'we accept, clang rejects: {sum(known.values())} listed, {len(new)} new, {len(stale)} stale '
+          f'({relative(KNOWN_ACCEPTED)}; bench/cxx-sema.py --bless rewrites it)')
     return 1 if new or stale else 0
 
 

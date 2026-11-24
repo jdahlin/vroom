@@ -31,6 +31,67 @@
 namespace cplusplus
 {
 
+bool semantic_analysis::list_initializer_list(qualified_type t) const
+{
+    const struct type &x = type_table[t.unqualified()];
+    return x.kind == type_kind::class_type &&
+           named(x.entity, "initializer_list") &&
+           std_namespace(entity_table[x.entity].enclosing);
+}
+
+/*
+ * [over.ics.list]/5: "if the parameter type is std::initializer_list<X> and
+ * all the elements of the initializer list can be implicitly converted to
+ * X, the implicit conversion sequence is the worst conversion necessary to
+ * convert an element of the list to X"; /8: for "array of N X" the same
+ * for X.  An element that is not a braced-init-list or string-literal
+ * never converts to an array X: brace elision belongs to the
+ * initialization ([dcl.init.aggr]/15), not to the conversion sequence.
+ */
+bool semantic_analysis::list_sequence_possible(SyntaxRef list,
+                                               qualified_type target)
+{
+    const struct type &t = type_table[target.unqualified()];
+    qualified_type element = target;
+    if (t.kind == type_kind::class_type) {
+        entity_index c = t.entity;
+        if (!named(c, "initializer_list") ||
+            !std_namespace(entity_table[c].enclosing) ||
+            !entity_table[c].instantiation)
+            return true;
+        const instantiation_record &inst =
+            instantiations[entity_table[c].instantiation - 1];
+        if (inst.argument_count < 1 ||
+            template_arguments[inst.first_argument].kind !=
+                template_argument::kind_t::type)
+            return true;
+        element = template_arguments[inst.first_argument].type;
+    } else if (t.kind == type_kind::array) {
+        element = t.operand;
+    } else {
+        return true;
+    }
+    if (type_table[element.unqualified()].kind != type_kind::array)
+        return true;
+    owned_array<SyntaxElement> clauses;
+    if (list_clauses(list, clauses) != analysis_result::well_formed)
+        return true;
+    for (size_t i = 0; i < clauses.size(); i++) {
+        if (clauses[i].is(syntax_kind::braced_init_list)) {
+            if (!list_sequence_possible(clauses[i], element))
+                return false;
+            continue;
+        }
+        bool string =
+            clauses[i].is_token() &&
+            tokens[clauses[i].token()].kind == token_kind::literal &&
+            tokens[clauses[i].token()].literal == literal_kind::string_literal;
+        if (!string)
+            return false;
+    }
+    return true;
+}
+
 void semantic_analysis::overload_set(entity_index e,
                                      owned_array<entity_index> &out) const
 {
@@ -170,9 +231,16 @@ analysis_result semantic_analysis::best_viable_function(
                             (*written_arguments)[k], list_target, true, value);
                         substituting--;
                         bool rolled_back = undo_substitution(mark);
-                        if (r == analysis_result::well_formed) {
+                        if (r == analysis_result::well_formed &&
+                            !list_sequence_possible((*written_arguments)[k],
+                                                    list_target)) {
+                            a.kind = sequence::form::bad;
+                        } else if (r == analysis_result::well_formed) {
                             a.kind = sequence::form::user_defined;
                             a.target = list_target;
+                            a.from_list = true;
+                            a.to_initializer_list =
+                                list_initializer_list(list_target);
                             if (semantics[value.node].kind ==
                                 semantic_kind::construct)
                                 a.function = semantics[value.node].b;

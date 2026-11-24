@@ -51,7 +51,8 @@ uint32_t c_lowering::destruction(uint32_t s, qualified_type object_type,
 
 uint32_t c_lowering::each_element(uint32_t s, ast_qualified_type array,
                                   ast_qualified_type element, uint64_t bound,
-                                  bool reverse, entity_index e, token_index at)
+                                  bool reverse, entity_index e, token_index at,
+                                  const semantic_node *construct)
 {
     ast_qualified_type index_type = ast_builder_type_basic(AST_TYPE_LONG);
     uint32_t i = c_local(c, index_type);
@@ -64,8 +65,20 @@ uint32_t c_lowering::each_element(uint32_t s, ast_qualified_type array,
     uint32_t object =
         make(AST_NODE_INDEX, element, first, c_variable(c, i, index_type), 0, 0,
              AST_NODE_FLAG_LVALUE);
-    uint32_t call =
-        special_call(e, address_of(object, pointer), nullptr, 0, at);
+    owned_array<uint32_t> arguments;
+    uint32_t argument_count = 0;
+    if (construct) {
+        const uint32_t *given = analysis.semantics.items(construct->first);
+        argument_count = construct->count;
+        for (uint32_t k = 0; k < argument_count; k++) {
+            uint32_t a = expression(given[k]);
+            if (!a)
+                return 0;
+            arguments.append(a);
+        }
+    }
+    uint32_t call = special_call(e, address_of(object, pointer),
+                                 arguments.data(), argument_count, at);
     if (!call)
         return 0;
     uint32_t items[2] = {

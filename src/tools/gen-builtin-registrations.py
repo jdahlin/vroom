@@ -108,6 +108,112 @@ def generate_integer(reader):
     return '\n'.join(lines) + '\n'
 
 
+# C23's <stdbit.h> functions in clang's custom-type-checked spellings
+# (CustomTypeChecking, prototype "void(...)" or "bool(...)": the operand type
+# decides).  The operation names are the C++ front end's builtin_stdc_op.
+# The C front end lowers the rotations as nodes and two counts as library
+# bodies; the others are known to analysis and constant evaluation only
+# (the C++ front end refuses a call outside a constant expression with the
+# reason).  Columns of the lowering: (kind, AST id, C flags, C signature).
+STDC_RECORDS = (
+    ('StdcLeadingZeros', 'leading_zeros', None),
+    ('StdcLeadingOnes', 'leading_ones', None),
+    ('StdcTrailingZeros', 'trailing_zeros', ('body', '', 1, 'u.')),
+    ('StdcTrailingOnes', 'trailing_ones', None),
+    ('StdcFirstLeadingZero', 'first_leading_zero', None),
+    ('StdcFirstLeadingOne', 'first_leading_one', None),
+    ('StdcFirstTrailingZero', 'first_trailing_zero', None),
+    ('StdcFirstTrailingOne', 'first_trailing_one', None),
+    ('StdcCountZeros', 'count_zeros', None),
+    ('StdcCountOnes', 'count_ones', ('body', '', 1, 'u.')),
+    ('StdcHasSingleBit', 'has_single_bit', None),
+    ('StdcBitWidth', 'bit_width', None),
+    ('StdcBitFloor', 'bit_floor', None),
+    ('StdcBitCeil', 'bit_ceil', None),
+    ('StdcRotateLeft', 'rotate_left', ('node', 'CC_BUILTIN_STDC_ROTL', 0, 'u..')),
+    ('StdcRotateRight', 'rotate_right', ('node', 'CC_BUILTIN_STDC_ROTR', 0, 'u..')),
+    ('Bitreverseg', 'bitreverse', None),
+)
+
+
+def generate_stdc(reader):
+    by_record = {}
+    for row in read_table(reader, 'Builtins.td'):
+        by_record.setdefault(row['record'], []).append(row)
+    lines = [
+        GENERATED,
+        '/* STDC_NODE (spelling, operation, AST id, C flags, C signature): the C',
+        '   front end has a node; STDC_BODY (spelling, operation, C flags, C',
+        '   signature): a library body there; STDC_OP (spelling, operation):',
+        '   neither.  The operation is builtin_stdc_op\'s name. */',
+    ]
+    for record, op, lowering in STDC_RECORDS:
+        rows = by_record.get(record, [])
+        if len(rows) != 1:
+            raise ValueError(f'{record}: expected one record, got {len(rows)}')
+        row, = rows
+        name = row['spelling']
+        expected = '__builtin_bitreverseg' if op == 'bitreverse' else f'__builtin_stdc_{op}'
+        if name != expected:
+            raise ValueError(f'{record}: expected spelling {expected}, got {name}')
+        if (row['alias_of'] or row['features'] or row['header'] or row['languages'] or
+                set(row['attributes']) != {'NoThrow', 'Const', 'Constexpr', 'CustomTypeChecking'} or
+                not row['prototype_template'].endswith('(...)')):
+            raise ValueError(f'{name}: unexpected availability, attributes or prototype')
+        if lowering is None:
+            lines.append(f'STDC_OP("{name}", {op})')
+        elif lowering[0] == 'node':
+            lines.append(f'STDC_NODE("{name}", {op}, {lowering[1]}, {lowering[2]}, "{lowering[3]}")')
+        else:
+            lines.append(f'STDC_BODY("{name}", {op}, {lowering[2]}, "{lowering[3]}")')
+    return '\n'.join(lines) + '\n'
+
+
+# Builtins whose type checking is custom (clang's CustomTypeChecking) and that
+# only the C++ front end has: the alignment builtins (prototype "T(void
+# const*, size_t)": the operand type decides), __builtin_get_vtable_pointer
+# and __builtin_invoke.  Columns: record, spelling, languages, attributes,
+# then the C++ front end's builtin_form, the form's own number, builtin_fold
+# and builtin_lowering.
+_CONST = {'NoThrow', 'Const', 'Constexpr', 'CustomTypeChecking'}
+CXX_RECORDS = (
+    ('AlignUp', '__builtin_align_up', '', _CONST, 'align', 0, 'align', 'align'),
+    ('AlignDown', '__builtin_align_down', '', _CONST, 'align', 1, 'align', 'align'),
+    ('IsAligned', '__builtin_is_aligned', '', _CONST, 'align', 2, 'align', 'align'),
+    ('GetVtablePointer', '__builtin_get_vtable_pointer', 'CXX_LANG',
+     {'NoThrow', 'Const', 'CustomTypeChecking'}, 'vtable_pointer', 0, 'none',
+     'vtable_pointer'),
+    ('IsWithinLifetime', '__builtin_is_within_lifetime', 'CXX_LANG',
+     {'NoThrow', 'CustomTypeChecking', 'Consteval'}, 'within_lifetime', 0, 'none',
+     'refuse'),
+    ('Invoke', '__builtin_invoke', '', {'CustomTypeChecking', 'Constexpr'},
+     'invoke', 0, 'none', 'node'),
+)
+
+
+def generate_cxx(reader):
+    by_record = {}
+    for row in read_table(reader, 'Builtins.td'):
+        by_record.setdefault(row['record'], []).append(row)
+    lines = [
+        GENERATED,
+        '/* CXX_BUILTIN (spelling, form, which, fold, lowering): the C++ front',
+        '   end\'s builtin_form, the form\'s number, builtin_fold, builtin_lowering. */',
+    ]
+    for record, name, languages, attributes, form, which, fold, lowering in CXX_RECORDS:
+        rows = by_record.get(record, [])
+        if len(rows) != 1:
+            raise ValueError(f'{record}: expected one record, got {len(rows)}')
+        row, = rows
+        if row['spelling'] != name:
+            raise ValueError(f'{record}: expected spelling {name}, got {row["spelling"]}')
+        if (row['alias_of'] or row['features'] or row['header'] or
+                row['languages'] != languages or set(row['attributes']) != attributes):
+            raise ValueError(f'{name}: unexpected availability or attributes')
+        lines.append(f'CXX_BUILTIN("{name}", {form}, {which}, {fold}, {lowering})')
+    return '\n'.join(lines) + '\n'
+
+
 def generate_targets(reader):
     # The compiler owns the dispatch IDs. The input owns the spellings,
     # prototypes and prerequisites. Only these wired operations are emitted.
@@ -213,6 +319,8 @@ def main():
     try:
         outputs = {
             args.output_root / 'frontend/integer-builtins.inc': generate_integer(args.reader),
+            args.output_root / 'frontend/stdc-builtins.inc': generate_stdc(args.reader),
+            args.output_root / 'frontend/cxx-builtins.inc': generate_cxx(args.reader),
             args.output_root / 'frontend/c/target-builtins.inc': generate_targets(args.reader),
             args.output_root / 'frontend/c/builtin-stubs.inc': generate_stubs(args.reader),
         }

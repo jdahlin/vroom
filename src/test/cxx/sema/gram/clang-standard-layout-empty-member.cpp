@@ -1,0 +1,24 @@
+// __is_standard_layout of a class with an empty base and an empty member after a bit-field, an unnamed bit-field or of zero size ([class.prop]/3's M(X), [class.bit]/2, [intro.object]/8); values are clang++'s.
+struct E {};
+struct B : E { int x : 3; E e; };
+struct C : E { int : 0; E e; };
+struct D : E { int : 3; E e; };
+struct F : E { E e; int x:3; };
+struct G : E { int x:3; int y; };
+struct H : E { [[no_unique_address]] E e; int x : 3; };
+struct I : E { int x : 3; [[no_unique_address]] E e; };
+struct J { int x:3; E e; };
+struct K : E { int :0; int y; };
+struct L : E { int : 3; };
+struct M : E { int : 0; [[no_unique_address]] E e;};
+static_assert(__is_standard_layout(B), "B");
+static_assert(!__is_standard_layout(C), "C");
+static_assert(!__is_standard_layout(D), "D");
+static_assert(!__is_standard_layout(F), "F");
+static_assert(__is_standard_layout(G), "G");
+static_assert(!__is_standard_layout(H), "H");
+static_assert(!__is_standard_layout(I), "I");
+static_assert(__is_standard_layout(J), "J");
+static_assert(__is_standard_layout(K), "K");
+static_assert(__is_standard_layout(L), "L");
+static_assert(!__is_standard_layout(M), "M");

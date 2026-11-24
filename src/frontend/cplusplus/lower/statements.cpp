@@ -353,6 +353,12 @@ bool c_lowering::needs_run_time(uint32_t n) const
     case semantic_kind::assignment:
     case semantic_kind::increment:
         return true;
+    case semantic_kind::bind_reference:
+        /* [class.temporary]/6: a temporary of static storage, made and
+           its destructor registered when the program starts */
+        if (!is_glvalue(node(x.a)))
+            return true;
+        break;
     case semantic_kind::conversion:
         if (static_cast<conversion_kind>(x.op) ==
                 conversion_kind::lvalue_to_rvalue &&

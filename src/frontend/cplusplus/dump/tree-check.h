@@ -59,6 +59,7 @@ struct tree_checker {
     {
         return is_expression(k) || k == semantic_kind::zero ||
                k == semantic_kind::initializer_list ||
+               k == semantic_kind::default_member_initializer ||
                k == semantic_kind::bind_reference ||
                k == semantic_kind::construct || k == semantic_kind::destroy;
     }
@@ -216,10 +217,21 @@ struct tree_checker {
             prvalue(n, node.a, "operand");
             break;
         case semantic_kind::binary:
-        case semantic_kind::subscript:
             child(n, node.a, tree_sort::expression, false, "left operand");
             child(n, node.b, tree_sort::expression, false, "right operand");
             prvalue(n, node.a, "left operand");
+            prvalue(n, node.b, "right operand");
+            break;
+        case semantic_kind::subscript:
+            child(n, node.a, tree_sort::expression, false, "left operand");
+            child(n, node.b, tree_sort::expression, false, "right operand");
+            /* [ext:gnu_vector_size]: a lane of a vector object is an lvalue
+               of that object, which the vector operand is */
+            if (node.a >= analysis.semantics.size() ||
+                analysis.type_table[analysis.semantics[node.a]
+                                        .type.unqualified()]
+                        .kind != type_kind::vector)
+                prvalue(n, node.a, "left operand");
             prvalue(n, node.b, "right operand");
             break;
         case semantic_kind::logical_and:
@@ -285,6 +297,9 @@ struct tree_checker {
             break;
         case semantic_kind::initializer_list:
             list(n, tree_sort::initializer, "element");
+            break;
+        case semantic_kind::default_member_initializer:
+            child(n, node.a, tree_sort::initializer, false, "initializer");
             break;
         case semantic_kind::bind_reference:
             child(n, node.a, tree_sort::expression, false, "referent");
@@ -481,6 +496,10 @@ size_t check_tree(const semantic_analysis &analysis, const syntax_tree &tree,
     for (const semantic_analysis::definition_record &d : analysis.definitions) {
         if (declaration_result(analysis, d.declaration) !=
             analysis_result::well_formed)
+            continue;
+        /* a system header's inline function whose body is not supported
+           is left undefined (defer_unsupported_body): its tree is partial */
+        if (analysis.entity_table[d.entity].unsupported_body)
             continue;
         uint32_t root = analysis.entity_table[d.entity].definition;
         if (!root) {

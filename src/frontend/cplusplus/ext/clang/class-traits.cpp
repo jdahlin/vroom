@@ -164,7 +164,8 @@ bool semantic_analysis::derives_from(entity_index d, entity_index b) const
    ([meta.rel]/5: "complete type"), left unsupported. */
 analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
                                                        bool virtual_base,
-                                                       expression_meaning &m)
+                                                       expression_meaning &m,
+                                                       bool interconvertible)
 {
     qualified_type b, d;
     VTRY(r, type_id(n[2], b));
@@ -182,6 +183,7 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
             /* __builtin_is_virtual_base_of(B, D): B is one of D's virtual
                bases, direct or indirect ([class.mi]/4); a class is none of
                its own */
+            require_complete(dk.entity);
             if (!entity_table[dk.entity].size)
                 return not_supported(n, "meta.rel");
             const entity &x = entity_table[dk.entity];
@@ -194,9 +196,22 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
         } else if (bk.entity == dk.entity) {
             value = !entity_table[bk.entity].union_;
         } else {
+            require_complete(dk.entity);
             if (!entity_table[dk.entity].size)
                 return not_supported(n, "meta.rel");
             value = derives_from(dk.entity, bk.entity);
+        }
+        /* [meta.rel] is_pointer_interconvertible_base_of: "Derived is
+           a standard-layout class and Base is Derived or one of its
+           base classes" ([basic.compound]/4.3's chain of first
+           members), what clang answers: a class with data in two of
+           its bases is not standard-layout (not by this rule) */
+        if (interconvertible && value) {
+            bool layout = false;
+            if (!class_property_trait(int(unary_trait_kind::is_standard_layout),
+                                      d, layout))
+                return not_supported(n, "meta.rel");
+            value = layout;
         }
     }
     m = integer_constant(fundamental_type::bool_, value, n.first_token());
@@ -224,6 +239,7 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     entity_index c = 0;
     if (is_class) {
         c = type_table[t.unqualified()].entity;
+        require_complete(c);
         if (!entity_table[c].size)
             return false;
     }
@@ -262,9 +278,6 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
     }
     /* [basic.types]/10 (literal_type), "unknown" is not answered */
     case unary_trait_kind::is_literal: {
-        /* a union's: its rule differs between editions */
-        if (is_class && entity_table[c].union_)
-            return false;
         constness literal = literal_type(t);
         if (literal == constness::unknown)
             return false;
@@ -319,9 +332,82 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
         }
         return true;
     }
+    /* [ext:clang_type_traits] the deprecated __has_trivial_move_* and
+       __has_nothrow_* traits.  A scalar: true (an assignment of a const
+       one, not).  A class: what clang answers by its implicit special
+       members; one that declares its own copy or move members, or has a
+       non-trivial subobject, is not followed (clang's answer there is
+       by the declared exception specifications and by overload
+       resolution of the copy and move members) */
+    case unary_trait_kind::has_trivial_move_constructor:
+    case unary_trait_kind::has_trivial_move_assign:
+    case unary_trait_kind::has_nothrow_copy:
+    case unary_trait_kind::has_nothrow_assign:
+    case unary_trait_kind::has_nothrow_constructor:
+    case unary_trait_kind::has_nothrow_move_assign: {
+        unary_trait_kind w = static_cast<unary_trait_kind>(which);
+        if (unbounded || kind == type_kind::function ||
+            kind == type_kind::lvalue_reference ||
+            kind == type_kind::rvalue_reference ||
+            fundamental_of(t) == fundamental_type::void_)
+            return false;
+        bool assign = w == unary_trait_kind::has_nothrow_assign;
+        if (!is_class) {
+            answer = !(assign && const_qualified);
+            return true;
+        }
+        if (triviality_unknown(c))
+            return false;
+        const entity &x = entity_table[c];
+        if (declares_move_constructor(c) || declares_move_assignment(c) ||
+            declares_copy_constructor(c) || x.user_copy_assignments)
+            return false;
+        bool declared_destructor =
+            x.destructor && !entity_table[x.destructor].implicit;
+        switch (w) {
+        case unary_trait_kind::has_trivial_move_constructor:
+        case unary_trait_kind::has_trivial_move_assign:
+        case unary_trait_kind::has_nothrow_move_assign:
+            /* a user-declared destructor leaves no implicit move */
+            if (declared_destructor)
+                return false;
+            break;
+        default:
+            break;
+        }
+        switch (w) {
+        case unary_trait_kind::has_trivial_move_constructor:
+        case unary_trait_kind::has_nothrow_copy:
+            answer = copies_bytes(c);
+            break;
+        case unary_trait_kind::has_nothrow_constructor: {
+            if (clang_template_default_constructor_of(x))
+                return false;
+            bool known = true;
+            answer = trivial_default_constructor(c, known);
+            if (!known)
+                return false;
+            break;
+        }
+        default:
+            if (assign && const_qualified) {
+                answer = false;
+                return true;
+            }
+            answer = assigned_bitwise(c);
+            break;
+        }
+        /* a non-trivial answer rests on exception specifications */
+        return answer;
+    }
     case unary_trait_kind::has_unique_object_representations:
         if (unbounded)
             return false;
+        if (kind == type_kind::lvalue_reference ||
+            kind == type_kind::rvalue_reference) {
+            answer = false;
+            return true;
+        }
         return unique_representation(t, answer);
     /* [ext:clang_type_traits] __is_trivially_relocatable (clang's own
        rule) and __builtin_is_cpp_trivially_relocatable ([class.prop] of
@@ -369,10 +455,6 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
         answer = !array && is_class && polymorphic_class(c);
         return true;
     case unary_trait_kind::is_aggregate:
-        /* is_aggregate does not take a base class that is empty yet
-           ([dcl.init.aggr]/1.4's public bases) */
-        if (is_class && entity_table[c].base_count)
-            return false;
         answer = array || (is_class && is_aggregate(c));
         return true;
     case unary_trait_kind::is_empty:
@@ -510,7 +592,8 @@ bool semantic_analysis::first_data_class(entity_index c,
 }
 
 /* [class.prop]/3's M(X) for the standard-layout rule: the types of the
-   first non-static data member of X, and of those, recursively (an
+   first non-static data member of X (and of a member of zero size), and
+   of those, recursively (an
    array's element type is included); a union's, of every member */
 void semantic_analysis::layout_member_types(entity_index c,
                                             owned_array<type_index> &out)
@@ -540,14 +623,24 @@ void semantic_analysis::layout_member_types(entity_index c,
     first_data_class(c, owner);
     if (!owner)
         return;
+    /* [class.bit]/2: "An unnamed bit-field is not a member": the first
+       member is the first named one.  [intro.object]/8: a member of zero
+       size ([[no_unique_address]] of an empty class) may be at offset zero
+       wherever it is declared, and is in M(X) too (clang's IsZeroSize) */
     const entity &o = entity_table[owner];
+    bool first = true;
     for (uint32_t i = 0; i < o.member_count; i++) {
         const entity &m = entity_table[class_members[o.first_member + i]];
-        if (m.kind == entity_kind::variable && m.nonstatic_member &&
-            !m.base_subobject) {
+        if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+            m.base_subobject || (m.bit_field && !m.name))
+            continue;
+        const type &mt = type_table[m.type.unqualified()];
+        bool zero_size = m.no_unique_address &&
+                         mt.kind == type_kind::class_type &&
+                         empty_class(mt.entity);
+        if (first || zero_size)
             add(add, m.type);
-            return;
-        }
+        first = false;
     }
 }
 
@@ -594,10 +687,6 @@ bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
             return true;
     }
     if (x.base_count) {
-        /* an empty base after a bit-field: clang's own rule */
-        for (uint32_t i = 0; i < x.member_count; i++)
-            if (entity_table[class_members[x.first_member + i]].bit_field)
-                return false;
         entity_index owner = 0;
         if (!first_data_class(c, owner))
             return true;
@@ -646,8 +735,8 @@ bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
  * such; a class, when it is trivially copyable, is no dynamic class, and its
  * bases and members all have, with no padding between or after them (their
  * bytes cover the class's size); a union, when each member has and fills
- * it.  false: not analysed (bit-fields, [[no_unique_address]], member
- * pointers).
+ * it; a bit-field counts its width.  false: not analysed (an array of
+ * unknown bound).
  */
 bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
 {
@@ -663,7 +752,15 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
     switch (record.kind) {
     case type_kind::enumeration:
     case type_kind::pointer:
+    case type_kind::pointer_to_member:
         answer = true;
+        return true;
+    /* [ext:clang_type_traits] an atomic, complex or vector type has not
+       (clang++) */
+    case type_kind::atomic:
+    case type_kind::complex:
+    case type_kind::vector:
+    case type_kind::ext_vector:
         return true;
     case type_kind::fundamental:
         if (is_integral(t)) {
@@ -671,13 +768,55 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
             return true;
         }
         /* a floating-point type has two representations of a zero */
-        return is_floating(t);
+        if (is_floating(t))
+            return true;
+        /* void and std::nullptr_t: no object representation of a value
+           ([ext:clang_type_traits]) */
+        return fundamental_of(t) == fundamental_type::void_ ||
+               fundamental_of(t) == fundamental_type::std_nullptr_t;
+    case type_kind::bit_int:
+        /* [ext:clang_type_traits] _BitInt(N): unique when its bits fill
+           its bytes, as clang's isUniqueObjRep: N == 8 * the size */
+        if (!record.bound)
+            return false;
+        answer = record.bound == 8 * bit_int_layout(record.bound, false);
+        return true;
+    case type_kind::function:
+        /* no object of the type */
+        return true;
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+        /* a reference member is as a pointer ("References are still
+           unique", clang's test); the trait of a reference type is false,
+           where the trait's case answers it */
+        answer = true;
+        return true;
     case type_kind::class_type:
         break;
     default:
         return false;
     }
-    entity_index c = record.entity;
+    bool unique = false;
+    uint64_t extent = 0;
+    if (!unique_class_extent(record.entity, unique, extent))
+        return false;
+    answer = unique && extent == 8 * entity_table[record.entity].size;
+    return true;
+}
+
+/*
+ * clang's structHasUniqueObjectRepresentations: whether the class's bases
+ * and members all have unique representations and cover its bytes from
+ * the first with no gap; `extent` is the bits they cover (a base's or a
+ * [[no_unique_address]] member's tail padding is left to what follows it,
+ * the caller compares the whole).  false: not analysed.
+ */
+bool semantic_analysis::unique_class_extent(entity_index c, bool &unique,
+                                            uint64_t &extent)
+{
+    unique = false;
+    extent = 0;
+    require_complete(c);
     const entity &x = entity_table[c];
     if (!x.size)
         return false;
@@ -699,60 +838,206 @@ bool semantic_analysis::unique_representation(qualified_type t, bool &answer)
         if (empty_class(bc))
             continue;
         bool sub = false;
-        if (!unique_representation(b.type, sub))
+        uint64_t covered = 0;
+        if (!unique_class_extent(bc, sub, covered))
             return false;
-        if (!sub) {
-            answer = false;
+        /* clang: a base without unique representations has the class
+           without */
+        if (!sub)
             return true;
-        }
-        pieces.append(piece{b.offset, entity_table[bc].size});
+        pieces.append(piece{8 * b.offset, covered});
     }
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
         if (m.kind != entity_kind::variable || !m.nonstatic_member ||
             m.base_subobject)
             continue;
-        if (m.bit_field || m.no_unique_address)
-            return false;
+        /* an unnamed bit-field is padding */
+        if (m.bit_field && !m.name)
+            continue;
+        /* an empty [[no_unique_address]] member has no bytes */
+        if (m.no_unique_address &&
+            type_table[m.type.unqualified()].kind == type_kind::class_type &&
+            empty_class(type_table[m.type.unqualified()].entity))
+            continue;
         bool sub = false;
-        if (!unique_representation(m.type, sub))
+        uint64_t covered = 0;
+        bool overlapping =
+            m.no_unique_address &&
+            type_table[m.type.unqualified()].kind == type_kind::class_type;
+        if (overlapping) {
+            if (!unique_class_extent(type_table[m.type.unqualified()].entity,
+                                     sub, covered))
+                return false;
+        } else if (!unique_representation(m.type, sub))
             return false;
-        if (!sub) {
-            answer = false;
+        if (!sub)
             return true;
-        }
-        uint64_t size = size_of_type(m.type);
+        uint64_t size = 8 * size_of_type(m.type);
+        /* a [[no_unique_address]] class leaves its tail padding to the
+           next member */
+        if (overlapping)
+            size = covered;
+        /* [ext:clang_type_traits] a bit-field's bits are its width, a
+           union's the whole class (as clang++ answers) */
+        if (m.bit_field)
+            size = m.bit_width;
+        /* a reference member's bytes are a pointer's */
+        if (type_table[m.type.unqualified()].kind ==
+                type_kind::lvalue_reference ||
+            type_table[m.type.unqualified()].kind ==
+                type_kind::rvalue_reference)
+            size = 8 * size_of_type(qualified_type::make(
+                           type_table.pointer_to(m.type), cv_none));
         if (!size)
             continue;
         if (x.union_) {
-            if (size != x.size) {
-                answer = false;
+            if (!m.bit_field && size != 8 * x.size)
                 return true;
-            }
             pieces_in_union = true;
             continue;
         }
-        pieces.append(piece{m.offset, size});
+        if (m.bit_field)
+            pieces.append(piece{m.bit_offset, size});
+        else
+            pieces.append(piece{8 * m.offset, size});
     }
     if (x.union_) {
-        answer = pieces_in_union;
+        unique = pieces_in_union;
+        extent = 8 * x.size;
         return true;
     }
     uint64_t end = 0;
+    uint32_t taken = 0;
     for (;;) {
         /* the piece that starts at the end of those taken */
         bool found = false;
         for (const piece &p : pieces)
             if (p.offset == end && p.size) {
                 end += p.size;
+                taken++;
                 found = true;
                 break;
             }
         if (!found)
             break;
     }
-    answer = end == x.size;
+    /* a piece left over starts after a gap */
+    unique = taken == pieces.size();
+    extent = end;
     return true;
+}
+
+/*
+ * [basic.types]/11 and [class.mem]/26: whether a and b are
+ * layout-compatible types, cv-qualification ignored: the same type; two
+ * enumerations with the same underlying type; two arrays of
+ * layout-compatible elements and the same bound; two standard-layout
+ * non-union classes, without base classes, whose members are in order
+ * layout-compatible, with the same bit-field widths, offsets and no
+ * [[no_unique_address]] (clang, CWG 2759).  known is false for what is not
+ * followed: an
+ * incomplete class, a union, a class with bases.
+ */
+bool semantic_analysis::layout_compatible(qualified_type a, qualified_type b,
+                                          bool &known)
+{
+    a = qualified_type::make(a.unqualified(), cv_none);
+    b = qualified_type::make(b.unqualified(), cv_none);
+    if (a == b) {
+        const struct type &k = type_table[a.unqualified()];
+        if (k.kind == type_kind::class_type) {
+            require_complete(k.entity);
+            if (!entity_table[k.entity].size)
+                known = false;
+        }
+        return true;
+    }
+    const struct type &x = type_table[a.unqualified()];
+    const struct type &y = type_table[b.unqualified()];
+    if (x.kind == type_kind::array && y.kind == type_kind::array) {
+        if (x.bound_known != y.bound_known)
+            return false;
+        if (x.bound_known && x.bound != y.bound)
+            return false;
+        return layout_compatible(x.operand, y.operand, known);
+    }
+    if (x.kind == type_kind::enumeration && y.kind == type_kind::enumeration) {
+        require_complete(x.entity);
+        require_complete(y.entity);
+        return entity_table[x.entity].underlying ==
+               entity_table[y.entity].underlying;
+    }
+    if (x.kind != type_kind::class_type || y.kind != type_kind::class_type)
+        return false;
+    entity_index c = x.entity, d = y.entity;
+    require_complete(c);
+    require_complete(d);
+    const entity &p = entity_table[c];
+    const entity &q = entity_table[d];
+    if (!p.size || !q.size) {
+        known = false;
+        return false;
+    }
+    if (p.union_ != q.union_)
+        return false;
+    bool layout_p = false, layout_q = false;
+    if (!standard_layout_class(c, layout_p) ||
+        !standard_layout_class(d, layout_q)) {
+        known = false;
+        return false;
+    }
+    if (!layout_p || !layout_q)
+        return false;
+    if (p.union_ || p.base_count || q.base_count || p.virtual_base_count ||
+        q.virtual_base_count) {
+        known = false;
+        return false;
+    }
+    owned_array<entity_index> first, second;
+    for (uint32_t i = 0; i < p.member_count; i++) {
+        const entity &m = entity_table[class_members[p.first_member + i]];
+        if (m.kind == entity_kind::variable && m.nonstatic_member)
+            first.append(class_members[p.first_member + i]);
+    }
+    for (uint32_t i = 0; i < q.member_count; i++) {
+        const entity &m = entity_table[class_members[q.first_member + i]];
+        if (m.kind == entity_kind::variable && m.nonstatic_member)
+            second.append(class_members[q.first_member + i]);
+    }
+    if (first.size() != second.size())
+        return false;
+    for (uint32_t i = 0; i < first.size(); i++) {
+        const entity &m = entity_table[first[i]];
+        const entity &n = entity_table[second[i]];
+        /* clang: a [[no_unique_address]] member makes two distinct
+           classes not layout-compatible (CWG 2759); a member with another
+           alignment or offset is not the same layout */
+        if (m.bit_field != n.bit_field || m.bit_width != n.bit_width ||
+            m.no_unique_address || n.no_unique_address || m.offset != n.offset)
+            return false;
+        if (!layout_compatible(m.type, n.type, known))
+            return false;
+    }
+    return true;
+}
+
+/* ( type-id , type-id ): __is_layout_compatible(T, U), [meta.rel] */
+analysis_result
+semantic_analysis::clang_layout_compatible_trait(SyntaxRef n,
+                                                 expression_meaning &m)
+{
+    qualified_type t, u;
+    VTRY(r, type_id(n[2], t));
+    VTRY_SET(r, type_id(n[4], u));
+    if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
+        return not_supported(n, "temp.dep.constexpr");
+    bool known = true;
+    bool answer = layout_compatible(t, u, known);
+    if (!known)
+        return not_supported(n, "meta.rel");
+    m = integer_constant(fundamental_type::bool_, answer, n.first_token());
+    return analysis_result::well_formed;
 }
 
 /*
@@ -817,6 +1102,7 @@ bool semantic_analysis::relocatable_type(qualified_type t, bool cpp26,
         return false;
     }
     entity_index c = record.entity;
+    require_complete(c);
     const entity &x = entity_table[c];
     if (!x.size) {
         known = false;

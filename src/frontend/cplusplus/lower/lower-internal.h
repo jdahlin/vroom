@@ -180,6 +180,8 @@ class c_lowering
        made, and __cxa_pure_virtual's ([abi:pure-virtual]) */
     owned_array<uint32_t> vtables;
     uint32_t pure_virtual = 0;
+    /* __cxa_deleted_virtual, the slot of a destructor defined as deleted */
+    uint32_t deleted_virtual = 0;
     uint32_t vtable(entity_index k, token_index at);
     ast_qualified_type vtable_type(entity_index k);
     /* the address point of class k's virtual table: &vtable[2]
@@ -395,12 +397,14 @@ class c_lowering
     void init_statement(uint32_t n, owned_array<uint32_t> &out);
     /* for each element of the array in symbol s (type array, elements of
        type element), first to last or last to first: a call of special
-       member e on its address */
+       member e on its address (a construct's arguments, each element's
+       own evaluation of them, [dcl.fct.default]/9) */
     uint32_t counted_loop(uint32_t i, ast_qualified_type t, uint32_t count,
                           bool reverse, uint32_t body);
     uint32_t each_element(uint32_t s, ast_qualified_type array,
                           ast_qualified_type element, uint64_t bound,
-                          bool reverse, entity_index e, token_index at);
+                          bool reverse, entity_index e, token_index at,
+                          const semantic_node *construct = nullptr);
 
     /* declaring every function's symbol, which uses none */
     bool declaring_symbols = false;
@@ -583,6 +587,20 @@ class c_lowering
        the reference it initializes (a declared variable's), not to the
        end of the full-expression */
     const semantic_node *extended_temporary = nullptr;
+    /* [basic.stc.static]: the namespace-scope variable whose dynamic
+       initialization is being lowered and the initializer's root node: a
+       prvalue bound to the reference initialized there has static storage
+       ([class.temporary]/6), _ZGR<name>_ */
+    entity_index static_owner = 0;
+    uint32_t static_root = 0;
+    /* the temporaries of static_owner named so far (the discriminator of
+       the next one's symbol, itanium_reference_temporary_name) */
+    uint32_t static_temporaries = 0;
+    /* the glvalue of that reference is being lowered: a temporary under it
+       would be automatic, not extended */
+    bool static_glvalue = false;
+    uint32_t static_temporary(const semantic_node &n,
+                              ast_qualified_type pointer);
     /* the destruction of the temporary of the prvalue n: at the end of
        the full-expression, or with the block's variables */
     void destroyed_temporary(const semantic_node &n, uint32_t temporary,
@@ -653,6 +671,9 @@ class c_lowering
         return block(items.data(), static_cast<uint32_t>(items.size()));
     }
     ast_qualified_type type_of(uint32_t n);
+    /* C23's <stdbit.h> functions and __builtin_bitreverseg at run time */
+    uint32_t stdc_bits(const semantic_node &n, ast_qualified_type t,
+                       uint32_t argument);
     uint32_t special_builtin(builtin_lowering lowering, const semantic_node &n,
                              ast_qualified_type t,
                              const owned_array<uint32_t> &arguments);
@@ -723,6 +744,7 @@ class c_lowering
     uint32_t bind_reference(const semantic_node &n);
     uint32_t initializer_list(const semantic_node &n);
     uint32_t compound_literal(uint32_t n);
+    uint32_t spaceship(const semantic_node &n);
     uint32_t compound_literal_of(uint32_t value, ast_qualified_type t);
     /* whether an object of type t has a pointer to data member in it,
        whose null value is not all zero bits */

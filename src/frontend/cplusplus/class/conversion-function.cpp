@@ -519,6 +519,15 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
     return best;
 }
 
+bool semantic_analysis::result_destructible(qualified_type t) const
+{
+    const struct type &x = type_table[t.unqualified()];
+    if (x.kind != type_kind::class_type)
+        return true;
+    entity_index d = entity_table[x.entity].destructor;
+    return !d || (accessible(d, x.entity) && !entity_table[d].deleted);
+}
+
 /*
  * [dcl.init]/17.7: "Otherwise, if the source type is a (possibly
  * cv-qualified) class type, conversion functions are considered.  The
@@ -559,11 +568,24 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
     VTRY_SET(r, need_specialization_definition(at, f));
     /* (a captureless lambda's closure object has no members: its
        temporary is the call's object argument, as for its call operator) */
-    if ((aggregate_prvalue(m) && !entity_table[c].lambda) ||
-        (m.category == value_category::prvalue && entity_table[c].destructor))
-        /* the temporary's destruction ([class.temporary]/4), an aggregate's
-           temporary (aggregate_prvalue) */
-        return not_supported(at, "class.temporary");
+    if (aggregate_prvalue(m) && !entity_table[c].lambda) {
+        const char *why = nullptr;
+        if (!at_block_scope() && !constant_only)
+            why = "an aggregate prvalue at namespace scope";
+        else if (entity_table[c].destructor)
+            why = "an aggregate prvalue with a destructor";
+        else if (entity_table[f].instantiation)
+            why = "an aggregate prvalue, a conversion function template";
+        else if (!result_destructible(to))
+            why = "an aggregate prvalue, a result whose destructor is "
+                  "inaccessible or deleted";
+        if (why)
+            return not_supported_because(at, "class.temporary", why);
+    }
+    if (m.category == value_category::prvalue && entity_table[c].destructor)
+        return not_supported_because(
+            at, "class.temporary",
+            "a prvalue with a destructor (the temporary's destruction)");
     const entity &x = entity_table[f];
     expression_meaning address;
     address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);

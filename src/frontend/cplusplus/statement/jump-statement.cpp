@@ -176,9 +176,11 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
     bool decltype_auto = false;
     if (function_state.deducing &&
         contains_placeholder(function_state.declared_returns, &decltype_auto) &&
-        decltype_auto && implicitly_movable(operand))
-        /* decltype(auto) of an implicitly movable entity: an xvalue in
-           C++23 (P2266R3) */
+        decltype_auto && !operand.is_token() && implicitly_movable(operand))
+        /* decltype(auto) of a parenthesized implicitly movable entity: an
+           xvalue in C++23 (P2266R3), so decltype((x)) is T&&; an
+           unparenthesized name yields its declared type ([dcl.type.decltype]
+           /1.3) whatever its category */
         return not_supported(n, "class.copy.elision");
     if (function_state.deducing) {
         analysis_result r = expression(operand, m);

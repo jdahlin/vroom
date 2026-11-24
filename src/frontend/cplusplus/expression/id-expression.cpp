@@ -618,6 +618,33 @@ analysis_result semantic_analysis::id_expression(token_index t,
         e = library_builtin(name);
     if (!e)
         e = allocation_builtin(name);
+    /* [basic.lookup.unqual]/1: the scopes were searched in order and none
+       has the name (no scope had names analysis did not follow); a call's
+       argument-dependent lookup ([basic.lookup.argdep]/1) found nothing
+       either: the program is ill-formed, as clang says "use of undeclared
+       identifier" */
+    bool callee = t && t == overloaded_callee;
+    bool adl_applies = callee && callee_has_arguments;
+    /* [lex.name]/3: a name of clang's builtins (by its __has_builtin
+       answers) is the implementation's, which this front end may not
+       have: not known to be undeclared */
+    size_t spelled_length = 0;
+    const char *spelled =
+        tokens.pp.identifier_spelling(name - 1, &spelled_length);
+    bool implementation_name =
+        !e &&
+        (builtin_spelled(name) ||
+         clang_has_builtin(tokens.files.behavior, spelled, spelled_length));
+    bool called = callee && !implementation_name;
+    /* (only a call's name: a name some declarations analysis has no rules
+       for declare without marking their scope as unknown, an enumerator of
+       an enumeration with a fixed underlying type, a member of an anonymous
+       union, a lambda's init-capture in its noexcept-specifier, the
+       enumerators of a using-enum-declaration) */
+    if (!e && !found.unknown && !found.ambiguous && called && !adl_applies &&
+        !declaration_not_parsed_seen)
+        return ill_formed_at_token(t, "use of an undeclared identifier",
+                                   "basic.lookup.unqual");
     if (!e) {
         analysis_result r =
             not_supported(current_declaration,
@@ -628,6 +655,15 @@ analysis_result semantic_analysis::id_expression(token_index t,
         if (builtin_spelled(name))
             name_unsupported_detail(t, "is a compiler builtin this front end "
                                        "does not have");
+        else if (adl_applies && !found.unknown)
+            name_unsupported_detail(t, "is called with arguments and has no "
+                                       "declaration by unqualified lookup: "
+                                       "argument-dependent lookup found "
+                                       "none either");
+        else if (!called && !found.unknown)
+            name_unsupported_detail(t, "is no call's name and has no "
+                                       "declaration the analysis knows: no "
+                                       "scope has it");
         else
             name_lookup_detail(t, found);
         return r;
@@ -898,6 +934,10 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         m = expression_meaning();
         return named_entity(t, e, m);
     }
+    if (!e && name == operator_name(preprocessing_op_or_punc::EQUAL))
+        /* [class.copy.assign]/2: the implicitly-declared assignment
+           operators are declared only when not trivial */
+        return not_supported(n, "class.copy.assign");
     if (!e)
         /* [class.qual]/1: the name after it is looked up in the class
            ([class.member.lookup]): finding nothing, clang's "no member

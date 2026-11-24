@@ -72,8 +72,16 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_expect_with_probability", CC_BUILTIN_EXPECT_PROB, 1, "llld"},
     {"__builtin_va_start", CC_BUILTIN_VA_START, 0, "vV."},
     {"__builtin_c23_va_start", CC_BUILTIN_VA_START, 0, "vV."},
-    {"__builtin_stdc_rotate_left", CC_BUILTIN_STDC_ROTL, 0, "u.."},
-    {"__builtin_stdc_rotate_right", CC_BUILTIN_STDC_ROTR, 0, "u.."},
+/* C23's stdc_* bit functions: the rotations are nodes, two counts library
+   bodies; the other spellings are the C++ front end's alone */
+#define STDC_NODE(name, op, id, flags, signature) {name, id, flags, signature},
+#define STDC_BODY(name, op, flags, signature)                                  \
+    {name, CC_BUILTIN_BODY, flags, signature, 1},
+#define STDC_OP(name, op)
+#include "frontend/stdc-builtins.inc"
+#undef STDC_NODE
+#undef STDC_BODY
+#undef STDC_OP
     {"__builtin_va_end", CC_BUILTIN_VA_END, 0, "vV"},
     {"__builtin_va_copy", CC_BUILTIN_VA_COPY, 0, "vVV"},
     /* x86-64: the Microsoft va_list (a char *) in any function, as clang; the same nodes as the
@@ -94,8 +102,6 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_ffsll", CC_BUILTIN_FFSLL, 1, "iw"},
     {"__builtin_clzg", CC_BUILTIN_CLZG, 1, "i."},
     {"__builtin_ctzg", CC_BUILTIN_CTZG, 1, "i."},
-    {"__builtin_stdc_count_ones", CC_BUILTIN_BODY, 1, "u.", 1},
-    {"__builtin_stdc_trailing_zeros", CC_BUILTIN_BODY, 1, "u.", 1},
     {"__builtin_popcountg", CC_BUILTIN_POPCOUNTG, 1, "i."},
     {"__builtin_unreachable", CC_BUILTIN_UNREACHABLE, 0, "v"},
     {"__builtin_trap", CC_BUILTIN_TRAP, 0, "v"},

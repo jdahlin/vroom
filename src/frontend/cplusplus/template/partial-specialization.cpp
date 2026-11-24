@@ -33,6 +33,14 @@ analysis_result semantic_analysis::variable_partial_specialization(
     /* [temp.param]/14: a partial specialization's packs are deduced,
        wherever they are */
     VTRY(r, template_head_parameters(n, parameters, true, true, true, true));
+    /* [temp.class.spec]/9: "The template parameter list of a
+       specialization shall not contain default template argument values." */
+    for (SyntaxRef parameter : parameters)
+        if (template_parameter_has_default(parameter))
+            return ill_formed(parameter,
+                              "default template arguments may not be used in "
+                              "partial specializations",
+                              "temp.class.spec");
     lookup_result x;
     entity_index named = 0;
     if (qualifier) {
@@ -69,12 +77,30 @@ analysis_result semantic_analysis::variable_partial_specialization(
     declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;
+    /* [temp.class.spec]/9.2: a parameter used only in an expression of
+       an argument (<I + 5, I * 2>) is not deducible: not judged */
+    for (const template_argument &a : arguments) {
+        if (a.template_entity && entity_table[a.template_entity].expression)
+            return not_supported(n, "temp.class.spec");
+        if (a.kind != template_argument::kind_t::pack || a.count == UINT32_MAX)
+            continue;
+        for (uint32_t k = 0; k < a.count; k++) {
+            entity_index d = pack_arguments[a.value + k].template_entity;
+            if (d && entity_table[d].expression)
+                return not_supported(n, "temp.class.spec");
+        }
+    }
     bool dependent = dependent_arguments(arguments);
     bool identity = primary_arguments(n, primary.declaration, arguments, first,
                                       parameters.size());
     /* [temp.class.spec]/9: more specialized than the primary */
     if (!dependent || identity)
         return not_supported(n, "temp.class.spec");
+    if (permuted_arguments(n, arguments, first, parameters.size()))
+        return ill_formed(n,
+                          "variable template partial specialization is not "
+                          "more specialized than the primary template",
+                          "temp.class.spec");
     /* [temp.class.spec]/1: prior instantiations for other arguments are
        unaffected. If this partial specialization would be selected for a
        prior use, no diagnostic is required. Keep the result cached at that
@@ -127,6 +153,38 @@ void semantic_analysis::equivalent_partial_specializations(uint32_t added)
 }
 
 /*
+ * [temp.class.spec]/9, [temp.class.order]: whether a partial
+ * specialization's arguments are its own parameters, each once, in another
+ * order than the primary's (template<class T, class U> struct S<U, T>):
+ * deduction succeeds both ways, so it is not more specialized than the
+ * primary template (a constrained one may be, [temp.constr.order]).
+ */
+bool semantic_analysis::permuted_arguments(
+    SyntaxRef n, const owned_array<template_argument> &arguments,
+    uint32_t first, size_t count)
+{
+    if (arguments.size() != count || count > 32 || template_head_constrained(n))
+        return false;
+    uint32_t seen = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (arguments[i].kind == template_argument::kind_t::pack)
+            return false;
+        bool found = false;
+        for (uint32_t j = 0; j < count && !found; j++)
+            if (argument_is_parameter(arguments[i],
+                                      template_parameter_entities[first + j])) {
+                if (seen & (1u << j))
+                    return false;
+                seen |= 1u << j;
+                found = true;
+            }
+        if (!found)
+            return false;
+    }
+    return true;
+}
+
+/*
  * [temp.class.spec]/9: "The specialization shall be more specialized than
  * the primary template": whether partial specialization n's arguments are
  * its parameters (first, count of them) in order, the primary's own,
@@ -148,6 +206,85 @@ bool semantic_analysis::primary_arguments(
     return !template_head_constrained(n) || template_head_constrained(primary);
 }
 
+/* whether the class is an explicit specialization of a class template (its
+   definition is the template<> one), not an implicit instantiation */
+bool semantic_analysis::explicitly_specialized_class(entity_index c) const
+{
+    uint32_t record = entity_table[c].instantiation;
+    if (!record)
+        return false;
+    const instantiation_record &r = instantiations[record - 1];
+    return r.specialization == c && r.pattern &&
+           !function_templates[r.pattern - 1].parameter_count;
+}
+
+/*
+ * [temp.expl.spec]/17: "A member class of a class template may be
+ * explicitly specialized for a given implicit instantiation of the class
+ * template", template<> struct S<int>::M; or with a class body.  The
+ * implicit instantiation of the enclosing specialization has declared the
+ * member (its class-specifier analysed again, [temp.inst]/1); the
+ * specialization is the member's definition for that specialization only,
+ * found as an out-of-class definition of a member class is.  A member the
+ * template defines in its class is defined already there: not yet.
+ */
+bool semantic_analysis::member_class_specialization(SyntaxRef n,
+                                                    SyntaxRef specifier,
+                                                    analysis_result &result)
+{
+    SyntaxRef nested;
+    token_index id = 0;
+    bool defines = specifier.is(syntax_kind::class_specifier);
+    if (defines) {
+        auto head = class_head_name(specifier[0]);
+        if (head.is_node() && head.qualified_class_head_name() &&
+            head.size() == 2 &&
+            head[0].is(syntax_kind::nested_name_specifier) &&
+            head[1].is_token() && head[1].is_identifier()) {
+            nested = head[0];
+            id = head[1].token();
+        }
+    } else if (specifier.size() == 3 &&
+               specifier[1].is(syntax_kind::nested_name_specifier) &&
+               specifier[2].is_token() && specifier[2].is_identifier()) {
+        nested = specifier[1];
+        id = specifier[2].token();
+    }
+    if (!nested)
+        return false;
+    nominated_scope ns;
+    analysis_result nr = nested_name_specifier(nested.index(), ns);
+    if (nr != analysis_result::well_formed) {
+        result = nr;
+        return true;
+    }
+    if (!is_class_entity(ns.entity))
+        return false;
+    uint32_t record = entity_table[ns.entity].instantiation;
+    if (!record || instantiations[record - 1].specialization != ns.entity)
+        return false;
+    /* [temp.expl.spec]/5: the members of an explicitly specialized class
+       are defined as a normal class's, without template<> */
+    if (explicitly_specialized_class(ns.entity)) {
+        result = ill_formed(n,
+                            "extraneous 'template<>' in the declaration of "
+                            "a member of an explicitly specialized class",
+                            "temp.expl.spec");
+        return true;
+    }
+    entity_index member = entity_table.find(ns.entity, tokens.identifier(id));
+    if (!member || entity_table[member].kind != entity_kind::class_type ||
+        entity_table[member].defined || entity_table[member].instantiation)
+        return false;
+    if (!defines) {
+        result = analysis_result::well_formed;
+        return true;
+    }
+    flag_set exempt(explicit_declaration_names, true);
+    result = simple_declaration(n[3]);
+    return true;
+}
+
 /*
  * [temp.class.spec]/1: "A partial specialization of a class template
  * provides an alternative definition of the template that is used instead
@@ -164,6 +301,19 @@ analysis_result semantic_analysis::class_specialization_definition(
     const char *rule = "temp.class.spec";
     if (parameters.empty())
         rule = "temp.expl.spec";
+    /* [temp.class.spec]/9: no default template argument in a partial
+       specialization's template-parameter-list */
+    for (SyntaxRef parameter : parameters)
+        if (template_parameter_has_default(parameter))
+            return ill_formed(parameter,
+                              "default template arguments may not be used in "
+                              "partial specializations",
+                              "temp.class.spec");
+    /* [temp.class.spec]/10: "The usual access checking rules do not apply
+       to non-dependent names used to specify template arguments of the
+       simple-template-id of the partial specialization" (as an explicit
+       specialization's, [temp.spec]/6; accessible()) */
+    flag_set exempt(explicit_declaration_names, true);
     entity_index outer = current_scope;
     /* [temp.class.spec]/5: a partial specialization of a member class
        template is declared in the member's class (member_template_declaration
@@ -173,6 +323,14 @@ analysis_result semantic_analysis::class_specialization_definition(
     if ((!is_namespace(outer) && !(member && !parameters.empty())) ||
         defining_class)
         return not_supported(n, rule);
+    /* [temp.expl.spec]/17: a member class of a class template
+       specialization, template<> struct S<int>::M ... */
+    if (parameters.empty() && n.size() == 4 &&
+        n[3].is(syntax_kind::simple_declaration)) {
+        analysis_result mr = analysis_result::well_formed;
+        if (member_class_specialization(n, specifier, mr))
+            return mr;
+    }
     /* [temp.expl.spec]/1 also declares a specialization without defining
        it: class-key simple-template-id ; (an elaborated-type-specifier),
        whose definition may follow */
@@ -182,18 +340,42 @@ analysis_result semantic_analysis::class_specialization_definition(
     auto written = specifier[1];
     if (defines)
         written = class_head_name(specifier[0]);
-    if (!written.is_node())
-        return not_supported(n, rule);
     bool qualified_head = false;
-    if (written.qualified_class_head_name() && written.size() == 2 &&
-        written[0].is(syntax_kind::nested_name_specifier) &&
-        written[1].is(syntax_kind::simple_template_id)) {
+    /* class-key nested-name-specifier simple-template-id ; */
+    SyntaxRef nested_part;
+    if (!defines && specifier.size() == 3 &&
+        specifier[1].is(syntax_kind::nested_name_specifier) &&
+        specifier[2].is(syntax_kind::simple_template_id)) {
+        nested_part = specifier[1];
+        written = specifier[2];
+    } else if (!written.is_node()) {
+        return not_supported(n, rule);
+    } else if (written.qualified_class_head_name() && written.size() == 2 &&
+               written[0].is(syntax_kind::nested_name_specifier) &&
+               written[1].is(syntax_kind::simple_template_id)) {
+        nested_part = written[0];
+        written = written[1];
+    }
+    if (nested_part) {
         nominated_scope ns;
-        VTRY(nr, nested_name_specifier(written[0].index(), ns));
+        if (member_partial_class)
+            ns.entity = member_partial_class;
+        else {
+            analysis_result nr = nested_name_specifier(nested_part.index(), ns);
+            if (nr != analysis_result::well_formed)
+                return nr;
+        }
         if (!is_class_entity(ns.entity) && !is_namespace(ns.entity))
             return not_supported(n, rule);
+        /* [temp.expl.spec]/2: in a namespace enclosing the primary's */
+        if (is_namespace(ns.entity) &&
+            !namespace_encloses(current_scope, ns.entity) &&
+            !tokens.files.behavior.microsoft_extensions)
+            return ill_formed(n,
+                              "a specialization shall be declared in a "
+                              "namespace enclosing the specialized template's",
+                              "temp.expl.spec");
         outer = ns.entity;
-        written = written[1];
         qualified_head = true;
     }
     lookup_result x;
@@ -213,8 +395,22 @@ analysis_result semantic_analysis::class_specialization_definition(
     uint32_t ct = class_template_of(named);
     /* [temp.class.spec]/6, [temp.expl.spec]/3: declared where the
        primary template is, by its name (not an injected-class-name) */
-    if (!ct || function_templates[ct - 1].name != named ||
-        entity_table[function_templates[ct - 1].entity].enclosing != outer)
+    if (!ct) {
+        analysis_result refused = not_supported(n, rule);
+        SyntaxElement template_name =
+            written.simple_template_id().template_name();
+        if (qualified_head && written.size() && written[0].is_token())
+            template_name = written[0];
+        if (template_name)
+            template_name_detail(template_name.token(), x, named);
+        return refused;
+    }
+    if (function_templates[ct - 1].name != named)
+        return not_supported_because(
+            n, rule, "the name is a class template's injected-class-name");
+    /* ... or in the namespace its inline namespaces are members of
+       ([namespace.memdef]/3, [temp.expl.spec]/2) */
+    if (!declared_in_scope_of(function_templates[ct - 1].entity, outer))
         return not_supported(n, rule);
     const function_template primary = function_templates[ct - 1];
     uint32_t index = 0, first = 0;
@@ -231,6 +427,20 @@ analysis_result semantic_analysis::class_specialization_definition(
     declaring_specializations--;
     if (r != analysis_result::well_formed)
         return r;
+    /* [temp.class.spec]/9.2: a parameter used only in expressions of the
+       arguments (<I + 5, I * 2>), a non-deduced context, is not
+       deducible: not judged when no argument deduces anything */
+    {
+        bool expressions = false, deduces = false;
+        for (const template_argument &a : arguments) {
+            if (a.template_entity && entity_table[a.template_entity].expression)
+                expressions = true;
+            else if (a.template_entity || depends_on_template_parameter(a.type))
+                deduces = true;
+        }
+        if (expressions && !deduces)
+            return not_supported(n, "temp.class.spec");
+    }
     bool dependent = dependent_arguments(arguments);
     bool identity = primary_arguments(n, primary.declaration, arguments, first,
                                       parameters.size());
@@ -239,6 +449,12 @@ analysis_result semantic_analysis::class_specialization_definition(
        (primary_arguments) */
     if (parameters.empty() == dependent || identity)
         return not_supported(n, rule);
+    if (!parameters.empty() &&
+        permuted_arguments(n, arguments, first, parameters.size()))
+        return ill_formed(n,
+                          "class template partial specialization is not more "
+                          "specialized than the primary template",
+                          "temp.class.spec");
     /* [temp.expl.spec]/7, [temp.class.spec]/1: one declared after a
        specialization it would be used for was instantiated makes the
        program ill-formed (no diagnostic required); any instantiation
@@ -364,7 +580,18 @@ analysis_result semantic_analysis::substitute_specialization(
             id = s.declarator[1][0].qualified_id()[1].index();
     } else {
         SyntaxRef head = s.definition[0].index();
-        id = class_head_name(head).index();
+        auto written = class_head_name(head);
+        id = written.index();
+        /* a member class template's partial specialization defined outside
+           its class (template<class T> template<class U> struct
+           S<T>::X<U*>): the arguments are the last template-id's, S<T> being
+           bound where the specialization was declared */
+        if (written.qualified_class_head_name() && written.size() == 2 &&
+            written[0].is(syntax_kind::nested_name_specifier) &&
+            written[0].size() == 2 &&
+            written[0][0].is(syntax_kind::simple_template_id) &&
+            written[1].is(syntax_kind::simple_template_id))
+            id = written[1].index();
     }
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[s.entity].enclosing);

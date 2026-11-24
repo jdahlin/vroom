@@ -81,12 +81,22 @@ analysis_result semantic_analysis::not_supported(SyntaxRef n,
 void semantic_analysis::name_lookup_detail(token_index t,
                                            const lookup_result &found)
 {
-    if (found.unknown && found.unknown_by != held_cause::refused)
+    if (found.unknown && found.unknown_by != held_cause::refused) {
         name_held_detail(t, found.unknown_by);
-    else if (found.unknown_entity)
+        last_unsupported_held_by(found.unknown_entity);
+    } else if (found.unknown_entity &&
+               entity_table[found.unknown_entity].instantiation &&
+               !entity_table[found.unknown_entity].held_by_template)
+        /* [temp.dep.constexpr]/2: in a template's own declaration, only
+           the parameter's bare name as an array bound is represented
+           (value_parameter_named) */
+        name_unsupported_detail(t, "is a non-type template parameter in an "
+                                   "expression of a declarator's type");
+    else if (found.unknown_entity) {
         name_unsupported_detail(t, "is declared by a declaration with no "
                                    "rules yet");
-    else if (found.unknown)
+        last_unsupported_held_by(found.unknown_entity);
+    } else if (found.unknown)
         name_unsupported_detail(t, "has no declaration the analysis knows: a "
                                    "scope it was searched in has names "
                                    "analysis did not follow");
@@ -107,6 +117,53 @@ void semantic_analysis::name_held_detail(token_index t, held_cause by)
             t, "is declared by a declaration that is not parsed");
 }
 
+namespace
+{
+/* what a template-id's name is when it is no template of the kind used
+   ([temp.names]/1), for the detail of the refusal */
+const char *template_name_names(const entity &e)
+{
+    switch (e.kind) {
+    case entity_kind::template_entity:
+        return "names a template of another kind than the use needs";
+    case entity_kind::template_specialization:
+        return "names a template specialization";
+    case entity_kind::class_type:
+        return "names a class that is not a template";
+    case entity_kind::function:
+        return "names a function";
+    case entity_kind::variable:
+        return "names a variable";
+    case entity_kind::typedef_name:
+        return "names a typedef-name";
+    case entity_kind::enumeration:
+        return "names an enumeration";
+    case entity_kind::enumerator:
+        return "names an enumerator";
+    case entity_kind::namespace_entity:
+        return "names a namespace";
+    case entity_kind::pack:
+        return "names a pack";
+    default:
+        break;
+    }
+    return "names something that is not a template";
+}
+} // namespace
+
+/* the last refusal of a template-id whose template-name at t is no
+   template the use wants: why lookup found nothing, or what it found */
+void semantic_analysis::template_name_detail(token_index t,
+                                             const lookup_result &found,
+                                             entity_index named)
+{
+    if (!found.entity) {
+        name_lookup_detail(t, found);
+        return;
+    }
+    name_unsupported_detail(t, template_name_names(entity_table[named]));
+}
+
 /* the last refusal recorded names the identifier at t: "NAME what" */
 void semantic_analysis::name_unsupported_detail(token_index t, const char *what)
 {
@@ -114,8 +171,39 @@ void semantic_analysis::name_unsupported_detail(token_index t, const char *what)
     tokens.spelling(t, text.get());
     vbuffer_string_append(text.get(), " ");
     vbuffer_string_append(text.get(), what);
-    owned_string &detail = detail_texts.make(text.data(), text.size());
+    last_unsupported_detail(text.data(), text.size());
+}
+
+analysis_result semantic_analysis::not_supported_because(SyntaxRef n,
+                                                         const char *subclause,
+                                                         const char *what,
+                                                         call_site where)
+{
+    analysis_result r = not_supported(n, subclause, where);
+    last_unsupported_detail(what, strlen(what));
+    return r;
+}
+
+void semantic_analysis::last_unsupported_detail(const char *text, size_t size)
+{
+    owned_string &detail = detail_texts.make(text, size);
     unsupported[unsupported.size() - 1].detail = detail.c_str();
+}
+
+void semantic_analysis::last_unsupported_held_by(entity_index e)
+{
+    if (e)
+        unsupported[unsupported.size() - 1].holder = entity_table[e].holder;
+}
+
+void semantic_analysis::instantiation_detail(const unsupported_construct &in)
+{
+    char text[512];
+    snprintf(text, sizeof text, "instantiation refused: [%s] %s:%u %s",
+             in.subclause, in.file, static_cast<unsigned>(in.line), in.detail);
+    last_unsupported_detail(text, strlen(text));
+    /* (a held name the specialization's analysis met) */
+    unsupported[unsupported.size() - 1].holder = in.holder;
 }
 
 analysis_result semantic_analysis::not_supported_builtin(SyntaxRef n,
@@ -165,6 +253,35 @@ analysis_result semantic_analysis::extension_used(diagnostic_id id,
     return analysis_result::well_formed;
 }
 
+/* extension_used for an error after which clang goes on as if the rule had
+   been met: a well-formed result, the declaration judged ill-formed when it
+   ends (declaration()), its entities declared */
+analysis_result semantic_analysis::recoverable_extension_used(diagnostic_id id,
+                                                              token_index at)
+{
+    analysis_result r = extension_used(id, at, nullptr);
+    if (r == analysis_result::ill_formed) {
+        record_recovered_error();
+        return analysis_result::well_formed;
+    }
+    return r;
+}
+
+analysis_result semantic_analysis::recovered_error_at(token_index at,
+                                                      const char *rule,
+                                                      const char *subclause)
+{
+    ill_formed_at_token(at, rule, subclause);
+    record_recovered_error();
+    return analysis_result::well_formed;
+}
+
+void semantic_analysis::record_recovered_error()
+{
+    if (analysing)
+        analysing->recovered = true;
+}
+
 bool semantic_analysis::in_system_header(token_index at) const
 {
     if (!diagnostics.files)
@@ -212,30 +329,50 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
     declaration_refusals = unsupported_before;
     size_t held_before = held_pending.size();
     size_t scopes_before = unknown_scopes_pending.size();
+    analysed_declaration *outer_analysing = analysing;
+    analysing = &d;
     if (is_namespace_definition(tree, n)) {
         /* the declarations of its body are analysed as declarations of
            their own: one of them not parsed does not make the namespace
            so, and the definition has no record unless it is not
            well-formed itself */
         d.result = namespace_definition(n);
-        if (d.result == analysis_result::well_formed)
+        if (d.result == analysis_result::well_formed && !d.recovered) {
+            analysing = outer_analysing;
             return d.result;
+        }
     } else if (tree[n].kind == syntax_kind::linkage_specification) {
         /* [dcl.link]: a linkage-specification is no scope of its own, its
            declarations are the enclosing scope's: one of them not parsed
            does not stop the others (linkage_specification() checks each) */
         d.result = linkage_specification(n);
-    } else if (!parsed_completely(n))
+    } else if (!parsed_completely(n)) {
         d.result = analysis_result::not_parsed;
-    else
+        /* what it declares is not known (a name it declares is no name
+           "no scope has") */
+        declaration_not_parsed_seen = true;
+    } else
         d.result = declaration_by_kind(n);
+    analysing = outer_analysing;
+    /* a recovered error: ill-formed, what it declares declared all the
+       same (hold_names does not run) */
+    bool declares = d.recovered && d.result == analysis_result::well_formed;
+    if (declares)
+        d.result = analysis_result::ill_formed;
     if (d.result == analysis_result::unsupported)
         d.first_unsupported = static_cast<uint32_t>(unsupported_before);
     d.has_unsupported = unsupported.size() > unsupported_before;
     /* (a linkage-specification holds the names of its own declarations) */
-    if (d.result != analysis_result::well_formed &&
-        tree[n].kind != syntax_kind::linkage_specification)
+    if (d.result != analysis_result::well_formed && !declares &&
+        tree[n].kind != syntax_kind::linkage_specification) {
+        /* [basic.scope.declarative]: a function redeclared ill-formed is
+           still the function its first declaration declared */
+        hold_ill_formed = d.result == analysis_result::ill_formed &&
+                          !d.has_unsupported &&
+                          tree[n].kind != syntax_kind::function_definition;
         hold_names(n);
+        hold_ill_formed = false;
+    }
     /* the names a template-declaration held while it was refused say why */
     held_cause cause = held_cause::refused;
     if (!d.has_unsupported && d.result == analysis_result::ill_formed)
@@ -248,6 +385,12 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
             held.held_because = unsupported[unsupported_before].subclause;
         else if (!d.has_unsupported && !held.held_because)
             held.held_by = cause;
+        /* (a well-formed declaration that holds a name, a definition of a
+           class template whose first declaration was refused, keeps the
+           holder that declaration was; it is the holder when there is no
+           other, a deduction guide) */
+        if (d.result != analysis_result::well_formed || !held.holder)
+            held.holder = n;
     }
     held_pending.resize(held_before);
     for (size_t i = scopes_before; i < unknown_scopes_pending.size(); i++) {
@@ -292,6 +435,7 @@ analysis_result semantic_analysis::declaration_by_kind(SyntaxRef n)
             return namespace_alias_definition(a);
         },
         [&](UsingDeclaration u) { return using_declaration(u); },
+        [&](UsingEnumDeclaration u) { return using_enum_declaration(u); },
         [&](OpaqueEnumDeclaration e) {
             type_index type = 0;
             return enum_specifier(e, type);
@@ -301,7 +445,22 @@ analysis_result semantic_analysis::declaration_by_kind(SyntaxRef n)
                    meaning */
             return declaration_by_kind(e[1]);
         },
-        [&](Declaration d) { return not_supported(d); }});
+        [&](Declaration d) {
+            /* [dcl.pre]/4: "An attribute-declaration has no effect" unless
+               an attribute says otherwise: the ones that change nothing
+               vcc generates, and those clang does not know (it ignores them,
+               [dcl.attr.grammar]/6), are passed over */
+            SyntaxRef r = d;
+            if (r.is(syntax_kind::attribute_declaration)) {
+                bool ignored = true;
+                for (SyntaxElement c : r.elements())
+                    if (!c.is_token() && !attributes_without_effect(c))
+                        ignored = false;
+                if (ignored)
+                    return analysis_result::well_formed;
+            }
+            return not_supported(d);
+        }});
 }
 
 void semantic_analysis::translation_unit()

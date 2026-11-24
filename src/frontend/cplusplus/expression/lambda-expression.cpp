@@ -375,8 +375,12 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
         entity_table[default_argument_function].inline_ &&
         entity_table[entity_table[default_argument_function].enclosing].kind ==
             entity_kind::class_type;
+    /* (an aggregate's default member initializer: the class's scope,
+       member_default_in_aggregate) */
+    bool in_member_default =
+        !function_state.active && function_state.this_class;
     if ((!function_state.active && !is_namespace(current_scope) &&
-         !in_default) ||
+         !in_default && !in_member_default) ||
         (substituting && !function_state.active) || n.size() < 2)
         return not_supported(n, "expr.prim.lambda");
     /* [expr.prim.lambda]/5: a template-parameter-list makes a generic
@@ -418,6 +422,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     lambda_context l;
     l.at = n;
     l.enclosing_function = function_state.function;
+    l.enclosing_class = function_state.this_class;
     /* the type of this where the lambda-expression is: in an enclosing
        lambda's body, the one it captured (a copy of *this is that
        lambda's member, const unless it is mutable) */
@@ -661,7 +666,17 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                 declaring_lambda = &l;
                 size_t claims_before = expressions.size();
                 declared_view_used = false;
-                r = type_id(part[1], returns);
+                /* [basic.scope.param]/1: the lambda-declarator's
+                   parameters are in scope in the trailing-return-type:
+                   their types first (analysed again below) */
+                entity_index outer = current_scope;
+                qualified_type probe = placeholder_type(false);
+                r = function(d, probe);
+                if (r == analysis_result::well_formed) {
+                    open_parameter_scope();
+                    r = type_id(part[1], returns);
+                }
+                current_scope = outer;
                 /* (a claim of what a name's type is there is clang's from
                    outside the lambda: not checkable) */
                 if (declared_view_used)
@@ -887,6 +902,7 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
     g.mutable_ = l.mutable_;
     g.enclosing_this = l.enclosing_this;
     g.enclosing_function = l.enclosing_function;
+    g.enclosing_class = l.enclosing_class;
     g.first_capture = static_cast<uint32_t>(generic_closure_captures.size());
     g.capture_count = static_cast<uint32_t>(captures.size());
     for (const capture_record &x : captures)
@@ -957,6 +973,7 @@ analysis_result semantic_analysis::lambda_specialization(
             l.mutable_ = g.mutable_;
             l.enclosing_this = g.enclosing_this;
             l.enclosing_function = g.enclosing_function;
+            l.enclosing_class = g.enclosing_class;
             made = g.capture_count;
             for (uint32_t i = 0; i < g.capture_count; i++)
                 lambda_captures.append(

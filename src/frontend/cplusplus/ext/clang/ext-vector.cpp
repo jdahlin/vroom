@@ -28,7 +28,7 @@ analysis_result semantic_analysis::clang_ext_vector_count(SyntaxRef at,
     if (entity_index named = value_parameter_named(count)) {
         if (!is_integral(entity_table[named].type))
             return not_supported(at, "temp.dep.constexpr");
-        g.ext_vector_parameter = named;
+        g.ext_vector.parameter = named;
         return analysis_result::well_formed;
     }
     expression_meaning m;
@@ -45,7 +45,7 @@ analysis_result semantic_analysis::clang_ext_vector_count(SyntaxRef at,
     if (n < 1 || n > 4096)
         return ill_formed(at, "a vector's element count shall be positive",
                           "ext.clang");
-    g.ext_vector = static_cast<uint64_t>(n);
+    g.ext_vector.count = static_cast<uint64_t>(n);
     return analysis_result::well_formed;
 }
 
@@ -64,8 +64,8 @@ semantic_analysis::clang_ext_vector_type(SyntaxRef at, const gnu_attributes &g,
         return not_supported(at, "ext.clang");
     type = qualified_type::make(
         type_table.ext_vector_of(
-            qualified_type::make(type.unqualified(), cv_none), g.ext_vector,
-            g.ext_vector_parameter),
+            qualified_type::make(type.unqualified(), cv_none),
+            g.ext_vector.count, g.ext_vector.parameter),
         cv_none);
     return analysis_result::well_formed;
 }

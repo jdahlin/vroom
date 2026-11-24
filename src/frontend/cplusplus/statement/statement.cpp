@@ -538,6 +538,7 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
         [&](UsingDirective d) { return declares_nothing(d); },
         [&](NamespaceAliasDefinition d) { return declares_nothing(d); },
         [&](UsingDeclaration d) { return declares_nothing(d); },
+        [&](UsingEnumDeclaration d) { return declares_nothing(d); },
         [&](Statement other) {
             if (other.is(syntax_kind::statement))
                 return attributed_statement(other, built);
@@ -557,12 +558,7 @@ bool semantic_analysis::fallthrough_statement(SyntaxElement s) const
     for (token_index t = s.first_token(); t < inner.first_token(); t++) {
         if (tokens[t].kind == token_kind::operator_or_punctuator)
             continue;
-        owned_buffer spelling;
-        tokens.spelling(t, spelling.get());
-        if ((spelling.size() == 11 &&
-             !memcmp(spelling.data(), "fallthrough", 11)) ||
-            (spelling.size() == 15 &&
-             !memcmp(spelling.data(), "__fallthrough__", 15)))
+        if (statement_attribute_at(t) == statement_attribute::fallthrough)
             return true;
     }
     return false;
@@ -614,23 +610,27 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
     if (n.size() < 2)
         return not_supported(n, "stmt.pre");
     SyntaxElement inner = n[n.size() - 1];
-    if (inner.is(syntax_kind::simple_declaration))
-        return not_supported(n, "dcl.attr");
+    bool declaration = inner.is(syntax_kind::simple_declaration);
     for (uint32_t i = 0; i + 1 < n.size(); i++) {
         SyntaxElement c = n[i];
         if (!c.is(syntax_kind::attribute_specifier,
                   syntax_kind::attribute_specifier_seq,
                   syntax_kind::gnu_attribute_specifier))
             return not_supported(n, "dcl.attr");
+        /* [dcl.attr.grammar]/6: the attributes that change nothing vcc
+           generates, and those clang does not know (it ignores them), may
+           stand before any statement */
+        if (c.is(syntax_kind::attribute_specifier,
+                 syntax_kind::attribute_specifier_seq) &&
+            attributes_without_effect(c))
+            continue;
+        if (declaration)
+            return not_supported_because(
+                n, "dcl.attr", "attributes of a declaration statement");
         for (token_index t = c.first_token(); t < c.end_token(); t++) {
             if (tokens[t].kind == token_kind::operator_or_punctuator)
                 continue;
-            owned_buffer spelling;
-            tokens.spelling(t, spelling.get());
-            bool likely =
-                spelling.size() == 6 && !memcmp(spelling.data(), "likely", 6);
-            bool unlikely =
-                spelling.size() == 8 && !memcmp(spelling.data(), "unlikely", 8);
+            statement_attribute a = statement_attribute_at(t);
             /* [dcl.attr.fallthrough]/1: "The attribute-token fallthrough
                may be applied to a null statement; such a statement is a
                fallthrough statement.  ... A fallthrough statement may only
@@ -643,11 +643,8 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
                __attribute__((fallthrough)) and clang's and GCC's
                [[clang::fallthrough]] and [[gnu::fallthrough]] are the same
                statement */
-            bool fallthrough =
-                (spelling.size() == 11 &&
-                 !memcmp(spelling.data(), "fallthrough", 11)) ||
-                (spelling.size() == 15 &&
-                 !memcmp(spelling.data(), "__fallthrough__", 15));
+            owned_buffer spelling;
+            tokens.spelling(t, spelling.get());
             /* (the attribute's own scope and the keyword spelling) */
             bool scope = ((spelling.size() == 5 &&
                            !memcmp(spelling.data(), "clang", 5)) ||
@@ -663,22 +660,28 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
                an integer power of two between 1 and 4096": a hint for the
                position of code, which vcc does not give (the tokens after
                it are its argument) */
-            bool code_align = (spelling.size() == 10 &&
-                               !memcmp(spelling.data(), "code_align", 10)) ||
-                              (spelling.size() == 14 &&
-                               !memcmp(spelling.data(), "__code_align__", 14));
-            if (code_align) {
+            if (a == statement_attribute::code_align) {
                 if (!inner.is(syntax_kind::iteration_statement) ||
                     !code_align_argument(t + 1))
                     return not_supported(n, "dcl.attr");
                 /* (past the argument's three tokens) */
                 t += 3;
-            } else if (fallthrough) {
+            } else if (a == statement_attribute::fallthrough) {
                 if (!inner.is(syntax_kind::expression_statement) ||
                     inner.size() != 1 || function_state.switches.empty())
                     return not_supported(n, "dcl.attr.fallthrough");
-            } else if (!likely && !unlikely && !wrapper) {
-                return not_supported(n, "dcl.attr");
+            } else if (a != statement_attribute::likely &&
+                       a != statement_attribute::unlikely && !wrapper) {
+                /* assume (C++23, not in n4861): its argument is a
+                   balanced-token-seq, which the parser does not read as an
+                   expression: the expression would have to be parsed from
+                   its tokens to be analysed as a bool */
+                if (a == statement_attribute::assume)
+                    return not_supported_because(
+                        n, "dcl.attr",
+                        "assume: the argument is not parsed as an expression");
+                return not_supported_because(
+                    n, "dcl.attr", "an attribute that changes the program");
             }
         }
     }

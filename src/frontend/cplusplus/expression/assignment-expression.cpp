@@ -125,6 +125,21 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
            temporary of the left operand's type, which is then assigned */
         if (op != preprocessing_op_or_punc::EQUAL)
             return not_supported(n, "expr.ass");
+        if (type_table[left.type.unqualified()].kind == type_kind::class_type) {
+            /* [expr.ass]/8: x = {...} means x.operator=({...}) of a class:
+               its operator= functions take the list, the left operand's
+               own type only when they are its copy assignment operators */
+            entity_index c = type_table[left.type.unqualified()].entity;
+            lookup_result found =
+                lookup_qualified(c, operator_name(op), lookup_filter::any);
+            if (found.entity && !found.ambiguous && !found.unknown) {
+                owned_array<entity_index> candidates;
+                overload_set(found.entity, candidates);
+                for (entity_index f : candidates)
+                    if (!copy_assignment_operator(f, c))
+                        return not_supported(n, "over.match.oper");
+            }
+        }
         right.type = qualified_type::make(left.type.unqualified(), cv_none);
         initialized_value value;
         VTRY_SET(r, list_initialization(n[2], right.type, false, value));
@@ -275,6 +290,7 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
     entity_index c = type_table[left.type.unqualified()].entity;
     if (entity_table[c].kind != entity_kind::class_type)
         return not_supported(n, "class.pre");
+    require_complete(c);
     if (!entity_table[c].size)
         return ill_formed(n,
                           "if the left operand is of class type, the class "

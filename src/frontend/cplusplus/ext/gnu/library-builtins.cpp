@@ -346,7 +346,9 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
         form == builtin_form::overflow || form == builtin_form::atomic ||
         form == builtin_form::bit_count || form == builtin_form::generic ||
         form == builtin_form::launder || form == builtin_form::clear_padding ||
-        form == builtin_form::bswapg || form == builtin_form::invoke ||
+        form == builtin_form::bswapg || form == builtin_form::stdc_bits ||
+        form == builtin_form::align || form == builtin_form::vtable_pointer ||
+        form == builtin_form::within_lifetime || form == builtin_form::invoke ||
         form == builtin_form::complex) {
         qualified_type result = void_type;
         /* (the type-generic ones have the signature's result type) */
@@ -750,6 +752,21 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         return clear_padding_result(n, called, nodes, result);
     case builtin_form::bswapg:
         return bswapg_result(n, called, nodes, result);
+    case builtin_form::align:
+        return align_result(n, called, nodes, result);
+    case builtin_form::vtable_pointer:
+        return vtable_pointer_result(n, called, nodes, result);
+    case builtin_form::within_lifetime:
+        /* [basic.life] needs the object a pointer designates, which for a
+           union's members (one offset) a pointer value does not say */
+        return not_supported_builtin(n, "ext.clang", called,
+                                     "whose answer needs the subobject a "
+                                     "pointer designates: a constant pointer "
+                                     "value of the evaluator keeps no "
+                                     "member of a union (they share one "
+                                     "offset) and no lifetime for others");
+    case builtin_form::stdc_bits:
+        return stdc_bits_result(n, called, nodes, result);
     case builtin_form::atomic:
         break;
     default:
@@ -830,6 +847,7 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
                     n, "ext.gnu", called,
                     "on an object of a class that is not known to be "
                     "trivially copyable");
+            require_complete(c);
             uint64_t bytes = entity_table[c].size;
             if (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 &&
                 bytes != 16)
@@ -1049,6 +1067,276 @@ semantic_analysis::bswapg_result(SyntaxRef n, entity_index called,
                                      "width that is not a multiple of 8");
     result = qualified_type::make(t.unqualified(), cv_none);
     return analysis_result::well_formed;
+}
+
+/*
+ * [ext:clang_builtin_functions] __builtin_align_up(x, alignment),
+ * __builtin_align_down and bool __builtin_is_aligned (clang's
+ * Builtins.td, custom type checking): x an integer (not bool) or a pointer
+ * to an object or void, alignment an integer; the call has x's type (a
+ * bool for is_aligned).  A constant alignment shall be a power of two;
+ * other operands are unsupported.
+ */
+analysis_result
+semantic_analysis::align_result(SyntaxRef n, entity_index called,
+                                const owned_array<uint32_t> &nodes,
+                                qualified_type &result)
+{
+    const gnu_builtin &row =
+        gnu_builtin_at(entity_table[called].gnu_builtin_row);
+    if (nodes.size() != 2)
+        return ill_formed(n, "the builtin takes two arguments", "ext.clang");
+    qualified_type t = semantics[nodes[0]].type;
+    qualified_type a = semantics[nodes[1]].type;
+    if (depends_on_template_parameter(t) || depends_on_template_parameter(a))
+        return not_supported(n, "temp.dep.constexpr");
+    fundamental_type f = fundamental_of(t);
+    bool integer = f != fundamental_type::none &&
+                   fundamental_type_is_integral(f) &&
+                   f != fundamental_type::bool_;
+    const struct type &tk = type_table[t.unqualified()];
+    bool pointer = tk.kind == type_kind::pointer;
+    if (pointer) {
+        type_kind ok = type_table[tk.operand.unqualified()].kind;
+        if (ok == type_kind::function)
+            pointer = false;
+    }
+    if (!integer && !pointer)
+        return not_supported_builtin(n, "ext.clang", called,
+                                     "of an operand that is no integer and "
+                                     "no pointer to an object");
+    fundamental_type af = fundamental_of(a);
+    if (af == fundamental_type::none || !fundamental_type_is_integral(af))
+        return not_supported_builtin(n, "ext.clang", called,
+                                     "of an alignment that is no integer");
+    constant_value v;
+    if (evaluate_value(nodes[1], v) == constness::constant) {
+        if (v.kind != constant_value_kind::integer || !v.integer ||
+            (v.integer & (v.integer - 1)))
+            return not_supported_builtin(n, "ext.clang", called,
+                                         "of a constant alignment that is no "
+                                         "power of two");
+    }
+    if (row.which == 2) {
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::bool_), cv_none);
+        return analysis_result::well_formed;
+    }
+    result = qualified_type::make(t.unqualified(), cv_none);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [ext:clang_builtin_functions] const void *__builtin_get_vtable_pointer(p)
+ * (clang's Builtins.td, custom type checking, C++): p a pointer (or an array,
+ * which decays) to a complete polymorphic class; the result is the virtual
+ * table pointer stored in the object, a `const void *`.
+ */
+analysis_result
+semantic_analysis::vtable_pointer_result(SyntaxRef n, entity_index called,
+                                         const owned_array<uint32_t> &nodes,
+                                         qualified_type &result)
+{
+    (void)called;
+    if (nodes.size() != 1)
+        return ill_formed(n, "__builtin_get_vtable_pointer takes one argument",
+                          "ext.clang");
+    qualified_type t = semantics[nodes[0]].type;
+    if (depends_on_template_parameter(t))
+        return not_supported(n, "temp.dep.constexpr");
+    const struct type &tk = type_table[t.unqualified()];
+    qualified_type pointee;
+    if (tk.kind == type_kind::pointer || tk.kind == type_kind::array)
+        pointee = tk.operand;
+    else
+        return ill_formed(n,
+                          "__builtin_get_vtable_pointer requires an argument "
+                          "of class pointer type",
+                          "ext.clang");
+    if (type_table[pointee.unqualified()].kind != type_kind::class_type)
+        return ill_formed(n,
+                          "__builtin_get_vtable_pointer requires an argument "
+                          "of class pointer type",
+                          "ext.clang");
+    if (!require_complete(pointee))
+        return ill_formed(n,
+                          "__builtin_get_vtable_pointer requires an argument "
+                          "with a complete type",
+                          "ext.clang");
+    if (!polymorphic_class(type_table[pointee.unqualified()].entity))
+        return ill_formed(n,
+                          "__builtin_get_vtable_pointer requires an argument "
+                          "of polymorphic class pointer type",
+                          "ext.clang");
+    result = qualified_type::make(
+        type_table.pointer_to(qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_const)),
+        cv_none);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [ext:gnu_library_builtins] C23's <stdbit.h> functions as clang's
+ * __builtin_stdc_* (C23 7.18) and __builtin_bitreverseg, one rule for the
+ * family: the first argument is a scalar unsigned integer (bitreverseg:
+ * any integer), not a bool except for the rotations and bitreverseg; a
+ * rotation's second argument is any integer.  The call has the unsigned int
+ * of the counts, the bool of has_single_bit, or the first argument's type
+ * (bit_ceil, bit_floor, the rotations, bitreverseg).
+ */
+analysis_result
+semantic_analysis::stdc_bits_result(SyntaxRef n, entity_index called,
+                                    const owned_array<uint32_t> &nodes,
+                                    qualified_type &result)
+{
+    const gnu_builtin &row =
+        gnu_builtin_at(entity_table[called].gnu_builtin_row);
+    builtin_stdc_op op = static_cast<builtin_stdc_op>(row.which);
+    bool rotation = op == builtin_stdc_op::rotate_left ||
+                    op == builtin_stdc_op::rotate_right;
+    bool reverse = op == builtin_stdc_op::bitreverse;
+    size_t wanted = 1;
+    if (rotation)
+        wanted = 2;
+    if (nodes.size() != wanted)
+        return ill_formed(n, "wrong number of arguments to a bit function",
+                          "ext.gnu");
+    qualified_type first = semantics[nodes[0]].type;
+    fundamental_type f = fundamental_of(first);
+    if (depends_on_template_parameter(first))
+        return not_supported(n, "temp.dep.constexpr");
+    if (f == fundamental_type::none)
+        return not_supported_builtin(n, "ext.gnu", called,
+                                     "of an operand that is not an integer");
+    if (!fundamental_type_is_integral(f))
+        return ill_formed(n, "1st argument must be a scalar integer type",
+                          "ext.gnu");
+    if (!reverse && fundamental_type_is_signed(tokens.files.behavior, f))
+        return ill_formed(n,
+                          "1st argument must be a scalar unsigned integer "
+                          "type",
+                          "ext.gnu");
+    if (!reverse && !rotation && f == fundamental_type::bool_)
+        return ill_formed(n,
+                          "1st argument must not be a boolean or "
+                          "enumeration type",
+                          "ext.gnu");
+    if (rotation) {
+        fundamental_type g = fundamental_of(semantics[nodes[1]].type);
+        if (g == fundamental_type::none)
+            return not_supported_builtin(
+                n, "ext.gnu", called,
+                "with a rotation count that is not an integer");
+        if (!fundamental_type_is_integral(g))
+            return ill_formed(n, "2nd argument must be a scalar integer type",
+                              "ext.gnu");
+    }
+    switch (op) {
+    case builtin_stdc_op::has_single_bit:
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::bool_), cv_none);
+        break;
+    case builtin_stdc_op::bit_ceil:
+    case builtin_stdc_op::bit_floor:
+    case builtin_stdc_op::rotate_left:
+    case builtin_stdc_op::rotate_right:
+    case builtin_stdc_op::bitreverse:
+        result = qualified_type::make(first.unqualified(), cv_none);
+        break;
+    default:
+        result = qualified_type::make(
+            type_table.fundamental(fundamental_type::unsigned_int), cv_none);
+        break;
+    }
+    return analysis_result::well_formed;
+}
+
+/* the value of a stdc_bits call, on the first argument's width in bits (a
+   bool's rotation and reversal have one bit): C23 7.18.2-7.18.14 */
+constness semantic_analysis::evaluate_stdc_bits(constant_evaluation &state,
+                                                int which,
+                                                const semantic_node &call,
+                                                constant_value &v)
+{
+    const uint32_t *items = semantics.items(call.first);
+    constant_value x[2];
+    for (uint32_t i = 0; i < call.count && i < 2; i++) {
+        constness c = evaluate_node(state, items[i], x[i]);
+        if (c != constness::constant)
+            return c;
+        if (x[i].kind != constant_value_kind::integer)
+            return constness::unknown;
+    }
+    fundamental_type f = fundamental_of(semantics[items[0]].type);
+    unsigned width = fundamental_type_width(tokens.files.behavior, f);
+    if (f == fundamental_type::bool_)
+        width = 1;
+    /* a count of a signed type is negative by its value */
+    unsigned __int128 count = 0;
+    bool negative = false;
+    if (call.count > 1) {
+        fundamental_type g = fundamental_of(semantics[items[1]].type);
+        count = x[1].integer;
+        negative = fundamental_type_is_signed(tokens.files.behavior, g) &&
+                   static_cast<__int128>(count) < 0;
+    }
+    unsigned __int128 r = 0;
+    if (!vfold_stdc(which, x[0].integer, width, count, negative, &r))
+        return constness::not_constant;
+    /* (a 128-bit result that does not fit in 64 bits has no value kept) */
+    if (!integer_kept_exactly(tokens.files.behavior, fundamental_of(call.type),
+                              r))
+        return constness::unknown;
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer =
+        integer_wrap(tokens.files.behavior, fundamental_of(call.type), r);
+    return constness::constant;
+}
+
+/*
+ * [ext:clang_builtin_functions] the value of __builtin_align_up,
+ * __builtin_align_down and __builtin_is_aligned of an integer: modulo the
+ * operand's type, (x + a - 1) & ~(a - 1), x & ~(a - 1), x & (a - 1) == 0,
+ * for a power of two a of at most 2^(width-1) (clang: other alignments are
+ * errors).  A pointer operand has no value kept here (unknown).
+ */
+constness semantic_analysis::evaluate_align(constant_evaluation &state,
+                                            int which,
+                                            const semantic_node &call,
+                                            constant_value &v)
+{
+    const uint32_t *items = semantics.items(call.first);
+    if (call.count != 2)
+        return constness::unknown;
+    fundamental_type f = fundamental_of(semantics[items[0]].type);
+    if (f == fundamental_type::none || !fundamental_type_is_integral(f))
+        return constness::unknown;
+    constant_value x[2];
+    for (uint32_t i = 0; i < 2; i++) {
+        constness c = evaluate_node(state, items[i], x[i]);
+        if (c != constness::constant)
+            return c;
+        if (x[i].kind != constant_value_kind::integer)
+            return constness::unknown;
+    }
+    unsigned width = fundamental_type_width(tokens.files.behavior, f);
+    fundamental_type g = fundamental_of(semantics[items[1]].type);
+    if (g == fundamental_type::none ||
+        (fundamental_type_is_signed(tokens.files.behavior, g) &&
+         static_cast<__int128>(x[1].integer) <= 0))
+        return constness::unknown;
+    unsigned __int128 r = 0;
+    if (!vfold_align_integer(which, x[0].integer, x[1].integer, width, &r))
+        return constness::unknown;
+    if (!integer_kept_exactly(tokens.files.behavior, fundamental_of(call.type),
+                              r))
+        return constness::unknown;
+    v = constant_value();
+    v.kind = constant_value_kind::integer;
+    v.integer =
+        integer_wrap(tokens.files.behavior, fundamental_of(call.type), r);
+    return constness::constant;
 }
 
 int semantic_analysis::query_builtin(entity_index e) const

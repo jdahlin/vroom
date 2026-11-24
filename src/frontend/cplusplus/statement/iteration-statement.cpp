@@ -489,6 +489,7 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
                declaration, begin-expr and end-expr are range.begin() and
                range.end(), respectively;" */
             entity_index c = record.entity;
+            require_complete(c);
             if (entity_table[c].kind != entity_kind::class_type ||
                 !entity_table[c].size)
                 return failed(not_supported(n, "stmt.ranged"));

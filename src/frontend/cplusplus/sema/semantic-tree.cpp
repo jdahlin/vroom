@@ -31,6 +31,8 @@ const char *semantic_kind_name(semantic_kind kind)
         "entity",
         "conversion",
         "vector_shuffle",
+        "complex_value",
+        "complex_part",
         "compound_literal",
         "unary",
         "address",
@@ -50,6 +52,7 @@ const char *semantic_kind_name(semantic_kind kind)
         "member_pointer_access",
         "zero",
         "initializer_list",
+        "default_member_initializer",
         "bind_reference",
         "construct",
         "destroy",
@@ -76,6 +79,7 @@ const char *semantic_kind_name(semantic_kind kind)
         "for_statement",
         "switch_statement",
         "case_label",
+        "statement_expression",
         "default_label",
         "identifier_label",
         "goto_statement",
@@ -89,6 +93,9 @@ const char *semantic_kind_name(semantic_kind kind)
         "function_body",
     };
     size_t k = static_cast<size_t>(kind);
+    static_assert(sizeof names / sizeof names[0] ==
+                      static_cast<size_t>(semantic_kind::function_body) + 1,
+                  "one name for each semantic_kind");
     if (k >= sizeof names / sizeof names[0])
         return "?";
     return names[k];
@@ -136,9 +143,12 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
                  kind == semantic_kind::destroy ||
                  kind == semantic_kind::bound_member_function)
             function = b;
+        else if ((kind == semantic_kind::entity) && a &&
+                 entity_table[a].kind == entity_kind::variable)
+            function = a;
         if (function)
             entity_table[function].member_definition_needed = true;
-        complete_class_type(m.type);
+        require_complete(m.type);
         if (m.category == value_category::prvalue)
             require_destructor_definition(m.type);
     }

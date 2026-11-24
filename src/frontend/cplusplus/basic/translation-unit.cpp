@@ -196,7 +196,8 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
     for (entity_index k = x.first_constructor; k;
          k = entity_table[k].next_constructor)
         if (!entity_table[k].implicit &&
-            !type_table[entity_table[k].type.unqualified()].parameter_count)
+            type_table[entity_table[k].type.unqualified()].parameter_count ==
+                entity_table[k].default_arguments)
             return true;
     if (x.union_ && x.member_count)
         return false;
@@ -209,6 +210,16 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
            M of T has a default member initializer or ..." */
         if (m.default_initializer && !x.union_)
             continue;
+        entity_index member = class_members[x.first_member + i];
+        const struct type &own = type_table[m.type.unqualified()];
+        if (!x.union_ && own.kind == type_kind::class_type &&
+            entity_table[own.entity].anonymous_object == member &&
+            entity_table[own.entity].union_) {
+            /* (7.6): an anonymous union member has an initialized member */
+            if (variant_initialized(member))
+                continue;
+            return false;
+        }
         qualified_type t = m.type;
         while (type_table[t.unqualified()].kind == type_kind::array)
             t = type_table[t.unqualified()].operand;
@@ -234,12 +245,10 @@ bool semantic_analysis::const_default_constructible(entity_index c) const
  * "it contains the extern specifier or a linkage-specification and neither
  * an initializer nor a function-body"); a typedef declaration is none.
  */
-analysis_result semantic_analysis::declare(SyntaxRef declaration,
-                                           token_index id, entity_kind kind,
-                                           qualified_type type,
-                                           const specified &s, bool definition,
-                                           bool initialized,
-                                           entity_index &declared_entity)
+analysis_result semantic_analysis::declare(
+    SyntaxRef declaration, token_index id, entity_kind kind,
+    qualified_type type, const specified &s, exception_specification exceptions,
+    bool definition, bool initialized, entity_index &declared_entity)
 {
     declared_entity = 0;
     if (kind != entity_kind::typedef_name) {
@@ -249,8 +258,10 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
         return declare_variable_specialization(declaration, type, s,
                                                declared_entity);
     if (instantiating && kind == entity_kind::function)
-        return declare_specialization(declaration, id, type, s,
+        return declare_specialization(declaration, id, type, s, exceptions,
                                       declared_entity);
+    if (kind == entity_kind::function)
+        exceptions = resolved_exceptions(exceptions, type, s.gnu_flags);
     uint32_t name = tokens.identifier(id);
     entity_index scope = current_scope;
     entity_index prior = 0;
@@ -439,7 +450,7 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
         !type_table[type.unqualified()].bound_known &&
         differ_in_major_bound(type_table, entity_table[prior].type, type))
         type = entity_table[prior].type;
-    const struct type &record = type_table[type.unqualified()];
+    const struct type record = type_table[type.unqualified()];
     bool is_reference = record.kind == type_kind::lvalue_reference ||
                         record.kind == type_kind::rvalue_reference;
     if (kind == entity_kind::variable) {
@@ -447,6 +458,12 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
            contains the extern specifier ... and neither an initializer nor
            a function-body" */
         definition = !s.extern_ || initialized;
+        /* [ext:microsoft_declspec] dllimport (ignored on clang's target)
+           still makes a declaration without an initializer a
+           non-definition */
+        if (((s.gnu_flags & gnu_dllimport) || declarator_dllimport) &&
+            !initialized)
+            definition = false;
         /* [dcl.link]/7: "A declaration directly contained in a
            linkage-specification is treated as if it contains the extern
            specifier ([dcl.stc]) for the purpose of determining the linkage
@@ -493,6 +510,7 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                                        "basic.def");
         }
         if (record.kind == type_kind::class_type) {
+            require_complete(record.entity);
             if (definition && !entity_table[record.entity].size &&
                 entity_table[record.entity].instantiation &&
                 !entity_table[record.entity].defined) {
@@ -504,17 +522,31 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                 uint32_t ct = entity_table[t].instantiation;
                 if (ct && !instantiations[k].defining) {
                     entity_index done = record.entity;
+                    /* (a copy: instantiate_class may grow template_arguments) */
+                    owned_array<template_argument> arguments;
+                    for (uint32_t i = 0; i < instantiations[k].argument_count;
+                         i++)
+                        arguments.append(
+                            template_arguments
+                                [instantiations[k].first_argument + i]);
                     VTRY(ir, instantiate_class(
-                                 declaration, ct,
-                                 &template_arguments[instantiations[k]
-                                                         .first_argument],
+                                 declaration, ct, arguments.data(),
                                  instantiations[k].argument_count, done));
                 }
             }
             const entity &c = entity_table[record.entity];
-            if (c.kind != entity_kind::class_type)
-                /* a class whose definition was not analysed */
-                return not_supported(declaration, "class.pre");
+            if (c.kind != entity_kind::class_type) {
+                /* a class whose definition was not analysed: a lazily
+                   declared specialization whose definition failed says why
+                   (its instantiation's own refusal, [temp.inst]) */
+                analysis_result refused =
+                    not_supported(declaration, "class.pre");
+                if (c.instantiation &&
+                    instantiations[c.instantiation - 1].has_failure)
+                    instantiation_detail(
+                        instantiations[c.instantiation - 1].failure);
+                return refused;
+            }
             /* [basic.def]/5 */
             if (definition && !c.size)
                 return ill_formed_at_token(id,
@@ -651,8 +683,23 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                 same = o;
         /* a function declared before by a friend declaration only
            ([namespace.memdef]/3), whose name is bound to others */
-        if (!same && !qualified && declared_unbound(scope, name, type))
-            return not_supported(declaration, "class.friend");
+        if (!same && !qualified) {
+            /* [namespace.memdef]/3, [class.friend]/6: the definition (or
+               redeclaration) in the namespace is of the function the friend
+               declaration declared there; it now joins the name's set */
+            entity_index u = declared_unbound(scope, name, type);
+            if (u) {
+                if (entity_table[prior].named_by_using ||
+                    entity_table[u].next_overload)
+                    return not_supported(declaration, "class.friend");
+                entity_index last = prior;
+                while (entity_table[last].next_overload)
+                    last = entity_table[last].next_overload;
+                entity_table[last].next_overload = u;
+                entity_table[u].hidden_type = entity_table[prior].hidden_type;
+                same = u;
+            }
+        }
         if (!same && qualified)
             /* [dcl.meaning]/1: "the declaration shall refer to a previously
                declared member of the class or namespace to which the
@@ -683,9 +730,19 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
     }
     if (prior) {
         entity &e = entity_table[prior];
-        /* declared by a declaration not analysed (hold_names) */
-        if (e.kind == entity_kind::none)
-            return not_supported(declaration, "basic.scope.declarative");
+        /* declared by a declaration not analysed (hold_names): the
+           detail names the reason, which --why follows to that declaration */
+        if (e.kind == entity_kind::none) {
+            analysis_result refused =
+                not_supported(declaration, "basic.scope.declarative");
+            if (e.held_by == held_cause::refused)
+                name_unsupported_detail(id, "is declared by a declaration "
+                                            "with no rules yet");
+            else
+                name_held_detail(id, e.held_by);
+            last_unsupported_held_by(prior);
+            return refused;
+        }
         /* [basic.scope.declarative]/4: "Given a set of declarations in a
            single declarative region, each of which specifies the same
            unqualified name, they shall all refer to the same entity, or all
@@ -700,12 +757,29 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
             /* [dcl.typedef]/6: "In a given scope, a typedef specifier shall
                not be used to redeclare the name of any type declared in
                that scope to refer to a different type." */
-            if (!(e.type == type))
+            if (!(e.type == type)) {
+                /* a specialization whose definition failed (one named
+                   only is defined when used, [temp.inst]/2) is no known
+                   type to compare */
+                const struct type &was = type_table[e.type.unqualified()];
+                const struct type &now = type_table[type.unqualified()];
+                if ((was.kind == type_kind::class_type &&
+                     entity_table[was.entity].kind !=
+                         entity_kind::class_type) ||
+                    (now.kind == type_kind::class_type &&
+                     entity_table[now.entity].kind != entity_kind::class_type))
+                    return not_supported(declaration, "temp.inst");
+                /* decltype of a name no rules hold has a dependent type
+                   of its own, which compares with nothing */
+                if (was.kind == type_kind::dependent ||
+                    now.kind == type_kind::dependent)
+                    return not_supported(declaration, "dcl.typedef");
                 return ill_formed_at_token(id,
                                            "a typedef specifier shall not be "
                                            "used to redeclare the name of a "
                                            "type to refer to a different type",
                                            "dcl.typedef");
+            }
         } else if (kind == entity_kind::function) {
             /* (a function of the same parameters: overloads above) */
             if (!(e.type == type) && differ_in_exceptions(e.type, type)) {
@@ -718,26 +792,25 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
                    (-Wmissing-exception-spec), as one in a system header or
                    with Microsoft's extensions does */
                 bool missing = type_table[e.type.unqualified()].non_throwing &&
-                               !function_exceptions_specified;
+                               !exceptions.written;
                 if (missing) {
                     type = e.type;
                 } else {
-                    /* [ext:gnu_attributes] nothrow: a non-throwing
-                       exception specification of its own, clang's
-                       compatible with noexcept */
-                    bool nothrow = ((e.gnu_flags | s.gnu_flags) & gnu_nothrow);
-                    if (!nothrow && !in_system_header(id) &&
-                        !tokens.files.behavior.microsoft_extensions)
-                        return ill_formed_at_token(id,
-                                                   "all declarations of a "
-                                                   "function shall have a "
-                                                   "compatible exception "
-                                                   "specification",
-                                                   "except.spec");
+                    /* (a function declared nothrow: its implicit
+                       specification is non-throwing, as noexcept's) */
+                    if (!same_exceptions(e.exceptions, exceptions)) {
+                        VTRY(r, mismatched_exceptions(id));
+                    }
                     /* the later declaration's, [impl.clang] as clang's */
                     e.type = type;
                 }
             }
+            /* [except.spec]/4: the specifications of two declarations are
+               compatible when both allow every exception or both name the
+               same set (a function with none, or a deallocation function,
+               taking the other's: [impl.clang]).  The type compares them
+               where it holds one (above) */
+            VTRY(r, compatible_exceptions(id, prior, exceptions));
             /* [over.load]/2: "Function declarations that differ only in the
                return type, the exception specification, or both cannot be
                overloaded." */
@@ -828,6 +901,8 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
         entity_table[e].type = type;
         entity_table[e].linkage_of_name = implied;
         entity_table[e].defined = definition;
+        if (kind == entity_kind::function)
+            entity_table[e].exceptions = exceptions;
         entity_table.add_declaration(e, declaration);
         if (overloads) {
             /* another function of the set: last in its chain, the name
@@ -875,6 +950,59 @@ analysis_result semantic_analysis::declare(SyntaxRef declaration,
     d.claimable = declarations_claimable && !qualified;
     declared.append(d);
     return analysis_result::well_formed;
+}
+
+/*
+ * [except.spec]/4: "If any declaration of a function has an exception
+ * specification that is not a noexcept-specification allowing all
+ * exceptions, all declarations, including the definition and any explicit
+ * specialization, of that function shall have a compatible exception
+ * specification."  Two are compatible when both allow every exception or
+ * both name the same set of types (same_exceptions); a declaration without
+ * one has its implicit specification (resolved_exceptions: a destructor's
+ * and a deallocation function's are non-throwing, [except.spec]/8, /12).
+ * A declaration without one after a noexcept(true) one is checked by the
+ * function's type (above).
+ */
+analysis_result
+semantic_analysis::compatible_exceptions(token_index id, entity_index prior,
+                                         exception_specification now)
+{
+    exception_specification before = entity_table[prior].exceptions;
+    /* (an entity whose specification is not recorded: an implicitly
+       declared one but a deallocation function) */
+    if (before.allows == exception_allowance::implicit ||
+        before.allows == exception_allowance::unknown ||
+        now.allows == exception_allowance::unknown ||
+        same_exceptions(before, now))
+        return analysis_result::well_formed;
+    /* [impl.clang] a declaration without one keeps the first's
+       (-Wmissing-exception-spec: an error clang recovers from, as the
+       type's check above does for noexcept) */
+    if (!now.written)
+        return analysis_result::well_formed;
+    /* [impl.clang] before C++17 the specification is no part of the type:
+       an error clang recovers from without making the declaration invalid,
+       which redeclares the function */
+    if (!tokens.files.behavior.has(
+            language_feature::exception_specification_in_type)) {
+        return analysis_result::well_formed;
+    }
+    return mismatched_exceptions(id);
+}
+
+/* [except.spec]/4 not met at id: an error, or [impl.clang] with Microsoft's
+   extensions or in a system header clang's warning (-Wmicrosoft-exception-
+   spec), the later declaration's specification taken */
+analysis_result semantic_analysis::mismatched_exceptions(token_index id)
+{
+    if (in_system_header(id) || tokens.files.behavior.microsoft_extensions)
+        return recoverable_extension_used(
+            diagnostic_id::sema_mismatched_exception_specification, id);
+    return ill_formed_at_token(id,
+                               "all declarations of a function shall have a "
+                               "compatible exception specification",
+                               "except.spec");
 }
 
 /* [dcl.constexpr]/1: every redeclaration must repeat constexpr. */
@@ -1150,6 +1278,11 @@ analysis_result semantic_analysis::declare_local(
            in that scope to refer to the type to which it already refers." */
         if (e.kind == entity_kind::typedef_name &&
             kind == entity_kind::typedef_name) {
+            if (!(e.type == type) &&
+                (type_table[e.type.unqualified()].kind ==
+                     type_kind::dependent ||
+                 type_table[type.unqualified()].kind == type_kind::dependent))
+                return not_supported(declaration, "dcl.typedef");
             if (!(e.type == type))
                 return ill_formed_at_token(id,
                                            "a typedef specifier shall not be "

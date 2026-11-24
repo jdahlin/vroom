@@ -193,7 +193,7 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                    lambda-introducer unless its innermost enclosing scope
                    is a block scope ([basic.scope.block]) or it appears
                    within a default member initializer" */
-                if (!l.enclosing_function)
+                if (!l.enclosing_function && !l.enclosing_class)
                     return ill_formed_at_token(
                         c.token(),
                         "a lambda-expression shall not have a "

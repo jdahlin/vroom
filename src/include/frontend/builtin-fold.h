@@ -51,8 +51,12 @@ enum vfold_op {
     vfold_stdc_rotate_right,
     vfold_stdc_count_ones,
     vfold_stdc_trailing_zeros,
+    /* the rest of C23's stdc_* and bitreverseg (C++ front end) */
+    vfold_stdc_bits,
     /* the byte swap of any integer width */
     vfold_bswap_generic,
+    /* clang's __builtin_align_up, _down and is_aligned (C++ front end) */
+    vfold_align,
     /* the queries about the argument or its type */
     vfold_constant_p,
     vfold_lock_free,
@@ -285,6 +289,168 @@ static inline unsigned __int128 vfold_rotate(unsigned __int128 value,
     if (!amount)
         return bits;
     return vfold_mask((bits << amount) | (bits >> (width - amount)), width);
+}
+
+/* ---- C23's stdc_* and bitreverseg (vfold_stdc_bits) -------------------- */
+
+/* the operations of the vfold_stdc_bits rows, C23 7.18.2-7.18.14 */
+enum vfold_stdc_kind {
+    vfold_stdc_leading_zeros,
+    vfold_stdc_leading_ones,
+    vfold_stdc_trailing_ones,
+    vfold_stdc_first_leading_zero,
+    vfold_stdc_first_leading_one,
+    vfold_stdc_first_trailing_zero,
+    vfold_stdc_first_trailing_one,
+    vfold_stdc_count_zeros,
+    vfold_stdc_bit_width,
+    vfold_stdc_has_single_bit,
+    vfold_stdc_bit_ceil,
+    vfold_stdc_bit_floor,
+    vfold_stdc_rotate_left_by,
+    vfold_stdc_rotate_right_by,
+    vfold_stdc_bitreverse,
+};
+
+/* the zero bits from the least significant end, width for a value with none */
+static inline unsigned vfold_trailing_zeros_of(unsigned __int128 value,
+                                               unsigned width)
+{
+    if (!value)
+        return width;
+    return vfold_trailing_zeros(value);
+}
+
+/*
+ * The stdc operation kind of the low width bits of value (width 1 for a
+ * bool).  A rotation's count is count, read as negative when
+ * count_negative (a signed count rotates the other way when negative, by
+ * its magnitude modulo the width); the other operations ignore it.  False
+ * when the result is not a constant.  The result is not yet converted to
+ * the call's type.
+ */
+static inline int vfold_stdc(int kind, unsigned __int128 value, unsigned width,
+                             unsigned __int128 count, int count_negative,
+                             unsigned __int128 *result)
+{
+    unsigned __int128 bits = vfold_mask(value, width);
+    unsigned __int128 inverse = vfold_mask(~bits, width);
+    unsigned __int128 r = 0;
+
+    switch (kind) {
+    case vfold_stdc_leading_zeros:
+        r = vfold_leading_zeros(bits, width);
+        break;
+    case vfold_stdc_leading_ones:
+        r = vfold_leading_zeros(inverse, width);
+        break;
+    case vfold_stdc_trailing_ones:
+        r = vfold_trailing_zeros_of(inverse, width);
+        break;
+    case vfold_stdc_first_leading_zero:
+        if (inverse)
+            r = vfold_leading_zeros(inverse, width) + 1;
+        break;
+    case vfold_stdc_first_leading_one:
+        if (bits)
+            r = vfold_leading_zeros(bits, width) + 1;
+        break;
+    case vfold_stdc_first_trailing_zero:
+        if (inverse)
+            r = vfold_trailing_zeros(inverse) + 1;
+        break;
+    case vfold_stdc_first_trailing_one:
+        if (bits)
+            r = vfold_trailing_zeros(bits) + 1;
+        break;
+    case vfold_stdc_count_zeros:
+        r = width - vfold_count_ones(bits);
+        break;
+    case vfold_stdc_bit_width:
+        r = width - vfold_leading_zeros(bits, width);
+        break;
+    case vfold_stdc_has_single_bit:
+        r = vfold_count_ones(bits) == 1;
+        break;
+    case vfold_stdc_bit_ceil:
+        /* 1 for 0 and 1; the power of two above x - 1, which wraps to 0
+           when the type has none (clang) */
+        r = 1;
+        if (bits > 1) {
+            unsigned shift = width - vfold_leading_zeros(bits - 1, width);
+
+            r = 0;
+            if (shift < width)
+                r = ((unsigned __int128)1) << shift;
+        }
+        break;
+    case vfold_stdc_bit_floor:
+        if (bits)
+            r = ((unsigned __int128)1)
+                << (width - 1 - vfold_leading_zeros(bits, width));
+        break;
+    case vfold_stdc_rotate_left_by:
+    case vfold_stdc_rotate_right_by: {
+        int right = kind == vfold_stdc_rotate_right_by;
+
+        r = bits;
+        if (width <= 1)
+            break;
+        if (count_negative) {
+            count = 0 - count;
+            right = !right;
+        }
+        r = vfold_rotate(bits, width, count % width, right);
+        break;
+    }
+    case vfold_stdc_bitreverse:
+        r = bits;
+        if (width > 1 && !vfold_integer(vfold_bitreverse, bits, width, &r))
+            return 0;
+        break;
+    default:
+        return 0;
+    }
+    *result = r;
+    return 1;
+}
+
+/* ---- clang's __builtin_align_up, _down and is_aligned (vfold_align) ---- */
+
+enum vfold_align_kind {
+    vfold_align_up,
+    vfold_align_down,
+    vfold_align_is_aligned,
+};
+
+/*
+ * The align operation kind of an integer: modulo its width-bit type,
+ * (x + a - 1) & ~(a - 1), x & ~(a - 1), x & (a - 1) == 0.  False unless
+ * the alignment is a power of two of at most 2^(width-1) (clang: other
+ * alignments are errors) and the width at most 64.
+ */
+static inline int vfold_align_integer(int kind, unsigned __int128 value,
+                                      unsigned __int128 alignment,
+                                      unsigned width, unsigned __int128 *result)
+{
+    unsigned __int128 bits, mask;
+
+    if (!alignment || (alignment & (alignment - 1)) || width > 64 ||
+        alignment > (((unsigned __int128)1) << (width - 1)))
+        return 0;
+    bits = vfold_mask(value, width);
+    mask = vfold_mask(~(alignment - 1), width);
+    switch (kind) {
+    case vfold_align_up:
+        *result = vfold_mask(bits + alignment - 1, width) & mask;
+        return 1;
+    case vfold_align_down:
+        *result = bits & mask;
+        return 1;
+    default:
+        *result = (bits & (alignment - 1)) == 0;
+        return 1;
+    }
 }
 
 #endif

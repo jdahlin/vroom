@@ -151,13 +151,15 @@ type_index types::array_of(qualified_type element, uint64_t bound)
 /* [temp.deduct.type]/8's T[i]: an array whose bound is a non-type
    template-parameter (its entity) */
 type_index types::array_of_parameter_bound(qualified_type element,
-                                           uint32_t parameter)
+                                           uint32_t parameter,
+                                           uint64_t expression)
 {
     type t;
     t.kind = type_kind::array;
     t.operand = element;
     t.bound_known = true;
     t.entity = parameter;
+    t.bound = expression;
     return intern(t, nullptr);
 }
 

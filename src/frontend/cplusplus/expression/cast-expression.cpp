@@ -284,6 +284,18 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
                 semantics[m.node].op =
                     static_cast<uint8_t>(conversion_kind::integral);
         }
+        /* [expr.static.cast]/10: a value outside the range of the
+           enumeration's values ([dcl.enum]/8) is undefined behavior, so
+           no core constant expression ([expr.const]/5); the evaluator's
+           conversion has the same rule for an operand known only there */
+        fundamental_type from = fundamental_of(m.type);
+        if (!entity_table[e].fixed_underlying && entity_table[e].defined &&
+            m.evaluation == constness::constant &&
+            fundamental_type_is_integral(from)) {
+            __int128 n = integer_value(tokens.files.behavior, from, m.value);
+            if (!enumeration_holds(entity_table[e], n))
+                m.evaluation = constness::not_constant;
+        }
         convert_arithmetic(m, entity_table[e].underlying);
         m.type = qualified_type::make(to.unqualified(), cv_none);
         converted(m, conversion_kind::integral);
@@ -428,6 +440,8 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
         entity_table[d].kind != entity_kind::class_type ||
         entity_table[b].kind != entity_kind::class_type)
         return not_supported(at, "expr.static.cast");
+    require_complete(b);
+    require_complete(d);
     if (entity_table[d].size && base_subobjects(d, b) == 0 &&
         entity_table[b].size && base_subobjects(b, d)) {
         /* [conv.mem]/2; [expr.cast]/4: "a pointer to member of an
@@ -682,6 +696,8 @@ analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
        static_cast or the reinterpret_cast interpretation is used"
        ([impl.clang]: the reinterpret_cast's); a static_cast alone needs
        complete classes ([expr.static.cast]/11, [conv.ptr]/3) */
+    require_complete(fp.entity);
+    require_complete(tp.entity);
     if (!entity_table[fp.entity].size || !entity_table[tp.entity].size)
         return analysis_result::well_formed;
     bool ambiguous = false;

@@ -100,6 +100,7 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
                       size_of_type(t);
             continue;
         }
+        require_complete(record.entity);
         if (record.kind != type_kind::class_type ||
             !entity_table[record.entity].size)
             return ill_formed(n, "offsetof requires a complete class type",

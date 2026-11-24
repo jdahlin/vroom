@@ -203,15 +203,20 @@ node_index parser::recover_declaration(node_index (parser::*alternative)())
     /* the tokens were not a declaration of the grammar written so far */
     if (debug_fallbacks) {
         const char *why = "expected ";
-        if (failed_with.beyond_step)
+        const char *in = "", *in_word = "";
+        if (failed_with.beyond_step) {
             why = "later step: ";
+            in = failed_with.beyond_where;
+            in_word = " in ";
+        }
         owned_buffer spelling;
         tokens.spelling(failed_with.at, spelling.get());
         source_position at = tokens.position(failed_with.at);
-        fprintf(stderr, "vcc: declaration at %s:%u:%u: %s%s at %u:%u `%.*s`\n",
-                at.file_name, tokens.position(first).line,
-                tokens.position(first).column, why, failed_with.expected,
-                at.line, at.column, (int)spelling.size(), spelling.data());
+        fprintf(
+            stderr, "vcc: declaration at %s:%u:%u: %s%s%s%s at %u:%u `%.*s`\n",
+            at.file_name, tokens.position(first).line,
+            tokens.position(first).column, why, failed_with.expected, in_word,
+            in, at.line, at.column, (int)spelling.size(), spelling.data());
     }
     size_t messages = diagnostics.messages.size();
     node_index n = unparsed_declaration();
@@ -365,9 +370,15 @@ node_index parser::block_or_function_declaration()
 {
     size_t mark = begin_node();
     token_index first = position;
+    /* [ext:gnu_attributes] a GNU attribute or __declspec before the
+       declaration is a decl-specifier as clang takes it, with no
+       attribute-specifier-seq's rule of an init-declarator-list */
+    bool gnu_first = at_gnu_attribute();
     node_index attributes = attribute_specifier_seq();
     if (failed())
         return 0;
+    if (gnu_first)
+        attributes = 0;
     decl_specifier_facts specifiers;
     /* [temp.res]/5: "a decl-specifier of the decl-specifier-seq of a
        simple-declaration or a function-definition in namespace scope" */
@@ -649,6 +660,22 @@ node_index parser::attribute_declaration()
  *
  * [dcl.pre]/7: "An empty-declaration has no effect."
  */
+/* [class.static.data]/3 (C++11, C++14): a constexpr static data member is
+   initialized in its class and "the namespace scope definition shall not
+   contain an initializer"; from C++17 the member is inline
+   ([dcl.constexpr]/1) and that declaration a redundant redeclaration
+   ([depr.static.constexpr]/1): A::x names a constexpr static data member
+   of class A */
+bool semantic_analysis::constexpr_member_redeclaration(
+    const declarator_meaning &m) const
+{
+    if (!m.qualifier || !is_class_entity(m.qualifier))
+        return false;
+    entity_index e = entity_table.find(m.qualifier, tokens.identifier(m.id));
+    return e && entity_table[e].kind == entity_kind::variable &&
+           entity_table[e].constexpr_;
+}
+
 analysis_result semantic_analysis::empty_declaration(EmptyDeclaration)
 {
     return analysis_result::well_formed;
@@ -671,9 +698,21 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
     if (n.size() < 5)
         return not_supported(n, "dcl.pre");
     bool constant = false, value = false;
-    VTRY(r, bool_constant_expression(n, n[2], constant, value));
-    if (!constant)
-        return not_supported(n, expr_const_reason());
+    constant_only++;
+    analysis_result r = bool_constant_expression(n, n[2], constant, value);
+    constant_only--;
+    if (r != analysis_result::well_formed)
+        return r;
+    if (!constant && constant_stop == 3)
+        return ill_formed(n,
+                          "the expression is not a constant expression: the "
+                          "evaluation applies a rule of [expr.const]/5",
+                          "expr.const");
+    if (!constant) {
+        analysis_result refused = not_supported(n, expr_const_reason());
+        evaluator_stop_detail();
+        return refused;
+    }
     if (!value)
         return ill_formed(n,
                           "if the value of the expression when so converted "
@@ -704,10 +743,10 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
     } else if (n.size() == 6 && !n[2].is_token() &&
                tokens.files.behavior.has(extension::clang_ext_vector_type)) {
         /* [ext:clang_ext_vector_type] */
-        g.ext_vector_allowed = true;
+        g.ext_vector.allowed = true;
         VTRY(r, gnu_attribute_specifier(n[2], g));
         if (g.flags || g.aligned || g.section || g.abi_tag ||
-            (!g.ext_vector && !g.ext_vector_parameter))
+            !g.ext_vector.given())
             return not_supported(n, "dcl.attr");
         type_at = 4;
     }
@@ -740,7 +779,7 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
         if (r != analysis_result::well_formed)
             return r;
     }
-    if (g.ext_vector || g.ext_vector_parameter)
+    if (g.ext_vector.given())
         return clang_ext_vector_type(n, g, type);
     return analysis_result::well_formed;
 }
@@ -757,9 +796,45 @@ analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
     s.has_type = true;
     entity_index declared = 0;
     r = declare(n, n.first_token() + 1, entity_kind::typedef_name, type, s,
-                false, false, declared);
+                exception_specification{}, false, false, declared);
     last_declared = declared;
     return r;
+}
+
+/* [dcl.attr.fallthrough]/1, [dcl.attr.likelihood]/1: the token of a
+   standard fallthrough, likely or unlikely among the tokens [first, end) of
+   attributes, else 0; these "may be applied to" a null statement, a label
+   or a statement only (clang: "cannot be applied to a declaration") */
+token_index semantic_analysis::statement_only_attribute(token_index first,
+                                                        token_index end) const
+{
+    for (token_index t = first; t < end; t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        if (!standard_attribute_token(t, first, "fallthrough") &&
+            !standard_attribute_token(t, first, "likely") &&
+            !standard_attribute_token(t, first, "unlikely"))
+            continue;
+        return t;
+    }
+    return 0;
+}
+
+/* whether token t, which is no earlier than first, spells the unscoped
+   attribute-token NAME (not gnu::NAME, not a namespace) */
+bool semantic_analysis::standard_attribute_token(token_index t,
+                                                 token_index first,
+                                                 const char *name) const
+{
+    if (tokens[t].kind != token_kind::identifier || t <= first)
+        return false;
+    owned_buffer spelling;
+    tokens.spelling(t, spelling.get());
+    size_t length = strlen(name);
+    return spelling.size() == length &&
+           !memcmp(spelling.data(), name, length) &&
+           !is_operator(tokens[t - 1], preprocessing_op_or_punc::COLON_COLON) &&
+           !is_operator(tokens[t + 1], preprocessing_op_or_punc::COLON_COLON);
 }
 
 /*
@@ -794,8 +869,26 @@ analysis_result semantic_analysis::simple_declaration(SyntaxRef n)
         break;
     }
     SyntaxTail tail(n, k);
-    if (k >= n.size() || !tail[0].is(syntax_kind::decl_specifier_seq))
-        return not_supported(n, "dcl.attr");
+    if (k >= n.size() || !tail[0].is(syntax_kind::decl_specifier_seq)) {
+        /* [dcl.attr.fallthrough]/1, [dcl.attr.likelihood]/1: these
+           attribute-tokens "may be applied to" a null statement, a label or
+           a statement; clang: "'fallthrough' attribute cannot be applied to
+           a declaration" */
+        token_index attributes_end = n.end_token();
+        for (uint32_t i = k; i < n.size(); i++)
+            if (n[i].is(syntax_kind::decl_specifier_seq)) {
+                attributes_end = n[i].first_token();
+                break;
+            }
+        if (token_index t =
+                statement_only_attribute(n.first_token(), attributes_end))
+            return ill_formed_at_token(
+                t, "this attribute cannot be applied to a declaration",
+                "dcl.attr");
+        return not_supported_because(
+            n, "dcl.attr",
+            "leading attributes that are not ones without effect");
+    }
     return init_declarators(n, tail[0], false);
 }
 
@@ -1012,8 +1105,11 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     /* (a declaration nested in an initializer has its own) */
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());
     scoped_value<bool> group(placeholder_group, false);
-    scoped_value<entity_index> member_context(
-        access_class, declarator_access_class(declaration));
+    /* (a template's declaration being substituted keeps its context) */
+    entity_index declarator_context = declarator_access_class(declaration);
+    if (!declarator_context)
+        declarator_context = access_class;
+    scoped_value<entity_index> member_context(access_class, declarator_context);
     /* [dcl.type.class.deduct]/1: a placeholder for a deduced class type
        (C b(args); or O::C b(args);) */
     analysis_result r = analysis_result::well_formed;
@@ -1065,6 +1161,9 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
             }
         }
     }
+    /* [ext:clang_ext_vector_type] a typedef's, applied by
+       declare_with_initializer */
+    s.ext_vector.allowed = true;
     if (!ctad_done && r == analysis_result::well_formed)
         r = decl_specifier_seq(specifiers, s, false);
     sole_elaborated = 0;
@@ -1081,6 +1180,8 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
                 VTRY(ar, alignment_specifier(elem.alignment_specifier(), a));
                 if (a > s.aligned)
                     s.aligned = static_cast<uint32_t>(a);
+                if (a > s.alignas_lead)
+                    s.alignas_lead = a;
                 return analysis_result::well_formed;
             }
             return gnu_attribute_specifier(elem, s);
@@ -1144,13 +1245,19 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
         /* [dcl.pre]/5: a class declared: a storage class or other
            specifier with it is [dcl.pre]/5's "ill-formed" or clang's
            warning, not analysed */
-        if (s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
-            s.type.cv())
+        bool anonymous = declares_unnamed_class(specifiers);
+        if (s.typedef_ ||
+            (s.static_ && !(anonymous && is_namespace(current_scope))) ||
+            s.extern_ || s.inline_ || s.constexpr_ || s.type.cv())
             return not_supported(declaration, "dcl.pre");
         /* [class.union.anon]/1: an anonymous union declares an unnamed
-           object (an unnamed struct so, clang's extension) */
-        if (declares_unnamed_class(specifiers))
+           object (an unnamed struct so, clang's extension); in a
+           namespace, a static one is a variable ([class.union.anon]/3) */
+        if (anonymous) {
+            if (is_namespace(current_scope))
+                return anonymous_union_member(current_scope, declaration, s, 0);
             return not_supported(declaration, "class.union.anon");
+        }
         return analysis_result::well_formed;
     }
     if (items.empty())
@@ -1202,6 +1309,8 @@ analysis_result semantic_analysis::declare_with_initializer(
     last_declared = 0;
     qualified_type type = s.type;
     declarator_meaning m;
+    m.ext_vector.allowed = s.ext_vector.allowed;
+    m.alignas_allowed = true;
     function_cv = 0;
     /* the parameters of this declarator's function declarator, if it has
        one (function sets them) */
@@ -1216,6 +1325,41 @@ analysis_result semantic_analysis::declare_with_initializer(
         scoped_value<bool> run_time(variable_length_declarator,
                                     variable_length);
         VTRY_SET(r, declarator(declaration, d, type, m));
+    }
+    /* [dcl.align]/1: "An alignment-specifier may be applied to a variable
+       or to a class data member, ... It shall not be applied to a typedef,
+       ... " (clang: only variables, data members and tag types) */
+    if (m.alignas_suffix &&
+        (s.typedef_ ||
+         type_table[type.unqualified()].kind == type_kind::function))
+        return ill_formed(declaration,
+                          "an alignment-specifier applies only to "
+                          "variables, data members and tag types",
+                          "dcl.align");
+    /* [dcl.align]/5: "The combined effect of all alignment-specifiers in a
+       declaration shall not specify an alignment that is less strict than
+       the alignment that would be required for the entity being declared
+       if all alignment-specifiers appertaining to it were omitted" */
+    uint64_t asked = s.alignas_lead;
+    if (m.alignas_suffix_value > asked)
+        asked = m.alignas_suffix_value;
+    if (asked) {
+        qualified_type element = type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        const struct type &record = type_table[element.unqualified()];
+        uint64_t natural = 0;
+        if (record.kind == type_kind::class_type)
+            natural = entity_table[record.entity].alignment;
+        else if (record.kind == type_kind::fundamental &&
+                 record.fundamental != fundamental_type::builtin_va_list &&
+                 record.fundamental != fundamental_type::builtin_va_list_tag)
+            natural = alignment_of_type(element);
+        if (natural && asked < natural)
+            return ill_formed(declaration,
+                              "the alignment requested is less than the "
+                              "minimum alignment of the type",
+                              "dcl.align");
     }
     if (has_variable_bound(type)) {
         VTRY_SET(r, variable_length_declaration(declaration, type,
@@ -1269,6 +1413,18 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (m.qualifier || m.qualified_namespace)
             return not_supported(declaration, "ext.gnu");
         r = gnu_vector_type(declaration, m.vector_bytes, type);
+        if (r != analysis_result::well_formed)
+            return r;
+    }
+    if (m.ext_vector.given() || s.ext_vector.given()) {
+        /* [ext:clang_ext_vector_type] only a typedef-name's */
+        if (!s.typedef_ || m.qualifier || m.qualified_namespace)
+            return not_supported(declaration, "ext.clang");
+        gnu_attributes g;
+        g.ext_vector = m.ext_vector;
+        if (!g.ext_vector.given())
+            g.ext_vector = s.ext_vector;
+        r = clang_ext_vector_type(declaration, g, type);
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -1351,7 +1507,8 @@ analysis_result semantic_analysis::declare_with_initializer(
            function template's specialization declares the specialization
            (instantiate_definition) */
         entity_index declared = 0;
-        VTRY(r, declare_specialization(declaration, m.id, type, s, declared));
+        VTRY(r, declare_specialization(declaration, m.id, type, s, m.exceptions,
+                                       declared));
         last_declared = declared;
         return r;
     }
@@ -1360,7 +1517,7 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (initialized)
             return not_supported(declaration, "dcl.init");
         return member_redeclaration(declaration, m.id, m.qualifier, type, s,
-                                    definition);
+                                    m.exceptions, definition);
     }
     /* [dcl.fct]/6: "A function type with a cv-qualifier-seq or a
        ref-qualifier ... shall appear only as the function type for a
@@ -1398,7 +1555,25 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* [ext:gnu_attributes] noreturn on what is no function (a pointer to
        function, a typedef-name): GCC and clang make it part of the
        function type pointed to */
+    if (m.noreturn_suffix && kind != entity_kind::function)
+        return ill_formed_at_token(m.noreturn_suffix,
+                                   "noreturn applies to a function only",
+                                   "dcl.attr.noreturn");
     if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
+        return not_supported(declaration, "ext.gnu");
+    /* [ext:gnu_attributes] require_constant_initialization: on a variable
+       with static or thread storage duration (clang: "only applies to
+       global variables"), the declarator's own definition, not a member
+       defined by a qualified name */
+    bool require_constant_initialization =
+        (gnu_flags & gnu_require_constant_initialization) != 0;
+    if (require_constant_initialization &&
+        (kind != entity_kind::variable || m.qualifier ||
+         m.qualified_namespace ||
+         !(is_namespace(current_scope) || function_state.active) ||
+         (at_block_scope() && !s.static_ && !s.extern_ &&
+          !s.c11_thread_local) ||
+         (!initialized && element_class(type))))
         return not_supported(declaration, "ext.gnu");
     /* [dcl.constinit]/1: "The constinit specifier shall be applied only
        to a declaration of a variable with static or thread storage
@@ -1441,11 +1616,18 @@ analysis_result semantic_analysis::declare_with_initializer(
            ([dcl.init]/7.1) */
         if (!initialized && record.kind == type_kind::class_type) {
             const entity &c = entity_table[record.entity];
-            if (c.dynamic || c.member_count ||
-                (c.first_constructor &&
-                 !trivial_defaulted_default_constructor(record.entity)))
+            /* a class with a default constructor that does something is
+               default-initialized below, and its evaluation must be a
+               constant ([dcl.constexpr]/10) */
+            bool by_constructor =
+                c.first_constructor && !c.dynamic && element == type &&
+                !trivial_defaulted_default_constructor(record.entity);
+            if (!by_constructor &&
+                (c.dynamic || c.member_count ||
+                 (c.first_constructor &&
+                  !trivial_defaulted_default_constructor(record.entity))))
                 return not_supported(declaration, "dcl.init");
-        } else if (!initialized)
+        } else if (!initialized && !constexpr_member_redeclaration(m))
             return ill_formed_at_token(m.id,
                                        "a constexpr object shall be "
                                        "initialized",
@@ -1472,13 +1654,23 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (m.qualifier && (instantiating || variable_instantiating)) {
         bool var_inst = variable_instantiating != 0;
         if (var_inst)
-            r = declare(declaration, m.id, kind, type, s, definition,
-                        initialized, declared_entity);
+            r = declare(declaration, m.id, kind, type, s, m.exceptions,
+                        definition, initialized, declared_entity);
         else
-            r = declare_specialization(declaration, m.id, type, s,
+            r = declare_specialization(declaration, m.id, type, s, m.exceptions,
                                        declared_entity);
         if (r == analysis_result::well_formed && !var_inst)
             current_scope = m.qualifier;
+    } else if (m.qualifier && !initialized && s.constexpr_ &&
+               tokens.files.behavior.edition >=
+                   standard_edition::cplusplus_17 &&
+               constexpr_member_redeclaration(m)) {
+        /* [depr.static.constexpr]/1: the member, inline and defined in its
+           class, redeclared without an initializer: no second definition */
+        declared_entity =
+            entity_table.find(m.qualifier, tokens.identifier(m.id));
+        entity_table.add_declaration(declared_entity, declaration);
+        current_scope = m.qualifier;
     } else if (m.qualifier) {
         r = static_member_definition(declaration, m.id, m.qualifier, type, s,
                                      definition, declared_entity);
@@ -1487,8 +1679,12 @@ analysis_result semantic_analysis::declare_with_initializer(
     } else {
         qualified_declarator = m.qualified_namespace;
         qualified_scope = m.namespace_qualifier;
-        r = declare(declaration, m.id, kind, type, s, definition, initialized,
-                    declared_entity);
+        declarator_dllimport = (m.gnu_flags & gnu_dllimport) != 0;
+        declarator_constinit = require_constant_initialization;
+        r = declare(declaration, m.id, kind, type, s, m.exceptions, definition,
+                    initialized, declared_entity);
+        declarator_dllimport = false;
+        declarator_constinit = false;
         qualified_declarator = false;
         if (r == analysis_result::well_formed && m.qualified_namespace)
             current_scope = entity_table[declared_entity].enclosing;
@@ -1514,7 +1710,7 @@ analysis_result semantic_analysis::declare_with_initializer(
     }
     last_declared = declared_entity;
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&
-        s.constinit_) {
+        (s.constinit_ || require_constant_initialization)) {
         /* [dcl.constinit]/1: "If the specifier is applied to any
            declaration of a variable, it shall be applied to the
            initializing declaration": one added to a later declaration is
@@ -1655,6 +1851,28 @@ analysis_result semantic_analysis::declare_with_initializer(
         kind == entity_kind::variable && declared_in_scope == current_scope &&
         !is_namespace(entity_table[declared_entity].enclosing))
         block_variables.append(declared_entity);
+    /* [class.dtor]/16, [dcl.fct.def.delete]/2: "the destructor is
+       potentially invoked" for an object defined here: a deleted one is
+       ill-formed (as clang) */
+    if (r == analysis_result::well_formed && kind == entity_kind::variable &&
+        entity_table[declared_entity].defined && !s.extern_ &&
+        !entity_table[declared_entity].nonstatic_member) {
+        entity_index record = element_class(element_type(type));
+        if (is_class_entity(record) && destructor_deleted(record))
+            return ill_formed(declaration,
+                              "a program that refers to a deleted function "
+                              "implicitly or explicitly is ill-formed: the "
+                              "destructor of the object is deleted",
+                              "class.dtor");
+        /* [class.access]/1: a private or protected one is named from
+           here, by the declaration's context */
+        if (is_class_entity(record) && entity_table[record].destructor &&
+            !accessible(entity_table[record].destructor))
+            return ill_formed(declaration,
+                              "the destructor of the object is potentially "
+                              "invoked and it is private or protected",
+                              "class.access");
+    }
     bool default_constructed = false;
     if (r == analysis_result::well_formed && !initialized &&
         kind == entity_kind::variable &&
@@ -1693,6 +1911,8 @@ analysis_result semantic_analysis::declare_with_initializer(
             owned_array<expression_meaning> none;
             initialized_value value;
             VTRY_SET(r, construct(declaration, object, none, 0, value));
+            if (s.constexpr_ && entity_table[declared_entity].automatic)
+                return not_supported(declaration, "dcl.init");
             /* [basic.start.static]/2: constant initialization for a static
                variable default-initialized by a constexpr constructor */
             if (!entity_table[declared_entity].automatic && value.node) {
@@ -1701,6 +1921,15 @@ analysis_result semantic_analysis::declare_with_initializer(
                                                 semantics[value.node].at, data);
                 if (c == constness::constant && data)
                     value.node = data;
+                if (c != constness::constant && s.constexpr_)
+                    return not_supported(declaration, "dcl.init");
+                /* [expr.const]/3: a constexpr variable is usable in constant
+                   expressions; the evaluator reads the object's value from
+                   its definition, as for an initialized class object */
+                if (s.constexpr_) {
+                    entity_table[declared_entity].usable = constness::unknown;
+                    entity_table[declared_entity].constexpr_ = true;
+                }
             }
             entity_table[declared_entity].definition = value.node;
             default_constructed = true;
@@ -1792,7 +2021,11 @@ analysis_result semantic_analysis::declare_with_initializer(
         scoped_value<entity_index> deducing(deducing_variable, declared_entity);
         r = deduced_initializer(init, declared_entity, type, value);
     } else {
+        /* (a constexpr reference to a static temporary: the evaluator has
+           no rule for it) */
+        declared_initializer = !s.constexpr_;
         r = initializer(init, type, value);
+        declared_initializer = false;
     }
     if (r != analysis_result::well_formed)
         return r;
@@ -1874,8 +2107,12 @@ analysis_result semantic_analysis::declare_with_initializer(
                 uint32_t data = 0;
                 constness c = evaluate_variable(type, value.node,
                                                 semantics[value.node].at, data);
-                if (c == constness::unknown)
-                    return not_supported(declaration, expr_const_reason());
+                if (c == constness::unknown) {
+                    analysis_result refused =
+                        not_supported(declaration, expr_const_reason());
+                    evaluator_stop_detail();
+                    return refused;
+                }
                 if (c == constness::not_constant)
                     value.evaluation = constness::not_constant;
                 /* [basic.start.static]/2: constant initialization, its
@@ -1930,7 +2167,8 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* [dcl.constinit]/2: "If a variable declared with the constinit
        specifier has dynamic initialization, the program is ill-formed."
        (what is not known to be constant initialization is not claimed) */
-    if (s.constinit_ || entity_table[declared_entity].constinit_) {
+    if (s.constinit_ || declarator_constinit ||
+        entity_table[declared_entity].constinit_) {
         if (value.evaluation == constness::not_constant)
             return ill_formed_at_token(m.id,
                                        "a variable declared with the "

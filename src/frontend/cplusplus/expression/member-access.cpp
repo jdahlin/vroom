@@ -85,6 +85,27 @@ analysis_result semantic_analysis::this_object(token_index t,
     return analysis_result::well_formed;
 }
 
+/* [dcl.init]/8: whether the value-initialization of the class is its
+   zero-initialization alone: no constructor to call, of it, a base class or
+   a member */
+bool semantic_analysis::trivial_zero_initialized(entity_index c)
+{
+    bool known = true;
+    if (!trivial_default_constructor(c, known) || !known)
+        return false;
+    const entity &k = entity_table[c];
+    for (uint32_t i = 0; i < k.member_count; i++) {
+        const entity &m = entity_table[class_members[k.first_member + i]];
+        if (m.kind != entity_kind::variable || !m.nonstatic_member)
+            continue;
+        const struct type &t = type_table[m.type.unqualified()];
+        if (t.kind == type_kind::class_type &&
+            !trivial_zero_initialized(t.entity))
+            return false;
+    }
+    return true;
+}
+
 /*
  * [expr.ref]/6.2 and /6.3: the member e of the object m, a glvalue (or a
  * prvalue, materialized: [basic.lval]/7) of the member's class.
@@ -103,11 +124,21 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         VTRY(r, member_access(at, through, m));
         object_class = type_table[m.type.unqualified()].entity;
     }
-    if (aggregate_prvalue(m) &&
-        (!at_block_scope() || entity_table[object_class].destructor ||
-         (entity_table[e].nonstatic_member &&
-          entity_table[e].enclosing != object_class)))
-        return not_supported(current_declaration, "class.temporary");
+    if (aggregate_prvalue(m) && !at_block_scope() &&
+        (entity_table[e].kind != entity_kind::variable ||
+         !entity_table[e].nonstatic_member ||
+         entity_table[e].enclosing != object_class ||
+         (semantics[m.node].kind == semantic_kind::zero &&
+          !trivial_zero_initialized(object_class))))
+        /* [class.temporary]/2: a member function called on one, a static
+           member, or a member of a value-initialized temporary (the evaluator
+           has no rule for zero-initialization before a non-constexpr
+           constructor) in a namespace-scope initializer: not analysed; a
+           data member of an initializer list's temporary is analysed (the
+           temporary is the initializer's own, destroyed with it) */
+        return not_supported_because(
+            current_declaration, "class.temporary",
+            "a member of an aggregate prvalue at namespace scope");
     if (!accessible(e, object_class))
         /* [class.access]/1.1: "private; that is, its name can be used only
            by members and friends of the class in which it is declared" */
@@ -155,7 +186,7 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
             result.category = value_category::lvalue;
         }
         result.evaluation = constness::unknown;
-        if (m.evaluation == constness::not_constant)
+        if (m.evaluation == constness::not_constant && !aggregate_prvalue(m))
             result.evaluation = constness::not_constant;
         result.node =
             expression_node(semantic_kind::member, result, at, object, e);
@@ -368,6 +399,14 @@ analysis_result semantic_analysis::member_object(SyntaxRef n, bool arrow,
             if (fundamental_of(m.type) == fundamental_type::none &&
                 pointer.kind != type_kind::pointer)
                 return not_supported(n, "expr.ref");
+            /* [ext:clang_ext_vector_type]: v->xy, an element access of a
+               vector, is not analysed */
+            if (pointer.kind == type_kind::pointer &&
+                (type_table[pointer.operand.unqualified()].kind ==
+                     type_kind::ext_vector ||
+                 type_table[pointer.operand.unqualified()].kind ==
+                     type_kind::vector))
+                return not_supported(n, "ext.clang");
             return ill_formed(n,
                               "the first expression of -> shall be a "
                               "pointer to a class",
@@ -408,6 +447,7 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         /* [expr.ref]/4: E1.B::m or E1->B::m */
         nominated_scope qscope;
         VTRY(qr, nested_name_specifier(n[2][0], qscope, false));
+        require_complete(qscope.entity);
         if (qscope.global || qscope.dependent || !qscope.entity ||
             entity_table[qscope.entity].kind != entity_kind::class_type ||
             !entity_table[qscope.entity].size)
@@ -469,9 +509,17 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
                           "expr.ref");
     }
     entity_index c = object.entity;
+    /* [temp.inst]/2: a specialization named only is defined here; one
+       that cannot be is no class */
+    require_complete(c);
     if (entity_table[c].kind != entity_kind::class_type)
         /* a class whose definition was not analysed */
         return not_supported(n, "class.pre");
+    /* a specialization whose definition could not be analysed is no
+       incomplete class */
+    if (!entity_table[c].size && entity_table[c].instantiation &&
+        instantiations[entity_table[c].instantiation - 1].has_failure)
+        return not_supported(n, "temp.inst");
     if (!entity_table[c].size)
         return ill_formed(n,
                           "the class type shall be complete unless the class "

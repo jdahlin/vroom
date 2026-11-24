@@ -44,3 +44,11 @@ void blocks() {
 int qualifiedClass = C1::missing;
 int qualifiedStatic = C1::sm;
 struct Derived : C1 { using M::member; using C1::cm; };
+
+// [basic.lookup.unqual]/1: a called name no scope has, and no argument for
+// argument-dependent lookup ([basic.lookup.argdep]/1): ill-formed.
+namespace NoName {
+void body() { undeclared_fn(); }
+void after() { later_fn(); }
+void later_fn() {}
+}

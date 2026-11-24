@@ -316,16 +316,53 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
             declared_virtuals.append(v);
         }
     }
-    /* [class.dtor]/6: a defaulted destructor is deleted when a
-       subobject's destructor is deleted or inaccessible: not followed for
-       a dynamic class (its destructor's slots) */
+    /* [class.dtor]/6: an implicitly declared destructor is deleted when a
+       subobject's destructor is deleted or inaccessible; its virtual table
+       slots point at __cxa_deleted_virtual ([abi:pure-virtual]) */
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes) {
         entity_index kd = entity_table[k].destructor;
-        if (subobject_destructor_inaccessible(c, k) ||
-            (kd && entity_table[kd].deleted))
-            return not_supported(n, "class.dtor");
+        if (!(subobject_destructor_inaccessible(c, k) ||
+              (kd && entity_table[kd].deleted)))
+            continue;
+        entity_index own = entity_table[c].destructor;
+        if (own && !entity_table[own].implicit)
+            return not_supported_because(
+                n, "class.dtor",
+                "a subobject's destructor is deleted or inaccessible (the "
+                "class's is defined as defaulted)");
+        if (own)
+            entity_table[own].deleted = true;
+        if (own && entity_table[own].virtual_) {
+            /* [class.virtual]/17: "A function with a deleted definition
+               shall not override a function that does not have a deleted
+               definition." */
+            const entity &cx = entity_table[c];
+            for (uint32_t i = 0; i < cx.base_count + cx.virtual_base_count;
+                 i++) {
+                entity_index base;
+                if (i < cx.base_count)
+                    base = class_bases[cx.first_base + i];
+                else
+                    base = class_virtual_bases[cx.first_virtual_base + i -
+                                               cx.base_count];
+                entity_index bd =
+                    entity_table
+                        [type_table[entity_table[base].type.unqualified()]
+                             .entity]
+                            .destructor;
+                if (bd && entity_table[bd].virtual_ &&
+                    !entity_table[bd].deleted)
+                    return ill_formed(n,
+                                      "a function with a deleted "
+                                      "definition shall not override a "
+                                      "function that does not have a "
+                                      "deleted definition",
+                                      "class.virtual");
+            }
+        }
+        break;
     }
     entity_index destructor = entity_table[c].destructor;
     if (destructor && entity_table[destructor].virtual_ &&

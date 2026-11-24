@@ -475,6 +475,108 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
     }
 }
 
+namespace
+{
+
+/* a floating-point type analysis evaluates in a double: its significand's
+   bits (the leading one counted), and the frexp exponents of its largest
+   finite and smallest normal values; false for another type */
+bool floating_format(fundamental_type t, int &precision, int &max_exponent,
+                     int &min_exponent)
+{
+    switch (t) {
+    case fundamental_type::float16:
+        precision = 11;
+        max_exponent = 16;
+        min_exponent = -13;
+        return true;
+    case fundamental_type::float_:
+        precision = 24;
+        max_exponent = 128;
+        min_exponent = -125;
+        return true;
+    case fundamental_type::double_:
+        precision = 53;
+        max_exponent = 1024;
+        min_exponent = -1021;
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* whether the finite d (not 0) is a value of the format: its magnitude
+   below 2^max_exponent, its significand in the bits the exponent leaves
+   (fewer below the normal range) */
+bool floating_holds(double d, int precision, int max_exponent, int min_exponent)
+{
+    int exponent = 0;
+    double significand = frexp(fabs(d), &exponent);
+    if (exponent > max_exponent)
+        return false;
+    int bits = precision;
+    if (exponent < min_exponent)
+        bits -= min_exponent - exponent;
+    if (bits <= 0)
+        return false;
+    double scaled = ldexp(significand, bits);
+    return scaled == trunc(scaled);
+}
+
+} // namespace
+
+/*
+ * Whether the arithmetic constant m is exactly a value of arithmetic type
+ * to ([conv.integral]/3, [conv.double]/1, [conv.fpint]/2: the conversion
+ * keeps it): exact is the answer; false when analysis cannot tell (m not a
+ * constant, a type it does not evaluate: long double, __float128, __bf16;
+ * a floating value to an integer type).  An infinity or a NaN is a value
+ * of every floating-point type.
+ */
+bool semantic_analysis::constant_representable(const expression_meaning &m,
+                                               fundamental_type to,
+                                               bool &exact) const
+{
+    const implementation_defined_behavior &b = tokens.files.behavior;
+    exact = false;
+    if (m.evaluation != constness::constant)
+        return false;
+    fundamental_type from = fundamental_of(m.type);
+    if (fundamental_type_is_integral(from) &&
+        fundamental_type_is_integral(to)) {
+        exact = integer_holds(b, to, integer_value(b, from, m.value));
+        return true;
+    }
+    int precision = 0, max_exponent = 0, min_exponent = 0;
+    if (!floating_format(to, precision, max_exponent, min_exponent))
+        return false;
+    if (fundamental_type_is_integral(from)) {
+        __int128 v = integer_value(b, from, m.value);
+        unsigned __int128 magnitude = static_cast<unsigned __int128>(v);
+        if (fundamental_type_is_signed(b, from) && v < 0)
+            magnitude = -magnitude;
+        exact = true;
+        if (!magnitude)
+            return true;
+        int high_bit = 127, low_bit = 0;
+        while (!((magnitude >> high_bit) & 1))
+            high_bit--;
+        while (!((magnitude >> low_bit) & 1))
+            low_bit++;
+        exact = high_bit - low_bit + 1 <= precision && high_bit < max_exponent;
+        return true;
+    }
+    int from_precision = 0, from_max = 0, from_min = 0;
+    if (!floating_format(from, from_precision, from_max, from_min))
+        return false;
+    double d = floating_value(m.value);
+    exact = true;
+    if (d == 0 || isinf(d) || isnan(d))
+        return true;
+    exact = floating_holds(d, precision, max_exponent, min_exponent);
+    return true;
+}
+
 /*
  * [expr.arith.conv]/1: "Many binary operators that expect operands of
  * arithmetic or enumeration type cause conversions and yield result types
@@ -845,6 +947,7 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
         if (!converts) {
             const struct type fp = type_table[pointee.unqualified()];
             bool ambiguous = false;
+            require_complete(fp.entity);
             if (fp.kind == type_kind::class_type &&
                 tp.kind == type_kind::class_type &&
                 entity_table[fp.entity].size &&

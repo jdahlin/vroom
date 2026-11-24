@@ -46,7 +46,8 @@ node_index parser::noexcept_specifier()
  * [diff.cpp17.except]/1: C++20 removed that too ("Remove throw()
  * exception specification"), which clang still accepts in every edition,
  * without a diagnostic.  Other dynamic-exception-specifications are
- * clang's extension in the later editions, P9's; throw ( ... ) is
+ * parsed in every edition; the analysis diagnoses them as clang does
+ * (semantic_analysis::dynamic_exception_types); throw ( ... ) is
  * Microsoft's in every edition.  C++03 has no pack expansion: the
  * ... after a type-id is C++11's (variadic templates, P7's).
  */
@@ -57,15 +58,13 @@ node_index parser::dynamic_exception_specification()
     const implementation_defined_behavior &b = tokens.files.behavior;
     bool empty = at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) &&
                  at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 2);
-    if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) &&
-        at(preprocessing_op_or_punc::ELLIPSIS, 2) &&
-        at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 3))
-        return beyond_this_step();
-    if (!b.has(language_feature::dynamic_exception_specifications)) {
-        /* clang's extension of the later editions (an error unless
-           -Wno-dynamic-exception-spec) */
-        if (!empty)
-            return beyond_this_step();
+    /* throw ( ... ): Microsoft's, which clang parses in every edition and
+       the analysis treats as any other dynamic specification */
+    bool any = at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) &&
+               at(preprocessing_op_or_punc::ELLIPSIS, 2) &&
+               at(preprocessing_op_or_punc::RIGHT_PARENTHESIS, 3);
+    if (!b.has(language_feature::dynamic_exception_specifications) && empty) {
+        /* [diff.cpp17.except]/1: throw ( ) still means noexcept(true) */
         add_token(); /* throw */
         add_token(); /* ( */
         add_token(); /* ) */
@@ -74,7 +73,9 @@ node_index parser::dynamic_exception_specification()
     add_token(); /* throw */
     if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         return expected("'(' after throw", "except.spec");
-    if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+    if (any)
+        add_token(); /* ... */
+    else if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
         size_t list_mark = begin_node();
         token_index list_first = position;
         unsigned count = 0;
@@ -227,6 +228,28 @@ bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
  */
 void semantic_analysis::open_parameter_scope()
 {
+    open_parameter_scope(function_parameters, function_empty_pack);
+}
+
+bool semantic_analysis::names_earlier_parameter(
+    SyntaxRef n, const owned_array<parameter_meaning> &list)
+{
+    for (token_index t = n.first_token(); t < n.end_token(); t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        uint32_t name = tokens.identifier(t);
+        for (const parameter_meaning &p : list) {
+            if (p.pack_name == name ||
+                (p.id && tokens.identifier(p.id) == name))
+                return true;
+        }
+    }
+    return false;
+}
+
+void semantic_analysis::open_parameter_scope(
+    const owned_array<parameter_meaning> &list, uint32_t empty_pack)
+{
     /* (a member function's declarator, the class being defined: the
        class's names and its template's parameters are found past it) */
     if (is_namespace(current_scope) && defining_class)
@@ -234,7 +257,7 @@ void semantic_analysis::open_parameter_scope()
     entity_index scope = open_scope(0, true);
     owned_array<entity_index> pack;
     uint32_t pack_name = 0;
-    for (const parameter_meaning &parameter : function_parameters) {
+    for (const parameter_meaning &parameter : list) {
         uint32_t name = parameter.pack_name;
         if (!name && parameter.id)
             name = tokens.identifier(parameter.id);
@@ -250,8 +273,8 @@ void semantic_analysis::open_parameter_scope()
             entity_table.bind(scope, name, e);
         }
     }
-    if (!pack_name && function_empty_pack)
-        make_bound_pack(scope, function_empty_pack, nullptr, 0);
+    if (!pack_name && empty_pack)
+        make_bound_pack(scope, empty_pack, nullptr, 0);
     if (pack_name && !entity_table.find(scope, pack_name))
         make_bound_pack(scope, pack_name, pack.data(),
                         static_cast<uint32_t>(pack.size()));
@@ -296,6 +319,92 @@ analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
         r = noexcept_specifier(n, member, non_throwing);
     current_scope = outer;
     return r;
+}
+
+/*
+ * [except.spec]/1: the value of the dynamic-exception-specification n, whose
+ * analysed types are types: throw ( ... ) allows every exception (the
+ * ellipsis is a token of n's own), throw ( ) none, and otherwise the set of
+ * the types, kept in exception_types sorted, each type once, so that two
+ * specifications naming the same set ([except.spec]/4's "compatible") have
+ * equal lists.
+ */
+exception_specification
+semantic_analysis::dynamic_exception_value(SyntaxRef n,
+                                           owned_array<uint32_t> &types)
+{
+    exception_specification value;
+    value.written = true;
+    value.allows = exception_allowance::none;
+    for (auto c : n.elements())
+        if (c.is(preprocessing_op_or_punc::ELLIPSIS))
+            value.allows = exception_allowance::all;
+    if (value.allows == exception_allowance::all || types.empty())
+        return value;
+    uint32_t *list = types.data();
+    size_t count = types.size();
+    for (size_t i = 1; i < count; i++)
+        for (size_t j = i; j > 0 && list[j - 1] > list[j]; j--) {
+            uint32_t moved = list[j];
+            list[j] = list[j - 1];
+            list[j - 1] = moved;
+        }
+    value.allows = exception_allowance::types;
+    value.first_type = static_cast<uint32_t>(exception_types.size());
+    size_t distinct = 0;
+    for (size_t i = 0; i < count; i++)
+        if (i == 0 || list[i] != list[i - 1]) {
+            exception_types.append(list[i]);
+            distinct++;
+        }
+    if (distinct > UINT16_MAX) {
+        /* (more types than a specification records: not compared) */
+        value.allows = exception_allowance::unknown;
+        return value;
+    }
+    value.type_count = static_cast<uint16_t>(distinct);
+    return value;
+}
+
+/*
+ * [except.spec]/1: a function declared without an exception-specification
+ * has its implicit one: /8 a destructor's and /12 a deallocation function's
+ * are non-throwing (implicitly_non_throwing, which sees the declarator-id),
+ * as is a function whose type says so (a typedef-name's noexcept function
+ * type, [except.spec]/2) or [ext:gnu_attributes] one declared nothrow
+ * (clang's: compatible with noexcept); /13 any other potentially-throwing.
+ */
+exception_specification
+semantic_analysis::resolved_exceptions(exception_specification exceptions,
+                                       qualified_type type,
+                                       uint32_t gnu_flags) const
+{
+    if (exceptions.allows != exception_allowance::implicit)
+        return exceptions;
+    const struct type &f = type_table[type.unqualified()];
+    exceptions.allows = exception_allowance::all;
+    if ((f.kind == type_kind::function && f.non_throwing) ||
+        (gnu_flags & gnu_nothrow))
+        exceptions.allows = exception_allowance::none;
+    return exceptions;
+}
+
+/* [except.spec]/4's "compatible": both allow every exception, both none, or
+   both the same set of types */
+bool semantic_analysis::same_exceptions(exception_specification a,
+                                        exception_specification b) const
+{
+    if (a.allows != b.allows)
+        return false;
+    if (a.allows != exception_allowance::types)
+        return true;
+    if (a.type_count != b.type_count)
+        return false;
+    for (uint32_t i = 0; i < a.type_count; i++)
+        if (exception_types[a.first_type + i] !=
+            exception_types[b.first_type + i])
+            return false;
+    return true;
 }
 
 /* whether the function template t's declaration has a noexcept-specifier

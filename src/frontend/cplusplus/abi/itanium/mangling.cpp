@@ -77,6 +77,23 @@ class itanium_mangler
         text("_ZTI");
         return type(qualified_type::make(t, cv_none));
     }
+    /* [abi:mangling-special-temporaries]:
+           <special-name> ::= GR <object name> _
+                          ::= GR <object name> <seq-id> _
+       the object name a variable's encoding (its <data name>), the
+       first temporary without a seq-id, the next ones 0, 1, ... */
+    bool reference_temporary_name(entity_index e, uint32_t index)
+    {
+        if (analysis.entity_table[e].kind != entity_kind::variable)
+            return false;
+        text("_ZGR");
+        if (!encoding(e))
+            return false;
+        if (index)
+            seq_id(index - 1);
+        text("_");
+        return true;
+    }
     /* [abi:mangling-special-vtables]: <special-name> ::= TV <type> */
     bool vtable_name(entity_index c)
     {
@@ -1763,6 +1780,27 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
             return true;
         }
     }
+    if (x.kind == entity_kind::class_type && !x.name && !x.linkage_name &&
+        !(as_type && analysis.number_closures) && x.enclosing &&
+        table[x.enclosing].kind == entity_kind::class_type) {
+        /* [abi:mangling.named]: an unnamed class of a class (clang's
+           _ZN1OUt0_C2Ev): Ut, the number of the unnamed classes and
+           enumerations of the class before it, less one, and _ */
+        uint64_t before = 0;
+        for (entity_index other = 1; other < e; other++) {
+            const entity &k = table[other];
+            if (k.enclosing == x.enclosing && !k.name && !k.linkage_name &&
+                !k.lambda &&
+                (k.kind == entity_kind::class_type ||
+                 k.kind == entity_kind::enumeration))
+                before++;
+        }
+        text("Ut");
+        if (before)
+            number(before - 1);
+        text("_");
+        return true;
+    }
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration)) {
@@ -2943,6 +2981,14 @@ bool itanium_symbol_name(const semantic_analysis &analysis,
 {
     itanium_mangler m(analysis, pp, out, variant);
     return m.mangled_name(e);
+}
+
+bool itanium_reference_temporary_name(const semantic_analysis &analysis,
+                                      const preprocessor &pp, entity_index e,
+                                      uint32_t index, vbuffer *out)
+{
+    itanium_mangler m(analysis, pp, out, 2);
+    return m.reference_temporary_name(e, index);
 }
 
 bool itanium_vtable_name(const semantic_analysis &analysis,

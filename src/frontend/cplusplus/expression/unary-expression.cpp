@@ -214,7 +214,7 @@ uint64_t semantic_analysis::pointer_size() const
    LP64), 0 if t is not a complete object type analysis knows the size of */
 uint64_t semantic_analysis::size_of_type(qualified_type t) const
 {
-    const_cast<semantic_analysis *>(this)->complete_class_type(t);
+    require_complete(t);
     const implementation_defined_behavior &b = tokens.files.behavior;
     const struct type record = type_table[t.unqualified()];
     switch (record.kind) {
@@ -359,6 +359,7 @@ uint64_t semantic_analysis::atomic_layout(qualified_type value,
 
 uint64_t semantic_analysis::alignment_of_type(qualified_type t) const
 {
+    require_complete(t);
     const struct type record = type_table[t.unqualified()];
     switch (record.kind) {
     case type_kind::atomic:
@@ -406,6 +407,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
 {
     qualified_type operand;
     uint32_t typedef_alignment = 0;
+    bool packed_member = false;
     if (n.size() == 4 && n[2].is(syntax_kind::type_id)) {
         VTRY(r, type_id(n[2], operand, &typedef_alignment));
     } else if (n.size() == 2) {
@@ -436,6 +438,31 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
                               "expr.sizeof");
         }
         operand = e.type;
+        /* [ext:gnu_attributes] __alignof__ of a data member: the
+           alignment of the member, which packed and aligned change */
+        entity_index field = 0;
+        if (alignment && e.node &&
+            semantics[e.node].kind == semantic_kind::member)
+            field = semantics[e.node].b;
+        if (field && entity_table[field].kind == entity_kind::variable &&
+            entity_table[field].nonstatic_member) {
+            const entity &f = entity_table[field];
+            bool packed = (f.gnu_flags & gnu_packed) != 0;
+            if (packed)
+                typedef_alignment = 1;
+            if (f.alignment)
+                typedef_alignment = f.alignment;
+            packed_member = packed;
+        }
+        /* [ext:gnu_attributes] __alignof__ of a variable named: its own
+           alignment, which alignas and aligned give it ([dcl.align]) */
+        if (alignment && e.node &&
+            semantics[e.node].kind == semantic_kind::entity) {
+            entity_index v = semantics[e.node].a;
+            if (v && entity_table[v].kind == entity_kind::variable &&
+                !entity_table[v].nonstatic_member && entity_table[v].alignment)
+                typedef_alignment = entity_table[v].alignment;
+        }
     } else if (!alignment && n.size() == 5 &&
                n[1].is(preprocessing_op_or_punc::ELLIPSIS) && n[3].is_token() &&
                n[3].is_identifier()) {
@@ -486,7 +513,7 @@ analysis_result semantic_analysis::size_of(SyntaxRef n, bool alignment,
         size = alignment_of_type(operand);
         /* [ext:gnu_attributes] alignof of a typedef-name declared with
            aligned */
-        if (typedef_alignment > size)
+        if (typedef_alignment > size || packed_member)
             size = typedef_alignment;
     }
     m.type = qualified_type::make(
@@ -586,6 +613,8 @@ analysis_result semantic_analysis::sized_operand(SyntaxRef n, bool alignment,
             return ill_formed(n, incomplete, subclause);
         return analysis_result::well_formed;
     case type_kind::class_type: {
+        /* [temp.inst]/2: a specialization named only is defined here */
+        require_complete(record.entity);
         const entity &c = entity_table[record.entity];
         if (c.kind != entity_kind::class_type)
             /* a class whose definition was not analysed */

@@ -109,8 +109,78 @@ uint32_t c_lowering::vector_lane(const semantic_node &n)
                 0, flags);
 }
 
+/*
+ * [expr.spaceship]/4-7: p <=> q of arithmetic operands, the category object
+ * its member's value is chosen by:
+ *     (ta = p, tb = q, (category){ ta < tb ? less : ta == tb ? equivalent
+ *                                  : ta > tb ? greater : unordered })
+ * the values the program's <compare> gives its categories.
+ */
+uint32_t c_lowering::spaceship(const semantic_node &n)
+{
+    entity_index category = record(n.type).entity;
+    const semantic_analysis::ordering_category *known =
+        analysis.ordering_category_values(category);
+    if (!known || !known->known)
+        return fail("a three-way comparison of a category the program's "
+                    "<compare> declares in a way not followed",
+                    n.at);
+    const int8_t *values = known->values;
+    const entity &x = analysis.entity_table[category];
+    entity_index member = analysis.class_members[x.first_member];
+    class_type(category, n.at);
+    ast_qualified_type integer = ast_builder_type_basic(AST_TYPE_INT);
+    ast_qualified_type t =
+        AST_QUALIFIED_TYPE_UNQUALIFIED(type(node(n.a).type, n.at));
+    uint32_t p = expression(n.a), q = expression(n.b);
+    if (!p || !q)
+        return 0;
+    uint32_t held_p = full_expression_temporary(t);
+    uint32_t held_q = full_expression_temporary(t);
+    auto left = [&] { return c_variable(c, held_p, t); };
+    auto right = [&] { return c_variable(c, held_q, t); };
+    auto compare = [&](preprocessing_op_or_punc op) {
+        return make(AST_NODE_BINARY, integer, left(), right(), 0,
+                    static_cast<uint16_t>(c_operator(op)), 0);
+    };
+    auto constant_int = [&](int64_t v) {
+        return ast_builder_integer(c, integer, v);
+    };
+    uint32_t chosen = constant_int(values[3]);
+    chosen = make(AST_NODE_CONDITIONAL, integer,
+                  compare(preprocessing_op_or_punc::GREATER),
+                  constant_int(values[2]), chosen, 0, 0);
+    chosen = make(AST_NODE_CONDITIONAL, integer,
+                  compare(preprocessing_op_or_punc::EQUAL_EQUAL),
+                  constant_int(values[1]), chosen, 0, 0);
+    chosen = make(AST_NODE_CONDITIONAL, integer,
+                  compare(preprocessing_op_or_punc::LESS),
+                  constant_int(values[0]), chosen, 0, 0);
+    ast_qualified_type field = type(analysis.entity_table[member].type, n.at);
+    chosen =
+        cast(chosen, AST_QUALIFIED_TYPE_UNQUALIFIED(field), AST_CAST_INTEGER);
+    owned_array<uint32_t> values_list;
+    while (values_list.size() < c_fields[member])
+        values_list.append(0);
+    values_list.append(chosen);
+    uint32_t value_count = static_cast<uint32_t>(values_list.size());
+    uint32_t initializer =
+        make(AST_NODE_INITIALIZER, type(n.type, n.at), 0,
+             ast_builder_list(c, values_list.data(), value_count), value_count,
+             0, 0);
+    uint32_t object = compound_literal_of(initializer, type(n.type, n.at));
+    uint32_t stored_p = assign(t, left(), p);
+    uint32_t stored_q = assign(t, right(), q);
+    ast_qualified_type result = type(n.type, n.at);
+    return comma(AST_QUALIFIED_TYPE_UNQUALIFIED(result),
+                 comma(t, stored_p, stored_q), object);
+}
+
 uint32_t c_lowering::binary(const semantic_node &n)
 {
+    if (n.op == static_cast<uint8_t>(preprocessing_op_or_punc::SPACESHIP) &&
+        record(n.type).kind == type_kind::class_type)
+        return spaceship(n);
     int op = c_operator(static_cast<preprocessing_op_or_punc>(n.op));
     if (!op)
         return fail("a binary operator", n.at);
@@ -249,6 +319,169 @@ uint32_t c_lowering::assignment(const semantic_node &n)
  * its message strings are no run-time operands), or the byte swap of the
  * argument's width (__builtin_bswapg).
  */
+/*
+ * C23 7.18.3-7.18.16 and [ext:clang_builtin_functions] __builtin_bitreverseg
+ * of x of an unsigned type of W bits (at most 64), x held in a temporary:
+ *     leading_zeros        clzg(x, W)          leading_ones   clzg(~x, W)
+ *     trailing_ones        ctzg(~x, W)         count_zeros    W - popcountg(x)
+ *     first_leading_zero   clzg(~x, -1) + 1    first_leading_one  clzg(x, -1) + 1
+ *     first_trailing_zero  ctzg(~x, -1) + 1    first_trailing_one ctzg(x, -1) + 1
+ *     bit_width            W - clzg(x, W)      has_single_bit popcountg(x) == 1
+ *     bit_floor            x == 0 ? 0 : 1 << (W - 1 - clzg(x, 0))
+ *     bit_ceil             x <= 1 ? 1 : s < W ? 1 << s : 0, s = W - clzg(x - 1, 0)
+ *     bitreverse           __builtin_bitreverseW(x)
+ * (~x and x - 1 in unsigned long long, converted back to x's type)
+ */
+uint32_t c_lowering::stdc_bits(const semantic_node &n, ast_qualified_type t,
+                               uint32_t argument)
+{
+    uint32_t callee = n.a;
+    if (node(callee).kind == semantic_kind::conversion)
+        callee = node(callee).a;
+    const gnu_builtin &row =
+        gnu_builtin_at(analysis.entity_table[node(callee).a].gnu_builtin_row);
+    ast_qualified_type x_type =
+        AST_QUALIFIED_TYPE_UNQUALIFIED(type_of(argument));
+    uint64_t bytes = ast_builder_type_size(c, x_type);
+    if (bytes > 8)
+        return fail("a C23 bit function (__builtin_stdc_*, "
+                    "__builtin_bitreverseg) of a 128-bit integer outside a "
+                    "constant expression",
+                    n.at);
+    int64_t width = static_cast<int64_t>(bytes * 8);
+    ast_qualified_type integer = ast_builder_type_basic(AST_TYPE_INT);
+    ast_qualified_type wide =
+        ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
+    uint32_t held = full_expression_temporary(x_type);
+    uint32_t stored = assign(x_type, c_variable(c, held, x_type), argument);
+    auto x = [&] { return c_variable(c, held, x_type); };
+    auto binary = [&](uint32_t l, uint32_t r, int op, ast_qualified_type u) {
+        return make(AST_NODE_BINARY, u, l, r, 0, static_cast<uint16_t>(op), 0);
+    };
+    auto number = [&](ast_qualified_type u, int64_t value) {
+        return ast_builder_integer(c, u, value);
+    };
+    /* ~x and x - 1 of x's type */
+    auto inverse = [&] {
+        return cast(binary(cast(x(), wide, AST_CAST_INTEGER), number(wide, -1),
+                           LEX_TOKEN_CARET, wide),
+                    x_type, AST_CAST_INTEGER);
+    };
+    auto count = [&](const char *name, uint32_t value, int64_t fallback) {
+        uint32_t operands[2] = {value, number(integer, fallback)};
+        return ast_builder_builtin_call(c, name, strlen(name), integer,
+                                        operands, 2);
+    };
+    auto plus_one = [&](uint32_t value) {
+        return binary(value, number(integer, 1), LEX_TOKEN_PLUS, integer);
+    };
+    auto power = [&](uint32_t shift) {
+        return binary(number(wide, 1), shift, LEX_TOKEN_LESS_LESS, wide);
+    };
+    uint32_t r = 0;
+    switch (static_cast<builtin_stdc_op>(row.which)) {
+    case builtin_stdc_op::leading_zeros:
+        r = count("__builtin_clzg", x(), width);
+        break;
+    case builtin_stdc_op::leading_ones:
+        r = count("__builtin_clzg", inverse(), width);
+        break;
+    case builtin_stdc_op::trailing_ones:
+        r = count("__builtin_ctzg", inverse(), width);
+        break;
+    case builtin_stdc_op::first_leading_zero:
+        r = plus_one(count("__builtin_clzg", inverse(), -1));
+        break;
+    case builtin_stdc_op::first_leading_one:
+        r = plus_one(count("__builtin_clzg", x(), -1));
+        break;
+    case builtin_stdc_op::first_trailing_zero:
+        r = plus_one(count("__builtin_ctzg", inverse(), -1));
+        break;
+    case builtin_stdc_op::first_trailing_one:
+        r = plus_one(count("__builtin_ctzg", x(), -1));
+        break;
+    case builtin_stdc_op::count_zeros: {
+        uint32_t ones = x();
+        ones = ast_builder_builtin_call(c, "__builtin_popcountg", 19, integer,
+                                        &ones, 1);
+        r = binary(number(integer, width), ones, LEX_TOKEN_MINUS, integer);
+        break;
+    }
+    case builtin_stdc_op::bit_width:
+        r = binary(number(integer, width), count("__builtin_clzg", x(), width),
+                   LEX_TOKEN_MINUS, integer);
+        break;
+    case builtin_stdc_op::has_single_bit: {
+        uint32_t ones = x();
+        ones = ast_builder_builtin_call(c, "__builtin_popcountg", 19, integer,
+                                        &ones, 1);
+        r = to_bool(
+            binary(ones, number(integer, 1), LEX_TOKEN_EQUAL_EQUAL, integer));
+        return comma(t, stored, r);
+    }
+    case builtin_stdc_op::bit_floor: {
+        uint32_t shift =
+            binary(number(integer, width - 1), count("__builtin_clzg", x(), 0),
+                   LEX_TOKEN_MINUS, integer);
+        uint32_t zero =
+            binary(x(), number(x_type, 0), LEX_TOKEN_EQUAL_EQUAL, integer);
+        r = make(AST_NODE_CONDITIONAL, wide, zero, number(wide, 0),
+                 power(shift), 0, 0);
+        break;
+    }
+    case builtin_stdc_op::bit_ceil: {
+        auto shift = [&] {
+            uint32_t less = cast(binary(cast(x(), wide, AST_CAST_INTEGER),
+                                        number(wide, 1), LEX_TOKEN_MINUS, wide),
+                                 x_type, AST_CAST_INTEGER);
+            return binary(number(integer, width),
+                          count("__builtin_clzg", less, 0), LEX_TOKEN_MINUS,
+                          integer);
+        };
+        uint32_t fits =
+            binary(shift(), number(integer, width), LEX_TOKEN_LESS, integer);
+        uint32_t above = make(AST_NODE_CONDITIONAL, wide, fits, power(shift()),
+                              number(wide, 0), 0, 0);
+        uint32_t small = binary(cast(x(), wide, AST_CAST_INTEGER),
+                                number(wide, 1), LEX_TOKEN_LESS_EQUAL, integer);
+        r = make(AST_NODE_CONDITIONAL, wide, small, number(wide, 1), above, 0,
+                 0);
+        break;
+    }
+    case builtin_stdc_op::bitreverse: {
+        if (bytes == 1 &&
+            record(node(analysis.semantics.items(n.first)[0]).type)
+                    .fundamental == fundamental_type::bool_) {
+            r = x();
+            break;
+        }
+        const char *name = "__builtin_bitreverse8";
+        ast_qualified_type u = ast_builder_type_basic(AST_TYPE_UNSIGNED_CHAR);
+        if (bytes == 2) {
+            name = "__builtin_bitreverse16";
+            u = ast_builder_type_basic(AST_TYPE_UNSIGNED_SHORT);
+        } else if (bytes == 4) {
+            name = "__builtin_bitreverse32";
+            u = ast_builder_type_basic(AST_TYPE_UNSIGNED_INT);
+        } else if (bytes == 8) {
+            name = "__builtin_bitreverse64";
+            u = wide;
+        }
+        uint32_t value = cast(x(), u, AST_CAST_INTEGER);
+        r = ast_builder_builtin_call(c, name, strlen(name), u, &value, 1);
+        break;
+    }
+    default:
+        return fail("a C23 bit function of this front end", n.at);
+    }
+    if (!r)
+        return fail("a C23 bit function the C front end has no builtin for",
+                    n.at);
+    r = cast(r, t, AST_CAST_INTEGER);
+    return comma(t, stored, r);
+}
+
 uint32_t c_lowering::special_builtin(builtin_lowering lowering,
                                      const semantic_node &n,
                                      ast_qualified_type t,
@@ -377,6 +610,92 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
                 c_statement(c, assign(u8, dereference(ptr, u8), zero)));
         }
         return statement_expression(v, block(stmts));
+    }
+    case builtin_lowering::refuse:
+        return fail("__builtin_is_within_lifetime outside a constant "
+                    "expression",
+                    n.at);
+    case builtin_lowering::stdc_bits:
+        return stdc_bits(n, t, arguments[0]);
+    case builtin_lowering::vtable_pointer: {
+        /* the virtual table pointer is the first word of the object
+           ([abi:vtable]): loaded through a pointer to a const void * */
+        ast_qualified_type word = t;
+        uint32_t slot =
+            cast(arguments[0], pointer_to(word), AST_CAST_POINTER_TO_POINTER);
+        return dereference(slot, word);
+    }
+    case builtin_lowering::align: {
+        /* [ext:clang_builtin_functions] an integer or pointer operand and
+           an alignment a (held when it is no constant): in unsigned long
+           long, (x + (a - 1)) & ~(a - 1), x & ~(a - 1), or
+           (x & (a - 1)) == 0, converted back (a pointer: from its address) */
+        uint32_t callee = n.a;
+        if (node(callee).kind == semantic_kind::conversion)
+            callee = node(callee).a;
+        const gnu_builtin &row = gnu_builtin_at(
+            analysis.entity_table[node(callee).a].gnu_builtin_row);
+        const uint32_t *items = analysis.semantics.items(n.first);
+        bool pointer = record(node(items[0]).type).kind == type_kind::pointer;
+        uint32_t alignment = items[1];
+        while (node(alignment).kind == semantic_kind::conversion)
+            alignment = node(alignment).a;
+        ast_qualified_type wide =
+            ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
+        ast_qualified_type narrow = ast_builder_type_basic(AST_TYPE_INT);
+        auto binary = [&](uint32_t l, uint32_t r, int op,
+                          ast_qualified_type type_) {
+            return make(AST_NODE_BINARY, type_, l, r, 0,
+                        static_cast<uint16_t>(op), 0);
+        };
+        /* a - 1 and ~(a - 1) */
+        uint32_t stored = 0;
+        uint32_t held = 0;
+        uint64_t av = node(alignment).value;
+        bool constant = node(alignment).kind == semantic_kind::constant;
+        uint32_t x = arguments[0];
+        if (pointer)
+            x = cast(x, wide, AST_CAST_POINTER_TO_INTEGER);
+        else
+            x = cast(x, wide, AST_CAST_INTEGER);
+        if (!constant) {
+            /* (the operand first, as the arguments are evaluated) */
+            uint32_t operand = full_expression_temporary(wide);
+            held = full_expression_temporary(wide);
+            stored = comma(wide, assign(wide, c_variable(c, operand, wide), x),
+                           assign(wide, c_variable(c, held, wide),
+                                  cast(arguments[1], wide, AST_CAST_INTEGER)));
+            x = c_variable(c, operand, wide);
+        }
+        auto low = [&] {
+            if (constant)
+                return ast_builder_integer(c, wide,
+                                           static_cast<int64_t>(av - 1));
+            return binary(c_variable(c, held, wide),
+                          ast_builder_integer(c, wide, 1), LEX_TOKEN_MINUS,
+                          wide);
+        };
+        auto high = [&] {
+            return binary(low(), ast_builder_integer(c, wide, -1),
+                          LEX_TOKEN_CARET, wide);
+        };
+        uint32_t r = 0;
+        if (row.which == 2) {
+            uint32_t rest = binary(x, low(), LEX_TOKEN_AMPERSAND, wide);
+            r = to_bool(binary(rest, ast_builder_integer(c, wide, 0),
+                               LEX_TOKEN_EQUAL_EQUAL, narrow));
+        } else {
+            if (row.which == 0)
+                x = binary(x, low(), LEX_TOKEN_PLUS, wide);
+            x = binary(x, high(), LEX_TOKEN_AMPERSAND, wide);
+            if (pointer)
+                r = cast(x, t, AST_CAST_INTEGER_TO_POINTER);
+            else
+                r = cast(x, t, AST_CAST_INTEGER);
+        }
+        if (stored)
+            return comma(t, stored, r);
+        return r;
     }
     case builtin_lowering::node:
         break;

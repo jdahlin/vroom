@@ -16,7 +16,7 @@ namespace cplusplus
  * a type that contains a placeholder type, or a placeholder for a deduced
  * class type."  Of /7's structural types, those with rules here: integral
  * and enumeration types, std::nullptr_t, pointers to objects and
- * functions, lvalue references to them (no placeholder: auto is
+ * functions, pointers to members, lvalue references to them (no placeholder: auto is
  * [dcl.spec.auto]'s).
  */
 bool semantic_analysis::structural_parameter_type(qualified_type t) const
@@ -26,6 +26,8 @@ bool semantic_analysis::structural_parameter_type(qualified_type t) const
         return true;
     if (r.kind == type_kind::fundamental)
         return r.fundamental == fundamental_type::std_nullptr_t;
+    if (r.kind == type_kind::pointer_to_member)
+        return true;
     if (r.kind != type_kind::pointer && r.kind != type_kind::lvalue_reference)
         return false;
     const struct type &to = type_table[r.operand.unqualified()];
@@ -33,6 +35,54 @@ bool semantic_analysis::structural_parameter_type(qualified_type t) const
            to.kind == type_kind::fundamental || to.kind == type_kind::pointer ||
            to.kind == type_kind::enumeration ||
            to.kind == type_kind::class_type;
+}
+
+const char *
+semantic_analysis::parameter_refusal_reason(qualified_type t,
+                                            const specified &sp) const
+{
+    if (sp.typedef_)
+        return "parameter has decl-specifier typedef";
+    if (sp.static_)
+        return "parameter has decl-specifier static";
+    if (sp.extern_)
+        return "parameter has decl-specifier extern";
+    if (sp.constexpr_)
+        return "parameter has decl-specifier constexpr";
+    if (sp.inline_)
+        return "parameter has decl-specifier inline";
+    if (sp.gnu_flags)
+        return "parameter has a GNU decl-specifier";
+    const struct type &r = type_table[t.unqualified()];
+    if (r.kind == type_kind::pointer || r.kind == type_kind::lvalue_reference) {
+        type_kind to = type_table[r.operand.unqualified()].kind;
+        if (r.kind == type_kind::lvalue_reference) {
+            if (to == type_kind::array)
+                return "parameter type reference to array";
+            if (to == type_kind::pointer_to_member)
+                return "parameter type reference to pointer to member";
+            return "parameter type reference to other";
+        }
+        if (to == type_kind::array)
+            return "parameter type pointer to array";
+        return "parameter type pointer to other";
+    }
+    if (is_floating(t))
+        return "parameter type floating-point";
+    switch (r.kind) {
+    case type_kind::class_type:
+        return "parameter type class type";
+    case type_kind::pointer_to_member:
+        return "parameter type pointer to member";
+    case type_kind::rvalue_reference:
+        return "parameter type rvalue reference";
+    case type_kind::array:
+        return "parameter type array";
+    case type_kind::function:
+        return "parameter type function";
+    default:
+        return "parameter type other";
+    }
 }
 
 /* a non-type argument that is an object's or function's address (a
@@ -120,6 +170,7 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     const struct type &at = type_table[a.type.unqualified()];
     if (a.kind == template_argument::kind_t::value &&
         (address_parameter_type(a.type) ||
+         at.kind == type_kind::pointer_to_member ||
          (at.kind == type_kind::fundamental &&
           at.fundamental == fundamental_type::std_nullptr_t))) {
         /* an address or null pointer: an entity whose uses have no rules
@@ -163,6 +214,24 @@ static uint64_t dependent_comparison_value(SyntaxElement op)
    (entity_kind::dependent_value): [!] Q<args>::name, Q unqualified as
    written (clang mangles the qualifier as written) */
 entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
+{
+    entity_index e = dependent_value_structure(written);
+    /* [temp.over.link]/5: an expression naming a non-type template
+       parameter that has no structure above (I + 1) is equivalent to
+       another of the same structure (expression_structure): one entity */
+    if (entity_table[e].value || entity_table[e].expression ||
+        written.is_token() || !value_parameter_in(written))
+        return e;
+    uint32_t structure = expression_structure(written);
+    if (entity_index d = expression_nodes[structure].dependent_value)
+        return d;
+    entity_table[e].expression = structure;
+    expression_nodes[structure].dependent_value = e;
+    dependent_values.append(e);
+    return e;
+}
+
+entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
 {
     while (written.is(syntax_kind::primary_expression) && written.size() == 3 &&
            written[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
@@ -674,6 +743,10 @@ analysis_result semantic_analysis::template_argument_for(
         lookup_result x =
             lookup_unqualified(tokens.identifier(t), lookup_filter::any);
         entity_index e = x.entity;
+        /* (a template's own non-type parameter is the entity an
+           unfollowed lookup found) */
+        if (!e)
+            e = x.unknown_entity;
         if (!e)
             e = find_pack(tokens.identifier(t));
         if (!e)
@@ -698,6 +771,8 @@ analysis_result semantic_analysis::template_argument_for(
     }
     if (address_parameter_type(to))
         return address_argument(at, to, written, out);
+    if (type_table[to.unqualified()].kind == type_kind::pointer_to_member)
+        return member_pointer_argument(at, to, written, out);
     const struct type &tr = type_table[to.unqualified()];
     if (tr.kind == type_kind::fundamental &&
         tr.fundamental == fundamental_type::std_nullptr_t) {
@@ -731,15 +806,61 @@ analysis_result semantic_analysis::template_argument_for(
         out.value = m.value;
         return analysis_result::well_formed;
     }
-    if (!is_integral(m.type) || !is_integral(to))
-        return not_supported(at, "temp.arg.nontype");
+    if (!is_integral(to)) {
+        const char *what = "parameter is of a type that is not integral";
+        switch (type_table[to.unqualified()].kind) {
+        case type_kind::pointer_to_member:
+            what = "parameter is a pointer to member";
+            break;
+        case type_kind::lvalue_reference:
+        case type_kind::rvalue_reference:
+            what = "parameter is a reference";
+            break;
+        case type_kind::pointer:
+            what = "parameter is a pointer";
+            break;
+        case type_kind::class_type:
+            what = "parameter is of class type";
+            break;
+        case type_kind::fundamental:
+            what = "parameter is of floating-point type";
+            break;
+        default:
+            break;
+        }
+        return not_supported_because(at, "temp.arg.nontype", what);
+    }
+    if (!is_integral(m.type)) {
+        const char *what = "argument is of a type that is not integral";
+        switch (type_table[m.type.unqualified()].kind) {
+        case type_kind::class_type:
+            what = "argument is of class type";
+            break;
+        case type_kind::pointer:
+            what = "argument is a pointer";
+            break;
+        case type_kind::fundamental:
+            what = "argument is of floating-point type";
+            break;
+        case type_kind::dependent:
+            what = "argument is of a dependent type";
+            break;
+        case type_kind::enumeration:
+            what = "argument is of enumeration type";
+            break;
+        default:
+            break;
+        }
+        return not_supported_because(at, "temp.arg.nontype", what);
+    }
     bool constant = false;
     r = integral_constant_expression(at, m, constant);
     if (r == analysis_result::well_formed && constant)
         VTRY_SET(r, converted_constant_expression(at, m, fundamental_of(to),
                                                   constant));
     if (!constant)
-        return not_supported(at, "temp.arg.nontype");
+        return not_supported_because(at, "temp.arg.nontype",
+                                     "argument is not constant");
     out.kind = template_argument::kind_t::value;
     out.type = to;
     out.value = m.value;
@@ -802,6 +923,53 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         same = r.operand == x.type;
     if (!same)
         return not_supported(at, "temp.arg.nontype");
+    out.value = e;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.arg.nontype]/2: a pointer to member parameter's argument, a
+ * converted constant expression of the parameter's type ([expr.const]/10):
+ * nullptr, or &C::m of exactly that type naming one non-static data member
+ * or one function.  The value is the member's entity (0 for a null
+ * member pointer); its uses have no rules yet, as an address's.
+ */
+analysis_result
+semantic_analysis::member_pointer_argument(SyntaxRef at, qualified_type to,
+                                           SyntaxElement written,
+                                           template_argument &out)
+{
+    out.kind = template_argument::kind_t::value;
+    out.type = to;
+    if (written.is_token() && written.keyword() == standard_keyword::nullptr_)
+        return analysis_result::well_formed;
+    expression_meaning m;
+    VTRY(r, expression(written, m));
+    if (!written.is(syntax_kind::unary_expression) || written.size() != 2 ||
+        !written[0].is(preprocessing_op_or_punc::AMPERSAND))
+        return not_supported_because(at, "temp.arg.nontype",
+                                     "pointer to member argument is not &C::m "
+                                     "or nullptr");
+    if (!(m.type.unqualified() == to.unqualified()))
+        return not_supported_because(at, "temp.arg.nontype",
+                                     "pointer to member argument is of "
+                                     "another type than the parameter");
+    entity_index e = 0;
+    if (m.node && semantics[m.node].kind == semantic_kind::member_pointer)
+        e = semantics[m.node].a;
+    if (!e ||
+        (entity_table[e].kind != entity_kind::variable &&
+         entity_table[e].kind != entity_kind::function) ||
+        entity_table[e].instantiation || entity_table[e].next_overload ||
+        entity_table[e].immediate ||
+        (entity_table[e].kind == entity_kind::function &&
+         entity_table[e].constexpr_))
+        /* (a consteval member function is not recorded: a constexpr one is
+           left out; a consteval function's address is no constant expression,
+           [expr.const]/13) */
+        return not_supported_because(at, "temp.arg.nontype",
+                                     "pointer to member argument names no "
+                                     "one member that has an address");
     out.value = e;
     return analysis_result::well_formed;
 }

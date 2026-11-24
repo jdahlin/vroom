@@ -37,13 +37,16 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
     auto item = declaration[skip + 1];
     if (item.is(syntax_kind::member_declarator_list) && item.size() == 1)
         item = item[0];
-    bool has_init = false;
+    bool has_init = false, has_definition = false;
     SyntaxElement decl_part = item;
     if (item.is(syntax_kind::init_declarator, syntax_kind::member_declarator)) {
         if (item.size() != 2 || item[1].is(syntax_kind::requires_clause))
             return not_supported(n, "temp.pre");
         decl_part = item[0];
         has_init = true;
+    } else if (declaration.is(syntax_kind::simple_declaration)) {
+        /* (no initializer: the declaration is a definition) */
+        has_definition = true;
     } else if (!declaration.is(syntax_kind::member_declaration)) {
         return not_supported(n, "temp.pre");
     }
@@ -61,7 +64,11 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
     scoped_value<entity_index> member_scope(template_member_scope, scope);
     specified s;
     declarator_meaning m;
+    /* [dcl.spec.auto]/4: a placeholder in a variable template's
+       declaration with an initializer; deduced in each specialization */
+    placeholder_allowed = has_init;
     r = decl_specifier_seq(declaration[skip], s, false);
+    placeholder_allowed = false;
     qualified_type type = s.type;
     if (r == analysis_result::well_formed) {
         function_cv = 0;
@@ -118,9 +125,10 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
             return not_supported(n, "temp.local");
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
-    entity_table[record.entity].defined = has_init;
+    has_definition = has_definition || has_init;
+    entity_table[record.entity].defined = has_definition;
     entity_table[record.entity].constexpr_ = s.constexpr_;
-    if (has_init)
+    if (has_definition)
         record.definition = declaration;
     record.declarator = declaration;
     record.is_variable = true;

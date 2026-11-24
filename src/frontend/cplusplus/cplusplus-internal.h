@@ -155,7 +155,7 @@ VPRIV int lookup_keyword(const implementation_defined_behavior &behavior,
 VPRIV const char *keyword_clang_name(int keyword);
 /* the keyword table: its size, and an entry's spelling */
 VPRIV int keyword_table_size();
-VPRIV const char *keyword_spelling(int keyword);
+VPRIV int keyword_of_spelling(const char *spelling);
 /* [lex.key]/2: and, or, ...: the operator they stand for */
 VPRIV bool keyword_is_alternative_representation(int keyword,
                                                  preprocessing_op_or_punc *op);
@@ -219,6 +219,11 @@ VPRIV int64_t clang_declspec_attribute_value(
     const implementation_defined_behavior &b, const char *name, size_t length);
 VPRIV bool has_builtin(const implementation_defined_behavior &b,
                        const char *name, size_t length);
+/* whether clang has a builtin (function, type trait or keyword) of this
+   name, by clang's own __has_builtin answers (this front end's not
+   counted) */
+VPRIV bool clang_has_builtin(const implementation_defined_behavior &b,
+                             const char *name, size_t length);
 
 /* ---- parse ------------------------------------------------------------- */
 

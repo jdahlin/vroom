@@ -48,6 +48,15 @@ bool semantic_analysis::namespace_encloses(entity_index n,
     }
 }
 
+bool semantic_analysis::declared_in_scope_of(entity_index e,
+                                             entity_index scope) const
+{
+    entity_index home = entity_table[e].enclosing;
+    while (home != scope && home && entity_table[home].inline_)
+        home = entity_table[home].enclosing;
+    return home == scope;
+}
+
 /* [namespace.udir]/2: "During unqualified name lookup, the names appear as
    if they were declared in the nearest enclosing namespace which contains
    both the using-directive and the nominated namespace." */
@@ -800,15 +809,25 @@ bool semantic_analysis::argument_dependent_lookup(
  */
 analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                                          nominated_scope &scope,
-                                                         bool dependent_allowed)
+                                                         bool dependent_allowed,
+                                                         bool member_pointer)
 {
     bool qualified = false;
     scope = nominated_scope();
+    size_t part_count = 0;
+    for (auto counted : n.parts()) {
+        (void)counted;
+        part_count++;
+    }
+    size_t part_index = 0;
     if (n.global()) {
         scope.global = true;
         qualified = true;
     }
     for (auto part : n.parts()) {
+        /* [dcl.mptr]/2: the class of a pointer to member may be incomplete:
+           only its name is looked up, not its members ([basic.lookup.qual]/1) */
+        bool incomplete_allowed = member_pointer && ++part_index == part_count;
         /* [temp.names]/4: template before a simple-template-id after a
            nested-name-specifier */
         if (part.has_template && !qualified)
@@ -877,9 +896,10 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                       "basic.lookup.qual");
                 return not_supported(n, "temp.res");
             }
-            complete_instantiation(st.entity);
+            require_complete(st.entity);
             const entity &x = entity_table[st.entity];
-            if (!x.size && st.entity != defining_class && !x.defined)
+            if (!incomplete_allowed && !x.size && st.entity != defining_class &&
+                !x.defined)
                 return not_supported(n, "basic.lookup.qual");
             scope.entity = st.entity;
             scope.global = false;
@@ -907,8 +927,11 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                        "namespace.udir");
         /* a name that is not found may be one a declaration analysis has
            no rules for declared */
-        if (r.unknown || !r.entity)
-            return not_supported(n, "basic.lookup.qual");
+        if (r.unknown || !r.entity) {
+            analysis_result refused = not_supported(n, "basic.lookup.qual");
+            name_lookup_detail(t, r);
+            return refused;
+        }
         entity_index e = r.entity;
         if (entity_table[e].kind == entity_kind::typedef_name) {
             /* [dcl.typedef]/1: "a typedef-name is thus a synonym for another
@@ -936,6 +959,8 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                     "basic.lookup.qual");
             e = named.entity;
         }
+        if (entity_table[e].kind == entity_kind::class_type)
+            require_complete(e);
         if (entity_table[e].kind == entity_kind::class_type &&
             !entity_table[e].size && entity_table[e].instantiation &&
             e != defining_class && !entity_table[e].defined) {
@@ -944,18 +969,23 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             uint32_t ct = entity_table[t_ent].instantiation;
             if (ct && !instantiations[k].defining) {
                 entity_index done = e;
+                /* (a copy: instantiate_class may grow template_arguments) */
+                owned_array<template_argument> arguments;
+                for (uint32_t i = 0; i < instantiations[k].argument_count; i++)
+                    arguments.append(
+                        template_arguments[instantiations[k].first_argument +
+                                           i]);
                 VTRY(ir,
-                     instantiate_class(
-                         n, ct,
-                         &template_arguments[instantiations[k].first_argument],
-                         instantiations[k].argument_count, done));
+                     instantiate_class(n, ct, arguments.data(),
+                                       instantiations[k].argument_count, done));
             }
         }
         const entity &x = entity_table[e];
         if (x.kind == entity_kind::class_type) {
             /* [basic.lookup.qual]/1 with [class.qual]: the class's members
                are looked up, so it is complete or being defined */
-            if (!x.size && e != defining_class && !x.defined)
+            if (!incomplete_allowed && !x.size && e != defining_class &&
+                !x.defined)
                 return not_supported(n, "basic.lookup.qual");
         } else if (x.kind != entity_kind::namespace_entity &&
                    x.kind != entity_kind::enumeration) {

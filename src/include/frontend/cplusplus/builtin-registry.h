@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "frontend/builtin-fold.h"
+
 namespace cplusplus
 {
 
@@ -37,6 +39,18 @@ enum class builtin_form : uint8_t {
     clear_padding,
     /* T __builtin_bswapg(T), T an integer type of a multiple of 8 bits */
     bswapg,
+    /* T __builtin_align_up(T, alignment) and __builtin_align_down (which 0,
+       1), bool __builtin_is_aligned(T, alignment) (2), T an integer or
+       pointer type */
+    align,
+    /* const void *__builtin_get_vtable_pointer(T *), T a polymorphic class */
+    vtable_pointer,
+    /* bool __builtin_is_within_lifetime(T *), a constant evaluation only:
+       unsupported (a pointer value does not say which subobject it designates) */
+    within_lifetime,
+    /* C23's <stdbit.h> functions and __builtin_bitreverseg, type-generic over
+       the integer types (builtin_stdc_op): the result by the operation */
+    stdc_bits,
     /* __builtin_addc (x, y, carry_in, &carry_out) and the subtraction and the
        typed forms: the C table's signature with the carry out a pointer to
        the type */
@@ -80,6 +94,31 @@ enum class builtin_fold : uint8_t {
     /* the first argument's value */
     identity,
     bswap,
+    /* the stdc_bits family (builtin_stdc_op) */
+    stdc_bits,
+    /* __builtin_align_up, _down, is_aligned of an integer (which as the
+       align form) */
+    align,
+};
+
+/* the operations of the stdc_bits form, [stdbit.h.syn] (C23 7.18): the
+   shared fold's (frontend/builtin-fold.h, vfold_stdc) */
+enum class builtin_stdc_op : uint8_t {
+    leading_zeros = vfold_stdc_leading_zeros,
+    leading_ones = vfold_stdc_leading_ones,
+    trailing_ones = vfold_stdc_trailing_ones,
+    first_leading_zero = vfold_stdc_first_leading_zero,
+    first_leading_one = vfold_stdc_first_leading_one,
+    first_trailing_zero = vfold_stdc_first_trailing_zero,
+    first_trailing_one = vfold_stdc_first_trailing_one,
+    count_zeros = vfold_stdc_count_zeros,
+    bit_width = vfold_stdc_bit_width,
+    has_single_bit = vfold_stdc_has_single_bit,
+    bit_ceil = vfold_stdc_bit_ceil,
+    bit_floor = vfold_stdc_bit_floor,
+    rotate_left = vfold_stdc_rotate_left_by,
+    rotate_right = vfold_stdc_rotate_right_by,
+    bitreverse = vfold_stdc_bitreverse,
 };
 
 enum class builtin_integer_op : uint8_t {
@@ -143,6 +182,17 @@ enum class builtin_lowering : uint8_t {
     bswap,
     /* zero the padding bytes of the pointee object */
     clear_padding,
+    /* a call that analysis and constant evaluation know and lowering does
+       not: refused with the reason */
+    refuse,
+    /* C23's <stdbit.h> counts and bit_floor/bit_ceil, bitreverseg: through
+       the C front end's clzg, ctzg, popcountg and bitreverseN */
+    stdc_bits,
+    /* __builtin_align_up, _down, is_aligned of an integer by a constant
+       alignment, as arithmetic */
+    align,
+    /* the object's virtual table pointer: the pointer stored at its start */
+    vtable_pointer,
 };
 
 struct gnu_builtin {

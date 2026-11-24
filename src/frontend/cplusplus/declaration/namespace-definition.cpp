@@ -327,9 +327,15 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
                 return not_supported(n, "dcl.attr");
             continue;
         }
-        if (!c.is_token())
-            /* an attribute-specifier-seq */
+        if (!c.is_token()) {
+            /* an attribute-specifier-seq: [namespace.def]/1 lets one
+               follow namespace or the name; one that changes nothing
+               vcc generates (clang warns where it does not apply, as
+               nodiscard on a namespace) is passed over */
+            if (attributes_without_effect(c))
+                continue;
             return not_supported(n, "dcl.attr");
+        }
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE))
             body = true;
         else

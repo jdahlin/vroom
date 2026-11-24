@@ -164,6 +164,10 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     if (!any_class && !any_enumeration)
         return analysis_result::well_formed;
+    /* [temp.inst]/2: the members the candidates come from: a specialization
+       named only is defined here */
+    for (const expression_meaning &e : operands)
+        require_complete(e.type);
     /* an operand of a class with conversion functions: built-in candidates
        ([over.built]) may be viable, which are not formed.  ! && || go on
        here only to find whether an operator function is a candidate:
@@ -279,8 +283,22 @@ analysis_result semantic_analysis::overloaded_operator(
     if (member_only && type_table[operands[0].type.unqualified()].kind !=
                            type_kind::class_type)
         return analysis_result::well_formed;
-    if (operators_held)
-        return not_supported(n, "over.match.oper");
+    if (operators_held) {
+        /* (the detail names the first declaration not analysed that may
+           declare an operator function: --why follows it) */
+        char at[256] = "a declaration not analysed";
+        if (operators_held_at) {
+            source_position where = tokens.position(operators_held_at);
+            snprintf(at, sizeof at,
+                     "an operator function may be declared by the "
+                     "declaration at %s:%u:%u, not analysed",
+                     where.file_name, where.line, where.column);
+        }
+        analysis_result refused =
+            not_supported_because(n, "over.match.oper", at);
+        unsupported[unsupported.size() - 1].holder = operators_holder;
+        return refused;
+    }
     owned_array<overload_candidate> candidates;
     auto stripped = [&](qualified_type t) {
         const struct type &r = type_table[t.unqualified()];
@@ -307,6 +325,7 @@ analysis_result semantic_analysis::overloaded_operator(
         const struct type &t1 = type_table[operand(0).type.unqualified()];
         if (t1.kind == type_kind::class_type) {
             entity_index c = t1.entity;
+            require_complete(c);
             if (entity_table[c].kind != entity_kind::class_type ||
                 !entity_table[c].size)
                 return not_supported(n, "over.match.oper");

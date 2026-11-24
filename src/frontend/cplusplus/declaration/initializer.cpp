@@ -512,14 +512,14 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
        class is held in a temporary of the enclosing block (bind_reference);
        one bound to a base class's reference needs the conversion to the
        base subobject, and at namespace scope the temporary has static
-       storage ([class.temporary]/6): not analysed */
+       storage ([class.temporary]/6): _ZGR<name>_ (lowering) */
     if (aggregate_prvalue(m) && !closure_prvalue_binding(m) &&
-        !(at_block_scope() &&
-          type_table[r.operand.unqualified()].kind == type_kind::class_type &&
-          type_table[m.type.unqualified()].kind == type_kind::class_type &&
-          type_table[r.operand.unqualified()].entity ==
-              type_table[m.type.unqualified()].entity))
-        return not_supported(at, "class.temporary");
+        (type_table[m.type.unqualified()].kind != type_kind::class_type ||
+         (!at_block_scope() && !binding_extends)))
+        return not_supported_because(
+            at, "class.temporary",
+            "an array's or scalar's list temporary, or a temporary of a call's "
+            "argument at namespace scope");
     /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
        to a bit-field"; a const lvalue or rvalue reference is bound to a
        temporary holding its value ([conv.lval]) */
@@ -541,6 +541,7 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     if (x.kind == type_kind::class_type && y.kind == type_kind::class_type) {
         entity_index c1 = x.entity, c2 = y.entity;
         bool ambiguous = false;
+        require_complete(c2);
         if (entity_table[c1].kind == entity_kind::class_type &&
             entity_table[c2].kind == entity_kind::class_type &&
             entity_table[c2].size && c1 != c2 && !base_step(c2, c1, ambiguous))
@@ -658,13 +659,10 @@ analysis_result semantic_analysis::converted_temporary_binding(
     bool rvalue_reference = r.kind == type_kind::rvalue_reference;
     qualified_type t1 = r.operand;
     /* /5.2: an lvalue reference to a non-const (or volatile) type binds to
-       nothing converted */
-    if (!rvalue_reference && (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile)))
-        return ill_formed(at,
-                          "an lvalue reference to a type that is not "
-                          "const-qualified or is volatile-qualified binds "
-                          "only to a reference-compatible lvalue",
-                          "dcl.init.ref");
+       nothing converted, but to the lvalue a conversion function returns
+       (/5.1.2) */
+    bool lvalue_only =
+        !rvalue_reference && (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile));
     if (converting_binds >= 16)
         return not_supported(at, "dcl.init.ref");
     qualified_type made_type = qualified_type::make(t1.unqualified(), cv_none);
@@ -675,9 +673,17 @@ analysis_result semantic_analysis::converted_temporary_binding(
            type "cv3 T3"" by a conversion function ([over.match.ref]) */
         bool converted = false;
         VTRY(c, conversion_function_call(at, m, made_type, false, converted));
-        if (converted)
+        if (converted && (!lvalue_only || m.category == value_category::lvalue))
             return analysis_result::well_formed;
+        if (converted)
+            return not_supported(at, "dcl.init.ref");
     }
+    if (lvalue_only)
+        return ill_formed(at,
+                          "an lvalue reference to a type that is not "
+                          "const-qualified or is volatile-qualified binds "
+                          "only to a reference-compatible lvalue",
+                          "dcl.init.ref");
     converting_binds++;
     initialized_value value;
     analysis_result a = initialize_with(at, m, made_type, false, false, value);
@@ -721,6 +727,7 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
         return not_supported(at, "dcl.init.ref");
     /* the same class binds even when incomplete (an lvalue of it); a base
        needs the complete derived class */
+    require_complete(c2);
     if (c1 != c2 && !entity_table[c2].size)
         return not_supported(at, "dcl.init.ref");
     bool ambiguous = false;
@@ -800,8 +807,13 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
                           "dcl.init");
     }
     /* [over.over]/1: "an object or reference being initialized" */
+    bool extends = declared_initializer;
+    declared_initializer = false;
     VTRY(r, target_expression(clause, type, m));
-    return initialize_with(at, m, type, direct, list, result);
+    binding_extends = extends;
+    analysis_result done = initialize_with(at, m, type, direct, list, result);
+    binding_extends = false;
+    return done;
 }
 
 /*
@@ -907,6 +919,10 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
                                         qualified_type type, bool direct,
                                         initialized_value &result)
 {
+    /* [temp.inst]/2: the constructors initialization uses: a specialization
+       named only is defined here */
+    require_complete(type);
+    require_complete(m.type);
     const struct type target = type_table[type.unqualified()];
     analysis_result r = analysis_result::well_formed;
     if (entity_table[target.entity].kind != entity_kind::class_type)
@@ -1405,6 +1421,9 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
+    /* [temp.spec]/6: a static data member or variable template
+       initializer is checked */
+    flag_set checked(explicit_declaration_names, false);
     InitializerParts parts(init);
     switch (parts.form) {
     case InitializerParts::syntax_form::braced:
@@ -1445,6 +1464,53 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
         break;
     }
     return not_supported(init, "dcl.init");
+}
+
+bool semantic_analysis::has_user_constructor_template(entity_index c) const
+{
+    entity_index held = entity_table[c].constructor_templates;
+    if (!held)
+        return false;
+    for (const function_template &t : function_templates)
+        if (t.name == held && !entity_table[t.entity].deleted &&
+            !(t.definition && t.definition.size() &&
+              deleted_body(t.definition[t.definition.size() - 1])))
+            return true;
+    return false;
+}
+
+/*
+ * [dcl.init.list]/3.5: "if the initializer list has no elements and T is a
+ * class type with a default constructor, the object is value-initialized";
+ * without one, /3.7 and [over.match.list]/1.1: the constructors taking a
+ * std::initializer_list are candidates with the empty list.
+ */
+bool semantic_analysis::empty_list_uses_constructors(entity_index c) const
+{
+    /* std::initializer_list<E> itself: [dcl.init.list]/3.6 */
+    if (named(c, "initializer_list") &&
+        std_namespace(entity_table[c].enclosing))
+        return true;
+    bool initializer_list_constructor = false;
+    for (entity_index k = entity_table[c].first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        const entity &x = entity_table[k];
+        if (x.deleted)
+            continue;
+        const struct type &ft = type_table[x.type.unqualified()];
+        if (ft.parameter_count == x.default_arguments)
+            return false;
+        qualified_type first = type_table.parameters(x.type.unqualified())[0];
+        const struct type *p = &type_table[first.unqualified()];
+        if (p->kind == type_kind::lvalue_reference ||
+            p->kind == type_kind::rvalue_reference)
+            p = &type_table[p->operand.unqualified()];
+        if (p->kind == type_kind::class_type &&
+            named(p->entity, "initializer_list") &&
+            std_namespace(entity_table[p->entity].enclosing))
+            initializer_list_constructor = true;
+    }
+    return initializer_list_constructor;
 }
 
 /*
@@ -1562,6 +1628,7 @@ analysis_result semantic_analysis::class_list_initialization(
         result.evaluation = constness::not_constant;
         return analysis_result::well_formed;
     }
+    require_complete(c);
     if (!entity_table[c].size)
         /* [dcl.init.list]/3: list-initialization of an incomplete class:
            clang's "incomplete type" error */
@@ -1572,6 +1639,10 @@ analysis_result semantic_analysis::class_list_initialization(
            value-initialized"; [dcl.init]/8.1: "if T is a (possibly
            cv-qualified) class type with ... a user-provided ... default
            constructor, then the object is default-initialized" */
+        if (clauses.empty() && entity_table[c].first_constructor &&
+            empty_list_uses_constructors(c))
+            return constructor_list_initialization(list, clauses, type, direct,
+                                                   result);
         if (clauses.empty() && entity_table[c].first_constructor) {
             owned_array<expression_meaning> none;
             analysis_result r = construct(list, type, none, 0, result);
@@ -1918,10 +1989,30 @@ analysis_result semantic_analysis::aggregate_elements(
             if (!arraylike)
                 default_initializer = members[i].default_initializer;
             VTRY(r, omitted_element_value(list, element, default_initializer,
-                                          one));
+                                          target.entity, one));
         }
         all = combined_constness(all, one.evaluation);
         elements.append(one.node);
+        /* [dcl.init.aggr]/8: "The destructor for each element of class type
+           is potentially invoked ([class.dtor]) from the context where the
+           aggregate initialization occurs": a deleted or inaccessible one
+           is ill-formed ([dcl.fct.def.delete]/2, [class.access]) */
+        qualified_type destroyed = element;
+        while (type_table[destroyed.unqualified()].kind == type_kind::array)
+            destroyed = type_table[destroyed.unqualified()].operand;
+        if (type_table[destroyed.unqualified()].kind == type_kind::class_type) {
+            entity_index sub = type_table[destroyed.unqualified()].entity;
+            if (entity_table[sub].kind == entity_kind::class_type &&
+                (destructor_deleted(sub) ||
+                 (entity_table[sub].destructor &&
+                  !accessible(entity_table[sub].destructor))))
+                return ill_formed(list,
+                                  "the destructor of an element of an "
+                                  "aggregate is potentially invoked by its "
+                                  "initialization and it is deleted or "
+                                  "inaccessible",
+                                  "dcl.init.aggr");
+        }
     }
     aggregate_value(list, type, all, elements, result);
     return analysis_result::well_formed;
@@ -2001,11 +2092,70 @@ analysis_result semantic_analysis::omitted_element_checks(
     return analysis_result::well_formed;
 }
 
+/* [dcl.init.aggr]/5.1, [class.mem]/6: a default member initializer that
+   names members is a complete-class context whose `this` is the aggregate
+   being initialized: analysed in the class's scope with a `this` of its
+   type (a variable of the class, which the lowering binds to the
+   aggregate), as a constructor analyses it ([class.base.init]/9.1,
+   default_member_initializer), and the value is not a constant, which the
+   evaluator has no object for */
+analysis_result semantic_analysis::member_default_in_aggregate(
+    SyntaxRef list, entity_index owner, SyntaxRef default_initializer,
+    qualified_type member_type, initialized_value &one)
+{
+    if (!owner || entity_table[owner].kind != entity_kind::class_type ||
+        function_state.active || at_block_scope() || defining_class)
+        return not_supported(list, "dcl.init.aggr");
+    /* (in a function body: the lowering has no rule for the
+       default_member_initializer node, whose `this` is the aggregate) */
+    /* (in a default argument ([dcl.fct.default]/1): the lowering of the
+       call that uses it has no object for its `this`) */
+    if (call_site_depth)
+        return not_supported(list, "dcl.init.aggr");
+    /* the class's scope with a `this` of its own: no function's */
+    function_context outer = static_cast<function_context &&>(function_state);
+    entity_index outer_scope = current_scope;
+    function_state = function_context();
+    entity_index this_object_entity =
+        entity_table.make(entity_kind::variable, 0, owner);
+    entity_table[this_object_entity].type = qualified_type::make(
+        type_table.pointer_to(qualified_type::make(
+            entity_table[owner].type.unqualified(), cv_none)),
+        cv_none);
+    entity_table[this_object_entity].automatic = true;
+    function_state.this_entity = this_object_entity;
+    function_state.this_class = owner;
+    current_scope = owner;
+    uint32_t locations_before = source_location_uses;
+    analysis_result r = initializer(default_initializer, member_type, one);
+    function_state = static_cast<function_context &&>(outer);
+    current_scope = outer_scope;
+    if (r != analysis_result::well_formed)
+        return r;
+    /* [ext:clang_source_location] a builtin in it is the place of the
+       aggregate's initialization, which is not the initializer's */
+    if (source_location_uses != locations_before)
+        return not_supported(list, "dcl.init.aggr");
+    if (!one.node)
+        return not_supported(list, "dcl.init.aggr");
+    /* the evaluator binds `this` to the aggregate under construction, whose
+       earlier elements it has stored; its value is not known here */
+    expression_meaning wrapped;
+    wrapped.type = member_type;
+    wrapped.evaluation = constness::unknown;
+    uint32_t node = expression_node(semantic_kind::default_member_initializer,
+                                    wrapped, list.first_token());
+    semantics[node].a = one.node;
+    semantics[node].b = this_object_entity;
+    one.node = node;
+    one.evaluation = constness::unknown;
+    return analysis_result::well_formed;
+}
+
 /* the value of an element no clause initializes ([dcl.init.aggr]/5) */
-analysis_result
-semantic_analysis::omitted_element_value(SyntaxRef list, qualified_type element,
-                                         SyntaxRef default_initializer,
-                                         initialized_value &one)
+analysis_result semantic_analysis::omitted_element_value(
+    SyntaxRef list, qualified_type element, SyntaxRef default_initializer,
+    entity_index owner, initialized_value &one)
 {
     if (default_initializer) {
         /* (5.1): "If the element has a default member initializer
@@ -2013,11 +2163,14 @@ semantic_analysis::omitted_element_value(SyntaxRef list, qualified_type element,
            initializer", whose this is the aggregate being initialized
            and whose names are looked up in the class: analysed here
            only when it names nothing (literals and operators) */
-        if (!initializer_names_nothing(default_initializer))
-            return not_supported(list, "dcl.init.aggr");
         qualified_type member_type = element;
         const struct type member = type_table[element.unqualified()];
-        VTRY(r, initializer(default_initializer, member_type, one));
+        if (initializer_names_nothing(default_initializer)) {
+            VTRY(r, initializer(default_initializer, member_type, one));
+        } else {
+            VTRY(r, member_default_in_aggregate(
+                        list, owner, default_initializer, member_type, one));
+        }
         if (member.kind == type_kind::class_type &&
             entity_table[member.entity].kind == entity_kind::class_type &&
             (entity_table[member.entity].first_constructor ||
@@ -2036,6 +2189,11 @@ semantic_analysis::omitted_element_value(SyntaxRef list, qualified_type element,
         entity_table[of_element.entity].kind == entity_kind::class_type &&
         entity_table[of_element.entity].first_constructor) {
         owned_array<expression_meaning> none;
+        if (empty_list_uses_constructors(of_element.entity)) {
+            owned_array<SyntaxElement> no_clauses;
+            return class_list_initialization(list, no_clauses, element, false,
+                                             one);
+        }
         return construct(list, element, none, 0, one);
     }
     expression_meaning zero;
@@ -2219,6 +2377,7 @@ analysis_result semantic_analysis::designated_elements(
         bound_known = target.bound_known;
     } else if (target.kind == type_kind::class_type &&
                entity_table[target.entity].kind == entity_kind::class_type) {
+        require_complete(target.entity);
         if (!entity_table[target.entity].size)
             return not_supported(list, "dcl.init.list");
         if (!is_aggregate(target.entity))
@@ -2416,8 +2575,8 @@ analysis_result semantic_analysis::designated_elements(
         initialized_value one;
         VTRY(r, omitted_element_checks(list, element,
                                        static_cast<bool>(default_initializer)));
-        VTRY_SET(
-            r, omitted_element_value(list, element, default_initializer, one));
+        VTRY_SET(r, omitted_element_value(list, element, default_initializer,
+                                          target.entity, one));
         all = combined_constness(all, one.evaluation);
         elements.append(one.node);
     }

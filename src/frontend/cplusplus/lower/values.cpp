@@ -128,7 +128,10 @@ bool c_lowering::folded_read(const semantic_node &x) const
     return x.kind == semantic_kind::entity &&
            x.evaluation == constness::constant &&
            analysis.entity_table[x.a].kind == entity_kind::variable &&
-           analysis.entity_table[x.a].usable == constness::constant;
+           analysis.entity_table[x.a].usable == constness::constant &&
+           /* (a class object has no scalar value to fold: its definition
+              is read) */
+           record(x.type).kind != type_kind::class_type;
 }
 
 uint32_t c_lowering::read(uint32_t n)

@@ -73,6 +73,7 @@ analysis_result semantic_analysis::member_pointer_conversion(
     }
     qualified_type via = qualified_type::make(
         type_table.pointer_to_member(d, source.operand), cv_none);
+    require_complete(d);
     if ((via.unqualified() != to.unqualified() &&
          !qualification_convertible(via, to)) ||
         entity_table[d].kind != entity_kind::class_type ||

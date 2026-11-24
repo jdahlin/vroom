@@ -15,8 +15,8 @@
  * the left operand by the right operand's, or by a scalar.
  *
  * What is analysed: two operands of one vector type, or a vector and a
- * scalar the element type holds (the scalar's type, or an integer constant
- * that fits: clang's "implicit conversion would cause truncation");
+ * scalar the element type holds (vector_scalar_fits: clang's "implicit
+ * conversion would cause truncation");
  * different vector types (clang's lax conversions) and && || <=> are not.
  * The result is as C's front end builds it (frontend/c/expression.cpp):
  * the scalar converted to the element type, the node left to code
@@ -56,28 +56,71 @@ type_index types::vector_mask_of(const struct type &vector, uint64_t element,
                      vector.bound);
 }
 
-/* whether the scalar converts to the vector's element without changing its
-   value: its type is the element's, or it is an integer constant of the
-   element's range */
+/*
+ * Whether the scalar converts to the vector's element type without
+ * changing its value, as clang's splat of a scalar operand checks it
+ * ("implicit conversion would cause truncation" otherwise): fits is the
+ * answer, false when analysis cannot tell.  Of the element's type, yes.  A
+ * constant: an integer element holds it in its width, signed or unsigned
+ * (clang: unsigned + -1 is allowed); a floating-point element has its value
+ * exactly (constant_representable: double 1.1 to float is not, 0.5 is).
+ * Not a constant: a floating-point scalar of a type no greater than the
+ * element's ([conv.fpprom]'s order: _Float16, float, double); an integer
+ * whose width is at most the element's significand (short to float, int to
+ * double; int to float is not).  long double, __float128, __bf16 and a
+ * non-constant integer to an integer element of another type: not told.
+ */
 bool semantic_analysis::vector_scalar_fits(const expression_meaning &scalar,
-                                           qualified_type element) const
+                                           qualified_type element,
+                                           bool &fits) const
 {
+    fits = true;
     if (scalar.type.unqualified() == element.unqualified())
         return true;
-    if (!is_integral(element) || !is_integral(scalar.type) ||
-        scalar.evaluation != constness::constant)
-        return false;
     const implementation_defined_behavior &b = tokens.files.behavior;
-    unsigned bits = static_cast<unsigned>(size_of_type(element)) * 8;
-    if (bits >= 127)
+    fundamental_type e = fundamental_of(element),
+                     s = fundamental_of(scalar.type);
+    if (is_integral(element) && is_integral(scalar.type)) {
+        if (scalar.evaluation != constness::constant)
+            return false;
+        unsigned bits = static_cast<unsigned>(size_of_type(element)) * 8;
+        if (bits >= 127)
+            return true;
+        __int128 v = integer_value(b, s, scalar.value);
+        __int128 high = (static_cast<__int128>(1) << bits) - 1,
+                 low = -(static_cast<__int128>(1) << (bits - 1));
+        fits = v >= low && v <= high;
         return true;
-    __int128 v = integer_value(b, fundamental_of(scalar.type), scalar.value);
-    __int128 high = (static_cast<__int128>(1) << bits) - 1, low = 0;
-    if (fundamental_type_is_signed(b, fundamental_of(element))) {
-        high = (static_cast<__int128>(1) << (bits - 1)) - 1;
-        low = -high - 1;
     }
-    return v >= low && v <= high;
+    if (!fundamental_type_is_floating(e))
+        return false;
+    if (scalar.evaluation == constness::constant)
+        return constant_representable(scalar, e, fits);
+    if (scalar.evaluation != constness::not_constant)
+        return false;
+    static const fundamental_type order[] = {fundamental_type::float16,
+                                             fundamental_type::float_,
+                                             fundamental_type::double_};
+    static const unsigned precision[] = {11, 24, 53};
+    int element_rank = -1, scalar_rank = -1;
+    for (int i = 0; i < 3; i++) {
+        if (order[i] == e)
+            element_rank = i;
+        if (order[i] == s)
+            scalar_rank = i;
+    }
+    if (element_rank < 0)
+        return false;
+    if (fundamental_type_is_floating(s)) {
+        if (scalar_rank < 0)
+            return false;
+        fits = scalar_rank <= element_rank;
+        return true;
+    }
+    if (!fundamental_type_is_integral(s))
+        return false;
+    fits = fundamental_type_width(b, s) <= precision[element_rank];
+    return true;
 }
 
 analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
@@ -122,8 +165,15 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
     if (!(left_vector && right_vector)) {
         if (!is_arithmetic(scalar->type))
             return not_supported(n, "ext.gnu");
-        if (!shift && !vector_scalar_fits(*scalar, element))
+        bool fits = true;
+        if (!shift && !vector_scalar_fits(*scalar, element, fits))
             return not_supported(n, "ext.gnu");
+        if (!fits)
+            return ill_formed(n,
+                              "a scalar cannot be converted to a vector "
+                              "element type, as the implicit conversion "
+                              "would cause truncation",
+                              "ext.gnu");
         VTRY(r, implicit_conversion(n, *scalar, element, false));
     }
     m = expression_meaning();

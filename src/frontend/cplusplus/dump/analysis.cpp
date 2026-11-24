@@ -704,6 +704,14 @@ void dump_analysis(const dump_request &r, const semantic_analysis &analysis,
             vbuffer_format_append(out, "\t%s", u.detail);
             /* the check in vcc that refused it */
             vbuffer_format_append(out, "\t%s:%u", u.file, u.line);
+            /* a held name's refusal: the declaration not analysed that
+               holds it */
+            if (u.holder) {
+                source_position held =
+                    tokens.position(tree[u.holder].first_token);
+                vbuffer_format_append(out, "\theld=%s:%u:%u", held.file_name,
+                                      held.line, held.column);
+            }
             vbuffer_string_append(out, "\n");
         }
     }

@@ -249,6 +249,8 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
 analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
                                                standard_keyword key)
 {
+    /* [temp.spec]/6: a base-clause is checked */
+    flag_set checked(explicit_declaration_names, false);
     /* [temp.variadic]/5.3: "In a base-specifier-list; the pattern is a
        base-specifier": a base-specifier followed by an ellipsis is one
        base per element of the packs it names (an instantiation's; in a
@@ -357,6 +359,7 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         }
         token_index id = named_ids[si];
         entity_index base = named_bases[si];
+        require_complete(base);
         const entity &bx = entity_table[base];
         if (!bx.size)
             return ill_formed_at_token(id,
@@ -633,7 +636,7 @@ entity_index semantic_analysis::class_member_lookup(entity_index c,
                                                     uint32_t name,
                                                     bool &ambiguous) const
 {
-    const_cast<semantic_analysis *>(this)->complete_instantiation(c);
+    require_complete(c);
     entity_index e = entity_table.find(c, name);
     if (e)
         return e;
@@ -666,8 +669,6 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
                                            expression_meaning &m,
                                            bool check_access)
 {
-    if (aggregate_prvalue(m) && type_table[m.type.unqualified()].entity != base)
-        return not_supported(current_declaration, "class.temporary");
     for (;;) {
         entity_index c = type_table[m.type.unqualified()].entity;
         if (c == base)

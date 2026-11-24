@@ -20,8 +20,19 @@ uint32_t c_lowering::construct_at(const semantic_node &n, uint32_t object,
 {
     owned_array<uint32_t> arguments;
     const uint32_t *items = analysis.semantics.items(n.first);
+    /* [abi:calls]: a class parameter passed by address is a temporary the
+       caller constructs and destroys at the end of the full-expression */
+    qualified_type function_type = analysis.entity_table[n.b].type;
+    const struct type &ft = record(function_type);
+    const qualified_type *parameters =
+        analysis.type_table.parameters(function_type.unqualified());
     for (uint32_t i = 0; i < n.count; i++) {
-        uint32_t a = expression(items[i]);
+        uint32_t a = 0;
+        if (i < ft.parameter_count && collecting &&
+            passed_indirectly(parameters[i]))
+            a = indirect_argument(items[i], parameters[i], at);
+        else
+            a = expression(items[i]);
         if (!a)
             return 0;
         arguments.append(a);
@@ -65,8 +76,8 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
         if (!count)
             return construct_at(x, object, 0, x.at);
         /* [dcl.init]/7.2: each element, first to last */
-        uint32_t loop =
-            each_element(s, t, type(element, x.at), count, false, x.b, x.at);
+        uint32_t loop = each_element(s, t, type(element, x.at), count, false,
+                                     x.b, x.at, &x);
         if (!loop)
             return 0;
         return statement_expression(v, block(&loop, 1));
@@ -204,6 +215,9 @@ uint32_t c_lowering::temporary_object(uint32_t n)
     const semantic_node &x = node(n);
     if (!collecting)
         return fail("a class temporary outside a statement", x.at);
+    if (static_glvalue)
+        return fail("a temporary extended through a member at static storage",
+                    x.at);
     ast_qualified_type t = type(x.type, x.at);
     uint32_t held = full_expression_temporary(t);
     entity_index destructor =
@@ -433,13 +447,17 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
     ast_qualified_type pointer = type(n.type, n.at);
     const semantic_node &bound = node(n.a);
     if (is_glvalue(bound)) {
+        static_glvalue = static_owner && &n == &node(static_root);
         uint32_t a = object(n.a);
+        static_glvalue = false;
         if (!a)
             return 0;
         return address_of(a, pointer);
     }
     if (!in_function)
         return fail("a temporary bound to a reference of static storage", n.at);
+    if (static_owner && &n == &node(static_root))
+        return static_temporary(n, pointer);
     entity_index cls = record(bound.type).entity;
     if (record(bound.type).kind == type_kind::class_type &&
         analysis.entity_table[cls].destructor) {
@@ -455,6 +473,49 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
     if (!literal)
         return 0;
     return make(AST_NODE_ADDRESS, pointer, literal, 0, 0, 0, 0);
+}
+
+/* [class.temporary]/6, [basic.stc.static]: the prvalue a namespace-scope
+   reference is initialized by, held in an object of static storage
+   _ZGR<the variable's name>_ ([abi:mangling-special-temporaries]) constructed by the initialization, its
+   destructor registered with __cxa_atexit */
+uint32_t c_lowering::static_temporary(const semantic_node &n,
+                                      ast_qualified_type pointer)
+{
+    const semantic_node &bound = node(n.a);
+    owned_buffer zgr;
+    if (!itanium_reference_temporary_name(analysis, tokens.pp, static_owner,
+                                          static_temporaries, zgr.get()))
+        return fail("an entity whose symbol is not mangled", n.at);
+    static_temporaries++;
+    owned_buffer written;
+    if (target == PP_DARWIN)
+        vbuffer_string_append(written.get(), "_");
+    vbuffer_append(written.get(), zgr.data(), zgr.size());
+    ast_qualified_type t = type(bound.type, bound.at);
+    uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, zgr.data(),
+                                    zgr.size(), t, AST_STORAGE_STATIC,
+                                    AST_SYMBOL_FLAG_ADDRESS_TAKEN, 1);
+    ast_builder_symbol_assembler_name(c, s, written.data(), written.size());
+    ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+    ast_builder_symbol_keep(c, s);
+    uint32_t made = initialize_into(s, bound.type, t, n.a);
+    if (!made)
+        return 0;
+    uint32_t address = address_of(c_variable(c, s, t), pointer);
+    if (record(bound.type).kind == type_kind::class_type) {
+        entity_index destructor =
+            analysis.entity_table[record(bound.type).entity].destructor;
+        if (destructor) {
+            uint32_t registered = destructor_registration(
+                special_callee(destructor, n.at), entity_type(destructor, n.at),
+                address_of(c_variable(c, s, t), pointer_to(t)));
+            if (!registered)
+                return 0;
+            made = comma(pointer, made, registered);
+        }
+    }
+    return comma(pointer, made, address);
 }
 
 /* the prvalue n held in a temporary of the enclosing block, as C's

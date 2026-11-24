@@ -230,6 +230,7 @@ analysis_result semantic_analysis::allocation_functions(
     implicit_allocation_functions();
     uint32_t name = allocation_function_name(kind);
     in_class = false;
+    require_complete(c);
     if (c && !class_complete && !entity_table[c].size &&
         allocation_names_spelled() != allocation_declarations_analysed)
         /* Before its layout, the class may declare one analysis has not
@@ -290,9 +291,14 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     qualified_type type;
     SyntaxElement bound{};
     analysis_result r = analysis_result::well_formed;
+    /* [dcl.spec.auto]/2: a placeholder type "in the type-specifier-seq of
+       the new-type-id or type-id of a new-expression": deduced from the
+       new-initializer below */
+    placeholder_allowed = true;
     if (i < count && n[i].is(syntax_kind::new_type_id)) {
         r = new_type_id(n[i++], type, bound);
     } else if (i + 2 < count && n[i + 1].is(syntax_kind::type_id)) {
+        placeholder_allowed = true;
         r = type_id(n[i + 1], type);
         i += 3;
     } else {
@@ -305,6 +311,25 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         init = n[i++];
     if (i < count)
         return not_supported(n, "expr.new");
+    if (contains_placeholder(type)) {
+        /* [dcl.type.auto.deduct]/2: "for a new-expression with a type that
+           contains a placeholder type, T is the declared type of the
+           new-expression and E is the new-initializer's single
+           assignment-expression" ([dcl.spec.auto]/4: the initializer shall
+           be one); no initializer, or an array: not analysed */
+        SyntaxElement clause;
+        bool direct = false, list = false;
+        if (bound || !init || init.is_token() ||
+            !initializer_form(init, clause, direct, list) || !direct)
+            return not_supported(n, "dcl.type.auto.deduct");
+        expression_meaning deduced_from;
+        VTRY(dr, expression(clause, deduced_from));
+        qualified_type deduced, replacement;
+        VTRY_SET(dr,
+                 deduce_placeholder(n, type, deduced_from, names_entity(clause),
+                                    deduced, replacement));
+        type = deduced;
+    }
     /* [expr.new]/6: an array: "the new-expression yields a pointer to the
        initial element (if any) of the array"; a type-id of array type is
        one too */
@@ -319,6 +344,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         known_count = a.bound;
         type = a.operand;
     }
+    /* [temp.inst]/2: a specialization named only is defined here (before
+       the reference into type_table: completing may grow it) */
+    require_complete(type);
     const struct type &allocated = type_table[type.unqualified()];
     bool object_type = allocated.kind != type_kind::lvalue_reference &&
                        allocated.kind != type_kind::rvalue_reference &&
@@ -364,6 +392,18 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
            ::new or not */
         VTRY_SET(r, array_cookie(n, c, type, false, cookie));
     }
+    /* [expr.new]/(array of class type): the destructor is potentially
+       invoked for the elements ([class.dtor]/16, [dcl.fct.def.delete]/2): a
+       deleted one is ill-formed (as clang; C++98 has no deleted
+       destructors) */
+    if (array && c &&
+        tokens.files.behavior.has(language_feature::rvalue_references) &&
+        destructor_deleted(c))
+        return ill_formed(n,
+                          "a program that refers to a deleted function "
+                          "implicitly or explicitly is ill-formed: the "
+                          "destructor of the elements is deleted",
+                          "class.dtor");
     bool elements =
         array && c &&
         (entity_table[c].first_constructor || destroys(c) || cookie);
