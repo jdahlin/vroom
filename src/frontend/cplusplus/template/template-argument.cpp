@@ -242,6 +242,52 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
            written[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
            written[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
         written = written[1];
+    /* [expr.prim.fold]/2: ( pattern && ... ) over a pack an alias
+       template's instantiation bound: pattern(e0) && (pattern(e1) && ...),
+       the elements' own value-dependent expressions (likewise ||) */
+    if (written.is(syntax_kind::fold_expression) && written.size() == 5 &&
+        written[3].is(preprocessing_op_or_punc::ELLIPSIS) &&
+        (written[2].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND) ||
+         written[2].is(preprocessing_op_or_punc::BAR_BAR))) {
+        uint64_t code = 8;
+        if (written[2].is(preprocessing_op_or_punc::BAR_BAR))
+            code = 9;
+        SyntaxElement pattern = written[1];
+        uint32_t times = 0;
+        bool own = false;
+        entity_index none =
+            entity_table.make(entity_kind::dependent_value, 0, 0);
+        if (!expansion_count(first_token(pattern), pattern.end_token(), times,
+                             &own) ||
+            own || times < 2)
+            return none;
+        owned_array<entity_index> parts;
+        for (uint32_t k = 0; k < times; k++) {
+            expansion_scope scope(*this, true, k);
+            entity_index part = dependent_value_entity(pattern);
+            if (!entity_table[part].value)
+                return none;
+            parts.append(part);
+        }
+        entity_index acc = parts[times - 1];
+        for (uint32_t k = times - 1; k-- > 0;) {
+            entity_index found = 0;
+            for (entity_index d : dependent_values)
+                if (entity_table[d].value == code &&
+                    entity_table[d].enclosing == parts[k] &&
+                    entity_table[d].name == acc)
+                    found = d;
+            if (!found) {
+                found = entity_table.make(entity_kind::dependent_value, 0, 0);
+                entity_table[found].enclosing = parts[k];
+                entity_table[found].name = acc;
+                entity_table[found].value = code;
+                dependent_values.append(found);
+            }
+            acc = found;
+        }
+        return acc;
+    }
     entity_index e = entity_table.make(entity_kind::dependent_value, 0, 0);
     uint64_t binary = 0;
     if (written.size() == 3) {

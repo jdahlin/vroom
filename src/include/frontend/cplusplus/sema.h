@@ -2850,12 +2850,17 @@ class semantic_analysis
         uint32_t identifier = 0;
         uint32_t element = UINT32_MAX;
         qualified_type type;
+        /* a cast-expression's type-id analysed there (identifier 0): the
+           cast's syntax node */
+        uint32_t cast = 0;
     };
     owned_array<written_binding> written_bindings;
 
   private:
     void collect_written_bindings(SyntaxRef n,
-                                  owned_array<written_binding> &found) const;
+                                  owned_array<written_binding> &found);
+    void collect_written_casts(SyntaxElement x,
+                               owned_array<written_binding> &found);
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(SyntaxRef op, qualified_type &type,
@@ -6246,6 +6251,12 @@ class semantic_analysis
     /* whether parameter p is one of t's own (not of an enclosing class
        template's) */
     bool constraint_parameter_is_own(entity_index t, entity_index p) const;
+    /* the type a type-id written in t's requires-clause names, analysed in
+       t's template-parameter scope (what [abi:mangle.template-args] spells) */
+    bool constraint_type(entity_index t, SyntaxElement written,
+                         qualified_type &type) const;
+    bool constraint_type_in(entity_index t, SyntaxElement written,
+                            qualified_type &type);
     /* what token i names, looked up from scope outward (0: none) */
     entity_index constraint_name(entity_index scope, token_index i) const;
     /* the concept token i names, looked up from scope outward (0: none) */

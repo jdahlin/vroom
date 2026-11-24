@@ -494,6 +494,38 @@ bool semantic_analysis::constraint_parameter_is_own(entity_index t,
     return false;
 }
 
+/* (the mangler holds the analysis const; this analysis leaves nothing
+   behind: the records it adds are dropped) */
+bool semantic_analysis::constraint_type(entity_index t, SyntaxElement written,
+                                        qualified_type &type) const
+{
+    return const_cast<semantic_analysis *>(this)->constraint_type_in(t, written,
+                                                                     type);
+}
+
+bool semantic_analysis::constraint_type_in(entity_index t,
+                                           SyntaxElement written,
+                                           qualified_type &type)
+{
+    uint32_t ft = template_record(t);
+    if (!ft || !function_templates[ft - 1].parameter_count)
+        return false;
+    const struct function_template &f = function_templates[ft - 1];
+    entity_index scope =
+        entity_table[template_parameter_entities[f.first_parameter]].enclosing;
+    size_t expressions_before = expressions.size();
+    size_t uses_before = name_uses.size();
+    size_t unsupported_before = unsupported.size();
+    entity_index saved_scope = current_scope;
+    current_scope = scope;
+    analysis_result r = type_id(written, type);
+    current_scope = saved_scope;
+    expressions.resize(expressions_before);
+    name_uses.resize(uses_before);
+    unsupported.resize(unsupported_before);
+    return r == analysis_result::well_formed;
+}
+
 entity_index semantic_analysis::constraint_parameter(entity_index t,
                                                      token_index i) const
 {

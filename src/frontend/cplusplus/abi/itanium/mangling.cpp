@@ -641,15 +641,28 @@ bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
         else
             written.append(c[i]);
     }
-    for (SyntaxElement a : written) {
+    for (size_t wi = 0; wi < written.size(); wi++) {
+        SyntaxElement a = written[wi];
         if (a.is(preprocessing_op_or_punc::COMMA))
             continue;
         /* a type-id that is one template parameter's name */
         while (a.is_node() && a.size() == 1 &&
                a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
             a = a[0];
-        if (!a.is_token())
-            return false;
+        if (!a.is_token()) {
+            /* another type (an alias template's specialization, a
+               typename, ...): analysed in the template's parameter scope */
+            qualified_type argument;
+            if (!analysis.constraint_type(t, written[wi], argument))
+                return false;
+            entity_index saved = encoding_template;
+            encoding_template = t;
+            bool ok = type(argument);
+            encoding_template = saved;
+            if (!ok)
+                return false;
+            continue;
+        }
         entity_index pe = analysis.constraint_parameter(t, a.token());
         if (pe) {
             if (!constraint_parameter(t, pe))
@@ -899,8 +912,41 @@ bool itanium_mangler::dependent_fold(SyntaxElement fold)
 
 bool itanium_mangler::dependent_expression(SyntaxElement expression)
 {
+    /* [abi:mangle.expression]: ( type-id ) cast-expression, cv <type>
+       <expression>, the type analysed with the alias's names bound */
+    if (expression.is(syntax_kind::cast_expression) && expression.size() == 4) {
+        SyntaxRef r = expression;
+        for (uint32_t i = 0; i < written_count; i++) {
+            const auto &b = analysis.written_bindings[written_first + i];
+            if (b.cast != r.index().index())
+                continue;
+            text("cv");
+            return type(b.type) && dependent_expression(expression[3]);
+        }
+        return false;
+    }
     if (expression.is(syntax_kind::fold_expression))
         return dependent_fold(expression);
+    /* [abi:mangle.expression] <unary operator-name> <expression> */
+    if (expression.is(syntax_kind::unary_expression) &&
+        expression.size() == 2) {
+        static const struct {
+            preprocessing_op_or_punc token;
+            const char *code;
+        } unary[] = {
+            {preprocessing_op_or_punc::STAR, "de"},
+            {preprocessing_op_or_punc::AMPERSAND, "ad"},
+            {preprocessing_op_or_punc::MINUS, "ng"},
+            {preprocessing_op_or_punc::PLUS, "ps"},
+            {preprocessing_op_or_punc::EXCLAMATION, "nt"},
+            {preprocessing_op_or_punc::TILDE, "co"},
+        };
+        for (const auto &u : unary)
+            if (punctuator(expression[0], u.token)) {
+                text(u.code);
+                return dependent_expression(expression[1]);
+            }
+    }
     /* T(), T an alias template's parameter: cv <type> _ E */
     if (expression.is(syntax_kind::postfix_expression) &&
         expression.size() == 3 &&
@@ -989,6 +1035,19 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
                     return false;
                 text("E");
                 return true;
+            }
+            /* ns::f as a callee: sr <source-name of ns> E <source-name> (a
+               function, or a name an inline namespace of ns holds) */
+            if (scope && !global && qual.size() == 2 &&
+                analysis.entity_table[scope].kind ==
+                    entity_kind::namespace_entity &&
+                (!target ||
+                 analysis.entity_table[target].kind != entity_kind::variable)) {
+                text("sr");
+                if (!source_name(analysis.entity_table[scope].name))
+                    return false;
+                text("E");
+                return source_name(analysis.token_identifier(member.token()));
             }
             return false;
         }
@@ -2797,6 +2856,37 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
            a parenthesized identifier or member access. */
         SyntaxRef n = SyntaxRef(node_index(
             static_cast<uint32_t>(analysis.entity_table[r.entity].value)));
+        if (n.is(syntax_kind::typename_specifier)) {
+            /* typename Q::template X<args>: N <Q's prefix> X I <args> E E */
+            uint32_t wf = analysis.entity_table[r.entity].first_member;
+            uint32_t wc = analysis.entity_table[r.entity].member_count;
+            uint32_t first = wc;
+            for (uint32_t i = 0; i < wc; i++)
+                if (analysis.written_bindings[wf + i].cast ==
+                    n.index().index()) {
+                    first = i;
+                    break;
+                }
+            SyntaxElement id = n[n.size() - 1];
+            if (first == wc || !id[0].is_identifier())
+                return false;
+            const auto &q = analysis.written_bindings[wf + first];
+            text("N");
+            if (!dependent_member_prefix(q.type.unqualified()) ||
+                !source_name(analysis.token_identifier(id[0].token())))
+                return false;
+            text("I");
+            for (uint32_t i = first + 1; i < wc; i++) {
+                const auto &a = analysis.written_bindings[wf + i];
+                if (a.cast != n.index().index())
+                    break;
+                if (!type(a.type))
+                    return false;
+            }
+            text("EE");
+            add_candidate(t);
+            return true;
+        }
         if (n.size() != 4 || !encoding_template)
             return false;
         SyntaxElement operand = n[2];
