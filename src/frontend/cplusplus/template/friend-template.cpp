@@ -169,6 +169,20 @@ analysis_result semantic_analysis::qualified_friend_class_template(
         return not_supported(n, "temp.friend");
     uint32_t name = tokens.identifier(elaborated[2].token());
     entity_index prior = entity_table.find(scope, name);
+    if (!prior && is_namespace(scope)) {
+        /* [namespace.def]/6: a member of an inline namespace of the
+           namespace is found by a qualified name of it
+           (::nlohmann::json_pointer, declared in an inline namespace) */
+        lookup_result q = lookup_qualified(scope, name, lookup_filter::any);
+        entity_index found = q.entity;
+        if (!found)
+            found = q.unknown_entity;
+        if (found && class_template_of(found)) {
+            befriend_template(
+                c, function_templates[class_template_of(found) - 1].entity);
+            return analysis_result::well_formed;
+        }
+    }
     if (!prior || !class_template_of(prior) ||
         entity_table.bound_by_using(scope, name))
         return not_supported(n, "temp.friend");
