@@ -576,6 +576,17 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
         VTRY(c, conversion_function_call(
                     at, m, qualified_type::make(t1.unqualified(), cv_none),
                     false, converted));
+        require_complete(y.entity);
+        if (!converted && entity_table[y.entity].size &&
+            !has_conversion_functions(y.entity))
+            /* [dcl.init.ref]/5.4: "Otherwise, ... the initializer expression
+               is implicitly converted to a prvalue of type "cv1 T1"": a
+               complete class without a conversion function has none */
+            return ill_formed(at,
+                              "a class without a conversion function to the "
+                              "referenced type does not initialize a "
+                              "reference to it",
+                              "dcl.init.ref");
         if (!converted)
             return not_supported(at, "dcl.init.ref");
         return reference_binding(at, m, reference);

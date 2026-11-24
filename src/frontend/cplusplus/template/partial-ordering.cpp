@@ -63,10 +63,23 @@ bool semantic_analysis::orderable(qualified_type t, bool packs) const
         if (entity_table[r.entity].kind == entity_kind::dependent_member ||
             !entity_table[r.entity].instantiation)
             return false;
-        for (uint32_t i = 0; i < specialization_argument_count(r.entity); i++)
-            if (specialization_template_argument(r.entity, i).kind !=
-                template_argument::kind_t::type)
+        for (uint32_t i = 0; i < specialization_argument_count(r.entity); i++) {
+            const template_argument &x =
+                specialization_template_argument(r.entity, i);
+            if (x.kind == template_argument::kind_t::type)
+                continue;
+            /* a non-type argument that is a value or a non-type parameter
+               (deduce_type's TT<i>), not an expression naming parameters
+               (a non-deduced context, [temp.deduct.type]/5.3) */
+            if (x.kind != template_argument::kind_t::value ||
+                (x.template_entity &&
+                 (entity_table[x.template_entity].kind ==
+                      entity_kind::dependent_value ||
+                  contains_placeholder(entity_table[x.template_entity].type))))
+                /* (a parameter of placeholder type, auto or decltype(auto),
+                   is ordered by that type too: [temp.func.order]) */
                 return false;
+        }
         return true;
     case type_kind::template_parameter:
     case type_kind::fundamental:

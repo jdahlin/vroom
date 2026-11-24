@@ -592,9 +592,12 @@ analysis_result semantic_analysis::overloaded_operator(
     if (r == analysis_result::well_formed && none_viable && converts)
         /* a built-in candidate may be viable through the conversion */
         return not_supported(n, "over.built");
-    if (r == analysis_result::well_formed && none_viable && member_only)
-        /* no built-in operator either: whether a conversion makes one
-           viable is not analysed */
+    if (r == analysis_result::well_formed && none_viable && member_only &&
+        has_conversion_functions(
+            type_table[operands[0].type.unqualified()].entity))
+        /* no built-in operator either: whether a conversion function makes
+           one viable ([over.match.oper]/3.3, [over.built]) is not analysed;
+           a class with none has no built-in candidate */
         return not_supported(n, "over.match.oper");
     if (r != analysis_result::well_formed || none_viable)
         /* /9: none viable, the built-in operator's meaning (whose rules
