@@ -625,14 +625,24 @@ analysis_result semantic_analysis::id_expression(token_index t,
        identifier" */
     bool callee = t && t == overloaded_callee;
     bool adl_applies = callee && callee_has_arguments;
-    /* [lex.name]/3: a name beginning with an underscore may be the
-       implementation's (clang's _ReadWriteBarrier, __unknown_anytype) */
+    /* [lex.name]/3: a name of clang's builtins (by its __has_builtin
+       answers) is the implementation's, which this front end may not
+       have: not known to be undeclared */
     size_t spelled_length = 0;
     const char *spelled =
         tokens.pp.identifier_spelling(name - 1, &spelled_length);
-    bool called = callee && spelled_length > 0 && spelled[0] != '_';
-    if (!e && !found.unknown && !found.ambiguous && !builtin_spelled(name) &&
-        called && !adl_applies && !declaration_not_parsed_seen)
+    bool implementation_name =
+        !e &&
+        (builtin_spelled(name) ||
+         clang_has_builtin(tokens.files.behavior, spelled, spelled_length));
+    bool called = callee && !implementation_name;
+    /* (only a call's name: a name some declarations analysis has no rules
+       for declare without marking their scope as unknown, an enumerator of
+       an enumeration with a fixed underlying type, a member of an anonymous
+       union, a lambda's init-capture in its noexcept-specifier, the
+       enumerators of a using-enum-declaration) */
+    if (!e && !found.unknown && !found.ambiguous && called && !adl_applies &&
+        !declaration_not_parsed_seen)
         return ill_formed_at_token(t, "use of an undeclared identifier",
                                    "basic.lookup.unqual");
     if (!e) {
