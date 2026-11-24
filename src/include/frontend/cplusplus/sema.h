@@ -424,6 +424,17 @@ const uint32_t gnu_inline_flags =
 /* [ext:clang_ext_vector_type] ext_vector_type(N) taken where a declaration
    allows it (an alias-declaration, a typedef): N, or the entity of the
    non-type template-parameter N names */
+/* the attributes of a statement that have rules there ([stmt.pre]/1):
+   statement_attribute_at's answer for an attribute-token */
+enum class statement_attribute : uint8_t {
+    other,
+    likely,
+    unlikely,
+    fallthrough,
+    code_align,
+    assume
+};
+
 struct ext_vector_attribute {
     bool allowed = false;
     uint64_t count = 0;
@@ -2818,6 +2829,7 @@ class semantic_analysis
                                          uint32_t count, gnu_attributes &g);
     bool gnu_cleanup_takes_pointer(entity_index function) const;
     bool code_align_argument(token_index at) const;
+    statement_attribute statement_attribute_at(token_index t) const;
     bool fallthrough_statement(SyntaxElement s) const;
     bool case_or_default_label(SyntaxElement s) const;
     analysis_result gnu_attribute_specifier(SyntaxRef n, declarator_meaning &m);

@@ -554,6 +554,38 @@ bool attribute_without_effect(const char *ns, size_t ns_length,
 } // namespace
 
 /*
+ * The attribute-tokens with rules for a statement, by their identifier
+ * (with or without the reserved __ around it, attribute_name):
+ * [dcl.attr.likelihood] likely and unlikely, [dcl.attr.fallthrough]
+ * fallthrough (also GNU's and clang's), clang's code_align and C++23's
+ * assume (not in n4861).
+ */
+statement_attribute
+semantic_analysis::statement_attribute_at(token_index t) const
+{
+    struct row {
+        const char *name;
+        statement_attribute attribute;
+    };
+    static constexpr row rows[] = {
+        {"likely", statement_attribute::likely},
+        {"unlikely", statement_attribute::unlikely},
+        {"fallthrough", statement_attribute::fallthrough},
+        {"code_align", statement_attribute::code_align},
+        {"assume", statement_attribute::assume},
+    };
+    owned_buffer spelling;
+    tokens.spelling(t, spelling.get());
+    const char *name;
+    size_t length;
+    attribute_name(spelling, &name, &length);
+    for (const row &r : rows)
+        if (name_is(name, length, r.name))
+            return r.attribute;
+    return statement_attribute::other;
+}
+
+/*
  * [dcl.attr.grammar]/4: "Each attribute-specifier-seq is said to appertain
  * to some entity or statement, identified by the syntactic context where
  * it appears."  Whether every attribute of the attribute-specifier (or
