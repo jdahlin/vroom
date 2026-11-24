@@ -52,6 +52,8 @@ thread_local uint32_t last_unknown_line = 0;
    analysis could not decide */
 thread_local uint32_t last_not_constant_line = 0;
 thread_local bool last_not_constant_certain = false;
+/* the message of the rule the last certain answer applied, or null */
+thread_local const char *last_rule_note = nullptr;
 #define CONST_NOT_CONSTANT                                                     \
     (last_not_constant_line = __LINE__, last_not_constant_certain = false,     \
      constness::not_constant)
@@ -59,8 +61,13 @@ thread_local bool last_not_constant_certain = false;
    declaration that needs a constant expression is ill-formed (not one the
    analysis merely cannot follow) */
 #define CONST_NOT_CONSTANT_RULE                                                \
-    (last_not_constant_line = __LINE__, last_not_constant_certain = true,      \
-     constness::not_constant)
+    (last_rule_note = nullptr, last_not_constant_line = __LINE__,              \
+     last_not_constant_certain = true, constness::not_constant)
+/* ... with the text of clang's note for it (the diagnostic of a static
+   assertion that is not constant says which rule) */
+#define CONST_NOT_CONSTANT_NOTE(text)                                          \
+    (last_rule_note = text, last_not_constant_line = __LINE__,                 \
+     last_not_constant_certain = true, constness::not_constant)
 
 /* The answer "the evaluator has no rules for this": normally just
    constness::unknown.  Compiled with -DVCC_TRACE_UNKNOWN each such answer
@@ -97,7 +104,9 @@ constness opaque_access(const State &state, const Object &o)
        variable it cannot know unusable to the call that needs a value,
        as clang does) */
     if (o.outside && o.static_unusable && !state.potential)
-        return CONST_NOT_CONSTANT_RULE;
+        return CONST_NOT_CONSTANT_NOTE(
+            "the expression is not a constant expression: read of "
+            "non-constexpr variable is not allowed in a constant expression");
     if (o.outside)
         return CONST_NOT_CONSTANT;
     return CONST_UNKNOWN;
@@ -528,6 +537,11 @@ bool semantic_analysis::evaluation_rule_applied() const
     return last_not_constant_certain;
 }
 
+const char *semantic_analysis::evaluation_rule_note() const
+{
+    return last_rule_note;
+}
+
 constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
 {
     if (semantics[node].evaluation == constness::not_constant)
@@ -535,6 +549,7 @@ constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
     constant_evaluation state;
     last_not_constant_line = 0;
     last_not_constant_certain = false;
+    last_rule_note = nullptr;
     constness c = evaluate_node(state, node, v);
     /* [expr.const]/5.18: an allocation not deallocated in the evaluation:
        whether this expression is the whole of the constant expression is
@@ -1378,7 +1393,10 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             /* [expr.const]/5.8: the read of a member of a static object
                that is not usable in constant expressions */
             if (w.static_unusable && state.reading && !state.potential)
-                return CONST_NOT_CONSTANT_RULE;
+                return CONST_NOT_CONSTANT_NOTE(
+                    "the expression is not a constant expression: read of "
+                    "non-constexpr variable is not allowed in a constant "
+                    "expression");
             return constness::unknown;
         }
         constant_value o = place_value(state, whole);
@@ -1429,7 +1447,9 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                evaluation ([expr.const]/5.9) is not constant */
             if (state.reading && !state.potential &&
                 place_read_only(state, whole))
-                return CONST_NOT_CONSTANT_RULE;
+                return CONST_NOT_CONSTANT_NOTE(
+                    "the expression is not a constant expression: read of "
+                    "mutable member is not allowed in a constant expression");
             return CONST_UNKNOWN;
         }
         for (uint32_t i = 0; i < k.member_count; i++)
@@ -1508,7 +1528,9 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         if (place_read_only(state, target)) {
             if (state.potential)
                 return CONST_NOT_CONSTANT;
-            return CONST_NOT_CONSTANT_RULE;
+            return CONST_NOT_CONSTANT_NOTE(
+                "the expression is not a constant expression: cannot modify an "
+                "object that is visible outside the current evaluation");
         }
         constant_value y;
         c = evaluate_node(state, x.b, y);
@@ -1761,7 +1783,9 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
             /* [dcl.constexpr]/10, [expr.const]/5.8: a constexpr variable
                whose initializer is no constant expression is not usable */
             if (e.unusable_initializer && !state.potential)
-                return CONST_NOT_CONSTANT_RULE;
+                return CONST_NOT_CONSTANT_NOTE(
+                    "the expression is not a constant expression: initializer "
+                    "of variable is not a constant expression");
             /* [expr.const]/4: only a const or constexpr object may be
                usable; another variable (a reference, a const one) may be
                one analysis could not classify (a later definition, a
@@ -1770,7 +1794,10 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
                 evaluated_type(e.type) != fundamental_type::none) {
                 if (state.potential)
                     return CONST_NOT_CONSTANT;
-                return CONST_NOT_CONSTANT_RULE;
+                return CONST_NOT_CONSTANT_NOTE(
+                    "the expression is not a constant expression: read of "
+                    "non-const variable is not allowed in a constant "
+                    "expression");
             }
             if (e.automatic)
                 return CONST_NOT_CONSTANT;
@@ -2089,7 +2116,10 @@ constness semantic_analysis::pointed_place(const constant_evaluation &state,
            object is not followed: it may be an element the evaluation
            models as an object) */
         if (state.reading && !state.potential && p.base != single_object_base)
-            return CONST_NOT_CONSTANT_RULE;
+            return CONST_NOT_CONSTANT_NOTE(
+                "the expression is not a constant expression: read of "
+                "dereferenced one-past-the-end pointer is not allowed in a "
+                "constant expression");
         return CONST_NOT_CONSTANT;
     }
     uint32_t index = p.first;
@@ -2100,7 +2130,9 @@ constness semantic_analysis::pointed_place(const constant_evaluation &state,
                (p.stamp && state.objects[index].serial != p.stamp)) {
         /* (a place that is gone, or another object's now) */
         if (state.reading && !state.potential && p.stamp)
-            return CONST_NOT_CONSTANT_RULE;
+            return CONST_NOT_CONSTANT_NOTE(
+                "the expression is not a constant expression: read of object "
+                "outside its lifetime is not allowed in a constant expression");
         return CONST_UNKNOWN;
     }
     place = index;
@@ -2397,7 +2429,10 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
                is required to compare greater than the other", whose
                result is unspecified ([expr.const]/5.24 of n4861) */
             if (p.count != q.count && !state.potential)
-                return CONST_NOT_CONSTANT_RULE;
+                return CONST_NOT_CONSTANT_NOTE(
+                    "the expression is not a constant expression: comparison "
+                    "between pointers to unrelated objects has unspecified "
+                    "value");
             return CONST_UNKNOWN;
         }
         order = 0;
@@ -2434,7 +2469,9 @@ constness semantic_analysis::evaluate_pointer_binary(constant_evaluation &state,
         /* [expr.rel]/4: pointers to different complete objects that are
            not members of one array or class: the result is unspecified,
            which [expr.const]/5.24 (n4861) makes not a constant */
-        return CONST_NOT_CONSTANT_RULE;
+        return CONST_NOT_CONSTANT_NOTE(
+            "the expression is not a constant expression: comparison between "
+            "pointers to unrelated objects has unspecified value");
     } else {
         return CONST_UNKNOWN;
     }
@@ -3277,7 +3314,9 @@ constness semantic_analysis::evaluate_invocation(
         if (e.enclosing && entity_table[e.enclosing].lambda)
             return CONST_UNKNOWN;
         /* [expr.const]/5.2: a call of a function that is not constexpr */
-        return CONST_NOT_CONSTANT_RULE;
+        return CONST_NOT_CONSTANT_NOTE(
+            "the expression is not a constant expression: non-constexpr "
+            "function cannot be used in a constant expression");
     }
     /* a defaulted constructor's default member initializers with a
        location builtin were folded at the wrong place */

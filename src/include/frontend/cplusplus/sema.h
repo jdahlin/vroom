@@ -3910,6 +3910,8 @@ class semantic_analysis
     /* whether the last evaluation's not_constant was a rule of [expr.const]/5
        that clang applies as it is */
     bool evaluation_rule_applied() const;
+    /* ... and its message (clang's note), or null */
+    const char *evaluation_rule_note() const;
     /* one evaluation's state: the objects of the evaluation (locals and
        parameters of the constexpr functions it calls, [expr.const]/5.8:
        their lifetime began within it), the depth of invocations and the

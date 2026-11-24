@@ -703,6 +703,8 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
     constant_only--;
     if (r != analysis_result::well_formed)
         return r;
+    if (!constant && constant_stop == 3 && evaluation_rule_note())
+        return ill_formed(n, evaluation_rule_note(), "expr.const");
     if (!constant && constant_stop == 3)
         return ill_formed(n,
                           "the expression is not a constant expression: the "
