@@ -223,6 +223,12 @@ semantic_analysis::resolve_call(SyntaxRef n,
     entity_index object_class = 0;
     if (object)
         object_class = type_table[implied.type.unqualified()].entity;
+    /* [class.protected]/1: the object expression's class, as written (the
+       implied object argument may be its base subobject) */
+    if (object &&
+        semantics[f.node].kind == semantic_kind::bound_member_function &&
+        semantics[f.node].c)
+        object_class = semantics[f.node].c;
     if (x.enclosing &&
         entity_table[x.enclosing].kind == entity_kind::class_type &&
         !accessible(c, object_class))

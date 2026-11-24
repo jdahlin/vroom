@@ -376,6 +376,7 @@ analysis_result semantic_analysis::declare(
        declarations of the same name in the same declarative region also apply
        to using-declarations"): a function beside functions is an overload, the
        rest conflicts or hides */
+    bool joined_set = false;
     if (prior && !qualified && entity_table.bound_by_using(scope, name)) {
         if (c_language && is_namespace(scope) &&
             kind == entity_kind::function &&
@@ -402,7 +403,48 @@ analysis_result semantic_analysis::declare(
                 }
             }
         }
-        return not_supported(declaration, "namespace.udecl");
+        /* [namespace.udecl]/14: "If a function declaration in namespace
+           scope or block scope has the same name and parameter-type-list as
+           a function introduced by a using-declaration, and the declarations
+           do not declare the same function, the program is ill-formed."  A
+           function template is not such a function: a function of other
+           parameters, or one beside only templates, is another overload of
+           the set, which this scope now holds by itself */
+        bool join = kind == entity_kind::function && is_namespace(scope) &&
+                    entity_table[prior].kind == entity_kind::none &&
+                    entity_table[prior].held_by_template &&
+                    function_template_of(prior);
+        if (join)
+            for (const function_template &t : function_templates)
+                if (t.name == prior && t.unusable)
+                    join = false;
+        if (join)
+            for (const template_name_function &x : template_name_functions)
+                if (x.name == prior &&
+                    same_parameters(type_table,
+                                    entity_table[x.function].type.unqualified(),
+                                    type.unqualified()))
+                    join = false;
+        if (!join)
+            return not_supported(declaration, "namespace.udecl");
+        if (entity_table[prior].enclosing != scope) {
+            entity_index held =
+                entity_table.make(entity_kind::none, name, scope);
+            entity_table[held].held_by_template = true;
+            for (size_t i = 0, k = function_templates.size(); i < k; i++)
+                if (function_templates[i].name == prior) {
+                    function_template copy = function_templates[i];
+                    copy.name = held;
+                    function_templates.append(copy);
+                }
+            for (size_t i = 0, k = template_name_functions.size(); i < k; i++)
+                if (template_name_functions[i].name == prior)
+                    template_name_functions.append(
+                        {held, template_name_functions[i].function});
+            entity_table.bind(scope, name, held);
+            prior = held;
+        }
+        joined_set = true;
     }
     /* [basic.scope.hiding]/2: "If a class name or enumeration name and a
        variable, data member, function, or enumerator are declared in the same
@@ -641,7 +683,7 @@ analysis_result semantic_analysis::declare(
     if (prior && kind == entity_kind::function && !qualified &&
         entity_table[prior].kind == entity_kind::none &&
         entity_table[prior].held_by_template &&
-        entity_table[prior].enclosing == scope && !c_language) {
+        entity_table[prior].enclosing == scope && (!c_language || joined_set)) {
         /* (only while a usable template holds it) */
         bool usable = false;
         for (const function_template &t : function_templates)

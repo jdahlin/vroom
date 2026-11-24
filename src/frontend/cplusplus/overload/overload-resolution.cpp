@@ -31,6 +31,19 @@
 namespace cplusplus
 {
 
+/* whether syntax tree n has a decltype-specifier anywhere */
+static bool uses_decltype(SyntaxRef n)
+{
+    if (n.is(syntax_kind::decltype_specifier))
+        return true;
+    for (size_t i = 0; i < n.size(); i++) {
+        SyntaxElement e = n[i];
+        if (!e.is_token() && uses_decltype(e))
+            return true;
+    }
+    return false;
+}
+
 bool semantic_analysis::list_initializer_list(qualified_type t) const
 {
     const struct type &x = type_table[t.unqualified()];
@@ -401,12 +414,7 @@ analysis_result semantic_analysis::best_viable_function(
             return true;
         /* [temp.func.order]/3 (CWG2445): with a synthesized candidate of
            reversed parameters, "the order of the function parameters in
-           its template is reversed" for the ordering: not analysed */
-        if (x.template_index && y.template_index &&
-            x.template_index != y.template_index && x.reversed != y.reversed) {
-            order_unknown = true;
-            return false;
-        }
+           its template is reversed" for the ordering */
         if (x.template_index && y.template_index &&
             x.template_index != y.template_index) {
             /* (an order analysis cannot tell is neither: the final check
@@ -414,9 +422,13 @@ analysis_result semantic_analysis::best_viable_function(
             bool unknown = false;
             /* (two member candidates' first argument is the object's,
                the same class's implicit object parameter, [temp.func.order]/3) */
-            int order =
-                function_template_order(x.template_index, y.template_index,
-                                        n - (x.member && y.member), unknown);
+            int order = function_template_order(
+                x.template_index, y.template_index, n - (x.member && y.member),
+                unknown, x.reversed, y.reversed);
+            if (x.reversed != y.reversed && unknown) {
+                order_unknown = true;
+                return false;
+            }
             if (!unknown && order != 0)
                 return order > 0;
         }
@@ -487,6 +499,57 @@ analysis_result semantic_analysis::best_viable_function(
                           "function, and the invocation is ill-formed",
                           "over.match");
     }
+    /* [temp.func.order]/6: two specializations of unconstrained function
+       templates that partial ordering finds equally specialized
+       ([temp.deduct.partial]/10) are indistinguishable, so
+       [over.match.best]/2's "otherwise the call is ill-formed" applies (a
+       tie an analysis cannot tell, or one that constraints may break, is
+       not this) */
+    auto unconstrained_tie = [&](size_t f1, size_t f2) {
+        const overload_candidate &x = candidates[f1], &y = candidates[f2];
+        if (!x.template_index || !y.template_index ||
+            x.template_index == y.template_index)
+            return false;
+        bool unknown = false;
+        int order =
+            function_template_order(x.template_index, y.template_index,
+                                    n - (x.member && y.member), unknown);
+        if (unknown || order != 0 || !x.function || !y.function)
+            return false;
+        /* the specializations take the same parameter types, so every
+           argument's conversion sequence is the same: nothing else in
+           [over.match.best]/2 can separate them */
+        const type &tx =
+            type_table[entity_table[x.function].type.unqualified()];
+        const type &ty =
+            type_table[entity_table[y.function].type.unqualified()];
+        if (tx.parameter_count != ty.parameter_count)
+            return false;
+        const qualified_type *px =
+            type_table.parameters(entity_table[x.function].type.unqualified());
+        const qualified_type *py =
+            type_table.parameters(entity_table[y.function].type.unqualified());
+        for (uint32_t k = 0; k < tx.parameter_count; k++)
+            if (px[k] != py[k])
+                return false;
+        /* a function's own return type or parameter written with decltype
+           may fail substitution ([temp.deduct]/8), which the candidate
+           set here does not always see: the tie is then not claimed.
+           Likewise a constructor a derived class inherits
+           ([over.match.best]/2.6). */
+        if (entity_table[x.function].special == special_member::constructor &&
+            entity_table[x.function].enclosing !=
+                entity_table[y.function].enclosing)
+            return false;
+        const entity_index both[2] = {x.template_index, y.template_index};
+        for (entity_index t : both) {
+            SyntaxRef d = function_templates[t - 1].declaration;
+            if (template_head_constrained(d) || trailing_constraint(d) ||
+                uses_decltype(d))
+                return false;
+        }
+        return true;
+    };
     /* [over.match.best]/2: "If there is exactly one viable function that is
        a better function than all other viable functions, then it is the
        one selected by overload resolution; otherwise the call is
@@ -501,7 +564,8 @@ analysis_result semantic_analysis::best_viable_function(
                (-Wambiguous-reversed-operator) */
             return not_supported(at, "over.match.oper");
         if (!better(w, i) &&
-            (candidates[w].template_index || candidates[i].template_index))
+            (candidates[w].template_index || candidates[i].template_index) &&
+            !unconstrained_tie(w, i))
             /* two specializations neither more specialized (or partial
                ordering analysis cannot tell): clang's ambiguity, not
                claimed */

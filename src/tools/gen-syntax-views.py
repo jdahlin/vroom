@@ -162,6 +162,9 @@ KNOWN_CHILDREN = {
     # passes through the init-declarator and member-declarator
     'member-declaration': ['requires-clause'],
     'member-declarator-list': ['requires-clause'],
+    # GCC's attributes after the class-key of an explicit instantiation
+    # ([ext:gnu_attributes]; libc++ writes two): a sequence
+    'elaborated-type-specifier': ['attribute-specifier-seq'],
     # the enum-head-name of an opaque-enum-declaration's elaborated form
     'elaborated-enum-specifier': ['enum-head-name'],
     # a constrained placeholder's type-constraint parsed as one

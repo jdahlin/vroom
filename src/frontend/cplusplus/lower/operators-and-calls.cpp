@@ -282,6 +282,10 @@ uint32_t c_lowering::assignment(const semantic_node &n)
         /* [dcl.init.list]/3.4: a member's braced default member
            initializer ([class.base.init]/9.1): its object, copied in */
         b = compound_literal(n.b);
+    else if (n.c)
+        /* a member initialized from a prvalue of its class: that object
+           ([class.copy.elision]/1, subobject_store) */
+        b = initializer(n.b);
     else
         b = expression(n.b);
     if (!a || !b)

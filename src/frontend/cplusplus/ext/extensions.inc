@@ -112,6 +112,10 @@ EXTENSION(clang_later_edition_features, clang,
 EXTENSION(clang_import_directive, clang, "Objective-C's #import, an include done once")
 EXTENSION(clang_embed, clang,
           "C23 6.10.4 #embed and __has_embed (C++26's [cpp.embed], P1967R14) in C++")
+EXTENSION(clang_diagnose_if, clang,
+          "clang Attributes, diagnose_if: an error or warning at a call whose arguments make the condition true")
+EXTENSION(clang_initializer_list, clang,
+          "the backing array of a std::initializer_list evaluated in constant expressions, as clang does")
 EXTENSION(clang_unicode_white_space, clang,
           "white space beyond [lex.charset]/1's (U+00A0, U+2000, ...), with a warning")
 

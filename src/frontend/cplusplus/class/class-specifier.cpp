@@ -141,8 +141,7 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
         return not_supported(n, "class.union.anon");
     entity_index u = record.entity;
     const entity &x = entity_table[u];
-    if ((!x.union_ && !trivial_special_members(u)) || x.base_count ||
-        !size_of_type(s.type))
+    if (x.base_count || !size_of_type(s.type))
         return not_supported(n, "class.union.anon");
     if (in_namespace && !x.union_)
         return not_supported(n, "class.union.anon");
@@ -770,6 +769,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     block_variables = owned_array<entity_index>();
     entity_index enclosing_scope = current_scope;
     result = worse(result, member_default_arguments(c));
+    result = worse(result, member_noexcept_specifiers(c));
     current_declaration = outer_declaration;
     bool incomplete_argument = false;
     if (specialization) {
@@ -905,8 +905,25 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
        changes what vcc generates (class_head_attributes_without_effect) */
     auto e = n;
     uint32_t at = 1;
-    if (e.size() > 2 && class_head_attributes_without_effect(e[1]))
+    bool hidden = false;
+    if (e.size() > 2 && class_head_attributes_without_effect(e[1])) {
         at = 2;
+    } else if (e.size() > 2 && e[1].is(syntax_kind::gnu_attribute_specifier)) {
+        /* [ext:gnu_attributes] visibility("hidden") (libc++'s
+           _LIBCPP_HIDDEN) in a class's forward or friend declaration: the
+           class's, which its definition keeps */
+        gnu_attributes gnu;
+        VTRY(g, gnu_attribute_specifier(e[1], gnu));
+        if (!gnu.aligned && !gnu.section && !gnu.priority && !gnu.cleanup &&
+            gnu.flags == gnu_hidden_visibility) {
+            at = 2;
+            hidden = true;
+        }
+    }
+    auto declared = [&](entity_index k) {
+        if (hidden)
+            entity_table[k].gnu_flags |= gnu_hidden_visibility;
+    };
     size_t count = e.size() - (at - 1);
     standard_keyword key = leading_keyword(n);
     if (!is_class_key(key))
@@ -1000,6 +1017,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
             entity_table[c].access = declaration_access;
             entity_table[c].linkage_of_name =
                 entity_table[defining_class].linkage_of_name;
+            declared(c);
             type = entity_table[c].type.unqualified();
             return analysis_result::well_formed;
         }
@@ -1029,6 +1047,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
             return not_supported(n, "basic.lookup.elab");
         } else {
             c = declare_class(target, name, is_union);
+            declared(c);
             type = entity_table[c].type.unqualified();
             return analysis_result::well_formed;
         }
@@ -1065,6 +1084,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
                       entity_table.bound_by_using(target, name)))
                 return not_supported(n, "basic.lookup.elab");
             c = declare_class(target, name, is_union);
+            declared(c);
             type = entity_table[c].type.unqualified();
             return analysis_result::well_formed;
         }
@@ -1088,6 +1108,7 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
     if (entity_table[c].union_ != is_union)
         return not_supported(n, "dcl.type.elab");
     used(id, c);
+    declared(c);
     type = entity_table[c].type.unqualified();
     return analysis_result::well_formed;
 }
@@ -1323,6 +1344,33 @@ bool semantic_analysis::accessible_here(entity_index member,
                 continue;
             if (as_member_of(here))
                 return true;
+        }
+    }
+    /* [class.friend]/6: "A function can be defined in a friend declaration
+       of a class if ... Such a function is implicitly an inline function
+       and is in the (lexical) scope of the class": the body of an
+       instantiated friend function template has the access of the class
+       that declares it [impl.clang] */
+    if (function_state.active) {
+        uint32_t i = entity_table[function_state.function].instantiation;
+        if (i) {
+            entity_index t = instantiations[i - 1].template_entity;
+            for (const function_template &f : function_templates)
+                if (f.entity == t && f.friend_class) {
+                    for (entity_index here = f.friend_class;
+                         !is_namespace(here);
+                         here = entity_table[here].enclosing) {
+                        for (const friend_record &g : friends)
+                            if (friend_names(g, here) &&
+                                as_member_of(g.granting))
+                                return true;
+                        if (entity_table[here].kind ==
+                                entity_kind::class_type &&
+                            as_member_of(here))
+                            return true;
+                    }
+                    break;
+                }
         }
     }
     return false;
@@ -2062,6 +2110,13 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         entity_table[e].type = type;
         entity_table[e].exceptions =
             resolved_exceptions(m.exceptions, type, m.gnu_flags);
+        if (deferred_noexcept) {
+            pending_noexcept p;
+            p.function = e;
+            p.specifier = deferred_noexcept;
+            pending_noexcepts.append(p);
+            deferred_noexcept = 0;
+        }
         entity_table[e].placeholder_return = placeholder_return;
         entity_table[e].nonstatic_member = !s.static_;
         entity_table[e].member_cv = function_cv;
@@ -2082,6 +2137,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         entity_table[e].gnu_flags |=
             m.gnu_flags & (gnu_function_symbol_flags | gnu_inline_flags);
         entity_table[e].abi_tag = m.abi_tag;
+        diagnose_if_declared(declaration, e);
         if (m.operator_function) {
             entity_table[e].operator_function = true;
             entity_table[e].implemented = m.implemented;

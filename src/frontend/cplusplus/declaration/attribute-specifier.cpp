@@ -776,7 +776,8 @@ bool semantic_analysis::gnu_attributes_without_effect(SyntaxElement n) const
         SyntaxElement name_token = c;
         if (!c.is_token()) {
             if (c.is(syntax_kind::gnu_attribute_specifier,
-                     syntax_kind::gnu_attribute_list)) {
+                     syntax_kind::gnu_attribute_list,
+                     syntax_kind::attribute_specifier_seq)) {
                 for (auto child : c.elements())
                     work.append(child);
                 continue;

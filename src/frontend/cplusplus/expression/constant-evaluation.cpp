@@ -106,6 +106,9 @@ constexpr const char cast_dynamic_type[] =
 constexpr const char read_past_the_end[] =
     "read of dereferenced one-past-the-end pointer is not allowed "
     "in a constant expression";
+constexpr const char modify_outside_lifetime[] =
+    "assignment to object outside its lifetime is not allowed in a "
+    "constant expression";
 constexpr const char read_outside_lifetime[] =
     "read of object outside its lifetime is not allowed in a "
     "constant expression";
@@ -1369,6 +1372,16 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
     const semantic_node x = semantics[node];
     constness c;
     switch (x.kind) {
+    /* [dcl.init.list]/5: the array of a std::initializer_list's backing
+       ([ext:clang_initializer_list], analysis makes it a compound literal of
+       the array type): a temporary of the evaluation */
+    case semantic_kind::compound_literal: {
+        constant_evaluation::object o;
+        o.frame = state.frame;
+        object = static_cast<uint32_t>(state.objects.size());
+        append_object(state, o);
+        return evaluate_initialization(state, x.type, x.a, false, object);
+    }
     case semantic_kind::complex_part: {
         if (x.op != 0 && x.op != 1)
             return CONST_UNKNOWN;
@@ -1816,8 +1829,28 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                 return CONST_NOT_CONSTANT;
             return CONST_NOT_CONSTANT_NOTE(rule_note::modify_outside_object);
         }
+        /* [basic.life]/1, [expr.const]/5.8: the member's own initializer
+           assigns to it before its initialization has finished (clang:
+           "assignment to object outside its lifetime"); since C++20 the
+           lifetime of an object with a trivial destructor begins when its
+           storage is obtained (CWG 2256), the assignment is fine */
+        bool before_lifetime =
+            tokens.files.behavior.edition < standard_edition::cplusplus_20;
+        for (uint32_t i = 0; i < state.initializing_count; i++)
+            if (before_lifetime && state.initializing[i] == target && !x.d) {
+                if (state.potential)
+                    return CONST_NOT_CONSTANT;
+                return CONST_NOT_CONSTANT_NOTE(
+                    rule_note::modify_outside_lifetime);
+            }
+        bool tracked =
+            x.d && state.initializing_count < state.initializing_limit;
+        if (tracked)
+            state.initializing[state.initializing_count++] = target;
         constant_value y;
         c = evaluate_node(state, x.b, y);
+        if (tracked)
+            state.initializing_count--;
         if (c != constness::constant)
             return c;
         /* [dcl.init.ref]: a mem-initializer binds a reference member that has
@@ -2948,6 +2981,11 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         return evaluate_call(state, node, v);
     case semantic_kind::conversion: {
         conversion_kind k = static_cast<conversion_kind>(x.op);
+        /* (the pointer of a std::initializer_list's backing array: its
+           conversion is marked as a read, which an array has none) */
+        if (k == conversion_kind::lvalue_to_rvalue &&
+            semantics[x.a].kind == semantic_kind::compound_literal)
+            return evaluate_array_pointer(state, x.a, v);
         if (k == conversion_kind::lvalue_to_rvalue)
             return evaluate_read(state, x.a, v);
         if (k == conversion_kind::to_void) {
@@ -4846,6 +4884,56 @@ constness semantic_analysis::potential_constant(uint32_t body)
     bool returned = false;
     constant_value result;
     return evaluate_statement(state, b.a, returned, result);
+}
+
+/*
+ * [impl.clang] diagnose_if's condition: the converted arguments evaluated in
+ * the caller's frame and bound to the parameters (entities, 0 for one the
+ * declaration did not name) of a frame of their own, as an invocation does
+ * ([expr.call]/8), and the condition evaluated there.  Answers whether it
+ * is a constant expression whose value is true; anything else (not constant,
+ * not decided) is not "true", as clang's rule is ("a diagnose_if condition
+ * that is not a constant expression is not diagnosed").
+ */
+bool semantic_analysis::diagnose_if_holds(uint32_t condition,
+                                          const entity_index *parameters,
+                                          size_t parameter_count,
+                                          const uint32_t *arguments)
+{
+    constant_evaluation state;
+    reset_evaluation_trace();
+    owned_array<constant_value> values;
+    owned_array<uint8_t> known;
+    for (size_t i = 0; i < parameter_count; i++) {
+        constant_value value;
+        /* (an argument that is not constant is a parameter whose value the
+           condition may not need: a read of it is not decided) */
+        known.append(parameters[i] &&
+                     evaluate_node(state, arguments[i], value) ==
+                         constness::constant);
+        values.append(value);
+    }
+    uint32_t frame = state.frames + 1;
+    for (size_t i = 0; i < parameter_count; i++) {
+        if (!parameters[i])
+            continue;
+        constant_evaluation::object o;
+        o.value = values[i];
+        o.entity = parameters[i];
+        o.frame = frame;
+        o.opaque = !known[i];
+        append_object(state, o);
+    }
+    state.frames = frame;
+    state.frame = frame;
+    /* (analysis folded the condition as not constant: it read parameters) */
+    constness folded = semantics[condition].evaluation;
+    semantics[condition].evaluation = constness::unknown;
+    constant_value v;
+    constness c = evaluate_node(state, condition, v);
+    semantics[condition].evaluation = folded;
+    return c == constness::constant && v.kind == constant_value_kind::integer &&
+           v.integer != 0;
 }
 
 } // namespace cplusplus

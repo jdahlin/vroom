@@ -43,7 +43,7 @@ static const gnu_builtin builtin_registry[] = {
          nullptr),
     ROWL("__builtin_memcpy_inline", library_alias, 0, none, node, "vpPz",
          "memcpy"),
-    ROWL("__builtin_char_memchr", library_alias, 4, string, node, "SSiz",
+    ROWL("__builtin_char_memchr", library_alias, 4, string, node, "sSiz",
          "memchr"),
     ROWL("__builtin_launder", launder, 0, identity, identity, nullptr, nullptr),
     ROWL("__builtin_clear_padding", clear_padding, 0, none, clear_padding,

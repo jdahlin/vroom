@@ -306,8 +306,14 @@ bool semantic_analysis::aggregate_value_stored(entity_index c,
 {
     const semantic_node &n = semantics[value];
     if (n.kind != semantic_kind::initializer_list &&
-        n.kind != semantic_kind::zero)
-        return false;
+        n.kind != semantic_kind::zero) {
+        /* [dcl.init]/17.6.1: a prvalue of the class itself (a call's
+           result) initializes the member as the object; a trivial class's
+           copy of it is the same */
+        if (n.category != value_category::prvalue ||
+            n.type.unqualified() != entity_table[c].type.unqualified())
+            return false;
+    }
     return trivial_class(c);
 }
 
@@ -330,6 +336,16 @@ analysis_result semantic_analysis::anonymous_member_initializers(
             inner = record.entity;
         uint32_t made = 0;
         if (entity_table[m].default_initializer) {
+            SyntaxRef init = entity_table[m].default_initializer;
+            if (!entity_table[anonymous].union_)
+                for (token_index t = init.first_token(); t < init.end_token();
+                     t++)
+                    /* [expr.prim.this]: the address of the enclosing
+                       object in a constant expression is not evaluated
+                       for an unnamed struct's member yet */
+                    if (p.keyword_of(tokens[t]) == standard_keyword::this_)
+                        return not_supported(current_declaration,
+                                             "expr.prim.this");
             VTRY(r, default_member_initializer(at, m, made));
         } else if (inner) {
             VTRY(r, anonymous_member_initializers(at, inner, made));
@@ -337,7 +353,16 @@ analysis_result semantic_analysis::anonymous_member_initializers(
                    entity_table[record.entity].first_constructor &&
                    !trivial_defaulted_default_constructor(record.entity) &&
                    !entity_table[anonymous].union_) {
-            return not_supported(current_declaration, "class.base.init");
+            /* [class.base.init]/9.3: default-initialized, constructed in
+               place as an ordinary member is (clang's unnamed struct) */
+            expression_meaning object;
+            VTRY(r, subobject(at, m, object));
+            owned_array<expression_meaning> none;
+            initialized_value value;
+            VTRY(r2, construct(current_declaration, entity_table[m].type, none,
+                               object.node, value));
+            made = statement_node(semantic_kind::expression_statement, at,
+                                  value.node);
         }
         if (made)
             statements.append(made);
@@ -744,6 +769,7 @@ analysis_result semantic_analysis::special_member_declarator(
     entity_table.add_declaration(e, declaration);
     if (has_defaults)
         defer_default_arguments(e, declaration, listed);
+    diagnose_if_declared(declaration, e);
     if (kind == special_member::destructor) {
         entity_table[c].destructor = e;
     } else if (!entity_table[c].first_constructor) {
@@ -1001,17 +1027,27 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
 }
 
 /* The expressions of an expression-list, with each pack expansion
-   analysed once per element ([temp.variadic]/5). */
+   analysed once per element ([temp.variadic]/5).  With `written`, a
+   braced-init-list argument is allowed: its meaning is empty and the
+   syntax of every argument is appended, for the overload resolution of
+   [over.match.ctor] and [over.ics.list] to initialize the parameter from it. */
 analysis_result semantic_analysis::expression_list_meanings(
-    SyntaxElement list, owned_array<expression_meaning> &out)
+    SyntaxElement list, owned_array<expression_meaning> &out,
+    owned_array<SyntaxElement> *written)
 {
     auto items = list.items(syntax_kind::initializer_list);
     auto end = items.end();
     for (auto i = items.begin(); i != end;) {
         SyntaxElement a = *i;
         ++i;
-        if (a.is(syntax_kind::braced_init_list))
-            return not_supported(a, "over.match.list");
+        if (a.is(syntax_kind::braced_init_list)) {
+            if (!written ||
+                (i != end && (*i).is(preprocessing_op_or_punc::ELLIPSIS)))
+                return not_supported(a, "over.match.list");
+            out.append(expression_meaning());
+            written->append(a);
+            continue;
+        }
         if (a.is(preprocessing_op_or_punc::ELLIPSIS))
             return not_supported(list, "temp.variadic");
         bool expands = i != end && (*i).is(preprocessing_op_or_punc::ELLIPSIS);
@@ -1019,6 +1055,8 @@ analysis_result semantic_analysis::expression_list_meanings(
             expression_meaning e;
             VTRY(r, expression(a, e));
             out.append(e);
+            if (written)
+                written->append(a);
             continue;
         }
         ++i;
@@ -1033,6 +1071,8 @@ analysis_result semantic_analysis::expression_list_meanings(
             expression_meaning e;
             VTRY(r, expansion_element_expression(a, k, e));
             out.append(e);
+            if (written)
+                written->append(a);
         }
     }
     return analysis_result::well_formed;
@@ -1294,6 +1334,8 @@ analysis_result semantic_analysis::construct(
         constexpr_calls++;
     }
     result.value = 0;
+    VTRY(du, diagnose_if_call(at.first_token(), chosen, nodes.data(),
+                              nodes.size()));
     result.node = expression_node(semantic_kind::construct, made,
                                   at.first_token(), object, chosen);
     if (!nodes.empty()) {
@@ -1358,13 +1400,16 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         SyntaxElement item = items[0];
         token_index id = item[0].token();
         owned_array<expression_meaning> arguments;
+        owned_array<SyntaxElement> listed_arguments;
         if (item.size() == 4) {
-            VTRY(r, expression_list_meanings(item[2], arguments));
+            VTRY(r, expression_list_meanings(item[2], arguments,
+                                             &listed_arguments));
         } else if (item.size() != 3) {
             return not_supported(item, "class.base.init");
         }
         initialized_value value;
-        VTRY(r, construct(item, entity_table[c].type, arguments, 0, value));
+        VTRY(r, construct(item, entity_table[c].type, arguments, 0, value,
+                          false, &listed_arguments));
         if (semantics[value.node].kind != semantic_kind::construct ||
             semantics[value.node].a)
             return not_supported(item, "class.base.init");
@@ -1549,8 +1594,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 entity_table[record.entity].first_constructor) {
                 /* [class.base.init]/7: direct-initialization: a constructor */
                 owned_array<expression_meaning> arguments;
+                owned_array<SyntaxElement> listed_arguments;
                 if (written.list)
-                    r = expression_list_meanings(written.list, arguments);
+                    r = expression_list_meanings(written.list, arguments,
+                                                 &listed_arguments);
                 else if (SyntaxElement braced = written.braced_list()) {
                     bool base = entity_table[e].base_subobject;
                     if (base && is_aggregate(record.entity))
@@ -1592,13 +1639,26 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                whose class copies its bytes is analysed (below) */
                 bool elided =
                     !entity_table[e].base_subobject && arguments.size() == 1 &&
+                    !listed_arguments[0].is(syntax_kind::braced_init_list) &&
                     arguments[0].category == value_category::prvalue &&
                     arguments[0].type.unqualified() == type.unqualified();
-                if (elided && !trivial_class(record.entity))
-                    return not_supported(item, "class.copy.elision");
                 initialized_value value;
+                if (elided && !trivial_class(record.entity)) {
+                    /* [class.copy.elision]/1.3 ([dcl.init]/17.6.1): the
+                       prvalue initializes the member itself, whatever its
+                       copy and move constructors do (as a variable's
+                       initializer, initialize_with); only a class that has
+                       a constructor reaches here */
+                    VTRY(rv, initialize_with(item, arguments[0], type, true,
+                                             false, value));
+                    set_slot(
+                        slot, id,
+                        subobject_store(object, type, id, value.node, true));
+                    continue;
+                }
                 constructing_base = entity_table[e].base_subobject;
-                r = construct(item, type, arguments, object.node, value);
+                r = construct(item, type, arguments, object.node, value, false,
+                              &listed_arguments);
                 constructing_base = false;
                 if (r != analysis_result::well_formed)
                     return r;
@@ -1910,7 +1970,7 @@ void semantic_analysis::construction_order(
 
 uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
                                             qualified_type type, token_index at,
-                                            uint32_t value)
+                                            uint32_t value, bool initializes)
 {
     /* [dcl.attr.nouniqueaddr]: an empty subobject may share its address with
        another member; do not write its padding byte */
@@ -1927,6 +1987,11 @@ uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
     uint32_t assigned = expression_node(
         semantic_kind::assignment, stored, at, object.node, value,
         static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
+    if (initializes)
+        semantics[assigned].c = 1;
+    /* a member's store of its initialization (the constant evaluator's
+       places under initialization) */
+    semantics[assigned].d = 1;
     return statement_node(semantic_kind::expression_statement, at, assigned);
 }
 
@@ -2259,6 +2324,16 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                 copy = true;
                 continue;
             }
+            /* [class.copy.ctor]/6, /8: a user-provided X(X&&) beside
+               X(const X&) = default: the defaulted copy constructor is
+               the explicit declaration of the copy one, declared as the
+               implicit one is */
+            if (p.kind == type_kind::rvalue_reference &&
+                entity_table[c].defaulted_copy_constructor &&
+                !entity_table[c].defaulted_move_constructor) {
+                copy = true;
+                continue;
+            }
             user_copy = true;
         }
     /* [class.copy.ctor]/11: X(X&&) = default is trivial when each
@@ -2270,8 +2345,6 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         for (entity_index k : classes)
             if (!copies_bytes(k))
                 trivial_move = false;
-        if (y.defaulted_move_assignment && !trivial_move)
-            return not_supported(n, "class.copy.ctor");
         /* [class.default.ctor]/1: a user-declared constructor (a
            constructor template is one, [temp.mem]/1) and no default one:
            no default constructor (not analysed) */
@@ -2284,7 +2357,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             if (y.union_)
                 return not_supported(n, "class.copy.ctor");
             entity_table[c].defaulted_move_constructor = false;
-            declare_implicit(c, special_member::constructor, false, true);
+            /* [class.copy.ctor]/10: "A defaulted move constructor that
+               is defined as deleted is ignored by overload resolution"
+               ([over.match.funcs]/8) when a subobject can be neither
+               moved nor copied: none is declared */
+            if (!move_deleted)
+                declare_implicit(c, special_member::constructor, false, true);
             move_declared = false;
         }
     }
@@ -3195,6 +3273,25 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
                                   "invoked by the constructor and it is "
                                   "deleted",
                                   "class.base.init");
+        /* the destructors it potentially invokes are used by this
+           definition ([temp.inst]/4: an argument-dependent error in an
+           instantiated one makes it ill-formed), those of an unnamed
+           union's or struct's members too */
+        owned_array<entity_index> pending;
+        for (entity_index sub : subobjects)
+            pending.append(sub);
+        for (size_t i = 0; i < pending.size(); i++) {
+            entity_index sub = pending[i];
+            if (entity_table[sub].kind != entity_kind::class_type)
+                continue;
+            if (entity_table[sub].anonymous_object)
+                subobject_classes(sub, pending);
+            entity_index dtor = entity_table[sub].destructor;
+            if (!dtor || instantiation_depth)
+                continue;
+            entity_table[dtor].member_needed_by = definition;
+            mark_needed(dtor);
+        }
     }
     return analyse_function_body(definition, body.compound_statement(), init);
 }

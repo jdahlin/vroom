@@ -170,6 +170,14 @@ class itanium_mangler
     bool constraint_namespace_member(entity_index t, SyntaxElement qualifier,
                                      SyntaxElement id);
     bool dependent_expression(SyntaxElement c);
+    bool dependent_fold(SyntaxElement fold);
+    bool named_variable(entity_index t, SyntaxElement name);
+    /* the dependent_written type being mangled: its bindings
+       (sema.h: written_bindings), and the element of the packs among them
+       a fold's pattern is mangled for */
+    uint32_t written_first = 0, written_count = 0;
+    uint32_t pack_element = UINT32_MAX;
+    const semantic_analysis::written_binding *bound(SyntaxElement name) const;
     const char *binary_operator_code(SyntaxElement op) const;
     bool punctuator(SyntaxElement c, preprocessing_op_or_punc op) const
     {
@@ -375,7 +383,12 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     candidate c;
     c.scope = pattern_of;
     candidates.append(c);
-    if (!template_args(e, pattern_of))
+    /* [impl.clang]: only a function template's specialization has the
+       parameters' types ("Tn") before its arguments; a variable's has not */
+    entity_index typed_parameters = pattern_of;
+    if (table[e].kind != entity_kind::function)
+        typed_parameters = 0;
+    if (!template_args(e, typed_parameters))
         return false;
     /* [abi:mangle.template-arg]'s template-args, with [impl.clang]'s
        requires-clause: I, the template-args, Q and the requires-clause's
@@ -434,6 +447,8 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
         if (entity_index parameter =
                 analysis.constraint_parameter(t, c.token()))
             return constraint_parameter(t, parameter);
+        if (named_variable(t, c))
+            return true;
         /* a decimal integer-literal of type int: Li <value> E */
         owned_buffer spelling;
         analysis.token_spelling(c.token(), spelling.get());
@@ -626,15 +641,28 @@ bool itanium_mangler::constraint_template_args(entity_index t, SyntaxElement c)
         else
             written.append(c[i]);
     }
-    for (SyntaxElement a : written) {
+    for (size_t wi = 0; wi < written.size(); wi++) {
+        SyntaxElement a = written[wi];
         if (a.is(preprocessing_op_or_punc::COMMA))
             continue;
         /* a type-id that is one template parameter's name */
         while (a.is_node() && a.size() == 1 &&
                a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
             a = a[0];
-        if (!a.is_token())
-            return false;
+        if (!a.is_token()) {
+            /* another type (an alias template's specialization, a
+               typename, ...): analysed in the template's parameter scope */
+            qualified_type argument;
+            if (!analysis.constraint_type(t, written[wi], argument))
+                return false;
+            entity_index saved = encoding_template;
+            encoding_template = t;
+            bool ok = type(argument);
+            encoding_template = saved;
+            if (!ok)
+                return false;
+            continue;
+        }
         entity_index pe = analysis.constraint_parameter(t, a.token());
         if (pe) {
             if (!constraint_parameter(t, pe))
@@ -713,9 +741,21 @@ bool itanium_mangler::constraint_parameter(entity_index t,
     for (entity_index s = table[t].enclosing; s; s = table[s].enclosing)
         if (table[s].kind == entity_kind::class_type && table[s].instantiation)
             level++;
-    if (!level)
+    if (!level || !analysis.constraint_parameter_is_own(t, parameter)) {
+        /* a non-type parameter (its type is the value's, not the
+           parameter's): T_ or T <n> _ alone */
+        if (record(table[parameter].type).kind !=
+            type_kind::template_parameter) {
+            template_param(table[parameter].value);
+            return true;
+        }
         return type(table[parameter].type);
-    if (substitution(parameter))
+    }
+    /* (a type parameter is a type, a candidate; a non-type one an
+       expression operand, never) */
+    bool is_type =
+        record(table[parameter].type).kind == type_kind::template_parameter;
+    if (is_type && substitution(parameter))
         return true;
     uint64_t position = table[parameter].value;
     text("TL");
@@ -724,6 +764,8 @@ bool itanium_mangler::constraint_parameter(entity_index t,
     if (position)
         number(position - 1);
     text("_");
+    if (!is_type)
+        return true;
     candidate y;
     y.scope = parameter;
     candidates.append(y);
@@ -776,8 +818,148 @@ const char *itanium_mangler::binary_operator_code(SyntaxElement op) const
     return nullptr;
 }
 
+/* [abi:expressions]' <expr-primary> of a variable the template's scope
+   declares, written unqualified: L_Z <encoding> E; false for another name */
+bool itanium_mangler::named_variable(entity_index t, SyntaxElement name)
+{
+    if (!name.is_token() || !name.is_identifier() || !t)
+        return false;
+    uint32_t id = analysis.token_identifier(name.token());
+    entity_index target = 0;
+    for (entity_index s = analysis.entity_table[t].enclosing;;
+         s = analysis.entity_table[s].enclosing) {
+        target = analysis.entity_table.find(s, id);
+        if (target || !s)
+            break;
+    }
+    if (!target || analysis.entity_table[target].kind != entity_kind::variable)
+        return false;
+    text("L_Z");
+    if (!encoding(target))
+        return false;
+    text("E");
+    return true;
+}
+
+/* the type an alias template's instantiation bound the identifier name to,
+   for the dependent_written type being mangled (the pack's element being
+   mangled for a name bound to a pack) */
+const semantic_analysis::written_binding *
+itanium_mangler::bound(SyntaxElement name) const
+{
+    if (!name.is_token() || !name.is_identifier())
+        return nullptr;
+    uint32_t id = analysis.token_identifier(name.token());
+    for (uint32_t i = 0; i < written_count; i++) {
+        const auto &b = analysis.written_bindings[written_first + i];
+        if (b.identifier == id &&
+            (b.element == UINT32_MAX || b.element == pack_element))
+            return &b;
+    }
+    return nullptr;
+}
+
+/* [abi:expressions] of a unary fold over a pack bound by an alias
+   template: expanded, as clang does, for the elements: ( pattern op ... )
+   is op e0 (op e1 (... en)), ( ... op pattern ) is ((e0 op e1) op ...) */
+bool itanium_mangler::dependent_fold(SyntaxElement fold)
+{
+    if (fold.size() != 5)
+        return false;
+    bool right = fold[3].is(preprocessing_op_or_punc::ELLIPSIS);
+    SyntaxElement pattern = fold[1];
+    SyntaxElement op = fold[2];
+    if (!right) {
+        if (!fold[1].is(preprocessing_op_or_punc::ELLIPSIS))
+            return false;
+        pattern = fold[3];
+    }
+    const char *code = binary_operator_code(op);
+    if (!code && op.is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND))
+        code = "aa";
+    if (!code && op.is(preprocessing_op_or_punc::BAR_BAR))
+        code = "oo";
+    if (!code || pack_element != UINT32_MAX)
+        return false;
+    /* the elements of the packs bound (one pack, or packs of one size) */
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < written_count; i++) {
+        const auto &b = analysis.written_bindings[written_first + i];
+        if (b.element != UINT32_MAX && b.element + 1 > count)
+            count = b.element + 1;
+    }
+    if (count < 2)
+        return false;
+    bool ok = true;
+    if (right) {
+        for (uint32_t k = 0; k < count && ok; k++) {
+            if (k + 1 < count)
+                text(code);
+            pack_element = k;
+            ok = dependent_expression(pattern);
+        }
+    } else {
+        for (uint32_t k = 1; k < count; k++)
+            text(code);
+        for (uint32_t k = 0; k < count && ok; k++) {
+            pack_element = k;
+            ok = dependent_expression(pattern);
+        }
+    }
+    pack_element = UINT32_MAX;
+    return ok;
+}
+
 bool itanium_mangler::dependent_expression(SyntaxElement expression)
 {
+    /* [abi:expressions]: ( type-id ) cast-expression, cv <type>
+       <expression>, the type analysed with the alias's names bound */
+    if (expression.is(syntax_kind::cast_expression) && expression.size() == 4) {
+        SyntaxRef r = expression;
+        for (uint32_t i = 0; i < written_count; i++) {
+            const auto &b = analysis.written_bindings[written_first + i];
+            if (b.cast != r.index().index())
+                continue;
+            text("cv");
+            return type(b.type) && dependent_expression(expression[3]);
+        }
+        return false;
+    }
+    if (expression.is(syntax_kind::fold_expression))
+        return dependent_fold(expression);
+    /* [abi:expressions] <unary operator-name> <expression> */
+    if (expression.is(syntax_kind::unary_expression) &&
+        expression.size() == 2) {
+        static const struct {
+            preprocessing_op_or_punc token;
+            const char *code;
+        } unary[] = {
+            {preprocessing_op_or_punc::STAR, "de"},
+            {preprocessing_op_or_punc::AMPERSAND, "ad"},
+            {preprocessing_op_or_punc::MINUS, "ng"},
+            {preprocessing_op_or_punc::PLUS, "ps"},
+            {preprocessing_op_or_punc::EXCLAMATION, "nt"},
+            {preprocessing_op_or_punc::TILDE, "co"},
+        };
+        for (const auto &u : unary)
+            if (punctuator(expression[0], u.token)) {
+                text(u.code);
+                return dependent_expression(expression[1]);
+            }
+    }
+    /* T(), T an alias template's parameter: cv <type> _ E */
+    if (expression.is(syntax_kind::postfix_expression) &&
+        expression.size() == 3 &&
+        expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        expression[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        if (const auto *b = bound(expression[0])) {
+            text("cv");
+            if (!type(b->type))
+                return false;
+            text("_E");
+            return true;
+        }
+    }
     if (expression.is(syntax_kind::expression) && expression.size() == 3 &&
         punctuator(expression[1], preprocessing_op_or_punc::COMMA)) {
         text("cm");
@@ -853,6 +1035,19 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
                     return false;
                 text("E");
                 return true;
+            }
+            /* ns::f as a callee: sr <source-name of ns> E <source-name> (a
+               function, or a name an inline namespace of ns holds) */
+            if (scope && !global && qual.size() == 2 &&
+                analysis.entity_table[scope].kind ==
+                    entity_kind::namespace_entity &&
+                (!target ||
+                 analysis.entity_table[target].kind != entity_kind::variable)) {
+                text("sr");
+                if (!source_name(analysis.entity_table[scope].name))
+                    return false;
+                text("E");
+                return source_name(analysis.token_identifier(member.token()));
             }
             return false;
         }
@@ -1582,7 +1777,7 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
         text("nt");
     text("sr");
     if (x.enclosing) {
-        uint32_t depth = static_cast<uint32_t>(x.value >> 8);
+        uint32_t depth = static_cast<uint32_t>((x.value >> 8) & 0xff);
         if (!depth)
             depth = 1;
         owned_array<entity_index> chain;
@@ -1596,6 +1791,9 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
                 return false;
     }
     if (!source_name(spec.name) || !template_args(q))
+        return false;
+    /* a member class between the specialization and the name */
+    if (x.value >> 32 && !source_name(static_cast<uint32_t>(x.value >> 32) - 1))
         return false;
     text("E");
     return source_name(x.name);
@@ -2658,6 +2856,37 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
            a parenthesized identifier or member access. */
         SyntaxRef n = SyntaxRef(node_index(
             static_cast<uint32_t>(analysis.entity_table[r.entity].value)));
+        if (n.is(syntax_kind::typename_specifier)) {
+            /* typename Q::template X<args>: N <Q's prefix> X I <args> E E */
+            uint32_t wf = analysis.entity_table[r.entity].first_member;
+            uint32_t wc = analysis.entity_table[r.entity].member_count;
+            uint32_t first = wc;
+            for (uint32_t i = 0; i < wc; i++)
+                if (analysis.written_bindings[wf + i].cast ==
+                    n.index().index()) {
+                    first = i;
+                    break;
+                }
+            SyntaxElement id = n[n.size() - 1];
+            if (first == wc || !id[0].is_identifier())
+                return false;
+            const auto &q = analysis.written_bindings[wf + first];
+            text("N");
+            if (!dependent_member_prefix(q.type.unqualified()) ||
+                !source_name(analysis.token_identifier(id[0].token())))
+                return false;
+            text("I");
+            for (uint32_t i = first + 1; i < wc; i++) {
+                const auto &a = analysis.written_bindings[wf + i];
+                if (a.cast != n.index().index())
+                    break;
+                if (!type(a.type))
+                    return false;
+            }
+            text("EE");
+            add_candidate(t);
+            return true;
+        }
         if (n.size() != 4 || !encoding_template)
             return false;
         SyntaxElement operand = n[2];
@@ -2670,7 +2899,13 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
             text("Dt");
         else
             text("DT");
+        uint32_t saved_first = written_first, saved_count = written_count;
+        written_first = analysis.entity_table[r.entity].first_member;
+        written_count = analysis.entity_table[r.entity].member_count;
         done = dependent_expression(operand);
+        pack_element = UINT32_MAX;
+        written_first = saved_first;
+        written_count = saved_count;
         text("E");
     } else if (r.kind == type_kind::class_type ||
                r.kind == type_kind::enumeration ||

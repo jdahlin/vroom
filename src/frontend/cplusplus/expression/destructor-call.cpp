@@ -62,7 +62,11 @@ semantic_analysis::destructor_type_name(SyntaxRef n, SyntaxElement name,
     SyntaxElement written = name[1];
     if (written.is(syntax_kind::simple_template_id)) {
         uint32_t cv = 0;
-        VTRY(r, template_type(written, scope, in_scope, type, &cv));
+        in_destructor_name = true;
+        analysis_result r = template_type(written, scope, in_scope, type, &cv);
+        in_destructor_name = false;
+        if (r != analysis_result::well_formed)
+            return r;
         found = true;
         name_uses.resize(uses_before);
         return analysis_result::well_formed;

@@ -148,6 +148,74 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
     return analysis_result::well_formed;
 }
 
+/* whether the noexcept-specifier n of a member function names the class
+   being defined, which is incomplete until its closing } */
+bool semantic_analysis::noexcept_needs_complete_class(SyntaxRef n)
+{
+    if (!defining_class || entity_table[defining_class].size)
+        return false;
+    for (token_index t = n.first_token(); t < n.end_token(); t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        lookup_result found =
+            lookup_unqualified(tokens.identifier(t), lookup_filter::any);
+        if (found.entity == defining_class)
+            return true;
+    }
+    return false;
+}
+
+/*
+ * [class.mem]/6: the noexcept-specifier of member functions of the class c
+ * that name c, analysed with c complete: each function's type then says
+ * whether it is non-throwing ([except.spec]/1).
+ */
+analysis_result semantic_analysis::member_noexcept_specifiers(entity_index c)
+{
+    analysis_result result = analysis_result::well_formed;
+    owned_array<pending_noexcept> kept;
+    entity_index scope = current_scope;
+    if (defining_class && defining_class != c &&
+        entity_table[defining_class].kind == entity_kind::class_type &&
+        entity_table[c].enclosing == defining_class)
+        return result;
+    for (const pending_noexcept &p : pending_noexcepts) {
+        if (entity_table[p.function].enclosing != c) {
+            kept.append(p);
+            continue;
+        }
+        current_scope = c;
+        function_parameters.clear();
+        bool non_throwing = false;
+        analysis_result r =
+            noexcept_specifier(p.specifier, false, non_throwing);
+        current_scope = scope;
+        result = worse(result, r);
+        if (r != analysis_result::well_formed)
+            continue;
+        entity &f = entity_table[p.function];
+        if (non_throwing)
+            f.exceptions.allows = exception_allowance::none;
+        else
+            f.exceptions.allows = exception_allowance::all;
+        if (!non_throwing)
+            continue;
+        const struct type old = type_table[f.type.unqualified()];
+        owned_array<qualified_type> parameters;
+        for (uint32_t i = 0; i < old.parameter_count; i++)
+            parameters.append(type_table.parameters(f.type.unqualified())[i]);
+        type_index changed = type_table.function(
+            old.operand, parameters.data(), parameters.size(), old.variadic,
+            true, old.function_cv, old.function_ref);
+        entity_table[p.function].type =
+            qualified_type::make(changed, f.type.cv());
+    }
+    pending_noexcepts.clear();
+    for (const pending_noexcept &p : kept)
+        pending_noexcepts.append(p);
+    return result;
+}
+
 /*
  * [class.mem]/6: the noexcept-specifier of a member function is a
  * complete-class context: a name in it is found among all the members of
@@ -200,9 +268,17 @@ bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
         if (found.found_in != defining_class)
             continue;
         /* a class scope binds the arguments of a specialization: those
-           have no declaration among the members */
-        if (!found.entity)
+           have no declaration among the members, and ([temp.local]/6) no
+           member can redeclare a template parameter's name */
+        if (!found.entity) {
+            /* (a bound pack is unknown to lookup, [temp.variadic]) */
+            bool pack = found.unknown && !found.ambiguous &&
+                        !found.unknown_entity && found.unknown_because &&
+                        !strcmp(found.unknown_because, "temp.variadic");
+            if (pack || (!found.unknown && !found.ambiguous))
+                continue;
             return true;
+        }
         uint32_t d = entity_table[found.entity].first_declaration;
         /* a type alias declared before: no later member of the name
            can overload it ([class.mem]/6 sees the same alias) */
@@ -307,7 +383,17 @@ analysis_result semantic_analysis::parameter_scope_noexcept(SyntaxRef n,
     entity_index outer = current_scope;
     open_parameter_scope();
     analysis_result r = analysis_result::well_formed;
-    if (names_dependent_entity(n.first_token(), n.end_token()))
+    if (member && !names_dependent_entity(n.first_token(), n.end_token()) &&
+        noexcept_needs_complete_class(n) &&
+        !names_earlier_parameter(n, function_parameters)) {
+        /* [class.mem]/6: the noexcept-specifier is a complete-class context
+           and it names the class being defined (libc++'s
+           noexcept(__is_nothrow_swappable_v<__tuple_leaf>)): analysed at
+           the class's closing } (member_noexcept_specifiers), which gives
+           the function its type; until then the specification is unknown */
+        non_throwing = false;
+        deferred_noexcept = n;
+    } else if (names_dependent_entity(n.first_token(), n.end_token()))
     /* [temp.dep.constexpr]: value-dependent in the template's own
            declaration; each specialization's declaration is analysed with
            the arguments, and the template's own type says potentially

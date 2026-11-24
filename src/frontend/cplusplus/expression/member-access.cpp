@@ -266,6 +266,10 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         result.evaluation = constness::not_constant;
         result.node = expression_node(semantic_kind::bound_member_function,
                                       result, at, address.node, e);
+        /* the class of the object expression as written, before the
+           conversion to the member's class above: [class.protected]/1's
+           check of the function chosen is made against it */
+        semantics[result.node].c = object_class;
         m = result;
         return analysis_result::well_formed;
     }

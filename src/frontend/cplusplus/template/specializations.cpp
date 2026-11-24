@@ -358,7 +358,11 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
         auto e = tail[0][0];
         auto ec = e;
         uint32_t id = 1;
-        if (e.size() == 3 && ec[1].is(syntax_kind::gnu_attribute_specifier) &&
+        /* two or more of them make an attribute-specifier-seq (libc++
+           writes deprecated and visibility) */
+        if (e.size() == 3 &&
+            ec[1].is(syntax_kind::gnu_attribute_specifier,
+                     syntax_kind::attribute_specifier_seq) &&
             gnu_attributes_without_effect(ec[1]))
             id = 2;
         if (e.size() == id + 2 && ec[0].is_token() &&
@@ -763,23 +767,35 @@ analysis_result semantic_analysis::named_specialization(
         return r;
     /* [temp.expl.spec]/14 and [temp.explicit]/2's kinds of declaration;
        default arguments are [dcl.fct.default]/4's error */
-    if (!m.has_id || m.qualified_namespace || m.operator_function ||
-        m.literal_operator || cv || defaults ||
-        type_table[type.unqualified()].kind != type_kind::function)
+    if (!m.has_id || m.qualified_namespace || m.literal_operator || cv ||
+        defaults || type_table[type.unqualified()].kind != type_kind::function)
         return not_supported_because(
             n, rule, "not a function with a named declarator-id");
     if (m.qualifier &&
         entity_table[m.qualifier].kind != entity_kind::class_type)
         return not_supported_because(n, rule,
                                      "a qualifier that is not a class");
-    if (s.typedef_ || s.static_ || s.extern_ || s.gnu_flags || m.gnu_flags ||
-        s.aligned || m.aligned || s.section || m.section || m.asm_label)
+    /* [ext:gnu_attributes] a specialization's own symbol may carry
+       visibility, abi_tag and exclude_from_explicit_instantiation
+       (libc++'s _LIBCPP_HIDE_FROM_ABI); they are the specialization's */
+    uint32_t symbol_flags = 0;
+    token_index symbol_abi_tag = 0;
+    if (specialization) {
+        symbol_flags = (s.gnu_flags | m.gnu_flags) & gnu_function_symbol_flags;
+        symbol_abi_tag = s.abi_tag;
+        if (m.abi_tag)
+            symbol_abi_tag = m.abi_tag;
+    }
+    if (s.typedef_ || s.static_ || s.extern_ ||
+        ((s.gnu_flags | m.gnu_flags) & ~symbol_flags) || s.aligned ||
+        m.aligned || s.section || m.section || m.asm_label)
         return not_supported_because(n, rule,
                                      "a storage class, typedef or attribute");
     /* [temp.explicit]/3: "An explicit instantiation of a function
        template ... shall not use the inline, constexpr, or consteval
-       specifiers" */
-    if (!specialization && (s.inline_ || s.constexpr_))
+       specifiers"; a friend declaration naming a specialization
+       ([temp.friend]/1) is no explicit instantiation and may */
+    if (!specialization && !friend_of && (s.inline_ || s.constexpr_))
         return not_supported_because(
             n, rule, "an explicit instantiation with inline or constexpr");
     /* the template and the arguments given */
@@ -836,7 +852,10 @@ analysis_result semantic_analysis::named_specialization(
                exactly one of them is the one named (more than one is
                partial ordering's) */
             uint32_t chosen = 0;
-            bool unique = !m.template_id && !m.qualifier;
+            /* [temp.explicit]/3, [temp.deduct.decl]/1: with template
+               arguments written, each template takes them first and then
+               deduces the rest from the declared type */
+            bool unique = !m.qualifier;
             for (uint32_t g : group) {
                 if (!unique)
                     break;
@@ -846,9 +865,29 @@ analysis_result semantic_analysis::named_specialization(
                     continue;
                 owned_array<template_argument> trial;
                 owned_array<bool> trial_set;
+                if (m.template_id && m.template_id.size() > 3) {
+                    /* [temp.arg.explicit]/6: more arguments than
+                       parameters: not this template (no pack) */
+                    owned_array<SyntaxElement> text;
+                    owned_array<bool> text_expansion;
+                    if (written_arguments_of(m.template_id, text,
+                                             text_expansion) !=
+                            analysis_result::well_formed ||
+                        text.size() > c.parameter_count)
+                        continue;
+                    size_t uses = name_uses.size();
+                    analysis_result w =
+                        template_id_arguments(m.template_id, g, trial);
+                    name_uses.resize(uses);
+                    if (w != analysis_result::well_formed ||
+                        trial.size() > c.parameter_count)
+                        continue;
+                }
+                uint32_t written = static_cast<uint32_t>(trial.size());
                 for (uint32_t i = 0; i < c.parameter_count; i++) {
-                    trial.append(template_argument());
-                    trial_set.append(false);
+                    if (i >= written)
+                        trial.append(template_argument());
+                    trial_set.append(i < written);
                 }
                 matching_declaration = true;
                 bool deduces = deduce_type(entity_table[c.entity].type, type,
@@ -865,6 +904,10 @@ analysis_result semantic_analysis::named_specialization(
                     n, rule,
                     "overloaded function templates (partial ordering)");
             ft = chosen;
+            if (m.template_id && m.template_id.size() > 3) {
+                values.clear();
+                VTRY(ar, template_id_arguments(m.template_id, ft, values));
+            }
         }
     }
     const function_template f = function_templates[ft - 1];
@@ -977,6 +1020,9 @@ analysis_result semantic_analysis::named_specialization(
            ... specifier is implicitly an inline function") */
         entity_table[e].inline_ = s.inline_ || s.constexpr_;
         entity_table[e].constexpr_ = s.constexpr_;
+        entity_table[e].gnu_flags |= symbol_flags;
+        if (symbol_abi_tag)
+            entity_table[e].abi_tag = symbol_abi_tag;
         /* its first declaration is this one, not the template's
            (clang's name of it, which a lookup claim gives) */
         entity_table[e].first_declaration = 0;
@@ -1127,8 +1173,7 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
         }
     }
     instantiation_kind was = entity_table[c].explicitly_instantiated;
-    if (was == instantiation_kind::definition ||
-        (extern_ && (was == instantiation_kind::none) && prior))
+    if (was == instantiation_kind::definition)
         return not_supported(n, "temp.explicit");
     mark_explicit_instantiation(c, extern_);
     if (!extern_)

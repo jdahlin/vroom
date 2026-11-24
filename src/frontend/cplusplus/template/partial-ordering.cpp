@@ -24,43 +24,6 @@ namespace cplusplus
 namespace
 {
 
-/* a type partial ordering compares with deduce_type's rules alone */
-bool orderable(const types &table, qualified_type t, bool packs)
-{
-    const struct type &r = table[t.unqualified()];
-    switch (r.kind) {
-    case type_kind::template_parameter:
-    case type_kind::fundamental:
-    case type_kind::enumeration:
-    case type_kind::class_type:
-        return true;
-    case type_kind::pack_expansion:
-        return packs && orderable(table, r.operand, packs);
-    case type_kind::pointer_to_member:
-        if (!r.entity &&
-            !orderable(table, qualified_type::make(r.bound, cv_none), packs))
-            return false;
-        return orderable(table, r.operand, packs);
-    case type_kind::pointer:
-    case type_kind::lvalue_reference:
-    case type_kind::rvalue_reference:
-        return orderable(table, r.operand, packs);
-    case type_kind::array:
-        return r.bound_known && orderable(table, r.operand, packs);
-    case type_kind::function: {
-        if (!orderable(table, r.operand, packs))
-            return false;
-        const qualified_type *list = table.parameters(t.unqualified());
-        for (uint32_t i = 0; i < r.parameter_count; i++)
-            if (!orderable(table, list[i], packs))
-                return false;
-        return true;
-    }
-    default:
-        return false;
-    }
-}
-
 bool is_reference(const types &table, qualified_type t)
 {
     type_kind k = table[t.unqualified()].kind;
@@ -87,6 +50,69 @@ bool more_cv(unsigned a, unsigned b)
 
 } // namespace
 
+/* a type partial ordering compares with deduce_type's rules alone */
+bool semantic_analysis::orderable(qualified_type t, bool packs) const
+{
+    const struct type &r = type_table[t.unqualified()];
+    switch (r.kind) {
+    case type_kind::dependent:
+        /* [temp.deduct.type]/8's TT<T>: a class template's specialization
+           in the template's own parameters, which deduce_type compares
+           argument by argument against the other's (type arguments only: a
+           non-type or pack argument is not compared by deduce_type here) */
+        if (entity_table[r.entity].kind == entity_kind::dependent_member ||
+            !entity_table[r.entity].instantiation)
+            return false;
+        for (uint32_t i = 0; i < specialization_argument_count(r.entity); i++) {
+            const template_argument &x =
+                specialization_template_argument(r.entity, i);
+            if (x.kind == template_argument::kind_t::type)
+                continue;
+            /* a non-type argument that is a value or a non-type parameter
+               (deduce_type's TT<i>), not an expression naming parameters
+               (a non-deduced context, [temp.deduct.type]/5.3) */
+            if (x.kind != template_argument::kind_t::value ||
+                (x.template_entity &&
+                 (entity_table[x.template_entity].kind ==
+                      entity_kind::dependent_value ||
+                  contains_placeholder(entity_table[x.template_entity].type))))
+                /* (a parameter of placeholder type, auto or decltype(auto),
+                   is ordered by that type too: [temp.func.order]) */
+                return false;
+        }
+        return true;
+    case type_kind::template_parameter:
+    case type_kind::fundamental:
+    case type_kind::enumeration:
+    case type_kind::class_type:
+        return true;
+    case type_kind::pack_expansion:
+        return packs && orderable(r.operand, packs);
+    case type_kind::pointer_to_member:
+        if (!r.entity &&
+            !orderable(qualified_type::make(r.bound, cv_none), packs))
+            return false;
+        return orderable(r.operand, packs);
+    case type_kind::pointer:
+    case type_kind::lvalue_reference:
+    case type_kind::rvalue_reference:
+        return orderable(r.operand, packs);
+    case type_kind::array:
+        return r.bound_known && orderable(r.operand, packs);
+    case type_kind::function: {
+        if (!orderable(r.operand, packs))
+            return false;
+        const qualified_type *list = type_table.parameters(t.unqualified());
+        for (uint32_t i = 0; i < r.parameter_count; i++)
+            if (!orderable(list[i], packs))
+                return false;
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
 /*
  * [temp.deduct.partial]/10: "Function template F is at least as
  * specialized as function template G if, for each pair of types used to
@@ -99,7 +125,9 @@ bool more_cv(unsigned a, unsigned b)
  * value.
  */
 bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
-                                                size_t arguments, bool &unknown)
+                                                size_t arguments, bool &unknown,
+                                                bool f_reversed,
+                                                bool g_reversed)
 {
     const function_template ff = function_templates[f - 1];
     const function_template gg = function_templates[g - 1];
@@ -109,6 +137,23 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
     const struct type gr = type_table[gtype.unqualified()];
     const qualified_type *fp = type_table.parameters(ftype.unqualified());
     const qualified_type *gp = type_table.parameters(gtype.unqualified());
+    /* [temp.func.order]/3 (CWG2445): a synthesized candidate of reversed
+       order takes its template's two parameters in the other order */
+    if ((f_reversed && (fr.parameter_count != 2 || arguments != 2)) ||
+        (g_reversed && (gr.parameter_count != 2 || arguments != 2))) {
+        unknown = true;
+        return false;
+    }
+    auto fparam = [&](size_t k) {
+        if (f_reversed)
+            k = 1 - k;
+        return fp[k];
+    };
+    auto gparam = [&](size_t k) {
+        if (g_reversed)
+            k = 1 - k;
+        return gp[k];
+    };
     uint32_t ffixed = fr.parameter_count, gfixed = gr.parameter_count;
     if (ffixed && type_table[fp[ffixed - 1].unqualified()].kind ==
                       type_kind::pack_expansion)
@@ -148,7 +193,7 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
     bool penalty = false;
     for (size_t k = 0; k < arguments; k++) {
         bool apack = k >= ffixed, ppack = k >= gfixed;
-        qualified_type a = fp[k], p = gp[k];
+        qualified_type a = fparam(k), p = gparam(k);
         if (apack)
             a = type_table[fp[ffixed].unqualified()].operand;
         if (ppack)
@@ -294,7 +339,8 @@ int semantic_analysis::conversion_template_order(entity_index t1,
 }
 
 int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
-                                               size_t arguments, bool &unknown)
+                                               size_t arguments, bool &unknown,
+                                               bool f_reversed, bool g_reversed)
 {
     unknown = false;
     const uint32_t both[2] = {f, g};
@@ -319,13 +365,15 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
         if (r.kind != type_kind::function || r.variadic)
             unknown = true;
         for (uint32_t i = 0; i < r.parameter_count && !unknown; i++)
-            if (!orderable(type_table, list[i], true))
+            if (!orderable(list[i], true))
                 unknown = true;
     }
     if (unknown)
         return 0;
-    bool fg = at_least_as_specialized(f, g, arguments, unknown);
-    bool gf = at_least_as_specialized(g, f, arguments, unknown);
+    bool fg = at_least_as_specialized(f, g, arguments, unknown, f_reversed,
+                                      g_reversed);
+    bool gf = at_least_as_specialized(g, f, arguments, unknown, g_reversed,
+                                      f_reversed);
     if (unknown)
         return 0;
     if (fg && !gf)
@@ -498,7 +546,7 @@ bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
             if (a.kind == template_argument::kind_t::pack ||
                 a.kind == template_argument::kind_t::template_name ||
                 (a.kind == template_argument::kind_t::type &&
-                 !orderable(type_table, a.type, false)))
+                 !orderable(a.type, false)))
                 unknown = true;
         }
     if (unknown)

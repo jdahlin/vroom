@@ -65,6 +65,12 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         size_t expressions_before = expressions.size();
         size_t uses_before = name_uses.size();
         current_scope = instantiations[index].scope;
+        /* [temp.res]/10: the declaration's names that do not depend on a
+           parameter are those in scope at the template's declaration, not
+           at the call (or the constraint) that asks for the
+           specialization */
+        token_index saved_horizon = lookup_horizon;
+        lookup_horizon = ft.declaration.first_token();
         analysed_declaration *saved_analysing = analysing;
         analysing = nullptr;
         /* (a pack expansion's pattern that names the template: its own
@@ -186,6 +192,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
             }
         }
         current_scope = saved_scope;
+        lookup_horizon = saved_horizon;
         analysing = saved_analysing;
         expanding = saved_expanding;
         function_cv = saved_cv;
@@ -284,6 +291,8 @@ semantic_analysis::need_specialization_definition(SyntaxRef at, entity_index f)
    of the translation unit; quiet while only quiet member bodies want it */
 void semantic_analysis::want_definition(instantiation_record &x, uint32_t index)
 {
+    if (!x.requested_by && analysing)
+        x.requested_by = analysing->node;
     x.pending = true;
     x.quiet = quiet_member_bodies != 0;
     if (!instantiation_depth && !x.wanted_by)
@@ -351,6 +360,8 @@ analysis_result semantic_analysis::quiet_definition_failed(SyntaxRef at,
 analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
                                                           uint32_t index)
 {
+    if (!instantiations[index].requested_by && analysing)
+        instantiations[index].requested_by = analysing->node;
     /* [temp.inst]/17: "There is an implementation-defined quantity that
        specifies the limit on the total depth of recursive
        instantiations"; [implimits]/2 suggests 1024, this one is lower
@@ -361,6 +372,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     const function_template ft =
         function_templates[entity_table[template_entity].instantiation - 1];
     size_t unsupported_before = unsupported.size();
+    uint32_t hidden_before = horizon_hidden;
     bool quiet = instantiations[index].quiet;
     diagnostics_suppressed_if hush(diagnostics, quiet);
     /* (what a quiet definition wants is as quiet) */
@@ -485,8 +497,43 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
             d.first_unsupported = static_cast<uint32_t>(unsupported_before);
         d.has_unsupported = unsupported.size() > unsupported_before;
     }
+    /* [temp.dep.candidate]: a dependent call's candidates are the
+       declarations visible from the template's definition and those
+       argument-dependent lookup finds from the point of instantiation; a
+       definition refused after a lookup found only later declarations
+       (horizon_hidden) is the use's as much as the template's
+       ([impl.clang] reports the error with a note at the declaration
+       that required it) */
+    if (r == analysis_result::unsupported &&
+        unsupported.size() > unsupported_before &&
+        horizon_hidden != hidden_before &&
+        instantiations[index].requested_by != ft.declaration)
+        charge_requester(instantiations[index].requested_by,
+                         unsupported_before);
     /* the use names a function all the same */
     return analysis_result::well_formed;
+}
+
+void semantic_analysis::charge_requester(SyntaxRef requester,
+                                         size_t first_refusal)
+{
+    if (!requester)
+        return;
+    /* (being analysed: judged at its end) */
+    if (analysing && analysing->node == requester) {
+        if (!analysing->refused_instantiation) {
+            analysing->refused_instantiation = true;
+            analysing->refused_at = static_cast<uint32_t>(first_refusal);
+        }
+        return;
+    }
+    for (analysed_declaration &d : declarations) {
+        if (d.node != requester || d.result != analysis_result::well_formed)
+            continue;
+        d.result = analysis_result::unsupported;
+        d.first_unsupported = static_cast<uint32_t>(first_refusal);
+        d.has_unsupported = true;
+    }
 }
 
 void semantic_analysis::lambda_error_in_enclosing(SyntaxRef lambda)
@@ -545,6 +592,14 @@ analysis_result semantic_analysis::instantiate_class(
                 entity_table[arg.entity].size)
                 continue;
             bool self = defining_class && arg.entity == defining_class;
+            /* a specialization that is itself waiting for the class being
+               defined (an iterator of it, named in its member-specification)
+               is incomplete for as long as that class is */
+            if (defining_class && !self && !entity_table[arg.entity].defined)
+                for (const deferred_class_instantiation &d :
+                     deferred_class_instantiations)
+                    self |= d.specialization == arg.entity &&
+                            d.owner == defining_class;
             incomplete_argument |= self || member_return_type;
             defining_argument |= self;
         }
@@ -599,6 +654,19 @@ analysis_result semantic_analysis::instantiate_class(
             defined_by = function_templates[pattern - 1].definition;
         if (defined_by && !declaring_specializations && !incomplete_argument)
             return define_class_outside(at, k, c);
+        /* declared before (a friend of the class being defined, whose
+           argument is that class: declaring_specializations) and named
+           again with the class still being defined: defined with the class,
+           as a specialization named so first is */
+        if (defined_by && defining_argument && !declaring_specializations) {
+            bool deferred = false;
+            for (const deferred_class_instantiation &d :
+                 deferred_class_instantiations)
+                deferred |= d.index == k;
+            if (!deferred)
+                deferred_class_instantiations.append(
+                    deferred_class_instantiation{defining_class, at, k, c});
+        }
         /* named again where no complete type is needed: the use that needs
            it defines it (complete_instantiation) */
         if (defined_by && lazy_return)
@@ -1164,7 +1232,13 @@ analysis_result semantic_analysis::declare_variable_specialization(
     /* ([temp.expl.spec]/12: an explicit specialization's as declared) */
     entity_table[e].inline_ = !explicit_ || s.inline_;
     entity_table[e].constexpr_ = s.constexpr_;
-    entity_table[e].defined = true;
+    /* [temp.inst]/3: a specialization of a variable template whose
+       declaration is no definition (a static data member template not
+       defined) is an implicit instantiation of no definition: an external
+       reference */
+    entity_table[e].defined = explicit_ || t.defined;
+    if (!entity_table[e].defined)
+        entity_table[e].inline_ = false;
     entity_table[e].instantiation = index + 1;
     entity_table.add_declaration(e, declaration);
     instantiations[index].specialization = e;
@@ -1229,8 +1303,13 @@ bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
             continue;
         const entity &p =
             entity_table[template_parameter_entities[ft.first_parameter + i]];
+        /* [impl.clang]: a parameter declared with a placeholder
+           (template <auto V>) is mangled as one of a dependent type,
+           "Tn" "Da" ([dcl.type.auto.deduct]/2) */
+        bool placeholder =
+            type_table[p.type.unqualified()].kind == type_kind::placeholder;
         if (p.kind != entity_kind::none ||
-            !depends_on_template_parameter(p.type))
+            !(placeholder || depends_on_template_parameter(p.type)))
             return false;
         type = p.type;
         return true;
@@ -1329,6 +1408,8 @@ void semantic_analysis::enter_instantiation(instantiation_context &c,
     c.expressions_before = expressions.size();
     c.uses_before = name_uses.size();
     c.argument_named = argument_named;
+    c.require_complete = require_complete_class;
+    require_complete_class = 0;
     c.dependent_errors = dependent_errors;
     c.independent_errors = independent_errors;
     argument_named = false;
@@ -1356,6 +1437,7 @@ void semantic_analysis::leave_instantiation(instantiation_context &c)
         independent_errors = c.independent_errors;
     }
     argument_named = c.argument_named;
+    require_complete_class = c.require_complete;
     current_scope = c.scope;
     defining_class = c.defining_class;
     explicit_declaration_names = c.explicit_declaration_names;

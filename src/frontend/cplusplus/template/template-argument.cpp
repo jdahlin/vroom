@@ -242,6 +242,52 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
            written[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
            written[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
         written = written[1];
+    /* [expr.prim.fold]/2: ( pattern && ... ) over a pack an alias
+       template's instantiation bound: pattern(e0) && (pattern(e1) && ...),
+       the elements' own value-dependent expressions (likewise ||) */
+    if (written.is(syntax_kind::fold_expression) && written.size() == 5 &&
+        written[3].is(preprocessing_op_or_punc::ELLIPSIS) &&
+        (written[2].is(preprocessing_op_or_punc::AMPERSAND_AMPERSAND) ||
+         written[2].is(preprocessing_op_or_punc::BAR_BAR))) {
+        uint64_t code = 8;
+        if (written[2].is(preprocessing_op_or_punc::BAR_BAR))
+            code = 9;
+        SyntaxElement pattern = written[1];
+        uint32_t times = 0;
+        bool own = false;
+        entity_index none =
+            entity_table.make(entity_kind::dependent_value, 0, 0);
+        if (!expansion_count(first_token(pattern), pattern.end_token(), times,
+                             &own) ||
+            own || times < 2)
+            return none;
+        owned_array<entity_index> parts;
+        for (uint32_t k = 0; k < times; k++) {
+            expansion_scope scope(*this, true, k);
+            entity_index part = dependent_value_entity(pattern);
+            if (!entity_table[part].value)
+                return none;
+            parts.append(part);
+        }
+        entity_index acc = parts[times - 1];
+        for (uint32_t k = times - 1; k-- > 0;) {
+            entity_index found = 0;
+            for (entity_index d : dependent_values)
+                if (entity_table[d].value == code &&
+                    entity_table[d].enclosing == parts[k] &&
+                    entity_table[d].name == acc)
+                    found = d;
+            if (!found) {
+                found = entity_table.make(entity_kind::dependent_value, 0, 0);
+                entity_table[found].enclosing = parts[k];
+                entity_table[found].name = acc;
+                entity_table[found].value = code;
+                dependent_values.append(found);
+            }
+            acc = found;
+        }
+        return acc;
+    }
     entity_index e = entity_table.make(entity_kind::dependent_value, 0, 0);
     uint64_t binary = 0;
     if (written.size() == 3) {
@@ -372,8 +418,19 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
     entity_index ns_scope = 0;
     uint32_t ns_depth = 0;
     SyntaxElement spec_node;
+    /* the template-id's position in the qualifier, and the name of one
+       member class (C<args>::type::name) between it and the member */
+    size_t spec_at = 0;
+    uint32_t level = 0;
+    if (qualifier.size() >= 2)
+        spec_at = qualifier.size() - 2;
+    if (qualifier.size() >= 4 && qualifier[spec_at].is_identifier() &&
+        qualifier[spec_at - 2].is(syntax_kind::simple_template_id)) {
+        level = tokens.identifier(qualifier[spec_at].token()) + 1;
+        spec_at -= 2;
+    }
     if (qualifier.size() >= 2 &&
-        qualifier[qualifier.size() - 2].is(syntax_kind::simple_template_id)) {
+        qualifier[spec_at].is(syntax_kind::simple_template_id)) {
         uint32_t qi = 0;
         bool qualified = false;
         if (qualifier[0].is(preprocessing_op_or_punc::COLON_COLON)) {
@@ -381,7 +438,7 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
             qualified = true;
         }
         entity_index scope = 0;
-        while (qi + 2 < qualifier.size()) {
+        while (qi < spec_at) {
             if (!qualifier[qi].is_identifier())
                 return e;
             lookup_result ns;
@@ -402,7 +459,7 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
             qi += 2;
         }
         ns_scope = scope;
-        spec_node = qualifier[qualifier.size() - 2];
+        spec_node = qualifier[spec_at];
     } else {
         return e;
     }
@@ -415,7 +472,7 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
     analysis_result r = template_type(spec_node, ns_scope, ns_scope != 0, q);
     unsupported.resize(unsupported_before);
     if (r == analysis_result::well_formed &&
-        type_table[q].kind == type_kind::class_type)
+        type_table[q].kind == type_kind::class_type && !level)
         return static_member_value_entity(type_table[q].entity,
                                           tokens.identifier(member.token()), e,
                                           negated);
@@ -431,6 +488,8 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
         value = 3;
     if (ns_depth > 1)
         value |= static_cast<uint64_t>(ns_depth) << 8;
+    /* (the member class's name, plus one, in the upper half) */
+    value |= static_cast<uint64_t>(level) << 32;
     for (entity_index d : dependent_values)
         if (entity_table[d].type == type && entity_table[d].name == name &&
             entity_table[d].value == value &&
@@ -692,7 +751,20 @@ analysis_result semantic_analysis::template_argument_for(
             if (placeholder_to)
                 to = qualified_type::make(
                     entity_table[named].type.unqualified(), cv_none);
-            if (!(entity_table[named].type == to))
+            /* [dcl.type.auto.deduct]/2: the name of a parameter declared
+               with a placeholder (template <auto V>) has a type only once
+               V's argument is known, so the argument is value-dependent
+               and is checked against this parameter's type
+               ([temp.arg.nontype]/2) at the instantiation (a scalar
+               integral or enumeration type only: a reference or pointer
+               parameter's argument needs the deduced type now,
+               [temp.deduct.type]/ex 13) */
+            bool deferred =
+                type_table[entity_table[named].type.unqualified()].kind ==
+                    type_kind::placeholder &&
+                (is_integral(to) ||
+                 type_table[to.unqualified()].kind == type_kind::enumeration);
+            if (!deferred && !(entity_table[named].type == to))
                 return not_supported(at, "temp.arg.nontype");
             out.kind = template_argument::kind_t::value;
             out.type = to;

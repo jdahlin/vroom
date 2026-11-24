@@ -481,20 +481,81 @@ semantic_analysis::template_trailing_constraint(entity_index t) const
     return trailing_constraint(function_templates[ft - 1].declaration);
 }
 
+bool semantic_analysis::constraint_parameter_is_own(entity_index t,
+                                                    entity_index p) const
+{
+    uint32_t ft = template_record(t);
+    if (!ft)
+        return false;
+    const struct function_template &f = function_templates[ft - 1];
+    for (uint32_t k = 0; k < f.parameter_count; k++)
+        if (template_parameter_entities[f.first_parameter + k] == p)
+            return true;
+    return false;
+}
+
+/* (the mangler holds the analysis const; this analysis leaves nothing
+   behind: the records it adds are dropped) */
+bool semantic_analysis::constraint_type(entity_index t, SyntaxElement written,
+                                        qualified_type &type) const
+{
+    return const_cast<semantic_analysis *>(this)->constraint_type_in(t, written,
+                                                                     type);
+}
+
+bool semantic_analysis::constraint_type_in(entity_index t,
+                                           SyntaxElement written,
+                                           qualified_type &type)
+{
+    uint32_t ft = template_record(t);
+    if (!ft || !function_templates[ft - 1].parameter_count)
+        return false;
+    const struct function_template &f = function_templates[ft - 1];
+    entity_index scope =
+        entity_table[template_parameter_entities[f.first_parameter]].enclosing;
+    size_t expressions_before = expressions.size();
+    size_t uses_before = name_uses.size();
+    size_t unsupported_before = unsupported.size();
+    entity_index saved_scope = current_scope;
+    current_scope = scope;
+    analysis_result r = type_id(written, type);
+    current_scope = saved_scope;
+    expressions.resize(expressions_before);
+    name_uses.resize(uses_before);
+    unsupported.resize(unsupported_before);
+    return r == analysis_result::well_formed;
+}
+
 entity_index semantic_analysis::constraint_parameter(entity_index t,
                                                      token_index i) const
 {
-    uint32_t ft = template_record(t);
     uint32_t name = tokens.identifier(i);
-    if (!ft || !name)
+    if (!name)
         return 0;
-    const struct function_template &f = function_templates[ft - 1];
-    for (uint32_t k = 0; k < f.parameter_count; k++) {
-        entity_index pe = template_parameter_entities[f.first_parameter + k];
-        if (entity_table[pe].name == name)
-            return pe;
+    entity_index own = t;
+    for (entity_index s = t;;) {
+        uint32_t ft = template_record(own);
+        if (ft) {
+            const struct function_template &f = function_templates[ft - 1];
+            for (uint32_t k = 0; k < f.parameter_count; k++) {
+                entity_index pe =
+                    template_parameter_entities[f.first_parameter + k];
+                if (entity_table[pe].name == name)
+                    return pe;
+            }
+        } else if (own == t) {
+            return 0;
+        }
+        /* the class template whose member t is (its specialization is
+           the enclosing entity of the pattern) */
+        for (s = entity_table[s].enclosing; s; s = entity_table[s].enclosing)
+            if (entity_table[s].kind == entity_kind::class_type &&
+                entity_table[s].instantiation)
+                break;
+        if (!s)
+            return 0;
+        own = specialized_template(s);
     }
-    return 0;
 }
 
 /* the function parameter of function template t's declarator whose name

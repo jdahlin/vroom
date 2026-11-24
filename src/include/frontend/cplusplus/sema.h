@@ -414,12 +414,15 @@ enum gnu_attribute_flag : uint32_t {
        or variable is an error, except inside an unavailable function
        (unavailable_use) */
     gnu_unavailable = 1u << 28,
+    /* [impl.clang] diagnose_if(condition, "message", "error" | "warning"):
+       a call where the condition holds is diagnosed (diagnose_if_call) */
+    gnu_diagnose_if = 524288,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
 const uint32_t gnu_function_symbol_flags =
     gnu_hidden_visibility | gnu_abi_tag |
-    gnu_exclude_from_explicit_instantiation;
+    gnu_exclude_from_explicit_instantiation | gnu_diagnose_if;
 /* noinline, always_inline and noreturn, which lowering gives a member
    function or function template's specialization as a non-member's */
 const uint32_t gnu_inline_flags =
@@ -1134,6 +1137,12 @@ struct analysed_declaration {
        (semantic_analysis::recovered_error_at): the declaration goes on,
        declares what it declares, and is judged ill-formed at its end */
     bool recovered = false;
+    /* a specialization it required has a definition refused for a name
+       not visible from the template's definition ([temp.dep]):
+       unsupported at its end, that refusal the first (an index into
+       semantic_analysis::unsupported) */
+    bool refused_instantiation = false;
+    uint32_t refused_at = 0;
 };
 
 /* a name a declaration declared, with the type analysis gave it: what
@@ -2139,6 +2148,11 @@ class semantic_analysis
                                        const char *subclause);
     void record_recovered_error();
     void lambda_error_in_enclosing(SyntaxRef lambda);
+    void charge_requester(SyntaxRef requester, size_t first_refusal);
+    /* lookups at an instantiation that found only functions declared after
+       the template, left to argument-dependent lookup (mutable: lookup is
+       const) */
+    mutable uint32_t horizon_hidden = 0;
     analysis_result extension_used(diagnostic_id id, token_index at,
                                    const char *argument);
 
@@ -2829,6 +2843,27 @@ class semantic_analysis
     bool pack_depends(entity_index pack) const;
     owned_array<entity_index> dependent_members;
     owned_array<entity_index> dependent_written_types;
+    /* the names of a dependent_written type's tokens that an alias
+       template's instantiation bound to a dependent type, with the
+       type (element UINT32_MAX), or to the elements of a pack (one
+       entry each, in order): entity first_member, member_count of them;
+       [abi:mangle.expression] mangles those names as the types */
+  public:
+    struct written_binding {
+        uint32_t identifier = 0;
+        uint32_t element = UINT32_MAX;
+        qualified_type type;
+        /* a cast-expression's type-id analysed there (identifier 0): the
+           cast's syntax node */
+        uint32_t cast = 0;
+    };
+    owned_array<written_binding> written_bindings;
+
+  private:
+    void collect_written_bindings(SyntaxRef n,
+                                  owned_array<written_binding> &found);
+    void collect_written_casts(SyntaxElement x,
+                               owned_array<written_binding> &found);
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(SyntaxRef op, qualified_type &type,
@@ -3564,7 +3599,8 @@ class semantic_analysis
     /* [meta.rel] is_convertible; known false when analysis cannot tell */
     bool copy_constructible_from(entity_index c, value_category category,
                                  bool source_const, bool &known);
-    bool convertible_types(qualified_type from, qualified_type to, bool &known);
+    bool convertible_types(SyntaxRef n, qualified_type from, qualified_type to,
+                           bool &known);
     /* [meta.unary.prop] is_constructible and is_nothrow_constructible
        (ext/clang/constructible-traits.cpp): the analysis of T t(declval<
        Args>()...); */
@@ -3962,6 +3998,16 @@ class semantic_analysis
                          exception_specification b) const;
     analysis_result parameter_scope_noexcept(SyntaxRef n, bool member,
                                              bool &non_throwing);
+    /* the noexcept-specifier of the member function declarator analysed last
+       that waits for its class's closing } ([class.mem]/6), or 0 */
+    SyntaxRef deferred_noexcept = 0;
+    struct pending_noexcept {
+        entity_index function = 0;
+        SyntaxRef specifier = 0;
+    };
+    owned_array<pending_noexcept> pending_noexcepts;
+    bool noexcept_needs_complete_class(SyntaxRef n);
+    analysis_result member_noexcept_specifiers(entity_index c);
     /* the noexcept-specifiers left value-dependent in templates' own
        declarations */
     owned_array<SyntaxRef> dependent_exception_specifications;
@@ -4055,6 +4101,12 @@ class semantic_analysis
            constructed in place) or for a read: a union's member that is
            not active is made so, or is not constant */
         uint32_t writing = 0, reading = 0;
+        /* [basic.life]/1, [expr.const]/5.8: the places whose initialization
+           (a constructor's store of a member) is under way: an assignment
+           to one from its own initializer is outside its lifetime */
+        static constexpr uint32_t initializing_limit = 8;
+        uint32_t initializing[initializing_limit] = {};
+        uint32_t initializing_count = 0;
         /* an object expression evaluated and not read ([expr.ref]/6.1): an
            inactive union member is designated without being read */
         uint32_t designating = 0;
@@ -4189,6 +4241,11 @@ class semantic_analysis
                              const semantic_node &call, constant_value &v);
     constness evaluate_call(constant_evaluation &state, uint32_t node,
                             constant_value &v);
+    /* [impl.clang] diagnose_if: whether the condition is a constant
+       expression with the value true when the parameters have the values of
+       the arguments (diagnose_if_call) */
+    bool diagnose_if_holds(uint32_t condition, const entity_index *parameters,
+                           size_t parameter_count, const uint32_t *arguments);
     constness evaluate_object(constant_evaluation &state, uint32_t node,
                               uint32_t &object);
     constness evaluate_read(constant_evaluation &state, uint32_t node,
@@ -4718,10 +4775,12 @@ class semantic_analysis
     void construction_order(entity_index c,
                             owned_array<entity_index> &order) const;
     /* the subobject object's initialization from value: its bytes, stored
-       as by an assignment, a statement */
+       as by an assignment, a statement; initializes: value is a prvalue
+       of the class that initializes the subobject itself ([dcl.init]/17.6.1,
+       the assignment node's c is 1: lowering does not materialize it) */
     uint32_t subobject_store(const expression_meaning &object,
                              qualified_type type, token_index at,
-                             uint32_t value);
+                             uint32_t value, bool initializes = false);
     /* a block of the statements */
     uint32_t complete_object(uint32_t statement);
     uint32_t block_statement(token_index at,
@@ -4892,7 +4951,8 @@ class semantic_analysis
     /* the expressions of an expression-list, analysed */
     analysis_result
     expression_list_meanings(SyntaxElement list,
-                             owned_array<expression_meaning> &out);
+                             owned_array<expression_meaning> &out,
+                             owned_array<SyntaxElement> *written = nullptr);
     /* the class whose member-specification is analysed, 0 if none */
     entity_index defining_class = 0;
     /* [class.access]/6: the class a member's qualified declarator-id
@@ -5096,6 +5156,9 @@ class semantic_analysis
            analysed */
         entity_index scope = 0;
         bool defined = false, pending = false, defining = false;
+        /* a function template's: the declaration whose analysis first
+           wanted its definition ([temp.point]; charge_requester) */
+        SyntaxRef requested_by = 0;
         /* a function template's: its definition is wanted only by member
            bodies analysed quietly (quiet_member_bodies), no use of the
            specialization known: instantiated quietly too */
@@ -5232,6 +5295,8 @@ class semantic_analysis
         owned_array<parameter_meaning> parameters;
         size_t expressions_before = 0, uses_before = 0;
         bool argument_named = false;
+        /* the use's require_complete_class: not the instantiated body's */
+        uint32_t require_complete = 0;
         uint32_t dependent_errors = 0, independent_errors = 0;
     };
     void enter_instantiation(instantiation_context &c, entity_index scope,
@@ -5258,6 +5323,10 @@ class semantic_analysis
        reports at the definition, with no note at the use.  The errors
        issued (not in a substitution, [temp.deduct]/8) of each kind */
     mutable bool argument_named = false;
+    /* the simple-template-id analysed is a destructor's type-name, where
+       the injected-class-name of the nominated class is a type
+       ([class.dtor]/1), not a constructor name ([class.qual]/2) */
+    bool in_destructor_name = false;
     uint32_t dependent_errors = 0, independent_errors = 0;
     void count_error();
     /* [temp.inst]/4, [temp.point]: the use at declaration d instantiated a
@@ -5643,6 +5712,12 @@ class semantic_analysis
        (matching_specialization): a decltype is a non-deduced context
        whose substitution substitute_specialization checks */
     bool matching_partial = false;
+    /* ... and the specialization has no template template-parameter: a
+       qualified type's nested-name-specifier (typename enable_if<C>::type)
+       is a non-deduced context whose substitution decides the match; with
+       a template template-parameter the ordering of the matches is not
+       analysed ([temp.class.order]) */
+    bool matching_substituted = false;
     /* the specialization of function_templates[class_template - 1] whose
        pattern the arguments match (0: the primary), with its parameters'
        arguments */
@@ -5831,10 +5906,14 @@ class semantic_analysis
        cannot tell */
     int conversion_template_order(entity_index t1, entity_index t2);
     int function_template_order(uint32_t f, uint32_t g, size_t arguments,
-                                bool &unknown);
+                                bool &unknown, bool f_reversed = false,
+                                bool g_reversed = false);
     int constraint_subsumption_order(uint32_t f, uint32_t g) const;
+    /* a type partial ordering compares with deduce_type's rules alone */
+    bool orderable(qualified_type t, bool packs) const;
     bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
-                                 bool &unknown);
+                                 bool &unknown, bool f_reversed = false,
+                                 bool g_reversed = false);
     /* [temp.class.order]: whether partial specialization s (index plus
        one) is at least as specialized as t */
     bool class_at_least_as_specialized(uint32_t s, uint32_t t, bool &unknown);
@@ -6191,7 +6270,18 @@ class semantic_analysis
     template_parameter_form_kind
     template_parameter_kind(entity_index t, uint32_t i, bool &pack,
                             qualified_type &value_type) const;
+    /* template t's own parameter token i names, or that of a class
+       template t is a member of (from the innermost out) */
     entity_index constraint_parameter(entity_index t, token_index i) const;
+    /* whether parameter p is one of t's own (not of an enclosing class
+       template's) */
+    bool constraint_parameter_is_own(entity_index t, entity_index p) const;
+    /* the type a type-id written in t's requires-clause names, analysed in
+       t's template-parameter scope (what [abi:mangle.template-args] spells) */
+    bool constraint_type(entity_index t, SyntaxElement written,
+                         qualified_type &type) const;
+    bool constraint_type_in(entity_index t, SyntaxElement written,
+                            qualified_type &type);
     /* what token i names, looked up from scope outward (0: none) */
     entity_index constraint_name(entity_index scope, token_index i) const;
     /* the concept token i names, looked up from scope outward (0: none) */
@@ -6601,6 +6691,31 @@ class semantic_analysis
     analysis_result deleted_definition(SyntaxRef n, entity_index f);
     /* a use of an entity declared unavailable (clang: "'f' is unavailable") */
     analysis_result unavailable_use(token_index at, entity_index e);
+    /* [impl.clang] clang's diagnose_if(condition, message, type): written
+       in a declarator (diagnose_if_attribute), analysed once the function
+       is declared (diagnose_if_declared) with its parameters in scope
+       (parameters: their entities, 0 for an unnamed one), and evaluated at
+       its calls (diagnose_if_call) */
+    struct diagnose_if_condition {
+        token_index at = 0;
+        SyntaxElement source;
+        uint32_t condition = 0;
+        token_index message = 0;
+        bool error = false;
+        entity_index function = 0;
+        uint32_t first_parameter = 0, parameter_count = 0;
+    };
+    owned_array<diagnose_if_condition> pending_diagnose_ifs;
+    owned_array<diagnose_if_condition> diagnose_ifs;
+    owned_array<entity_index> diagnose_if_parameters;
+    bool plain_string_token(token_index t, owned_buffer &text) const;
+    analysis_result diagnose_if_attribute(SyntaxRef at, SyntaxElement a,
+                                          uint32_t count);
+    /* ... the function e declared by declaration, with its parameters in
+       function_parameters */
+    void diagnose_if_declared(SyntaxRef declaration, entity_index e);
+    analysis_result diagnose_if_call(token_index at, entity_index f,
+                                     const uint32_t *arguments, size_t count);
     analysis_result deleted_use(token_index at, entity_index f);
     /* [new.delete.placement]/1: f is a global allocation function
        taking (std::size_t, void *), the reserved placement form */

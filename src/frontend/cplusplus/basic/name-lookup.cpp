@@ -379,8 +379,14 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
             if (ambiguous)
                 mark_unknown(r, "class.member.lookup");
             else if (e) {
-                /* the class or base the member is declared in */
+                /* the class or base the member is declared in; an
+                   injected-class-name ([class.pre]/2: this class's or a
+                   base's) is in that class's own scope, not the namespace
+                   the class is a member of */
                 entity_index in = entity_table[e].enclosing;
+                if (entity_table[e].kind == entity_kind::class_type &&
+                    entity_table.find(e, name) == e)
+                    in = e;
                 if (entity_table.find(in, name) == e)
                     e = declared_in(in, name, filter);
                 if (e)
@@ -407,15 +413,38 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
        template, which the template's lookup would not find, makes what
        the name denotes not known (a dependent call's lookup at the point
        of instantiation, [temp.dep.candidate], is not told apart) */
-    if (lookup_horizon && r.entity && is_namespace(r.found_in))
+    if (lookup_horizon && r.entity && is_namespace(r.found_in)) {
+        bool late = false, early = false, functions = true;
         for (entity_index o = r.entity; o; o = entity_table[o].next_overload) {
             uint32_t d = entity_table[o].first_declaration;
             if (d &&
                 entity_table.declaration(d).node.first_token() > lookup_horizon)
-                mark_unknown(r, "temp.dep");
-            if (entity_table[o].kind != entity_kind::function)
+                late = true;
+            else
+                early = true;
+            if (entity_table[o].kind != entity_kind::function) {
+                functions = false;
                 break;
+            }
         }
+        /* [temp.dep.candidate]/1: functions all declared after the
+           template are not found from its definition; argument-dependent
+           lookup at the point of instantiation decides (when no enclosing
+           namespace declares the name, which the definition's lookup
+           would find instead) */
+        bool outer = false;
+        for (entity_index ns = entity_table[r.found_in].enclosing; ns;
+             ns = entity_table[ns].enclosing)
+            if (entity_table.find(ns, name))
+                outer = true;
+        if (late && !early && functions && !outer && !r.unknown &&
+            !r.ambiguous) {
+            r.entity = 0;
+            r.found_in = 0;
+            horizon_hidden++;
+        } else if (late)
+            mark_unknown(r, "temp.dep");
+    }
     /* a pack named outside a pack expansion's pattern: ill-formed
        ([temp.variadic]/7) unless it is one analysis has no rules for */
     if (r.entity && entity_table[r.entity].kind == entity_kind::pack)

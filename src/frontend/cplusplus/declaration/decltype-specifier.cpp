@@ -206,10 +206,130 @@ bool semantic_analysis::names_dependent_entity(token_index first,
     return false;
 }
 
+/* the types of the casts written in x, analysed with the alias template's
+   names bound ([expr.cast]: ( type-id ) cast-expression); a type that does
+   not analyse is left out (the mangler then has no encoding) */
+void semantic_analysis::collect_written_casts(
+    SyntaxElement x, owned_array<written_binding> &found)
+{
+    if (!x.is_node())
+        return;
+    if (x.is(syntax_kind::cast_expression) && x.size() == 4 &&
+        x[1].is(syntax_kind::type_id)) {
+        size_t unsupported_before = unsupported.size();
+        qualified_type t;
+        analysis_result r = type_id(x[1], t);
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed) {
+            written_binding b;
+            SyntaxRef r = x;
+            b.cast = r.index().index();
+            b.type = t;
+            found.append(b);
+        }
+    }
+    /* typename Q::template X<args> ([temp.dep.type]/9): the qualifier's
+       type (element 0) and the type arguments, for the mangler */
+    if (x.is(syntax_kind::typename_specifier) && x.size() >= 3 &&
+        x[1].is(syntax_kind::nested_name_specifier) &&
+        x[x.size() - 1].is(syntax_kind::simple_template_id)) {
+        size_t before = found.size();
+        size_t unsupported_before = unsupported.size();
+        SyntaxRef r = x;
+        nominated_scope scope;
+        bool ok = nested_name_specifier(x[1], scope, true) ==
+                      analysis_result::well_formed &&
+                  scope.dependent;
+        if (ok) {
+            written_binding b;
+            b.cast = r.index().index();
+            b.element = 0;
+            b.type = qualified_type::make(scope.dependent, cv_none);
+            found.append(b);
+            SyntaxElement id = x[x.size() - 1];
+            uint32_t count = 0;
+            for (uint32_t i = 2; i + 1 < id.size() && ok; i++) {
+                if (id[i].is(preprocessing_op_or_punc::COMMA))
+                    continue;
+                if (id[i].is(syntax_kind::template_argument_list)) {
+                    ok = false;
+                    break;
+                }
+                qualified_type t;
+                ok = type_id(id[i], t) == analysis_result::well_formed;
+                if (ok) {
+                    written_binding a;
+                    a.cast = r.index().index();
+                    a.element = ++count;
+                    a.type = t;
+                    found.append(a);
+                }
+            }
+        }
+        unsupported.resize(unsupported_before);
+        if (!ok)
+            found.resize(before);
+    }
+    for (SyntaxElement c : x.elements())
+        collect_written_casts(c, found);
+}
+
+/* [temp.dep.type]/10.3: the names in n that an alias template's
+   instantiation bound to a type that depends on a template parameter (an
+   alias template used in another template's declaration), or to a pack of
+   such types */
+void semantic_analysis::collect_written_bindings(
+    SyntaxRef n, owned_array<written_binding> &found)
+{
+    collect_written_casts(n, found);
+    for (token_index t = n.first_token(); t < n.end_token(); t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        uint32_t id = tokens.identifier(t);
+        bool seen = false;
+        for (const written_binding &b : found)
+            seen = seen || b.identifier == id;
+        if (seen)
+            continue;
+        lookup_result x = lookup_unqualified(id, lookup_filter::any);
+        entity_index e = x.entity;
+        if (e) {
+            /* (a template parameter's own name is no binding) */
+            const struct type &r =
+                type_table[entity_table[e].type.unqualified()];
+            bool own = r.kind == type_kind::template_parameter &&
+                       entity_table[r.entity].name == id &&
+                       !entity_table[e].type.cv();
+            if (entity_table[e].kind == entity_kind::typedef_name && !own &&
+                depends_on_template_parameter(entity_table[e].type)) {
+                written_binding b;
+                b.identifier = id;
+                b.type = entity_table[e].type;
+                found.append(b);
+            }
+            continue;
+        }
+        entity_index pack = find_pack(id);
+        if (!pack || !pack_depends(pack))
+            continue;
+        for (uint32_t i = 0; i < entity_table[pack].member_count; i++) {
+            entity_index a = pack_elements[entity_table[pack].value + i];
+            written_binding b;
+            b.identifier = id;
+            b.element = i;
+            if (a)
+                b.type = entity_table[a].type;
+            found.append(b);
+        }
+    }
+}
+
 /* the dependent type of decltype-specifier n: one for the operands of the
-   same tokens */
+   same tokens and the same bindings of its names */
 type_index semantic_analysis::dependent_written_type(SyntaxRef n)
 {
+    owned_array<written_binding> bindings;
+    collect_written_bindings(n, bindings);
     for (entity_index e : dependent_written_types) {
         auto y =
             SyntaxRef(node_index(static_cast<uint32_t>(entity_table[e].value)));
@@ -219,11 +339,25 @@ type_index semantic_analysis::dependent_written_type(SyntaxRef n)
              i++)
             same =
                 same_token_spelling(n.first_token() + i, y.first_token() + i);
+        same = same && entity_table[e].member_count == bindings.size();
+        for (uint32_t i = 0; same && i < bindings.size(); i++) {
+            const written_binding &a =
+                written_bindings[entity_table[e].first_member + i];
+            same = a.identifier == bindings[i].identifier &&
+                   a.cast == bindings[i].cast &&
+                   a.element == bindings[i].element &&
+                   a.type == bindings[i].type;
+        }
         if (same)
             return entity_table[e].type.unqualified();
     }
     entity_index e = entity_table.make(entity_kind::dependent_written, 0, 0);
     entity_table[e].value = n.index().index();
+    entity_table[e].first_member =
+        static_cast<uint32_t>(written_bindings.size());
+    entity_table[e].member_count = static_cast<uint32_t>(bindings.size());
+    for (const written_binding &b : bindings)
+        written_bindings.append(b);
     entity_table[e].type = qualified_type::make(
         type_table.of_entity(type_kind::dependent, e), cv_none);
     dependent_written_types.append(e);

@@ -576,6 +576,17 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
         VTRY(c, conversion_function_call(
                     at, m, qualified_type::make(t1.unqualified(), cv_none),
                     false, converted));
+        require_complete(y.entity);
+        if (!converted && entity_table[y.entity].size &&
+            !has_conversion_functions(y.entity))
+            /* [dcl.init.ref]/5.4: "Otherwise, ... the initializer expression
+               is implicitly converted to a prvalue of type "cv1 T1"": a
+               complete class without a conversion function has none */
+            return ill_formed(at,
+                              "a class without a conversion function to the "
+                              "referenced type does not initialize a "
+                              "reference to it",
+                              "dcl.init.ref");
         if (!converted)
             return not_supported(at, "dcl.init.ref");
         return reference_binding(at, m, reference);
@@ -1694,10 +1705,12 @@ analysis_result semantic_analysis::class_list_initialization(
                                                result);
     }
     if (clauses.size() == 1 && !clauses[0].is(syntax_kind::braced_init_list)) {
-        /* (3.2): an element of the class's own type */
+        /* (3.2): an element of the class's own type or of a class derived
+           from it (CWG 1467) */
         expression_meaning e;
         VTRY(r, expression(clauses[0], e));
-        if (e.type.unqualified() == type.unqualified())
+        if (e.type.unqualified() == type.unqualified() ||
+            same_or_derived_class(e, c))
             return initialize_with(list, e, type, false, true, result);
         /* an element initialized from it: analysed again below */
     }

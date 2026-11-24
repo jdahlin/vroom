@@ -132,8 +132,19 @@ node_index parser::class_or_decltype(scope_index *region)
         /* a specialization's members are the primary template's, as far
            as the parser knows them */
         if (kind == name_kind::template_name && found &&
-            names.kind_of(found) == scope_kind::class_)
+            names.kind_of(found) == scope_kind::class_) {
             *region = found;
+            /* [temp.expl.spec]/7: an explicit specialization has its own
+               members: those of the one these arguments name */
+            for (size_t i = specialization_regions.size(); i-- > 0;) {
+                const specialization_region &r = specialization_regions[i];
+                if (r.primary == found &&
+                    same_template_id(r.first, id_first, r.end - r.first)) {
+                    *region = r.region;
+                    break;
+                }
+            }
+        }
         if (!qualifier)
             return 0;
         return finish_node(syntax_kind::class_or_decltype, mark, first);
