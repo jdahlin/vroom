@@ -431,9 +431,31 @@ analysis_result semantic_analysis::analyse_function_body_of(
         result = worse(result, block_items(compound, block));
     result = finish_return_deduction(definition, result, returns);
     uint32_t destructions = 0;
-    if (entity_table[f].special == special_member::destructor)
-        destructions = subobject_destructions(entity_table[f].enclosing,
-                                              first_token(compound));
+    if (entity_table[f].special == special_member::destructor) {
+        /* [class.dtor]/16: "A destructor ... is potentially invoked" for
+           each potentially constructed subobject ([class.dtor]/13): an
+           inaccessible or deleted destructor makes the definition
+           ill-formed ([class.access], [dcl.fct.def.delete]/2); clang
+           reports it at the class */
+        owned_array<entity_index> subobjects;
+        entity_index owner = entity_table[f].enclosing;
+        if (!entity_table[owner].union_)
+            subobject_classes(owner, subobjects);
+        for (entity_index sub : subobjects)
+            if (entity_table[sub].kind == entity_kind::class_type &&
+                (destructor_deleted(sub) ||
+                 subobject_destructor_inaccessible(owner, sub))) {
+                result = worse(
+                    result, ill_formed_at_token(
+                                entity_table[owner].class_key,
+                                "the destructor of a potentially constructed "
+                                "subobject is potentially invoked by the "
+                                "destructor and it is deleted or inaccessible",
+                                "class.dtor"));
+                break;
+            }
+        destructions = subobject_destructions(owner, first_token(compound));
+    }
     /* the function's semantic tree: its outermost block and parameters */
     uint32_t body =
         statement_node(semantic_kind::function_body, first_token(compound),

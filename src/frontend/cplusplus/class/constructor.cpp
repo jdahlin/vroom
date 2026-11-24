@@ -3133,7 +3133,8 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
         subobject_classes(f.enclosing, subobjects);
         for (entity_index sub : subobjects)
             if (entity_table[sub].kind == entity_kind::class_type &&
-                destructor_deleted(sub))
+                (destructor_deleted(sub) ||
+                 subobject_destructor_inaccessible(f.enclosing, sub)))
                 return ill_formed(definition,
                                   "the destructor of a potentially "
                                   "constructed subobject is potentially "
