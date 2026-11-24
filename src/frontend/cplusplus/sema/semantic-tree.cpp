@@ -52,6 +52,7 @@ const char *semantic_kind_name(semantic_kind kind)
         "member_pointer_access",
         "zero",
         "initializer_list",
+        "default_member_initializer",
         "bind_reference",
         "construct",
         "destroy",

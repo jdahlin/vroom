@@ -59,6 +59,7 @@ struct tree_checker {
     {
         return is_expression(k) || k == semantic_kind::zero ||
                k == semantic_kind::initializer_list ||
+               k == semantic_kind::default_member_initializer ||
                k == semantic_kind::bind_reference ||
                k == semantic_kind::construct || k == semantic_kind::destroy;
     }
@@ -296,6 +297,9 @@ struct tree_checker {
             break;
         case semantic_kind::initializer_list:
             list(n, tree_sort::initializer, "element");
+            break;
+        case semantic_kind::default_member_initializer:
+            child(n, node.a, tree_sort::initializer, false, "initializer");
             break;
         case semantic_kind::bind_reference:
             child(n, node.a, tree_sort::expression, false, "referent");

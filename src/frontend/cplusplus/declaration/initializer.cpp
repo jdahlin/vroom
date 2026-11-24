@@ -2122,6 +2122,7 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     entity_table[function_state.this_entity].defined = false;
     uint32_t locations_before = source_location_uses;
     analysis_result r = initializer(default_initializer, member_type, one);
+    entity_index this_object_entity = function_state.this_entity;
     current_scope = sf.outer_scope;
     function_state = static_cast<function_context &&>(outer);
     current_scope = outer_scope;
@@ -2131,7 +2132,19 @@ analysis_result semantic_analysis::member_default_in_aggregate(
        aggregate's initialization, which is not the initializer's */
     if (source_location_uses != locations_before)
         return not_supported(list, "dcl.init.aggr");
-    one.evaluation = constness::not_constant;
+    if (!one.node)
+        return not_supported(list, "dcl.init.aggr");
+    /* the evaluator binds `this` to the aggregate under construction, whose
+       earlier elements it has stored; its value is not known here */
+    expression_meaning wrapped;
+    wrapped.type = member_type;
+    wrapped.evaluation = constness::unknown;
+    uint32_t node = expression_node(semantic_kind::default_member_initializer,
+                                    wrapped, list.first_token());
+    semantics[node].a = one.node;
+    semantics[node].b = this_object_entity;
+    one.node = node;
+    one.evaluation = constness::unknown;
     return analysis_result::well_formed;
 }
 

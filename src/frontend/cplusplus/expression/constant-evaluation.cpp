@@ -942,8 +942,37 @@ constness semantic_analysis::evaluate_initialization(constant_evaluation &state,
             const entity &x = entity_table[c_entity];
             et = entity_table[class_members[x.first_member + i]].type;
         }
-        constness c = evaluate_initialization(state, et, element, read_only,
-                                              element_place | (first + i));
+        constness c;
+        if (c_entity && element != zero_initializer && element != zero_fill &&
+            semantics[element].kind ==
+                semantic_kind::default_member_initializer) {
+            /* [dcl.init.aggr]/5.1, [class.mem]/6: the default member
+               initializer's `this` is the aggregate, whose earlier elements
+               are stored; evaluated in a frame of its own */
+            const semantic_node wrapper = semantics[element];
+            constant_evaluation::object self;
+            self.entity = static_cast<entity_index>(wrapper.b);
+            self.frame = state.frames + 1;
+            self.value.kind = constant_value_kind::pointer;
+            self.value.first = place;
+            self.value.count = 1;
+            if (!(place & element_place))
+                self.value.stamp = state.objects[place].serial;
+            size_t saved_objects = state.objects.size();
+            uint32_t caller = state.frame, caller_frames = state.frames;
+            state.frames = state.frames + 1;
+            state.frame = state.frames;
+            append_object(state, self);
+            c = evaluate_initialization(state, et, wrapper.a, read_only,
+                                        element_place | (first + i));
+            if (state.objects.size() > saved_objects)
+                state.objects.resize(saved_objects);
+            state.frame = caller;
+            state.frames = caller_frames;
+        } else {
+            c = evaluate_initialization(state, et, element, read_only,
+                                        element_place | (first + i));
+        }
         if (c != constness::constant)
             return c;
         /* [class.bit]/1: a bit-field initialized holds the value modulo

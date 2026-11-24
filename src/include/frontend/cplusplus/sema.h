@@ -1311,6 +1311,10 @@ enum class semantic_kind : uint8_t {
     /* an array's elements, each initialized, in list[first .. first +
        count); the rest zero */
     initializer_list,
+    /* [dcl.init.aggr]/5.1: an element initialized from its default member
+       initializer that names members: a: the initializer, b: the `this` it
+       was analysed with, which the evaluator binds to the aggregate */
+    default_member_initializer,
     /* a: the glvalue a reference binds to; a prvalue: a temporary
        materialized from it ([conv.rval]) */
     bind_reference,
