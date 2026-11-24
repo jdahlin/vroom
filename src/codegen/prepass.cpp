@@ -895,6 +895,15 @@ static int codegen_prepass_node_walk(codegen_prepass_state *P, uint32_t n)
                 P->E->local_needs_memory[x->a] =
                     1; /* gen_init_local works on memory */
         }
+        if (codegen_symbol_attributes(c, x->a)->catch_count) {
+            /* a try block's handlers are entered from the landing pads, after the body */
+            uint32_t count;
+            const uint32_t *h = codegen_catch_scope(c, x->a, &count);
+
+            for (uint32_t i = 0; i < count; i++)
+                P->E->label_flags[h[2 * i + 1]] |=
+                    CODEGEN_LABEL_REFERENCED | CODEGEN_LABEL_BACKWARD;
+        }
         if (codegen_symbol_attributes(c, x->a)->cleanup ||
             (y->kind == AST_SYMBOL_VARIABLE &&
              (T(c, y->ty)->flags & AST_TYPE_FLAG_VLA)))

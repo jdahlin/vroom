@@ -605,7 +605,7 @@ typedef struct codegen_context {
     int64_t eh_selector_slot; /* ... and the selector (catch scopes) */
     codegen_eh_lsda eh_lsda;
     int eh_cleanup_limit; /* while cleanup k runs on the normal path: k (it no longer covers calls) */
-    bool eh_function, eh_in_pads;
+    bool eh_function, eh_in_pads, eh_cover;
     codegen_function_instance *function_instance;
     int inline_depth;
     uint32_t top_symbol; /* sym being emitted */
@@ -1464,7 +1464,7 @@ VPRIV void a64_eh_call_end(codegen_context *e, uint32_t site);
 VPRIV int a64_eh_cleanup_limit_set(codegen_context *e, int k);
 VPRIV void a64_eh_pads(codegen_context *e);
 VPRIV bool a64_eh_wanted(const codegen_context *e);
-VPRIV void a64_eh_table(const codegen_context *e, tbuf *b, uint32_t s);
+VPRIV void a64_eh_table(codegen_context *e, tbuf *b, uint32_t s);
 VPRIV uint32_t
 a64_eh_pad_node(codegen_context *e, uint32_t label,
                 bool catch_all); /* VIR: the node of a landing pad's label */
