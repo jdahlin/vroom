@@ -1360,7 +1360,12 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
        designates the corresponding member subobject" */
     case semantic_kind::member: {
         uint32_t whole = 0;
+        /* (a static member reads nothing of the object expression) */
+        uint32_t outer_reading = state.reading;
+        if (!entity_table[x.b].nonstatic_member)
+            state.reading = 0;
         c = evaluate_object(state, x.a, whole);
+        state.reading = outer_reading;
         if (c != constness::constant)
             return c;
         if (!(whole & element_place) && state.objects[whole].opaque) {
@@ -1494,8 +1499,11 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         uint32_t target = object;
         /* [expr.const]/5.16: the modification of an object whose lifetime
            did not begin within the evaluation */
-        if (place_read_only(state, target))
-            return CONST_NOT_CONSTANT;
+        if (place_read_only(state, target)) {
+            if (state.potential)
+                return CONST_NOT_CONSTANT;
+            return CONST_NOT_CONSTANT_RULE;
+        }
         constant_value y;
         c = evaluate_node(state, x.b, y);
         if (c != constness::constant)
@@ -1625,8 +1633,12 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             state.designating--;
             state.reading = outer_reading;
         } else {
+            /* (a discarded operand is not part of the read) */
+            uint32_t outer_reading = state.reading;
             constant_value discarded;
+            state.reading = 0;
             c = evaluate_node(state, x.a, discarded);
+            state.reading = outer_reading;
         }
         if (c != constness::constant)
             return c;
@@ -2077,6 +2089,8 @@ constness semantic_analysis::pointed_place(const constant_evaluation &state,
     } else if (index >= state.objects.size() ||
                (p.stamp && state.objects[index].serial != p.stamp)) {
         /* (a place that is gone, or another object's now) */
+        if (state.reading && !state.potential && p.stamp)
+            return CONST_NOT_CONSTANT_RULE;
         return CONST_UNKNOWN;
     }
     place = index;
