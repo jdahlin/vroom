@@ -188,7 +188,7 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
                cv-qualifier-seq pointer to member of class
                nested-name-specifier of type T"." */
             nominated_scope scope;
-            VTRY(r, nested_name_specifier(c, scope, true));
+            VTRY(r, nested_name_specifier(c, scope, true, true));
             if (!scope.global && !scope.dependent &&
                 (is_namespace(scope.entity) ||
                  entity_table[scope.entity].kind == entity_kind::enumeration))

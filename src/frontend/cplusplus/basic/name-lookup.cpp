@@ -809,15 +809,25 @@ bool semantic_analysis::argument_dependent_lookup(
  */
 analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                                          nominated_scope &scope,
-                                                         bool dependent_allowed)
+                                                         bool dependent_allowed,
+                                                         bool member_pointer)
 {
     bool qualified = false;
     scope = nominated_scope();
+    size_t part_count = 0;
+    for (auto counted : n.parts()) {
+        (void)counted;
+        part_count++;
+    }
+    size_t part_index = 0;
     if (n.global()) {
         scope.global = true;
         qualified = true;
     }
     for (auto part : n.parts()) {
+        /* [dcl.mptr]/2: the class of a pointer to member may be incomplete:
+           only its name is looked up, not its members ([basic.lookup.qual]/1) */
+        bool incomplete_allowed = member_pointer && ++part_index == part_count;
         /* [temp.names]/4: template before a simple-template-id after a
            nested-name-specifier */
         if (part.has_template && !qualified)
@@ -888,7 +898,8 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             }
             require_complete(st.entity);
             const entity &x = entity_table[st.entity];
-            if (!x.size && st.entity != defining_class && !x.defined)
+            if (!incomplete_allowed && !x.size && st.entity != defining_class &&
+                !x.defined)
                 return not_supported(n, "basic.lookup.qual");
             scope.entity = st.entity;
             scope.global = false;
@@ -973,7 +984,8 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
         if (x.kind == entity_kind::class_type) {
             /* [basic.lookup.qual]/1 with [class.qual]: the class's members
                are looked up, so it is complete or being defined */
-            if (!x.size && e != defining_class && !x.defined)
+            if (!incomplete_allowed && !x.size && e != defining_class &&
+                !x.defined)
                 return not_supported(n, "basic.lookup.qual");
         } else if (x.kind != entity_kind::namespace_entity &&
                    x.kind != entity_kind::enumeration) {

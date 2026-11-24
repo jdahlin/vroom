@@ -2622,7 +2622,8 @@ class semantic_analysis
     };
     analysis_result nested_name_specifier(NestedNameSpecifier n,
                                           nominated_scope &scope,
-                                          bool dependent_allowed = false);
+                                          bool dependent_allowed = false,
+                                          bool member_pointer = false);
     /* whether class c's scope, for unqualified lookup of name, is to be
        passed over: found only in a dependent base ([temp.dep]/3); unknown
        when a dependent base and another one both may have it */
