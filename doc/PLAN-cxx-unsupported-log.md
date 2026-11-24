@@ -932,3 +932,24 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   refusal (largest fixable: `A<T>::C::B<T2*>` 16; namespace-qualified
   `N::X<T>::f` 8).  Unsupported 34275 -> 34256.  cxx-spec-refs had failed
   on a [temp.spec.partial] citation since b677259b9 (11.14); fixed.
+- 11.22 (dc47817ff, de0aba8f2, a302ddb39, a69ff16c1): dynamic-exception-
+  specifications (`throw(int)`, `throw(...)`) are parsed in every edition
+  and an error in C++17 unless -Wno-dynamic-exception-spec (the 181-group
+  "noptr_declarator `(`" was mostly these); `recovered_error`: an error clang
+  recovers from does not stop its declaration, which is judged ill-formed at
+  its end with its entities declared (a dynamic specification, a data
+  member of incomplete type: the member dropped, the class complete).  Not
+  parsed 7447 -> 7324, unsupported 34256 -> 34194, we reject 383, we accept
+  5295 -> 5306: 11 new lines from exception specifications not compared yet
+  (redeclarations cwg5xx.cpp:1260, cxx1z-noexcept-function-type.cpp:17,
+  explicit instantiation explicit-instantiation.cpp:154,156, instantiated
+  class specs cwg13xx.cpp:279,293).  Open in the `(` group: `this`
+  explicit object parameters (parser stops at the parameter list; semantics
+  needed), `throw(T)` naming a type a later member declares (the parser
+  needs the name now), MS calling conventions `__cdecl`/`__unaligned` in
+  declarators.  Tried and reverted: a declarator-id `A<T>::x<U*>` without
+  `template` (partial specialization of a member variable template, 56
+  not-parsed declarations) parses (clang accepts) but the analysis refuses
+  it ([temp.mem], template/declared-templates.cpp:148): unsupported +31, so
+  the analysis must come first.  A class with an invalid base is no base in
+  clang (`B *b = &c` fails there; we accept).
