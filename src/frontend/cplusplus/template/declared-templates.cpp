@@ -73,7 +73,33 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
                     out_of_class_class_member(only, nullptr, true))
                     return member_definition_of_template(t, d, inner);
             }
-            return not_supported(t, "temp.mem");
+            /* what the nested template declaration is, for the detail */
+            if (d.is(syntax_kind::function_definition)) {
+                SyntaxRef nested = out_of_class_nested(d);
+                if (!nested)
+                    return not_supported_because(
+                        t, "temp.mem",
+                        "a member template function definition without a "
+                        "nested-name-specifier");
+                if (nested.size() != 2)
+                    return not_supported_because(
+                        t, "temp.mem",
+                        "a member template function definition of a member "
+                        "class (the nested-name-specifier has more than one "
+                        "component)");
+                return not_supported_because(
+                    t, "temp.mem",
+                    "a member template function definition whose "
+                    "nested-name-specifier is not a simple-template-id");
+            }
+            if (d.is(syntax_kind::simple_declaration))
+                return not_supported_because(
+                    t, "temp.mem",
+                    "a member template simple-declaration that is no "
+                    "variable or class definition outside its class");
+            return not_supported_because(t, "temp.mem",
+                                         "a member template of another kind of "
+                                         "declaration");
         },
         /* [temp.alias]/1: "A template-declaration in which the declaration
            is an alias-declaration declares the identifier to be an alias
