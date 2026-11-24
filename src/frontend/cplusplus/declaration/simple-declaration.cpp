@@ -370,9 +370,15 @@ node_index parser::block_or_function_declaration()
 {
     size_t mark = begin_node();
     token_index first = position;
+    /* [ext:gnu_attributes] a GNU attribute or __declspec before the
+       declaration is a decl-specifier as clang takes it, with no
+       attribute-specifier-seq's rule of an init-declarator-list */
+    bool gnu_first = at_gnu_attribute();
     node_index attributes = attribute_specifier_seq();
     if (failed())
         return 0;
+    if (gnu_first)
+        attributes = 0;
     decl_specifier_facts specifiers;
     /* [temp.res]/5: "a decl-specifier of the decl-specifier-seq of a
        simple-declaration or a function-definition in namespace scope" */

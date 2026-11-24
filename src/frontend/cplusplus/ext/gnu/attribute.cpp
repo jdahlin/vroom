@@ -454,6 +454,16 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"enable_if", gnu_enable_if},
 };
 
+/* [ext:microsoft_declspec] the attributes only __declspec has: on clang's
+   target (-triple aarch64-unknown-linux-gnu) align(N) is aligned's, and
+   empty_bases and layout_version are accepted with no effect on what vcc
+   generates (selectany and code_seg have rules of their own to check) */
+static const gnu_attribute_rule microsoft_declspec_rules[] = {
+    {"align", gnu_aligned},
+    {"empty_bases", 0},
+    {"layout_version", 0},
+};
+
 /* the rule of an attribute's spelling, nullptr if analysis has none */
 static const gnu_attribute_rule *gnu_attribute_rule_of(const char *name,
                                                        size_t length)
@@ -620,6 +630,14 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                 attributes.append(c);
         }
     }
+    bool declspec = false;
+    {
+        owned_buffer first_spelling;
+        tokens.spelling(n.first_token(), first_spelling.get());
+        declspec = first_spelling.size() >= 8 &&
+                   !memcmp(first_spelling.data() + first_spelling.size() - 8,
+                           "declspec", 8);
+    }
     for (SyntaxElement a : attributes) {
         token_index name_token = a.token();
         uint32_t count = a.size();
@@ -645,6 +663,11 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             VTRY(r, clang_ext_vector_count(at, a[2], g));
             continue;
         }
+        if (!rule && declspec)
+            for (const gnu_attribute_rule &r : microsoft_declspec_rules)
+                if (strlen(r.name) == spelling.size() &&
+                    !memcmp(r.name, spelling.data(), spelling.size()))
+                    rule = &r;
         if (!rule)
             return not_supported(at, "ext.gnu");
         /* clang's enable_if: the function a candidate only where the
