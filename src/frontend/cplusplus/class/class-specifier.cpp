@@ -770,6 +770,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     block_variables = owned_array<entity_index>();
     entity_index enclosing_scope = current_scope;
     result = worse(result, member_default_arguments(c));
+    result = worse(result, member_noexcept_specifiers(c));
     current_declaration = outer_declaration;
     bool incomplete_argument = false;
     if (specialization) {
@@ -2089,6 +2090,13 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         entity_table[e].type = type;
         entity_table[e].exceptions =
             resolved_exceptions(m.exceptions, type, m.gnu_flags);
+        if (deferred_noexcept) {
+            pending_noexcept p;
+            p.function = e;
+            p.specifier = deferred_noexcept;
+            pending_noexcepts.append(p);
+            deferred_noexcept = 0;
+        }
         entity_table[e].placeholder_return = placeholder_return;
         entity_table[e].nonstatic_member = !s.static_;
         entity_table[e].member_cv = function_cv;

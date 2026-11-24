@@ -3974,6 +3974,16 @@ class semantic_analysis
                          exception_specification b) const;
     analysis_result parameter_scope_noexcept(SyntaxRef n, bool member,
                                              bool &non_throwing);
+    /* the noexcept-specifier of the member function declarator analysed last
+       that waits for its class's closing } ([class.mem]/6), or 0 */
+    SyntaxRef deferred_noexcept = 0;
+    struct pending_noexcept {
+        entity_index function = 0;
+        SyntaxRef specifier = 0;
+    };
+    owned_array<pending_noexcept> pending_noexcepts;
+    bool noexcept_needs_complete_class(SyntaxRef n);
+    analysis_result member_noexcept_specifiers(entity_index c);
     /* the noexcept-specifiers left value-dependent in templates' own
        declarations */
     owned_array<SyntaxRef> dependent_exception_specifications;

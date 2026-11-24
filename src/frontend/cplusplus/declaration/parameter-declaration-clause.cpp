@@ -710,11 +710,13 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         /* not analysed with the declaration ([temp.inst]/15) */
         value.allows = exception_allowance::unknown;
     }
+    deferred_noexcept = 0;
     if (exceptions) {
         size_t dependent_before = dependent_exception_specifications.size();
         VTRY(r,
              parameter_scope_noexcept(exceptions, may_qualify, non_throwing));
-        if (dependent_exception_specifications.size() != dependent_before)
+        if (dependent_exception_specifications.size() != dependent_before ||
+            deferred_noexcept)
             value.allows = exception_allowance::unknown;
         else if (non_throwing)
             value.allows = exception_allowance::none;
