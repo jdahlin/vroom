@@ -126,7 +126,7 @@ template <class state_type> constness undefined_value(const state_type &state)
 {
     if (state.potential)
         return CONST_UNKNOWN;
-    return CONST_NOT_CONSTANT;
+    return CONST_NOT_CONSTANT_RULE;
 }
 
 /* an object of the evaluation, with the serial that tells it from the
