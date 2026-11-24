@@ -1266,17 +1266,22 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
            the operator function is selected by overload resolution
            ([over.call.object])" and the expression "interpreted as
            postfix-expression . operator () (expression-list_opt)" */
-        if (!expanded.empty())
-            return not_supported(n, "temp.variadic");
         owned_array<SyntaxElement> operand_syntax;
         owned_array<expression_meaning> operands;
         operand_syntax.append(callee);
         operands.append(f);
-        for (SyntaxElement a : arguments) {
+        for (size_t i = 0; i < arguments.size(); i++) {
+            SyntaxElement a = arguments[i];
             if (a.is(syntax_kind::braced_init_list))
                 return not_supported(n, "over.ics.list");
             expression_meaning e;
-            VTRY_SET(r, expression(a, e));
+            if (i < expanded.size() && expanded.size() == arguments.size()) {
+                /* [temp.variadic]/5: an element of a pack expansion,
+                   analysed above */
+                e = expanded[i];
+            } else {
+                VTRY_SET(r, expression(a, e));
+            }
             operand_syntax.append(a);
             operands.append(e);
         }
