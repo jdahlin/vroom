@@ -2232,6 +2232,16 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         }
         if (copy_usable)
             copy_ok = true;
+        /* [class.default.ctor]/2.1: a constructor template whose template
+           arguments all have defaults and that takes no parameter (libc++'s
+           unique_ptr()) is the subobject's default constructor */
+        if (!default_ok && sub.constructor_templates && !sub.union_) {
+            owned_array<overload_candidate> found;
+            VTRY(probe, constructor_template_candidates(n, k, nullptr, 0, false,
+                                                        found));
+            if (!found.empty())
+                default_ok = true;
+        }
         if (move_seen && !copies_bytes(k))
             move_declared = true;
         /* the subobject's move, by overload resolution on an xvalue: its
