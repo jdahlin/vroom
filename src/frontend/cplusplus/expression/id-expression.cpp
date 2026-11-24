@@ -924,6 +924,10 @@ analysis_result semantic_analysis::qualified_id(QualifiedId n,
         m = expression_meaning();
         return named_entity(t, e, m);
     }
+    if (!e && name == operator_name(preprocessing_op_or_punc::EQUAL))
+        /* [class.copy.assign]/2: the implicitly-declared assignment
+           operators are declared only when not trivial */
+        return not_supported(n, "class.copy.assign");
     if (!e)
         /* [class.qual]/1: the name after it is looked up in the class
            ([class.member.lookup]): finding nothing, clang's "no member

@@ -399,6 +399,14 @@ analysis_result semantic_analysis::member_object(SyntaxRef n, bool arrow,
             if (fundamental_of(m.type) == fundamental_type::none &&
                 pointer.kind != type_kind::pointer)
                 return not_supported(n, "expr.ref");
+            /* [ext:clang_ext_vector_type]: v->xy, an element access of a
+               vector, is not analysed */
+            if (pointer.kind == type_kind::pointer &&
+                (type_table[pointer.operand.unqualified()].kind ==
+                     type_kind::ext_vector ||
+                 type_table[pointer.operand.unqualified()].kind ==
+                     type_kind::vector))
+                return not_supported(n, "ext.clang");
             return ill_formed(n,
                               "the first expression of -> shall be a "
                               "pointer to a class",
