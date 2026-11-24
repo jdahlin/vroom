@@ -1361,6 +1361,19 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
     initialized.resize(subobjects.size());
     for (uint32_t &i : initialized)
         i = 0;
+    /* [class.base.init]/2: the distinct members of an anonymous struct
+       share its unnamed object's slot: their initializations run in the
+       order written */
+    auto set_slot = [&](size_t slot, token_index at, uint32_t statement) {
+        if (!initialized[slot]) {
+            initialized[slot] = statement;
+            return;
+        }
+        owned_array<uint32_t> both;
+        both.append(initialized[slot]);
+        both.append(statement);
+        initialized[slot] = block_statement(at, both);
+    };
     for (size_t idx = 0; idx < items.size(); idx++) {
         SyntaxElement item = items[idx];
         /* mem-initializer-id ( expression-list_opt ) or braced-init-list */
@@ -1518,9 +1531,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                             semantic_kind::construct &&
                         !semantics[listed.node].a) {
                         semantics[listed.node].a = object.node;
-                        initialized[slot] =
+                        set_slot(
+                            slot, id,
                             statement_node(semantic_kind::expression_statement,
-                                           id, listed.node);
+                                           id, listed.node));
                         if (entity_table[e].virtual_base)
                             initialized[slot] =
                                 complete_object(initialized[slot]);
@@ -1531,8 +1545,8 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     if (base ||
                         !aggregate_value_stored(record.entity, listed.node))
                         return not_supported(item, "class.base.init");
-                    initialized[slot] =
-                        subobject_store(object, type, id, listed.node);
+                    set_slot(slot, id,
+                             subobject_store(object, type, id, listed.node));
                     continue;
                 } else if (!written)
                     return not_supported(item, "class.base.init");
@@ -1565,16 +1579,17 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                         entity_table[record.entity].data_size !=
                             entity_table[record.entity].size)
                         return not_supported(item, "class.copy.ctor");
-                    initialized[slot] =
-                        subobject_store(object, type, id, value.node);
+                    set_slot(slot, id,
+                             subobject_store(object, type, id, value.node));
                     continue;
                 }
                 if (elided)
                     /* (the copy or move constructor of the class is called:
                    [class.copy.elision]/1 calls none) */
                     return not_supported(item, "class.copy.elision");
-                initialized[slot] = statement_node(
-                    semantic_kind::expression_statement, id, value.node);
+                set_slot(slot, id,
+                         statement_node(semantic_kind::expression_statement, id,
+                                        value.node));
                 if (entity_table[e].virtual_base)
                     initialized[slot] = complete_object(initialized[slot]);
                 continue;
@@ -1632,7 +1647,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 return r;
             /* the member's initialization: its bytes, stored as by an
            assignment to (*this).member */
-            initialized[slot] = subobject_store(object, type, id, value.node);
+            set_slot(slot, id, subobject_store(object, type, id, value.node));
         }
     }
     /* [class.base.init]/9: "In a non-delegating constructor, if a given
