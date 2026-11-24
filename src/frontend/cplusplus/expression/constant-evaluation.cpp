@@ -986,8 +986,11 @@ constness semantic_analysis::evaluate_union_initialization(
         if (given)
             value = items[0];
     }
-    if (!member && u.member_count)
-        member = class_members[u.first_member];
+    /* [dcl.init.aggr]/5.2, [dcl.init]/6: the first member that is not an
+       unnamed bit-field */
+    for (uint32_t i = 0; !member && i < u.member_count; i++)
+        if (initializer_member(class_members[u.first_member + i]))
+            member = class_members[u.first_member + i];
     if (!member)
         return CONST_UNKNOWN;
     place_value(state, place).member = member;
