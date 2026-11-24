@@ -831,3 +831,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   names clang also calls undeclared; real groups: `using enum` through a
   typedef, namespace-scope anonymous union, enumerators after a refused one,
   a refused pointer-to-member constexpr.
+- 11.13 (0bf833d7d, 22b5fbdb5, 9fc0bf7c9, c9bf6d8f9): namespace-scope
+  static anonymous union (and a static member of an anonymous union is
+  ill-formed: we accept -2); `using enum` of a typedef; enumerators after a
+  refused initializer (types/constants refuted -4/-4); --why's holder()
+  skips declarations refused for the same name, so the real roots show:
+  [temp.class] class-template.cpp:43 286, [temp.expl.spec]
+  specializations.cpp:691 274, CTAD placeholder as a return type
+  (decl-specifier.cpp:1420) 194, structured bindings (id-expression.cpp:640)
+  208.  Unsupported 34674 -> 34625, we reject 390, we accept 5304.
