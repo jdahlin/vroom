@@ -7,6 +7,7 @@
  * Handling"; the encodings are GCC's (DW_EH_PE_pcrel|sdata4, the types indirect).
  */
 #include "codegen-internal.h"
+#include "vir/vir.h"
 
 VPRIV uint32_t codegen_eh_type_index(codegen_context *e, codegen_eh_lsda *l,
                                      uint32_t symbol)
@@ -19,6 +20,9 @@ VPRIV uint32_t codegen_eh_type_index(codegen_context *e, codegen_eh_lsda *l,
     if (l->type_count == 63 || l->type_count == CODEGEN_EH_TYPES)
         codegen_fatal_report(e, 0, "too many exception types in one function");
     l->types[l->type_count++] = symbol;
+    if (symbol) /* (the type_info object is emitted if it is this unit's) */
+        codegen_reference_note(
+            e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, symbol));
     return l->type_count;
 }
 
@@ -133,4 +137,39 @@ VPRIV void codegen_eh_table_end(tbuf *b, cc *c, const codegen_eh_lsda *l,
         codegen_symbol_name_append(c, b, l->types[i - 1]);
         vtext_string_append(b, "\n\t.popsection\n");
     }
+}
+
+/* VIR: the call site action of landing pad block b, from its landingpad's clauses (extra: flags with the
+   cleanup bit, the count, per clause its symbol reference + 1, 0: catch (...)) */
+VPRIV uint32_t codegen_eh_vir_action(codegen_context *e, codegen_eh_lsda *l,
+                                     const vir_function *f, uint32_t b)
+{
+    const vir_block *k = &f->blocks[b];
+    codegen_eh_chain chain;
+
+    memset(&chain, 0, sizeof chain);
+    for (uint32_t i = k->first; i < k->first + k->insn_count; i++) {
+        const vir_insn *x = &f->insns[i];
+        uint32_t n;
+
+        if (vir_opcode_is_constant(x->op))
+            continue;
+        if (x->op != VIR_OP_LANDINGPAD)
+            break;
+        n = f->extra[x->a + 1];
+        chain.cleanup = f->extra[x->a] & 1;
+        for (uint32_t c = 0; c < n && !chain.closed; c++) {
+            uint32_t t = f->extra[x->a + 2 + c];
+
+            if (chain.count == CODEGEN_EH_CHAIN_TYPES)
+                break;
+            if (!t)
+                chain.closed = true;
+            else
+                t = CODEGEN_REFERENCE_INDEX(t - 1);
+            chain.types[chain.count++] = t;
+        }
+        break;
+    }
+    return codegen_eh_action(e, l, &chain);
 }

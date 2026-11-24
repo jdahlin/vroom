@@ -62,6 +62,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
     case VIR_OP_CALL:
     case VIR_OP_INVOKE:
     case VIR_OP_LANDINGPAD:
+    case VIR_OP_EHTYPEID:
     case VIR_OP_RESUME:
     case VIR_OP_MEMCPY:
     case VIR_OP_MEMSET:

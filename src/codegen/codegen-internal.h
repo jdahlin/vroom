@@ -892,8 +892,9 @@ struct codegen_eh_site {
 };
 struct codegen_eh_node {
     uint32_t symbol, parent, pad;
-    bool
-        catch_all; /* VIR's landing pads: a catch (...) pad (action 1), not a cleanup */
+    uint32_t
+        action; /* VIR's landing pads (vir): the call site action of the pad's clauses */
+    bool vir;
 };
 
 typedef struct a64_call_argument {
@@ -1151,6 +1152,10 @@ VPRIV void codegen_eh_chain_node(
 VPRIV uint32_t
 codegen_eh_action(codegen_context *e, codegen_eh_lsda *l,
                   const codegen_eh_chain *k); /* a call site's action field */
+struct vir_function;
+VPRIV uint32_t codegen_eh_vir_action(
+    codegen_context *e, codegen_eh_lsda *l, const struct vir_function *f,
+    uint32_t landingpad_block); /* the action of a VIR landing pad's clauses */
 VPRIV void codegen_eh_table_begin(tbuf *b, const codegen_eh_lsda *l,
                                   uint32_t id); /* up to the call sites */
 VPRIV void codegen_eh_table_end(tbuf *b, cc *c, const codegen_eh_lsda *l,
@@ -1467,7 +1472,7 @@ VPRIV bool a64_eh_wanted(const codegen_context *e);
 VPRIV void a64_eh_table(codegen_context *e, tbuf *b, uint32_t s);
 VPRIV uint32_t
 a64_eh_pad_node(codegen_context *e, uint32_t label,
-                bool catch_all); /* VIR: the node of a landing pad's label */
+                uint32_t action); /* VIR: the node of a landing pad's label */
 VPRIV uint32_t a64_eh_site_begin(codegen_context *e, uint32_t node);
 VPRIV uint32_t user_label(codegen_context *e, uint32_t l);
 VPRIV codegen_value gen_block(codegen_context *e, uint32_t n, bool want);

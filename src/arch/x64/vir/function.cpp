@@ -323,9 +323,10 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         walk_state *W = e->walk_state;
 
         W->eh_nsites = W->eh_marks = W->eh_term = 0;
+        W->eh_vir = 1;
+        memset(&W->eh_lsda, 0, sizeof W->eh_lsda);
         W->eh_overflow = W->eh_in_pads = 0;
         W->eh_fn = (f->flags & VIR_FUNCTION_FLAG_EH) != 0;
-        L.eh_catch_all_block = VIR_BLOCK_NONE;
         if (W->eh_fn && f->block_count + 1 >= WALK_CLEANUP_MAX) {
             *why = VIRBUILD_FAILURE(exceptions_lowering);
             e->vir_try = false;

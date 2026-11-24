@@ -180,8 +180,10 @@ typedef struct virbuild_context {
 #define VIRBUILD_FLOAT_REGISTER_FIRST 192 /* float names 192..254 */
 #define VIRBUILD_RESULT_VARIABLE 255      /* the result variable */
 #define VIRBUILD_JUMP_VARIABLE 257
+#define VIRBUILD_SELECTOR_VARIABLE                                             \
+    258 /* a landing pad's selector, for its catch scopes' dispatch */
 #define VIRBUILD_LOCAL_VARIABLE_FIRST                                          \
-    258 /* locals: VIRBUILD_LOCAL_VARIABLE_FIRST + k */
+    259 /* locals: VIRBUILD_LOCAL_VARIABLE_FIRST + k */
 #define VIRBUILD_BLOCK_NONE 0xffffffffu
 
 #define VIRBUILD_ARRAY_GROW(p, n, cap, k)                                      \
@@ -289,6 +291,10 @@ VPRIV uint32_t virbuild_label_block(codegen_context *e, uint32_t l);
 VPRIV void virbuild_block_terminate(codegen_context *e, uint32_t op, uint32_t a,
                                     uint32_t b, uint32_t c, uint32_t fl);
 VPRIV void virbuild_branch_emit(codegen_context *e, uint32_t blk);
+VPRIV uint32_t virbuild_integer_condition_code(int op, bool sgn);
+VPRIV void virbuild_branch_if(
+    codegen_context *e, uint32_t c, uint32_t lbl,
+    bool nz); /* to the walker's label lbl if c (an i32 or i64) is nonzero */
 
 /* ssa-construction.c */
 VPRIV void virbuild_variable_table_clear(virbuild_context *V);

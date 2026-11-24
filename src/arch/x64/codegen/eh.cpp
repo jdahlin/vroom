@@ -186,6 +186,8 @@ static uint32_t x64_eh_site_action(codegen_context *e, uint32_t node)
     codegen_eh_chain k;
 
     memset(&k, 0, sizeof k);
+    if (W->eh_vir)
+        return W->eh_action[node];
     if (node == UINT32_MAX) { /* (the terminate pad: catch (...)) */
         k.types[k.count++] = 0;
         k.closed = true;

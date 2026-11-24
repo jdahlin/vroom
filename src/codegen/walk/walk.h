@@ -147,6 +147,9 @@ typedef struct walk_state {
     } eh_sites[WALK_EH_SITES];
     uint32_t eh_nsites, eh_marks, eh_term, eh_pad[WALK_CLEANUP_MAX];
     uint8_t eh_fn, eh_in_pads, eh_overflow;
+    uint32_t eh_action
+        [WALK_CLEANUP_MAX]; /* VIR's lowering: per landing pad node, its call site action (eh_vir) */
+    uint8_t eh_vir;
     codegen_eh_lsda
         eh_lsda; /* the catch types and actions (codegen/eh-table.cpp) */
     uint8_t *

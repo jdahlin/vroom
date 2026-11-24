@@ -61,7 +61,7 @@ static uint32_t a64_eh_node_current(codegen_context *e)
                                      "exception table");
             k = ++e->eh_node_count;
             e->eh_nodes[k].symbol = s, e->eh_nodes[k].parent = node,
-            e->eh_nodes[k].pad = 0, e->eh_nodes[k].catch_all = false;
+            e->eh_nodes[k].pad = 0, e->eh_nodes[k].vir = false;
         }
         node = k;
     }
@@ -104,7 +104,7 @@ VPRIV uint32_t a64_eh_call_begin(codegen_context *e)
 
 /* VIR's lowering: the node standing for the landing pad at label (made on first use) */
 VPRIV uint32_t a64_eh_pad_node(codegen_context *e, uint32_t label,
-                               bool catch_all)
+                               uint32_t action)
 {
     for (uint32_t k = 1; k <= e->eh_node_count; k++)
         if (e->eh_nodes[k].pad == label)
@@ -115,7 +115,7 @@ VPRIV uint32_t a64_eh_pad_node(codegen_context *e, uint32_t label,
 
     e->eh_nodes[k] =
         VCC_LITERAL(struct codegen_eh_node, .symbol = 0, .parent = 0,
-                    .pad = label, .catch_all = catch_all);
+                    .pad = label, .action = action, .vir = true);
     return k;
 }
 
@@ -318,8 +318,10 @@ VPRIV bool a64_eh_wanted(const codegen_context *e)
         const struct codegen_eh_site *t = &e->eh_sites[k];
         uint32_t pad = e->eh_terminate_pad;
 
-        if (t->node != UINT32_MAX)
+        if (t->node != UINT32_MAX && t->node)
             pad = e->eh_nodes[t->node].pad;
+        else if (t->node == 0)
+            pad = 0;
         any = pad && seen[pad] && seen[t->begin] && t->end && seen[t->end];
     }
     free(seen);
@@ -346,14 +348,18 @@ VPRIV void a64_eh_table(codegen_context *e, tbuf *b, uint32_t s)
             continue;
         if (in_pad && term)
             pad = e->eh_terminate_pad;
-        else if (!in_pad)
+        else if (!in_pad && t->node)
             pad = e->eh_nodes[t->node].pad;
         if (pad && !seen[pad])
             pad = 0;
         pads[k] = pad;
         if (!pad)
             continue;
-        if (in_pad || e->eh_nodes[t->node].catch_all) {
+        if (!in_pad && e->eh_nodes[t->node].vir) {
+            action[k] = e->eh_nodes[t->node].action;
+            continue;
+        }
+        if (in_pad) {
             chain.types[chain.count++] = 0; /* (catch (...)) */
             chain.closed = true;
         } else
