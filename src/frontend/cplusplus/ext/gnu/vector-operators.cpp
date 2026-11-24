@@ -122,8 +122,25 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
     if (!(left_vector && right_vector)) {
         if (!is_arithmetic(scalar->type))
             return not_supported(n, "ext.gnu");
-        if (!shift && !vector_scalar_fits(*scalar, element))
-            return not_supported(n, "ext.gnu");
+        if (!shift && !vector_scalar_fits(*scalar, element)) {
+            /* a floating constant of another type: converted when it is
+               in the range of the element (clang: "as implicit
+               conversion would cause truncation" otherwise) */
+            fundamental_type e = fundamental_of(element);
+            if (scalar->evaluation != constness::constant ||
+                !fundamental_type_is_floating(e) ||
+                fundamental_of(scalar->type) != fundamental_type::double_ ||
+                e != fundamental_type::float_)
+                return not_supported(n, "ext.gnu");
+            double v = floating_value(scalar->value);
+            if (v > 3.4028234663852886e38 || v < -3.4028234663852886e38)
+                return ill_formed(n,
+                                  "a scalar cannot be converted to a vector "
+                                  "of a narrower element type, as the "
+                                  "implicit conversion would cause "
+                                  "truncation",
+                                  "ext.gnu");
+        }
         VTRY(r, implicit_conversion(n, *scalar, element, false));
     }
     m = expression_meaning();
