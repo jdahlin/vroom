@@ -170,6 +170,7 @@ void semantic_analysis::bind_template_argument(entity_index scope,
     const struct type &at = type_table[a.type.unqualified()];
     if (a.kind == template_argument::kind_t::value &&
         (address_parameter_type(a.type) ||
+         at.kind == type_kind::pointer_to_member ||
          (at.kind == type_kind::fundamental &&
           at.fundamental == fundamental_type::std_nullptr_t))) {
         /* an address or null pointer: an entity whose uses have no rules
@@ -748,6 +749,8 @@ analysis_result semantic_analysis::template_argument_for(
     }
     if (address_parameter_type(to))
         return address_argument(at, to, written, out);
+    if (type_table[to.unqualified()].kind == type_kind::pointer_to_member)
+        return member_pointer_argument(at, to, written, out);
     const struct type &tr = type_table[to.unqualified()];
     if (tr.kind == type_kind::fundamental &&
         tr.fundamental == fundamental_type::std_nullptr_t) {
@@ -781,15 +784,61 @@ analysis_result semantic_analysis::template_argument_for(
         out.value = m.value;
         return analysis_result::well_formed;
     }
-    if (!is_integral(m.type) || !is_integral(to))
-        return not_supported(at, "temp.arg.nontype");
+    if (!is_integral(to)) {
+        const char *what = "parameter is of a type that is not integral";
+        switch (type_table[to.unqualified()].kind) {
+        case type_kind::pointer_to_member:
+            what = "parameter is a pointer to member";
+            break;
+        case type_kind::lvalue_reference:
+        case type_kind::rvalue_reference:
+            what = "parameter is a reference";
+            break;
+        case type_kind::pointer:
+            what = "parameter is a pointer";
+            break;
+        case type_kind::class_type:
+            what = "parameter is of class type";
+            break;
+        case type_kind::fundamental:
+            what = "parameter is of floating-point type";
+            break;
+        default:
+            break;
+        }
+        return not_supported_because(at, "temp.arg.nontype", what);
+    }
+    if (!is_integral(m.type)) {
+        const char *what = "argument is of a type that is not integral";
+        switch (type_table[m.type.unqualified()].kind) {
+        case type_kind::class_type:
+            what = "argument is of class type";
+            break;
+        case type_kind::pointer:
+            what = "argument is a pointer";
+            break;
+        case type_kind::fundamental:
+            what = "argument is of floating-point type";
+            break;
+        case type_kind::dependent:
+            what = "argument is of a dependent type";
+            break;
+        case type_kind::enumeration:
+            what = "argument is of enumeration type";
+            break;
+        default:
+            break;
+        }
+        return not_supported_because(at, "temp.arg.nontype", what);
+    }
     bool constant = false;
     r = integral_constant_expression(at, m, constant);
     if (r == analysis_result::well_formed && constant)
         VTRY_SET(r, converted_constant_expression(at, m, fundamental_of(to),
                                                   constant));
     if (!constant)
-        return not_supported(at, "temp.arg.nontype");
+        return not_supported_because(at, "temp.arg.nontype",
+                                     "argument is not constant");
     out.kind = template_argument::kind_t::value;
     out.type = to;
     out.value = m.value;
@@ -852,6 +901,53 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         same = r.operand == x.type;
     if (!same)
         return not_supported(at, "temp.arg.nontype");
+    out.value = e;
+    return analysis_result::well_formed;
+}
+
+/*
+ * [temp.arg.nontype]/2: a pointer to member parameter's argument, a
+ * converted constant expression of the parameter's type ([expr.const]/10):
+ * nullptr, or &C::m of exactly that type naming one non-static data member
+ * or one function.  The value is the member's entity (0 for a null
+ * member pointer); its uses have no rules yet, as an address's.
+ */
+analysis_result
+semantic_analysis::member_pointer_argument(SyntaxRef at, qualified_type to,
+                                           SyntaxElement written,
+                                           template_argument &out)
+{
+    out.kind = template_argument::kind_t::value;
+    out.type = to;
+    if (written.is_token() && written.keyword() == standard_keyword::nullptr_)
+        return analysis_result::well_formed;
+    expression_meaning m;
+    VTRY(r, expression(written, m));
+    if (!written.is(syntax_kind::unary_expression) || written.size() != 2 ||
+        !written[0].is(preprocessing_op_or_punc::AMPERSAND))
+        return not_supported_because(at, "temp.arg.nontype",
+                                     "pointer to member argument is not &C::m "
+                                     "or nullptr");
+    if (!(m.type.unqualified() == to.unqualified()))
+        return not_supported_because(at, "temp.arg.nontype",
+                                     "pointer to member argument is of "
+                                     "another type than the parameter");
+    entity_index e = 0;
+    if (m.node && semantics[m.node].kind == semantic_kind::member_pointer)
+        e = semantics[m.node].a;
+    if (!e ||
+        (entity_table[e].kind != entity_kind::variable &&
+         entity_table[e].kind != entity_kind::function) ||
+        entity_table[e].instantiation || entity_table[e].next_overload ||
+        entity_table[e].immediate ||
+        (entity_table[e].kind == entity_kind::function &&
+         entity_table[e].constexpr_))
+        /* (a consteval member function is not recorded: a constexpr one is
+           left out; a consteval function's address is no constant expression,
+           [expr.const]/13) */
+        return not_supported_because(at, "temp.arg.nontype",
+                                     "pointer to member argument names no "
+                                     "one member that has an address");
     out.value = e;
     return analysis_result::well_formed;
 }

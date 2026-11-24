@@ -5258,6 +5258,9 @@ class semantic_analysis
     uint32_t own_type_parameter_position(qualified_type t, entity_index scope,
                                          uint32_t first) const;
     bool address_parameter_type(qualified_type t) const;
+    analysis_result member_pointer_argument(SyntaxRef at, qualified_type to,
+                                            SyntaxElement written,
+                                            template_argument &out);
     /* [temp.arg.nontype]/3: an argument for one of those */
     analysis_result address_argument(SyntaxRef at, qualified_type to,
                                      SyntaxElement written,
