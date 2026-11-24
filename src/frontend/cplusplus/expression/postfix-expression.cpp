@@ -1307,6 +1307,12 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         function_type = f.type;
         if (member)
             member = semantics[f.node].b;
+    } else if (set.size() == 1 && f.node) {
+        /* the one function the name names is the function called (its use
+           is not the name's, a callee's); [dcl.fct.def.delete]/2's deleted
+           calls of it are not diagnosed here yet (a template argument's
+           substitution error is attributed to the use) */
+        VTRY(du, unavailable_use(semantics[f.node].at, set[0]));
     }
     return call_with(n, f, function_type, object, member, arguments, early, m);
 }

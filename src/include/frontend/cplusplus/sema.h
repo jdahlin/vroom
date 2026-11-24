@@ -410,6 +410,10 @@ enum gnu_attribute_flag : uint32_t {
     /* clang's require_constant_initialization: on a variable with static
        or thread storage duration, constinit's rule ([dcl.constinit]/2) */
     gnu_require_constant_initialization = 1u << 27,
+    /* clang's unavailable, with or without a message: a use of the function
+       or variable is an error, except inside an unavailable function
+       (unavailable_use) */
+    gnu_unavailable = 1u << 28,
 };
 /* the GNU attributes of a function's own symbol that analysis carries to
    member functions and function templates */
@@ -6474,6 +6478,8 @@ class semantic_analysis
     bool explicit_body(SyntaxElement body, standard_keyword k) const;
     bool deleted_body(SyntaxElement body) const;
     analysis_result deleted_definition(SyntaxRef n, entity_index f);
+    /* a use of an entity declared unavailable (clang: "'f' is unavailable") */
+    analysis_result unavailable_use(token_index at, entity_index e);
     analysis_result deleted_use(token_index at, entity_index f);
     /* [new.delete.placement]/1: f is a global allocation function
        taking (std::size_t, void *), the reserved placement form */

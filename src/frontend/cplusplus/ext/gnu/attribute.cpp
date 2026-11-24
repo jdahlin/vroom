@@ -369,6 +369,8 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"alloc_align", 0},
     {"warn_unused_result", 0},
     {"deprecated", 0},
+    /* clang's unavailable("message"): a use is an error (unavailable_use) */
+    {"unavailable", gnu_unavailable},
     {"sentinel", 0},
     {"flatten", 0},
     {"no_icf", 0},
@@ -774,6 +776,15 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             if (count != 4 || !a[2].is_token())
                 return not_supported(at, "ext.gnu");
             VTRY(r, add_gnu_abi_tag(at, a[2].token(), g));
+            continue;
+        }
+        if (rule->flag == gnu_unavailable) {
+            /* at most one ordinary string-literal, the message */
+            if (count > 1 && count != 3 &&
+                (count != 4 || !a[2].is_token() ||
+                 tokens[a[2].token()].literal != literal_kind::string_literal))
+                return not_supported(at, "ext.gnu");
+            g.flags |= gnu_unavailable;
             continue;
         }
         /* the others take no arguments analysis has rules for (format's

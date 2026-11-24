@@ -51,8 +51,31 @@ analysis_result semantic_analysis::deleted_definition(SyntaxRef n,
     return analysis_result::well_formed;
 }
 
+/* clang: "'f' is unavailable" for a use of an entity declared with the
+   unavailable attribute, except where the use is in an unavailable function
+   (the diagnostic is delayed there, as a deprecated one is) */
+analysis_result semantic_analysis::unavailable_use(token_index at,
+                                                   entity_index e)
+{
+    if (!(entity_table[e].gnu_flags & gnu_unavailable))
+        return analysis_result::well_formed;
+    /* clang delays the diagnostic in an unavailable function, and in a member
+       of an unavailable class; a default argument is analysed before the
+       function's attributes are all known */
+    if (default_argument_function)
+        return not_supported(current_declaration, "ext.gnu");
+    if (function_state.active && function_state.function)
+        for (entity_index c = function_state.function; c;
+             c = entity_table[c].enclosing)
+            if (entity_table[c].gnu_flags & gnu_unavailable)
+                return analysis_result::well_formed;
+    return ill_formed_at_token(at, "the entity is declared unavailable",
+                               "ext.gnu");
+}
+
 analysis_result semantic_analysis::deleted_use(token_index at, entity_index f)
 {
+    VTRY(u, unavailable_use(at, f));
     if (!entity_table[f].deleted)
         return analysis_result::well_formed;
     /* /2 */

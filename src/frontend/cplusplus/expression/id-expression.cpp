@@ -718,6 +718,9 @@ analysis_result semantic_analysis::named_entity(token_index t, entity_index e,
         ((!x.next_overload && t != overloaded_callee) || chosen)) {
         VTRY(r, deleted_use(t, e));
     }
+    if (x.kind == entity_kind::variable) {
+        VTRY(r, unavailable_use(t, e));
+    }
     if (x.nonstatic_member)
         return implicit_member_access(t, e, m);
     if (x.enclosing &&
