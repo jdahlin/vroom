@@ -2748,6 +2748,7 @@ class semantic_analysis
     bool same_abi_tag(token_index a, token_index b) const;
     bool class_specifier_before(SyntaxRef seq, uint32_t i) const;
     bool gnu_or_without_effect(SyntaxRef n) const;
+    bool destroying_delete_tag(qualified_type t) const;
     token_index statement_only_attribute(token_index first,
                                          token_index end) const;
     bool standard_attribute_token(token_index t, token_index first,

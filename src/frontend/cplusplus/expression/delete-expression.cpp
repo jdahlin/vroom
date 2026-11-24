@@ -126,6 +126,56 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     if (array) {
         VTRY_SET(r, array_cookie(n, c, object_type, global, cookie));
     }
+    /* [expr.delete]/10: "If any of the deallocation functions is a
+       destroying operator delete, all deallocation functions that are not
+       destroying operator deletes are eliminated"; /6: it is the function
+       that destroys the object, no destructor is invoked */
+    entity_index destroying = 0;
+    if (c && !global && !array) {
+        owned_array<entity_index> set;
+        bool in_class = false;
+        VTRY_SET(r, allocation_functions(n, allocation_function::delete_, c,
+                                         set, in_class));
+        for (entity_index f : set) {
+            const struct type &ft =
+                type_table[entity_table[f].type.unqualified()];
+            if (in_class && ft.parameter_count == 2 &&
+                destroying_delete_tag(type_table.parameters(
+                    entity_table[f].type.unqualified())[1]))
+                destroying = f;
+        }
+        if (destroying && entity_table[destroying].enclosing != c)
+            /* a base class's: the first argument's conversion to the
+               base and its access are not followed */
+            return not_supported(n, "expr.delete");
+        if (destroying && entity_table[c].destructor &&
+            entity_table[entity_table[c].destructor].virtual_)
+            /* the deleting destructor would call it */
+            return not_supported(n, "expr.delete");
+    }
+    if (destroying) {
+        expression_meaning tag;
+        tag.type = type_table.parameters(
+            entity_table[destroying].type.unqualified())[1];
+        tag.category = value_category::prvalue;
+        tag.evaluation = constness::not_constant;
+        tag.node = expression_node(semantic_kind::zero, tag, at);
+        owned_array<expression_meaning> arguments;
+        arguments.append(deleted);
+        arguments.append(tag);
+        expression_meaning call;
+        VTRY_SET(r, call_function(n, at, destroying, arguments, call));
+        m = expression_meaning();
+        m.type = qualified_type::make(
+            type_table.fundamental(fundamental_type::void_), cv_none);
+        m.category = value_category::prvalue;
+        m.evaluation = constness::not_constant;
+        m.node = expression_node(semantic_kind::delete_object, m, at,
+                                 operand.node, 0);
+        semantics[m.node].c = call.node;
+        semantics[m.node].computation = deleted.type;
+        return analysis_result::well_formed;
+    }
     if (c && destroys(c)) {
         entity_index destructor = entity_table[c].destructor;
         if (!destructor)
