@@ -144,6 +144,16 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
                                       d.parameter_count) ||
             !same_constraints(d.declaration, n))
             return not_supported(n, "temp.class");
+        /* [dcl.align]/5: the alignment of the declaration applies to the
+           class; a definition that names none is not analysed */
+        if (d.alignas_declared) {
+            bool named = false;
+            for (token_index t = head.first_token(); t < head.end_token(); t++)
+                if (SyntaxElement::from_token(t).is(standard_keyword::alignas_))
+                    named = true;
+            if (!named)
+                return not_supported(n, "temp.class");
+        }
         VTRY(merged, merge_template_defaults(n, d.first_parameter, first,
                                              d.parameter_count, true));
         for (uint32_t i = 0; i < d.parameter_count; i++)
@@ -226,11 +236,24 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
        changes what vcc generates ([dcl.type.elab]/1), one without an
        argument (clang checks preferred_name's against the template) */
     uint32_t at = 1;
+    bool alignment_declared = false;
     if (elaborated.is(syntax_kind::elaborated_type_specifier)) {
         SyntaxElement seq =
             ElaboratedClassSpecifier(elaborated).attribute_specifier_seq();
-        if (seq && class_head_attributes_without_effect(seq) &&
-            !attribute_argument_present(seq)) {
+        bool only_alignment =
+            seq && seq.is(syntax_kind::attribute_specifier_seq,
+                          syntax_kind::alignment_specifier);
+        if (seq && seq.is(syntax_kind::attribute_specifier_seq))
+            for (auto k : seq.elements())
+                only_alignment =
+                    only_alignment && k.is(syntax_kind::alignment_specifier);
+        if (only_alignment) {
+            /* [dcl.align]/1: alignas on a class template's declaration;
+               the definition names it again (declared_alignment) */
+            alignment_declared = true;
+            at = 2;
+        } else if (seq && class_head_attributes_without_effect(seq) &&
+                   !attribute_argument_present(seq)) {
             at = 2;
         } else if (seq && !seq.is_token()) {
             /* [ext:gnu_attributes] visibility("hidden") (libc++'s
@@ -294,6 +317,8 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         for (SyntaxRef x : parameters)
             if (template_parameter_has_default(x))
                 return not_supported(n, "temp.param");
+        if (alignment_declared)
+            function_templates[ct - 1].alignas_declared = true;
         entity_table.add_declaration(d.entity, n);
         return analysis_result::well_formed;
     }
@@ -304,6 +329,7 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.is_class = true;
+    record.alignas_declared = alignment_declared;
     hold_template_name(record, name, outer);
     return analysis_result::well_formed;
 }
