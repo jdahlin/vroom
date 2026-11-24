@@ -50,10 +50,43 @@ bool semantic_analysis::default_constructed(entity_index c,
 bool semantic_analysis::destructor_deleted(entity_index c) const
 {
     const entity &x = entity_table[c];
+    /* an anonymous union's destructor is never invoked: its owner's
+       checks its variant members (below) */
+    if (x.anonymous_object && x.union_)
+        return false;
     if (x.destructor && entity_table[x.destructor].deleted)
         return true;
     if (x.destructor && !entity_table[x.destructor].implicit)
         return false;
+    /* [class.dtor]/7: a union-like class (a union, or a class with an
+       anonymous union) that has a variant member with a non-trivial
+       destructor */
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+            m.base_subobject)
+            continue;
+        entity_index owner = c;
+        const struct type &t = type_table[m.type.unqualified()];
+        if (t.kind == type_kind::class_type &&
+            entity_table[t.entity].anonymous_object &&
+            entity_table[t.entity].union_)
+            owner = t.entity;
+        if (owner == c && !x.union_)
+            continue;
+        const entity &u = entity_table[owner];
+        for (uint32_t j = 0; j < u.member_count; j++) {
+            const entity &v = entity_table[class_members[u.first_member + j]];
+            if (v.kind != entity_kind::variable || !v.nonstatic_member ||
+                v.base_subobject)
+                continue;
+            entity_index vk = element_class(v.type);
+            if (vk && destroys(vk))
+                return true;
+        }
+        if (owner == c)
+            break;
+    }
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes)
@@ -89,6 +122,15 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
     if (x.implicit_default_deleted)
         return true;
     if (x.union_) {
+        /* [class.default.ctor]/2: only a defaulted default constructor is
+           defined as deleted; a user-provided one (Storage() {}) is not */
+        if (!x.defaulted_default_constructor)
+            for (entity_index k = x.first_constructor; k;
+                 k = entity_table[k].next_constructor)
+                if (!entity_table[k].implicit &&
+                    !type_table[entity_table[k].type.unqualified()]
+                         .parameter_count)
+                    return false;
         /* [class.default.ctor]/2.2: a union with no default member
            initializers and a variant member with a non-trivial default
            constructor has a deleted defaulted default constructor */

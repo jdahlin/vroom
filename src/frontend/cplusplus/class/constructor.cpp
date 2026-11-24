@@ -1768,6 +1768,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 union_default = i;
                 union_member_designated = true;
             }
+    /* (9.2) a variant member that is neither designated nor has a default
+       member initializer: "no initialization is performed" */
+    if (entity_table[c].union_)
+        union_member_designated = true;
     for (size_t i = 0; i < subobjects.size(); i++) {
         if (initialized[i])
             continue;
