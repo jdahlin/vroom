@@ -69,7 +69,7 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             token_index class_name = 0;
             SyntaxRef id = 0;
             if (only && only.is(syntax_kind::class_specifier))
-                id = out_of_class_class_member(only, &class_name);
+                id = out_of_class_class_member(only, &class_name, true);
             if (id) {
                 nominated_scope ns;
                 SyntaxRef head = only.class_specifier().class_head()[1][0];
