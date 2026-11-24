@@ -123,6 +123,7 @@ analysis_result semantic_analysis::throw_expression(ThrowExpression n,
                 v.a = place.node;
             else if (k.kind == type_kind::class_type &&
                      v.kind != semantic_kind::initializer_list &&
+                     v.kind != semantic_kind::call &&
                      !(v.kind == semantic_kind::conversion &&
                        v.op == static_cast<uint8_t>(
                                    conversion_kind::lvalue_to_rvalue)))
