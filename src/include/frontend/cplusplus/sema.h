@@ -5562,6 +5562,12 @@ class semantic_analysis
        (matching_specialization): a decltype is a non-deduced context
        whose substitution substitute_specialization checks */
     bool matching_partial = false;
+    /* ... and the specialization has no template template-parameter: a
+       qualified type's nested-name-specifier (typename enable_if<C>::type)
+       is a non-deduced context whose substitution decides the match; with
+       a template template-parameter the ordering of the matches is not
+       analysed ([temp.class.order]) */
+    bool matching_substituted = false;
     /* the specialization of function_templates[class_template - 1] whose
        pattern the arguments match (0: the primary), with its parameters'
        arguments */

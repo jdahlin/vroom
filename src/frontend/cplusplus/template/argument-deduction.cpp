@@ -75,8 +75,11 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
            of an equivalent qualifier; matching a declaration to a function
            template ([temp.deduct.decl]: a friend's, once the class is
            instantiated) a type with no template parameter in it is checked
-           against the specialization's by the caller */
-        if (!exact ||
+           against the specialization's by the caller.  Matching a partial
+           specialization the argument typename enable_if<C(T)>::type is
+           substituted once T is deduced (substitute_specialization,
+           [temp.class.spec.match]/2) */
+        if (!exact || matching_substituted ||
             (matching_declaration && !depends_on_template_parameter(a)))
             return true;
         const struct type &ar = type_table[a.unqualified()];

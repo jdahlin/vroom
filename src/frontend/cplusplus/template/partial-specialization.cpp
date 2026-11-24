@@ -715,6 +715,11 @@ analysis_result semantic_analysis::matching_specialization(
         uint32_t unknowns = deduction_unknowns;
         bool match = true;
         matching_partial = true;
+        matching_substituted = true;
+        for (uint32_t i = 0; i < s.parameter_count; i++)
+            if (template_template_parameter(
+                    template_parameter_entities[s.first_parameter + i]))
+                matching_substituted = false;
         for (uint32_t i = 0; i < count && match; i++) {
             const template_argument x = template_arguments[s.first_pattern + i];
             const template_argument &y = arguments[i];
@@ -725,6 +730,7 @@ analysis_result semantic_analysis::matching_specialization(
                 match = deduce_argument(x, y, d, set);
         }
         matching_partial = false;
+        matching_substituted = false;
         if (deduction_unknowns != unknowns)
             return not_supported(at, "temp.deduct.type");
         /* [temp.deduct.type]/8: noexcept(B) of a function type in the
