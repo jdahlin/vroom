@@ -422,6 +422,13 @@ semantic_analysis::implicit_assignment_definitions(entity_index c, SyntaxRef n)
                may never be used ([temp.inst]/4's instantiated members
                are treated the same, instantiated_member_body) */
             diagnostics_suppressed hush(diagnostics);
+            /* [class.copy.assign]/12: defined when odr-used: what its body
+               needs waits for its use (as constructor.cpp's defaulted
+               members) */
+            scoped_value<entity_index> deferring(needs_deferred_by,
+                                                 needs_deferred_by);
+            if (!entity_table[f].member_definition_needed)
+                needs_deferred_by = f;
             r = implicit_assignment_body(c, n, f, returns);
         }
         if (r == analysis_result::well_formed)

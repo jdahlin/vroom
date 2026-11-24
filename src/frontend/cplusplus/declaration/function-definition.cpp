@@ -280,6 +280,19 @@ void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
 
 } // namespace
 
+/* [temp.inst]/4: an instantiated function nobody is known to use needs
+   nothing yet: what its body needs waits for its own use (the caller
+   restores needs_deferred_by) */
+void semantic_analysis::defer_needs_of_instantiated_body(entity_index f)
+{
+    if (!defer_next_body_needs)
+        return;
+    defer_next_body_needs = false;
+    if (f && !entity_table[f].member_definition_needed &&
+        !entity_table[f].virtual_)
+        needs_deferred_by = f;
+}
+
 /* the function being defined, last_declared, holds the reason a refused
    body gives: a constant expression that calls it is refused for that */
 analysis_result semantic_analysis::analyse_function_body(
@@ -287,6 +300,8 @@ analysis_result semantic_analysis::analyse_function_body(
 {
     entity_index f = last_declared;
     size_t before = unsupported.size();
+    scoped_value<entity_index> deferring(needs_deferred_by, needs_deferred_by);
+    defer_needs_of_instantiated_body(f);
     analysis_result result =
         analyse_function_body_of(definition, compound, ctor_init);
     if (result == analysis_result::unsupported && unsupported.size() > before &&

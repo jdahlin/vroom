@@ -3248,6 +3248,8 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
                                        FunctionBody body)
 {
     SyntaxElement init = body.ctor_initializer();
+    scoped_value<entity_index> deferring(needs_deferred_by, needs_deferred_by);
+    defer_needs_of_instantiated_body(last_declared);
     if (body.defaulted()) {
         /* [dcl.fct.def.default]/1: out-of-class = default for a constructor
            or destructor (e.g. X::X() = default; X::~X() = default;) */

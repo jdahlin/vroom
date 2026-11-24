@@ -2473,9 +2473,16 @@ analysis_result semantic_analysis::instantiated_member_body(entity_index c,
        instantiation of member function ... requested here") [impl.clang] */
     diagnostics_suppressed_if hush(diagnostics, !used);
     size_t unsupported_before = unsupported.size();
+    /* [temp.inst]/4: a member not used is not instantiated, so what its
+       body would need (a deleter's call operator, whose own body waits
+       for the type to be complete) is needed only once the member is:
+       kept in deferred_needs until then, as a defaulted special member's */
+    scoped_value<entity_index> deferring(needs_deferred_by, needs_deferred_by);
+    defer_next_body_needs = !used;
     quiet_member_bodies++;
     analysis_result r = member_function_body(c, n);
     quiet_member_bodies--;
+    defer_next_body_needs = false;
     /* ill-formed for these arguments (its diagnostics hushed, or a
        definition it wanted failed quietly): a use of the member is
        refused, never a call of a function without code */
