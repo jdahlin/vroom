@@ -136,11 +136,15 @@ node_index parser::declarator(declarator_form form, declarator_facts &facts)
         return expected("parameters-and-qualifiers before '->'", "dcl.decl");
     /* [basic.scope.param]/1: the parameters' scope "ends at the end of
        that function declarator", after the trailing-return-type */
+    scope_index outside_parameters = names.current();
     if (facts.has_parameters)
         names.reenter(facts.parameters);
     trailing_return_type();
+    /* back to where the declarator is, not to the scope the parameters were
+       made in: a member declared outside its class has its parameters in
+       the class's scope ([basic.scope.class]/1) */
     if (facts.has_parameters)
-        names.leave();
+        names.reenter(outside_parameters);
     if (failed())
         return 0;
     facts.trailing_return = true;
