@@ -4335,7 +4335,8 @@ class semantic_analysis
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, SyntaxRef definition);
-    void instantiated_member_body(entity_index c, SyntaxRef definition);
+    void instantiated_member_body(entity_index c, SyntaxRef definition,
+                                  bool used = false);
     /* [temp.inst]/4: inside instantiated_member_body, a body of an
        implicit instantiation's member not known to be used, or a
        definition only such a body wanted (instantiation_record::quiet):

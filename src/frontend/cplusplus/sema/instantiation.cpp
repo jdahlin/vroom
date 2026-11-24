@@ -806,7 +806,7 @@ void semantic_analysis::instantiate_pending()
                 entity_table[b.function].member_body_deferred = false;
             instantiation_context context;
             enter_instantiation(context, b.scope, b.declaration);
-            instantiated_member_body(b.c, b.body);
+            instantiated_member_body(b.c, b.body, b.function != 0);
             leave_instantiation(context);
             progress = true;
         }

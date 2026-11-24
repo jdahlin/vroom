@@ -2270,9 +2270,14 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
  * left undefined, so that no code is made for it; one that is unsupported
  * also makes a use of the function a refusal.
  */
-void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n)
+void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n,
+                                                 bool used)
 {
-    diagnostics_suppressed hush(diagnostics);
+    /* [temp.inst]/1, /4: a member function used is instantiated, and an
+       ill-formed instantiation makes the program ill-formed: its errors
+       are reported (in the instantiation's context, as clang's "in
+       instantiation of member function ... requested here") */
+    diagnostics_suppressed_if hush(diagnostics, !used);
     size_t unsupported_before = unsupported.size();
     quiet_member_bodies++;
     analysis_result r = member_function_body(c, n);
@@ -2280,7 +2285,7 @@ void semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n)
     /* ill-formed for these arguments (its diagnostics hushed, or a
        definition it wanted failed quietly): a use of the member is
        refused, never a call of a function without code */
-    if (r == analysis_result::ill_formed && last_declared)
+    if (r == analysis_result::ill_formed && last_declared && !used)
         r = not_supported(n, "temp.inst");
     if (r == analysis_result::ill_formed)
         entity_table[last_declared].defined = false;
