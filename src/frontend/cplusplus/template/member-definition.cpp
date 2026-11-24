@@ -48,13 +48,15 @@ SyntaxRef
 semantic_analysis::out_of_class_variable_member(SyntaxRef declaration,
                                                 token_index *name) const
 {
-    if (!declaration.is(syntax_kind::simple_declaration) ||
-        declaration.size() != 3 ||
-        !declaration[0].is(syntax_kind::decl_specifier_seq) ||
-        !declaration[1].is(syntax_kind::init_declarator,
-                           syntax_kind::qualified_id))
+    if (!declaration.is(syntax_kind::simple_declaration))
         return 0;
-    auto item = declaration[1];
+    /* ([ext:gnu_attributes] before the declaration are not among its
+       parts) */
+    SyntaxTail parts(declaration, leading_gnu_attributes(declaration));
+    if (parts.size() != 3 || !parts[0].is(syntax_kind::decl_specifier_seq) ||
+        !parts[1].is(syntax_kind::init_declarator, syntax_kind::qualified_id))
+        return 0;
+    auto item = parts[1];
     if (item.is(syntax_kind::init_declarator) &&
         (item.size() != 2 || !item[0].is(syntax_kind::qualified_id)))
         return 0;

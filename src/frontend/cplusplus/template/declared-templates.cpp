@@ -216,6 +216,7 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
        initializer, after attributes without effect (libc++'s deprecated
        is_pod_v) */
     uint32_t lead = attributes_without_effect_before(s);
+    uint32_t gnu_before = leading_gnu_attributes(s);
     if (s.size() == 3 + lead &&
         s.is(s[lead], syntax_kind::decl_specifier_seq) &&
         s.is(s[lead + 1], syntax_kind::init_declarator)) {
@@ -249,7 +250,7 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
     }
     /* [temp.static]/1: a static data member of a class template defined
        outside it without an initializer (template<class T> int S<T>::m;) */
-    if (s.size() == 3 && !lead && out_of_class_variable_member(s))
+    if (s.size() == 3 + gnu_before && out_of_class_variable_member(s))
         return member_definition_of_template(t, s);
     /* [temp.fct]/1: a function template's declaration (template<class T>
        T f(T);), one declarator not in an init-declarator-list */
