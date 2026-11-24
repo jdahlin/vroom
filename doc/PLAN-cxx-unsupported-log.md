@@ -953,3 +953,8 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   it ([temp.mem], template/declared-templates.cpp:148): unsupported +31, so
   the analysis must come first.  A class with an invalid base is no base in
   clang (`B *b = &c` fails there; we accept).
+- 11.23 (e397a3381, d5d43bea9): redeclarations must have compatible
+  exception specifications ([except.spec]/4); a dynamic exception
+  specification of a class template's member is an error of the template's
+  definition in C++17.  We accept 5306 -> 5297 (8 of 11.22's 11 lines),
+  unsupported 34194.  __declspec not started (the agent's session ended).
