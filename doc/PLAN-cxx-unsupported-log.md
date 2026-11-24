@@ -902,3 +902,6 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   holds it.  The general form (any held template) costs +416 unsupported,
   -305 agree, so it is limited to templates with co_await/co_return/co_yield
   tokens: unsupported 34416 -> 34428, we accept 5296 -> 5293 (-9 agree).
+  Orchestrator: 3fd0cc89d (11.17b, a token scan for co_await in the held
+  template) reverted as a special case; the general rule waits.  Tip:
+  unsupported 34416, we reject 390, we accept 5296.
