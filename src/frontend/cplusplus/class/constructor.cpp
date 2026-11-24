@@ -330,6 +330,16 @@ analysis_result semantic_analysis::anonymous_member_initializers(
             inner = record.entity;
         uint32_t made = 0;
         if (entity_table[m].default_initializer) {
+            SyntaxRef init = entity_table[m].default_initializer;
+            if (!entity_table[anonymous].union_)
+                for (token_index t = init.first_token(); t < init.end_token();
+                     t++)
+                    /* [expr.prim.this]: the address of the enclosing
+                       object in a constant expression is not evaluated
+                       for an unnamed struct's member yet */
+                    if (p.keyword_of(tokens[t]) == standard_keyword::this_)
+                        return not_supported(current_declaration,
+                                             "expr.prim.this");
             VTRY(r, default_member_initializer(at, m, made));
         } else if (inner) {
             VTRY(r, anonymous_member_initializers(at, inner, made));
@@ -337,7 +347,16 @@ analysis_result semantic_analysis::anonymous_member_initializers(
                    entity_table[record.entity].first_constructor &&
                    !trivial_defaulted_default_constructor(record.entity) &&
                    !entity_table[anonymous].union_) {
-            return not_supported(current_declaration, "class.base.init");
+            /* [class.base.init]/9.3: default-initialized, constructed in
+               place as an ordinary member is (clang's unnamed struct) */
+            expression_meaning object;
+            VTRY(r, subobject(at, m, object));
+            owned_array<expression_meaning> none;
+            initialized_value value;
+            VTRY(r2, construct(current_declaration, entity_table[m].type, none,
+                               object.node, value));
+            made = statement_node(semantic_kind::expression_statement, at,
+                                  value.node);
         }
         if (made)
             statements.append(made);

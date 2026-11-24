@@ -141,8 +141,7 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
         return not_supported(n, "class.union.anon");
     entity_index u = record.entity;
     const entity &x = entity_table[u];
-    if ((!x.union_ && !trivial_special_members(u)) || x.base_count ||
-        !size_of_type(s.type))
+    if (x.base_count || !size_of_type(s.type))
         return not_supported(n, "class.union.anon");
     if (in_namespace && !x.union_)
         return not_supported(n, "class.union.anon");
