@@ -136,6 +136,10 @@ constexpr uint32_t single_object_base = UINT32_MAX;
 /* the base of a pointer to the first element of an array of unknown bound
    ([expr.const]/5.8's "indexing of array without known bound") */
 constexpr uint32_t unknown_bound_base = UINT32_MAX - 1;
+/* the elements of an array object the evaluation does not hold: places
+   above any element of the evaluation, one range per object */
+constexpr uint32_t opaque_array_base = 0x40000000u;
+constexpr uint64_t opaque_array_limit = 0x10000000u;
 
 /* a read of an indeterminate value ([basic.indet]/2) or of a volatile
    object ([expr.const]/5.8): not constant, but the check of a body for a
@@ -2432,6 +2436,21 @@ constness semantic_analysis::evaluate_array_pointer(constant_evaluation &state,
                 v.base = unknown_bound_base;
                 v.first = array;
                 v.stamp = state.objects[array].serial;
+                return constness::constant;
+            }
+            /* an array of known bound whose elements the evaluation does not
+               hold (not constexpr, or declared only): the pointer has its
+               extent, so [expr.add]/4's bounds apply; its elements are never
+               read (the place is no element of the evaluation) */
+            if (t.kind == type_kind::array && t.bound_known && t.bound &&
+                t.bound < opaque_array_limit) {
+                v = constant_value();
+                v.kind = constant_value_kind::pointer;
+                v.count = 1;
+                v.base = opaque_array_base + array;
+                v.extent = t.bound;
+                v.offset = 0;
+                v.first = element_place | v.base;
                 return constness::constant;
             }
         }
