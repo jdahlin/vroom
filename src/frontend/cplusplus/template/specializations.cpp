@@ -131,7 +131,8 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     if (SyntaxRef id = qualified_variable_specialization_id(inner, qualifier))
         return variable_specialization(n, inner, id, qualifier);
     if (!inner.is(syntax_kind::function_definition,
-                  syntax_kind::simple_declaration))
+                  syntax_kind::simple_declaration,
+                  syntax_kind::member_declaration))
         return not_supported_because(n, "temp.expl.spec",
                                      syntax_kind_name(inner.kind()));
     /* [ext:gnu_attributes] before the declaration (e.g. SK_API /
@@ -693,14 +694,17 @@ analysis_result semantic_analysis::named_specialization(
         !declaration.function_definition().function_body().plain())
         return not_supported_because(
             n, rule, "a function definition with a non-plain body");
-    if (declaration.is(syntax_kind::simple_declaration) &&
+    if (declaration.is(syntax_kind::simple_declaration,
+                       syntax_kind::member_declaration) &&
         !tail[has_spec + 1].is(preprocessing_op_or_punc::SEMICOLON))
         return not_supported_because(
             n, rule, "a declaration with an initializer-like tail");
     /* (a friend declaration is in its class, naming the namespace's
        template: [namespace.memdef]/3) */
-    if (!friend_of && (!is_namespace(current_scope) || defining_class ||
-                       function_state.active))
+    if (!friend_of &&
+        (!is_namespace(current_scope) || defining_class ||
+         function_state.active) &&
+        !(specialization && defining_class && !function_state.active))
         return not_supported_because(n, rule, "not at namespace scope");
     /* the declared type; what the declarator records for claims is the
        specialization's, which the definition (if any) records again */
@@ -779,10 +783,15 @@ analysis_result semantic_analysis::named_specialization(
     entity_index owner_scope = current_scope;
     if (friend_of)
         owner_scope = enclosing_namespace(friend_of);
-    if (m.qualifier) {
-        owner_scope = m.qualifier;
+    /* [temp.expl.spec]/2 (CWG727): in a class's member-specification the
+       member templates are the class's own */
+    entity_index member_of = m.qualifier;
+    if (!member_of && specialization && !friend_of && defining_class)
+        member_of = defining_class;
+    if (member_of) {
+        owner_scope = member_of;
         entity_index held =
-            entity_table.find(m.qualifier, tokens.identifier(m.id));
+            entity_table.find(member_of, tokens.identifier(m.id));
         if (held)
             held = member_templates_of(held);
         if (held)
@@ -820,6 +829,12 @@ analysis_result semantic_analysis::named_specialization(
     }
     const function_template f = function_templates[ft - 1];
     const entity t = entity_table[f.entity];
+    /* [temp.deduct.decl]/1: a member function template's cv-qualifiers
+       are part of the function type compared (the declarator's are
+       refused above) */
+    if (t.member_cv)
+        return not_supported_because(n, "temp.deduct.decl",
+                                     "a cv-qualified member function template");
     if (t.enclosing != owner_scope || f.primary)
         return not_supported_because(
             n, rule, "the template is a member of another scope or primary");

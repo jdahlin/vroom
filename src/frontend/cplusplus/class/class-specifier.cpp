@@ -1266,6 +1266,11 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
         [&](TemplateDeclaration t) {
             return member_template_declaration(c, t, access);
         },
+        [&](ExplicitSpecialization s) {
+            /* [temp.expl.spec]/2 (CWG727): an explicit specialization of a
+               member template in the class's own scope */
+            return explicit_specialization(s);
+        },
         [&](StaticAssertDeclaration s) {
             /* [class.mem]/1: a member-declaration */
             return static_assert_declaration(s);
