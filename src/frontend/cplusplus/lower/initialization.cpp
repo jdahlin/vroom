@@ -494,7 +494,7 @@ uint32_t c_lowering::static_temporary(const semantic_node &n,
         vbuffer_append(zgr.get(), name.data() + 2, name.size() - 2);
     else {
         /* a variable of the global namespace is mangled as its name; the
-           reference temporary's is <length><name> ([abi:mangling.special]) */
+           reference temporary's is <length><name> ([abi:mangling-special]) */
         vbuffer_format_append(zgr.get(), "%zu", name.size());
         vbuffer_append(zgr.get(), name.data(), name.size());
     }

@@ -126,7 +126,7 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
         if (op != preprocessing_op_or_punc::EQUAL)
             return not_supported(n, "expr.ass");
         if (type_table[left.type.unqualified()].kind == type_kind::class_type) {
-            /* [expr.ass]/9: x = {...} means x.operator=({...}) of a class:
+            /* [expr.ass]/8: x = {...} means x.operator=({...}) of a class:
                its operator= functions take the list, the left operand's
                own type only when they are its copy assignment operators */
             entity_index c = type_table[left.type.unqualified()].entity;
