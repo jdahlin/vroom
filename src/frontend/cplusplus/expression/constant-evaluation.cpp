@@ -2059,8 +2059,9 @@ constness semantic_analysis::offset_pointer(const constant_value &p, __int128 n,
         return constness::constant;
     }
     __int128 i = static_cast<__int128>(p.offset) + n;
+    /* [expr.add]/4.2, [expr.const]/5.7: undefined behavior */
     if (i < 0 || i > static_cast<__int128>(p.extent))
-        return CONST_NOT_CONSTANT;
+        return CONST_NOT_CONSTANT_RULE;
     moved.offset = static_cast<uint64_t>(i);
     moved.first = element_place | (p.base + static_cast<uint32_t>(i));
     return constness::constant;
