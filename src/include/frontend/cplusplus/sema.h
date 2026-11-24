@@ -3463,7 +3463,7 @@ class semantic_analysis
                                  const expression_meaning &right,
                                  expression_meaning &m);
     bool vector_scalar_fits(const expression_meaning &scalar,
-                            qualified_type element) const;
+                            qualified_type element, bool &fits) const;
     analysis_result vector_binary(SyntaxRef n, token_index at,
                                   preprocessing_op_or_punc op,
                                   expression_meaning &left,
@@ -3789,6 +3789,8 @@ class semantic_analysis
                               bool comparison);
     /* a prvalue converted to the arithmetic type to, its value with it */
     void convert_arithmetic(expression_meaning &m, fundamental_type to);
+    bool constant_representable(const expression_meaning &m,
+                                fundamental_type to, bool &exact) const;
     /* ... its type and value, without the node */
     void arithmetic_value(expression_meaning &m, fundamental_type to);
     /* [expr.arith.conv]: the operands' common type, both converted */
