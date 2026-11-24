@@ -327,13 +327,9 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
        one that calls an operator function is not analysed */
     if (!assigned_bitwise(c))
         return not_supported(n, "class.copy.assign");
-    const entity &x = entity_table[c];
-    for (uint32_t i = 0; i < x.member_count; i++)
-        if (cv_of(type_table,
-                  entity_table[class_members[x.first_member + i]].type) &
-            cv_const)
-            return not_supported(n, "class.copy.assign");
-    if (copy_assignment_deleted(c)) {
+    /* [class.copy.assign]/7.2: a const non-static data member of a class
+       (or of a subobject's class) defines the implicit operator deleted */
+    if (copy_assignment_deleted(c) || bytewise_const_member(c)) {
         /* [impl.clang] -fms-compatibility keeps the copy assignment
            operator beside a user-declared move constructor */
         if (tokens.files.behavior.microsoft_compatibility)
