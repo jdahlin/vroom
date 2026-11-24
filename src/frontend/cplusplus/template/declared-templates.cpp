@@ -1092,7 +1092,7 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
     entity_index c = 0;
     VTRY(r, instantiate_class(id, ct, &arguments[0],
                               static_cast<uint32_t>(arguments.size()), c,
-                              !qualified));
+                              !(qualified && explicit_instantiating)));
     type = entity_table[c].type.unqualified();
     return analysis_result::well_formed;
 }

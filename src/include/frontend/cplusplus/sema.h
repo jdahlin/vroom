@@ -5236,6 +5236,8 @@ class semantic_analysis
            ([temp.inst]/2: no completely-defined type is needed there):
            declared, defined by complete_instantiation when a use needs it */
         bool lazy = false;
+        /* ... and where it was named, for what its definition reports */
+        SyntaxRef lazy_at = 0;
     };
     /* [temp.fct]/1: a function template: its entity (template_entity,
        whose type is the function type with the type parameters' types,
@@ -6707,6 +6709,9 @@ class semantic_analysis
         }
     };
     uint32_t require_complete_class = 0;
+    /* an explicit instantiation directive is being analysed: the
+       specialization it names is defined ([temp.explicit]/10), not named */
+    bool explicit_instantiating = false;
     /* a nested-name-specifier's simple-template-id is being analysed: its
        template-arguments are only named (template_id_arguments) */
     bool nested_template_id = false;

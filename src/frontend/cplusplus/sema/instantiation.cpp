@@ -705,8 +705,11 @@ analysis_result semantic_analysis::instantiate_class(
         }
         /* named again where no complete type is needed: the use that needs
            it defines it (complete_instantiation) */
-        if (defined_by && lazy_return)
+        if (defined_by && lazy_return) {
             instantiations[k].lazy = true;
+            if (!instantiations[k].lazy_at)
+                instantiations[k].lazy_at = at;
+        }
         return analysis_result::well_formed;
     }
     if (instantiation_depth >= 64)
@@ -760,8 +763,12 @@ analysis_result semantic_analysis::instantiate_class(
             type_table.of_entity(type_kind::class_type, c), cv_none);
         entity_table[c].instantiation = index + 1;
         instantiations[index].specialization = c;
-        if (lazy_return && defined_by)
+        /* (declared while the specializations of a class are declared:
+           the use that needs it complete defines it) */
+        if ((lazy_return || declaring_specializations) && defined_by) {
             instantiations[index].lazy = true;
+            instantiations[index].lazy_at = at;
+        }
         if (defining_argument && defined_by && !declaring_specializations)
             deferred_class_instantiations.append(
                 deferred_class_instantiation{defining_class, at, index, c});
@@ -782,7 +789,7 @@ void semantic_analysis::complete_instantiation(entity_index c)
         return;
     instantiations[index].lazy = false;
     entity_index done = 0;
-    define_class_outside(SyntaxRef(), index, done);
+    define_class_outside(instantiations[index].lazy_at, index, done);
 }
 
 bool semantic_analysis::require_complete(entity_index c) const

@@ -349,6 +349,7 @@ analysis_result
 semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
 {
     flag_set exempt(explicit_declaration_names, true);
+    flag_set instantiating(explicit_instantiating, true);
     /* [extern] template declaration */
     bool extern_ = n.size() == 3;
     if ((n.size() != 2 && n.size() != 3) || n[n.size() - 1].is_token())

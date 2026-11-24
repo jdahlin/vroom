@@ -1557,6 +1557,9 @@ analysis_result semantic_analysis::class_list_initialization(
     qualified_type type, bool direct, initialized_value &result)
 {
     entity_index c = type_table[type.unqualified()].entity;
+    /* [temp.inst]/2: a specialization named where no complete type was
+       needed is defined by the initialization of an object of it */
+    require_complete(c);
     if (entity_table[c].kind != entity_kind::class_type)
         return not_supported(list, "class.pre");
     /* [dcl.init.list]/3.6: "Otherwise, if T is a specialization of
