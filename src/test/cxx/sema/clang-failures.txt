@@ -251,8 +251,6 @@ lookup CXX/drs/cwg5xx.cpp -std=c++20 -pedantic-errors: 620:41: `n` finds the var
 lookup CXX/drs/cwg5xx.cpp -std=c++23 -pedantic-errors: 620:41: `n` finds the variable declared at 616:8, clang the one at 618:36
 lookup CXX/drs/cwg5xx.cpp -std=c++2c -pedantic-errors: 620:41: `n` finds the variable declared at 616:8, clang the one at 618:36
 lookup CXX/drs/cwg5xx.cpp -std=c++98 -pedantic-errors: 620:41: `n` finds the variable declared at 616:8, clang the one at 618:36
-lookup CXX/over/over.match/over.match.funcs/over.match.class.deduct/p2.cpp -std=c++1z: 82:58: `value` finds the variable declared at 64:27, clang the one at 68:27
-lookup CXX/over/over.match/over.match.funcs/over.match.class.deduct/p2.cpp -std=c++1z: 83:69: `value` finds the variable declared at 68:27, clang the one at 64:27
 lookup CXX/temp/temp.decls/temp.fct/temp.func.order/p6.cpp -std=c++20: 21:3: `f` finds the function declared at 17:6, clang the one at 18:21
 lookup CXX/temp/temp.spec/func.spec.cpp -std=c++17: 246:10: `stealFunc` finds the function declared at 243:5, clang the one at 239:14
 lookup SemaCXX/builtin-operator-new-delete.cpp -std=c++03: 153:3: `__builtin_operator_new` finds the function declared at 32:7, clang the one at 70:3
@@ -509,7 +507,6 @@ verdict CXX/drs/cwg6xx.cpp -std=c++20 -pedantic-errors: ill-formed for us, accep
 verdict CXX/drs/cwg6xx.cpp -std=c++23 -pedantic-errors: ill-formed for us, accepted by clang: line 1167 (1 declarations)
 verdict CXX/drs/cwg6xx.cpp -std=c++2c -pedantic-errors: ill-formed for us, accepted by clang: line 1167 (1 declarations)
 verdict CXX/over/over.match/over.match.best/p2.cpp -std=c++2a: ill-formed for us, accepted by clang: line 27 (1 declarations)
-verdict CXX/over/over.match/over.match.funcs/over.match.class.deduct/p2.cpp -std=c++1z: ill-formed for us, accepted by clang: line 77 (1 declarations)
 verdict CXX/over/over.match/over.match.funcs/over.match.oper/p3.cpp -std=c++11: ill-formed for us, accepted by clang: line 49 (1 declarations)
 verdict CXX/over/over.over/p1.cpp -std=c++1z -DNOEXCEPT=noexcept: ill-formed for us, accepted by clang: line 14 (7 declarations)
 verdict CXX/special/class.copy/p11.0x.copy.cpp -std=c++11: ill-formed for us, accepted by clang: line 15 (1 declarations)

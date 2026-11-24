@@ -1155,8 +1155,9 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
                 declaration[spec_at + 1].is(syntax_kind::init_declarator) &&
                 declaration[spec_at + 1].size() == 2 &&
                 declaration[spec_at + 1][0].is_identifier() &&
-                declaration[spec_at + 1][1].is(syntax_kind::initializer,
-                                               syntax_kind::braced_init_list)) {
+                declaration[spec_at + 1][1].is(
+                    syntax_kind::initializer, syntax_kind::braced_init_list,
+                    syntax_kind::brace_or_equal_initializer)) {
                 entity_index deduced_c = 0;
                 r = deduced_class(declaration[spec_at + 1][1].index(), ct,
                                   deduced_c);

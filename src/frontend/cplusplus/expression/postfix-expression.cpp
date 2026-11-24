@@ -747,6 +747,10 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
         parts = InitializerParts::after(n, 1);
     if (SyntaxElement list = parts.braced_list()) {
         VTRY(gathered, list_clauses(list, clauses, nullptr));
+    } else if (parts.form == InitializerParts::syntax_form::equals) {
+        /* [dcl.type.class.deduct]/1: C x = e; the guides are resolved
+           for the argument e ([over.match.class.deduct]/3) */
+        clauses.append(parts.clause);
     } else if (parts.form == InitializerParts::syntax_form::parenthesized &&
                parts.list) {
         for (SyntaxElement a : parts.list.items(syntax_kind::initializer_list))
@@ -764,6 +768,16 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
             return not_supported(n, "over.match.class.deduct");
         arguments.append(e);
+    }
+    /* [over.match.class.deduct]/1.2: a lone argument of the template's own
+       specialization selects the copy deduction candidate (not a guide
+       here) */
+    if (arguments.size() == 1) {
+        const struct type &argument =
+            type_table[arguments[0].type.unqualified()];
+        if (argument.kind == type_kind::class_type &&
+            class_template_of(argument.entity) == ct)
+            return not_supported(n, "over.match.class.deduct");
     }
     owned_array<uint32_t> group;
     for (size_t i = 0; i < function_templates.size(); i++)
@@ -784,6 +798,19 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             /* (the arguments are analysed again by the initialization) */
             expressions.resize(expressions_before);
             name_uses.resize(uses_before);
+            /* [over.match.copy]/1, [over.match.list]/1: "In copy-list-
+               initialization, if an explicit constructor is chosen, the
+               initialization is ill-formed", and an explicit guide is no
+               candidate of copy-initialization: not analysed here */
+            if (parts.form == InitializerParts::syntax_form::equals &&
+                candidates[chosen].template_index) {
+                const function_template &guide =
+                    function_templates[candidates[chosen].template_index - 1];
+                SyntaxElement first = guide.declarator[0];
+                if (first.is_token() &&
+                    first.keyword() == standard_keyword::explicit_)
+                    return not_supported(n, "over.match.class.deduct");
+            }
             qualified_type function =
                 entity_table[candidates[chosen].function].type;
             const struct type &returned =
