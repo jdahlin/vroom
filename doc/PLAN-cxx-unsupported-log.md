@@ -840,3 +840,13 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   specializations.cpp:691 274, CTAD placeholder as a return type
   (decl-specifier.cpp:1420) 194, structured bindings (id-expression.cpp:640)
   208.  Unsupported 34674 -> 34625, we reject 390, we accept 5304.
+- 11.14 (b677259b9, 4dc12c7fb, dc78eb828, ac2283324): a partial
+  specialization with a qualified class-head-name; trailing-return
+  declarators in function explicit specializations/instantiations (lookup
+  in the member's scope); `new auto(x)`; the 208 "no rules yet" names are a
+  non-type template parameter in an expression of a declarator's type
+  (`-> int (&)[N + 1]`), needs a dependent bound representation.
+  Unsupported 34625 -> 34523, we accept 5304 -> 5311: +13 coroutines.cpp /
+  cxx2b-deducing-this-coro.cpp lines (co_return in an instantiated body,
+  newly analysed after the coroutine_traits partial specialization) kept as
+  a known gap; -6 rejected as clang.
