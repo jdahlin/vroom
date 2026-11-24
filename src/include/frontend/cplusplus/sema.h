@@ -5218,6 +5218,11 @@ class semantic_analysis
            children are its decl-specifier-seq and declarator */
         SyntaxRef declarator = 0;
         uint32_t first_parameter = 0, parameter_count = 0;
+        /* a member template defined outside a class template whose
+           template-head renames the class's parameters: the first of
+           them, and the class specialization (instantiations index plus
+           one) whose arguments they name */
+        uint32_t outer_first_parameter = 0, outer_instantiation = 0;
         bool unusable = false;
         /* a function template: the GNU attributes of its specializations'
            symbols (gnu_function_symbol_flags) and abi_tag */
@@ -5816,10 +5821,10 @@ class semantic_analysis
     analysis_result define_plain_member_template(SyntaxRef n,
                                                  SyntaxRef definition,
                                                  entity_index c);
-    analysis_result
-    define_member_template_of(entity_index c, SyntaxRef declaration,
-                              SyntaxRef inner, SyntaxRef definition,
-                              bool recorded, bool allow_redefine = false);
+    analysis_result define_member_template_of(
+        entity_index c, SyntaxRef declaration, SyntaxRef inner,
+        SyntaxRef definition, bool recorded, bool allow_redefine = false,
+        uint32_t outer_member = 0, uint32_t outer_instantiation = 0);
     analysis_result define_member_class_template_of(entity_index c,
                                                     SyntaxRef declaration,
                                                     SyntaxRef inner,

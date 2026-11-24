@@ -477,6 +477,23 @@ semantic_analysis::record_instantiation(const function_template &ft,
         bind_template_argument(
             record.scope, template_parameter_entities[ft.first_parameter + i],
             arguments[i]);
+    if (ft.outer_instantiation) {
+        const instantiation_record &ox =
+            instantiations[ft.outer_instantiation - 1];
+        function_template oof =
+            function_templates[entity_table[ox.template_entity].instantiation -
+                               1];
+        uint32_t first = ox.first_argument;
+        if (ox.pattern) {
+            oof = function_templates[ox.pattern - 1];
+            first = ox.first_deduced;
+        }
+        for (uint32_t i = 0; i < oof.parameter_count; i++)
+            bind_template_argument(
+                record.scope,
+                template_parameter_entities[ft.outer_first_parameter + i],
+                template_arguments[first + i]);
+    }
     uint32_t index = static_cast<uint32_t>(instantiations.size());
     instantiations.append(record);
     return index;

@@ -788,7 +788,7 @@ analysis_result semantic_analysis::define_member_template(uint32_t member,
             o.definition, recorded);
     return define_member_template_of(instantiations[index].specialization,
                                      o.declaration, o.inner, o.definition,
-                                     recorded);
+                                     recorded, false, member + 1, index + 1);
 }
 
 /*
@@ -873,7 +873,8 @@ analysis_result semantic_analysis::define_member_class_template_of(
    (declaration, whose template-head is inner) defines */
 analysis_result semantic_analysis::define_member_template_of(
     entity_index c, SyntaxRef declaration, SyntaxRef inner,
-    SyntaxRef definition, bool recorded, bool allow_redefine)
+    SyntaxRef definition, bool recorded, bool allow_redefine,
+    uint32_t outer_member, uint32_t outer_instantiation)
 {
     owned_array<SyntaxRef> parameters;
     instantiation_context context;
@@ -901,6 +902,31 @@ analysis_result semantic_analysis::define_member_template_of(
     /* (the parameters' scope stands for the namespace of the qualified
        declarator-id, as define_template_member's) */
     template_member_scope = scope;
+    /* [temp.local]/1, [basic.scope.temp]/1: the outer template-head's own
+       parameter names, where they differ from the class's, name the
+       specialization's arguments in the definition: bound in the member
+       template's parameter scope, whose parent stays the class */
+    if (r == analysis_result::well_formed && outer_member) {
+        const template_member_definition od =
+            template_member_definitions[outer_member - 1];
+        const instantiation_record ox = instantiations[outer_instantiation - 1];
+        function_template oof =
+            function_templates[entity_table[ox.template_entity].instantiation -
+                               1];
+        uint32_t ofirst = ox.first_argument;
+        if (ox.pattern) {
+            oof = function_templates[ox.pattern - 1];
+            ofirst = ox.first_deduced;
+        }
+        for (uint32_t i = 0; od.first_parameter && i < oof.parameter_count;
+             i++) {
+            entity_index pe =
+                template_parameter_entities[od.first_parameter + i];
+            if (!entity_table.find(scope, entity_table[pe].name))
+                bind_template_argument(scope, pe,
+                                       template_arguments[ofirst + i]);
+        }
+    }
     if (r == analysis_result::well_formed)
         r = function_template_declarator(definition, lead, c, scope, s, m,
                                          type);
@@ -964,6 +990,30 @@ analysis_result semantic_analysis::define_member_template_of(
         function_template &record = function_templates[g - 1];
         record.declaration = declaration;
         record.definition = definition;
+        /* the outer template-head's renamed parameters, bound again in
+           each specialization's scope (record_instantiation) */
+        if (outer_member) {
+            const template_member_definition od =
+                template_member_definitions[outer_member - 1];
+            const instantiation_record ox =
+                instantiations[outer_instantiation - 1];
+            const function_template oof = function_templates
+                [entity_table[ox.template_entity].instantiation - 1];
+            bool differs = false;
+            for (uint32_t i = 0; od.first_parameter && i < oof.parameter_count;
+                 i++)
+                if (entity_table
+                        [template_parameter_entities[od.first_parameter + i]]
+                            .name !=
+                    entity_table
+                        [template_parameter_entities[oof.first_parameter + i]]
+                            .name)
+                    differs = true;
+            if (differs) {
+                record.outer_first_parameter = od.first_parameter;
+                record.outer_instantiation = outer_instantiation;
+            }
+        }
         if (renamed) {
             record.first_parameter = first;
             entity_table[f.entity].type = type;
