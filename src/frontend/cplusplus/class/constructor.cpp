@@ -402,7 +402,7 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
          record.kind == type_kind::rvalue_reference) &&
         semantics[value.node].kind == semantic_kind::bind_reference &&
         semantics[value.node].category == value_category::prvalue) {
-        /* clang reports it where a constructor using the initializer is
+        /* [impl.clang] clang reports it where a constructor using the initializer is
            defined, and none is when the class is only declared: the
            implicit definition's is not reported here */
         if (defining_defaulted_member)

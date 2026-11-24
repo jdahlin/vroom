@@ -3609,7 +3609,7 @@ uint32_t semantic_analysis::std_identity_argument(uint32_t node) const
         return 0;
     entity_index f = semantics[callee].a;
     /* (a declaration that is not constexpr stays a call of a function
-       that is not constexpr, [expr.const]/5.3, as clang has it) */
+       that is not constexpr, [expr.const]/5.3; [impl.clang] as clang has it) */
     if (entity_table[f].kind != entity_kind::function ||
         !entity_table[f].instantiation || !entity_table[f].constexpr_)
         return 0;

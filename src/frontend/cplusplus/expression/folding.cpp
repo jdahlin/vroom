@@ -125,7 +125,7 @@ constness fold_binary(const implementation_defined_behavior &b,
         double r = floating_operation(t, op, p, q);
         /* [expr.pre]/4: a division by zero or an operation with no
            mathematical result (a NaN) is undefined; a result beyond the
-           type's range is the infinity, as clang folds it (a conversion
+           type's range is the infinity, as clang folds it ([impl.clang]; a conversion
            to a narrower type does the same) */
         if ((op == preprocessing_op_or_punc::SLASH && q == 0) || isnan(r))
             return constness::not_constant;

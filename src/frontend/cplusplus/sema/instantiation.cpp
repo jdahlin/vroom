@@ -432,7 +432,7 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     member_template_declarator(0);
     instantiations[index].defining = false;
     /* [temp.res]/6, /8: an error of a construct naming no template
-       argument is the template's (clang reports it at the definition);
+       argument is the template's ([impl.clang] clang reports it at the definition);
        one naming an argument is the specialization's, its use's, unless
        the template has one of the first kind: clang then marks it invalid
        and instantiates nothing of it */

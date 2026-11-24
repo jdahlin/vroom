@@ -1262,7 +1262,7 @@ bool semantic_analysis::accessible_here(entity_index member,
     const entity &x = entity_table[member];
     if (!x.access)
         return true;
-    /* a class whose access clang does not check (access_unchecked) */
+    /* [impl.clang] a class whose access clang does not check (access_unchecked) */
     const entity &k = entity_table[x.enclosing];
     if (k.kind == entity_kind::class_type &&
         (k.access_unchecked ||
