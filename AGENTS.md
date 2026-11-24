@@ -490,7 +490,7 @@ headers using the pinned clang-format version. Review and stage any formatting
 edits before retrying the commit. CI runs the same hook on changed files
 before promotion. Exclusions live in `src/.clang-format-ignore`.
 `.github/workflows/premerge.yml` runs one reusable workflow per target in
-parallel (`arm64.yml`: jobs arm64, asan, tsan; x86-64 gets its own; `wasm.yml` is
+parallel (`arm64.yml`: job arm64, only what depends on the target; `x86.yml`: generic (the target-independent steps, once), x86, asan, tsan; `wasm.yml` is
 manual-only, not in the gate), each on GitHub's ubuntu-24.04-arm (tsan on
 x86-64's ubuntu-24.04 for now) in a Debian 13 container
 (`ci/setup-debian.sh`: clang 23 from apt.llvm.org, qemu; `wasm` adds emsdk).
