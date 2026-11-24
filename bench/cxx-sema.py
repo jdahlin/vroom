@@ -1041,6 +1041,15 @@ def root_causes(test, opts, vpp, counted):
         word = re.compile(r'\b' + re.escape(held) + r'\b')
         for j in range(i - 1, -1, -1):
             if decls[j]['result'] != 'well-formed' and word.search(declaration_text(cwd, decls[j])):
+                # a declaration refused for the same name (it uses the
+                # name, it does not declare it) is not the holder: a run
+                # of such users would use up WHY_DEPTH before the declaration
+                # that holds the name
+                r = first_refusal(decls[j]) if decls[j]['result'] == 'unsupported' else None
+                if r is not None:
+                    h = HELD.match(unwrap_instantiation(r['sub'], r['detail'], r['site'])[1])
+                    if h and h.group(1) == held:
+                        continue
                 return j
         return None
 
