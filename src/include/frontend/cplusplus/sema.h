@@ -1528,6 +1528,9 @@ enum class increment_kind : uint8_t {
     post_decrement,
 };
 
+/* the bit of a built-in <=> node's value that says its four values are known */
+constexpr uint64_t ordering_values_known = 1ull << 63;
+
 struct semantic_node {
     semantic_kind kind = semantic_kind::none;
     uint8_t op = 0;
@@ -3975,6 +3978,16 @@ class semantic_analysis
                                   constant_value &result);
     /* [dcl.constexpr]/10 for a constexpr variable of class type: whether
        its initialization init is a constant expression */
+    /* [cmp.categories]: the values of std::strong_ordering's (or weak's,
+       partial's) less, equivalent, greater and unordered, as the program's
+       <compare> declares them (the class has one integral member), a byte
+       each in packed: the value of a built-in <=>'s node */
+    bool ordering_values(entity_index category, uint64_t &packed);
+    /* [expr.spaceship]/4-7: the category object of a built-in p <=> q */
+    constness evaluate_spaceship(constant_evaluation &state,
+                                 const semantic_node &x, fundamental_type t,
+                                 const constant_value &p,
+                                 const constant_value &q, constant_value &v);
     constness evaluate_variable(qualified_type t, uint32_t init, token_index at,
                                 uint32_t &value);
     /* the tree of constant and initializer_list nodes for an evaluated

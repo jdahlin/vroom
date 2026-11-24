@@ -109,8 +109,78 @@ uint32_t c_lowering::vector_lane(const semantic_node &n)
                 0, flags);
 }
 
+/*
+ * [expr.spaceship]/4-7: p <=> q of arithmetic operands, the category object
+ * its member's value is chosen by:
+ *     (ta = p, tb = q, (category){ ta < tb ? less : ta == tb ? equivalent
+ *                                  : ta > tb ? greater : unordered })
+ * the values the program's <compare> gives its categories.
+ */
+uint32_t c_lowering::spaceship(const semantic_node &n)
+{
+    entity_index category = record(n.type).entity;
+    if (!(n.value & ordering_values_known))
+        return fail("a three-way comparison of a category the program's "
+                    "<compare> declares in a way not followed",
+                    n.at);
+    int64_t values[4];
+    for (int i = 0; i < 4; i++)
+        values[i] = static_cast<int8_t>(n.value >> (8 * i));
+    const entity &x = analysis.entity_table[category];
+    entity_index member = analysis.class_members[x.first_member];
+    class_type(category, n.at);
+    ast_qualified_type integer = ast_builder_type_basic(AST_TYPE_INT);
+    ast_qualified_type t =
+        AST_QUALIFIED_TYPE_UNQUALIFIED(type(node(n.a).type, n.at));
+    uint32_t p = expression(n.a), q = expression(n.b);
+    if (!p || !q)
+        return 0;
+    uint32_t held_p = full_expression_temporary(t);
+    uint32_t held_q = full_expression_temporary(t);
+    auto left = [&] { return c_variable(c, held_p, t); };
+    auto right = [&] { return c_variable(c, held_q, t); };
+    auto compare = [&](preprocessing_op_or_punc op) {
+        return make(AST_NODE_BINARY, integer, left(), right(), 0,
+                    static_cast<uint16_t>(c_operator(op)), 0);
+    };
+    auto constant_int = [&](int64_t v) {
+        return ast_builder_integer(c, integer, v);
+    };
+    uint32_t chosen = constant_int(values[3]);
+    chosen = make(AST_NODE_CONDITIONAL, integer,
+                  compare(preprocessing_op_or_punc::GREATER),
+                  constant_int(values[2]), chosen, 0, 0);
+    chosen = make(AST_NODE_CONDITIONAL, integer,
+                  compare(preprocessing_op_or_punc::EQUAL_EQUAL),
+                  constant_int(values[1]), chosen, 0, 0);
+    chosen = make(AST_NODE_CONDITIONAL, integer,
+                  compare(preprocessing_op_or_punc::LESS),
+                  constant_int(values[0]), chosen, 0, 0);
+    ast_qualified_type field = type(analysis.entity_table[member].type, n.at);
+    chosen =
+        cast(chosen, AST_QUALIFIED_TYPE_UNQUALIFIED(field), AST_CAST_INTEGER);
+    owned_array<uint32_t> values_list;
+    while (values_list.size() < c_fields[member])
+        values_list.append(0);
+    values_list.append(chosen);
+    uint32_t value_count = static_cast<uint32_t>(values_list.size());
+    uint32_t initializer =
+        make(AST_NODE_INITIALIZER, type(n.type, n.at), 0,
+             ast_builder_list(c, values_list.data(), value_count), value_count,
+             0, 0);
+    uint32_t object = compound_literal_of(initializer, type(n.type, n.at));
+    uint32_t stored_p = assign(t, left(), p);
+    uint32_t stored_q = assign(t, right(), q);
+    ast_qualified_type result = type(n.type, n.at);
+    return comma(AST_QUALIFIED_TYPE_UNQUALIFIED(result),
+                 comma(t, stored_p, stored_q), object);
+}
+
 uint32_t c_lowering::binary(const semantic_node &n)
 {
+    if (n.op == static_cast<uint8_t>(preprocessing_op_or_punc::SPACESHIP) &&
+        record(n.type).kind == type_kind::class_type)
+        return spaceship(n);
     int op = c_operator(static_cast<preprocessing_op_or_punc>(n.op));
     if (!op)
         return fail("a binary operator", n.at);

@@ -2470,6 +2470,21 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         return c;
     }
     case semantic_kind::binary: {
+        if (x.op == static_cast<uint8_t>(preprocessing_op_or_punc::SPACESHIP) &&
+            type_table[x.type.unqualified()].kind == type_kind::class_type) {
+            fundamental_type operands = evaluated_type(semantics[x.a].type);
+            if (operands == fundamental_type::none ||
+                evaluated_type(semantics[x.b].type) != operands)
+                return CONST_UNKNOWN;
+            constant_value p, q;
+            c = evaluate_node(state, x.a, p);
+            if (c != constness::constant)
+                return c;
+            c = evaluate_node(state, x.b, q);
+            if (c != constness::constant)
+                return c;
+            return evaluate_spaceship(state, x, operands, p, q, v);
+        }
         if (type_table[semantics[x.a].type.unqualified()].kind ==
                 type_kind::pointer ||
             type_table[semantics[x.b].type.unqualified()].kind ==
@@ -3224,6 +3239,94 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
                                       returned, result);
     state.zeroed = saved;
     return c;
+}
+
+bool semantic_analysis::ordering_values(entity_index category, uint64_t &packed)
+{
+    packed = 0;
+    static const char *const names[4] = {"less", "equivalent", "greater",
+                                         "unordered"};
+    const entity &c = entity_table[category];
+    if (c.member_count != 1 ||
+        evaluated_type(entity_table[class_members[c.first_member]].type) ==
+            fundamental_type::none)
+        return false;
+    for (int i = 0; i < 4; i++) {
+        lookup_result found = lookup_qualified(
+            category,
+            tokens.pp.identifier(names[i],
+                                 static_cast<uint32_t>(strlen(names[i]))) +
+                1,
+            lookup_filter::any);
+        /* (a strong ordering has no unordered) */
+        if (!found.entity && i == 3)
+            continue;
+        if (!found.entity || found.ambiguous)
+            return false;
+        const entity &e = entity_table[found.entity];
+        if (e.kind != entity_kind::variable || !e.constexpr_ || !e.definition)
+            return false;
+        constant_evaluation state;
+        constant_evaluation::object o;
+        append_object(state, o);
+        constness k =
+            evaluate_initialization(state, e.type, e.definition, false, 0);
+        const constant_value &v = state.objects[0].value;
+        if (k != constness::constant ||
+            v.kind != constant_value_kind::class_object || v.count != 1 ||
+            state.elements[v.first].kind != constant_value_kind::integer)
+            return false;
+        __int128 value = static_cast<__int128>(state.elements[v.first].integer);
+        if (value < -128 || value > 127)
+            return false;
+        packed |= static_cast<uint64_t>(static_cast<uint8_t>(value)) << (8 * i);
+    }
+    packed |= ordering_values_known;
+    return true;
+}
+
+/*
+ * [expr.spaceship]/4-7: "the result is of type std::strong_ordering ...
+ * partial_ordering": p <=> q of the converted arithmetic operands is the
+ * category's less, equivalent or greater by p < q, p == q, p > q, and for
+ * a floating type with a NaN, partial_ordering::unordered ([cmp.partialord]).
+ */
+constness semantic_analysis::evaluate_spaceship(
+    constant_evaluation &state, const semantic_node &x, fundamental_type t,
+    const constant_value &p, const constant_value &q, constant_value &v)
+{
+    if (type_table[x.type.unqualified()].kind != type_kind::class_type)
+        return CONST_UNKNOWN;
+    entity_index category = type_table[x.type.unqualified()].entity;
+    if (!(x.value & ordering_values_known))
+        return CONST_UNKNOWN;
+    int64_t values[4];
+    for (int i = 0; i < 4; i++)
+        values[i] = static_cast<int8_t>(x.value >> (8 * i));
+    static const preprocessing_op_or_punc ops[3] = {
+        preprocessing_op_or_punc::LESS, preprocessing_op_or_punc::EQUAL_EQUAL,
+        preprocessing_op_or_punc::GREATER};
+    int64_t chosen = values[3];
+    for (int i = 2; i >= 0; i--) {
+        constant_value r;
+        constness c = evaluate_binary(static_cast<uint8_t>(ops[i]), t, t,
+                                      fundamental_type::int_, p, q, r);
+        if (c != constness::constant)
+            return c;
+        if (r.integer != 0)
+            chosen = values[i];
+    }
+    const entity &k = entity_table[category];
+    fundamental_type member =
+        evaluated_type(entity_table[class_members[k.first_member]].type);
+    v = constant_value();
+    v.kind = constant_value_kind::class_object;
+    v.designator = category;
+    v.first = static_cast<uint32_t>(state.elements.size());
+    v.count = 1;
+    state.elements.append(value_of(member, static_cast<uint64_t>(chosen)));
+    state.element_read_only.append(0);
+    return constness::constant;
 }
 
 constness semantic_analysis::evaluate_variable(qualified_type t, uint32_t init,

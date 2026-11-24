@@ -542,7 +542,7 @@ analysis_result semantic_analysis::comparison(SyntaxRef n,
  * [expr.spaceship]/3-7: p <=> q of arithmetic, enumeration or object
  * pointer operands, a prvalue of std::strong_ordering or
  * std::partial_ordering (/9: <compare> shall have been included).  Its
- * value is not modelled; operand types the rules judge by a narrowing
+ * value is the category's own constants; operand types the rules judge by a narrowing
  * conversion or by a composite type that is not an object pointer type
  * are refused.
  */
@@ -591,7 +591,8 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
         entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
     entity_index category = 0;
     if (std_ && is_namespace(std_) && std_namespace(std_)) {
-        lookup_result found = lookup_in_namespace(
+        /* (a name of an inline namespace of std too, [namespace.def]/5) */
+        lookup_result found = lookup_qualified(
             std_,
             tokens.pp.identifier(name, static_cast<uint32_t>(strlen(name))) + 1,
             lookup_filter::any);
@@ -606,11 +607,17 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
                           "the header <compare> shall be included before a "
                           "use of the built-in three-way comparison",
                           "expr.spaceship");
+    uint64_t packed = 0;
+    ordering_values(category, packed);
     m = expression_meaning();
     m.type = qualified_type::make(entity_table[category].type.unqualified(),
                                   cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::unknown;
+    /* (the node's value: the category's four values, evaluated at the
+       operation; none when the program's <compare> declares them in a way
+       not followed: the operation's value is not known) */
+    m.value = packed;
     return analysis_result::well_formed;
 }
 
