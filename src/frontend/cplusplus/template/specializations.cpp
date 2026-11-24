@@ -356,6 +356,22 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
         if (e.size() == 3 && ec[1].is(syntax_kind::gnu_attribute_specifier) &&
             gnu_attributes_without_effect(ec[1]))
             id = 2;
+        entity_index qualifier = 0;
+        if (e.size() == id + 2 && ec[0].is_token() &&
+            ec[id].is(syntax_kind::nested_name_specifier) &&
+            ec[id + 1].is(syntax_kind::simple_template_id)) {
+            /* [temp.explicit]/3: class-key nested-name-specifier
+               simple-template-id; the template is looked up in the
+               scope the qualifier nominates ([basic.lookup.qual]) */
+            nominated_scope scope;
+            VTRY(q, nested_name_specifier(ec[id], scope));
+            if (!scope.entity ||
+                (!is_namespace(scope.entity) &&
+                 entity_table[scope.entity].kind != entity_kind::class_type))
+                return not_supported(n, "temp.explicit");
+            qualifier = scope.entity;
+            id++;
+        }
         if (e.size() != id + 1 || !ec[0].is_token())
             return not_supported_because(
                 n, "temp.explicit",
@@ -374,7 +390,7 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
             ec[0].keyword() != standard_keyword::class_)
             return not_supported_because(
                 n, "temp.explicit", "an explicit instantiation of a union");
-        return class_explicit_instantiation(n, ec[id], extern_);
+        return class_explicit_instantiation(n, ec[id], extern_, qualifier);
     }
     /* a constructor or destructor: no decl-specifier-seq,
        extern template S<A>::S(); S<A>::~S(); */
@@ -905,16 +921,18 @@ analysis_result semantic_analysis::named_specialization(
  * functions are then emitted (explicitly_instantiated), or, for an
  * explicit instantiation declaration (/11), not.
  */
-analysis_result semantic_analysis::class_explicit_instantiation(SyntaxRef n,
-                                                                SyntaxRef id,
-                                                                bool extern_)
+analysis_result semantic_analysis::class_explicit_instantiation(
+    SyntaxRef n, SyntaxRef id, bool extern_, entity_index qualifier)
 {
     lookup_result x;
     entity_index named = 0;
-    if (!template_id_name(id, x, named))
+    if (!template_id_name(id, x, named, qualifier))
         return not_supported(n, "temp.explicit");
     uint32_t ct = class_template_of(named);
-    if (!ct ||
+    if (!ct)
+        return not_supported(n, "temp.explicit");
+    /* (a qualified name found the template in the nominated scope) */
+    if (!qualifier &&
         !declared_in_scope_of(function_templates[ct - 1].entity, current_scope))
         return not_supported(n, "temp.explicit");
     entity_index t = function_templates[ct - 1].entity;
@@ -929,7 +947,7 @@ analysis_result semantic_analysis::class_explicit_instantiation(SyntaxRef n,
     uint32_t prior = find_instantiation(
         t, arguments.data(), static_cast<uint32_t>(arguments.size()));
     type_index type = 0;
-    r = template_type(id, 0, false, type);
+    r = template_type(id, qualifier, qualifier != 0, type);
     if (r != analysis_result::well_formed)
         return not_supported(n, "temp.explicit");
     const struct type &ty = type_table[type];

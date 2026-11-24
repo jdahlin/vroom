@@ -2002,7 +2002,8 @@ class semantic_analysis
     analysis_result explicit_specialization(ExplicitSpecialization n);
     analysis_result explicit_instantiation(ExplicitInstantiation n);
     analysis_result class_explicit_instantiation(SyntaxRef n, SyntaxRef id,
-                                                 bool extern_);
+                                                 bool extern_,
+                                                 entity_index qualifier = 0);
     analysis_result member_explicit_instantiation(SyntaxRef n,
                                                   SyntaxRef declaration,
                                                   uint32_t lead, bool extern_);
@@ -4993,8 +4994,8 @@ class semantic_analysis
     uint32_t alias_template_of(entity_index e) const;
     uint32_t template_of_form(entity_index e,
                               bool function_template::*form) const;
-    bool template_id_name(SyntaxRef id, lookup_result &x,
-                          entity_index &named) const;
+    bool template_id_name(SyntaxRef id, lookup_result &x, entity_index &named,
+                          entity_index qualifier = 0) const;
     /* [temp.alias]/1: an alias template defined at namespace scope */
     analysis_result alias_template_definition(SyntaxRef n, SyntaxRef alias);
     /* [temp.alias]/2: the type a simple-template-id naming the alias

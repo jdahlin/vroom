@@ -602,16 +602,22 @@ semantic_analysis::template_of_form(entity_index e,
 }
 
 /* the simple-template-id id's template-name, an identifier, looked up
-   unqualified (x), the entity it names or holds (named); false for another
+   unqualified or in the qualifier's scope (x), the entity it names or holds (named); false for another
    form */
 bool semantic_analysis::template_id_name(SyntaxRef id, lookup_result &x,
-                                         entity_index &named) const
+                                         entity_index &named,
+                                         entity_index qualifier) const
 {
     SyntaxElement template_name = id.simple_template_id().template_name();
     if (!template_name)
         return false;
-    x = lookup_unqualified(tokens.identifier(template_name.token()),
-                           lookup_filter::any);
+    uint32_t name = tokens.identifier(template_name.token());
+    /* [basic.lookup.qual]: after a nested-name-specifier, in the scope it
+       nominates */
+    if (qualifier)
+        x = lookup_qualified(qualifier, name, lookup_filter::any);
+    else
+        x = lookup_unqualified(name, lookup_filter::any);
     named = x.entity;
     if (!named)
         named = x.unknown_entity;
