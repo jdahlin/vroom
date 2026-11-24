@@ -268,9 +268,17 @@ bool semantic_analysis::noexcept_names_later_member(SyntaxRef n)
         if (found.found_in != defining_class)
             continue;
         /* a class scope binds the arguments of a specialization: those
-           have no declaration among the members */
-        if (!found.entity)
+           have no declaration among the members, and ([temp.local]/6) no
+           member can redeclare a template parameter's name */
+        if (!found.entity) {
+            /* (a bound pack is unknown to lookup, [temp.variadic]) */
+            bool pack = found.unknown && !found.ambiguous &&
+                        !found.unknown_entity && found.unknown_because &&
+                        !strcmp(found.unknown_because, "temp.variadic");
+            if (pack || (!found.unknown && !found.ambiguous))
+                continue;
             return true;
+        }
         uint32_t d = entity_table[found.entity].first_declaration;
         /* a type alias declared before: no later member of the name
            can overload it ([class.mem]/6 sees the same alias) */
