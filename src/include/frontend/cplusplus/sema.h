@@ -4739,6 +4739,7 @@ class semantic_analysis
                                        entity_index to, qualified_type type,
                                        expression_meaning &m);
     /* the non-virtual bases from class c to its base, outermost first */
+    bool covariant_override(type_index base_function, type_index function);
     bool nonvirtual_path(entity_index c, entity_index base,
                          owned_array<entity_index> &steps) const;
     analysis_result accessible_path(token_index at, entity_index derived,
