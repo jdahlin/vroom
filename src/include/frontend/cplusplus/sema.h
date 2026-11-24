@@ -2497,6 +2497,8 @@ class semantic_analysis
     bool defaulted_member_equality(entity_index c, SyntaxElement d,
                                    const specified &s, uint8_t access);
     entity_index defaulted_comparison = 0;
+    bool declared_constexpr = false;
+    analysis_result constexpr_compatible(SyntaxRef n, bool compatible);
     analysis_result
     defaulted_inequality(token_index at,
                          const owned_array<uint32_t> &parameters, bool of_class,
@@ -2505,7 +2507,18 @@ class semantic_analysis
                                        expression_meaning x,
                                        expression_meaning y,
                                        expression_meaning &all, bool &any,
-                                       bool &deleted);
+                                       bool &deleted,
+                                       owned_array<uint32_t> *statements,
+                                       qualified_type category, bool &constant);
+    analysis_result three_way_step(token_index at, expression_meaning x,
+                                   expression_meaning y, bool &deleted,
+                                   owned_array<uint32_t> &statements,
+                                   qualified_type category, bool &constant);
+    analysis_result defaulted_three_way_end(
+        token_index at, const owned_array<uint32_t> &parameters, bool of_class,
+        qualified_type category, owned_array<uint32_t> &statements,
+        bool constant, uint32_t &block);
+    int comparison_category(qualified_type t);
     analysis_result defaulted_equality(token_index at,
                                        const owned_array<uint32_t> &parameters,
                                        uint32_t &block);

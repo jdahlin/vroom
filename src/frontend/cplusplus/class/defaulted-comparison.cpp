@@ -22,10 +22,15 @@ bool semantic_analysis::defaulted_equality_declared(entity_index c,
                                                     qualified_type type)
 {
     const struct type &f = type_table[type.unqualified()];
+    bool three_way = name == operator_name(preprocessing_op_or_punc::SPACESHIP);
     if ((name != operator_name(preprocessing_op_or_punc::EQUAL_EQUAL) &&
-         name != operator_name(preprocessing_op_or_punc::EXCLAMATION_EQUAL)) ||
-        f.kind != type_kind::function || f.variadic || f.parameter_count != 2 ||
-        fundamental_of(f.operand) != fundamental_type::bool_)
+         name != operator_name(preprocessing_op_or_punc::EXCLAMATION_EQUAL) &&
+         !three_way) ||
+        f.kind != type_kind::function || f.variadic || f.parameter_count != 2)
+        return false;
+    if (three_way && !comparison_category(f.operand))
+        return false;
+    if (!three_way && fundamental_of(f.operand) != fundamental_type::bool_)
         return false;
     const qualified_type *parameters =
         type_table.parameters(type.unqualified());
@@ -48,7 +53,8 @@ bool semantic_analysis::defaulted_equality_declared(entity_index c,
  */
 analysis_result semantic_analysis::compare_subobjects(
     token_index at, qualified_type type, expression_meaning x,
-    expression_meaning y, expression_meaning &all, bool &any, bool &deleted)
+    expression_meaning y, expression_meaning &all, bool &any, bool &deleted,
+    owned_array<uint32_t> *statements, qualified_type category, bool &constant)
 {
     const struct type &t = type_table[type.unqualified()];
     if (t.kind == type_kind::array) {
@@ -59,12 +65,16 @@ analysis_result semantic_analysis::compare_subobjects(
             VTRY(r, array_element(current_declaration, at, ex, i));
             VTRY(r2, array_element(current_declaration, at, ey, i));
             VTRY(r3,
-                 compare_subobjects(at, t.operand, ex, ey, all, any, deleted));
+                 compare_subobjects(at, t.operand, ex, ey, all, any, deleted,
+                                    statements, category, constant));
             if (deleted)
                 return analysis_result::well_formed;
         }
         return analysis_result::well_formed;
     }
+    if (statements)
+        return three_way_step(at, x, y, deleted, *statements, category,
+                              constant);
     expression_meaning equal;
     analysis_result compared = binary_of(
         current_declaration, at, preprocessing_op_or_punc::EQUAL_EQUAL,
@@ -84,6 +94,28 @@ analysis_result semantic_analysis::compare_subobjects(
     all = equal;
     any = true;
     return analysis_result::well_formed;
+}
+
+/*
+ * [dcl.fct.def.default]/3: "An explicitly-defaulted function that is not
+ * defined as deleted may be declared constexpr or consteval only if it is
+ * constexpr-compatible ([class.compare.default])", before C++23's
+ * P2448R2; the function is implicitly constexpr when it is
+ * ([class.compare.default]/3).
+ */
+analysis_result semantic_analysis::constexpr_compatible(SyntaxRef n,
+                                                        bool compatible)
+{
+    entity_table[last_declared].constexpr_ = compatible;
+    if (compatible || !declared_constexpr ||
+        tokens.files.behavior.has(
+            language_feature::constexpr_without_constant_result))
+        return analysis_result::well_formed;
+    entity_table[last_declared].constexpr_ = true;
+    return ill_formed(n,
+                      "an explicitly-defaulted function that is not "
+                      "constexpr-compatible shall not be declared constexpr",
+                      "dcl.fct.def.default");
 }
 
 /*
@@ -134,13 +166,143 @@ semantic_analysis::defaulted_inequality(token_index at,
             literal_type(entity_table[parameters[k]].type) !=
                 constness::constant)
             literal = false;
-    if (literal && potential_constant(equal.node) != constness::not_constant)
-        entity_table[last_declared].constexpr_ = true;
+    VTRY(c2, constexpr_compatible(current_declaration,
+                                  literal && potential_constant(equal.node) !=
+                                                 constness::not_constant));
     owned_array<uint32_t> statements;
     statements.append(
         statement_node(semantic_kind::return_statement, at, equal.node));
     block = block_statement(at, statements);
     return analysis_result::well_formed;
+}
+
+/*
+ * [class.spaceship]/2: "Let R be the declared return type.  The operator
+ * function is defined as deleted if ... overload resolution ... x_i <=>
+ * y_i ... cannot be converted to R.  Otherwise the return value is the
+ * first x_i <=> y_i, converted to R, that is not equal to 0"; the
+ * statements `R c = x_i <=> y_i; if (c != 0) return c;` for one
+ * subobject.
+ */
+analysis_result semantic_analysis::three_way_step(
+    token_index at, expression_meaning x, expression_meaning y, bool &deleted,
+    owned_array<uint32_t> &statements, qualified_type category, bool &constant)
+{
+    expression_meaning compared;
+    size_t issued = diagnostics.messages.size();
+    analysis_result r =
+        binary_of(current_declaration, at, preprocessing_op_or_punc::SPACESHIP,
+                  SyntaxElement(), x, SyntaxElement(), y, compared);
+    if (r == analysis_result::well_formed &&
+        compared.type.unqualified() != category.unqualified())
+        r = implicit_conversion(current_declaration, compared, category, false);
+    if (r == analysis_result::ill_formed) {
+        /* no usable <=> or a result not convertible to R: deleted
+           ([class.spaceship]/2), but a subobject with only < and == is
+           compared by the synthesized three-way comparison ([class.spaceship]/3,
+           [expr.spaceship]): not analysed */
+        diagnostics.discard_since(issued);
+        return not_supported(current_declaration, "class.spaceship");
+    }
+    VTRY(r1, r);
+    if (potential_constant(compared.node) == constness::not_constant)
+        constant = false;
+    /* the variable c of type R, initialized by the comparison */
+    entity_index v = entity_table.make(entity_kind::variable, 0, current_scope);
+    entity_table[v].defined = true;
+    entity_table[v].automatic = true;
+    entity_table[v].type = category;
+    initialized_value initial;
+    VTRY(r2, initialize_with(current_declaration, compared, category, false,
+                             false, initial));
+    entity_table[v].definition = initial.node;
+    uint32_t declaration = statement_node(semantic_kind::declaration_statement,
+                                          at, v, initial.node);
+    expression_meaning variable;
+    VTRY(r2b, named_entity(at, v, variable, false));
+    expression_meaning zero = integer_constant(fundamental_type::int_, 0, at);
+    zero.zero_literal = true;
+    expression_meaning unequal, returned = variable;
+    VTRY(r3,
+         binary_of(current_declaration, at,
+                   preprocessing_op_or_punc::EXCLAMATION_EQUAL, SyntaxElement(),
+                   variable, SyntaxElement(), zero, unequal));
+    initialized_value result;
+    VTRY(r4, initialize_with(current_declaration, returned, category, false,
+                             false, result));
+    statements.append(declaration);
+    statements.append(statement_node(
+        semantic_kind::if_statement, at, unequal.node,
+        statement_node(semantic_kind::return_statement, at, result.node)));
+    return analysis_result::well_formed;
+}
+
+/*
+ * [class.spaceship]/2: "Otherwise, the return value is static_cast<R>(0
+ * <=> 0)", the category's `equal` (`equivalent` for the weak and partial
+ * orderings); the body is the statements the subobjects made, then that
+ * return.  Implicitly constexpr as ==.
+ */
+analysis_result semantic_analysis::defaulted_three_way_end(
+    token_index at, const owned_array<uint32_t> &parameters, bool of_class,
+    qualified_type category, owned_array<uint32_t> &statements, bool constant,
+    uint32_t &block)
+{
+    entity_index c = type_table[category.unqualified()].entity;
+    const char *name = "equivalent";
+    if (comparison_category(category) == 1)
+        name = "equal";
+    bool ambiguous = false;
+    entity_index e = class_member_lookup(
+        c, tokens.pp.identifier(name, static_cast<uint32_t>(strlen(name))) + 1,
+        ambiguous);
+    if (!e || ambiguous)
+        return not_supported(current_declaration, "class.spaceship");
+    expression_meaning value;
+    VTRY(r, named_entity(at, e, value, false));
+    initialized_value result;
+    VTRY(r2, initialize_with(current_declaration, value, category, false, false,
+                             result));
+    statements.append(
+        statement_node(semantic_kind::return_statement, at, result.node));
+    bool literal = constant;
+    for (size_t k = 0; k < parameters.size(); k++)
+        if (!(of_class && k == 0) &&
+            literal_type(entity_table[parameters[k]].type) !=
+                constness::constant)
+            literal = false;
+    VTRY(c3, constexpr_compatible(current_declaration,
+                                  literal && literal_type(category) ==
+                                                 constness::constant));
+    block = block_statement(at, statements);
+    return analysis_result::well_formed;
+}
+
+/*
+ * [cmp.categories]: 1 when t is std::strong_ordering, 2 for
+ * std::weak_ordering and std::partial_ordering, else 0.
+ */
+int semantic_analysis::comparison_category(qualified_type t)
+{
+    const struct type &k = type_table[t.unqualified()];
+    if (k.kind != type_kind::class_type)
+        return 0;
+    entity_index c = k.entity;
+    entity_index scope = entity_table[c].enclosing;
+    uint32_t std_name = tokens.pp.identifier("std", 3) + 1;
+    /* in namespace std, perhaps in an inline namespace of it */
+    while (scope && is_namespace(scope) && entity_table[scope].name &&
+           entity_table[scope].name != std_name)
+        scope = entity_table[scope].enclosing;
+    if (!scope || !is_namespace(scope))
+        return 0;
+    uint32_t n = entity_table[c].name;
+    if (n == tokens.pp.identifier("strong_ordering", 15) + 1)
+        return 1;
+    if (n == tokens.pp.identifier("weak_ordering", 13) + 1 ||
+        n == tokens.pp.identifier("partial_ordering", 16) + 1)
+        return 2;
+    return 0;
 }
 
 /*
@@ -158,12 +320,18 @@ analysis_result semantic_analysis::defaulted_equality(
 {
     const entity &x = entity_table[defaulted_comparison];
     entity_table[last_declared].inline_ = true;
+    declared_constexpr = entity_table[last_declared].constexpr_;
+    /* (provisionally: a body analysis does not complete is a function not
+       known to be non-constexpr) */
+    entity_table[last_declared].constexpr_ = true;
     /* a member's first parameter entity is its object */
     bool of_class =
         entity_table[last_declared].kind == entity_kind::function &&
         entity_table[last_declared].enclosing == defaulted_comparison;
     if (!x.member_count || parameters.size() != 2u)
         return not_supported(current_declaration, "class.compare.default");
+    bool three_way = entity_table[last_declared].name ==
+                     operator_name(preprocessing_op_or_punc::SPACESHIP);
     if (entity_table[last_declared].name ==
         operator_name(preprocessing_op_or_punc::EXCLAMATION_EQUAL))
         return defaulted_inequality(at, parameters, of_class, block);
@@ -173,6 +341,12 @@ analysis_result semantic_analysis::defaulted_equality(
         return not_supported(current_declaration, "class.compare.default");
     expression_meaning all;
     bool any = false, deleted = false;
+    qualified_type category;
+    owned_array<uint32_t> statements;
+    bool constant = true;
+    if (three_way)
+        category =
+            type_table[entity_table[last_declared].type.unqualified()].operand;
     for (uint32_t i = 0; i < x.base_count + x.member_count; i++) {
         entity_index member = 0, base = 0;
         qualified_type type;
@@ -202,8 +376,12 @@ analysis_result semantic_analysis::defaulted_equality(
                 r = member_access(at, member, sides[k]);
             VTRY(r2, r);
         }
+        owned_array<uint32_t> *collected = nullptr;
+        if (three_way)
+            collected = &statements;
         analysis_result r =
-            compare_subobjects(at, type, sides[0], sides[1], all, any, deleted);
+            compare_subobjects(at, type, sides[0], sides[1], all, any, deleted,
+                               collected, category, constant);
         if (deleted) {
             /* [class.eq]/2: "A defaulted == operator function for class C
                is defined as deleted if ... overload resolution as applied
@@ -218,6 +396,9 @@ analysis_result semantic_analysis::defaulted_equality(
         }
         VTRY(r3, r);
     }
+    if (three_way)
+        return defaulted_three_way_end(at, parameters, of_class, category,
+                                       statements, constant, block);
     if (!any)
         return not_supported(current_declaration, "class.compare.default");
     /* [class.compare.default]/3: "A defaulted comparison operator function
@@ -231,9 +412,9 @@ analysis_result semantic_analysis::defaulted_equality(
             literal_type(entity_table[parameters[k]].type) !=
                 constness::constant)
             literal = false;
-    if (literal && potential_constant(all.node) != constness::not_constant)
-        entity_table[last_declared].constexpr_ = true;
-    owned_array<uint32_t> statements;
+    VTRY(c1, constexpr_compatible(current_declaration,
+                                  literal && potential_constant(all.node) !=
+                                                 constness::not_constant));
     statements.append(
         statement_node(semantic_kind::return_statement, at, all.node));
     block = block_statement(at, statements);
@@ -270,7 +451,8 @@ bool semantic_analysis::defaulted_member_equality(entity_index c,
     if (r != analysis_result::well_formed || !m.has_id || m.qualifier ||
         !m.operator_function || m.aligned ||
         (m.implemented != preprocessing_op_or_punc::EQUAL_EQUAL &&
-         m.implemented != preprocessing_op_or_punc::EXCLAMATION_EQUAL) ||
+         m.implemented != preprocessing_op_or_punc::EXCLAMATION_EQUAL &&
+         m.implemented != preprocessing_op_or_punc::SPACESHIP) ||
         function_cv != cv_const)
         return false;
     for (const parameter_meaning &parameter : function_parameters)
@@ -278,7 +460,12 @@ bool semantic_analysis::defaulted_member_equality(entity_index c,
             return false;
     const struct type &f = type_table[type.unqualified()];
     if (f.kind != type_kind::function || f.variadic || f.parameter_count != 1 ||
-        fundamental_of(f.operand) != fundamental_type::bool_ || f.operand.cv())
+        f.operand.cv())
+        return false;
+    bool three_way = m.implemented == preprocessing_op_or_punc::SPACESHIP;
+    if (three_way && !comparison_category(f.operand))
+        return false;
+    if (!three_way && fundamental_of(f.operand) != fundamental_type::bool_)
         return false;
     const struct type &first =
         type_table[type_table.parameters(type.unqualified())[0].unqualified()];
