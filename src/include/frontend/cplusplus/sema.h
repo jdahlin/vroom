@@ -4686,10 +4686,12 @@ class semantic_analysis
     void construction_order(entity_index c,
                             owned_array<entity_index> &order) const;
     /* the subobject object's initialization from value: its bytes, stored
-       as by an assignment, a statement */
+       as by an assignment, a statement; initializes: value is a prvalue
+       of the class that initializes the subobject itself ([dcl.init]/17.6.1,
+       the assignment node's c is 1: lowering does not materialize it) */
     uint32_t subobject_store(const expression_meaning &object,
                              qualified_type type, token_index at,
-                             uint32_t value);
+                             uint32_t value, bool initializes = false);
     /* a block of the statements */
     uint32_t complete_object(uint32_t statement);
     uint32_t block_statement(token_index at,
