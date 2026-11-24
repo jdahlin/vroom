@@ -2349,8 +2349,10 @@ analysis_result semantic_analysis::member_function_body(entity_index c,
  * left undefined, so that no code is made for it; one that is unsupported
  * also makes a use of the function a refusal.
  */
-bool semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n,
-                                                 bool used)
+analysis_result semantic_analysis::instantiated_member_body(entity_index c,
+                                                            SyntaxRef n,
+                                                            bool used,
+                                                            uint32_t *failure)
 {
     /* [temp.inst]/1, /4: a member function used is instantiated, and an
        ill-formed instantiation makes the program ill-formed: its errors
@@ -2378,9 +2380,15 @@ bool semantic_analysis::instantiated_member_body(entity_index c, SyntaxRef n,
             body_failures.append(unsupported[unsupported_before]);
             entity_table[last_declared].unsupported_body =
                 static_cast<uint32_t>(body_failures.size());
+            if (failure)
+                *failure = static_cast<uint32_t>(body_failures.size());
         }
     }
-    return failed;
+    if (failed)
+        return analysis_result::ill_formed;
+    if (used && r == analysis_result::unsupported)
+        return r;
+    return analysis_result::well_formed;
 }
 
 analysis_result

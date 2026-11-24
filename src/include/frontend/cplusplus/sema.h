@@ -4416,9 +4416,13 @@ class semantic_analysis
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, SyntaxRef definition);
-    /* whether a used body is ill-formed */
-    bool instantiated_member_body(entity_index c, SyntaxRef definition,
-                                  bool used = false);
+    /* a used body: ill_formed when it is for these arguments,
+       unsupported when the analysis does not follow it (*failure its
+       body_failures index plus one, if any) */
+    analysis_result instantiated_member_body(entity_index c,
+                                             SyntaxRef definition,
+                                             bool used = false,
+                                             uint32_t *failure = nullptr);
     /* [temp.inst]/4: inside instantiated_member_body, a body of an
        implicit instantiation's member not known to be used, or a
        definition only such a body wanted (instantiation_record::quiet):
@@ -5701,22 +5705,26 @@ class semantic_analysis
         uint32_t instantiation = 0;
     };
     owned_array<postponed_body> postponed_bodies;
-    /* the explicit instantiation definitions of classes ([temp.explicit]/10):
-       the declaration an ill-formed member body makes ill-formed */
-    struct explicit_class_instantiation {
-        entity_index c;
-        SyntaxRef declaration;
+    /* [temp.explicit]/10, /12: an explicit instantiation definition of a
+       class or function: the entity it instantiates, its declaration, and
+       the verdict of the definitions it instantiates (the worst: a body
+       ill-formed for these arguments, or one the analysis does not follow,
+       body_failures[failure - 1]), which the declaration takes at the end
+       of the unit (instantiate_pending) */
+    struct explicit_instantiation_unit {
+        entity_index entity = 0;
+        SyntaxRef declaration = 0;
+        analysis_result verdict = analysis_result::well_formed;
+        uint32_t failure = 0;
     };
-    owned_array<explicit_class_instantiation> explicit_class_instantiations;
-    /* [temp.explicit]/10: an explicit instantiation definition of a
-       function: its specialization and declaration */
-    struct explicit_function_instantiation {
-        entity_index function;
-        SyntaxRef declaration;
-    };
-    owned_array<explicit_function_instantiation>
-        explicit_function_instantiations;
-    void explicit_instantiation_ill_formed(entity_index c);
+    owned_array<explicit_instantiation_unit> explicit_instantiations;
+    void explicit_instantiation_record(entity_index e, SyntaxRef declaration);
+    bool explicit_instantiation_takes_verdict(
+        const explicit_instantiation_unit &x) const;
+    /* a definition the explicit instantiation of e instantiated was
+       analysed: its result r, its first refusal body_failures[failure - 1] */
+    void explicit_instantiation_verdict(entity_index e, analysis_result r,
+                                        uint32_t failure);
     bool member_definition_wanted(const postponed_body &b);
     token_index member_definition_name(const template_member_definition &o);
     void define_waiting_members(entity_index scope, token_index name,

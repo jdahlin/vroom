@@ -427,6 +427,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
         entity_table[f].unsupported_body =
             static_cast<uint32_t>(body_failures.size());
     }
+    explicit_instantiation_verdict(
+        instantiations[index].specialization, r,
+        entity_table[instantiations[index].specialization].unsupported_body);
     for (analysed_declaration &d : declarations) {
         if (d.node != ft.declaration || d.result == analysis_result::ill_formed)
             continue;
@@ -815,18 +818,68 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     return false;
 }
 
-/* [temp.explicit]/10: the explicit instantiation definition of the class
-   (or of a class it is a member of) is ill-formed */
-void semantic_analysis::explicit_instantiation_ill_formed(entity_index c)
+void semantic_analysis::explicit_instantiation_record(entity_index e,
+                                                      SyntaxRef declaration)
 {
-    for (const explicit_class_instantiation &x :
-         explicit_class_instantiations) {
-        if (x.c != c)
+    explicit_instantiation_unit x;
+    x.entity = e;
+    x.declaration = declaration;
+    explicit_instantiations.append(x);
+}
+
+/* (ill-formed outranks not analysed: the first of each is kept) */
+void semantic_analysis::explicit_instantiation_verdict(entity_index e,
+                                                       analysis_result r,
+                                                       uint32_t failure)
+{
+    if (r == analysis_result::well_formed)
+        return;
+    for (explicit_instantiation_unit &x : explicit_instantiations) {
+        if (x.entity != e || x.verdict == analysis_result::ill_formed)
             continue;
-        for (analysed_declaration &d : declarations)
-            if (d.node == x.declaration)
-                d.result = analysis_result::ill_formed;
+        if (r == analysis_result::ill_formed) {
+            x.verdict = r;
+            continue;
+        }
+        if (x.verdict == analysis_result::well_formed) {
+            x.verdict = r;
+            x.failure = failure;
+        }
     }
+}
+
+/*
+ * Whether the explicit instantiation's declaration takes the verdict of
+ * the definitions it instantiated.  An ill-formed member body of a class
+ * makes it ill-formed (clang's error is at the member, its note "in
+ * instantiation ... requested here" at the explicit instantiation).  A
+ * function's ill-formed body is the template's: instantiate_definition
+ * gave the template's declaration its verdict, as clang reports an error
+ * it finds before instantiation (a non-dependent one, [temp.res]/8) there
+ * and no note; the analysis cannot tell the two kinds apart yet, and
+ * taking it here makes declarations clang accepts ill-formed
+ * (+33 we reject: CXX/drs/cwg2xx.cpp:753's pseudo-destructor, ...).  A
+ * body the analysis does not
+ * follow leaves the explicit instantiation not known to be well-formed;
+ * taking every such body costs +464 unsupported against 163 agreeing
+ * declarations, bodies refused for rules not written yet (over.match.oper,
+ * temp.dep, temp.names, expr.type.conv, ...), so it is taken only for a
+ * coroutine's, whose promise's members are looked up in the instantiated
+ * body only ([dcl.fct.def.coroutine]/5, /6), until fewer bodies are
+ * refused.
+ */
+bool semantic_analysis::explicit_instantiation_takes_verdict(
+    const explicit_instantiation_unit &x) const
+{
+    if (x.verdict == analysis_result::ill_formed)
+        return entity_table[x.entity].kind == entity_kind::class_type;
+    if (x.verdict != analysis_result::unsupported || !x.failure)
+        return false;
+    const char *rule = body_failures[x.failure - 1].subclause;
+    return !strncmp(rule, "stmt.return.coroutine", 21) ||
+           !strncmp(rule, "expr.await", 10) ||
+           !strncmp(rule, "expr.yield", 10) ||
+           !strncmp(rule, "dcl.fct.def.coroutine", 21);
 }
 
 /* [temp.point]/7: the definitions of the specializations used, after the
@@ -872,11 +925,12 @@ void semantic_analysis::instantiate_pending()
             bool explicit_ =
                 explicit_class &&
                 entity_table[explicit_class].kind == entity_kind::class_type;
-            bool failed = instantiated_member_body(
-                b.c, b.body, b.function != 0 || explicit_);
+            uint32_t failure = 0;
+            analysis_result r = instantiated_member_body(
+                b.c, b.body, b.function != 0 || explicit_, &failure);
             leave_instantiation(context);
-            if (failed && explicit_)
-                explicit_instantiation_ill_formed(explicit_class);
+            if (explicit_)
+                explicit_instantiation_verdict(explicit_class, r, failure);
             progress = true;
         }
         for (; next_definition < pending_definitions.size();
@@ -895,32 +949,26 @@ void semantic_analysis::instantiate_pending()
             progress = true;
         }
     } while (progress);
-    /* [temp.explicit]/10: an explicit instantiation definition of a
-       function whose instantiated body the analysis does not follow */
-    for (const explicit_function_instantiation &x :
-         explicit_function_instantiations) {
-        uint32_t failure = entity_table[x.function].unsupported_body;
-        if (!failure)
-            continue;
-        /* (a coroutine's: the promise type's members, [dcl.fct.def.coroutine]
-           /5 and /6, are looked up in the instantiated body only) */
-        const char *rule = body_failures[failure - 1].subclause;
-        if (strncmp(rule, "stmt.return.coroutine", 21) &&
-            strncmp(rule, "expr.await", 10) &&
-            strncmp(rule, "expr.yield", 10) &&
-            strncmp(rule, "dcl.fct.def.coroutine", 21))
+    /* [temp.explicit]/10, /12: an explicit instantiation definition
+       instantiated the definitions it names, and takes their verdict */
+    for (const explicit_instantiation_unit &x : explicit_instantiations) {
+        if (!explicit_instantiation_takes_verdict(x))
             continue;
         for (analysed_declaration &d : declarations) {
             if (d.node != x.declaration ||
                 d.result == analysis_result::ill_formed)
                 continue;
-            unsupported.append(body_failures[failure - 1]);
+            if (x.verdict == analysis_result::ill_formed) {
+                d.result = analysis_result::ill_formed;
+                continue;
+            }
+            unsupported.append(body_failures[x.failure - 1]);
             d.result = analysis_result::unsupported;
             d.first_unsupported = static_cast<uint32_t>(unsupported.size() - 1);
             d.has_unsupported = true;
         }
     }
-    explicit_function_instantiations.clear();
+    explicit_instantiations.clear();
     postponed_bodies.clear();
     pending_definitions.clear();
 }
