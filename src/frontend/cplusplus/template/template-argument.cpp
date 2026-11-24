@@ -372,8 +372,19 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
     entity_index ns_scope = 0;
     uint32_t ns_depth = 0;
     SyntaxElement spec_node;
+    /* the template-id's position in the qualifier, and the name of one
+       member class (C<args>::type::name) between it and the member */
+    size_t spec_at = 0;
+    uint32_t level = 0;
+    if (qualifier.size() >= 2)
+        spec_at = qualifier.size() - 2;
+    if (qualifier.size() >= 4 && qualifier[spec_at].is_identifier() &&
+        qualifier[spec_at - 2].is(syntax_kind::simple_template_id)) {
+        level = tokens.identifier(qualifier[spec_at].token()) + 1;
+        spec_at -= 2;
+    }
     if (qualifier.size() >= 2 &&
-        qualifier[qualifier.size() - 2].is(syntax_kind::simple_template_id)) {
+        qualifier[spec_at].is(syntax_kind::simple_template_id)) {
         uint32_t qi = 0;
         bool qualified = false;
         if (qualifier[0].is(preprocessing_op_or_punc::COLON_COLON)) {
@@ -381,7 +392,7 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
             qualified = true;
         }
         entity_index scope = 0;
-        while (qi + 2 < qualifier.size()) {
+        while (qi < spec_at) {
             if (!qualifier[qi].is_identifier())
                 return e;
             lookup_result ns;
@@ -402,7 +413,7 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
             qi += 2;
         }
         ns_scope = scope;
-        spec_node = qualifier[qualifier.size() - 2];
+        spec_node = qualifier[spec_at];
     } else {
         return e;
     }
@@ -415,7 +426,7 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
     analysis_result r = template_type(spec_node, ns_scope, ns_scope != 0, q);
     unsupported.resize(unsupported_before);
     if (r == analysis_result::well_formed &&
-        type_table[q].kind == type_kind::class_type)
+        type_table[q].kind == type_kind::class_type && !level)
         return static_member_value_entity(type_table[q].entity,
                                           tokens.identifier(member.token()), e,
                                           negated);
@@ -431,6 +442,8 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
         value = 3;
     if (ns_depth > 1)
         value |= static_cast<uint64_t>(ns_depth) << 8;
+    /* (the member class's name, plus one, in the upper half) */
+    value |= static_cast<uint64_t>(level) << 32;
     for (entity_index d : dependent_values)
         if (entity_table[d].type == type && entity_table[d].name == name &&
             entity_table[d].value == value &&

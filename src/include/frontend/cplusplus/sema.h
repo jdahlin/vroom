@@ -2840,6 +2840,22 @@ class semantic_analysis
     bool pack_depends(entity_index pack) const;
     owned_array<entity_index> dependent_members;
     owned_array<entity_index> dependent_written_types;
+    /* the names of a dependent_written type's tokens that an alias
+       template's instantiation bound to a dependent type, with the
+       type (element UINT32_MAX), or to the elements of a pack (one
+       entry each, in order): entity first_member, member_count of them;
+       [abi:mangle.expression] mangles those names as the types */
+  public:
+    struct written_binding {
+        uint32_t identifier = 0;
+        uint32_t element = UINT32_MAX;
+        qualified_type type;
+    };
+    owned_array<written_binding> written_bindings;
+
+  private:
+    void collect_written_bindings(SyntaxRef n,
+                                  owned_array<written_binding> &found) const;
     /* a block scope in the current one, made current */
     entity_index open_scope(entity_index conflicts, bool parameters);
     analysis_result pointer_operator(SyntaxRef op, qualified_type &type,
@@ -6218,7 +6234,12 @@ class semantic_analysis
     template_parameter_form_kind
     template_parameter_kind(entity_index t, uint32_t i, bool &pack,
                             qualified_type &value_type) const;
+    /* template t's own parameter token i names, or that of a class
+       template t is a member of (from the innermost out) */
     entity_index constraint_parameter(entity_index t, token_index i) const;
+    /* whether parameter p is one of t's own (not of an enclosing class
+       template's) */
+    bool constraint_parameter_is_own(entity_index t, entity_index p) const;
     /* what token i names, looked up from scope outward (0: none) */
     entity_index constraint_name(entity_index scope, token_index i) const;
     /* the concept token i names, looked up from scope outward (0: none) */

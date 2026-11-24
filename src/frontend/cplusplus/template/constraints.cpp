@@ -481,20 +481,49 @@ semantic_analysis::template_trailing_constraint(entity_index t) const
     return trailing_constraint(function_templates[ft - 1].declaration);
 }
 
+bool semantic_analysis::constraint_parameter_is_own(entity_index t,
+                                                    entity_index p) const
+{
+    uint32_t ft = template_record(t);
+    if (!ft)
+        return false;
+    const struct function_template &f = function_templates[ft - 1];
+    for (uint32_t k = 0; k < f.parameter_count; k++)
+        if (template_parameter_entities[f.first_parameter + k] == p)
+            return true;
+    return false;
+}
+
 entity_index semantic_analysis::constraint_parameter(entity_index t,
                                                      token_index i) const
 {
-    uint32_t ft = template_record(t);
     uint32_t name = tokens.identifier(i);
-    if (!ft || !name)
+    if (!name)
         return 0;
-    const struct function_template &f = function_templates[ft - 1];
-    for (uint32_t k = 0; k < f.parameter_count; k++) {
-        entity_index pe = template_parameter_entities[f.first_parameter + k];
-        if (entity_table[pe].name == name)
-            return pe;
+    entity_index own = t;
+    for (entity_index s = t;;) {
+        uint32_t ft = template_record(own);
+        if (ft) {
+            const struct function_template &f = function_templates[ft - 1];
+            for (uint32_t k = 0; k < f.parameter_count; k++) {
+                entity_index pe =
+                    template_parameter_entities[f.first_parameter + k];
+                if (entity_table[pe].name == name)
+                    return pe;
+            }
+        } else if (own == t) {
+            return 0;
+        }
+        /* the class template whose member t is (its specialization is
+           the enclosing entity of the pattern) */
+        for (s = entity_table[s].enclosing; s; s = entity_table[s].enclosing)
+            if (entity_table[s].kind == entity_kind::class_type &&
+                entity_table[s].instantiation)
+                break;
+        if (!s)
+            return 0;
+        own = specialized_template(s);
     }
-    return 0;
 }
 
 /* the function parameter of function template t's declarator whose name
