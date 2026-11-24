@@ -592,7 +592,8 @@ bool semantic_analysis::first_data_class(entity_index c,
 }
 
 /* [class.prop]/3's M(X) for the standard-layout rule: the types of the
-   first non-static data member of X, and of those, recursively (an
+   first non-static data member of X (and of a member of zero size), and
+   of those, recursively (an
    array's element type is included); a union's, of every member */
 void semantic_analysis::layout_member_types(entity_index c,
                                             owned_array<type_index> &out)
@@ -622,14 +623,24 @@ void semantic_analysis::layout_member_types(entity_index c,
     first_data_class(c, owner);
     if (!owner)
         return;
+    /* [class.bit]/2: "An unnamed bit-field is not a member": the first
+       member is the first named one.  [intro.object]/8: a member of zero
+       size ([[no_unique_address]] of an empty class) may be at offset zero
+       wherever it is declared, and is in M(X) too (clang's IsZeroSize) */
     const entity &o = entity_table[owner];
+    bool first = true;
     for (uint32_t i = 0; i < o.member_count; i++) {
         const entity &m = entity_table[class_members[o.first_member + i]];
-        if (m.kind == entity_kind::variable && m.nonstatic_member &&
-            !m.base_subobject) {
+        if (m.kind != entity_kind::variable || !m.nonstatic_member ||
+            m.base_subobject || (m.bit_field && !m.name))
+            continue;
+        const type &mt = type_table[m.type.unqualified()];
+        bool zero_size = m.no_unique_address &&
+                         mt.kind == type_kind::class_type &&
+                         empty_class(mt.entity);
+        if (first || zero_size)
             add(add, m.type);
-            return;
-        }
+        first = false;
     }
 }
 
@@ -676,22 +687,6 @@ bool semantic_analysis::standard_layout_class(entity_index c, bool &answer)
             return true;
     }
     if (x.base_count) {
-        /* clang's own rule for an empty class as a member after a
-           bit-field (HasEmptyIndirectBaseAfterBitfield): not followed */
-        bool bit_fields = false, class_members_seen = false;
-        for (uint32_t i = 0; i < x.member_count; i++) {
-            const entity &m = entity_table[class_members[x.first_member + i]];
-            if (m.kind != entity_kind::variable || !m.nonstatic_member ||
-                m.base_subobject)
-                continue;
-            if (m.bit_field)
-                bit_fields = true;
-            else if (type_table[m.type.unqualified()].kind ==
-                     type_kind::class_type)
-                class_members_seen = true;
-        }
-        if (bit_fields && class_members_seen)
-            return false;
         entity_index owner = 0;
         if (!first_data_class(c, owner))
             return true;
