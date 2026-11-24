@@ -951,6 +951,24 @@ analysis_result semantic_analysis::named_specialization(
     if (!(entity_table[e].type == type))
         return not_supported_because(n, "temp.deduct.decl",
                                      "the specialization has another type");
+    /* [temp.explicit]/10: the definition an explicit instantiation
+       definition makes is instantiated here, where an error in it (a
+       coroutine's promise, [dcl.fct.def.coroutine]) makes the program
+       ill-formed: a body the analysis does not follow is not known to be
+       well-formed */
+    /* [temp.explicit]/10: the definition an explicit instantiation
+       definition makes is instantiated at the end of the unit, where an
+       error in it (a coroutine's promise, [dcl.fct.def.coroutine]) makes
+       the program ill-formed: a body the analysis does not follow keeps
+       the explicit instantiation unsupported (instantiate_pending) */
+    if (!specialization && !extern_) {
+        explicit_function_instantiations.append(
+            explicit_function_instantiation{e, n});
+        uint32_t at = entity_table[e].instantiation - 1;
+        if (!instantiations[at].defined && !instantiations[at].pending &&
+            !instantiations[at].defining)
+            want_definition(instantiations[at], at);
+    }
     index = entity_table[e].instantiation - 1;
     if (specialization) {
         /* [temp.expl.spec]/12: "An explicit specialization of a function

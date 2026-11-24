@@ -5635,6 +5635,14 @@ class semantic_analysis
         SyntaxRef declaration;
     };
     owned_array<explicit_class_instantiation> explicit_class_instantiations;
+    /* [temp.explicit]/10: an explicit instantiation definition of a
+       function: its specialization and declaration */
+    struct explicit_function_instantiation {
+        entity_index function;
+        SyntaxRef declaration;
+    };
+    owned_array<explicit_function_instantiation>
+        explicit_function_instantiations;
     void explicit_instantiation_ill_formed(entity_index c);
     bool member_definition_wanted(const postponed_body &b);
     token_index member_definition_name(const template_member_definition &o);

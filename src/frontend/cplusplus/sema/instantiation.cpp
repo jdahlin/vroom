@@ -892,6 +892,32 @@ void semantic_analysis::instantiate_pending()
             progress = true;
         }
     } while (progress);
+    /* [temp.explicit]/10: an explicit instantiation definition of a
+       function whose instantiated body the analysis does not follow */
+    for (const explicit_function_instantiation &x :
+         explicit_function_instantiations) {
+        uint32_t failure = entity_table[x.function].unsupported_body;
+        if (!failure)
+            continue;
+        /* (a coroutine's: the promise type's members, [dcl.fct.def.coroutine]
+           /5 and /6, are looked up in the instantiated body only) */
+        const char *rule = body_failures[failure - 1].subclause;
+        if (strncmp(rule, "stmt.return.coroutine", 21) &&
+            strncmp(rule, "expr.await", 10) &&
+            strncmp(rule, "expr.yield", 10) &&
+            strncmp(rule, "dcl.fct.def.coroutine", 21))
+            continue;
+        for (analysed_declaration &d : declarations) {
+            if (d.node != x.declaration ||
+                d.result == analysis_result::ill_formed)
+                continue;
+            unsupported.append(body_failures[failure - 1]);
+            d.result = analysis_result::unsupported;
+            d.first_unsupported = static_cast<uint32_t>(unsupported.size() - 1);
+            d.has_unsupported = true;
+        }
+    }
+    explicit_function_instantiations.clear();
     postponed_bodies.clear();
     pending_definitions.clear();
 }

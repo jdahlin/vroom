@@ -859,3 +859,13 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   Unsupported 34523 -> 34466, we reject 390, we accept 5311 -> 5312
   (SemaTemplate/canonical-expr-type.cpp:36: f1(T(&)[M + N]) redefinition,
   equivalence of expressions is by their token, not canonical).
+- 11.15b: an explicit instantiation definition of a function template whose
+  instantiated body is refused for a coroutine (co_return, co_await,
+  co_yield: the promise's members are looked up in the instantiated body,
+  [dcl.fct.def.coroutine]) stays unsupported instead of well-formed
+  (explicit_function_instantiations, checked in instantiate_pending);
+  unsupported 34466 -> 34495, we reject 390, we accept 5312 -> 5297
+  (coroutines.cpp 271, 307, 499, 505, 1145).  Left: coroutines.cpp 566
+  (class member explicit instantiation), 714 and 750 (the template's own
+  declaration is held by [temp.names]/[ext.gnu]; its instantiation is
+  well-formed), cxx2b-deducing-this-coro.cpp:32.
