@@ -1,5 +1,7 @@
 # x86-64 Linux runners (ubuntu-24.04, more and cheaper than the arm ones):
 # the expensive sanitizer jobs and the steps that need an x86-64 host.
+#   generic  target-independent steps (front ends, generated tables,
+#            harness self-tests), run once here instead of on arm64
 #   x86   vcc built for x86-64: host dispatch, x86 objects, VIR x86, ...
 #   asan  ASan+UBSan build (arm64 target suites under qemu, as before)
 #   tsan  TSan build: vcc suite, VIR x86
@@ -22,6 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - { job: generic, os: ubuntu-24.04 }
           - { job: x86,  os: ubuntu-24.04 }
           - { job: asan, os: ubuntu-24.04 }
           - { job: tsan, os: ubuntu-24.04 }

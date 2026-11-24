@@ -73,16 +73,72 @@ arm64)
 	build vref
 	step vref python3 bench/vref-test.py --bin-dir "$BUILD"
 	step runtime-exceptions python3 bench/test-runtime-exceptions.py
+	# __has_builtin, typed calls, -c and constant folding per language and target against the known list
+	step builtin-consistency python3 bench/vcc-builtins.py --check-consistency --vpp "$BUILD/vpp"
+	# builtins with a C body leave no helper call at any level
+	step builtin-bodies python3 bench/vcc-builtin-bodies.py --vpp "$BUILD/vpp"
+	# C++ programs lowered to C's AST (vpp -c, -O0..-O3) run as clang++'s under qemu
+	step cxx-run      python3 bench/cxx-run.py -j "$J"
+	# programs using libc++ headers: OK or a clean refusal, never a crash (needs libc++ headers; skipped without)
+	[ -d "${LIBCXX_INC:-/usr/lib/llvm-23/include/c++/v1}" ] && step cxx-libcxx-apps python3 bench/cxx-libcxx-apps.py -j "$J" --bin-dir "$BUILD"
+	# Cover VIR at -O0, -O2 and -O3, and the direct emitter at -O1.
+	step ctests       python3 bench/vcc-ctests.py -j "$J"
+	step ctests-O0    python3 bench/vcc-ctests.py -j "$J" --suite vcc -O0 --vflags "-fvir-verify -fvir-check"
+	step ctests-O1    python3 bench/vcc-ctests.py -j "$J" -O1 --vflags "-fno-vir"
+	step ctests-O3    python3 bench/vcc-ctests.py -j "$J" -O3 --vflags "-fvir-verify -fvir-check"
+	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
+	step udivconst python3 bench/vcc-udivconst.py --sanitize
+	step sdivconst python3 bench/vcc-sdivconst.py --sanitize
+	step mulhi python3 bench/vcc-mulhi.py --sanitize
+	step rec-effects  python3 bench/vcc-rec-effects.py
+	step rec-slots python3 bench/vcc-rec-slots.py --sanitize
+	step rec-slot-values python3 bench/vcc-rec-slot-values.py --sanitize
+	step rec-mulconst python3 bench/vcc-rec-mulconst.py --sanitize --check-mutation
+	step flow-contracts python3 bench/vcc-flow.py --sanitize
+	step flow-values python3 bench/vcc-flow-values.py --sanitize
+	step rec-dead python3 bench/vcc-rec-dead.py --sanitize
+	step emit-names python3 bench/vcc-emit-names.py --sanitize
+	step unused-init-contracts python3 bench/vcc-unused-init.py --sanitize
+	step slot-observable python3 bench/vcc-slot-observable.py --check-mutation
+	step rec-copies python3 bench/vcc-rec-copies.py
+	step switch-bitsets-arm64 python3 bench/vcc-switch-bitsets.py --target aarch64-linux-gnu --run
+	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
+	step switch-values-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu --rule switchvalues --run
+	step tail-controls python3 bench/vcc-tail-controls.py
+	step tail-object-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu --rule tails --run --tail-obj --cfi
+	step const-control-arm64 python3 bench/vcc-constant-control.py --target aarch64-linux-gnu
+	step stress       python3 bench/vcc-stress.py
+	step stress-vccd  python3 bench/vcc-stress.py --vccd
+	step vccd         python3 bench/vccd-test.py
+	step abi          python3 bench/vcc-abi.py
+	# exceptions through vcc's C frames (doc/PLAN-vir-eh.md): hosted glibc, a target without clang++'s C++ run time is skipped
+	step eh           python3 bench/vcc-eh.py -j "$J" --target aarch64
+	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
+	step bitint-ops   python3 bench/vcc-bitint.py --target aarch64 --bin-dir "$BUILD" --output "$LOGS/bitint-ops" -j "$J"
+	step bitint-abi   python3 bench/vcc-bitint-abi.py --target aarch64 --bin-dir "$BUILD" --output "$LOGS/bitint-abi" -j "$J"
+	step c90-modes    python3 bench/vcc-c90.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/c90-modes"
+	step extint-alias python3 bench/vcc-extint.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/extint-alias"
+	step bitint-constants python3 bench/vcc-bitint-constants.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-constants"
+	step bitint-float python3 bench/vcc-bitint-float.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-float" --cflag=-O3
+	step pic          python3 bench/vcc-pic.py
+	step vas-obj      python3 bench/vas-obj.py
+	step vlink-opts   python3 bench/vlink-opts.py
+	step onboarding   python3 bench/vcc-onboarding.py --target aarch64-linux-gnu --baseline
+	step bflayout     python3 bench/vcc-bflayout.py
+	step ldconst      python3 bench/vcc-ldconst.py
+	step cfi          python3 bench/vcc-cfi.py -j "$J"
+	step dwarf        python3 bench/vcc-dwarf.py -j "$J"
+	;;
+generic)
+	# target-independent: the front ends, generated tables, harness self-tests;
+	# on a cheap x86-64 runner, once (the platform jobs run only what depends on a target)
+	build vcc
 	step pg-cc-contract python3 bench/pg/test-cc.py
 	step pg-speed-accounting python3 bench/pg/test-speed.py
 	step builtin-tests-generated python3 src/tools/gen-builtin-tests.py --check \
 		--registry "$BUILD/generated/include/frontend/integer-builtins.inc"
 	step builtin-integer-arity python3 bench/vcc-builtins.py --check-integer-arity --vpp "$BUILD/vpp"
 	step builtin-stubs python3 bench/vcc-builtins.py --check-stubs --vpp "$BUILD/vpp"
-	# __has_builtin, typed calls, -c and constant folding per language and target against the known list
-	step builtin-consistency python3 bench/vcc-builtins.py --check-consistency --vpp "$BUILD/vpp"
-	# builtins with a C body leave no helper call at any level
-	step builtin-bodies python3 bench/vcc-builtin-bodies.py --vpp "$BUILD/vpp"
 	step clang-builtin-reader make -C src -j "$J" OUT="$BUILD" clang-builtin-reader-check
 	step builtin-typed-samples python3 bench/vcc-builtins.py --clang-vendored --sample-calls \
 		--clang-reader "$BUILD/clang-builtin-reader" --vpp "$BUILD/vpp"
@@ -106,69 +162,17 @@ arm64)
 	# semantic analysis vs clang on clang's own C++ tests (CXX, SemaCXX, SemaTemplate; fetched, pinned):
 	# no failure beyond src/test/cxx/sema/clang-failures.txt, no we-accept beyond clang-accepted.txt, and none of their lines gone
 	step cxx-sema-clang sh -c 'sh bench/fetch-testsuites.sh llvm && env PATH="${LLVM:-/usr/lib/llvm-23}/bin:$PATH" python3 bench/cxx-sema.py -j "$1" --bin-dir "$2" --check' sh "$J" "$BUILD"
-	# C++ programs lowered to C's AST (vpp -c, -O0..-O3) run as clang++'s under qemu
-	step cxx-run      python3 bench/cxx-run.py -j "$J"
-	# programs using libc++ headers: OK or a clean refusal, never a crash (needs libc++ headers; skipped without)
-	[ -d "${LIBCXX_INC:-/usr/lib/llvm-23/include/c++/v1}" ] && step cxx-libcxx-apps python3 bench/cxx-libcxx-apps.py -j "$J" --bin-dir "$BUILD"
-	# Cover VIR at -O0, -O2 and -O3, and the direct emitter at -O1.
-	step ctests       python3 bench/vcc-ctests.py -j "$J"
-	step ctests-O0    python3 bench/vcc-ctests.py -j "$J" --suite vcc -O0 --vflags "-fvir-verify -fvir-check"
-	step ctests-O1    python3 bench/vcc-ctests.py -j "$J" -O1 --vflags "-fno-vir"
-	step ctests-O3    python3 bench/vcc-ctests.py -j "$J" -O3 --vflags "-fvir-verify -fvir-check"
-	step switch-plan python3 bench/vcc-switch-plan.py --sanitize
-	step udivconst python3 bench/vcc-udivconst.py --sanitize
-	step sdivconst python3 bench/vcc-sdivconst.py --sanitize
-	step mulhi python3 bench/vcc-mulhi.py --sanitize
-	step rec-effects  python3 bench/vcc-rec-effects.py
-	step rec-slots python3 bench/vcc-rec-slots.py --sanitize
-	step rec-slot-values python3 bench/vcc-rec-slot-values.py --sanitize
-	step rec-mulconst python3 bench/vcc-rec-mulconst.py --sanitize --check-mutation
-
-	step flow-contracts python3 bench/vcc-flow.py --sanitize
-	step flow-values python3 bench/vcc-flow-values.py --sanitize
 	step vperf-lifecycle python3 bench/vperf-test.py
 	step vir-tests python3 bench/vir-test.py -j "$J" --bin-dir "$BUILD"
 	step vir-exposure python3 bench/vir-exposure.py --bin-dir "$BUILD"
-	step rec-dead python3 bench/vcc-rec-dead.py --sanitize
-	step emit-names python3 bench/vcc-emit-names.py --sanitize
-	step unused-init-contracts python3 bench/vcc-unused-init.py --sanitize
-	step slot-observable python3 bench/vcc-slot-observable.py --check-mutation
-	step opt-debug-x86 python3 bench/vcc-opt-debug.py
-	step x86-leaf-frame python3 bench/vcc-x86-leaf-frame.py --no-run
-	step rec-copies python3 bench/vcc-rec-copies.py
-	step switch-bitsets-arm64 python3 bench/vcc-switch-bitsets.py --target aarch64-linux-gnu --run
-	step switch-bitsets-x86 python3 bench/vcc-switch-bitsets.py --target x86_64-linux-gnu --run
-	step opt-rules-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu
-	step switch-values-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu --rule switchvalues --run
-	step tail-controls python3 bench/vcc-tail-controls.py
-	step tail-object-arm64 python3 bench/vcc-opt-rules.py --target aarch64-linux-gnu --rule tails --run --tail-obj --cfi
-	step const-control-arm64 python3 bench/vcc-constant-control.py --target aarch64-linux-gnu
-	step opt-rules-x86 python3 bench/vcc-opt-rules.py --target x86_64-linux-gnu --run
-	step const-control-x86 python3 bench/vcc-constant-control.py --target x86_64-linux-gnu
 	step c2y-cache    python3 bench/vcc-c2y-cache.py
 	step embed-search python3 bench/vcc-embed-search.py
 	step diag         python3 bench/vcc-diag.py -j "$J"
 	step field-uses   python3 bench/vcc-field-uses.py -j "$J"
 	step x86-features python3 bench/vcc-x86features.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
 	step x86-targets  python3 bench/vcc-x86target.py --clang "${LLVM:-/usr/lib/llvm-23}/bin/clang" --vpp "$BUILD/vpp"
-	step stress       python3 bench/vcc-stress.py
-	step stress-vccd  python3 bench/vcc-stress.py --vccd
 	step task-test    "$BUILD/task-test"
 	step common-test  env CC="${LLVM:-/usr/lib/llvm-23}/bin/clang" python3 bench/common-test.py -j "$J"
-	step vccd         python3 bench/vccd-test.py
-	step abi          python3 bench/vcc-abi.py
-	# exceptions through vcc's C frames (doc/PLAN-vir-eh.md): hosted glibc, a target without clang++'s C++ run time is skipped
-	step eh           python3 bench/vcc-eh.py -j "$J" --target aarch64
-	step atomic       python3 bench/vcc-atomic.py --bin-dir "$BUILD" --target aarch64-linux-gnu
-	step bitint-ops   python3 bench/vcc-bitint.py --target aarch64 --bin-dir "$BUILD" --output "$LOGS/bitint-ops" -j "$J"
-	step bitint-abi   python3 bench/vcc-bitint-abi.py --target aarch64 --bin-dir "$BUILD" --output "$LOGS/bitint-abi" -j "$J"
-	step c90-modes    python3 bench/vcc-c90.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/c90-modes"
-	step extint-alias python3 bench/vcc-extint.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/extint-alias"
-	step bitint-constants python3 bench/vcc-bitint-constants.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-constants"
-	step bitint-float python3 bench/vcc-bitint-float.py --target aarch64-linux-gnu --bin-dir "$BUILD" --output "$LOGS/bitint-float" --cflag=-O3
-	step pic          python3 bench/vcc-pic.py
-	step vas-obj      python3 bench/vas-obj.py
-	step vlink-opts   python3 bench/vlink-opts.py
 	step vsh          python3 bench/vsh-test.py
 	step torture-dg   python3 bench/test-torture-directives.py
 	step gcc-dg       python3 bench/test-gcc-dg.py
@@ -177,11 +181,6 @@ arm64)
 	step runtime-oracle-harness python3 bench/test-runtime-oracle.py
 	step verify-contract python3 bench/test-verify.py
 	step onboarding-verifier python3 bench/test-onboarding.py
-	step onboarding   python3 bench/vcc-onboarding.py --target aarch64-linux-gnu --baseline
-	step bflayout     python3 bench/vcc-bflayout.py
-	step ldconst      python3 bench/vcc-ldconst.py
-	step cfi          python3 bench/vcc-cfi.py -j "$J"
-	step dwarf        python3 bench/vcc-dwarf.py -j "$J"
 	;;
 x86)
 	# vcc as an x86-64 program on an x86-64 host: the steps that need one
@@ -192,6 +191,11 @@ x86)
 	step x86-eh       python3 bench/vcc-eh.py -j "$J" --target x86_64
 	step interrupt python3 bench/vcc-interrupt.py
 	step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"
+	step opt-debug-x86 python3 bench/vcc-opt-debug.py
+	step x86-leaf-frame python3 bench/vcc-x86-leaf-frame.py --no-run
+	step switch-bitsets-x86 python3 bench/vcc-switch-bitsets.py --target x86_64-linux-gnu --run
+	step opt-rules-x86 python3 bench/vcc-opt-rules.py --target x86_64-linux-gnu --run
+	step const-control-x86 python3 bench/vcc-constant-control.py --target x86_64-linux-gnu
 	step bitint-float-x86 python3 bench/vcc-bitint-float.py --bin-dir "$BUILD" --output "$LOGS/bitint-float-x86" --cflag=-O3
 	;;
 asan)
