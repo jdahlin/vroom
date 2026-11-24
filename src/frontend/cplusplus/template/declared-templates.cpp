@@ -1337,6 +1337,13 @@ bool semantic_analysis::equivalent_template(const function_template &f,
                     el.count != UINT32_MAX || el.template_entity != pe)
                     return false;
             }
+        } else if (entity_table[pe].kind != entity_kind::typedef_name &&
+                   values[i].kind == template_argument::kind_t::value &&
+                   values[i].template_entity) {
+            /* a non-type parameter: the argument is the parameter itself,
+               value-dependent */
+            if (values[i].template_entity != pe)
+                return false;
         } else if (entity_table[pe].kind != entity_kind::typedef_name ||
                    !(values[i].type == entity_table[pe].type)) {
             return false;
