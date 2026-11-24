@@ -1640,8 +1640,19 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
        mem-initializer-id ... (9.3) otherwise, the entity is
        default-initialized ([dcl.init])": [dcl.init]/7.1, a class's default
        constructor */
+    /* (9.1) a default member initializer of a variant member is used only
+       when "no other variant member of the union is designated by a
+       mem-initializer-id"; (9.2) otherwise "if the entity is an anonymous
+       union or a variant member, no initialization is performed" */
+    bool union_member_designated = false;
+    if (entity_table[c].union_)
+        for (size_t i = 0; i < subobjects.size(); i++)
+            if (initialized[i])
+                union_member_designated = true;
     for (size_t i = 0; i < subobjects.size(); i++) {
         if (initialized[i])
+            continue;
+        if (union_member_designated)
             continue;
         const dynamic_class *dynamic = dynamic_of(c);
         if (entity_table[subobjects[i]].virtual_base && dynamic &&
