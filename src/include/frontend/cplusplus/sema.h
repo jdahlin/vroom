@@ -1954,7 +1954,7 @@ class semantic_analysis
     /* the evaluator's last "no rules" line as the last refusal's detail */
     __attribute__((noinline, cold)) void evaluator_stop_detail();
     /* why constant_expression answered no (1: analysis folded it as not
-       constant, 2: no node), for evaluator_stop_detail */
+       constant, 2: no node, 3: the evaluator applied a rule of [expr.const]/5), for evaluator_stop_detail */
     uint8_t constant_stop = 0;
     __attribute__((noinline, cold)) void
     evaluation_detail(uint32_t node, bool gave_up, const constant_value &v);

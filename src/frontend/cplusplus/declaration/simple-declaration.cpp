@@ -697,6 +697,11 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
     constant_only--;
     if (r != analysis_result::well_formed)
         return r;
+    if (!constant && constant_stop == 3)
+        return ill_formed(n,
+                          "the expression is not a constant expression: the "
+                          "evaluation applies a rule of [expr.const]/5",
+                          "expr.const");
     if (!constant) {
         analysis_result refused = not_supported(n, expr_const_reason());
         evaluator_stop_detail();

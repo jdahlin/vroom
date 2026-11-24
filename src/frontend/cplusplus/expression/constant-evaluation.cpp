@@ -51,8 +51,16 @@ thread_local uint32_t last_unknown_line = 0;
    [expr.const]/5), for the detail of the refusal that follows when the
    analysis could not decide */
 thread_local uint32_t last_not_constant_line = 0;
+thread_local bool last_not_constant_certain = false;
 #define CONST_NOT_CONSTANT                                                     \
-    (last_not_constant_line = __LINE__, constness::not_constant)
+    (last_not_constant_line = __LINE__, last_not_constant_certain = false,     \
+     constness::not_constant)
+/* the same for a rule of [expr.const]/5 that clang applies as it is: the
+   declaration that needs a constant expression is ill-formed (not one the
+   analysis merely cannot follow) */
+#define CONST_NOT_CONSTANT_RULE                                                \
+    (last_not_constant_line = __LINE__, last_not_constant_certain = true,      \
+     constness::not_constant)
 
 /* The answer "the evaluator has no rules for this": normally just
    constness::unknown.  Compiled with -DVCC_TRACE_UNKNOWN each such answer
@@ -483,6 +491,7 @@ constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
         return CONST_NOT_CONSTANT;
     constant_evaluation state;
     last_not_constant_line = 0;
+    last_not_constant_certain = false;
     constness c = evaluate_node(state, node, v);
     /* [expr.const]/5.18: an allocation not deallocated in the evaluation:
        whether this expression is the whole of the constant expression is
@@ -516,6 +525,8 @@ analysis_result semantic_analysis::evaluate_constant(SyntaxRef at,
         return refused;
     }
     constant = c == constness::constant;
+    if (c == constness::not_constant && last_not_constant_certain)
+        constant_stop = 3;
     return analysis_result::well_formed;
 }
 
@@ -1284,7 +1295,7 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             if (o.member != x.b) {
                 if (!state.writing) {
                     if (state.reading)
-                        return CONST_NOT_CONSTANT;
+                        return CONST_NOT_CONSTANT_RULE;
                     if (state.designating) {
                         object = element_place | o.first;
                         return constness::constant;
