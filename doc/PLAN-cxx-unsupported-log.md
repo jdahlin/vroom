@@ -905,3 +905,9 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   Orchestrator: 3fd0cc89d (11.17b, a token scan for co_await in the held
   template) reverted as a special case; the general rule waits.  Tip:
   unsupported 34416, we reject 390, we accept 5296.
+- 11.18 (01b5468c0): a statement attribute after the class-key is
+  ill-formed; class-head details.  Parked patch (scratchpad 11.18-1.patch):
+  constexpr static data members before C++17 (-142) needs two fixes first:
+  access of a private name in a friend class template's template-head
+  (access.cpp:84), static_cast of an out-of-range value to an unfixed enum
+  is not constant (constant-expression-cxx11.cpp:2660).
