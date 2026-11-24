@@ -390,9 +390,9 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     {"swift_attr", 0},
     /* clang's diagnose_if(condition, message, "warning" | "error"): a
        diagnostic at a call where the condition holds (libc++'s
-       _LIBCPP_DIAGNOSE_WARNING and _LIBCPP_CHECK_*_MEMORY_ORDER); accepted
-       and not evaluated, so a call it would diagnose is accepted */
-    {"diagnose_if", 0},
+       _LIBCPP_DIAGNOSE_WARNING and _LIBCPP_CHECK_*_MEMORY_ORDER), analysed
+       and evaluated at the calls (diagnose-if.cpp) */
+    {"diagnose_if", gnu_diagnose_if},
     /* clang's thread-safety attributes (libc++'s _LIBCPP_CAPABILITY,
        _LIBCPP_ACQUIRE_CAPABILITY, ...): arguments are expressions naming
        members or this, or a string; checked only under -Wthread-safety,
@@ -776,6 +776,11 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             if (count != 4 || !a[2].is_token())
                 return not_supported(at, "ext.gnu");
             VTRY(r, add_gnu_abi_tag(at, a[2].token(), g));
+            continue;
+        }
+        if (rule->flag == gnu_diagnose_if) {
+            VTRY(r, diagnose_if_attribute(at, a, count));
+            g.flags |= gnu_diagnose_if;
             continue;
         }
         if (rule->flag == gnu_unavailable) {

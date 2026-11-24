@@ -2116,6 +2116,7 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
         entity_table[e].gnu_flags |=
             m.gnu_flags & (gnu_function_symbol_flags | gnu_inline_flags);
         entity_table[e].abi_tag = m.abi_tag;
+        diagnose_if_declared(declaration, e);
         if (m.operator_function) {
             entity_table[e].operator_function = true;
             entity_table[e].implemented = m.implemented;
