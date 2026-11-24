@@ -180,6 +180,8 @@ class c_lowering
        made, and __cxa_pure_virtual's ([abi:pure-virtual]) */
     owned_array<uint32_t> vtables;
     uint32_t pure_virtual = 0;
+    /* __cxa_deleted_virtual, the slot of a destructor defined as deleted */
+    uint32_t deleted_virtual = 0;
     uint32_t vtable(entity_index k, token_index at);
     ast_qualified_type vtable_type(entity_index k);
     /* the address point of class k's virtual table: &vtable[2]

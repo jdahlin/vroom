@@ -3020,6 +3020,24 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
                               "dcl.constexpr");
         }
     }
+    if (f.special == special_member::constructor &&
+        !entity_table[f.enclosing].union_) {
+        /* [class.base.init]/12: "In a non-delegating constructor, the
+           destructor for each potentially constructed subobject of class
+           type is potentially invoked ([class.dtor])": one that is deleted
+           makes the definition ill-formed ([dcl.fct.def.delete]/2) */
+        owned_array<entity_index> subobjects;
+        subobject_classes(f.enclosing, subobjects);
+        for (entity_index sub : subobjects)
+            if (entity_table[sub].kind == entity_kind::class_type &&
+                destructor_deleted(sub))
+                return ill_formed(definition,
+                                  "the destructor of a potentially "
+                                  "constructed subobject is potentially "
+                                  "invoked by the constructor and it is "
+                                  "deleted",
+                                  "class.base.init");
+    }
     return analyse_function_body(definition, body.compound_statement(), init);
 }
 

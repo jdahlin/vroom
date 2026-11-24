@@ -39,6 +39,31 @@ bool semantic_analysis::default_constructed(entity_index c,
 }
 
 /*
+ * [class.dtor]/6: "A defaulted destructor for a class X is defined as
+ * deleted if: X is a union-like class that has a variant member with a
+ * non-trivial destructor, any potentially constructed subobject has class
+ * type M (or array thereof) and M has a destructor that is deleted or
+ * inaccessible".  Whether class c's destructor is deleted: by its
+ * definition (= delete), or, when it is not user-provided, by a
+ * subobject's.  Access is not analysed.
+ */
+bool semantic_analysis::destructor_deleted(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.destructor && entity_table[x.destructor].deleted)
+        return true;
+    if (x.destructor && !entity_table[x.destructor].implicit)
+        return false;
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes)
+        if (entity_table[k].kind == entity_kind::class_type &&
+            destructor_deleted(k))
+            return true;
+    return false;
+}
+
+/*
  * [class.default.ctor]/2: "A defaulted default constructor for class X is
  * defined as deleted if:
  * - X is a union that has a variant member with a non-trivial default
@@ -56,7 +81,7 @@ bool semantic_analysis::default_constructed(entity_index c,
  *   ambiguity or in a function that is deleted ...".
  * Whether class c's default constructor is implicitly declared or defaulted
  * ([dcl.fct.def.default]) and deleted.  Not analysed (false): a const member
- * of class type, the anonymous-union bullets, access, a deleted destructor.
+ * of class type, the anonymous-union bullets, access.
  */
 bool semantic_analysis::default_constructor_deleted(entity_index c) const
 {
@@ -106,6 +131,11 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
     }
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
+    /* the last bullet: a subobject whose destructor is deleted */
+    for (entity_index k : classes)
+        if (entity_table[k].kind == entity_kind::class_type &&
+            destructor_deleted(k))
+            return true;
     for (entity_index k : classes)
         if (entity_table[k].kind == entity_kind::class_type &&
             default_constructed(c, k) && default_constructor_deleted(k))

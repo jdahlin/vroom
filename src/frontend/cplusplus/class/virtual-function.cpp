@@ -316,19 +316,25 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
             declared_virtuals.append(v);
         }
     }
-    /* [class.dtor]/6: a defaulted destructor is deleted when a
-       subobject's destructor is deleted or inaccessible: not followed for
-       a dynamic class (its destructor's slots) */
+    /* [class.dtor]/6: an implicitly declared destructor is deleted when a
+       subobject's destructor is deleted or inaccessible; its virtual table
+       slots point at __cxa_deleted_virtual ([abi:pure-virtual]) */
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes) {
         entity_index kd = entity_table[k].destructor;
-        if (subobject_destructor_inaccessible(c, k) ||
-            (kd && entity_table[kd].deleted))
+        if (!(subobject_destructor_inaccessible(c, k) ||
+              (kd && entity_table[kd].deleted)))
+            continue;
+        entity_index own = entity_table[c].destructor;
+        if (own && !entity_table[own].implicit)
             return not_supported_because(
                 n, "class.dtor",
                 "a subobject's destructor is deleted or inaccessible (the "
-                "class's is defined as deleted)");
+                "class's is defined as defaulted)");
+        if (own)
+            entity_table[own].deleted = true;
+        break;
     }
     entity_index destructor = entity_table[c].destructor;
     if (destructor && entity_table[destructor].virtual_ &&

@@ -533,7 +533,19 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
                 destructor && i && analysis.vtable_slots[slot - 1] == f;
             ast_qualified_type ft = entity_type(f, at);
             uint32_t target = 0;
-            if (analysis.entity_table[f].pure && !destructor) {
+            if (destructor && analysis.entity_table[f].deleted) {
+                /* [abi:pure-virtual]: a deleted virtual function's slot
+                   points at __cxa_deleted_virtual, as for a destructor
+                   defined as deleted ([class.dtor]/6) */
+                ft = ast_builder_type_function(c, v, nullptr, 0, 0);
+                if (!deleted_virtual) {
+                    deleted_virtual = ast_builder_symbol(
+                        c, AST_SYMBOL_FUNCTION, "__cxa_deleted_virtual", 21, ft,
+                        AST_STORAGE_NONE, AST_SYMBOL_FLAG_GLOBAL, 0);
+                    ast_builder_toplevel(c, deleted_virtual);
+                }
+                target = deleted_virtual;
+            } else if (analysis.entity_table[f].pure && !destructor) {
                 ft = ast_builder_type_function(c, v, nullptr, 0, 0);
                 if (!pure_virtual) {
                     pure_virtual = ast_builder_symbol(

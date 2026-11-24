@@ -1806,6 +1806,20 @@ analysis_result semantic_analysis::declare_with_initializer(
         kind == entity_kind::variable && declared_in_scope == current_scope &&
         !is_namespace(entity_table[declared_entity].enclosing))
         block_variables.append(declared_entity);
+    /* [class.dtor]/16, [dcl.fct.def.delete]/2: "the destructor is
+       potentially invoked" for an object defined here: a deleted one is
+       ill-formed (as clang) */
+    if (r == analysis_result::well_formed && kind == entity_kind::variable &&
+        entity_table[declared_entity].defined && !s.extern_ &&
+        !entity_table[declared_entity].nonstatic_member) {
+        entity_index record = element_class(element_type(type));
+        if (is_class_entity(record) && destructor_deleted(record))
+            return ill_formed(declaration,
+                              "a program that refers to a deleted function "
+                              "implicitly or explicitly is ill-formed: the "
+                              "destructor of the object is deleted",
+                              "class.dtor");
+    }
     bool default_constructed = false;
     if (r == analysis_result::well_formed && !initialized &&
         kind == entity_kind::variable &&
