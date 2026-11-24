@@ -536,6 +536,10 @@ struct entity {
     /* with no held_because: why the declaration that held the name was
        not analysed, told in a refusal's detail */
     held_cause held_by = held_cause::refused;
+    /* the declaration that held the name (declaration() sets it), 0 if
+       not known: a refusal of a use of the name gives it
+       (unsupported_construct::holder) */
+    SyntaxRef holder = 0;
     /* with unknown_names: the subclause whose missing rules made the
        declaration that left the scope's names not all known not
        analysed (declaration() sets it), else the using-directive's */
@@ -1081,6 +1085,10 @@ struct unsupported_construct {
     /* the form of the construct that has no rules yet (a builtin's name
        and what about its call), "" if the subclause says enough */
     const char *detail = "";
+    /* a name refused because a declaration not analysed declares it:
+       that declaration (-fcxx-dump=unsupported's held= field, its first
+       token's place, which bench/cxx-sema.py --why follows), 0 if none */
+    SyntaxRef holder = 0;
 };
 
 struct analysed_declaration {
@@ -2046,6 +2054,9 @@ class semantic_analysis
     /* the last refusal recorded gets this text as its detail (a copy) */
     __attribute__((noinline, cold)) void
     last_unsupported_detail(const char *text, size_t size);
+    /* the last refusal recorded was of a use of e, a name held by a
+       declaration not analysed: it names that declaration */
+    void last_unsupported_held_by(entity_index e);
     /* the last refusal of an instantiation: the failure of the
        specialization's own analysis, "instantiation refused: [SUBCLAUSE]
        FILE:LINE DETAIL" */
@@ -6590,6 +6601,8 @@ class semantic_analysis
     /* a declaration analysis did not follow may declare an operator
        function (hold_names): what an operator means is not known */
     bool operators_held = false;
+    /* the declaration that held them first (operators_held_at is in it) */
+    SyntaxRef operators_holder = 0;
     /* the last class definition was kept complete though a member
        function body was ill-formed ([class.mem]/6) */
     bool class_kept_ill_formed = false;

@@ -1008,12 +1008,11 @@ def clang_crash_line(stderr, name):
 
 # --why: the root causes of the unsupported declarations, by how many
 # counted declarations each blocks (doc/PLAN-cxx-unsupported.md, step 0)
-UNSUPPORTED_LINE = re.compile(r'^\[([^\]]*)\] (\S+) (.*?):(\d+):(\d+)\t(.*?)\t(.*)$')
-HELD = re.compile(r'^(\S+) is declared by a declaration (that is not parsed|that is ill-formed|with no rules yet)$')
+# -fcxx-dump=unsupported: [SUB] NODE FILE:L:C <tab> DETAIL <tab> SITE, and for a
+# name held by a declaration not analysed <tab> held=FILE:L:C, that declaration
+UNSUPPORTED_LINE = re.compile(r'^\[([^\]]*)\] (\S+) (.*?):(\d+):(\d+)\t(.*?)\t([^\t]*)'
+                              r'(?:\theld=(.*?):(\d+):(\d+))?$')
 INSTANTIATION = re.compile(r'^instantiation refused: \[([^\]]*)\] (\S+:\d+) ?(.*)$')
-WHY_DEPTH = 8
-# a refusal that names the declaration (not analysed) it depends on
-HELD_AT = re.compile(r'declared by the declaration at (.*?):(\d+):(\d+), not analysed')
 
 
 def unwrap_instantiation(sub, detail, site):
@@ -1044,20 +1043,6 @@ def why_key(sub, detail, site):
     return f'[{sub}] {site} {detail}'.rstrip()
 
 
-def source_lines(path, cache={}):
-    if path not in cache:
-        try:
-            cache[path] = open(path, errors='replace').read().split('\n')
-        except OSError:
-            cache[path] = []
-    return cache[path]
-
-
-def declaration_text(cwd, d):
-    lines = source_lines(os.path.join(cwd, d['path']))
-    return '\n'.join(lines[d['l1'] - 1:d['l2']])
-
-
 def root_causes(test, opts, vpp, counted):
     """{root key: [count, example]} for the counted unsupported declarations
     of one run"""
@@ -1080,9 +1065,12 @@ def root_causes(test, opts, vpp, counted):
     for line in ours[1].splitlines():
         u = UNSUPPORTED_LINE.match(line)
         if u:
+            held = None
+            if u.group(8):
+                held = (u.group(8), int(u.group(9)), int(u.group(10)))
             refusals.append({'sub': u.group(1), 'node': u.group(2), 'path': u.group(3),
                              'pos': (int(u.group(4)), int(u.group(5))),
-                             'detail': u.group(6), 'site': u.group(7)})
+                             'detail': u.group(6), 'site': u.group(7), 'held': held})
             continue
         m = ANALYSIS_LINE.match(line)
         if m:
@@ -1101,50 +1089,43 @@ def root_causes(test, opts, vpp, counted):
         return None
 
     def holder(i, held):
-        """the last declaration before decls[i] that is not well-formed and
-        has the name"""
-        word = re.compile(r'\b' + re.escape(held) + r'\b')
+        """the declaration the refusal's held= field names: the innermost
+        one of the dump that has that place, before decls[i]"""
+        path, pos = held[0], held[1:]
+        best = None
         for j in range(i - 1, -1, -1):
-            if decls[j]['result'] != 'well-formed' and word.search(declaration_text(cwd, decls[j])):
-                # a declaration refused for the same name (it uses the
-                # name, it does not declare it) is not the holder: a run
-                # of such users would use up WHY_DEPTH before the declaration
-                # that holds the name
-                r = first_refusal(decls[j]) if decls[j]['result'] == 'unsupported' else None
-                if r is not None:
-                    h = HELD.match(unwrap_instantiation(r['sub'], r['detail'], r['site'])[1])
-                    if h and h.group(1) == held:
-                        continue
-                return j
-        return None
+            dj = decls[j]
+            if dj['path'] == path and (dj['l1'], dj['c1']) <= pos <= (dj['l2'], dj['c2']):
+                if best is None or (dj['l1'], dj['c1']) >= (decls[best]['l1'], decls[best]['c1']):
+                    best = j
+        return best
 
-    def root(i, depth):
-        d = decls[i]
-        if d['result'] != 'unsupported':
-            reason = ''
-            if d['result'] == 'not-parsed':
-                for n in range(d['l1'], d['l2'] + 1):
-                    if (d['path'], n) in parse_why:
-                        reason = ' ' + parse_why[(d['path'], n)]
-                        break
-            return f'{d["result"]}: {d["kind"]}{reason}', d
-        r = first_refusal(d)
-        if r is None:
-            return f'[{d["sub"]}] (no refusal line in the declaration)', d
-        at = HELD_AT.search(r['detail'])
-        if at and depth < WHY_DEPTH:
-            pos = (int(at.group(2)), int(at.group(3)))
-            for j in range(i - 1, -1, -1):
-                dj = decls[j]
-                if os.path.basename(dj['path']) == os.path.basename(at.group(1)) and \
-                        (dj['l1'], dj['c1']) <= pos <= (dj['l2'], dj['c2']):
-                    return root(j, depth + 1)
-        h = HELD.match(unwrap_instantiation(r['sub'], r['detail'], r['site'])[1])
-        if h and depth < WHY_DEPTH:
-            j = holder(i, h.group(1))
-            if j is not None:
-                return root(j, depth + 1)
-        return why_key(r['sub'], r['detail'], r['site']), d
+    def root(i):
+        """the cause of decls[i]: its first refusal's, or, for a name held
+        by a declaration not analysed, that declaration's (a holder is
+        always an earlier declaration, so the chain ends)"""
+        while True:
+            d = decls[i]
+            if d['result'] != 'unsupported':
+                reason = ''
+                if d['result'] == 'not-parsed':
+                    for n in range(d['l1'], d['l2'] + 1):
+                        if (d['path'], n) in parse_why:
+                            reason = ' ' + parse_why[(d['path'], n)]
+                            break
+                if d['result'] == 'well-formed':
+                    # (it holds the name all the same: a deduction guide)
+                    return f'held by a well-formed {d["kind"]}', d
+                return f'{d["result"]}: {d["kind"]}{reason}', d
+            r = first_refusal(d)
+            if r is None:
+                return f'[{d["sub"]}] (no refusal line in the declaration)', d
+            j = None
+            if r['held']:
+                j = holder(i, r['held'])
+            if j is None:
+                return why_key(r['sub'], r['detail'], r['site']), d
+            i = j
 
     out = {}
     index = {(d['l1'], d['c1']): i for i, d in enumerate(decls) if d['path'] == name}
@@ -1153,7 +1134,7 @@ def root_causes(test, opts, vpp, counted):
         if i is None:
             key, d = '(declaration not in the dump)', None
         else:
-            key, d = root(i, 0)
+            key, d = root(i)
         e = out.setdefault(key, [0, None])
         e[0] += 1
         if e[1] is None and d is not None:

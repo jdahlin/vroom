@@ -60,7 +60,8 @@ namespace cplusplus
       "ill-formed, not-parsed or unsupported=[SUBCLAUSE]")                     \
     X(unsupported, "unsupported", analysis,                                    \
       "per construct without rules: [SUBCLAUSE] nonterminal FILE:LINE:COL, a " \
-      "tab and its detail")                                                    \
+      "tab and its detail, a tab and vcc's check; for a name held by a "       \
+      "declaration not analysed, a tab and held=FILE:LINE:COL of it")          \
     X(declaration_claims, "declaration-claims", analysis,                      \
       "per declared name: the type analysis gave it")                          \
     X(type_claims, "type-claims", analysis,                                    \

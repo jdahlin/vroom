@@ -81,20 +81,22 @@ analysis_result semantic_analysis::not_supported(SyntaxRef n,
 void semantic_analysis::name_lookup_detail(token_index t,
                                            const lookup_result &found)
 {
-    if (found.unknown && found.unknown_by != held_cause::refused)
+    if (found.unknown && found.unknown_by != held_cause::refused) {
         name_held_detail(t, found.unknown_by);
-    else if (found.unknown_entity &&
-             entity_table[found.unknown_entity].instantiation &&
-             !entity_table[found.unknown_entity].held_by_template)
+        last_unsupported_held_by(found.unknown_entity);
+    } else if (found.unknown_entity &&
+               entity_table[found.unknown_entity].instantiation &&
+               !entity_table[found.unknown_entity].held_by_template)
         /* [temp.dep.constexpr]/2: in a template's own declaration, only
            the parameter's bare name as an array bound is represented
            (value_parameter_named) */
         name_unsupported_detail(t, "is a non-type template parameter in an "
                                    "expression of a declarator's type");
-    else if (found.unknown_entity)
+    else if (found.unknown_entity) {
         name_unsupported_detail(t, "is declared by a declaration with no "
                                    "rules yet");
-    else if (found.unknown)
+        last_unsupported_held_by(found.unknown_entity);
+    } else if (found.unknown)
         name_unsupported_detail(t, "has no declaration the analysis knows: a "
                                    "scope it was searched in has names "
                                    "analysis did not follow");
@@ -188,12 +190,20 @@ void semantic_analysis::last_unsupported_detail(const char *text, size_t size)
     unsupported[unsupported.size() - 1].detail = detail.c_str();
 }
 
+void semantic_analysis::last_unsupported_held_by(entity_index e)
+{
+    if (e)
+        unsupported[unsupported.size() - 1].holder = entity_table[e].holder;
+}
+
 void semantic_analysis::instantiation_detail(const unsupported_construct &in)
 {
     char text[512];
     snprintf(text, sizeof text, "instantiation refused: [%s] %s:%u %s",
              in.subclause, in.file, static_cast<unsigned>(in.line), in.detail);
     last_unsupported_detail(text, strlen(text));
+    /* (a held name the specialization's analysis met) */
+    unsupported[unsupported.size() - 1].holder = in.holder;
 }
 
 analysis_result semantic_analysis::not_supported_builtin(SyntaxRef n,
@@ -375,6 +385,12 @@ analysis_result semantic_analysis::declaration(SyntaxRef n)
             held.held_because = unsupported[unsupported_before].subclause;
         else if (!d.has_unsupported && !held.held_because)
             held.held_by = cause;
+        /* (a well-formed declaration that holds a name, a definition of a
+           class template whose first declaration was refused, keeps the
+           holder that declaration was; it is the holder when there is no
+           other, a deduction guide) */
+        if (d.result != analysis_result::well_formed || !held.holder)
+            held.holder = n;
     }
     held_pending.resize(held_before);
     for (size_t i = scopes_before; i < unknown_scopes_pending.size(); i++) {

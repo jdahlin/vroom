@@ -294,7 +294,10 @@ analysis_result semantic_analysis::overloaded_operator(
                      "declaration at %s:%u:%u, not analysed",
                      where.file_name, where.line, where.column);
         }
-        return not_supported_because(n, "over.match.oper", at);
+        analysis_result refused =
+            not_supported_because(n, "over.match.oper", at);
+        unsupported[unsupported.size() - 1].holder = operators_holder;
+        return refused;
     }
     owned_array<overload_candidate> candidates;
     auto stripped = [&](qualified_type t) {

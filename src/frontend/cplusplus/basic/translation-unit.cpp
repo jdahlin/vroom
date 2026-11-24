@@ -740,6 +740,7 @@ analysis_result semantic_analysis::declare(
                                             "with no rules yet");
             else
                 name_held_detail(id, e.held_by);
+            last_unsupported_held_by(prior);
             return refused;
         }
         /* [basic.scope.declarative]/4: "Given a set of declarations in a

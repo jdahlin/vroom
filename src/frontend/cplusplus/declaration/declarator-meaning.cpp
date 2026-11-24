@@ -723,8 +723,10 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         if (tokens[t].kind == token_kind::keyword &&
             p.keyword_of(tokens[t]) == standard_keyword::operator_) {
             operators_held = true;
-            if (!operators_held_at)
+            if (!operators_held_at) {
                 operators_held_at = t;
+                operators_holder = declaration;
+            }
         }
     if (declaration.is(syntax_kind::linkage_specification)) {
         /* extern "C" { ... }: the declarations in it are the scope's */
