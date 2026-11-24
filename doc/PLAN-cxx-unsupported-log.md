@@ -737,3 +737,12 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   [temp.deduct] refusal names its stage (declarator 104, decl-specifiers
   61).  We accept 5443 -> 5407 (36 lines now rejected as clang does),
   unsupported 34909 -> 34894, we reject unchanged.
+- 11.4 (4f2501f3e, cd281c8f7): access in a function template's
+  declaration and definition is checked in the template's context
+  ([temp.deduct]/8); a variable with a private or protected destructor is
+  ill-formed.  Unsupported 34894 -> 34891, we accept 5407 -> 5390.
+  Parked: cwg7 (virtual base reachable only through a private base) as a
+  patch: it makes long-virtual-inheritance-chain.cpp exponential and analyses
+  classes with layout bugs (layout refuted +29); find the exponential walk
+  first.  Open: [temp.deduct] stage counts unchanged (narrowing in
+  sizeof((T){1.1}), cwg13xx:659, cwg14xx:124).
