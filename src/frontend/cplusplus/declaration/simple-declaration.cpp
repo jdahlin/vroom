@@ -703,8 +703,13 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
     constant_only--;
     if (r != analysis_result::well_formed)
         return r;
-    if (!constant && constant_stop == 3 && evaluation_rule_note())
-        return ill_formed(n, evaluation_rule_note(), "expr.const");
+    if (!constant && constant_stop == 3 && evaluation_rule_note()) {
+        char text[256];
+        snprintf(text, sizeof text,
+                 "the expression is not a constant expression: %s",
+                 evaluation_rule_note());
+        return ill_formed(n, text, "expr.const");
+    }
     if (!constant && constant_stop == 3)
         return ill_formed(n,
                           "the expression is not a constant expression: the "
@@ -2057,15 +2062,8 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (s.constexpr_ && value.evaluation == constness::unknown &&
         (type_table[type.unqualified()].kind == type_kind::lvalue_reference ||
          type_table[type.unqualified()].kind == type_kind::rvalue_reference) &&
-        value.node &&
-        semantics[value.node].kind == semantic_kind::bind_reference) {
-        uint32_t target = semantics[value.node].a;
-        if (target && semantics[target].kind == semantic_kind::entity &&
-            semantics[target].a && !entity_table[semantics[target].a].automatic)
-            value.evaluation = constness::constant;
-        else if (target)
-            value.evaluation = evaluate_reference_binding(value.node);
-    }
+        value.node)
+        value.evaluation = evaluate_reference_binding(value.node);
     /* [expr.const]/3: a const integral local may be usable in constant
        expressions, which decides whether a lambda that names it captures
        it: evaluated, not refused if the evaluator cannot tell (it is then
@@ -2195,15 +2193,8 @@ analysis_result semantic_analysis::declare_with_initializer(
             /* (only when the evaluator applies a rule of [expr.const]/5
                to it: a not constant the analysis folded without one may
                be an error of ours) */
-            if (value.node) {
-                constant_value v;
-                constness folded = semantics[value.node].evaluation;
-                semantics[value.node].evaluation = constness::unknown;
-                constness c = evaluate_value(value.node, v);
-                semantics[value.node].evaluation = folded;
-                if (c == constness::not_constant && evaluation_rule_applied())
-                    entity_table[declared_entity].unusable_initializer = true;
-            }
+            if (value.node && refuted_by_rule(value.node))
+                entity_table[declared_entity].unusable_initializer = true;
         }
         if (value.evaluation == constness::not_constant)
             return ill_formed_at_token(m.id,

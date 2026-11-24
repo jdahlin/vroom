@@ -1899,10 +1899,10 @@ class semantic_analysis
     /* [abi:definitions], [class.prop]/5 (std::is_empty): no non-static data
        member but zero-width bit-fields, no virtual function or base, every
        base empty (ext/clang/class-traits.cpp) */
+    bool empty_class(entity_index c) const;
     /* a class whose implicit copy reads no value: no union, no scalar
        or array subobject ([class.copy.ctor]/14) */
     bool copy_reads_nothing(entity_index c) const;
-    bool empty_class(entity_index c) const;
     /* the explicit instantiation a function is the subject of, its own or
        its class's ([temp.explicit]/10) */
     instantiation_kind explicitly_instantiated(entity_index f) const;
@@ -3915,6 +3915,13 @@ class semantic_analysis
     bool evaluation_rule_applied() const;
     /* ... and its message (clang's note), or null */
     const char *evaluation_rule_note() const;
+    /* whether the evaluator finds a rule of [expr.const]/5 clang applies as
+       it is in a node the analysis folded as not constant (the fold's own
+       answer is not taken) */
+    bool refuted_by_rule(uint32_t node);
+    /* the read of a variable not usable in constant expressions: not_constant
+       with its rule, or unknown */
+    constness unusable_variable_read(const entity &e, bool potential) const;
     /* one evaluation's state: the objects of the evaluation (locals and
        parameters of the constexpr functions it calls, [expr.const]/5.8:
        their lifetime began within it), the depth of invocations and the
