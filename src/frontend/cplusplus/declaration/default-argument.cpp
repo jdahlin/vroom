@@ -41,6 +41,8 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
             any = true;
     if (!any)
         return analysis_result::well_formed;
+    /* [temp.spec]/6: a default argument is checked */
+    flag_set checked(explicit_declaration_names, false);
     /* [temp.inst]/4: a function template specialization a default
        argument names is not "referenced in a context that requires a
        function definition to exist" until the argument is used in a
@@ -221,6 +223,8 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
 
 analysis_result semantic_analysis::member_default_arguments(entity_index c)
 {
+    /* [temp.spec]/6: a default argument is checked */
+    flag_set checked(explicit_declaration_names, false);
     analysis_result result = analysis_result::well_formed;
     owned_array<pending_default_arguments> kept;
     entity_index scope = current_scope;

@@ -379,6 +379,8 @@ analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
+    /* [temp.spec]/6: an initializer is checked */
+    flag_set checked(explicit_declaration_names, false);
     SyntaxElement clause;
     bool direct = false, list = false;
     if (!initializer_form(init, clause, direct, list))

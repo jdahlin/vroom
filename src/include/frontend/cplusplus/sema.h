@@ -4472,10 +4472,12 @@ class semantic_analysis
     /* [class.access]: whether a member with this access can be named
        here */
     bool accessible(entity_index member, entity_index object_class = 0) const;
-    /* [temp.spec]/6: set while the
-       declaration of an explicit instantiation or explicit specialization is
-       analysed; accessible() ignores access then, except in a function body or
-       a class's member-specification (function_state.active, defining_class) */
+    /* [temp.spec]/6: set while the names of the declaration of an explicit
+       instantiation or explicit specialization are analysed (accessible()
+       ignores access then); the parts the paragraph checks clear it:
+       a base-clause, member-specification,
+       default argument, enumerator-list and initializer, an instantiation
+       the declaration causes; a function body is function_state.active */
     bool explicit_declaration_names = false;
     bool copy_argument_candidate(
         entity_index c, const owned_array<expression_meaning> &arguments) const;
@@ -5047,6 +5049,7 @@ class semantic_analysis
     struct instantiation_context {
         entity_index scope = 0, defining_class = 0, last_declared = 0,
                      member_scope = 0;
+        bool explicit_declaration_names = false;
         SyntaxRef declaration = 0;
         token_index horizon = 0, callee = 0;
         uint32_t function_cv = 0, instantiating = 0, class_instantiating = 0,

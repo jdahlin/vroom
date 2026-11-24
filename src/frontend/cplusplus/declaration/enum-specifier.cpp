@@ -657,6 +657,8 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
     } restore_scope = {current_scope, current_scope};
     if (scoped)
         current_scope = e;
+    /* [temp.spec]/6: an enumerator-list is checked */
+    flag_set checked(explicit_declaration_names, false);
     for (SyntaxElement c : enumerators) {
         SyntaxElement id = c;
         SyntaxElement init;

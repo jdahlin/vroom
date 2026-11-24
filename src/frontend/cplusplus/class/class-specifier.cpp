@@ -614,6 +614,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         access = 2;
     uint8_t outer_access = declaration_access;
     defining_class = c;
+    /* [temp.spec]/6: a member-specification is checked */
+    flag_set checked(explicit_declaration_names, false);
     /* the enclosing class's analysis goes on after this one: its state
        back, and its members so far again after this class's, so that they
        stay one range of class_members */
@@ -1236,7 +1238,7 @@ bool semantic_analysis::accessible(entity_index member,
        body, default argument, base-clause, member-specification,
        enumerator-list, or static data member or variable template
        initializer." */
-    if (explicit_declaration_names && !function_state.active && !defining_class)
+    if (explicit_declaration_names && !function_state.active)
         return true;
     /* the classes the name is used in a member of: the class of the
        function analysed, the class whose member-specification is

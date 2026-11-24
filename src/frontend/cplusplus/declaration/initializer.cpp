@@ -1421,6 +1421,9 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
 {
     if (init.is_token())
         return not_supported(current_declaration, "dcl.init");
+    /* [temp.spec]/6: a static data member or variable template
+       initializer is checked */
+    flag_set checked(explicit_declaration_names, false);
     InitializerParts parts(init);
     switch (parts.form) {
     case InitializerParts::syntax_form::braced:

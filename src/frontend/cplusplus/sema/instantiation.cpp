@@ -1229,6 +1229,7 @@ void semantic_analysis::enter_instantiation(instantiation_context &c,
 {
     c.scope = current_scope;
     c.defining_class = defining_class;
+    c.explicit_declaration_names = explicit_declaration_names;
     c.last_declared = last_declared;
     c.member_scope = template_member_scope;
     c.declaration = current_declaration;
@@ -1253,6 +1254,9 @@ void semantic_analysis::enter_instantiation(instantiation_context &c,
     current_declaration = declaration;
     lookup_horizon = declaration.first_token();
     defining_class = 0;
+    /* [temp.spec]/6 exempts the names of the explicit declaration itself,
+       not those of the declarations it instantiates */
+    explicit_declaration_names = false;
     in_condition = false;
     overloaded_callee = 0;
     declarations_claimable = false;
@@ -1265,6 +1269,7 @@ void semantic_analysis::leave_instantiation(instantiation_context &c)
     instantiation_depth--;
     current_scope = c.scope;
     defining_class = c.defining_class;
+    explicit_declaration_names = c.explicit_declaration_names;
     last_declared = c.last_declared;
     template_member_scope = c.member_scope;
     current_declaration = c.declaration;
