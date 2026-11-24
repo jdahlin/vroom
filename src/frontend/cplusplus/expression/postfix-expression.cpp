@@ -1532,6 +1532,12 @@ analysis_result semantic_analysis::template_callee_parts(
             return analysis_result::well_formed;
         name = id[0].token();
         VTRY(r, written_arguments_of(id, written, expansion));
+    } else if (id.is(syntax_kind::template_id) && id.size() >= 3 &&
+               id[0].operator_function_id() && !qualified) {
+        /* [temp.names]/1: operator-function-id < template-argument-list >;
+           its name token was named by the operator-function-id's analysis */
+        name = id[0].operator_function_id().operator_keyword().token();
+        VTRY(r, written_arguments_of(id, written, expansion));
     } else {
         return analysis_result::well_formed;
     }

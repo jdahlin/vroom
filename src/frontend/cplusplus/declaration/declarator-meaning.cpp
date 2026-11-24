@@ -1346,6 +1346,17 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         has_head = true;
         head = id[0];
         i = 1;
+    } else if (declarator_template_id && id.is(syntax_kind::template_id) &&
+               id.size() >= 3 && id[0].operator_function_id()) {
+        /* [temp.names]/1, [temp.explicit]/3: a specialization of an
+           operator function template, operator-function-id < arguments >
+           (an operator-function-id is a template-name) */
+        VTRY(r, operator_function_id(id[0].operator_function_id(), m));
+        m.template_id = id;
+        declarator_template_id = false;
+        has_head = true;
+        head = id[0];
+        i = 1;
     } else if (id.operator_function_id() || id.literal_operator_id() ||
                id.conversion_function_id()) {
         /* [over.oper]/1, [over.literal]/1: an operator function's name */

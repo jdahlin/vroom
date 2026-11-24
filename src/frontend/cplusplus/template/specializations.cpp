@@ -763,9 +763,8 @@ analysis_result semantic_analysis::named_specialization(
         return r;
     /* [temp.expl.spec]/14 and [temp.explicit]/2's kinds of declaration;
        default arguments are [dcl.fct.default]/4's error */
-    if (!m.has_id || m.qualified_namespace || m.operator_function ||
-        m.literal_operator || cv || defaults ||
-        type_table[type.unqualified()].kind != type_kind::function)
+    if (!m.has_id || m.qualified_namespace || m.literal_operator || cv ||
+        defaults || type_table[type.unqualified()].kind != type_kind::function)
         return not_supported_because(
             n, rule, "not a function with a named declarator-id");
     if (m.qualifier &&
@@ -849,7 +848,10 @@ analysis_result semantic_analysis::named_specialization(
                exactly one of them is the one named (more than one is
                partial ordering's) */
             uint32_t chosen = 0;
-            bool unique = !m.template_id && !m.qualifier;
+            /* [temp.explicit]/3, [temp.deduct.decl]/1: with template
+               arguments written, each template takes them first and then
+               deduces the rest from the declared type */
+            bool unique = !m.qualifier;
             for (uint32_t g : group) {
                 if (!unique)
                     break;
@@ -859,9 +861,29 @@ analysis_result semantic_analysis::named_specialization(
                     continue;
                 owned_array<template_argument> trial;
                 owned_array<bool> trial_set;
+                if (m.template_id && m.template_id.size() > 3) {
+                    /* [temp.arg.explicit]/6: more arguments than
+                       parameters: not this template (no pack) */
+                    owned_array<SyntaxElement> text;
+                    owned_array<bool> text_expansion;
+                    if (written_arguments_of(m.template_id, text,
+                                             text_expansion) !=
+                            analysis_result::well_formed ||
+                        text.size() > c.parameter_count)
+                        continue;
+                    size_t uses = name_uses.size();
+                    analysis_result w =
+                        template_id_arguments(m.template_id, g, trial);
+                    name_uses.resize(uses);
+                    if (w != analysis_result::well_formed ||
+                        trial.size() > c.parameter_count)
+                        continue;
+                }
+                uint32_t written = static_cast<uint32_t>(trial.size());
                 for (uint32_t i = 0; i < c.parameter_count; i++) {
-                    trial.append(template_argument());
-                    trial_set.append(false);
+                    if (i >= written)
+                        trial.append(template_argument());
+                    trial_set.append(i < written);
                 }
                 matching_declaration = true;
                 bool deduces = deduce_type(entity_table[c.entity].type, type,
@@ -878,6 +900,10 @@ analysis_result semantic_analysis::named_specialization(
                     n, rule,
                     "overloaded function templates (partial ordering)");
             ft = chosen;
+            if (m.template_id && m.template_id.size() > 3) {
+                values.clear();
+                VTRY(ar, template_id_arguments(m.template_id, ft, values));
+            }
         }
     }
     const function_template f = function_templates[ft - 1];
