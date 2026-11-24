@@ -581,6 +581,9 @@ constness semantic_analysis::evaluate_reference_binding(uint32_t node)
     /* the object the reference is bound to: a variable, a subobject of one
        (a base class, a member, an array element) */
     uint32_t root = semantics[node].a;
+    /* an element through a pointer: the object is the pointee, not the
+       variable the pointer is read from; the evaluation decides */
+    bool through_pointer = false;
     for (;;) {
         const semantic_node &r = semantics[root];
         if (r.kind == semantic_kind::member ||
@@ -593,31 +596,37 @@ constness semantic_analysis::evaluate_reference_binding(uint32_t node)
                      conversion_kind::array_to_pointer)
             root = r.a;
         else if (r.kind == semantic_kind::subscript) {
-            /* an element of an array object: the operand of array or
-               pointer type */
-            type_kind first =
-                type_table[semantics[r.a].type.unqualified()].kind;
-            if (first == type_kind::array || first == type_kind::pointer)
+            /* an element of an array object: the operand of array type;
+               through a pointer the object is whatever it points to, which
+               the evaluation decides */
+            if (type_table[semantics[r.a].type.unqualified()].kind ==
+                type_kind::array)
                 root = r.a;
-            else
+            else if (type_table[semantics[r.b].type.unqualified()].kind ==
+                     type_kind::array)
                 root = r.b;
+            else {
+                through_pointer = true;
+                break;
+            }
         } else
             break;
         if (!root)
             return constness::unknown;
     }
     const semantic_node &r = semantics[root];
-    if (r.kind != semantic_kind::entity || !r.a ||
-        entity_table[r.a].kind != entity_kind::variable ||
-        type_table[entity_table[r.a].type.unqualified()].kind ==
-            type_kind::lvalue_reference ||
-        type_table[entity_table[r.a].type.unqualified()].kind ==
-            type_kind::rvalue_reference)
+    if (!through_pointer &&
+        (r.kind != semantic_kind::entity || !r.a ||
+         entity_table[r.a].kind != entity_kind::variable ||
+         type_table[entity_table[r.a].type.unqualified()].kind ==
+             type_kind::lvalue_reference ||
+         type_table[entity_table[r.a].type.unqualified()].kind ==
+             type_kind::rvalue_reference))
         return constness::unknown;
     /* [expr.const]/13.1 (/11 before C++23): a constant expression's result
        does not refer to an object of automatic storage duration (a local
        variable, a parameter; whose address differs per invocation) */
-    if (entity_table[r.a].automatic) {
+    if (!through_pointer && entity_table[r.a].automatic) {
         last_not_constant_certain = true;
         last_rule_note = nullptr;
         return constness::not_constant;
