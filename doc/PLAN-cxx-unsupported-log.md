@@ -756,3 +756,11 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   with unanalysed initializer 96, specialization 46, defined function 32.
   Unsupported 34891 -> 34878; types/constants_verified -15/-14 blessed
   (declarations clang also rejects).
+- 11.6 (e7a6e609f, 911cdc86a): `template struct N::B<float>;` looks the
+  template up through the qualifier (the `A<int>::B` member form is open);
+  `return x;` in a decltype(auto) function is refused only for `(x)`.
+  Unsupported 34878 -> 34785, we accept 5390 -> 5395: the 5 new lines
+  (instantiate-call.cpp:33,48, instantiate-declref.cpp:71,
+  instantiate-expr-3.cpp:46, instantiate-member-expr.cpp:50) are errors in
+  member bodies clang reports at an explicit instantiation; accepted as the
+  queued "use-site verdict for instantiated-member-body errors" gap.
