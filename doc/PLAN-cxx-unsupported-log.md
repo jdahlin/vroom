@@ -811,3 +811,6 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   default member initializer names members (dcl.init.aggr/p7.cpp:6,
   initializer.cpp omitted_element_value); a consteval member function is
   not recorded as immediate (member_pointer_argument refuses constexpr ones).
+  Orchestrator: the we-reject +5 (source_location.cpp:119 follow-on, a
+  builtin default argument in [over.match.viable]) breaks the no-rise rule;
+  kept because it exposes an existing bug, which 11.11 fixes first.
