@@ -679,3 +679,19 @@ doc/PLAN-cxx-unsupported.md on 2026-11-23; new entries go here).
   defaulted == does not instantiate the member operator== it uses).  Left:
   the builtin <=> on arithmetic (evaluation, lowering), auto <=> and its
   implicit ==.
+- 10.8 (8d9ee1263, 175d9a007): the built-in <=> on arithmetic operands has
+  its value: evaluated (the category's less/equivalent/greater/unordered
+  read from the program's <compare>, packed in the node's value, bit 63 =
+  known) and lowered (a compound literal, operands held once); constexpr
+  compatibility of the == a defaulted <=> declares (p4.cpp:92).  Unsupported
+  35199, we reject 449, we accept 5409 -> 5408.  Left: `auto` as a
+  defaulted <=>'s return type (the category is read from the declared type
+  before the body: deduce it from the subobjects' results, [class.spaceship]/3)
+  and the implicit == itself as a declared function (overloads: p4.cpp
+  `j == j` ambiguous, private, deprecated); p11-2a.cpp:47/59: not feasible
+  before uses of member functions of specializations are tracked:
+  instantiated_member_body (class/class-specifier.cpp) analyses a member
+  body quietly and leaves a failing one undefined, so even a plain call of
+  D<int>::f with `typename T::error` is no error; a std-compare.h from
+  clang's tests stays refused at its out-of-class friend definitions
+  ([class.friend], std-compare.h:90).
