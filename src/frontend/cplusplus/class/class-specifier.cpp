@@ -2400,8 +2400,7 @@ analysis_result semantic_analysis::member_declarator(
            its declaration in the class (its initializer:
            static_member_initializer) */
         if (s.constexpr_)
-            type =
-                qualified_type::make(type.unqualified(), type.cv() | cv_const);
+            type = add_cv(type, cv_const);
         if (local_class_rule(c))
             /* [class.local]/4: "A local class cannot have static data
                members" (a class nested in one neither) */
@@ -2963,8 +2962,12 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     const bool constexpr_floating = s.constexpr_ &&
                                     record.kind == type_kind::fundamental &&
                                     is_floating(type);
+    /* (and of a literal class, array or pointer type: [dcl.constexpr]/10,
+       the value the evaluator's as a constexpr variable's) */
     const bool constexpr_class =
-        s.constexpr_ && record.kind == type_kind::class_type;
+        s.constexpr_ &&
+        (record.kind == type_kind::class_type ||
+         record.kind == type_kind::array || record.kind == type_kind::pointer);
     /* [expr.const]/3: until the initializer is analysed (and if analysis
        has no rules for it) whether a member that may be usable in constant
        expressions is one, and its value, are unknown: a later member's
