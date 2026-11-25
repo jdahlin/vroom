@@ -648,9 +648,26 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         }
         defined = defined_special_member(owner, o, name);
         if (!defined) {
+            uint32_t lookup_id = 0;
+            if (name) {
+                lookup_id = tokens.identifier(name);
+            } else {
+                SyntaxRef nested = out_of_class_nested(o.definition, nullptr);
+                if (nested &&
+                    nested.end_token() + 1 < o.definition.end_token() &&
+                    tokens[nested.end_token()].kind == token_kind::keyword &&
+                    tokens[nested.end_token()].keyword ==
+                        static_cast<int16_t>(standard_keyword::operator_) &&
+                    tokens[nested.end_token() + 1].kind ==
+                        token_kind::operator_or_punctuator)
+                    lookup_id = operator_name(preprocessing_op_or_punc_primary(
+                        tokens[nested.end_token() + 1].op_or_punc));
+            }
             /* (the overload this definition is the member's) */
-            for (entity_index f =
-                     entity_table.find(owner, tokens.identifier(name));
+            entity_index first = 0;
+            if (lookup_id)
+                first = entity_table.find(owner, lookup_id);
+            for (entity_index f = first;
                  f && !defined && entity_table[f].kind == entity_kind::function;
                  f = entity_table[f].next_overload)
                 if (declared_by(f, o.definition) ||
