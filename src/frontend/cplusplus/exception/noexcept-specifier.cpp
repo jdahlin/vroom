@@ -168,6 +168,30 @@ bool semantic_analysis::noexcept_needs_complete_class(SyntaxRef n)
     return false;
 }
 
+bool semantic_analysis::noexcept_needs_itself(SyntaxRef n, entity_index c) const
+{
+    uint32_t name = entity_table[c].name;
+    auto is_name = [&](token_index t) {
+        return tokens[t].kind == token_kind::identifier &&
+               tokens.identifier(t) == name;
+    };
+    auto is_op = [&](token_index t, preprocessing_op_or_punc op) {
+        return tokens[t].kind == token_kind::operator_or_punctuator &&
+               preprocessing_op_or_punc_primary(tokens[t].op_or_punc) == op;
+    };
+    bool asks = false;
+    for (token_index t = n.first_token() + 1; t + 3 < n.end_token(); t++) {
+        if (tokens[t].kind == token_kind::keyword &&
+            syntax_parser.keyword_of(tokens[t]) == standard_keyword::noexcept_)
+            asks = true;
+        if (asks && is_name(t) &&
+            is_op(t + 1, preprocessing_op_or_punc::LESS) && is_name(t + 2) &&
+            is_op(t + 3, preprocessing_op_or_punc::GREATER))
+            return true;
+    }
+    return false;
+}
+
 /*
  * [class.mem]/6: the noexcept-specifier of member functions of the class c
  * that name c, analysed with c complete: each function's type then says

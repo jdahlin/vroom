@@ -29,9 +29,9 @@ In the suite this is `SemaTemplate/instantiation-depth.cpp -std=c++11
 -DNOEXCEPT` (the harness does not pass the test's `-ftemplate-depth=5`).
 Where clang crashes, line 21 on is not compared; where it does not (the
 premerge run of 2026-11-25 on jdahlin/vroom#594), `cxx-sema.py --check`
-fails with a new "we accept" at `instantiation-depth.cpp:21`.  vcc accepts
-the program, on main too: a missing recursion check of ours, which the crash
-hides.
+failed with a new "we accept" at `instantiation-depth.cpp:21`: vcc accepted
+the program, which the crash hid.  vcc now refuses this self-growing shape
+([temp.inst]/15's deferred specifications are still not instantiated).
 
 ## Related: warning analysis
 
