@@ -429,8 +429,8 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p,
         case X64_OP_FSUB:
         case X64_OP_FMUL:
         case X64_OP_FDIV: {
-            static const char *const op[] = {"add", "sub", "mul", "div"};
-            snprintf(name, sizeof name, "%s%s", op[i->opcode - X64_OP_FADD],
+            static const char *const op2[] = {"add", "sub", "mul", "div"};
+            snprintf(name, sizeof name, "%s%s", op2[i->opcode - X64_OP_FADD],
                      sz == 4 ? "ss" : "sd");
             mn = name;
             sz = 0;

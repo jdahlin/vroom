@@ -80,7 +80,7 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
                                      x.b, x.at, &x);
         if (!loop)
             return 0;
-        return statement_expression(v, block(&loop, 1));
+        return statement_expression(void_type, block(&loop, 1));
     }
     if (x.kind == semantic_kind::conditional && x.b && !is_glvalue(x)) {
         uint32_t cond = truth(expression(x.a));
@@ -90,8 +90,9 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
         conditional_depth--;
         if (!cond || !b || !c_)
             return 0;
-        return make(AST_NODE_CONDITIONAL, v, cond, cast(b, v, AST_CAST_VOID),
-                    cast(c_, v, AST_CAST_VOID), 0, 0);
+        return make(AST_NODE_CONDITIONAL, void_type, cond,
+                    cast(b, void_type, AST_CAST_VOID),
+                    cast(c_, void_type, AST_CAST_VOID), 0, 0);
     }
     if (x.kind == semantic_kind::initializer_list && piecewise_initializer(n))
         return initialize_list_into(object, object_type, t, n);
@@ -154,7 +155,7 @@ uint32_t c_lowering::initialize_list_into(uint32_t object,
                     return 0;
                 stmts.append(c_statement(c, one));
             }
-            return statement_expression(v, block(stmts));
+            return statement_expression(void_type, block(stmts));
         }
         if (record(object_type).kind == type_kind::array) {
             qualified_type et = record(object_type).operand;
@@ -173,7 +174,7 @@ uint32_t c_lowering::initialize_list_into(uint32_t object,
                     return 0;
                 stmts.append(c_statement(c, one));
             }
-            return statement_expression(v, block(stmts));
+            return statement_expression(void_type, block(stmts));
         }
     }
     uint32_t value = 0;
@@ -415,11 +416,11 @@ uint32_t c_lowering::full_value(uint32_t e, bool discarded)
     if (!value || (items.empty() && after.empty()))
         return value;
     ast_qualified_type t = type_of(value);
-    if (discarded || AST_QUALIFIED_TYPE_UNQUALIFIED(t) == v) {
+    if (discarded || AST_QUALIFIED_TYPE_UNQUALIFIED(t) == void_type) {
         items.append(c_statement(c, value));
         for (uint32_t a : after)
             items.append(a);
-        return statement_expression(v, block(items));
+        return statement_expression(void_type, block(items));
     }
     bool lvalue = ast_builder_ast(c)->nodes[value].flags & AST_NODE_FLAG_LVALUE;
     ast_qualified_type held_type = AST_QUALIFIED_TYPE_UNQUALIFIED(t);
@@ -489,7 +490,7 @@ uint32_t c_lowering::static_temporary(const semantic_node &n,
         return fail("an entity whose symbol is not mangled", n.at);
     static_temporaries++;
     owned_buffer written;
-    if (target == PP_DARWIN)
+    if (target_id == PP_DARWIN)
         vbuffer_string_append(written.get(), "_");
     vbuffer_append(written.get(), zgr.data(), zgr.size());
     ast_qualified_type t = type(bound.type, bound.at);

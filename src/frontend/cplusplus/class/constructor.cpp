@@ -343,7 +343,8 @@ analysis_result semantic_analysis::anonymous_member_initializers(
                     /* [expr.prim.this]: the address of the enclosing
                        object in a constant expression is not evaluated
                        for an unnamed struct's member yet */
-                    if (p.keyword_of(tokens[t]) == standard_keyword::this_)
+                    if (syntax_parser.keyword_of(tokens[t]) ==
+                        standard_keyword::this_)
                         return not_supported(current_declaration,
                                              "expr.prim.this");
             VTRY(r, default_member_initializer(at, m, made));
@@ -702,10 +703,10 @@ analysis_result semantic_analysis::special_member_declarator(
                X&& and the other parameters' default arguments: a copy or
                move constructor, or ill-formed (X), not told apart */
             qualified_type first = parameters[0];
-            const struct type &r = type_table[first.unqualified()];
-            if (r.kind == type_kind::lvalue_reference ||
-                r.kind == type_kind::rvalue_reference)
-                first = r.operand;
+            const struct type &r4 = type_table[first.unqualified()];
+            if (r4.kind == type_kind::lvalue_reference ||
+                r4.kind == type_kind::rvalue_reference)
+                first = r4.operand;
             if (first.unqualified() == entity_table[c].type.unqualified())
                 return not_supported(declaration, "class.copy.ctor");
         }
@@ -787,10 +788,10 @@ analysis_result semantic_analysis::special_member_declarator(
         /* virt_override, virt_final: the destructor's virt-specifier-seq
            (member_declaration) */
         virt_pure = false;
-        analysis_result r =
+        analysis_result r3 =
             virtual_member(c, e, declaration, m.id, virtual_specified);
         virt_override = virt_final = false;
-        return r;
+        return r3;
     }
     return analysis_result::well_formed;
 }
@@ -1008,10 +1009,11 @@ analysis_result semantic_analysis::defaulted_copy_assignment(entity_index c,
        defaulted ([class.copy.assign]/2, /3) */
     bool declared_here = false;
     if (found.entity && found.found_in == c) {
-        for (entity_index f = found.entity; f && entity_table[f].enclosing == c;
-             f = entity_table[f].next_overload) {
-            if ((!move && copy_assignment_operator(f, c)) ||
-                (move && move_assignment_operator(f, c)))
+        for (entity_index f2 = found.entity;
+             f2 && entity_table[f2].enclosing == c;
+             f2 = entity_table[f2].next_overload) {
+            if ((!move && copy_assignment_operator(f2, c)) ||
+                (move && move_assignment_operator(f2, c)))
                 declared_here = true;
         }
     }

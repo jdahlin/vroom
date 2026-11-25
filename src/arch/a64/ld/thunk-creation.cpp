@@ -106,8 +106,8 @@ VPRIV bool a64_ld_thunks_create(struct ld_context *ctx, int pass)
             uint32_t cur = LD_NONE;
             uint64_t base = 0;
             for (uint32_t ci = 0; ci < d->call_count; ci++) {
-                a64_ld_call *c = &d->calls[ci];
-                uint32_t si = c->input_section, r = c->relocation_index;
+                a64_ld_call *c2 = &d->calls[ci];
+                uint32_t si = c2->input_section, r = c2->relocation_index;
                 ld_input_section *is = &ctx->inputs.sections.v[si];
                 ld_object *o = ctx->inputs.objects.v[is->object];
                 if (si != cur) {
@@ -117,19 +117,19 @@ VPRIV bool a64_ld_thunks_create(struct ld_context *ctx, int pass)
                 const elf_rela *rl = &is->rela[r];
                 uint64_t src = base + rl->r_offset;
                 {
-                    uint32_t th = c->thunk;
+                    uint32_t th = c2->thunk;
                     if (th != LD_NONE) {
                         if (a64_ld_branch_is_in_range(
                                 src, a64_ld_thunk_address(ctx, th)))
                             continue;
                     }
-                    if (c->destination_section != LD_NONE) {
+                    if (c2->destination_section != LD_NONE) {
                         /* same value as ld_relocation_target_find(): a plain input section */
                         const ld_input_section *ds =
-                            &ctx->inputs.sections.v[c->destination_section];
+                            &ctx->inputs.sections.v[c2->destination_section];
                         t.address =
                             ctx->script.sections.v[ds->output_section].address +
-                            ds->offset + c->destination_offset;
+                            ds->offset + c2->destination_offset;
                     } else {
                         ld_relocation_target_find(ctx, o, rl->r_info >> 32,
                                                   rl->r_addend, &t);
@@ -213,7 +213,7 @@ VPRIV bool a64_ld_thunks_create(struct ld_context *ctx, int pass)
                         changed = true;
                     }
                     a64_ld_thunk_relocation_record(ctx, si, r, found);
-                    c->thunk = found;
+                    c2->thunk = found;
                 }
             }
             /* assign thunk offsets in this ld_input_section_description's thunk section */

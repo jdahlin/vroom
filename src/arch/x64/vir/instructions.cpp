@@ -500,11 +500,11 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     case VIR_OP_LANDINGPAD: /* (its mark is the block's first: x64_vir_landing_pad_enter) */
         return;
     case VIR_OP_RESUME: { /* _Unwind_Resume(exception) */
-        cc *c = e->compile_context;
+        cc *c2 = e->compile_context;
         uint32_t ref =
-            CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, c->eh_resume_sym);
+            CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_SYMBOL, c2->eh_resume_sym);
 
-        if (!c->eh_resume_sym)
+        if (!c2->eh_resume_sym)
             x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
         if (a != RDI)
             x64_mov(e, RDI, a);

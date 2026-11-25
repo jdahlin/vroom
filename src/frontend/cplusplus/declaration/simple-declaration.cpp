@@ -1524,10 +1524,10 @@ analysis_result semantic_analysis::declare_with_initializer(
            function template's specialization declares the specialization
            (instantiate_definition) */
         entity_index declared = 0;
-        VTRY(r, declare_specialization(declaration, m.id, type, s, m.exceptions,
-                                       declared));
+        VTRY(r3, declare_specialization(declaration, m.id, type, s,
+                                        m.exceptions, declared));
         last_declared = declared;
-        return r;
+        return r3;
     }
     if (m.qualifier &&
         type_table[type.unqualified()].kind == type_kind::function) {
@@ -2178,16 +2178,16 @@ analysis_result semantic_analysis::declare_with_initializer(
     entity &e = entity_table[declared_entity];
     e.definition = value.node;
     if (!function_state.active) {
-        definition_record d;
-        d.declaration = current_declaration;
-        d.entity = declared_entity;
-        definitions.append(d);
+        definition_record d2;
+        d2.declaration = current_declaration;
+        d2.entity = declared_entity;
+        definitions.append(d2);
     }
     if (!(before == type)) {
         /* [dcl.array]/7: an array of unknown bound completed by its
            initializer */
         e.type = type;
-        declared.back().type = type;
+        declared_names.back().type = type;
     }
     /* [dcl.constinit]/2: "If a variable declared with the constinit
        specifier has dynamic initialization, the program is ill-formed."
@@ -2254,12 +2254,12 @@ analysis_result semantic_analysis::declare_with_initializer(
             bound = semantics[bound].a;
         if (bound && semantics[bound].kind == semantic_kind::entity) {
             entity_index referent = semantics[bound].a;
-            const entity &r = entity_table[referent];
-            if (r.kind == entity_kind::variable && !r.automatic &&
-                !r.c11_thread_local &&
-                type_table[r.type.unqualified()].kind !=
+            const entity &r2 = entity_table[referent];
+            if (r2.kind == entity_kind::variable && !r2.automatic &&
+                !r2.c11_thread_local &&
+                type_table[r2.type.unqualified()].kind !=
                     type_kind::lvalue_reference &&
-                type_table[r.type.unqualified()].kind !=
+                type_table[r2.type.unqualified()].kind !=
                     type_kind::rvalue_reference)
                 entity_table[declared_entity].constant_referent = referent;
         }

@@ -53,7 +53,7 @@ analysis_result semantic_analysis::pointer_qualifier(SyntaxRef op,
                                                      token_index t,
                                                      qualified_type &type)
 {
-    switch (p.extension_keyword_of(tokens[t])) {
+    switch (syntax_parser.extension_keyword_of(tokens[t])) {
     case extension_keyword::nullability:
         return analysis_result::well_formed;
     case extension_keyword::restrict:
@@ -79,7 +79,7 @@ analysis_result semantic_analysis::pointer_qualifier(SyntaxRef op,
     default:
         break;
     }
-    standard_keyword kw = p.keyword_of(tokens[t]);
+    standard_keyword kw = syntax_parser.keyword_of(tokens[t]);
     if (kw == standard_keyword::const_)
         type = add_cv(type, cv_const);
     else if (kw == standard_keyword::volatile_)
@@ -721,7 +721,8 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
     for (token_index t = declaration.first_token(); t < declaration.end_token();
          t++)
         if (tokens[t].kind == token_kind::keyword &&
-            p.keyword_of(tokens[t]) == standard_keyword::operator_) {
+            syntax_parser.keyword_of(tokens[t]) ==
+                standard_keyword::operator_) {
             operators_held = true;
             if (!operators_held_at) {
                 operators_held_at = t;
@@ -945,7 +946,8 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
                declaration declares; its template-arguments neither */
             if (tok.kind == token_kind::identifier && !depth && !qualified &&
                 t > declaration.first_token() &&
-                p.keyword_of(tokens[t - 1]) == standard_keyword::typename_ &&
+                syntax_parser.keyword_of(tokens[t - 1]) ==
+                    standard_keyword::typename_ &&
                 t + 1 < declaration.end_token() &&
                 is_punctuator_at(t + 1, preprocessing_op_or_punc::LESS)) {
                 token_index close = 0;
@@ -1040,20 +1042,20 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
        parentheses (template<class T> void (f)(T);) */
     bool by_template = declaration.is(syntax_kind::template_declaration,
                                       syntax_kind::explicit_specialization);
-    for (SyntaxRef inner = declaration;
-         inner.is(syntax_kind::template_declaration,
-                  syntax_kind::explicit_specialization);) {
-        auto t = inner;
-        if (!t.size() || inner[t.size() - 1].is_token())
+    for (SyntaxRef inner2 = declaration;
+         inner2.is(syntax_kind::template_declaration,
+                   syntax_kind::explicit_specialization);) {
+        auto t = inner2;
+        if (!t.size() || inner2[t.size() - 1].is_token())
             break;
-        inner = inner[t.size() - 1].index();
-        if ((inner.is(syntax_kind::simple_declaration,
-                      syntax_kind::member_declaration,
-                      syntax_kind::function_definition)) &&
-            (parsed_completely(inner) ||
+        inner2 = inner2[t.size() - 1].index();
+        if ((inner2.is(syntax_kind::simple_declaration,
+                       syntax_kind::member_declaration,
+                       syntax_kind::function_definition)) &&
+            (parsed_completely(inner2) ||
              (template_head_declares &&
-              inner.is(syntax_kind::function_definition))))
-            declarator_ids(inner);
+              inner2.is(syntax_kind::function_definition))))
+            declarator_ids(inner2);
     }
     for (token_index id : ids) {
         if (!id)

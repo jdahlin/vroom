@@ -477,14 +477,14 @@ analysis_result semantic_analysis::class_specialization_definition(
        arguments (<I + 5, I * 2>), a non-deduced context, is not
        deducible: not judged when no argument deduces anything */
     {
-        bool expressions = false, deduces = false;
+        bool expressions2 = false, deduces = false;
         for (const template_argument &a : arguments) {
             if (a.template_entity && entity_table[a.template_entity].expression)
-                expressions = true;
+                expressions2 = true;
             else if (a.template_entity || depends_on_template_parameter(a.type))
                 deduces = true;
         }
-        if (expressions && !deduces)
+        if (expressions2 && !deduces)
             return not_supported(n, "temp.class.spec");
     }
     bool dependent = dependent_arguments(arguments);
@@ -510,13 +510,13 @@ analysis_result semantic_analysis::class_specialization_definition(
        specialization's head, instantiate_class) is not instantiated */
     /* only an instantiation whose arguments this one matches would have
        used it: [temp.class.spec]/1, [temp.class.spec.match]/2 */
-    for (const instantiation_record &r : instantiations)
-        if (r.template_entity == primary.entity && r.specialization &&
-            entity_table[r.specialization].kind == entity_kind::class_type &&
-            (entity_table[r.specialization].defined || r.defining) &&
-            !(r.pattern &&
-              !function_templates[r.pattern - 1].parameter_count) &&
-            r.argument_count == arguments.size()) {
+    for (const instantiation_record &r2 : instantiations)
+        if (r2.template_entity == primary.entity && r2.specialization &&
+            entity_table[r2.specialization].kind == entity_kind::class_type &&
+            (entity_table[r2.specialization].defined || r2.defining) &&
+            !(r2.pattern &&
+              !function_templates[r2.pattern - 1].parameter_count) &&
+            r2.argument_count == arguments.size()) {
             owned_array<template_argument> d;
             owned_array<bool> set;
             for (size_t i = 0; i < parameters.size(); i++) {
@@ -527,7 +527,7 @@ analysis_result semantic_analysis::class_specialization_definition(
             matching_partial = true;
             for (size_t i = 0; i < arguments.size() && match; i++) {
                 const template_argument &y =
-                    template_arguments[r.first_argument + i];
+                    template_arguments[r2.first_argument + i];
                 if (arguments[i].kind == template_argument::kind_t::pack &&
                     y.kind == template_argument::kind_t::pack)
                     match = deduce_pack_argument(arguments[i], y, d, set);

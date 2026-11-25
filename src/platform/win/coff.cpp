@@ -650,10 +650,10 @@ size_t coff_finish(ElfObj *o)
         return 0;
     w->relocation_first =
         (uint32_t *)(rpush(&o->arena, sizeof(uint32_t) * (ns + 1), 8));
-    for (uint32_t s = 1, k = 0; s <= ns; s++) {
-        w->relocation_first[s] = k;
+    for (uint32_t s = 1, k2 = 0; s <= ns; s++) {
+        w->relocation_first[s] = k2;
         if (s < ns)
-            k += elf_sec(o, s)->nfix_reloc;
+            k2 += elf_sec(o, s)->nfix_reloc;
     }
     coff_symbols(o, w);
     if (o->has_err)

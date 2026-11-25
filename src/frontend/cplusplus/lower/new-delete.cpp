@@ -99,7 +99,7 @@ static uint32_t declared_symbol(cc *c, owned_array<uint32_t> &items,
    when the allocation function may return null */
 uint32_t c_lowering::new_array(const semantic_node &n, ast_qualified_type t)
 {
-    if (target == PP_DARWIN && n.value)
+    if (target_id == PP_DARWIN && n.value)
         /* Apple's arm64 cookie has the element size too */
         return fail("an array cookie of Apple's arm64 ABI", n.at);
     ast_qualified_type size =
@@ -161,7 +161,7 @@ uint32_t c_lowering::new_array(const semantic_node &n, ast_qualified_type t)
    last first: its destruction; deallocation (raw, k * size + cookie); } }) */
 uint32_t c_lowering::delete_array(const semantic_node &n)
 {
-    if (target == PP_DARWIN)
+    if (target_id == PP_DARWIN)
         return fail("an array cookie of Apple's arm64 ABI", n.at);
     ast_qualified_type t = type(n.computation, n.at);
     ast_qualified_type size = ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG);
@@ -200,7 +200,7 @@ uint32_t c_lowering::delete_array(const semantic_node &n)
         return 0;
     body.append(c_statement(c, deallocated));
     items.append(if_statement(truth(variable(p, t)), block(body), 0));
-    return statement_expression(v, block(items));
+    return statement_expression(void_type, block(items));
 }
 
 /* [expr.new]/9: ({ size_t k = count; k > SIZE_MAX / size ? SIZE_MAX : k *
@@ -259,11 +259,11 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
         if (!callee)
             return 0;
         uint32_t argument = variable();
-        uint32_t call = make(AST_NODE_CALL, v, callee,
+        uint32_t call = make(AST_NODE_CALL, void_type, callee,
                              ast_builder_list(c, &argument, 1), 1, 0, 0);
         body[0] = c_statement(c, call);
         items.append(if_statement(truth(variable()), block(body, 1), 0));
-        return statement_expression(v, block(items));
+        return statement_expression(void_type, block(items));
     }
     allocation bound(*this, symbol, t, count_symbol);
     if (n.b)
@@ -275,7 +275,7 @@ uint32_t c_lowering::delete_object(const semantic_node &n)
         body[count++] = c_statement(c, destroyed);
     body[count++] = c_statement(c, deallocated);
     items.append(if_statement(truth(variable()), block(body, count), 0));
-    return statement_expression(v, block(items));
+    return statement_expression(void_type, block(items));
 }
 
 } // namespace cplusplus::lowering

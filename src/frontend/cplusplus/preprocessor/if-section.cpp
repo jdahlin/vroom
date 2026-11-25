@@ -1234,15 +1234,16 @@ bool preprocessor::has_include(expression_reader &r,
     if (embed && *result) {
         /* C23 6.10.1: __STDC_EMBED_FOUND__ 1, __STDC_EMBED_EMPTY__ 2; an
            unknown parameter is not found */
-        embed_parameters parameters;
-        int parsed = parse_embed_parameters(
-            parameter_tokens.data(), parameter_tokens.size(), parameters, true);
+        embed_parameters parameters2;
+        int parsed =
+            parse_embed_parameters(parameter_tokens.data(),
+                                   parameter_tokens.size(), parameters2, true);
         if (parsed < 0)
             return false;
         uint64_t size;
         if (parsed == 0)
             *result = 0;
-        else if (!embedded_size(path.data(), parameters, &size))
+        else if (!embedded_size(path.data(), parameters2, &size))
             *result = 0;
         else if (size == 0)
             *result = 2;

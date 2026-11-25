@@ -255,11 +255,11 @@ int main(int argc, char **argv)
         p = shim_string_append(p, *e);
     { /* the client's umask, for files the server creates (last: it wins) */
         char um[16] = "VCC_UMASK=";
-        mode_t m = umask(0);
+        mode_t m2 = umask(0);
 
-        umask(m);
-        um[10] = (char)('0' + (m >> 6 & 7)),
-        um[11] = (char)('0' + (m >> 3 & 7)), um[12] = (char)('0' + (m & 7));
+        umask(m2);
+        um[10] = (char)('0' + (m2 >> 6 & 7)),
+        um[11] = (char)('0' + (m2 >> 3 & 7)), um[12] = (char)('0' + (m2 & 7));
         p = shim_string_append(p, um);
     }
 

@@ -1466,52 +1466,60 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             continue;
         }
         /* [ext:clang_nullability]: no effect on the type */
-        if (p.extension_keyword_of(tok) == extension_keyword::nullability)
+        if (syntax_parser.extension_keyword_of(tok) ==
+            extension_keyword::nullability)
             continue;
         /* [ext:clang_atomic] _Atomic without (: the qualifier */
-        if (p.extension_keyword_of(tok) == extension_keyword::atomic) {
+        if (syntax_parser.extension_keyword_of(tok) ==
+            extension_keyword::atomic) {
             count(atomic_qualifier, t, "_Atomic");
             continue;
         }
         /* [ext:clang_c11_thread_local] */
-        if (p.extension_keyword_of(tok) ==
+        if (syntax_parser.extension_keyword_of(tok) ==
             extension_keyword::c11_thread_local) {
             count(c11_thread_local, t, "_Thread_local");
             continue;
         }
-        if (p.extension_keyword_of(tok) == extension_keyword::complex) {
+        if (syntax_parser.extension_keyword_of(tok) ==
+            extension_keyword::complex) {
             /* [ext:gnu_complex] */
             if (!k.first)
                 k.first = t;
             k.complex++;
             continue;
         }
-        if (p.extension_keyword_of(tok) == extension_keyword::float128) {
+        if (syntax_parser.extension_keyword_of(tok) ==
+            extension_keyword::float128) {
             /* [ext:gnu_float128] */
             if (!k.first)
                 k.first = t;
             k.float128++;
             continue;
         }
-        if (p.extension_keyword_of(tok) == extension_keyword::float16 ||
-            p.extension_keyword_of(tok) == extension_keyword::bfloat16) {
+        if (syntax_parser.extension_keyword_of(tok) ==
+                extension_keyword::float16 ||
+            syntax_parser.extension_keyword_of(tok) ==
+                extension_keyword::bfloat16) {
             /* [ext:clang_float16] */
             if (!k.first)
                 k.first = t;
-            if (p.extension_keyword_of(tok) == extension_keyword::float16)
+            if (syntax_parser.extension_keyword_of(tok) ==
+                extension_keyword::float16)
                 k.float16++;
             else
                 k.bfloat16++;
             continue;
         }
-        if (p.extension_keyword_of(tok) == extension_keyword::int128) {
+        if (syntax_parser.extension_keyword_of(tok) ==
+            extension_keyword::int128) {
             /* [ext:gnu_int128] */
             if (!k.first)
                 k.first = t;
             k.int128++;
             continue;
         }
-        standard_keyword kw = p.keyword_of(tok);
+        standard_keyword kw = syntax_parser.keyword_of(tok);
         if (!k.first && kw != standard_keyword::const_ &&
             kw != standard_keyword::volatile_ &&
             kw != standard_keyword::typedef_ &&
@@ -1668,7 +1676,7 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     }
                     const token &o = tokens[child.token()];
                     if (o.kind == token_kind::identifier ||
-                        is_simple_type_keyword(p.keyword_of(o)))
+                        is_simple_type_keyword(syntax_parser.keyword_of(o)))
                         other_type = true;
                 }
                 if (other_type)
@@ -1809,17 +1817,17 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
        the _Atomic qualifier shall not be an array type or a function
        type"); other cv-qualifiers stay on the atomic type */
     if (atomic_qualifier && type) {
-        type_kind k = type_table[type].kind;
-        if (k == type_kind::array || k == type_kind::function ||
-            k == type_kind::atomic)
+        type_kind k2 = type_table[type].kind;
+        if (k2 == type_kind::array || k2 == type_kind::function ||
+            k2 == type_kind::atomic)
             return ill_formed(seq,
                               "_Atomic cannot be applied to an array, "
                               "function or atomic type",
                               "ext.clang");
         /* clang: "'_Atomic' qualifier on reference type ... has no
            effect" */
-        if (k != type_kind::lvalue_reference &&
-            k != type_kind::rvalue_reference) {
+        if (k2 != type_kind::lvalue_reference &&
+            k2 != type_kind::rvalue_reference) {
             VTRY(r,
                  atomic_value_check(seq, qualified_type::make(type, cv_none)));
             type = type_table.atomic_of(qualified_type::make(type, cv_none));

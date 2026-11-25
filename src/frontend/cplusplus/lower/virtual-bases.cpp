@@ -95,11 +95,11 @@ uint32_t c_lowering::vtt_argument(entity_index b, token_index at)
     uint32_t index = sub_vtt_index(structor_class, of, offset);
     if (index == UINT32_MAX)
         return fail("a base without a sub-VTT", at);
-    ast_qualified_type vpp = pointer_to(ast_builder_type_pointer(c, v));
+    ast_qualified_type vpp = pointer_to(ast_builder_type_pointer(c, void_type));
     if (structor_variant == 2) {
         uint32_t p = c_variable(c, vtt_parameter, vpp);
         uint32_t element =
-            make(AST_NODE_INDEX, pointer_to(v), p,
+            make(AST_NODE_INDEX, pointer_to(void_type), p,
                  to_ptrdiff(ast_builder_integer(
                      c, ast_builder_type_basic(AST_TYPE_INT), index)),
                  0, 0, AST_NODE_FLAG_LVALUE);
@@ -110,8 +110,8 @@ uint32_t c_lowering::vtt_argument(entity_index b, token_index at)
         return 0;
     vtt_layout layout;
     vtt_of(structor_class, layout);
-    ast_qualified_type array =
-        ast_builder_type_array(c, pointer_to(v), layout.entries.size(), true);
+    ast_qualified_type array = ast_builder_type_array(
+        c, pointer_to(void_type), layout.entries.size(), true);
     return element_address(s, array, index);
 }
 
@@ -122,7 +122,7 @@ ast_qualified_type c_lowering::structor_type(entity_index e, token_index at)
     owned_array<ast_qualified_type> parameters;
     parameters.append(
         pointer_to(type(analysis.entity_table[x.enclosing].type, at)));
-    parameters.append(pointer_to(ast_builder_type_pointer(c, v)));
+    parameters.append(pointer_to(ast_builder_type_pointer(c, void_type)));
     const qualified_type *p =
         analysis.type_table.parameters(x.type.unqualified());
     for (uint32_t i = 0; i < f.parameter_count; i++)
@@ -145,7 +145,7 @@ uint32_t c_lowering::vtable_pointer_stores(const semantic_node &n)
 {
     entity_index k = n.b;
     const dynamic_class *d = analysis.dynamic_of(k);
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     ast_qualified_type vpp = pointer_to(vp);
     ast_qualified_type vppp = pointer_to(vpp);
     bool from_vtt = structor_variant == 2 && k == structor_class &&
@@ -405,11 +405,11 @@ bool c_lowering::thunk_body(const thunk_record &r, token_index at)
              ast_builder_list(c, arguments.data(), count), count, 0, 0);
     uint32_t statement_node = 0;
     if (record(ft.operand).kind == type_kind::fundamental &&
-        AST_QUALIFIED_TYPE_UNQUALIFIED(result) == v)
+        AST_QUALIFIED_TYPE_UNQUALIFIED(result) == void_type)
         statement_node = c_statement(c, call);
     else
         statement_node =
-            ast_builder_node(c, AST_NODE_RETURN, v, call, 0, 0, 0, 0);
+            ast_builder_node(c, AST_NODE_RETURN, void_type, call, 0, 0, 0, 0);
     uint32_t body = block(&statement_node, 1);
     struct node &b = ast_builder_ast(c)->nodes[body];
     b.a = ast_builder_list(c, forwarded.data(), count);
@@ -472,7 +472,7 @@ bool c_lowering::deleting_destructor(entity_index e, token_index at,
     uint32_t callee =
         cast(make(AST_NODE_VARIABLE, function, target, 0, 0, 0, 0),
              pointer_to(function), AST_CAST_FUNCTION_DECAY);
-    uint32_t call = make(AST_NODE_CALL, v, callee,
+    uint32_t call = make(AST_NODE_CALL, void_type, callee,
                          ast_builder_list(c, arguments, count), count, 0, 0);
     statements[1] = c_statement(c, call);
     uint32_t body = block(statements, 2);
@@ -489,7 +489,7 @@ bool c_lowering::deleting_destructor(entity_index e, token_index at,
 uint32_t c_lowering::virtual_function(entity_index f, uint32_t object,
                                       token_index at, uint32_t next)
 {
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     ast_qualified_type vpp = pointer_to(vp);
     uint32_t table = dereference(
         cast(object, pointer_to(vpp), AST_CAST_POINTER_TO_POINTER), vpp);
@@ -551,8 +551,8 @@ bool c_lowering::complete_variant(entity_index e)
         return false;
     vtt_layout layout;
     vtt_of(k, layout);
-    ast_qualified_type array =
-        ast_builder_type_array(c, pointer_to(v), layout.entries.size(), true);
+    ast_qualified_type array = ast_builder_type_array(
+        c, pointer_to(void_type), layout.entries.size(), true);
     ast_qualified_type pointer =
         pointer_to(type(analysis.entity_table[k].type, body.at));
     uint32_t call = special_call(e, c_variable(c, self, pointer), nullptr, 0,

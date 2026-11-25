@@ -133,7 +133,7 @@ bool semantic_analysis::member_class_function_unjudged(
                 preprocessing_op_or_punc_primary(x.op_or_punc) ==
                     preprocessing_op_or_punc::COLON_COLON)
                 qualified = true;
-            if (p.keyword_of(x) == standard_keyword::typename_)
+            if (syntax_parser.keyword_of(x) == standard_keyword::typename_)
                 typename_seen = true;
         }
         if (qualified && !typename_seen)

@@ -134,7 +134,7 @@ analysis_result semantic_analysis::member_function_template(
                                          "function template with fewer "
                                          "than two parameters");
         const struct type &result = type_table[fn.operand.unqualified()];
-        const struct type &first = type_table[ps[0].unqualified()];
+        const struct type &first2 = type_table[ps[0].unqualified()];
         bool fine = false;
         if (allocation) {
             fine = result.kind == type_kind::pointer && !fn.operand.cv() &&
@@ -147,9 +147,9 @@ analysis_result semantic_analysis::member_function_template(
         } else {
             fine = result.kind == type_kind::fundamental &&
                    result.fundamental == fundamental_type::void_ &&
-                   !fn.operand.cv() && first.kind == type_kind::pointer &&
-                   !ps[0].cv() && !first.operand.cv() &&
-                   fundamental_of(first.operand) == fundamental_type::void_;
+                   !fn.operand.cv() && first2.kind == type_kind::pointer &&
+                   !ps[0].cv() && !first2.operand.cv() &&
+                   fundamental_of(first2.operand) == fundamental_type::void_;
         }
         if (!fine)
             return not_supported_because(n, "temp.mem",
@@ -201,11 +201,11 @@ analysis_result semantic_analysis::member_function_template(
     if (prior && entity_table[prior].enclosing == c &&
         entity_table[prior].kind == entity_kind::function &&
         entity_table[prior].special == special_member::none) {
-        entity_index head = prior;
-        prior = entity_table[head].member_templates;
+        entity_index head2 = prior;
+        prior = entity_table[head2].member_templates;
         if (!prior) {
             prior = make_held_name(name, c);
-            entity_table[head].member_templates = prior;
+            entity_table[head2].member_templates = prior;
         }
     } else if (prior && entity_table[prior].enclosing != c) {
         /* [namespace.udecl]/15, [temp.mem]/2: a name a using-declaration

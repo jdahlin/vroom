@@ -185,7 +185,7 @@ static void dump_declaration_claims(const semantic_analysis &analysis,
                                     token_stream &tokens, vbuffer *out)
 {
     owned_buffer claim;
-    for (const declared_name &d : analysis.declared) {
+    for (const declared_name &d : analysis.declared_names) {
         if (!d.claimable)
             continue;
         /* [ext:gnu_attributes] noreturn is part of the function's type for
@@ -365,7 +365,7 @@ static void dump_symbols(const semantic_analysis &analysis,
 {
     owned_array<entity_index> seen;
     owned_buffer symbol;
-    for (const declared_name &d : analysis.declared) {
+    for (const declared_name &d : analysis.declared_names) {
         if (!d.entity)
             continue;
         const entity &e = analysis.entity_table[d.entity];
@@ -436,7 +436,7 @@ static void dump_lookup_claims(const semantic_analysis &analysis,
     /* only a name of the entity's first declaration: one declaration
        analysis records no declared_name for (a member's, in its class)
        leaves the entity's claims out rather than naming a later one */
-    for (const declared_name &d : analysis.declared) {
+    for (const declared_name &d : analysis.declared_names) {
         if (!d.entity || !d.id || first[d.entity])
             continue;
         uint32_t f = analysis.entity_table[d.entity].first_declaration;

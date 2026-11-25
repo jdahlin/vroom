@@ -1118,14 +1118,14 @@ static uint32_t virbuild_vectorize_vector_make(virbuild_vectorize_state *S,
                                                vt, 0, a, b, 0);
             break;
         case VIR_OP_FMA: {
-            uint32_t c;
+            uint32_t c2;
 
             if (!(a = virbuild_vectorize_vector_make(S, in.a)) ||
                 !(b = virbuild_vectorize_vector_make(S, in.b)) ||
-                !(c = virbuild_vectorize_vector_make(S, in.c)))
+                !(c2 = virbuild_vectorize_vector_make(S, in.c)))
                 return 0;
             r = virbuild_vectorize_insn_append(
-                S, S->vector_body_block, VIR_OP_FMA, vt, in.flags, a, b, c);
+                S, S->vector_body_block, VIR_OP_FMA, vt, in.flags, a, b, c2);
             break;
         }
         case VIR_OP_NEG:

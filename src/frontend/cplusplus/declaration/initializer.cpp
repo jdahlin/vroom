@@ -1894,7 +1894,7 @@ bool semantic_analysis::initializer_names_nothing(SyntaxRef init) const
             k.literal != literal_kind::user_defined_literal)
             continue;
         if (k.kind == token_kind::keyword) {
-            standard_keyword w = this->p.keyword_of(k);
+            standard_keyword w = this->syntax_parser.keyword_of(k);
             if (w == standard_keyword::true_ || w == standard_keyword::false_ ||
                 w == standard_keyword::nullptr_)
                 continue;

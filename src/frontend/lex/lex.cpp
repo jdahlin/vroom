@@ -1362,11 +1362,11 @@ fast:
 
             memcpy(&c01, s + at, 2);
             /* kind without branches: ktab knows identifiers and numbers too */
-            const unsigned kind = kt[c01];
+            const unsigned kind2 = kt[c01];
             t->off = (uint32_t)at;
             t->len = e - o;
             t->id = 0;
-            t->kind = (uint8_t)kind;
+            t->kind = (uint8_t)kind2;
             t->flags = (uint8_t)(f | pend);
             pend = 0;
 #if defined(__aarch64__)
@@ -1374,7 +1374,7 @@ fast:
             __asm__("" : "+r"(t));
 #endif
             il[ni] = (uint32_t)(uintptr_t)t;
-            ni += kind == LEX_TOKEN_IDENTIFIER;
+            ni += kind2 == LEX_TOKEN_IDENTIFIER;
             t++;
 
 #if defined(__x86_64__)

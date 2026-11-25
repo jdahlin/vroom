@@ -941,20 +941,21 @@ again:
                     cc_declaration_specifiers_tag_body_end(c, kind);
                     if (unlikely(cc_extension_is_enabled(
                             c, "gnu-empty-struct", cc_warning_group_gnu))) {
-                        const tag *r = &c->tags[ti];
-                        bool named = false;
+                        const tag *r2 = &c->tags[ti];
+                        bool named2 = false;
 
-                        for (uint32_t i = 0; i < r->nfield && !named; i++)
-                            named = r->f[i].name ||
-                                    (!r->f[i].bitfield &&
-                                     cc_type_is_record(c, r->f[i].ty));
-                        if (!named)
+                        for (uint32_t i = 0; i < r2->nfield && !named2; i++)
+                            named2 = r2->f[i].name ||
+                                     (!r2->f[i].bitfield &&
+                                      cc_type_is_record(c, r2->f[i].ty));
+                        if (!named2)
                             cc_report_extension(
                                 c, "gnu-empty-struct", cc_warning_group_gnu,
                                 loc,
-                                r->nfield ? "%s without named members is a GNU "
-                                            "extension"
-                                          : "empty %s is a GNU extension",
+                                r2->nfield
+                                    ? "%s without named members is a GNU "
+                                      "extension"
+                                    : "empty %s is a GNU extension",
                                 kind == AST_TYPE_UNION ? "union" : "struct");
                     }
                 }

@@ -20,7 +20,8 @@ ast_qualified_type c_lowering::member_function_pointer_type()
 {
     if (member_function_pair)
         return member_function_pair;
-    ast_qualified_type fields[2] = {pointer_to(v), ast_builder_type_ptrdiff(c)};
+    ast_qualified_type fields[2] = {pointer_to(void_type),
+                                    ast_builder_type_ptrdiff(c)};
     const char *names[2] = {"ptr", "adj"};
     size_t lengths[2] = {3, 3};
     uint32_t aligned[2] = {0, 0};
@@ -142,7 +143,7 @@ uint32_t c_lowering::member_pointer_constant(qualified_type t,
     if (record(record(t).operand).kind != type_kind::function)
         return ast_builder_integer(c, d,
                                    static_cast<int64_t>(f.offset) + adjustment);
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     uint32_t ptr = 0;
     int64_t adj = 2 * adjustment;
     if (f.virtual_) {
@@ -172,7 +173,7 @@ uint32_t c_lowering::null_member_pointer(qualified_type t, token_index at)
     uint32_t zero =
         ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0);
     return member_function_pointer_of(
-        cast(zero, pointer_to(v), AST_CAST_NULL_POINTER),
+        cast(zero, pointer_to(void_type), AST_CAST_NULL_POINTER),
         ast_builder_integer(c, ast_builder_type_ptrdiff(c), 0), at);
 }
 
@@ -253,7 +254,7 @@ uint32_t c_lowering::member_pointer_conversion(const semantic_node &n)
             make(AST_NODE_BINARY, d, ast_builder_member(c, read_again(r), 1, d),
                  ast_builder_integer(c, d, 2 * offset), 0, LEX_TOKEN_PLUS, 0);
         uint32_t pair = member_function_pointer_of(
-            ast_builder_member(c, held, 0, pointer_to(v)), adj, n.at);
+            ast_builder_member(c, held, 0, pointer_to(void_type)), adj, n.at);
         if (!r.symbol)
             return pair;
         /* the temporary assigned before the pair reads it */
@@ -329,7 +330,7 @@ uint32_t c_lowering::member_pointer_test(uint32_t n, token_index at)
                             ast_builder_integer(c, d, -1), 0,
                             LEX_TOKEN_EXCLAMATION_EQUAL, 0));
     }
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     reread r;
     uint32_t first = read_first(n, r,
                                 "a pointer to member function tested "
@@ -365,7 +366,7 @@ uint32_t c_lowering::member_pointer_equality(const semantic_node &n, int op)
         return to_bool(
             make(AST_NODE_BINARY, i, a, b, 0, static_cast<uint16_t>(op), 0));
     }
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     const char *what = "pointers to member functions compared outside a "
                        "statement";
     reread ra, rb;
@@ -419,7 +420,7 @@ uint32_t c_lowering::member_function_call(const semantic_node &n,
                                           uint32_t &object)
 {
     const semantic_node &access = node(n.a);
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     ast_qualified_type d = ast_builder_type_ptrdiff(c);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     ast_qualified_type bytes = pointer_to(byte);

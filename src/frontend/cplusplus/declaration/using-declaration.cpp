@@ -465,9 +465,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                    also names something calls of them cannot resolve)
                    stays so: what joins it is unusable too, and a call of
                    it is refused */
-                for (const function_template &t : function_templates)
-                    if (t.name == prior && !t.is_class && !t.is_alias &&
-                        !t.is_variable)
+                for (const function_template &t3 : function_templates)
+                    if (t3.name == prior && !t3.is_class && !t3.is_alias &&
+                        !t3.is_variable)
                         poisoned = true;
                 if (!poisoned)
                     return not_supported(n, "over");
@@ -480,8 +480,8 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 if (imported.name != held || imported.unusable)
                     continue;
                 bool present = false;
-                for (const function_template &t : function_templates)
-                    if (t.name == prior && t.entity == imported.entity) {
+                for (const function_template &t2 : function_templates)
+                    if (t2.name == prior && t2.entity == imported.entity) {
                         present = true;
                         break;
                     }

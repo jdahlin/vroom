@@ -559,11 +559,11 @@ analysis_result semantic_analysis::best_viable_function(
         if (!x.template_index || !y.template_index ||
             x.template_index == y.template_index)
             return false;
-        bool order_unknown = false;
+        bool order_unknown2 = false;
         int order =
             function_template_order(x.template_index, y.template_index,
-                                    n - (x.member && y.member), order_unknown);
-        if (order_unknown || order != 0 || !x.function || !y.function)
+                                    n - (x.member && y.member), order_unknown2);
+        if (order_unknown2 || order != 0 || !x.function || !y.function)
             return false;
         /* the specializations take the same parameter types, so every
            argument's conversion sequence is the same: nothing else in
@@ -626,14 +626,14 @@ analysis_result semantic_analysis::best_viable_function(
                ordering analysis cannot tell): clang's ambiguity, not
                claimed */
             return not_supported(at, "temp.func.order");
-        bool user_defined = false;
+        bool user_defined2 = false;
         for (size_t k = 0; k < width; k++)
             if (ics[w * width + k].kind ==
                     conversion_sequence::form::user_defined &&
                 ics[i * width + k].kind ==
                     conversion_sequence::form::user_defined &&
                 ics[w * width + k].function != ics[i * width + k].function)
-                user_defined = true;
+                user_defined2 = true;
         bool to_arrays = false;
         for (size_t k = 0; k < width; k++)
             if (ics[w * width + k].to_array && ics[i * width + k].to_array)
@@ -642,7 +642,7 @@ analysis_result semantic_analysis::best_viable_function(
             /* /3.1: lists to arrays of different bounds (CWG1307), not
                ranked here */
             return not_supported(at, "over.ics.rank");
-        if (!better(w, i) && user_defined)
+        if (!better(w, i) && user_defined2)
             /* /3.3: two user-defined conversion sequences of different
                functions are indistinguishable; clang's ambiguity is not
                claimed */

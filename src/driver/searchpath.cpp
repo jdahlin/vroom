@@ -83,9 +83,9 @@ VPRIV void driver_searchpath_build(struct driver_job *job,
                                    const driver_environment *env)
 {
     size_t nsys, nfwdirs;
-    const char *const *sysdirs_darwin =
+    const char *const *darwin_system_dirs =
         driver_predef_darwin_system_directories(&nsys);
-    const char *const *fwdirs_darwin =
+    const char *const *darwin_framework_dirs =
         driver_predef_darwin_framework_directories(&nfwdirs);
 
     /* search path: -iquote, -I, -isystem, -idirafter; exact duplicates dropped */
@@ -129,7 +129,7 @@ VPRIV void driver_searchpath_build(struct driver_job *job,
         static __thread char cxxdir[1024];
 
         for (size_t k = 0; k < nsys; k++) {
-            const char *d = sysdirs_darwin[k],
+            const char *d = darwin_system_dirs[k],
                        *u = strstr(d, ".sdk/usr/include");
 
             if (u && !u[16] &&
@@ -142,13 +142,13 @@ VPRIV void driver_searchpath_build(struct driver_job *job,
     }
     if (job->darwin && !job->no_standard_includes)
         for (size_t k = 0; k < nsys; k++) {
-            size_t l = strlen(sysdirs_darwin[k]);
-            int xc =
-                l > 12 && !strcmp(sysdirs_darwin[k] + l - 12, "/usr/include");
+            size_t l = strlen(darwin_system_dirs[k]);
+            int xc = l > 12 &&
+                     !strcmp(darwin_system_dirs[k] + l - 12, "/usr/include");
 
             if (xc)
                 job->pp_options.xc0 = job->search_count;
-            ADD(sysdirs_darwin[k]);
+            ADD(darwin_system_dirs[k]);
             if (xc)
                 job->pp_options.xc1 = job->search_count;
         }
@@ -159,7 +159,7 @@ VPRIV void driver_searchpath_build(struct driver_job *job,
         static __thread char sdk[1024];
 
         for (size_t k = 0; k < nsys && !job->depfile_first_input; k++) {
-            const char *d = sysdirs_darwin[k],
+            const char *d = darwin_system_dirs[k],
                        *u = strstr(d, ".sdk/usr/include");
 
             if (u &&
@@ -231,7 +231,7 @@ VPRIV void driver_searchpath_build(struct driver_job *job,
     for (int k = 0; k < job->after_count; k++)
         ADD(job->after_directories[k]);
     if (job->darwin && !job->no_standard_includes) {
-        job->pp_options.fwdirs = fwdirs_darwin;
+        job->pp_options.fwdirs = darwin_framework_dirs;
         job->pp_options.nfwdirs = (int)(nfwdirs);
     }
     job->pp_options.dirs = job->search_directories;

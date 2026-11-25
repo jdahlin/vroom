@@ -359,8 +359,8 @@ static bool shell_command_parse(struct shell_token *t, int n,
                !strcmp(name, "trap")) {
         if (name[0] == 't' &&
             name[1] == 'r') /* trap: signal handlers only; EXIT/0 must run */
-            for (int i = 2; i < nw; i++)
-                if (!strcmp(w[i].text, "EXIT") || !strcmp(w[i].text, "0"))
+            for (int i2 = 2; i2 < nw; i2++)
+                if (!strcmp(w[i2].text, "EXIT") || !strcmp(w[i2].text, "0"))
                     return false;
         if (!strcmp(name, "trap") && nw < 3)
             return false;

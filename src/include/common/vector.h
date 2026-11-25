@@ -136,12 +136,12 @@ static inline void *vvector_reserve(void *p, uint32_t *cap, size_t need,
 #define VVEC_PUSH(a, x, alloc)                                                 \
     do {                                                                       \
         if ((a).n == (a).cap) {                                                \
-            uint32_t nc = (a).cap ? (a).cap * 2 : 8;                           \
-            void *nv = alloc(nc * sizeof(*(a).v));                             \
+            uint32_t vvec_cap_ = (a).cap ? (a).cap * 2 : 8;                    \
+            void *vvec_v_ = alloc(vvec_cap_ * sizeof(*(a).v));                 \
             if ((a).n)                                                         \
-                memcpy(nv, (a).v, (a).n * sizeof(*(a).v));                     \
-            (a).v = (__typeof__((a).v))nv;                                     \
-            (a).cap = nc;                                                      \
+                memcpy(vvec_v_, (a).v, (a).n * sizeof(*(a).v));                \
+            (a).v = (__typeof__((a).v))vvec_v_;                                \
+            (a).cap = vvec_cap_;                                               \
         }                                                                      \
         (a).v[(a).n++] = (x);                                                  \
     } while (0)

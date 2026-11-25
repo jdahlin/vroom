@@ -683,14 +683,14 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
                                 .rd = R_X16,
                                 .rn = SP,
                                 .immediate = total - 16};
-                a64_record a = {.opcode = A64_OP_ANDI,
-                                .size = 1,
-                                .rd = SP,
-                                .rn = R_X16,
-                                .immediate = -(int64_t)e->frame_alignment};
+                a64_record a2 = {.opcode = A64_OP_ANDI,
+                                 .size = 1,
+                                 .rd = SP,
+                                 .rn = R_X16,
+                                 .immediate = -(int64_t)e->frame_alignment};
 
                 a64_record_print(c, b, &i, s, e->raw.p);
-                a64_record_print(c, b, &a, s, e->raw.p);
+                a64_record_print(c, b, &a2, s, e->raw.p);
             } else if (total > 16) {
                 a64_record i = {.opcode = A64_OP_SUBI,
                                 .size = 1,
@@ -766,8 +766,8 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
             } else if (i->condition == A64_NOP_CFI_RESTORE) {
                 vtext_string_append(b, "\t.cfi_restore_state\n");
             } else {
-                for (int k = 0; k < ncs; k++)
-                    vtext_format_append(b, "\t.cfi_restore w%d\n", cs[k]);
+                for (int k2 = 0; k2 < ncs; k2++)
+                    vtext_format_append(b, "\t.cfi_restore w%d\n", cs[k2]);
                 if (!leaf && !a64_frame_shape.is_stack_pointer_leaf)
                     vtext_string_append(
                         b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");

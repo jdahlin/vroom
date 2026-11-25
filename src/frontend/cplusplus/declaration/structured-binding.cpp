@@ -157,7 +157,7 @@ analysis_result semantic_analysis::binding_variable(SyntaxRef n,
         name.kind = entity_kind::variable;
         name.type = entity_table[v].type;
         name.claimable = false;
-        declared.append(name);
+        declared_names.append(name);
     }
     return analysis_result::well_formed;
 }

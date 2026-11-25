@@ -1009,7 +1009,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
                                 .align = codegen_type_alignment(c, re),
                                 .offset = (int64_t)i *
                                           (int64_t)codegen_type_size(c, re)};
-            codegen_value v;
+            codegen_value v3;
 
             if (x->aux == CC_BUILTIN_SHUFFLEVECTOR) {
                 int64_t k = (int64_t)c->ipool[N(arg[2 + i])->a];
@@ -1025,7 +1025,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
                     s.offset = j / 8, s.is_bitfield = 1, s.width = 1,
                     s.bit_offset = j % 8;
                 }
-                v = k < 0 ? codegen_value_constant(0) : load(e, &s, ae);
+                v3 = k < 0 ? codegen_value_constant(0) : load(e, &s, ae);
             } else {
                 codegen_lvalue s = {
                     .kind = CODEGEN_LVALUE_REGISTER,
@@ -1043,14 +1043,14 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
                 if (codegen_type_is_bool_vector(c, at))
                     s.offset = i / 8, s.is_bitfield = 1, s.width = 1,
                     s.bit_offset = i % 8;
-                v = cast(e, load(e, &s, ae), ae, re,
-                         KIND(c, re) == AST_TYPE_BOOL ? AST_CAST_BOOL : ck);
+                v3 = cast(e, load(e, &s, ae), ae, re,
+                          KIND(c, re) == AST_TYPE_BOOL ? AST_CAST_BOOL : ck);
             }
             if (codegen_type_is_bool_vector(c, x->ty))
                 d.offset = i / 8, d.is_bitfield = 1, d.width = 1,
                 d.bit_offset = i % 8;
-            store(e, &d, re, &v);
-            val_free(e, &v);
+            store(e, &d, re, &v3);
+            val_free(e, &v3);
         }
         tfree(e, ra);
         if (rb >= 0)

@@ -374,7 +374,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     using punct = preprocessing_op_or_punc;
     /* the parameter-declarations and the ellipsis, from the clause and its
        list: ( clause ) is the first and last child */
-    owned_array<SyntaxRef> declarations;
+    owned_array<SyntaxRef> declarations2;
     bool variadic = false, closed = false;
     token_index clause_ellipsis = 0;
     owned_array<SyntaxElement> work;
@@ -515,12 +515,12 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         }
         if (!c.parameter_declaration())
             return not_supported(parameters, "dcl.fct");
-        declarations.append(c);
+        declarations2.append(c);
     }
     owned_array<qualified_type> list;
     owned_array<parameter_meaning> named;
     uint32_t empty_pack = 0;
-    for (size_t k = 0; k < declarations.size(); k++) {
+    for (size_t k = 0; k < declarations2.size(); k++) {
         qualified_type t;
         bool unnamed = true;
         token_index id = 0;
@@ -530,16 +530,17 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
            element */
         uint32_t elements = 0;
         token_index ellipsis = 0;
-        VTRY(r, parameter_pack_expansion(
-                    declarations[k], k + 1 == declarations.size() && !variadic,
-                    elements, ellipsis));
+        VTRY(r, parameter_pack_expansion(declarations2[k],
+                                         k + 1 == declarations2.size() &&
+                                             !variadic,
+                                         elements, ellipsis));
         /* [dcl.fct]/22: the clause's own "..." after the last parameter,
            whose type names a pack, is that pack's expansion (an
            instantiation's: R (*)(A...) with A bound to its elements) */
         bool clause_expansion = false;
-        if (!ellipsis && variadic && k + 1 == declarations.size() &&
-            expansion_count(declarations[k].first_token(),
-                            declarations[k].end_token(), elements)) {
+        if (!ellipsis && variadic && k + 1 == declarations2.size() &&
+            expansion_count(declarations2[k].first_token(),
+                            declarations2[k].end_token(), elements)) {
             clause_expansion = true;
             ellipsis = clause_ellipsis;
         }
@@ -551,18 +552,18 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
             for (uint32_t e = 0; e < elements; e++) {
                 {
                     expansion_scope scope(*this, true, e);
-                    r = parameter_declaration(declarations[k], t, unnamed, id,
+                    r = parameter_declaration(declarations2[k], t, unnamed, id,
                                               default_argument);
                 }
                 if (r != analysis_result::well_formed)
                     return r;
                 if ((!clause_expansion && declared_pack != ellipsis) ||
                     default_argument || depends_on_template_parameter(t))
-                    return not_supported(declarations[k], "temp.variadic");
+                    return not_supported(declarations2[k], "temp.variadic");
                 const struct type &element = type_table[t.unqualified()];
                 if ((element.kind == type_kind::fundamental &&
                      element.fundamental == fundamental_type::void_))
-                    return not_supported(declarations[k], "temp.variadic");
+                    return not_supported(declarations2[k], "temp.variadic");
                 if (element.kind == type_kind::array)
                     t = qualified_type::make(
                         type_table.pointer_to(element.operand), cv_none);
@@ -571,7 +572,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 list.append(qualified_type::make(t.unqualified(), cv_none));
                 parameter_meaning parameter;
                 parameter.type = t;
-                parameter.declaration = declarations[k];
+                parameter.declaration = declarations2[k];
                 parameter.pack_name = pack_name;
                 named.append(parameter);
             }
@@ -586,11 +587,11 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
            point of declaration ([basic.scope.pdecl]/1), so a later
            parameter's declaration (an array bound, a decltype) finds it */
         entity_index outer = current_scope;
-        if (names_earlier_parameter(declarations[k], named))
+        if (names_earlier_parameter(declarations2[k], named))
             open_parameter_scope(named, 0);
         bool named_before = argument_named;
         argument_named = false;
-        r = parameter_declaration(declarations[k], t, unnamed, id,
+        r = parameter_declaration(declarations2[k], t, unnamed, id,
                                   default_argument);
         bool parameter_dependent = argument_named;
         argument_named = named_before || parameter_dependent;
@@ -608,15 +609,15 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                analyse) */
             if (variadic)
                 return not_supported_because(
-                    declarations[k], "temp.variadic",
+                    declarations2[k], "temp.variadic",
                     "a parameter pack before the ellipsis");
             if (default_argument)
                 return not_supported_because(
-                    declarations[k], "temp.variadic",
+                    declarations2[k], "temp.variadic",
                     "a parameter pack with a default argument");
             if (!depends_on_template_parameter(t))
                 return not_supported_because(
-                    declarations[k], "temp.variadic",
+                    declarations2[k], "temp.variadic",
                     "a parameter pack of a type naming no template parameter");
             t = qualified_type::make(
                 type_table.pack_expansion_of(
@@ -631,9 +632,9 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                parameter of non-dependent type void is equivalent to an
                empty parameter list.  Except for this special case, a
                parameter shall not have type cv void." */
-            if (declarations.size() == 1 && unnamed && !t.cv() && !variadic)
+            if (declarations2.size() == 1 && unnamed && !t.cv() && !variadic)
                 break;
-            return ill_formed(declarations[k],
+            return ill_formed(declarations2[k],
                               "except for a parameter list consisting of a "
                               "single unnamed parameter of non-dependent type "
                               "void, a parameter shall not have type cv void",
@@ -648,7 +649,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
            parameter of abstract class type is checked where the function
            is defined or called: not analysed */
         if (abstract_class(t))
-            return not_supported(declarations[k], "class.abstract");
+            return not_supported(declarations2[k], "class.abstract");
         if (record.kind == type_kind::array)
             t = qualified_type::make(type_table.pointer_to(record.operand),
                                      cv_none);
@@ -658,7 +659,7 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         parameter_meaning parameter;
         parameter.id = id;
         parameter.type = t;
-        parameter.declaration = declarations[k];
+        parameter.declaration = declarations2[k];
         parameter.default_argument = default_argument;
         parameter.argument_dependent = parameter_dependent;
         named.append(parameter);

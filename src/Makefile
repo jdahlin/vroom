@@ -97,7 +97,7 @@ VCC_WARN ?= -Wmissing-prototypes -Wunreachable-code -Wnull-dereference \
 	-Wconditional-uninitialized -Wcast-qual -Wunreachable-code-aggressive \
 	-Wunused-macros -Wextra-semi-stmt -Wformat-signedness \
 	-Wshadow-uncaptured-local -Wimplicit-int-conversion \
-	-Wshorten-64-to-32
+	-Wshorten-64-to-32 -Wshadow
 VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(VCC_WARN) $(VCC_DIALECT_WARN) $(VCC_WERROR) $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,

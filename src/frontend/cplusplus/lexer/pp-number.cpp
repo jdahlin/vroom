@@ -165,13 +165,13 @@ bool lexer::analyze_pp_number(const char *s, size_t n, source_location at,
 
     /* "'''_opt digit": a digit separator follows a digit and is followed by
        one; reported where a sequence of digits starts or ends with one */
-    auto check_separator = [&](size_t position, bool after_digits) {
-        size_t q = position;
+    auto check_separator = [&](size_t where, bool after_digits) {
+        size_t q = where;
         if (after_digits) {
-            if (position == 0)
+            if (where == 0)
                 return;
-            q = position - 1;
-        } else if (position >= n)
+            q = where - 1;
+        } else if (where >= n)
             return;
         if (s[q] != '\'')
             return;

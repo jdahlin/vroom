@@ -776,14 +776,15 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
         return not_supported(n, "expr.unary");
     const token &op = tokens[n[0].token()];
     if (op.kind == token_kind::keyword) {
-        standard_keyword kw = p.keyword_of(op);
+        standard_keyword kw = syntax_parser.keyword_of(op);
         if (kw == standard_keyword::sizeof_)
             return size_of(n, false, m);
         if (kw == standard_keyword::alignof_)
             return size_of(n, true, m);
-        if (p.extension_keyword_of(op) == extension_keyword::datasizeof_)
+        if (syntax_parser.extension_keyword_of(op) ==
+            extension_keyword::datasizeof_)
             return size_of(n, false, m, true);
-        extension_keyword ek = p.extension_keyword_of(op);
+        extension_keyword ek = syntax_parser.extension_keyword_of(op);
         if (ek == extension_keyword::real_ || ek == extension_keyword::imag_) {
             expression_meaning operand;
             VTRY(r, expression(n[1], operand));

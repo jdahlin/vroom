@@ -562,12 +562,12 @@ CC_PRIVATE void cc_conversion_constant_check(cc *c, uint32_t n,
     if (AST_NODE(n)->op ==
         AST_NODE_COMMA) { /* clang: the right operand, at the comma */
         uint32_t sl = c->cv_loc;
-        uint8_t sw = c->cv_what;
+        uint8_t sw2 = c->cv_what;
 
         c->cv_loc = AST_NODE(n)->loc,
         c->cv_what = CC_CONVERSION_CONTEXT_INITIALIZER;
         cc_conversion_constant_check(c, AST_NODE(n)->b, to);
-        c->cv_loc = sl, c->cv_what = sw;
+        c->cv_loc = sl, c->cv_what = sw2;
         return;
     }
     if (cc_type_is_integer(c, to) && cc_type_is_float(c, from) &&

@@ -2963,9 +2963,9 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
                 if (N(sa)->op == AST_NODE_STRING &&
                     N(sb)->op == AST_NODE_STRING &&
                     c->strs[N(sa)->a].esz == 1 && c->strs[N(sb)->a].esz == 1) {
-                    int r = strcmp(c->strs[N(sa)->a].s, c->strs[N(sb)->a].s);
+                    int r3 = strcmp(c->strs[N(sa)->a].s, c->strs[N(sb)->a].s);
 
-                    return codegen_value_constant(r < 0 ? -1 : r > 0);
+                    return codegen_value_constant(r3 < 0 ? -1 : r3 > 0);
                 }
             }
             if (na == 3 && walk_memory_call_inline(e, n, kind, &mv))
@@ -4250,13 +4250,13 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
                       !walk_type_is_signed(c, tb);
             codegen_value a = walk_value_convert(e, walk_value_emit(e, arg[0]),
                                                  ta, w),
-                          b = walk_value_convert(e, walk_value_emit(e, arg[1]),
-                                                 tb, w),
+                          b4 = walk_value_convert(e, walk_value_emit(e, arg[1]),
+                                                  tb, w),
                           r, d;
             codegen_lvalue hi;
             int rr, s;
 
-            r = WALK_LOWER(wbin)(e, op, true, a, b);
+            r = WALK_LOWER(wbin)(e, op, true, a, b4);
             d = walk_value_emit(e, arg[2]);
             {
                 codegen_lvalue l = walk_lvalue_from_value(e, d, tr);
@@ -4287,7 +4287,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
         int op = x->aux == CC_BUILTIN_ADD_OVERFLOW   ? LEX_TOKEN_PLUS
                  : x->aux == CC_BUILTIN_SUB_OVERFLOW ? LEX_TOKEN_MINUS
                                                      : LEX_TOKEN_STAR;
-        codegen_value a, b, r, lo, back;
+        codegen_value a, b3, r, lo, back;
         codegen_lvalue l;
         int rr, cp, rs;
 
@@ -4295,8 +4295,8 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
             walk_type_size(c, tr) > 8 || !WALK_LOWER(i128mem)())
             walk_unsupported_fail(e, n, "a 128-bit overflow builtin");
         a = walk_value_convert(e, walk_value_emit(e, arg[0]), ta, w);
-        b = walk_value_convert(e, walk_value_emit(e, arg[1]), tb, w);
-        r = WALK_LOWER(wbin)(e, op, true, a, b);
+        b3 = walk_value_convert(e, walk_value_emit(e, arg[1]), tb, w);
+        r = WALK_LOWER(wbin)(e, op, true, a, b3);
         l = walk_lvalue_from_value(e, walk_value_emit(e, arg[2]), tr);
         rr = walk_value_to_register(e, &r);
         cp = WALK_LOWER(treg)(e);
@@ -4532,12 +4532,12 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
         ast_qualified_type at = N(arg[0])->ty, bt = N(arg[1])->ty;
         ast_qualified_type ct = walk_operation_type(c, LEX_TOKEN_PLUS, at, bt);
         codegen_value a = walk_value_emit(e, arg[0]),
-                      b = walk_right_operand_emit(e, &a, arg[1], at);
+                      b2 = walk_right_operand_emit(e, &a, arg[1], at);
 
         a = walk_value_convert(e, a, at, ct);
-        b = walk_value_convert(e, b, bt, ct);
+        b2 = walk_value_convert(e, b2, bt, ct);
         return WALK_LOWER(fcmp)(e, ops[x->aux - CC_BUILTIN_ISGREATER], ct, a,
-                                b);
+                                b2);
     }
     case CC_BUILTIN_VA_START: {
         int r = walk_valist_emit(e, arg[0]);

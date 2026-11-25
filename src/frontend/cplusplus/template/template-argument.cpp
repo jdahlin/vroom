@@ -863,7 +863,7 @@ analysis_result semantic_analysis::template_argument_for(
         tr.fundamental == fundamental_type::std_nullptr_t) {
         /* (nullptr itself; another constant of the type is not followed) */
         if (!written.is_token() ||
-            this->p.keyword_of(tokens[written.token()]) !=
+            this->syntax_parser.keyword_of(tokens[written.token()]) !=
                 standard_keyword::nullptr_)
             return not_supported(at, "temp.arg.nontype");
         out.kind = template_argument::kind_t::value;

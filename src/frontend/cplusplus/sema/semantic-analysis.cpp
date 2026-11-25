@@ -33,7 +33,7 @@ const char *analysis_result_name(analysis_result result)
 semantic_analysis::semantic_analysis(const syntax_tree &tree,
                                      token_stream &tokens, const parser &p,
                                      diagnostic_consumer &diagnostics)
-    : tree(tree), tokens(tokens), p(p), diagnostics(diagnostics),
+    : tree(tree), tokens(tokens), syntax_parser(p), diagnostics(diagnostics),
       syntax_cx(tree, tokens, p)
 {
     unsupported.append(unsupported_construct());

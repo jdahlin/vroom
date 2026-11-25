@@ -318,11 +318,11 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
                 {"1y", 14}, {"17", 17}, {"1z", 17}, {"20", 20}, {"2a", 20},
                 {"23", 23}, {"2b", 23}, {"26", 26}, {"2c", 26},
             };
-            const char *v = a + 5 + (a[5] == 'g' ? 5 : 3);
+            const char *v3 = a + 5 + (a[5] == 'g' ? 5 : 3);
             size_t k;
 
             for (k = 0;
-                 k < sizeof(stds) / sizeof(stds[0]) && strcmp(v, stds[k].s);
+                 k < sizeof(stds) / sizeof(stds[0]) && strcmp(v3, stds[k].s);
                  k++)
                 ;
             if (k == sizeof(stds) / sizeof(stds[0])) {
@@ -393,22 +393,22 @@ VPRIV __attribute__((noinline)) int driver_cmdline_parse(struct driver_job *job,
                 {"gnu2x", 23, NULL},        {"c2y", 23, "202400L"},
                 {"gnu2y", 23, "202400L"},
             };
-            const char *v = a + 5;
+            const char *v2 = a + 5;
             size_t k;
 
             for (k = 0;
-                 k < sizeof(stds) / sizeof(stds[0]) && strcmp(v, stds[k].s);
+                 k < sizeof(stds) / sizeof(stds[0]) && strcmp(v2, stds[k].s);
                  k++)
                 ;
             if (k == sizeof(stds) / sizeof(stds[0])) {
-                dprintf(job->errfd, "error: invalid value '%s' in '%s'\n", v,
+                dprintf(job->errfd, "error: invalid value '%s' in '%s'\n", v2,
                         a); /* clang, without its notes */
                 job->status = 1;
                 return 1;
             }
             job->standard = stds[k].v;
             job->standard_version = stds[k].ver;
-            job->strict_standard = strncmp(v, "gnu", 3) != 0;
+            job->strict_standard = strncmp(v2, "gnu", 3) != 0;
             continue;
         }
         if (!strcmp(a, "-ansi")) {

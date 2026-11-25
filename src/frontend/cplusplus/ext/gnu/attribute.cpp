@@ -633,8 +633,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
         }
     }
     /* [ext:microsoft_declspec] (the keyword, extension_keyword::declspec) */
-    bool declspec = p.extension_keyword_of(tokens[n.first_token()]) ==
-                    extension_keyword::declspec;
+    bool declspec = syntax_parser.extension_keyword_of(
+                        tokens[n.first_token()]) == extension_keyword::declspec;
     for (SyntaxElement a : attributes) {
         token_index name_token = a.token();
         uint32_t count = a.size();

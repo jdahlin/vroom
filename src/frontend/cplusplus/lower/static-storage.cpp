@@ -46,11 +46,12 @@ uint32_t c_lowering::generated_function(const char *base)
 
 uint32_t c_lowering::local_function(const char *name, size_t length)
 {
-    ast_qualified_type f = ast_builder_type_function(c, v, nullptr, 0, 0);
+    ast_qualified_type f =
+        ast_builder_type_function(c, void_type, nullptr, 0, 0);
     uint32_t s = ast_builder_symbol(c, AST_SYMBOL_FUNCTION, name, length, f,
                                     AST_STORAGE_STATIC, 0, 0);
     owned_buffer written;
-    if (target == PP_DARWIN)
+    if (target_id == PP_DARWIN)
         vbuffer_string_append(written.get(), "_");
     vbuffer_append(written.get(), name, length);
     ast_builder_symbol_assembler_name(c, s, written.data(), written.size());
@@ -153,10 +154,10 @@ void c_lowering::static_destruction(entity_index e, owned_array<uint32_t> &out,
         ast_builder_symbol_body(c, f, block(&loop, 1));
         ast_builder_symbol_flags_add(c, f, AST_SYMBOL_FLAG_DEFINED);
         registered = destructor_registration(
-            f, ast_builder_type_function(c, v, nullptr, 0, 0),
+            f, ast_builder_type_function(c, void_type, nullptr, 0, 0),
             cast(ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_LONG),
                                      0),
-                 pointer_to(v), AST_CAST_INTEGER_TO_POINTER));
+                 pointer_to(void_type), AST_CAST_INTEGER_TO_POINTER));
     }
     if (registered)
         out.append(c_statement(c, registered));
@@ -168,8 +169,9 @@ uint32_t c_lowering::destructor_registration(uint32_t d, ast_qualified_type f,
     if (!d || !object)
         return 0;
     ast_builder_symbol_flags_add(c, d, AST_SYMBOL_FLAG_ADDRESS_TAKEN);
-    ast_qualified_type pointer = pointer_to(v);
-    ast_qualified_type dt = ast_builder_type_function(c, v, &pointer, 1, false);
+    ast_qualified_type pointer = pointer_to(void_type);
+    ast_qualified_type dt =
+        ast_builder_type_function(c, void_type, &pointer, 1, false);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     if (!dso_handle) {
         dso_handle =
@@ -242,7 +244,7 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     vbuffer_string_append(guard_name.get(), "_ZGV");
     vbuffer_append(guard_name.get(), name.data() + 2, name.size() - 2);
     owned_buffer written;
-    if (target == PP_DARWIN)
+    if (target_id == PP_DARWIN)
         vbuffer_string_append(written.get(), "_");
     vbuffer_append(written.get(), guard_name.data(), guard_name.size());
     ast_qualified_type i64 =
@@ -266,8 +268,8 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     if (failure.what)
         return;
     uint32_t argument = guard_address();
-    uint32_t release = runtime_call(guard_release, "__cxa_guard_release", v,
-                                    &i64p, &argument, 1);
+    uint32_t release = runtime_call(guard_release, "__cxa_guard_release",
+                                    void_type, &i64p, &argument, 1);
     inner.append(c_statement(c, release));
     argument = guard_address();
     uint32_t acquire = runtime_call(guard_acquire, "__cxa_guard_acquire",
@@ -331,11 +333,12 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
     ast_builder_symbol_body(c, f, block(statements));
     ast_builder_symbol_flags_add(
         c, f, AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED);
-    ast_qualified_type ft = ast_builder_type_function(c, v, nullptr, 0, 0);
+    ast_qualified_type ft =
+        ast_builder_type_function(c, void_type, nullptr, 0, 0);
     uint32_t callee = cast(make(AST_NODE_VARIABLE, ft, f, 0, 0, 0, 0),
                            pointer_to(ft), AST_CAST_FUNCTION_DECAY);
     initializers.append(
-        c_statement(c, make(AST_NODE_CALL, v, callee, 0, 0, 0, 0)));
+        c_statement(c, make(AST_NODE_CALL, void_type, callee, 0, 0, 0, 0)));
     return true;
 }
 

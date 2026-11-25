@@ -1570,7 +1570,8 @@ bool semantic_analysis::pack_only_expanded(uint32_t name, token_index first,
         /* sizeof...(A) names the pack and expands it ([expr.sizeof]/5) */
         if (t >= first + 3 && t + 1 < end &&
             tokens[t - 3].kind == token_kind::keyword &&
-            p.keyword_of(tokens[t - 3]) == standard_keyword::sizeof_ &&
+            syntax_parser.keyword_of(tokens[t - 3]) ==
+                standard_keyword::sizeof_ &&
             is(t - 2, preprocessing_op_or_punc::ELLIPSIS) &&
             is(t - 1, preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
             is(t + 1, preprocessing_op_or_punc::RIGHT_PARENTHESIS))
