@@ -100,9 +100,10 @@ analysis_result semantic_analysis::builtin_invoke(
                     false, operand_syntax, operands, handled, m));
         if (handled)
             return analysis_result::well_formed;
-        return not_supported_builtin(n, "ext.clang", called,
-                                     "of a class object that has no call "
-                                     "operator found by overload resolution");
+        return ill_formed(n,
+                          "the first argument of __builtin_invoke is not "
+                          "callable",
+                          "ext.clang");
     }
     qualified_type function_type = f.type;
     if (type_table[f.type.unqualified()].kind != type_kind::function ||
