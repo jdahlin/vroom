@@ -685,7 +685,7 @@ analysis_result semantic_analysis::overloaded_operator(
         if (t == analysis_result::well_formed && none)
             candidates.clear();
     }
-    if (candidates.empty()) {
+    auto builtin_via_conversion = [&]() -> analysis_result {
         bool unary_builtin = false;
         if (converts && (unary_prefix || incdec)) {
             switch (op) {
@@ -782,7 +782,14 @@ analysis_result semantic_analysis::overloaded_operator(
             }
             VTRY(br, builtin_binary(n, at, op, lhs, rhs, m));
             handled = true;
+            return analysis_result::well_formed;
         }
+        return analysis_result::ill_formed;
+    };
+    if (candidates.empty()) {
+        analysis_result br = builtin_via_conversion();
+        if (br != analysis_result::ill_formed)
+            return br;
         return analysis_result::well_formed;
     }
     if (converts && candidates.empty())
@@ -960,11 +967,15 @@ analysis_result semantic_analysis::overloaded_operator(
                 n, "class.copy.assign",
                 "a deleted copy assignment against another viable operator=");
     }
-    if (r == analysis_result::well_formed && none_viable && converts)
+    if (r == analysis_result::well_formed && none_viable && converts) {
         /* a built-in candidate may be viable through the conversion */
+        analysis_result br = builtin_via_conversion();
+        if (br != analysis_result::ill_formed)
+            return br;
         return not_supported_because(n, "over.built",
                                      "no viable operator function while a "
                                      "conversion may allow a built-in one");
+    }
     if (r == analysis_result::well_formed && !none_viable && converts &&
         !unary_prefix) {
         /* [over.ics.rank]/2: a viable operator function that binds every
