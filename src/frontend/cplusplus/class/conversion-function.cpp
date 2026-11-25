@@ -410,16 +410,64 @@ bool semantic_analysis::deduce_conversion_templates(
             }
             if (!deduce_type(ret, dest, values, set, true))
                 continue;
+            /* [temp.deduct]/5: a parameter not deduced takes its
+               default template-argument ([temp.deduct.conv] deduces the
+               rest as a call does); with none, deduction fails */
             bool all_set = true;
-            for (bool s : set)
-                if (!s)
+            for (uint32_t i = 0; i < ft.parameter_count && all_set; i++) {
+                if (set[i])
+                    continue;
+                template_parameter_parts form;
+                if (!template_parameter_form(
+                        template_parameter_nodes[ft.first_parameter + i],
+                        form) ||
+                    !(form.has_default || form.pack))
                     all_set = false;
+            }
+            /* the class is being defined (an implicit member of its
+               instantiation is analysed): its default template-arguments
+               may name the class itself, which is incomplete; they wait
+               as before */
             if (!all_set)
                 continue;
+            {
+                bool defaulted = false;
+                for (bool s : set)
+                    defaulted |= !s;
+                if (defaulted && instantiation_depth)
+                    continue;
+            }
             entity_index spec = 0;
             substitution_mark mark = mark_substitution();
             substituting++;
             unevaluated++;
+            /* a default template-argument that needs this same conversion
+               (json's `get<T>()` detection converts to T again) is
+               being substituted: no candidate, as the recursion cannot
+               end otherwise */
+            const uint64_t key =
+                (uint64_t(g) << 32) | uint32_t(dest.unqualified());
+            bool busy = false;
+            for (uint64_t a : defaulting_conversions)
+                if (a == key)
+                    busy = true;
+            if (busy) {
+                unevaluated--;
+                substituting--;
+                continue;
+            }
+            defaulting_conversions.append(key);
+            analysis_result dr =
+                default_template_arguments(current_declaration, g, values, set);
+            defaulting_conversions.resize(defaulting_conversions.size() - 1);
+            if (dr != analysis_result::well_formed) {
+                unevaluated--;
+                substituting--;
+                if (dr == analysis_result::ill_formed &&
+                    undo_substitution(mark))
+                    continue;
+                return false;
+            }
             analysis_result r =
                 instantiate(current_declaration, ft.entity, values.data(),
                             ft.parameter_count, spec);
@@ -448,6 +496,7 @@ semantic_analysis::conversion_function_for(const expression_meaning &m,
     }
     owned_array<entity_index> candidates;
     owned_array<entity_index> conv_templates;
+    conversion_receiver = c;
     if (!visible_conversion_functions(c, candidates, &conv_templates) ||
         !deduce_conversion_templates(conv_templates, to, candidates)) {
         unknown = true;

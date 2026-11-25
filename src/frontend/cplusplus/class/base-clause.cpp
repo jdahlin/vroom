@@ -331,6 +331,10 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         }
         if (named != analysis_result::well_formed)
             return named;
+        /* [class.derived]/2: complete each base before recording this class's
+           first_base, since completing a base specialization appends its own
+           entries to class_bases */
+        require_complete(base);
         named_bases.append(base);
         named_ids.append(id);
     }
@@ -370,7 +374,6 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         }
         token_index id = named_ids[si];
         entity_index base = named_bases[si];
-        require_complete(base);
         const entity &bx = entity_table[base];
         if (!bx.size)
             return ill_formed_at_token(id,

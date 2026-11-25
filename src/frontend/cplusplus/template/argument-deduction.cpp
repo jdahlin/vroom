@@ -306,7 +306,27 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     }
     case type_kind::array:
-        if (pr.entity && ar.entity && exact) {
+        if (pr.entity && ar.entity && !pr.bound && !ar.bound &&
+            !deduced.empty()) {
+            /* [temp.deduct.partial]: a non-type template parameter in an
+               array bound deduces from the other template's synthesized
+               non-type parameter */
+            uint32_t i = static_cast<uint32_t>(entity_table[pr.entity].value);
+            if (i >= deduced.size())
+                return false;
+            if (entity_table[pr.entity].type.unqualified() !=
+                entity_table[ar.entity].type.unqualified())
+                return false;
+            if (set[i]) {
+                if (deduced[i].kind != template_argument::kind_t::value ||
+                    deduced[i].template_entity != ar.entity)
+                    return false;
+            } else {
+                deduced[i].kind = template_argument::kind_t::value;
+                deduced[i].template_entity = ar.entity;
+                set[i] = true;
+            }
+        } else if (pr.entity && ar.entity && exact) {
             /* [temp.over.link]/7: the same parameter's position */
             if (entity_table[pr.entity].value !=
                     entity_table[ar.entity].value ||

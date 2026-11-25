@@ -229,7 +229,7 @@ analysis_result semantic_analysis::best_viable_function(
     owned_array<sequence> ics;
     owned_array<viability> state;
     for (const overload_candidate &c : candidates) {
-        const struct type &f = type_table[c.type.unqualified()];
+        const struct type f = type_table[c.type.unqualified()];
         size_t count = f.parameter_count;
         /* a member candidate's first argument is for its implicit object
            parameter ([over.match.oper]/3): its parameters are for the
@@ -286,7 +286,7 @@ analysis_result semantic_analysis::best_viable_function(
                 if (written_arguments &&
                     (*written_arguments)[k].is(syntax_kind::braced_init_list)) {
                     qualified_type list_target = target;
-                    const struct type &tr = type_table[target.unqualified()];
+                    const struct type tr = type_table[target.unqualified()];
                     /* (an array's cv-qualifiers are its elements',
                        [basic.type.qualifier]/3) */
                     qualified_type referred = tr.operand;
@@ -320,6 +320,13 @@ analysis_result semantic_analysis::best_viable_function(
                             a.from_list = true;
                             a.to_initializer_list =
                                 list_initializer_list(list_target);
+                            if (tr.kind == type_kind::lvalue_reference ||
+                                tr.kind == type_kind::rvalue_reference) {
+                                a.reference = true;
+                                a.binds_rvalue = true;
+                                a.rvalue_reference =
+                                    tr.kind == type_kind::rvalue_reference;
+                            }
                             if (semantics[value.node].kind ==
                                 semantic_kind::construct)
                                 a.function = semantics[value.node].b;
@@ -571,9 +578,11 @@ analysis_result semantic_analysis::best_viable_function(
             type_table.parameters(entity_table[x.function].type.unqualified());
         const qualified_type *py =
             type_table.parameters(entity_table[y.function].type.unqualified());
-        for (uint32_t k = 0; k < tx.parameter_count; k++)
-            if (px[k] != py[k])
-                return false;
+        if (!substituting || order_unknown) {
+            for (uint32_t k = 0; k < tx.parameter_count; k++)
+                if (px[k] != py[k])
+                    return false;
+        }
         /* a function's own return type or parameter written with decltype
            may fail substitution ([temp.deduct]/8), which the candidate
            set here does not always see: the tie is then not claimed.
@@ -598,6 +607,11 @@ analysis_result semantic_analysis::best_viable_function(
        ill-formed." */
     for (size_t i = 0; i < candidates.size(); i++) {
         if (i == w || state[i] != viability::viable)
+            continue;
+        if (candidates[i].function &&
+            candidates[i].function == candidates[w].function &&
+            candidates[i].rewritten == candidates[w].rewritten &&
+            candidates[i].reversed == candidates[w].reversed)
             continue;
         if (!better(w, i) &&
             (candidates[w].rewritten || candidates[i].rewritten))

@@ -1182,10 +1182,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             if (!argument_dependent_lookup(name, types, set, 0, &held))
                 return not_supported(n, "basic.lookup.argdep");
             if (!held.empty()) {
-                /* (the other templates ADL found join the first's, the
-                   candidates of template_call) */
-                if (!set.empty())
-                    return not_supported(n, "basic.lookup.argdep");
+                /* (the other templates and non-template functions ADL found
+                   join the first's, the candidates of template_call) */
                 uint32_t found_template = function_template_of(held[0]);
                 if (!found_template)
                     return not_supported(n, "basic.lookup.argdep");
@@ -1293,8 +1291,15 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                                 false, operand_syntax, operands, handled, m);
         if (r != analysis_result::well_formed || handled)
             return r;
-        /* [over.call.object]/2: no surrogate call functions (no conversion
-           functions are analysed) */
+        /* [over.call.object]/2: if the class has no viable operator() and no
+           conversion functions (no surrogate call functions), calling it is
+           ill-formed in a substitution context */
+        if (substituting && !has_implicit_conversion_functions(
+                                type_table[f.type.unqualified()].entity))
+            return ill_formed(n,
+                              "called object type is not a function or "
+                              "function pointer",
+                              "over.call.object");
         return not_supported(n, "over.call.object");
     }
     qualified_type function_type = f.type;
@@ -1325,7 +1330,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             function_type = pointer.operand;
         } else {
             if (fundamental_of(f.type) == fundamental_type::none &&
-                !is_pointer(f.type))
+                !is_pointer(f.type) &&
+                type_table[f.type.unqualified()].kind != type_kind::enumeration)
                 return not_supported(n, "expr.call");
             return ill_formed(n,
                               "the postfix expression shall be either an "
@@ -1378,6 +1384,18 @@ analysis_result semantic_analysis::template_callee(
     name = 0;
     function_template = 0;
     qualified = false;
+    if (auto op = callee.operator_function_id()) {
+        /* [over.call.func]/3: operator<(a, b) names the function templates
+           of that operator found by unqualified lookup too */
+        declarator_meaning function_name;
+        VTRY(r, operator_function_id(op, function_name));
+        name = function_name.id;
+        lookup_result x =
+            lookup_unqualified(tokens.identifier(name), lookup_filter::any);
+        if (!x.entity)
+            function_template = function_template_of(x.unknown_entity);
+        return analysis_result::well_formed;
+    }
     if (callee.is_token()) {
         if (tokens[callee.token()].kind != token_kind::identifier)
             return analysis_result::well_formed;
@@ -1973,6 +1991,26 @@ analysis_result semantic_analysis::template_call(
         tokens[name + 1].kind == token_kind::operator_or_punctuator &&
         preprocessing_op_or_punc_primary(tokens[name + 1].op_or_punc) ==
             preprocessing_op_or_punc::LESS;
+    /* (the token after operator is the operator's own, operator<: a
+       template-id only where written arguments follow it) */
+    {
+        size_t length = 0;
+        const char *spelled = identifier_text(tokens.identifier(name), &length);
+        if (length > 8 && memcmp(spelled, "operator", 8) == 0) {
+            template_id = static_cast<bool>(written_at);
+            /* [over.oper]/6: an operator function shall have a parameter of
+               class or enumeration type; of a specialization that has none
+               (clang: substitution failure at the use) not analysed */
+            bool user_defined = false;
+            for (const expression_meaning &e : early) {
+                type_index t = referenced_type(e.type).unqualified();
+                user_defined |= type_table[t].kind == type_kind::class_type ||
+                                type_table[t].kind == type_kind::enumeration;
+            }
+            if (!user_defined)
+                return not_supported(n, "over.oper");
+        }
+    }
     for (const template_name_function &x : template_name_functions)
         if (x.name == function_templates[function_template - 1].name &&
             !template_id)

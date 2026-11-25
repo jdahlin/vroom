@@ -262,9 +262,8 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
         s.string_literal_to_char_pointer = true;
         return s;
     }
-    /* [conv.fctptr]: a function pointer conversion */
-    if (fp.kind == type_kind::function || tp.kind == type_kind::function)
-        return of_form(sequence::form::unknown);
+    /* [conv.ptr]: an object pointer and a function pointer have no standard
+       conversion between them (both function pointers were handled above) */
     if (fp.kind == type_kind::none || tp.kind == type_kind::none)
         return of_form(sequence::form::unknown);
     return of_form(sequence::form::bad);
@@ -368,6 +367,7 @@ bool semantic_analysis::conversion_function_to_class(
     entity_index c1 = type_table[to.unqualified()].entity;
     owned_array<entity_index> candidates;
     owned_array<entity_index> conv_templates;
+    conversion_receiver = type_table[a.type.unqualified()].entity;
     if (!visible_conversion_functions(type_table[a.type.unqualified()].entity,
                                       candidates, &conv_templates) ||
         !deduce_conversion_templates(conv_templates, to, candidates)) {
@@ -463,8 +463,11 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         return of_form(sequence::form::bad);
     /* [temp.mem]/1: a constructor template of c1 only declared is a
        candidate too: not analysed */
-    if (entity_table[c1].constructor_template)
-        return of_form(sequence::form::unknown);
+    if (entity_table[c1].constructor_template) {
+        sequence cannot_tell = of_form(sequence::form::unknown);
+        cannot_tell.user_defined_if_viable = true;
+        return cannot_tell;
+    }
     /* the converting constructors of c1, and the specializations of its
        converting constructor templates, with one parameter to take the
        argument */
@@ -476,8 +479,11 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         owned_array<overload_candidate> specializations;
         if (constructor_template_candidates(SyntaxRef(), c1, &a, 1, true,
                                             specializations) !=
-            analysis_result::well_formed)
-            return of_form(sequence::form::unknown);
+            analysis_result::well_formed) {
+            sequence cannot_tell = of_form(sequence::form::unknown);
+            cannot_tell.user_defined_if_viable = true;
+            return cannot_tell;
+        }
         for (const overload_candidate &k : specializations)
             constructors.append(k.function);
     }
@@ -512,8 +518,11 @@ semantic_analysis::class_sequence(const expression_meaning &a,
             unique = false;
         }
     }
-    if (unknown)
-        return of_form(sequence::form::unknown);
+    if (unknown) {
+        sequence cannot_tell = of_form(sequence::form::unknown);
+        cannot_tell.user_defined_if_viable = true;
+        return cannot_tell;
+    }
     if (by_function.kind == sequence::form::user_defined) {
         /* [over.match.copy]/1: a conversion function and a converting
            constructor both viable are candidates of one overload
@@ -655,13 +664,21 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                             return found;
                     }
                 }
-                if (functions)
-                    return of_form(sequence::form::unknown);
+                if (functions) {
+                    sequence cannot_tell = of_form(sequence::form::unknown);
+                    /* [over.ics.rank]/2: once the source class is complete
+                       and known not to be reference-related, any viable
+                       conversion here is user-defined. */
+                    cannot_tell.user_defined_if_viable = entity_table[c2].size;
+                    return cannot_tell;
+                }
             }
             if (!c1 || !binds_rvalues || !user_defined)
                 return of_form(sequence::form::bad);
             s = class_sequence(
                 a, qualified_type::make(t1.unqualified(), cv_none), true);
+            if (s.kind == sequence::form::unknown)
+                s.user_defined_if_viable = true;
             if (s.kind != sequence::form::user_defined)
                 return s;
             lvalue = false;
@@ -743,8 +760,11 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
         bool ambiguous = false, unknown = false;
         entity_index f =
             conversion_function_for(a, parameter, false, ambiguous, unknown);
-        if (unknown)
-            return of_form(sequence::form::unknown);
+        if (unknown) {
+            sequence s = of_form(sequence::form::unknown);
+            s.user_defined_if_viable = true;
+            return s;
+        }
         if (ambiguous) {
             sequence s = of_form(sequence::form::user_defined);
             s.ambiguous = true;
@@ -757,8 +777,11 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
            for [over.ics.rank]/3.3 */
         expression_meaning value = conversion_function_result(f);
         sequence s = standard_conversion_sequence(value, parameter);
-        if (s.kind != sequence::form::standard)
-            return of_form(sequence::form::unknown);
+        if (s.kind != sequence::form::standard) {
+            sequence u = of_form(sequence::form::unknown);
+            u.user_defined_if_viable = true;
+            return u;
+        }
         s.kind = sequence::form::user_defined;
         s.function = f;
         return s;

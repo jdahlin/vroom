@@ -200,19 +200,19 @@ semantic_analysis::make_pack(const template_argument *elements, uint32_t count)
     a.count = count;
     if (!count)
         return a;
-    size_t size = pack_arguments.size();
-    for (size_t start = 0; start + count <= size; start++) {
+    for (const template_argument &prior : canonical_packs) {
+        if (prior.count != count)
+            continue;
         bool same = true;
         for (uint32_t i = 0; i < count && same; i++)
-            same = pack_arguments[start + i] == elements[i];
-        if (same) {
-            a.value = start;
-            return a;
-        }
+            same = pack_arguments[prior.value + i] == elements[i];
+        if (same)
+            return prior;
     }
-    a.value = size;
+    a.value = pack_arguments.size();
     for (uint32_t i = 0; i < count; i++)
         pack_arguments.append(elements[i]);
+    canonical_packs.append(a);
     return a;
 }
 

@@ -2811,6 +2811,7 @@ class semantic_analysis
        declared in the current scope by using-declarations */
     analysis_result using_enum_declaration(UsingEnumDeclaration n);
     analysis_result using_declarator(UsingDeclarator n, bool if_exists = false);
+    analysis_result using_typename(UsingDeclarator n);
     /* [temp.variadic]/5: in a using-declaration the pattern is a
        using-declarator: one followed by an ellipsis, once for each element
        of the packs it names */
@@ -4699,7 +4700,8 @@ class semantic_analysis
                                        owned_array<SyntaxRef> &bodies);
     analysis_result member_declarator(entity_index c, SyntaxRef declaration,
                                       SyntaxElement d, const specified &s,
-                                      uint8_t access, bool definition);
+                                      uint8_t access, bool definition,
+                                      bool initialized = false);
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, SyntaxRef definition);
@@ -5236,6 +5238,9 @@ class semantic_analysis
            ([temp.inst]/2: no completely-defined type is needed there):
            declared, defined by complete_instantiation when a use needs it */
         bool lazy = false;
+        /* named before its template was defined: the use that needs it
+           complete defines it (complete_instantiation) */
+        bool named_before_definition = false;
         /* ... and where it was named, for what its definition reports */
         SyntaxRef lazy_at = 0;
     };
@@ -5391,6 +5396,13 @@ class semantic_analysis
        analysed: a specialization named there needs no definition
        ([temp.inst]/5) */
     unsigned unevaluated = 0;
+    /* the conversion function templates (index << 32 | destination type)
+       whose default template-arguments are being substituted for a
+       conversion: deduce_conversion_templates */
+    owned_array<uint64_t> defaulting_conversions;
+    /* the class whose conversion functions deduce_conversion_templates
+       considers (set by conversion_function_for) */
+    entity_index conversion_receiver = 0;
     /* a static_assert's condition is analysed: its temporaries live only in
        the constant evaluation, nothing is lowered for them */
     unsigned constant_only = 0;
@@ -6016,6 +6028,9 @@ class semantic_analysis
     /* [temp.variadic]: the elements of the packs among template arguments
        (template_argument::kind_t::pack) */
     owned_array<template_argument> pack_arguments;
+    /* Packs returned by make_pack, indexed separately from their elements:
+       an overlapping element sequence may appear only after a pack exists. */
+    owned_array<template_argument> canonical_packs;
     template_argument make_pack(const template_argument *elements,
                                 uint32_t count);
     bool deduce_argument(const template_argument &x, const template_argument &y,
@@ -6181,7 +6196,8 @@ class semantic_analysis
     token_index member_definition_name(const template_member_definition &o);
     void define_waiting_members(entity_index scope, token_index name,
                                 bool define = true);
-    void defer_or_define_member(uint32_t m, uint32_t index);
+    analysis_result defer_or_define_member(uint32_t m, uint32_t index,
+                                           bool recorded = true);
     bool postpone_member_bodies = false;
     analysis_result analyse_function_body(SyntaxRef definition,
                                           SyntaxElement compound,
@@ -6753,6 +6769,7 @@ class semantic_analysis
     /* ... a base class of c does */
     bool base_has_conversion_functions(entity_index c) const;
     bool converts_to_non_class(entity_index c, bool explicit_counts) const;
+    bool converts_to_callable(entity_index c) const;
     /* whether class c may bind to a non-const lvalue reference to a non-class
        type: a conversion function returning an lvalue reference
        ([over.match.ref]) */

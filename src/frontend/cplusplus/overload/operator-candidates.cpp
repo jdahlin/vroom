@@ -86,6 +86,38 @@ bool semantic_analysis::converts_to_non_class(entity_index c,
     return false;
 }
 
+/* [over.call.object]/2: only a non-explicit conversion to a function
+   pointer or function reference supplies a surrogate call candidate.  A
+   conversion template or a class whose members are unknown may supply one. */
+bool semantic_analysis::converts_to_callable(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.kind != entity_kind::class_type)
+        return true;
+    for (uint32_t i = 0; i < x.base_count; i++)
+        if (converts_to_callable(
+                type_table[entity_table[class_bases[x.first_base + i]]
+                               .type.unqualified()]
+                    .entity))
+            return true;
+    for (entity_index f = own_conversion_functions(c); f;
+         f = entity_table[f].next_overload) {
+        if (!entity_table[f].conversion_function)
+            return true;
+        if (entity_table[f].explicit_)
+            continue;
+        expression_meaning value = conversion_function_result(f);
+        const struct type &to = type_table[value.type.unqualified()];
+        if (to.kind == type_kind::function &&
+            value.category != value_category::prvalue)
+            return true;
+        if (to.kind == type_kind::pointer &&
+            type_table[to.operand.unqualified()].kind == type_kind::function)
+            return true;
+    }
+    return false;
+}
+
 /*
  * [over.call.object]/2: "for each non-explicit conversion function declared
  * in T or in a base class of T ... to pointer to function, ... a surrogate
@@ -179,11 +211,17 @@ analysis_result semantic_analysis::overloaded_operator(
                    op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
                    op == preprocessing_op_or_punc::BAR_BAR;
     bool converts = false;
-    for (const expression_meaning &e : operands) {
-        const struct type &t = type_table[e.type.unqualified()];
-        if (t.kind == type_kind::class_type &&
-            converts_to_non_class(t.entity, logical))
-            converts = true;
+    if (op == preprocessing_op_or_punc::LEFT_PARENTHESIS) {
+        const struct type &t = type_table[operands[0].type.unqualified()];
+        if (t.kind == type_kind::class_type)
+            converts = converts_to_callable(t.entity);
+    } else {
+        for (const expression_meaning &e : operands) {
+            const struct type &t = type_table[e.type.unqualified()];
+            if (t.kind == type_kind::class_type &&
+                converts_to_non_class(t.entity, logical))
+                converts = true;
+        }
     }
     /* [over.call.object]/2: a captureless lambda's surrogate call function
        ([expr.prim.lambda.closure]/7) has its const function call
@@ -642,7 +680,7 @@ analysis_result semantic_analysis::overloaded_operator(
         }
         return analysis_result::well_formed;
     }
-    if (converts && (!unary_prefix || candidates.empty()))
+    if (converts && candidates.empty())
         return not_supported(n, "over.built");
     bool deleted_copy = false;
     if (op == preprocessing_op_or_punc::EQUAL) {
@@ -734,12 +772,48 @@ analysis_result semantic_analysis::overloaded_operator(
     if (r == analysis_result::well_formed && none_viable && converts)
         /* a built-in candidate may be viable through the conversion */
         return not_supported(n, "over.built");
+    if (r == analysis_result::well_formed && !none_viable && converts &&
+        !unary_prefix) {
+        /* [over.ics.rank]/2: a viable operator function that binds every
+           operand with an exact-match standard conversion sequence beats
+           every built-in candidate that must convert a class operand */
+        const overload_candidate &win = candidates[chosen];
+        const struct type &ft = type_table[win.type.unqualified()];
+        const qualified_type *params =
+            type_table.parameters(win.type.unqualified());
+        bool beats_builtin = true;
+        for (size_t i = 0; i < arguments.size() && beats_builtin; i++) {
+            size_t ai = i;
+            if (win.reversed && arguments.size() == 2)
+                ai = 1 - i;
+            if (win.member && i == 0) {
+                /* implicit object parameter: standard binding */
+                continue;
+            }
+            size_t pi = i;
+            if (win.member)
+                pi = i - 1;
+            if (pi >= ft.parameter_count) {
+                beats_builtin = false;
+                break;
+            }
+            conversion_sequence seq =
+                implicit_conversion_sequence(arguments[ai], params[pi], false);
+            if (seq.kind != conversion_sequence::form::standard ||
+                seq.rank != 0)
+                beats_builtin = false;
+        }
+        if (!beats_builtin)
+            return not_supported(n, "over.built");
+    }
     if (r == analysis_result::well_formed && none_viable && member_only &&
+        op != preprocessing_op_or_punc::EQUAL &&
         has_conversion_functions(
             type_table[operands[0].type.unqualified()].entity))
-        /* no built-in operator either: whether a conversion function makes
-           one viable ([over.match.oper]/3.3, [over.built]) is not analysed;
-           a class with none has no built-in candidate */
+        /* [over.match.oper]/3.3, [over.built]: a conversion may make a
+           built-in subscript or a surrogate call viable.  Assignment's
+           built-in candidates require a non-class left operand without a
+           user-defined conversion, so this does not apply to operator=. */
         return not_supported(n, "over.match.oper");
     if (r == analysis_result::well_formed && none_viable &&
         op == preprocessing_op_or_punc::EQUAL &&
@@ -758,7 +832,7 @@ analysis_result semantic_analysis::overloaded_operator(
         return r;
     const overload_candidate &c = candidates[chosen];
     entity_index f = c.function;
-    if (converts && !c.member) {
+    if (converts && !c.member && unary_prefix) {
         /* [over.match.best]/2: a non-member's parameter reached by a
            user-defined conversion is no better than the built-in's */
         if (c.template_index)

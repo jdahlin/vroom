@@ -763,6 +763,7 @@ analysis_result semantic_analysis::instantiate_class(
             type_table.of_entity(type_kind::class_type, c), cv_none);
         entity_table[c].instantiation = index + 1;
         instantiations[index].specialization = c;
+        instantiations[index].named_before_definition = !defined_by;
         /* (declared while the specializations of a class are declared:
            the use that needs it complete defines it) */
         if ((lazy_return || declaring_specializations) && defined_by) {
@@ -785,8 +786,42 @@ void semantic_analysis::complete_instantiation(entity_index c)
     if (!x.instantiation || x.defined || x.size)
         return;
     uint32_t index = x.instantiation - 1;
-    if (!instantiations[index].lazy || instantiations[index].defining)
+    if (instantiations[index].defining)
         return;
+    if (!instantiations[index].lazy) {
+        /* [temp.inst]/2: named before its template was defined (libc++'s
+           streampos, in iosfwd, before <__ios/fpos.h> defines fpos), it
+           was made an incomplete class: the use that needs it complete
+           names it again, where the template defines it now */
+        const instantiation_record record = instantiations[index];
+        if (!record.named_before_definition || record.has_failure ||
+            !record.specialization ||
+            !function_templates
+                 [entity_table[record.template_entity].instantiation - 1]
+                     .definition)
+            return;
+        owned_array<template_argument> again;
+        for (uint32_t i = 0; i < record.argument_count; i++) {
+            const template_argument &a =
+                template_arguments[record.first_argument + i];
+            /* (one made incomplete by an argument still being defined stays
+               so: the argument's definition ends first) */
+            if (a.kind == template_argument::kind_t::type) {
+                const struct type &arg = type_table[a.type.unqualified()];
+                if (arg.kind == type_kind::class_type &&
+                    entity_table[arg.entity].kind == entity_kind::class_type &&
+                    (!entity_table[arg.entity].size ||
+                     !entity_table[arg.entity].defined))
+                    return;
+            }
+            again.append(a);
+        }
+        entity_index done = 0;
+        instantiate_class(current_declaration,
+                          entity_table[record.template_entity].instantiation,
+                          again.data(), record.argument_count, done);
+        return;
+    }
     instantiations[index].lazy = false;
     entity_index done = 0;
     define_class_outside(instantiations[index].lazy_at, index, done);
@@ -911,7 +946,9 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
    template's specialization is defined when a member it may define is needed
    (postponed_bodies, instantiate_pending); a member template's, a nested
    class's and one in a specialization defined within another class now */
-void semantic_analysis::defer_or_define_member(uint32_t m, uint32_t index)
+analysis_result semantic_analysis::defer_or_define_member(uint32_t m,
+                                                          uint32_t index,
+                                                          bool recorded)
 {
     const template_member_definition o = template_member_definitions[m];
     bool now = o.inner || !instantiations[index].specialization;
@@ -932,14 +969,14 @@ void semantic_analysis::defer_or_define_member(uint32_t m, uint32_t index)
             now = true;
     }
     if (now) {
-        define_template_member(m, index, true);
-        return;
+        return define_template_member(m, index, recorded);
     }
     postponed_body b = {};
     b.c = instantiations[index].specialization;
     b.member_definition = m + 1;
     b.instantiation = index;
     postponed_bodies.append(b);
+    return analysis_result::well_formed;
 }
 
 token_index
@@ -984,7 +1021,21 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     const template_member_definition o =
         template_member_definitions[b.member_definition - 1];
     token_index name = member_definition_name(o);
-    if (!name)
+    uint32_t lookup_id = 0;
+    if (name) {
+        lookup_id = tokens.identifier(name);
+    } else if (o.definition.is(syntax_kind::function_definition)) {
+        SyntaxRef nested = out_of_class_nested(o.definition, nullptr);
+        if (nested && nested.end_token() + 1 < o.definition.end_token() &&
+            tokens[nested.end_token()].kind == token_kind::keyword &&
+            tokens[nested.end_token()].keyword ==
+                static_cast<int16_t>(standard_keyword::operator_) &&
+            tokens[nested.end_token() + 1].kind ==
+                token_kind::operator_or_punctuator)
+            lookup_id = operator_name(preprocessing_op_or_punc_primary(
+                tokens[nested.end_token() + 1].op_or_punc));
+    }
+    if (!lookup_id)
         return true;
     entity_index scope = instantiations[b.instantiation].specialization;
     /* (a virtual function is needed by the vtable, [temp.inst]/11; an
@@ -997,7 +1048,20 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
        needed by one [impl.clang] */
     bool vtable_elsewhere = entity_table[scope].explicitly_instantiated ==
                             instantiation_kind::declaration;
-    entity_index first = entity_table.find(scope, tokens.identifier(name));
+    if (name && lookup_id == entity_table[scope].name) {
+        if (entity_index d = entity_table[scope].destructor)
+            if (entity_table[d].member_definition_needed ||
+                (entity_table[d].virtual_ && !vtable_elsewhere) ||
+                explicitly_instantiated(d) == instantiation_kind::definition)
+                return true;
+        for (entity_index k = entity_table[scope].first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (entity_table[k].member_definition_needed ||
+                explicitly_instantiated(k) == instantiation_kind::definition)
+                return true;
+        return false;
+    }
+    entity_index first = entity_table.find(scope, lookup_id);
     /* (a constructor, destructor or operator is found by no such name here:
        defined with the unit) */
     if (!first || (entity_table[first].kind != entity_kind::function &&

@@ -94,6 +94,7 @@ node_index parser::using_declarator()
                         "namespace.udecl", position);
     if (name) {
         name_kind kind = name_kind::not_declared;
+        scope_index owned = 0;
         bool dependent = false;
         if (typename_) {
             kind = name_kind::type_name;
@@ -101,7 +102,7 @@ node_index parser::using_declarator()
                nested-name-specifier is dependent */
             dependent = qualifier_dependent;
         } else if (known) {
-            kind = names.lookup_qualified(scope, name);
+            kind = names.lookup_qualified(scope, name, &owned, &dependent);
         } else if (qualifier_dependent) {
             /* [temp.dep.type]/6, [temp.res]/4: what a dependent base's
                member is, the parser cannot tell, but it names no type
@@ -112,7 +113,7 @@ node_index parser::using_declarator()
         }
         if (kind != name_kind::not_declared &&
             kind != name_kind::namespace_name)
-            names.declare(name, kind, 0, dependent);
+            names.declare(name, kind, owned, dependent);
     }
     return finish_node(syntax_kind::using_declarator, mark, first);
 }
@@ -329,11 +330,38 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
  * of a namespace is followed; other sets of more than one declaration (a
  * class and what hides it found in two namespaces) have no rules yet.
  */
+/*
+ * [namespace.udecl]/19: a using-declarator with typename names a type
+ * ([temp.res]/5): "the name introduced is a synonym" for it, here a typedef
+ * of the type typename Q::name has (a dependent one when Q is dependent,
+ * [temp.dep.type]/9).
+ */
+analysis_result semantic_analysis::using_typename(UsingDeclarator n)
+{
+    type_index type = 0;
+    uint32_t cv = 0;
+    if (!defining_class)
+        return not_supported(n, "namespace.udecl");
+    VTRY(r, typename_type(n, type, cv));
+    if (!type)
+        return not_supported(n, "namespace.udecl");
+    qualified_type q;
+    q = qualified_type::make(type, cv);
+    specified s;
+    s.typedef_ = true;
+    s.type = q;
+    s.has_type = true;
+    return member_typedef(defining_class, n, n[2].token(), q, s,
+                          declarator_meaning(), declaration_access);
+}
+
 analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                                                     bool if_exists)
 {
+    if (n.size() == 3 && n[0].is(standard_keyword::typename_) &&
+        n[1].is(syntax_kind::nested_name_specifier) && n[2].is_identifier())
+        return using_typename(n);
     if (n.size() != 2 || !n.nested_name_specifier())
-        /* typename */
         return not_supported(n, "namespace.udecl");
     token_index t = 0;
     if (n.identifier()) {

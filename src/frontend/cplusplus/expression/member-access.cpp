@@ -273,7 +273,8 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         m = result;
         return analysis_result::well_formed;
     }
-    if ((x.kind == entity_kind::variable || x.kind == entity_kind::function) &&
+    if ((x.kind == entity_kind::variable || x.kind == entity_kind::function ||
+         x.kind == entity_kind::enumerator) &&
         !x.nonstatic_member && !x.next_overload) {
         /* [expr.ref]/6.1: "If E2 is a static data member and the type of E2
            is T, then E1.E2 is an lvalue; the expression designates the named
@@ -285,6 +286,13 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         uint32_t object = m.node;
         constness object_evaluation = m.evaluation;
         expression_meaning result;
+        /* [impl.clang] with -fms-compatibility, clang takes a member enumerator named
+           through an object that is no constant as a constant (s->E in an
+           array bound): not analysed */
+        if (x.kind == entity_kind::enumerator &&
+            object_evaluation != constness::constant &&
+            tokens.files.behavior.microsoft_compatibility)
+            return not_supported(current_declaration, "expr.ref");
         VTRY(r, named_entity(at, e, result));
         if (object_evaluation != constness::constant &&
             result.evaluation != constness::not_constant)
@@ -518,7 +526,9 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     const struct type object = type_table[m.type.unqualified()];
     if (object.kind != type_kind::class_type) {
         if (fundamental_of(m.type) == fundamental_type::none &&
-            object.kind != type_kind::pointer)
+            object.kind != type_kind::pointer &&
+            object.kind != type_kind::array &&
+            object.kind != type_kind::enumeration)
             return not_supported(n, "expr.ref");
         return ill_formed(n,
                           "the object expression of a class member access "

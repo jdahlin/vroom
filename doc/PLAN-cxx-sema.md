@@ -1611,6 +1611,69 @@ lines:
   and SFINAE, [temp.variadic], [temp.alias], variable templates, generic
   lambdas, fold expressions, class template argument deduction.
 - Instantiation recorded as 3.5 says, bodies only on use.
+- Progress (2026-11-25): ordinary out-of-class member definitions recorded
+  after an implicit class specialization now wait for use, as definitions
+  recorded before the specialization do ([temp.inst]/4).  Constructors,
+  destructors and explicit instantiations still use the earlier eager path;
+  their point-of-instantiation and explicit-specialization handling remain.
+  Regression: `temp.inst-late-member-definition.cpp`.  A minimal JSON include
+  passes libc++ `std::function`'s call operator after restricting surrogate
+  call candidates to non-explicit conversions of the callable object to a
+  function pointer or reference ([over.call.object]/2); conversions of call
+  arguments cannot create them.  Tests `call-argument-conversions` and
+  `over.call.object-surrogate-conversion`.  JSON still stops on an
+  instantiated libc++ `__tree` member definition.  Assignment traits now
+  reject a const class object with no viable assignment even when its class
+  has conversion functions: those cannot bind the left operand of a built-in
+  assignment ([over.match.oper]/4, [over.built]/21-23).  Test `over.match.oper-assignment-conversion`;
+  ordering a fixed template argument pack against one trailing expansion
+  ([temp.class.order]/1, [temp.deduct.type]/9) now selects the fixed pattern.
+  Pack interning records actual pack starts, so an overlapping sequence
+  created later cannot acquire a second identity.  Test
+  `partial-ordering-pack`.  A JSON include now reaches a function-template
+  overload refusal in `json.hpp`.  Detection idioms using a dependent
+  member with a directly deduced template-template parameter now substitute
+  it when there is one partial specialization ([temp.deduct.type]/5.1,
+  [temp.class.spec.match]/2); array member access is ill-formed in such a
+  substitution ([expr.ref]/2).  Tests `detection-dependent-member` and
+  `temp.class.order-template-template-ambiguous`; competing partial
+  specializations still use the earlier conservative ordering path.  The
+  member-template calls now fail substitution when no overload is viable,
+  and dereferencing a class with neither an operator nor a non-class
+  conversion is ill-formed ([over.match.viable]/2, [expr.unary.op]/1).
+  Test `detection-dependent-member`.  The JSON include reaches an overload
+  ranking refusal in libc++ filesystem.  Semantic comparison gains four
+  agreeing declarations and loses eight type claims as invalid calls now
+  terminate their analysis; no newly accepted invalid declarations.
+  A known-unrelated complete class's unknown reference conversion is now
+  ranked no better than a user-defined conversion ([over.ics.rank]/2), and
+  a member-template call on a temporary uses the existing full-expression
+  destruction ([class.temporary]/4).  Tests `copy-versus-conversion` and
+  `temporary-member-lifetime`.  The JSON include now reaches an implicit
+  assignment refusal in libc++ `error_code`; sampled JSON tests also expose
+  an unrelated vector instantiation and a BSON member-access error.
+  `assigned_bitwise` now ignores member function template `operator=`
+  declarations ([class.copy.assign]/1, /3).  Test
+  `implicit-assign-member-template` (4/4 at `-O0..3`); semantic comparison
+  gains 18 agreeing declarations and 18 verified types/constants, dropping
+  `[class.copy.assign]` refusals by 27.  The JSON include now reaches
+  `[class.copy.elision]` in libc++ `path_iterator.h`.
+  `return_statement` now checks all `[class.copy.ctor]/8` suppressors of an
+  implicitly-declared move constructor (defaulted copy constructor, copy/move
+  assignment, user-declared destructor) before refusing an lvalue return.
+  Test `return-defaulted-copy-no-move` (4/4 at `-O0..3`); the JSON include
+  now clears `<filesystem>` and reaches `[temp.class.spec]` in libc++
+  `__ranges/movable_box.h`.
+  `primary_arguments` now recognizes a partial specialization that keeps the
+  primary template's type-constraints and adds a `requires`-clause
+  ([temp.class.spec]/9).  Test `partial-spec-constrained-primary` (4/4 at
+  `-O0..3`); the JSON include now reaches `[temp.mem]` in libc++
+  `__ranges/join_view.h`.
+  `member_definition_of_template` now skips member `function_definition`
+  templates when matching a member class template ([temp.mem]/1).  Test
+  `member-class-template-constrained-method` (4/4 at `-O0..3`); `#include
+  <nlohmann/json.hpp>` with `-std=c++20 -stdlib=libc++ -fsyntax-only` now
+  succeeds with zero errors.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land

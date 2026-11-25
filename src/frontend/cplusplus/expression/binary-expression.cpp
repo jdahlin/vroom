@@ -266,7 +266,9 @@ analysis_result semantic_analysis::arithmetic(SyntaxRef n,
     if (!allowed) {
         auto known = [&](const expression_meaning &x) {
             return fundamental_of(x.type) != fundamental_type::none ||
-                   is_pointer(x.type) || class_operand(x);
+                   is_pointer(x.type) || class_operand(x) ||
+                   type_table[x.type.unqualified()].kind ==
+                       type_kind::enumeration;
         };
         if (!known(left) || !known(right))
             return not_supported(n, "expr.compound");

@@ -710,6 +710,15 @@ analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
        function may be the meaning */
     {
         type_kind operand_kind = type_table[m.type.unqualified()].kind;
+        if (substituting && (operand_kind == type_kind::enumeration ||
+                             (operand_kind == type_kind::class_type &&
+                              !has_implicit_conversion_functions(
+                                  type_table[m.type.unqualified()].entity))))
+            return ill_formed(n,
+                              "the type of the operand shall be an arithmetic "
+                              "type other than cv bool, or a pointer to a "
+                              "completely-defined object type",
+                              subclause);
         if (operand_kind == type_kind::class_type ||
             operand_kind == type_kind::enumeration)
             return not_supported(n, "over.match.oper");
@@ -955,7 +964,11 @@ analysis_result semantic_analysis::indirection_of(SyntaxRef n, token_index at,
        is "pointer to T", the type of the result is "T"." */
     VTRY(r, operand_value(n, m));
     if (!is_pointer(m.type)) {
-        if (fundamental_of(m.type) == fundamental_type::none)
+        const struct type &object = type_table[m.type.unqualified()];
+        if (fundamental_of(m.type) == fundamental_type::none &&
+            object.kind != type_kind::enumeration &&
+            !(object.kind == type_kind::class_type &&
+              !converts_to_non_class(object.entity, false)))
             return not_supported(n, "expr.unary.op");
         return ill_formed(n,
                           "the operand of unary * shall be a pointer to an "

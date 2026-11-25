@@ -1760,10 +1760,9 @@ analysis_result semantic_analysis::member_declarators(
  * Only the first alternative without its options: a member-declarator
  * node is one with a bit-field, an initializer or a specifier.
  */
-analysis_result
-semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
-                                     SyntaxElement d, const specified &s,
-                                     uint8_t access, bool definition)
+analysis_result semantic_analysis::member_declarator(
+    entity_index c, SyntaxRef declaration, SyntaxElement d, const specified &s,
+    uint8_t access, bool definition, bool initialized)
 {
     if (d.is(syntax_kind::member_declarator)) {
         /* identifier_opt attribute-specifier-seq_opt : constant-expression */
@@ -1801,7 +1800,8 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                       syntax_kind::braced_init_list))
             return not_supported(d.index(), "class.mem");
         last_declared = 0;
-        VTRY(r, member_declarator(c, declaration, d[0], s, access, definition));
+        VTRY(r, member_declarator(c, declaration, d[0], s, access, definition,
+                                  true));
         entity_index e = last_declared;
         if (e && entity_table[e].kind == entity_kind::variable &&
             !entity_table[e].nonstatic_member)
@@ -1961,8 +1961,9 @@ semantic_analysis::member_declarator(entity_index c, SyntaxRef declaration,
                                        "a placeholder type is not allowed in "
                                        "a non-static data member",
                                        "dcl.spec.auto");
-        return not_supported_because(declaration, "dcl.spec.auto",
-                                     "in a static data member");
+        if (!initialized)
+            return not_supported_because(declaration, "dcl.spec.auto",
+                                         "in a static data member");
     }
     /* [dcl.fct.spec]/2: "The virtual specifier shall be used only in the
        initial declaration of a non-static class member function" */
@@ -2719,6 +2720,21 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
                                              const specified &s)
 {
     qualified_type type = entity_table[e].type;
+    initialized_value value;
+    value.evaluation = constness::unknown;
+    value.value = 0;
+    bool deduced = false;
+    if (contains_placeholder(type)) {
+        qualified_type saved = declaration_deduced;
+        declaration_deduced = qualified_type();
+        analysis_result r = deduced_initializer(init, e, type, value);
+        declaration_deduced = saved;
+        if (r != analysis_result::well_formed)
+            return r;
+        if (!declared.empty() && declared.back().entity == e)
+            declared.back().type = type;
+        deduced = true;
+    }
     uint32_t cv = cv_of(type_table, type);
     const struct type record = type_table[type.unqualified()];
     /* [class.static.data]/4: integral or enumeration type;
@@ -2742,10 +2758,9 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     if (!(cv & cv_const) || (cv & cv_volatile) ||
         (!integral_or_enumeration && !constexpr_floating && !constexpr_class))
         return not_supported(declarator, "class.static.data");
-    initialized_value value;
-    value.evaluation = constness::unknown;
-    value.value = 0;
-    VTRY(r, initializer(init, type, value));
+    analysis_result r = analysis_result::well_formed;
+    if (!deduced)
+        VTRY_SET(r, initializer(init, type, value));
     /* [expr.const]/5: an initializer that calls a function (a constexpr
        function, or a builtin clang evaluates) is the evaluator's */
     if (constexpr_class && value.node) {

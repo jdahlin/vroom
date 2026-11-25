@@ -369,6 +369,9 @@ analysis_result semantic_analysis::member_definition_of_template(
             if (member.is_token() ||
                 !member.is(syntax_kind::template_declaration))
                 continue;
+            if (member.size() >= 2 &&
+                member[1].is(syntax_kind::function_definition))
+                continue;
             bool writes = false;
             for (token_index t = member.first_token(); t < member.end_token();
                  t++)
@@ -645,9 +648,26 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         }
         defined = defined_special_member(owner, o, name);
         if (!defined) {
+            uint32_t lookup_id = 0;
+            if (name) {
+                lookup_id = tokens.identifier(name);
+            } else {
+                SyntaxRef nested = out_of_class_nested(o.definition, nullptr);
+                if (nested &&
+                    nested.end_token() + 1 < o.definition.end_token() &&
+                    tokens[nested.end_token()].kind == token_kind::keyword &&
+                    tokens[nested.end_token()].keyword ==
+                        static_cast<int16_t>(standard_keyword::operator_) &&
+                    tokens[nested.end_token() + 1].kind ==
+                        token_kind::operator_or_punctuator)
+                    lookup_id = operator_name(preprocessing_op_or_punc_primary(
+                        tokens[nested.end_token() + 1].op_or_punc));
+            }
             /* (the overload this definition is the member's) */
-            for (entity_index f =
-                     entity_table.find(owner, tokens.identifier(name));
+            entity_index first = 0;
+            if (lookup_id)
+                first = entity_table.find(owner, lookup_id);
+            for (entity_index f = first;
                  f && !defined && entity_table[f].kind == entity_kind::function;
                  f = entity_table[f].next_overload)
                 if (declared_by(f, o.definition) ||
@@ -794,7 +814,21 @@ semantic_analysis::record_template_member(const template_member_definition &m)
             entity_table[y.specialization].kind != entity_kind::class_type ||
             !entity_table[y.specialization].defined)
             continue;
-        analysis_result one = define_template_member(member, k, false);
+        /* [temp.inst]/4: ordinary members of an existing implicit
+           specialization wait for use just as they do when the definition
+           precedes the specialization.  Constructors and destructors still
+           use the existing path: their explicit specializations are not
+           tracked by the postponed-name lookup.  Explicit instantiations
+           likewise retain their point-of-instantiation handling. */
+        token_index name = member_definition_name(m);
+        bool special = name && tokens.identifier(name) ==
+                                   entity_table[y.specialization].name;
+        analysis_result one;
+        if (special || entity_table[y.specialization].explicitly_instantiated !=
+                           instantiation_kind::none)
+            one = define_template_member(member, k, false);
+        else
+            one = defer_or_define_member(member, k, false);
         if (one != analysis_result::well_formed &&
             result == analysis_result::well_formed)
             result = one;

@@ -98,7 +98,7 @@ bool semantic_analysis::orderable(qualified_type t, bool packs) const
     case type_kind::rvalue_reference:
         return orderable(r.operand, packs);
     case type_kind::array:
-        return r.bound_known && orderable(r.operand, packs);
+        return (r.bound_known || r.entity) && orderable(r.operand, packs);
     case type_kind::function: {
         if (!orderable(r.operand, packs))
             return false;
@@ -540,15 +540,36 @@ bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
         return false;
     }
     const uint32_t firsts[2] = {ss.first_pattern, tt.first_pattern};
+    unsigned expansions = 0;
     for (uint32_t i = 0; i < ss.pattern_count; i++)
         for (uint32_t first : firsts) {
             const template_argument a = template_arguments[first + i];
-            if (a.kind == template_argument::kind_t::pack ||
-                a.kind == template_argument::kind_t::template_name ||
-                (a.kind == template_argument::kind_t::type &&
-                 !orderable(a.type, false)))
+            if (a.kind == template_argument::kind_t::pack) {
+                if (a.count == UINT32_MAX) {
+                    unknown = true;
+                    continue;
+                }
+                for (uint32_t j = 0; j < a.count; j++) {
+                    const template_argument e = pack_arguments[a.value + j];
+                    if (e.kind == template_argument::kind_t::pack &&
+                        e.count == UINT32_MAX && j + 1 == a.count &&
+                        e.value != UINT32_MAX) {
+                        expansions++;
+                    } else if (e.kind != template_argument::kind_t::type ||
+                               !orderable(e.type, false)) {
+                        unknown = true;
+                    }
+                }
+            } else if (a.kind == template_argument::kind_t::template_name ||
+                       (a.kind == template_argument::kind_t::type &&
+                        !orderable(a.type, false))) {
                 unknown = true;
+            }
         }
+    /* A single trailing expansion can be deduced against a fixed pack.
+       Ordering two expansions requires comparing their patterns. */
+    if (expansions > 1)
+        unknown = true;
     if (unknown)
         return false;
     owned_array<template_argument> d;
@@ -562,6 +583,11 @@ bool semantic_analysis::class_at_least_as_specialized(uint32_t s, uint32_t t,
         const template_argument y = template_arguments[ss.first_pattern + i];
         if (x.kind != y.kind)
             return false;
+        if (x.kind == template_argument::kind_t::pack) {
+            if (!deduce_pack_argument(x, y, d, set))
+                return false;
+            continue;
+        }
         if (x.kind == template_argument::kind_t::type) {
             if (!deduce_type(x.type, y.type, d, set, true))
                 return false;
