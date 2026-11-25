@@ -773,11 +773,13 @@ analysis_result semantic_analysis::overloaded_operator(
         /* a built-in candidate may be viable through the conversion */
         return not_supported(n, "over.built");
     if (r == analysis_result::well_formed && none_viable && member_only &&
+        op != preprocessing_op_or_punc::EQUAL &&
         has_conversion_functions(
             type_table[operands[0].type.unqualified()].entity))
-        /* no built-in operator either: whether a conversion function makes
-           one viable ([over.match.oper]/3.3, [over.built]) is not analysed;
-           a class with none has no built-in candidate */
+        /* [over.match.oper]/3.3, [over.built]: a conversion may make a
+           built-in subscript or a surrogate call viable.  Assignment's
+           built-in candidates require a non-class left operand without a
+           user-defined conversion, so this does not apply to operator=. */
         return not_supported(n, "over.match.oper");
     if (r == analysis_result::well_formed && none_viable &&
         op == preprocessing_op_or_punc::EQUAL &&

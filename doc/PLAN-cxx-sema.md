@@ -1622,7 +1622,11 @@ lines:
   function pointer or reference ([over.call.object]/2); conversions of call
   arguments cannot create them.  Tests `call-argument-conversions` and
   `over.call.object-surrogate-conversion`.  JSON still stops on an
-  instantiated libc++ `__tree` member definition.
+  instantiated libc++ `__tree` member definition.  Assignment traits now
+  reject a const class object with no viable assignment even when its class
+  has conversion functions: those cannot bind the left operand of a built-in
+  assignment ([over.match.oper]/4, [over.built]/21-23).  Test `over.match.oper-assignment-conversion`;
+  the remaining `__tree` refusal reaches a JSON class's base clause.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land
