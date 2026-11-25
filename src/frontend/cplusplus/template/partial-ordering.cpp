@@ -181,10 +181,11 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
             return false;
         }
     /* the template parameter pack G's function parameter pack expands
-       (its last template parameter) */
+       (defaulted parameters may follow it: template <class... U, int = 0>) */
     uint32_t pack = gg.parameter_count;
-    if (template_parameter_is_pack(gg.first_parameter + gg.parameter_count - 1))
-        pack = gg.parameter_count - 1;
+    for (uint32_t i = 0; i < gg.parameter_count; i++)
+        if (template_parameter_is_pack(gg.first_parameter + i))
+            pack = i;
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < gg.parameter_count; i++) {
