@@ -879,24 +879,36 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                 }
             }
         }
+        size_t chosen = 0;
+        bool chosen_ok = false;
+        if (used_braced) {
+            owned_array<SyntaxElement> lists;
+            lists.append(parts.braced_list());
+            bool none_viable = false;
+            VTRY(best,
+                 best_viable_function(n, candidates, nullptr, call_args, chosen,
+                                      &none_viable, false, &lists));
+            if (none_viable) {
+                candidates.clear();
+                first_arguments.clear();
+                all.clear();
+                used_braced = false;
+            } else {
+                chosen_ok = true;
+            }
+        }
         if (!used_braced) {
             VTRY(added, template_candidates(
                             n, group, arguments.data(),
                             static_cast<uint32_t>(arguments.size()), candidates,
                             &first_arguments, &all, nullptr, 0));
-        }
-        if (!candidates.empty()) {
-            size_t chosen = 0;
-            if (used_braced) {
-                owned_array<SyntaxElement> lists;
-                lists.append(parts.braced_list());
-                VTRY(best,
-                     best_viable_function(n, candidates, nullptr, call_args,
-                                          chosen, nullptr, false, &lists));
-            } else {
+            if (!candidates.empty()) {
                 VTRY(best, best_viable_function(n, candidates, nullptr,
                                                 arguments, chosen));
+                chosen_ok = true;
             }
+        }
+        if (chosen_ok) {
             /* (the arguments are analysed again by the initialization) */
             expressions.resize(expressions_before);
             name_uses.resize(uses_before);
