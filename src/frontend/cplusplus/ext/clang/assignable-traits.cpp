@@ -59,17 +59,12 @@ static triviality assignment_triviality(const semantic_analysis &a,
             work.append(s.a);
             work.append(s.b);
             break;
-        case semantic_kind::call: {
-            /* an implicitly-declared assignment operator that analysis
-               defines memberwise (implicit_assignments) is trivial when
-               every subobject's selected one is, which it does not tell */
-            const semantic_node callee = a.semantics[s.a];
-            if (callee.kind == semantic_kind::entity &&
-                a.entity_table[callee.a].implicit &&
-                a.entity_table[callee.a].operator_function)
-                return triviality::unknown;
+        case semantic_kind::call:
+            /* [class.copy.assign]/12: a trivial implicit assignment is
+               represented as semantic_kind::assignment, not a call; any
+               call (including a memberwise implicit assignment) is
+               non-trivial */
             return triviality::not_trivial;
-        }
         default:
             return triviality::unknown;
         }
