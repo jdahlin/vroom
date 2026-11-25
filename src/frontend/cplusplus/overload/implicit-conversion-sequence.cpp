@@ -262,9 +262,8 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
         s.string_literal_to_char_pointer = true;
         return s;
     }
-    /* [conv.fctptr]: a function pointer conversion */
-    if (fp.kind == type_kind::function || tp.kind == type_kind::function)
-        return of_form(sequence::form::unknown);
+    /* [conv.ptr]: an object pointer and a function pointer have no standard
+       conversion between them (both function pointers were handled above) */
     if (fp.kind == type_kind::none || tp.kind == type_kind::none)
         return of_form(sequence::form::unknown);
     return of_form(sequence::form::bad);
