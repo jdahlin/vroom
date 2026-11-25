@@ -5464,6 +5464,10 @@ class semantic_analysis
        instantiations nest ([temp.inst]/16) */
     uint32_t instantiating = 0;
     unsigned instantiation_depth = 0;
+    /* how deep overloaded operators nest in their own candidates' analysis
+       (a default template argument whose expression uses the operator:
+       [temp.deduct]/7, [implimits] bounds it) */
+    unsigned overloaded_operator_depth = 0;
     /* the state enter_instantiation saves and leave_instantiation puts
        back */
     struct instantiation_context {
