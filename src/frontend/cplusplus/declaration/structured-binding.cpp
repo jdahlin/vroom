@@ -437,8 +437,19 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
     for (uint32_t g : group) {
         owned_array<template_argument> given;
         template_argument index;
-        /* a template whose first parameter is no integral non-type one
-           is no candidate (deduction fails): not analysed */
+        /* [temp.arg]: a template whose first parameter is a type's or a
+           template's takes no value argument and is no candidate (std::get
+           by type, get<T>(pair)); another that is no integral one is not
+           analysed */
+        const function_template f = function_templates[g - 1];
+        if (f.parameter_count) {
+            entity_kind first =
+                entity_table[template_parameter_entities[f.first_parameter]]
+                    .kind;
+            if (first == entity_kind::typedef_name ||
+                first == entity_kind::template_entity)
+                continue;
+        }
         VTRY_SET(r, index_argument(n, g, i, index));
         given.append(index);
         owned_array<uint32_t> one;
