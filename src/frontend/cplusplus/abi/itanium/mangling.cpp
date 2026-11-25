@@ -1433,6 +1433,23 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         }
         out->n = before;
     }
+    /* [abi:expressions] T{}, T a class the analysis recorded:
+
+           <expression> ::= tl <type> <braced-expression>* E
+     */
+    if (expression.is(syntax_kind::postfix_expression) &&
+        expression.size() == 2 && expression[0].is_token() &&
+        expression[0].is_identifier() &&
+        expression[1].is(syntax_kind::braced_init_list) &&
+        expression[1].size() == 2) {
+        size_t before = out->n;
+        text("tl");
+        if (type_operand(expression)) {
+            text("E");
+            return true;
+        }
+        out->n = before;
+    }
     /* [abi:expressions] <unary operator-name> <expression> */
     if (expression.is(syntax_kind::unary_expression) &&
         expression.size() == 2) {
