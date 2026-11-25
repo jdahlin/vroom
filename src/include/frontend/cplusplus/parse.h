@@ -416,6 +416,9 @@ class declared_names
     /* [basic.scope.pdecl]/7: "the smallest namespace or block scope that
        contains the declaration" */
     scope_index nearest_namespace_or_block() const;
+    /* [temp.pre]/1: the current region is inside a template-declaration's
+       (a template-parameter scope encloses it) */
+    bool within_template() const;
     scope_kind kind_of(scope_index region) const
     {
         return scopes[region].kind;
@@ -1171,6 +1174,12 @@ class parser
     /* a member-declaration's declarator is being parsed: its default
        arguments are complete-class contexts */
     bool member_declarator_context = false;
+    /* [dcl.fct]/6 (C++23): the next parameter-declaration may begin with
+       `this` (the first parameter of a function declarator's clause) */
+    bool explicit_object_ok = false;
+    /* ... the declarator being parsed is a function's: its clause's first
+       parameter may be one (parameters_and_qualifiers sets it) */
+    bool explicit_object_clause = false;
     /* the class whose member-specification is being parsed directly: what
        a nested-name-specifier-less constructor name is */
     uint32_t member_class_name = 0;

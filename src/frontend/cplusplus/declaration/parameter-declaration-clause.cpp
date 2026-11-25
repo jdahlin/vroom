@@ -66,6 +66,7 @@ node_index parser::parameters_and_qualifiers(scope_index *parameters)
     scope_index made = names.enter(scope_kind::function_prototype);
     if (parameters)
         *parameters = made;
+    explicit_object_clause = true;
     parameter_declaration_clause();
     if (failed())
         return 0;
@@ -107,6 +108,8 @@ node_index parser::parameter_declaration_clause()
 {
     size_t mark = begin_node();
     token_index first = position;
+    bool explicit_object = explicit_object_clause;
+    explicit_object_clause = false;
     if (at(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
         return 0;
     if (accept(preprocessing_op_or_punc::ELLIPSIS))
@@ -117,6 +120,7 @@ node_index parser::parameter_declaration_clause()
     unsigned count = 0;
     bool ellipsis = false;
     for (;;) {
+        explicit_object_ok = explicit_object && count == 0;
         parameter_declaration();
         if (failed())
             return 0;
@@ -161,6 +165,8 @@ node_index parser::parameter_declaration_clause()
  */
 node_index parser::parameter_declaration()
 {
+    bool explicit_object = explicit_object_ok;
+    explicit_object_ok = false;
     size_t mark = begin_node();
     token_index first = position;
     {
@@ -171,11 +177,21 @@ node_index parser::parameter_declaration()
     }
     if (failed())
         return 0;
-    /* C++23's explicit object parameter (P0847R7, "this
-       decl-specifier-seq declarator") is not C++20's grammar: a later
-       edition's, P9's */
-    if (at(standard_keyword::this_))
-        return beyond_this_step();
+    /* C++23's explicit object parameter (P0847R7: parameter-declaration:
+       attribute-specifier-seq_opt this_opt decl-specifier-seq declarator,
+       [dcl.fct]/6 of n4861's successor) is not C++20's grammar: the
+       parser keeps `this` as a token of the parameter-declaration; which
+       parameter it may be and what it means are the analysis's
+       ([dcl.fct]/6 of C++23: the first parameter of a member function) */
+    if (at(standard_keyword::this_)) {
+        /* only the first parameter of a function's declarator; in a
+           template the declaration's analysis (a redeclaration the
+           explicit object parameter conflicts with, [over.load]/2.2) is
+           not made until instantiation: a later step's */
+        if (!explicit_object || names.within_template())
+            return beyond_this_step();
+        add_token();
+    }
     decl_specifier_facts specifiers;
     /* [temp.res]/5: where the parameter's context says (a member's,
        a requires-expression's, a template-parameter's ...) */
@@ -262,6 +278,12 @@ analysis_result semantic_analysis::parameter_declaration(
     /* the children after the attributes left out */
     auto at = [&](uint32_t i) { return n[lead + i]; };
     uint32_t child_count = n.size() - lead;
+    /* [dcl.fct]/6 (C++23): this decl-specifier-seq declarator, an explicit
+       object parameter: its meaning (the member function's object, its
+       deduced type) is not analysed yet */
+    if (at(0).is(standard_keyword::this_))
+        return not_supported_because(n, "dcl.fct",
+                                     "an explicit object parameter");
     if (!at(0).decl_specifier_seq())
         return not_supported_because(
             n, "dcl.attr", "a parameter without a decl-specifier-seq");
