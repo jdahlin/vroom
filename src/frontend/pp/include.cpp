@@ -1,4 +1,5 @@
 /* vcc preprocessor: include search, entering files, #include */
+#include "common/attributes.h"
 #include "common/literal.h"
 #include "pp-internal.h"
 
@@ -790,7 +791,7 @@ VPRIV void pp_include_run(pp *p, pp_context *c, uint32_t b, uint32_t e,
                 (c->lexed_tokens[b].kind == LEX_TOKEN_STRING ||
                  c->lexed_tokens[b].kind == LEX_TOKEN_LESS) &&
                 p->options_signature != PP_HEADER_CACHE_NONE
-            ? &((pp_skeleton *)c->skeleton)
+            ? &VUNCONST(pp_skeleton *, c->skeleton)
                    ->include_answers[c->next_directive - 1]
             : NULL;
 

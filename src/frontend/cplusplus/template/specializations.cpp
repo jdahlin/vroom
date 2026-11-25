@@ -349,7 +349,7 @@ analysis_result
 semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
 {
     flag_set exempt(explicit_declaration_names, true);
-    flag_set instantiating(explicit_instantiating, true);
+    flag_set instantiating2(explicit_instantiating, true);
     /* [extern] template declaration */
     bool extern_ = n.size() == 3;
     if ((n.size() != 2 && n.size() != 3) || n[n.size() - 1].is_token())
@@ -1068,7 +1068,7 @@ analysis_result semantic_analysis::named_specialization(
         entity_table[e].first_declaration = 0;
         entity_table[e].last_declaration = 0;
         entity_table.add_declaration(e, declaration);
-        for (declared_name &x : declared)
+        for (declared_name &x : declared_names)
             if (x.entity == e) {
                 x.declaration = declaration;
                 x.outermost = n;
@@ -1325,7 +1325,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
         x.kind = entity_kind::variable;
         x.type = entity_table[f].type;
         x.claimable = false;
-        declared.append(x);
+        declared_names.append(x);
         return analysis_result::well_formed;
     }
     /* clang's "explicit instantiation of undefined function" (a

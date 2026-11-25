@@ -65,7 +65,7 @@ class c_lowering
   public:
     c_lowering(const semantic_analysis &analysis, token_stream &tokens, cc *c,
                int target, const char *main_path, bool rtti)
-        : analysis(analysis), tokens(tokens), c(c), target(target),
+        : analysis(analysis), tokens(tokens), c(c), target_id(target),
           main_path(main_path), rtti(rtti)
     {
         symbols.resize(analysis.entity_table.size());
@@ -111,7 +111,7 @@ class c_lowering
     const semantic_analysis &analysis;
     token_stream &tokens;
     cc *c;
-    int target;
+    int target_id;
     const char *main_path;
     /* -frtti: classes' type_info objects are made */
     bool rtti;
@@ -684,7 +684,7 @@ class c_lowering
                     static_cast<uint16_t>(kind), 0);
     }
     /* C types and nodes said once */
-    ast_qualified_type v = ast_builder_type_basic(AST_TYPE_VOID);
+    ast_qualified_type void_type = ast_builder_type_basic(AST_TYPE_VOID);
     ast_qualified_type pointer_to(ast_qualified_type t)
     {
         return ast_builder_type_pointer(c, t);
@@ -707,7 +707,8 @@ class c_lowering
     }
     uint32_t if_statement(uint32_t cond, uint32_t then, uint32_t otherwise)
     {
-        return ast_builder_node(c, AST_NODE_IF, v, cond, then, otherwise, 0, 0);
+        return ast_builder_node(c, AST_NODE_IF, void_type, cond, then,
+                                otherwise, 0, 0);
     }
     uint32_t block(const owned_array<uint32_t> &items)
     {

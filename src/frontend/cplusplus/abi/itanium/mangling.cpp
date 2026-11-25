@@ -1472,10 +1472,10 @@ bool itanium_mangler::class_enum_type(qualified_type t)
                <template-template-param> ::= <template-param>
 
            the parameter a candidate */
-        entity_index t = analysis.specialized_template(c);
-        template_param(table[t].value);
+        entity_index t2 = analysis.specialized_template(c);
+        template_param(table[t2].value);
         candidate y;
-        y.scope = t;
+        y.scope = t2;
         candidates.append(y);
         return template_args(c);
     }

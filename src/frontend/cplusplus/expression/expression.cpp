@@ -189,10 +189,11 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
         if (t.kind == token_kind::identifier)
             return id_expression(e.token(), m);
         if (t.kind == token_kind::keyword &&
-            p.keyword_of(t) == standard_keyword::this_)
+            syntax_parser.keyword_of(t) == standard_keyword::this_)
             return this_pointer(e.token(), m);
         if (t.kind == token_kind::keyword &&
-            p.extension_keyword_of(t) == extension_keyword::predefined_name)
+            syntax_parser.extension_keyword_of(t) ==
+                extension_keyword::predefined_name)
             return predefined_name(e.token(), m);
         return not_supported(current_declaration, "expr.prim");
     }

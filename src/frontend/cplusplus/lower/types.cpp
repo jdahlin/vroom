@@ -10,7 +10,7 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
 {
     switch (f) {
     case fundamental_type::void_:
-        return v;
+        return void_type;
     case fundamental_type::bool_:
         return ast_builder_type_basic(AST_TYPE_BOOL);
     case fundamental_type::char_:
@@ -33,7 +33,7 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
     case fundamental_type::wchar_t_:
         /* [impl.clang]: the target's wchar_t, as C's (unsigned on Linux
            arm64) */
-        if (target == PP_LINUX_AARCH64)
+        if (target_id == PP_LINUX_AARCH64)
             return ast_builder_type_basic(AST_TYPE_UNSIGNED_INT);
         return ast_builder_type_basic(AST_TYPE_INT);
     case fundamental_type::long_int:
@@ -60,13 +60,13 @@ ast_qualified_type c_lowering::fundamental(fundamental_type f, token_index at)
         return ast_builder_type_basic(AST_TYPE_BFLOAT16);
     case fundamental_type::float128:
         /* as C: a type of its own on x86-64, long double elsewhere */
-        if (target == PP_LINUX_X86_64)
+        if (target_id == PP_LINUX_X86_64)
             return ast_builder_type_basic(AST_TYPE_FLOAT128);
         return ast_builder_type_basic(AST_TYPE_LONG_DOUBLE);
     case fundamental_type::std_nullptr_t:
         /* [basic.fundamental]/14: "A value of type std::nullptr_t is a
            null pointer constant"; it has a pointer's size */
-        return pointer_to(v);
+        return pointer_to(void_type);
     case fundamental_type::builtin_va_list:
         return ast_builder_type_va_list(c);
     case fundamental_type::builtin_va_list_tag:
@@ -282,8 +282,8 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
         fail("a class whose primary base is a virtual base", at);
     if (dynamic && !dynamic->primary_base) {
         /* [abi:class-types] I: the virtual table pointer at offset 0 */
-        add(pointer_to(ast_builder_type_pointer(c, v)), "__vptr", 6, 0, false,
-            -1);
+        add(pointer_to(ast_builder_type_pointer(c, void_type)), "__vptr", 6, 0,
+            false, -1);
         offsets.append(0);
         end = analysis.pointer_size();
     }

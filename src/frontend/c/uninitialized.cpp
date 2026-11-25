@@ -210,9 +210,9 @@ static diag_span cc_uninitialized_case_range(cc *c, uint32_t n)
     const char *t = NULL;
     size_t i = 0, e;
 
-    for (uint32_t n = 256; !t && n >= 8;
-         n /= 2) /* (near the end of the file) */
-        t = pp_source_text(c->p, b, b + n, &len);
+    for (uint32_t n2 = 256; !t && n2 >= 8;
+         n2 /= 2) /* (near the end of the file) */
+        t = pp_source_text(c->p, b, b + n2, &len);
 
     if (AST_NODE(n)->op == AST_NODE_DEFAULT || !t)
         return VCC_LITERAL(diag_span, b, b + 7);

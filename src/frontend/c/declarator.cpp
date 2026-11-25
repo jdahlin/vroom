@@ -431,8 +431,8 @@ CC_PRIVATE void cc_declarator_parse(cc *c, cc_declarator *d, bool abstract_ok,
                 next(c);
             }
             if ((uint32_t)np == pcap)
-                ptrs =
-                    cc_declarator_operations_grow(c, ptrs, np, &pcap, pcap + 1);
+                ptrs = cc_declarator_operations_grow(c, ptrs, (uint32_t)np,
+                                                     &pcap, pcap + 1);
             ptrs[np++] =
                 VCC_LITERAL(cc_declarator_operation, .kind = 0, .q = (uint8_t)q,
                             .fl = (uint16_t)(blk ? AST_TYPE_FLAG_BLOCK : 0));
@@ -503,8 +503,8 @@ CC_PRIVATE void cc_declarator_parse(cc *c, cc_declarator *d, bool abstract_ok,
     for (;;) {
         if (cc_token_accept(c, LEX_TOKEN_LEFT_SQUARE)) {
             if ((uint32_t)ns == scap)
-                sufs =
-                    cc_declarator_operations_grow(c, sufs, ns, &scap, scap + 1);
+                sufs = cc_declarator_operations_grow(c, sufs, (uint32_t)ns,
+                                                     &scap, scap + 1);
             cc_declarator_array_suffix_parse(c, &sufs[ns++], d->name);
         } else if (cc_token_is(c, LEX_TOKEN_LEFT_PAREN)) {
             uint32_t plb;
@@ -512,8 +512,8 @@ CC_PRIVATE void cc_declarator_parse(cc *c, cc_declarator *d, bool abstract_ok,
             next(c);
             plb = tok(c)->loc;
             if ((uint32_t)ns == scap)
-                sufs =
-                    cc_declarator_operations_grow(c, sufs, ns, &scap, scap + 1);
+                sufs = cc_declarator_operations_grow(c, sufs, (uint32_t)ns,
+                                                     &scap, scap + 1);
             if (unlikely(
                     !cc_declarator_parameter_list_parse(c, &sufs[ns], NULL)))
                 d->invalid = true;
@@ -543,8 +543,8 @@ CC_PRIVATE void cc_declarator_parse(cc *c, cc_declarator *d, bool abstract_ok,
         /* the inner ops sit at [ifirst, ifirst + inops) which is below at */
         if (inner) {
             at = ifirst;
-            memmove(&c->dops[at + np + ns], &c->dops[ifirst],
-                    inops * sizeof(cc_declarator_operation));
+            memmove(&c->dops[at + (uint32_t)np + (uint32_t)ns],
+                    &c->dops[ifirst], inops * sizeof(cc_declarator_operation));
             for (int i = 0; i < np; i++)
                 c->dops[at + (uint32_t)i] = ptrs[i];
             for (int i = 0; i < ns; i++)

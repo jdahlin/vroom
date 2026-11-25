@@ -258,7 +258,7 @@ static bool evaluate_defined(preprocessor &p,
     v.bits = m >= 0;
     v.is_unsigned = false;
     if (m >= 0)
-        p.macros[m].used = true;
+        p.macros[static_cast<size_t>(m)].used = true;
     if (parenthesized) {
         r.advance_unexpanded();
         if (!is_operator(r.token,
@@ -823,7 +823,7 @@ bool preprocessor::evaluate_defined_condition(const preprocessing_token &name,
     uint32_t operand = identifier(t);
     int32_t m = identifiers[operand].macro;
     if (m >= 0)
-        macros[m].used = true;
+        macros[static_cast<size_t>(m)].used = true;
     defined_condition_operand = operand; /* OPTIMIZATION: the guard */
     char name_text[16];
     snprintf(name_text, sizeof name_text, "%.*s", (int)directive.size(),
@@ -1234,15 +1234,16 @@ bool preprocessor::has_include(expression_reader &r,
     if (embed && *result) {
         /* C23 6.10.1: __STDC_EMBED_FOUND__ 1, __STDC_EMBED_EMPTY__ 2; an
            unknown parameter is not found */
-        embed_parameters parameters;
-        int parsed = parse_embed_parameters(
-            parameter_tokens.data(), parameter_tokens.size(), parameters, true);
+        embed_parameters parameters2;
+        int parsed =
+            parse_embed_parameters(parameter_tokens.data(),
+                                   parameter_tokens.size(), parameters2, true);
         if (parsed < 0)
             return false;
         uint64_t size;
         if (parsed == 0)
             *result = 0;
-        else if (!embedded_size(path.data(), parameters, &size))
+        else if (!embedded_size(path.data(), parameters2, &size))
             *result = 0;
         else if (size == 0)
             *result = 2;
@@ -1263,7 +1264,7 @@ bool preprocessor::expansion_is_function_like(
     (void)t;
     for (size_t i = contexts.size(); i-- > 0;)
         if (contexts[i].macro >= 0)
-            return macros[contexts[i].macro].function_like;
+            return macros[static_cast<size_t>(contexts[i].macro)].function_like;
     return false;
 }
 

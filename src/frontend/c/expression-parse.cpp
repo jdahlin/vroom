@@ -452,7 +452,7 @@ static uint32_t cc_explicit_cast_build(cc *c, uint32_t n, ast_qualified_type to,
     }
     if (cc_type_is_complex(c, to) || (cc_type_is_complex(c, AST_NODE(n)->ty) &&
                                       cc_type_is_arithmetic(c, to))) {
-        uint32_t r;
+        uint32_t r3;
 
         if (!cc_type_is_arithmetic(c, AST_NODE(n)->ty) &&
             !cc_type_is_complex(c, AST_NODE(n)->ty)) {
@@ -462,9 +462,9 @@ static uint32_t cc_explicit_cast_build(cc *c, uint32_t n, ast_qualified_type to,
                 tyname(c, AST_NODE(n)->ty));
             return n;
         }
-        r = cc_conversion_apply(c, cc_node_rvalue(c, n),
-                                AST_QUALIFIED_TYPE_UNQUALIFIED(to));
-        return r;
+        r3 = cc_conversion_apply(c, cc_node_rvalue(c, n),
+                                 AST_QUALIFIED_TYPE_UNQUALIFIED(to));
+        return r3;
     }
     if (!cc_type_is_scalar(c, to) &&
         !cc_type_is_compatible(c, to, AST_NODE(n)->ty)) {
@@ -480,10 +480,10 @@ static uint32_t cc_explicit_cast_build(cc *c, uint32_t n, ast_qualified_type to,
                                 AST_QUALIFIED_TYPE_UNQUALIFIED(to), n);
     if (k < 0 && cc_type_is_scalar(c, to) &&
         !cc_type_is_scalar(c, AST_NODE(n)->ty)) {
-        diag_span r = cc_node_range(c, n);
+        diag_span r2 = cc_node_range(c, n);
 
         report(
-            c, "error", r.b, &r, 1, NULL, 0,
+            c, "error", r2.b, &r2, 1, NULL, 0,
             "operand of type '%s' where arithmetic or pointer type is required",
             tyname(c, AST_NODE(n)->ty));
         n = cc_node_integer_new(c, 0, AST_QUALIFIED_TYPE_UNQUALIFIED(to), loc);
@@ -919,7 +919,7 @@ static __attribute__((noinline)) uint32_t cc_assignment_rest_parse(cc *c,
         r = cc_assignment_parse(c);
         if (unlikely(pend)) {
             c->syms[pend].flags &=
-                ~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING; /* (after the right side: "z = z + 1" reads z first) */
+                (uint32_t)(~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING); /* (after the right side: "z = z + 1" reads z first) */
             c->uv_asg = 0;
         }
     }

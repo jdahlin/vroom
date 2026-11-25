@@ -69,7 +69,7 @@ VPRIV void a64_vir_goto_emit(a64_vir_context *L, uint32_t b, uint32_t t)
     }
     if (vir_layout_duplicate(L->function, L->loops,
                              a64_vir_thread_state_instance.head_labels, b, t,
-                             a64_vir_block_fallthrough(L), L->dup,
+                             a64_vir_block_fallthrough(L), (unsigned)L->dup,
                              !L->context->unit->cleanups_disabled)) {
         int d = L->dup++;
 

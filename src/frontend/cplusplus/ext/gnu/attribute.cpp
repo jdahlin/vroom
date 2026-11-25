@@ -563,7 +563,7 @@ analysis_result semantic_analysis::add_gnu_abi_tag(SyntaxRef at,
     if (tag.size() < 3 || tag.data()[0] != '"')
         return not_supported(at, "ext.gnu");
     for (size_t i = 1; i + 1 < tag.size(); i++) {
-        unsigned char ch = tag.data()[i];
+        unsigned char ch = static_cast<unsigned char>(tag.data()[i]);
         if (!(ch == '_' || (ch >= '0' && ch <= '9') ||
               ((ch | 32) >= 'a' && (ch | 32) <= 'z')))
             return not_supported(at, "ext.gnu");
@@ -633,8 +633,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
         }
     }
     /* [ext:microsoft_declspec] (the keyword, extension_keyword::declspec) */
-    bool declspec = p.extension_keyword_of(tokens[n.first_token()]) ==
-                    extension_keyword::declspec;
+    bool declspec = syntax_parser.extension_keyword_of(
+                        tokens[n.first_token()]) == extension_keyword::declspec;
     for (SyntaxElement a : attributes) {
         token_index name_token = a.token();
         uint32_t count = a.size();

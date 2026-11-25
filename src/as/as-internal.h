@@ -378,7 +378,8 @@ static inline uint32_t as_alias_hash(const char *s, size_t n)
 /* as.c */
 VPRIV as_text as_text_duplicate(as_context *a, const char *s, size_t n);
 VPRIV uint32_t as_line_current(as_context *a);
-VPRIV int as_error_report(as_context *a, const char *fmt, ...);
+VPRIV __attribute__((format(printf, 2, 3))) int
+as_error_report(as_context *a, const char *fmt, ...);
 /* symbol.c */
 VPRIV uint32_t as_symbol_temporary(as_context *a);
 VPRIV const char *as_register_alias_find(as_context *a, uint32_t y);

@@ -75,7 +75,8 @@ enum {
 };
 
 typedef uint32_t ast_qualified_type; /* (type index << 3) | Q_* */
-#define AST_QUALIFIED_TYPE(i, q) (((ast_qualified_type)(i) << 3) | (q))
+#define AST_QUALIFIED_TYPE(i, q)                                               \
+    (((ast_qualified_type)(i) << 3) | (ast_qualified_type)(q))
 #define AST_QUALIFIED_TYPE_INDEX(t) ((t) >> 3)
 #define AST_QUALIFIED_TYPE_QUALIFIERS(t) ((t) & AST_QUALIFIER_MASK)
 #define AST_QUALIFIED_TYPE_UNQUALIFIED(t)                                      \

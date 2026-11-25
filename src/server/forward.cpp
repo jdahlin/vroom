@@ -58,7 +58,8 @@ static int vccd_backend_relay(const struct vccd_request *r, const char *sock)
     do
         n = sendmsg(s, &m, 0);
     while (n < 0 && errno == EINTR);
-    if (n < 0 || !vccd_fd_write_full(s, r->raw + n, r->raw_length - n) ||
+    if (n < 0 ||
+        !vccd_fd_write_full(s, r->raw + n, r->raw_length - (size_t)n) ||
         !vccd_fd_read_full(s, (char *)&status, sizeof(status)))
         status = 127;
     close(s);

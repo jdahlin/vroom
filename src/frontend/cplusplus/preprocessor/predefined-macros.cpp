@@ -308,7 +308,7 @@ bool preprocessor::replace_dynamic(preprocessing_token &name,
 void preprocessor::write_definitions(vbuffer *out)
 {
     for (int32_t index : definition_order) {
-        const macro_definition &m = macros[index];
+        const macro_definition &m = macros[static_cast<size_t>(index)];
         if (identifiers[m.name].macro != index ||
             m.dynamic != dynamic_macro::none)
             continue;

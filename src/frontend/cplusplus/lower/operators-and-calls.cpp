@@ -498,16 +498,16 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
     case builtin_lowering::discard: {
         uint32_t all = 0;
         for (uint32_t i = 0; i < count; i++) {
-            uint32_t one = cast(arguments[i], v, AST_CAST_VOID);
+            uint32_t one = cast(arguments[i], void_type, AST_CAST_VOID);
             if (all)
-                all = comma(v, all, one);
+                all = comma(void_type, all, one);
             else
                 all = one;
         }
         if (!all)
             all = cast(
                 ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0),
-                v, AST_CAST_VOID);
+                void_type, AST_CAST_VOID);
         return all;
     }
     case builtin_lowering::trap:
@@ -538,13 +538,13 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
         if (!n.count)
             return cast(
                 ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 0),
-                v, AST_CAST_VOID);
+                void_type, AST_CAST_VOID);
         uint32_t arg_node = analysis.semantics.items(n.first)[0];
         qualified_type ptr_type = node(arg_node).type;
         qualified_type pointee = record(ptr_type).operand;
         uint64_t total = ast_builder_type_size(c, type(pointee, n.at));
         if (!total || record(pointee).kind != type_kind::class_type)
-            return cast(arguments[0], v, AST_CAST_VOID);
+            return cast(arguments[0], void_type, AST_CAST_VOID);
         owned_array<uint8_t> covered;
         covered.resize(static_cast<size_t>(total));
         for (size_t i = 0; i < covered.size(); i++)
@@ -607,13 +607,14 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
                 continue;
             uint32_t ptr = c_variable(c, tmp, u8p);
             if (off)
-                ptr = make(AST_NODE_BINARY, u8p, ptr,
-                           ast_builder_integer(c, sz_t, off), 0, LEX_TOKEN_PLUS,
-                           0);
+                ptr = make(
+                    AST_NODE_BINARY, u8p, ptr,
+                    ast_builder_integer(c, sz_t, static_cast<int64_t>(off)), 0,
+                    LEX_TOKEN_PLUS, 0);
             stmts.append(
                 c_statement(c, assign(u8, dereference(ptr, u8), zero)));
         }
-        return statement_expression(v, block(stmts));
+        return statement_expression(void_type, block(stmts));
     }
     case builtin_lowering::refuse:
         return fail("__builtin_is_within_lifetime outside a constant "
@@ -809,7 +810,7 @@ uint32_t c_lowering::call(const semantic_node &n)
                                                  AST_SYMBOL_FLAG_DEFINED);
                 }
                 ast_qualified_type fn_t =
-                    ast_builder_type_function(c, v, nullptr, 0, 0);
+                    ast_builder_type_function(c, void_type, nullptr, 0, 0);
                 uint32_t fn_ref = c_variable(c, noop_coro_symbol, fn_t);
                 result = cast(address_of(fn_ref, pointer_to(fn_t)), rtype,
                               AST_CAST_POINTER_TO_POINTER);

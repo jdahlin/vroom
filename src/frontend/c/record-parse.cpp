@@ -375,13 +375,13 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after,
     cc_token_expect(c, LEX_TOKEN_LEFT_BRACE, "'{'");
     c->tags[ti].flags |= AST_RECORD_FLAG_BEING_DEFINED;
     while (!cc_token_is(c, LEX_TOKEN_RIGHT_BRACE)) {
-        uint32_t name, loc, s;
+        uint32_t name, loc2, s;
         attrs ea = {0};
 
         if (!cc_token_is(c, LEX_TOKEN_IDENTIFIER) || cc_token_keyword(tok(c)))
             cc_report_fatal(c, tok(c)->loc, "expected identifier");
         name = tok(c)->id;
-        loc = tok(c)->loc;
+        loc2 = tok(c)->loc;
         next(c);
         cc_attribute_list_parse(c, &ea);
         bool explicit_value = cc_token_accept(c, LEX_TOKEN_EQUAL);
@@ -400,14 +400,14 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after,
 
             if (bits < 128 && (v < lo || (v >= 0 && (u128)v > hi))) {
                 if (explicit_value)
-                    cc_report_error(c, loc,
+                    cc_report_error(c, loc2,
                                     "enumerator value is not representable in "
                                     "underlying type '%s'",
                                     tyname(c, fixed));
                 else {
                     char b[48];
                     cc_format_i128(b, sizeof b, v);
-                    cc_report_error(c, loc,
+                    cc_report_error(c, loc2,
                                     "enumerator value %s is not representable "
                                     "in underlying type '%s'",
                                     b, tyname(c, fixed));
@@ -425,11 +425,12 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after,
             if (o && c->syms[o].depth == c->depth &&
                 c->syms[o].kind != CC_SYMBOL_NAMESPACE_TAG) {
                 if (c->syms[o].kind == AST_SYMBOL_ENUMERATOR)
-                    cc_report_error(c, loc, "redefinition of enumerator '%.*s'",
+                    cc_report_error(c, loc2,
+                                    "redefinition of enumerator '%.*s'",
                                     CC_IDENTIFIER(name));
                 else
                     cc_report_error(
-                        c, loc,
+                        c, loc2,
                         "redefinition of '%.*s' as different kind of symbol",
                         CC_IDENTIFIER(name));
                 cc_report_note(c, c->syms[o].loc,
@@ -442,7 +443,7 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after,
 
             cc_format_i128(b, sizeof b, v);
             CC_REPORT_EXTENSION(c, "c23-extensions", cc_warning_group_pedantic,
-                                loc,
+                                loc2,
                                 "enumerator value which exceeds the range of "
                                 "'int' is a C23 extension "
                                 "(%s is too %s)",
@@ -455,7 +456,7 @@ CC_PRIVATE void cc_enum_body_parse(cc *c, uint32_t ti, attrs *after,
             : v >= 0 && v <= UINT32_MAX ? cc_type_basic(AST_TYPE_UNSIGNED_INT)
             : v >= INT64_MIN && v <= INT64_MAX ? cc_type_basic(CC_I64(c, false))
                                                : cc_type_basic(CC_I64(c, true)),
-            loc);
+            loc2);
         if (unlikely(ea.depr))
             cc_attribute_apply_symbol(c, &c->syms[s], &ea);
         c->syms[s].val = (int64_t)v;

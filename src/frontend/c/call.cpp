@@ -150,7 +150,7 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
             if (fs) {
                 const sym *y = &c->syms[fs];
                 diag_span pr = {y->plb, y->ple};
-                size_t len;
+                size_t len = 0;
                 const char *t = y->ple > y->plb
                                     ? pp_source_text(c->p, y->plb, y->ple, &len)
                                     : NULL;
@@ -264,15 +264,16 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
         if ((y->flags & AST_SYMBOL_FLAG_GLOBAL) &&
             y->sc != AST_STORAGE_STATIC &&
             !(y->attrs && c->attr[y->attrs].asmname) &&
-            !cc_library_builtin_is_disabled(c->o, cc_identifier_string(y->name),
-                                            cc_identifier_length(y->name))) {
+            !cc_library_builtin_is_disabled(
+                c->o, cc_identifier_string(y->name),
+                (size_t)cc_identifier_length(y->name))) {
             uint32_t result = cc_builtin_fp_sign_build(
-                c, cc_identifier_string(y->name), cc_identifier_length(y->name),
-                ft, &args, loc);
+                c, cc_identifier_string(y->name),
+                (size_t)cc_identifier_length(y->name), ft, &args, loc);
             if (!result)
                 result = cc_builtin_fast_math_build(
                     c, cc_identifier_string(y->name),
-                    cc_identifier_length(y->name), ft, &args, loc);
+                    (size_t)cc_identifier_length(y->name), ft, &args, loc);
             if (result) {
                 AST_NODE(result)->flags |= aflags & AST_NODE_FLAG_ERROR;
                 return result;
@@ -288,7 +289,8 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
           c->attr[c->syms[AST_NODE(callee)->a].attrs].asmname) &&
         !cc_library_builtin_is_disabled(
             c->o, cc_identifier_string(c->syms[AST_NODE(callee)->a].name),
-            cc_identifier_length(c->syms[AST_NODE(callee)->a].name))) {
+            (size_t)(cc_identifier_length(
+                c->syms[AST_NODE(callee)->a].name)))) {
         /* clang: abs, labs and llabs declared with their library types are builtins (inline) */
         int nl, k = AST_TYPE_KIND(c, AST_TYPE(c, ft)->base);
         const char *nm =

@@ -1078,7 +1078,7 @@ static inline void ld_relocation_target_final_find(struct ld_context *ctx,
             t->is_global = true;
             t->is_absolute = s->is_absolute;
             t->symbol_address = s->final_address;
-            t->address = s->final_address + addend;
+            t->address = s->final_address + (uint64_t)addend;
             return;
         }
     } else {
@@ -1094,7 +1094,7 @@ static inline void ld_relocation_target_final_find(struct ld_context *ctx,
                 t->is_absolute = false;
                 t->symbol_address =
                     b + ((y->st_info & 15) == STT_SECTION ? 0 : y->st_value);
-                t->address = t->symbol_address + addend;
+                t->address = t->symbol_address + (uint64_t)addend;
                 return;
             }
         }

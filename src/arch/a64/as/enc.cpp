@@ -1951,10 +1951,10 @@ static int k_ldst(Ctx *c, const Mn *m)
             }
             *c->out = b | R(&o[0]);
             if (!o[1].hassym) { /* a constant is the pc-relative offset */
-                int64_t v = o[1].imm;
-                if (o[1].mod || (v & 3) || v < -(1 << 20) || v >= (1 << 20))
+                int64_t v2 = o[1].imm;
+                if (o[1].mod || (v2 & 3) || v2 < -(1 << 20) || v2 >= (1 << 20))
                     FAIL("fixup value out of range");
-                *c->out |= (uint32_t)((v >> 2) & 0x7ffff) << 5;
+                *c->out |= (uint32_t)((v2 >> 2) & 0x7ffff) << 5;
                 return 0;
             }
             if (o[1].mod == A64_MOD_GOT)
@@ -3316,8 +3316,8 @@ static int k_pac(Ctx *c, const Mn *m)
             FAIL("index must be a multiple of 8 in range [-4096, 4088].");
         unsigned u = (unsigned)(v / 8) & 0x3ff;
         *c->out = b | (u >> 9) << 22 | (u & 0x1ff) << 12 |
-                  (o[1].mode == A64M_PRE) << 11 | (unsigned)o[1].reg << 5 |
-                  R(&o[0]);
+                  (unsigned)((o[1].mode == A64M_PRE) << 11) |
+                  (unsigned)o[1].reg << 5 | R(&o[0]);
         return 0;
     }
     case 7: /* psb/tsb csync */

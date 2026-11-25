@@ -11,6 +11,7 @@
  * --backend-sock nothing is forwarded: a request vcc cannot do fails, with vcc's diagnostics.  A
  * compile that succeeded gets the fixdep step (vccd_compile_fixdep_after) in vccd_request_handle().
  */
+#include "common/attributes.h"
 #include "vccd-internal.h"
 
 static int vccd_request_dispatch(const struct vccd_request *r,
@@ -136,7 +137,8 @@ static int vccd_request_dispatch(const struct vccd_request *r,
                          t, d1);
         else
             n = snprintf(line, sizeof line, "%s\n", t);
-        return n < (int)sizeof line && vccd_fd_write_full(r->fds[1], line, n)
+        return n >= 0 && n < (int)sizeof line &&
+                       vccd_fd_write_full(r->fds[1], line, (size_t)n)
                    ? 0
                    : 1;
     }
@@ -151,7 +153,8 @@ static int vccd_request_dispatch(const struct vccd_request *r,
                      strcmp(name, "include")
                          ? name
                          : vccd_capabilities_resource_include);
-        return n < (int)sizeof(line) && vccd_fd_write_full(r->fds[1], line, n)
+        return n >= 0 && n < (int)sizeof(line) &&
+                       vccd_fd_write_full(r->fds[1], line, (size_t)n)
                    ? 0
                    : 1;
     }
@@ -243,7 +246,7 @@ static int vccd_request_dispatch(const struct vccd_request *r,
         }
         av[n++] = "-c";
         if (deps && !mt)
-            av[n++] = "-MT", av[n++] = (char *)out;
+            av[n++] = "-MT", av[n++] = VUNCONST(char *, out);
         av[n] = NULL;
         if (lv && driver_job_run(n, av, &e) == 0) {
             /* the link: the object for the source, no dependency options */

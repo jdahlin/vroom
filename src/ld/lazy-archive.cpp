@@ -14,7 +14,7 @@
 static ld_lazy_symbol *ld_lazy_symbol_find(struct ld_context *ctx,
                                            const char *name)
 {
-    uint32_t len = strlen(name), h = ld_name_hash(name, len);
+    uint32_t len = (uint32_t)strlen(name), h = ld_name_hash(name, len);
 
     if (!ctx->inputs.lazy_symbols.v ||
         (ctx->inputs.lazy_symbols.n + 1) * 2 > ctx->inputs.lazy_symbols.mask) {
@@ -88,8 +88,8 @@ static const elf_symbol *ld_lazy_object_globals(struct ld_context *ctx,
                 (const elf_symbol *)(o.file_bytes +
                                      o.section_headers[s].sh_offset);
 
-            *n = o.section_headers[s].sh_size / sizeof(elf_symbol) -
-                 o.section_headers[s].sh_info;
+            *n = (uint32_t)(o.section_headers[s].sh_size / sizeof(elf_symbol) -
+                            o.section_headers[s].sh_info);
             *str = (const char *)o.file_bytes +
                    o.section_headers[o.section_headers[s].sh_link].sh_offset;
             return y + o.section_headers[s].sh_info;

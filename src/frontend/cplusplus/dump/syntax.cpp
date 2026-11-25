@@ -42,7 +42,8 @@ bool dump_parsing_selftest(vbuffer *out)
         for (int round = 0; round < 20000 && same; round++) {
             uint32_t n = random() % 260;
             for (uint32_t i = 0; i < n; i++)
-                text[i] = alphabet[random() % (sizeof alphabet - 1)];
+                text[i] = static_cast<unsigned char>(
+                    alphabet[random() % (sizeof alphabet - 1)]);
             memset(text + n, 0, 64);
             if (n && !(random() % 8))
                 text[random() % n] = 0;

@@ -260,7 +260,7 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
         case A64_ABI_ARGUMENT_BOOL_LANES:
             for (unsigned k = 0; k < T(c, a->type)->n; k++) {
                 int rd = k < a->argument.register_count
-                             ? a->argument.register_number + k
+                             ? (int)(a->argument.register_number + k)
                              : R_X16;
                 a64_record_emit_memory(e, A64_OP_LD, 0, 0, rd,
                                        A64_REGISTER_FRAME, a->slot + k / 8);
@@ -269,7 +269,7 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
                 if (k >= a->argument.register_count)
                     a64_record_emit_memory(
                         e, A64_OP_ST, 3, 0, rd, SP,
-                        a->argument.stack_offset +
+                        (unsigned)a->argument.stack_offset +
                             (k - a->argument.register_count) * 8);
             }
             break;
@@ -301,7 +301,7 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
             for (int k = 0; k < a->argument.register_count; k++) {
                 /* an Apple HFA of floats on the stack: a 4-byte last part */
                 int lg = a->argument.float_member_size &&
-                                 a->argument.size - 8 * k < 8
+                                 a->argument.size - (uint32_t)(8 * k) < 8
                              ? 2
                              : 3;
 
@@ -621,7 +621,7 @@ VPRIV codegen_value inline_call(codegen_context *e, uint32_t s,
                 ? 16
                 : codegen_type_alignment(c, rty));
     for (int i = 0; i < (int)body->aux; i++) {
-        uint32_t p = c->lists[body->a + i];
+        uint32_t p = c->lists[body->a + (uint32_t)i];
         const sym *ps = &c->syms[p];
         codegen_binding *b = codegen_symbol_binding_get(e, p);
         /* Reload only this parameter: restoring all parked values together
@@ -702,7 +702,7 @@ VPRIV codegen_value inline_call(codegen_context *e, uint32_t s,
     }
     for (int i = 0; i < (int)body->aux; i++) {
         codegen_binding *b =
-            codegen_symbol_binding_get(e, c->lists[body->a + i]);
+            codegen_symbol_binding_get(e, c->lists[body->a + (uint32_t)i]);
 
         if (b->kind == CODEGEN_BINDING_REGISTER && b->instance == F.instance) {
             tfree(e, b->value.register_number);
@@ -882,15 +882,16 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
     if (inl)
         codegen_function_prepass_request(e, s);
     for (int i = 0; i < na; i++) {
-        uint32_t an = c->lists[x->b + i];
+        uint32_t an = c->lists[x->b + (uint32_t)i];
 
         /* an argument the inlined body never reads: only its side effects count */
         if (inl && i < (int)N(c->syms[s].body)->aux &&
-            !(e->unit->symbol_flags[c->lists[N(c->syms[s].body)->a + i]] &
+            !(e->unit->symbol_flags[c->lists[N(c->syms[s].body)->a +
+                                             (uint32_t)i]] &
               CODEGEN_SYMBOL_USED) &&
             !codegen_expression_has_side_effects(c, an) &&
             !codegen_type_is_aggregate(
-                c, c->syms[c->lists[N(c->syms[s].body)->a + i]].ty)) {
+                c, c->syms[c->lists[N(c->syms[s].body)->a + (uint32_t)i]].ty)) {
             args[i].value = codegen_value_constant(0);
             args[i].type = N(an)->ty;
             args[i].slot = 1;

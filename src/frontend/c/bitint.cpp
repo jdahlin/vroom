@@ -77,10 +77,9 @@ CC_PRIVATE uint32_t cc_bitint_literal_parse(cc *c, const char *s, size_t len,
     }
     while (used > 1 && !a[used - 1])
         used--;
-    unsigned bits =
-        a[used - 1]
-            ? (unsigned)((used - 1) * 32 + 32 - __builtin_clz(a[used - 1]))
-            : 1;
+    unsigned bits = a[used - 1] ? (unsigned)((used - 1) * 32 + 32 -
+                                             (size_t)__builtin_clz(a[used - 1]))
+                                : 1;
     bits += !unsign;
     if (bits > 8388608) {
         free(a);
@@ -151,9 +150,9 @@ static bool cc_bitint_to_float(cc *c, const cc_value *a,
     size_t used = n;
     while (used && !words[used - 1])
         used--;
-    unsigned bits =
-        used ? (unsigned)((used - 1) * 32 + 32 - __builtin_clz(words[used - 1]))
-             : 0;
+    unsigned bits = used ? (unsigned)((used - 1) * 32 + 32 -
+                                      (size_t)__builtin_clz(words[used - 1]))
+                         : 0;
     u128 m = 0;
     if (bits) {
         int shift = (int)bits - 116;
@@ -263,9 +262,9 @@ CC_PRIVATE bool cc_bitint_conversion_is_exact(cc *c, const cc_value *v,
     size_t used = n;
     while (used && !a[used - 1])
         used--;
-    unsigned bits =
-        used ? (unsigned)((used - 1) * 32 + 32 - __builtin_clz(a[used - 1]))
-             : 0;
+    unsigned bits = used ? (unsigned)((used - 1) * 32 + 32 -
+                                      (size_t)__builtin_clz(a[used - 1]))
+                         : 0;
     bool exact = true;
     if (cc_type_is_integer(c, to)) {
         unsigned limit = cc_type_integer_bits(c, to);

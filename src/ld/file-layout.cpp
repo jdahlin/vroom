@@ -26,8 +26,8 @@ VPRIV void ld_segment_section_add(struct ld_context *ctx, int ph, uint32_t oi)
 {
     ld_segment_sections *p = &ctx->layout.program_header_sections.v[ph];
     if (p->first_output_section < 0)
-        p->first_output_section = oi;
-    p->last_output_section = oi;
+        p->first_output_section = (int)oi;
+    p->last_output_section = (int)oi;
     ld_output_section *os = &ctx->script.sections.v[oi];
     if (os->address_alignment > ctx->layout.program_headers.v[ph].p_align)
         ctx->layout.program_headers.v[ph].p_align = os->address_alignment;
@@ -46,7 +46,7 @@ VPRIV int ld_segment_create(struct ld_context *ctx, uint32_t type,
               (VCC_LITERAL(ld_segment_sections, .first_output_section = -1,
                            .last_output_section = -1)),
               ld_region_alloc);
-    return ctx->layout.program_headers.n - 1;
+    return (int)(ctx->layout.program_headers.n - 1);
 }
 
 VPRIV void ld_file_offsets_assign(struct ld_context *ctx)

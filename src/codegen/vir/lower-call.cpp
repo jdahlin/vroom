@@ -138,7 +138,8 @@ static uint32_t virbuild_call_signature_make(codegen_context *e,
         *rpc = virbuild_call_group_pack(&r, &V->extra[o + 1], true);
     }
     for (int k = 0; k < n; k++)
-        virbuild_call_group_pack(&a[k], &V->extra[o + 3 + 2 * k], false);
+        virbuild_call_group_pack(&a[k], &V->extra[o + 3 + (uint32_t)(2 * k)],
+                                 false);
     V->extra_count += 3 + 2 * (uint32_t)n;
     return o;
 }
@@ -155,7 +156,7 @@ VPRIV codegen_value virbuild_wide_helper_call(codegen_context *e, int helper,
     virbuild_classify(e, operand_type, &args[0], false);
     args[1] = args[0];
     virbuild_classify(e, result_type, &result, false);
-    uint32_t rpc, sig = virbuild_call_signature_make(e, args, nargs, false,
+    uint32_t rpc, sig = virbuild_call_signature_make(e, args, (int)nargs, false,
                                                      result_type, &rpc);
     uint32_t count = nargs * args[0].eightbyte_count;
     uint32_t operands = virbuild_extra_append(e, &count, 1);
@@ -234,8 +235,8 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
     for (int k = 0; k < n; k++) {
         for (int j = 0; j < (a[k].is_in_memory ? 1 : a[k].eightbyte_count);
              j++) {
-            uint32_t ty =
-                virbuild_pass_class_type(virbuild_piece_class(&a[k], j));
+            uint32_t ty = virbuild_pass_class_type(
+                virbuild_piece_class(&a[k], (unsigned)j));
             uint32_t x =
                 a[k].is_in_memory
                     ? virbuild_call_slot_pointer(e, a[k].slot)
@@ -269,10 +270,10 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
         for (int j = 0; multi && j < 2; j++)
             values[j] = virbuild_insn_append(
                 e, VIR_OP_PROJ,
-                virbuild_pass_class_type(virbuild_piece_class(r, j)), 0, v, j,
-                0);
+                virbuild_pass_class_type(virbuild_piece_class(r, (unsigned)j)),
+                0, v, (uint32_t)j, 0);
         for (int j = 0; j < r->eightbyte_count; j++) {
-            uint32_t pc = virbuild_piece_class(r, j);
+            uint32_t pc = virbuild_piece_class(r, (unsigned)j);
             int q = pc == VIR_CLASS_INT ? virbuild_treg(e) : virbuild_ftreg(e);
             codegen_lvalue at = {.kind = CODEGEN_LVALUE_FRAME,
                                  .align = 8,
@@ -341,11 +342,12 @@ VPRIV void virbuild_params(codegen_context *e, walk_argument *a, int n,
         ast_qualified_type ty = c->syms[sym].ty;
         for (int j = 0; j < (a[k].is_in_memory ? 1 : a[k].eightbyte_count);
              j++) {
-            uint32_t vty =
-                a[k].is_in_memory || codegen_type_is_pointer(c, ty)
-                    ? VIR_TYPE_PTR
-                    : virbuild_pass_class_type(virbuild_piece_class(&a[k], j));
-            virbuild_insn_append(e, VIR_OP_PARAM, vty, 0, k, j, 0);
+            uint32_t vty = a[k].is_in_memory || codegen_type_is_pointer(c, ty)
+                               ? VIR_TYPE_PTR
+                               : virbuild_pass_class_type(
+                                     virbuild_piece_class(&a[k], (unsigned)j));
+            virbuild_insn_append(e, VIR_OP_PARAM, vty, 0, (uint32_t)k,
+                                 (uint32_t)j, 0);
         }
     }
     uint32_t next = pv0;

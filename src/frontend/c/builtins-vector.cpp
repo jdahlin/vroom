@@ -309,7 +309,8 @@ CC_PRIVATE uint32_t cc_vector_abs(cc *c, uint32_t arg, uint32_t loc)
     AST_NODE(out)->a = sym;
     AST_NODE(out)->flags = AST_NODE_FLAG_LVALUE;
     uint32_t result = cc_node_rvalue(c, out);
-    for (unsigned i = cc_type_size(c, t) / cc_type_size(c, et); i--;) {
+    for (unsigned i = (unsigned)(cc_type_size(c, t) / cc_type_size(c, et));
+         i--;) {
         uint32_t lane =
             cc_node_rvalue(c, cc_builtin_vector_lane(c, saved, et, i, loc));
         uint32_t value = cc_builtin_elementwise_abs_lane(c, lane, et, loc);

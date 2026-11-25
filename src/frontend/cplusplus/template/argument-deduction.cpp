@@ -295,8 +295,10 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
             if (pr.entity != ar.entity || pr.bound != ar.bound)
                 return false;
         } else {
-            qualified_type pc = qualified_type::make(pr.bound, cv_none);
-            qualified_type ac = qualified_type::make(ar.bound, cv_none);
+            qualified_type pc = qualified_type::make(
+                static_cast<type_index>(pr.bound), cv_none);
+            qualified_type ac = qualified_type::make(
+                static_cast<type_index>(ar.bound), cv_none);
             if (ar.entity)
                 ac = qualified_type::make(
                     entity_table[ar.entity].type.unqualified(), cv_none);

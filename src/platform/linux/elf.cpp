@@ -418,8 +418,8 @@ void elf_emit(ElfObj *o, uint8_t *b)
         uint8_t type = s->type;
         uint64_t size = s->size;
         if (s->alias) { /* mergeTypeForSet / inherited size */
-            ElfSym *b = elf_symp(o, s->alias);
-            uint8_t t = b->type;
+            ElfSym *b2 = elf_symp(o, s->alias);
+            uint8_t t = b2->type;
             switch (type) {
             case STT_GNU_IFUNC:
                 if (t == STT_FUNC || t == STT_OBJECT || t == STT_NOTYPE ||
@@ -442,7 +442,7 @@ void elf_emit(ElfObj *o, uint8_t *b)
             }
             type = t;
             if (!size && !(s->flags & ESYM_SIZE_EXPR))
-                size = b->size;
+                size = b2->size;
         }
         if ((type == STT_NOTYPE || type == STT_OBJECT) &&
             (s->flags & ESYM_DEFINED) && !(s->flags & ESYM_ABS) &&

@@ -123,7 +123,8 @@ analysis_result semantic_analysis::member_pointer_operator(
            whose second operand is a pointer to a member function is a
            prvalue." */
         const struct type &f = type_table[member.unqualified()];
-        if (pointee.cv() & ~f.function_cv & (cv_const | cv_volatile))
+        if (pointee.cv() & static_cast<uint32_t>(~f.function_cv) &
+            (cv_const | cv_volatile))
             return ill_formed(n,
                               "a member function with fewer cv-qualifiers "
                               "than the object has cannot be called",

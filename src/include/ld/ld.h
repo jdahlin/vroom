@@ -37,8 +37,9 @@ struct ld_diagnostics {
         blank_line_after_multiline; /* lld: a blank line after a multi-line diagnostic */
     bool last_was_multiline;
 };
-void ld_diagnostic_report(struct ld_diagnostics *diagnostics, const char *kind,
-                          const char *fmt, va_list ap);
+__attribute__((format(printf, 3, 0))) void
+ld_diagnostic_report(struct ld_diagnostics *diagnostics, const char *kind,
+                     const char *fmt, va_list ap);
 void ld_diagnostic_error(struct ld_diagnostics *diagnostics, const char *fmt,
                          ...) __attribute__((format(printf, 2, 3)));
 void ld_diagnostic_warning(struct ld_diagnostics *diagnostics, const char *fmt,

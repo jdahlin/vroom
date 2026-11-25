@@ -1323,7 +1323,7 @@ analysis_result semantic_analysis::declare_specialization(
     d.kind = entity_kind::function;
     d.type = type;
     d.claimable = false;
-    declared.append(d);
+    declared_names.append(d);
     declared_entity = e;
     return analysis_result::well_formed;
 }
@@ -1372,7 +1372,7 @@ analysis_result semantic_analysis::declare_variable_specialization(
     d.kind = entity_kind::variable;
     d.type = type;
     d.claimable = false;
-    declared.append(d);
+    declared_names.append(d);
     declared_entity = e;
     return analysis_result::well_formed;
 }

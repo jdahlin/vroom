@@ -24,7 +24,7 @@
 static void ld_dso_tab_put(struct ld_context *ctx, const char *name, uint32_t d,
                            uint32_t idx)
 {
-    uint32_t len = strlen(name), h = ld_name_hash(name, len);
+    uint32_t len = (uint32_t)strlen(name), h = ld_name_hash(name, len);
 
     if (!ctx->dso.symbols.v ||
         (ctx->dso.symbols.n + 1) * 2 > ctx->dso.symbols.mask) {
@@ -60,7 +60,7 @@ VPRIV const DsoSym *ld_dso_lookup(struct ld_context *ctx, const char *name)
 {
     if (!ctx->dso.symbols.v)
         return NULL;
-    uint32_t len = strlen(name), h = ld_name_hash(name, len),
+    uint32_t len = (uint32_t)strlen(name), h = ld_name_hash(name, len),
              j = h & ctx->dso.symbols.mask;
 
     for (; ctx->dso.symbols.v[j].name; j = (j + 1) & ctx->dso.symbols.mask)
@@ -138,7 +138,7 @@ static bool ld_dso_read(struct ld_context *ctx, Dso *d)
         ds->sh_link >= nsh || sh[ds->sh_link].sh_type != SHT_STRTAB)
         DBAD("%s: invalid .dynsym", d->path);
     d->dsym = (const elf_symbol *)(b + ds->sh_offset);
-    d->ndsym = ds->sh_size / sizeof(elf_symbol);
+    d->ndsym = (uint32_t)(ds->sh_size / sizeof(elf_symbol));
     d->dstr = (const char *)b + sh[ds->sh_link].sh_offset;
     d->dstrsz = sh[ds->sh_link].sh_size;
     if (!d->dstrsz || d->dstr[d->dstrsz - 1])

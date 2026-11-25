@@ -78,7 +78,7 @@ VPRIV void ld_inputs_load(struct ld_context *ctx)
                     (uint32_t)(uintptr_t)ctx->inputs.pending.v[i].file_bytes);
             else
                 ld_lazy_archive_process(
-                    ctx, ctx->inputs.pending.v[i].size,
+                    ctx, (uint32_t)ctx->inputs.pending.v[i].size,
                     (uint32_t)(uintptr_t)ctx->inputs.pending.v[i].file_bytes);
         ctx->inputs.pending = ctx->inputs.lazy_order;
     }

@@ -44,7 +44,8 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     }
     if (variant == 2) {
         /* the VTT parameter after this */
-        vtt_parameter = c_local(c, pointer_to(ast_builder_type_pointer(c, v)));
+        vtt_parameter =
+            c_local(c, pointer_to(ast_builder_type_pointer(c, void_type)));
         ast_builder_symbol_flags_add(c, vtt_parameter,
                                      AST_SYMBOL_FLAG_PARAMETER);
         owned_array<uint32_t> with_vtt;
@@ -78,8 +79,8 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     uint32_t block_node = scoped_block(node(body.a), prefix);
     if (body.c) {
         /* [class.dtor]/13: after the body, the members and bases */
-        uint32_t items[2] = {block_node, statement(body.c)};
-        block_node = block(items, 2);
+        uint32_t items2[2] = {block_node, statement(body.c)};
+        block_node = block(items2, 2);
     }
     in_function = false;
     structor_variant = 0;
@@ -198,7 +199,7 @@ bool c_lowering::function_definition(entity_index e)
     uint32_t callee = cast(make(AST_NODE_VARIABLE, function, s, 0, 0, 0, 0),
                            pointer_to(function), AST_CAST_FUNCTION_DECAY);
     ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
-    uint32_t call = make(AST_NODE_CALL, v, callee,
+    uint32_t call = make(AST_NODE_CALL, void_type, callee,
                          ast_builder_list(c, arguments.data(), body.count),
                          body.count, 0, 0);
     uint32_t statement_node = c_statement(c, call);
@@ -277,7 +278,7 @@ bool c_lowering::translation_unit()
         return false;
     /* the namespace-scope functions and variables, in the order they are
        first declared */
-    for (const declared_name &d : analysis.declared) {
+    for (const declared_name &d : analysis.declared_names) {
         if (!d.entity)
             continue;
         const entity &x = analysis.entity_table[d.entity];
@@ -317,7 +318,7 @@ bool c_lowering::translation_unit()
             return false;
     }
     owned_array<entity_index> done;
-    for (const declared_name &d : analysis.declared) {
+    for (const declared_name &d : analysis.declared_names) {
         if (!d.entity)
             continue;
         const entity &x = analysis.entity_table[d.entity];

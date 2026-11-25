@@ -29,14 +29,15 @@ uint32_t preprocessor::gnu_comma_paste(substitution &s, uint32_t at,
         is_operator(elements[at + 2].token,
                     preprocessing_op_or_punc::HASH_HASH) &&
         elements[at + 3].parameter == variable &&
-        s.arguments[variable].begin == s.arguments[variable].end)
+        s.arguments[static_cast<size_t>(variable)].begin ==
+            s.arguments[static_cast<size_t>(variable)].end)
         return 4;
     const replacement_element &paste = elements[at];
     const replacement_element &next = elements[at + 1];
     if (!m.variadic || next.parameter != variable || out.empty() ||
         !is_operator(out.back(), preprocessing_op_or_punc::COMMA))
         return 0;
-    const argument &a = s.arguments[next.parameter];
+    const argument &a = s.arguments[static_cast<size_t>(next.parameter)];
     if (a.begin == a.end) {
         /* [impl.clang] only when the variable arguments are left out (f(x)
            for f(x, ...), or g() for g(...)); g(x,) keeps the comma */

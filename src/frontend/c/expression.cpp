@@ -810,7 +810,6 @@ static __attribute__((noinline, cold, noreturn)) void
 cc_primary_invalid_report(cc *c, const ptok *t)
 {
     cc_report_fatal(c, t->loc, "expected expression");
-    abort();
 }
 
 /* a name bound to s (already consumed) */
@@ -861,9 +860,9 @@ cc_primary_symbol_build(cc *c, uint32_t s, uint32_t id, uint32_t loc)
         if (unlikely(y->flags & AST_SYMBOL_FLAG_UNINITIALIZED_PENDING)) {
             if (tok(c)->kind == LEX_TOKEN_PERIOD)
                 y->flags &=
-                    ~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING; /* s.m: initializes it for the analysis */
+                    (uint32_t)(~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING); /* s.m: initializes it for the analysis */
             else if (tok(c)->kind != LEX_TOKEN_EQUAL) {
-                y->flags &= ~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING;
+                y->flags &= (uint32_t)(~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING);
                 c->uv_any |=
                     4; /* read (or &) before any assignment: run the analysis */
             } else if (!cc_uninitialized_is_assigned_deeper(c, s))
@@ -1372,22 +1371,22 @@ cc_postfix_operators_parse(cc *c, uint32_t n)
                 at = AST_NODE(n)->ty, it = AST_NODE(ix)->ty;
             }
             if (!cc_type_is_pointer(c, at) || !cc_type_is_integer(c, it)) {
-                diag_span r[2] = {cc_node_range(c, n), cc_node_range(c, ix)};
+                diag_span r4[2] = {cc_node_range(c, n), cc_node_range(c, ix)};
 
                 if (!cc_type_is_pointer(c, at))
-                    report(c, "error", loc, r, 2, NULL, 0,
+                    report(c, "error", loc, r4, 2, NULL, 0,
                            "subscripted value is not an array, pointer, or "
                            "vector");
                 else
-                    report(c, "error", loc, r, 2, NULL, 0,
+                    report(c, "error", loc, r4, 2, NULL, 0,
                            "array subscript is not an integer");
                 n = cc_node_error_new(c, loc);
                 continue;
             }
             if (cc_type_is_function(c, AST_TYPE(c, at)->base)) {
-                diag_span r = cc_node_range(c, n);
+                diag_span r3 = cc_node_range(c, n);
 
-                report(c, "error", r.b, &r, 1, NULL, 0,
+                report(c, "error", r3.b, &r3, 1, NULL, 0,
                        "subscript of pointer to function type '%s'",
                        tyname(c, AST_TYPE(c, at)->base));
                 n = cc_node_error_new(c, loc);
@@ -1395,9 +1394,9 @@ cc_postfix_operators_parse(cc *c, uint32_t n)
             }
             if (!cc_type_is_void(c, AST_TYPE(c, at)->base) &&
                 !cc_type_complete(c, AST_TYPE(c, at)->base)) {
-                diag_span r = cc_node_range(c, n);
+                diag_span r2 = cc_node_range(c, n);
 
-                report(c, "error", loc, &r, 1, NULL, 0,
+                report(c, "error", loc, &r2, 1, NULL, 0,
                        "subscript of pointer to incomplete type '%s'",
                        tyname(c, AST_TYPE(c, at)->base));
                 cc_report_forward_note(c, AST_TYPE(c, at)->base);

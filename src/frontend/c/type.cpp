@@ -328,7 +328,8 @@ CC_PRIVATE ast_qualified_type cc_type_qualify(cc *c, ast_qualified_type t,
                                   AST_QUALIFIED_TYPE_QUALIFIERS(t));
     }
     return AST_QUALIFIED_TYPE(AST_QUALIFIED_TYPE_INDEX(t),
-                              AST_QUALIFIED_TYPE_QUALIFIERS(t) | q);
+                              AST_QUALIFIED_TYPE_QUALIFIERS(t) |
+                                  (ast_qualified_type)q);
 }
 
 CC_PRIVATE ast_qualified_type cc_type_function(cc *c, ast_qualified_type ret,

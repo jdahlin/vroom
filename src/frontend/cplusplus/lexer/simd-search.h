@@ -28,6 +28,18 @@
 #include <emmintrin.h>
 #define CPLUSPLUS_LEX_SSE2 1
 #endif
+#ifndef CPLUSPLUS_LEX_NEON
+#define CPLUSPLUS_LEX_NEON 0
+#endif
+#ifndef CPLUSPLUS_LEX_AVX512
+#define CPLUSPLUS_LEX_AVX512 0
+#endif
+#ifndef CPLUSPLUS_LEX_AVX2
+#define CPLUSPLUS_LEX_AVX2 0
+#endif
+#ifndef CPLUSPLUS_LEX_SSE2
+#define CPLUSPLUS_LEX_SSE2 0
+#endif
 
 namespace cplusplus
 {

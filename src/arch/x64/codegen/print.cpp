@@ -1034,7 +1034,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 
                 while (q < end && *q && *q != X_ASMFRAME)
                     q++;
-                vtext_append(b, p, q - p);
+                vtext_append(b, p, (size_t)(q - p));
                 if (q == end)
                     break;
                 if (*q == X_ASMFRAME) {
@@ -1370,7 +1370,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
                 b, "\t.byte 0x49, 0x0f, 0xae, 0x0c, 0x24 # fxrstor64 (%r12)\n");
         if (cfi && !x64_target_has_no_simd(e))
             for (int k = 0; k < 16; k++)
-                vtext_format_append(b, "\t.cfi_escape 0x08, %u\n", 17 + k);
+                vtext_format_append(b, "\t.cfi_escape 0x08, %d\n", 17 + k);
         vtext_string_append(b, "\tleaq\t-112(%rbp), %rsp\n");
         for (int k = 13; k >= 0; k--) {
             int r = x64_interrupt_saved_registers[k];

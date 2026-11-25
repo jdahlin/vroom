@@ -233,7 +233,7 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
                     return not_supported(n, "basic.lookup.qual");
                 if (last) {
                     uint32_t cv = 0;
-                    VTRY(r,
+                    VTRY(r7,
                          named_member_type(n, t, x.entity, "basic.lookup.qual",
                                            qualifier, cv));
                     break;
@@ -254,7 +254,7 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
             }
         } else {
             nominated_scope nominated;
-            VTRY(r, nested_name_specifier(specifier, nominated));
+            VTRY(r6, nested_name_specifier(specifier, nominated));
             if (!nominated.entity ||
                 entity_table[nominated.entity].kind != entity_kind::class_type)
                 return not_supported(n, "basic.lookup.qual");
@@ -262,7 +262,7 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
             in_scope = true;
             qualifier = entity_table[scope].type.unqualified();
         }
-        VTRY(r, destructor_type_name(n, name, in_scope, scope, named, found));
+        VTRY(r5, destructor_type_name(n, name, in_scope, scope, named, found));
         if (!found || named != qualifier)
             return ill_formed(n,
                               "the second type-name of a destructor's "
@@ -280,11 +280,11 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
     } else {
         bool matches = false;
         if (c) {
-            VTRY(r, destructor_type_name(n, name, true, c, named, found));
+            VTRY(r4, destructor_type_name(n, name, true, c, named, found));
             matches = found && named == object_type;
         }
         if (!matches) {
-            VTRY(r, destructor_type_name(n, name, false, 0, named, found));
+            VTRY(r3, destructor_type_name(n, name, false, 0, named, found));
             matches = found && named == object_type;
         }
         if (!matches)
@@ -310,7 +310,7 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
         destructor = entity_table[c].destructor;
         if (!destructor)
             return not_supported(n, "class.dtor");
-        VTRY(r, deleted_use(at, destructor));
+        VTRY(r2, deleted_use(at, destructor));
         if (!accessible(destructor, c))
             return ill_formed_at_token(at,
                                        "a private or protected member's name "

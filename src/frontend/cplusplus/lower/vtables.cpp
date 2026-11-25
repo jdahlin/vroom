@@ -14,7 +14,8 @@ ast_qualified_type c_lowering::vtable_type(entity_index k)
     table_spec t;
     t.k = k;
     t.layout = k;
-    return ast_builder_type_array(c, pointer_to(v), table_length(t), true);
+    return ast_builder_type_array(c, pointer_to(void_type), table_length(t),
+                                  true);
 }
 
 /*
@@ -321,7 +322,7 @@ uint32_t c_lowering::element_address(uint32_t s, ast_qualified_type array,
                                      uint32_t index)
 {
     ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     ast_qualified_type vpp = pointer_to(vp);
     uint32_t table = c_variable(c, s, array);
     address_taken(table);
@@ -487,7 +488,7 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
     shape sh;
     table_shape(t, sh);
     owned_array<uint32_t> runs;
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     auto entry = [&](uint32_t index, uint32_t value) {
         runs.append(index);
         runs.append(index);
@@ -496,8 +497,9 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
     auto integer = [&](uint32_t index, int64_t value) {
         if (value)
             entry(index,
-                  cast(ast_builder_integer(c, ast_builder_type_ptrdiff(c),
-                                           static_cast<uint64_t>(value)),
+                  cast(ast_builder_integer(
+                           c, ast_builder_type_ptrdiff(c),
+                           static_cast<int64_t>(static_cast<uint64_t>(value))),
                        vp, AST_CAST_INTEGER_TO_POINTER));
     };
     for (uint32_t g = 0; g < d->group_count; g++) {
@@ -544,7 +546,7 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
                 /* [abi:pure-virtual]: a deleted virtual function's slot
                    points at __cxa_deleted_virtual, as for a destructor
                    defined as deleted ([class.dtor]/6) */
-                ft = ast_builder_type_function(c, v, nullptr, 0, 0);
+                ft = ast_builder_type_function(c, void_type, nullptr, 0, 0);
                 if (!deleted_virtual) {
                     deleted_virtual = ast_builder_symbol(
                         c, AST_SYMBOL_FUNCTION, "__cxa_deleted_virtual", 21, ft,
@@ -553,7 +555,7 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
                 }
                 target = deleted_virtual;
             } else if (analysis.entity_table[f].pure && !destructor) {
-                ft = ast_builder_type_function(c, v, nullptr, 0, 0);
+                ft = ast_builder_type_function(c, void_type, nullptr, 0, 0);
                 if (!pure_virtual) {
                     pure_virtual = ast_builder_symbol(
                         c, AST_SYMBOL_FUNCTION, "__cxa_pure_virtual", 18, ft,
@@ -618,7 +620,7 @@ uint32_t c_lowering::vtt_define(entity_index k, uint32_t table, int storage,
         return fail("a VTT whose symbol is not mangled", at);
     vtt_layout layout;
     vtt_of(k, layout);
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     ast_qualified_type array =
         ast_builder_type_array(c, vp, layout.entries.size(), true);
     uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, name.data(),

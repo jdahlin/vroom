@@ -654,9 +654,9 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                    [expr.prim.lambda.capture]/6 declares it in the
                    compound-statement, clang finds it in the declarator
                    too */
-                for (size_t i = l.first_capture; i < lambda_captures.size();
-                     i++)
-                    if (lambda_captures[i].init_capture)
+                for (size_t i2 = l.first_capture; i2 < lambda_captures.size();
+                     i2++)
+                    if (lambda_captures[i2].init_capture)
                         r = not_supported(n, "expr.prim.lambda.capture");
                 if (r != analysis_result::well_formed)
                     continue;

@@ -134,7 +134,7 @@ static void virbuild_literal_memcmp_fold(codegen_context *e,
         for (int i = 0; i < size; i++)
             bits |= (uint64_t)(unsigned char)str->s[i] << (8 * i);
         uint32_t type = size == 8 ? VIR_TYPE_I64 : VIR_TYPE_I32;
-        uint32_t value = virbuild_constant_integer(e, type, bits);
+        uint32_t value = virbuild_constant_integer(e, type, (int64_t)bits);
         V->insns[id].insn = VCC_LITERAL(vir_insn, VIR_OP_LOAD, (uint8_t)(type),
                                         (uint16_t)(size == 8   ? 3
                                                    : size == 4 ? 2
@@ -219,8 +219,8 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
         hc *= 2;
     if (kc > UINT32_MAX || hc > UINT32_MAX)
         virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
-    S.constant_table_mask = kc - 1;
-    S.value_table_mask = hc - 1;
+    S.constant_table_mask = (uint32_t)(kc - 1);
+    S.value_table_mask = (uint32_t)(hc - 1);
     size_t need = virbuild_simplify_layout(e, &S, NULL, kc, hc);
     void *buf = virbuild_pass_scratch_get(e, need);
     virbuild_simplify_layout(e, &S, (char *)buf, kc, hc);
@@ -325,7 +325,8 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
             continue;
         if (op == VIR_OP_LOAD
                 ? (V->insns[q].insn.flags & VIR_INSN_FLAG_VOL) != 0
-                : ((eff & ~(VIR_EFFECT_UF | VIR_EFFECT_F)) != VIR_EFFECT_P ||
+                : ((eff & (uint32_t)(~(VIR_EFFECT_UF | VIR_EFFECT_F))) !=
+                       VIR_EFFECT_P ||
                    op == VIR_OP_BPARAM ||
                    op ==
                        VIR_OP_PARAM)) /* (FP status flags are not kept: no FENV_ACCESS) */

@@ -316,44 +316,53 @@ static _Thread_local struct {
     uint32_t *
         lpos; /* per label: its block + 1 (UINT32_MAX: jumped to, not placed) */
     uint32_t cap, lcap;
-} W;
+} opt_scratch;
 
 static void grow(uint32_t n, uint32_t nl)
 {
-    if (n > W.cap) {
+    if (n > opt_scratch.cap) {
         uint32_t c = n * 2;
 
-        W.la = (record_register_mask *)(realloc(
-            W.la, c * sizeof(record_register_mask)));
-        W.rr = (record_register_mask *)(realloc(
-            W.rr, c * sizeof(record_register_mask)));
-        W.ww = (record_register_mask *)(realloc(
-            W.ww, c * sizeof(record_register_mask)));
-        W.blk = (uint32_t *)(realloc(W.blk, c * sizeof(uint32_t)));
-        W.bs = (uint32_t *)(realloc(W.bs, c * sizeof(uint32_t)));
-        W.be = (uint32_t *)(realloc(W.be, c * sizeof(uint32_t)));
-        W.s0 = (int32_t *)(realloc(W.s0, c * sizeof(int32_t)));
-        W.s1 = (int32_t *)(realloc(W.s1, c * sizeof(int32_t)));
-        W.in = (record_register_mask *)(realloc(
-            W.in, c * sizeof(record_register_mask)));
-        W.out = (record_register_mask *)(realloc(
-            W.out, c * sizeof(record_register_mask)));
-        W.use = (record_register_mask *)(realloc(
-            W.use, c * sizeof(record_register_mask)));
-        W.def = (record_register_mask *)(realloc(
-            W.def, c * sizeof(record_register_mask)));
-        W.ro = (uint16_t *)(realloc(W.ro, c * sizeof(uint16_t)));
-        if (!W.ro || !W.la || !W.rr || !W.ww || !W.blk || !W.bs || !W.be ||
-            !W.s0 || !W.s1 || !W.in || !W.out || !W.use || !W.def)
+        opt_scratch.la = (record_register_mask *)(realloc(
+            opt_scratch.la, c * sizeof(record_register_mask)));
+        opt_scratch.rr = (record_register_mask *)(realloc(
+            opt_scratch.rr, c * sizeof(record_register_mask)));
+        opt_scratch.ww = (record_register_mask *)(realloc(
+            opt_scratch.ww, c * sizeof(record_register_mask)));
+        opt_scratch.blk =
+            (uint32_t *)(realloc(opt_scratch.blk, c * sizeof(uint32_t)));
+        opt_scratch.bs =
+            (uint32_t *)(realloc(opt_scratch.bs, c * sizeof(uint32_t)));
+        opt_scratch.be =
+            (uint32_t *)(realloc(opt_scratch.be, c * sizeof(uint32_t)));
+        opt_scratch.s0 =
+            (int32_t *)(realloc(opt_scratch.s0, c * sizeof(int32_t)));
+        opt_scratch.s1 =
+            (int32_t *)(realloc(opt_scratch.s1, c * sizeof(int32_t)));
+        opt_scratch.in = (record_register_mask *)(realloc(
+            opt_scratch.in, c * sizeof(record_register_mask)));
+        opt_scratch.out = (record_register_mask *)(realloc(
+            opt_scratch.out, c * sizeof(record_register_mask)));
+        opt_scratch.use = (record_register_mask *)(realloc(
+            opt_scratch.use, c * sizeof(record_register_mask)));
+        opt_scratch.def = (record_register_mask *)(realloc(
+            opt_scratch.def, c * sizeof(record_register_mask)));
+        opt_scratch.ro =
+            (uint16_t *)(realloc(opt_scratch.ro, c * sizeof(uint16_t)));
+        if (!opt_scratch.ro || !opt_scratch.la || !opt_scratch.rr ||
+            !opt_scratch.ww || !opt_scratch.blk || !opt_scratch.bs ||
+            !opt_scratch.be || !opt_scratch.s0 || !opt_scratch.s1 ||
+            !opt_scratch.in || !opt_scratch.out || !opt_scratch.use ||
+            !opt_scratch.def)
             abort();
-        W.cap = c;
+        opt_scratch.cap = c;
     }
-    if (nl > W.lcap) {
-        W.lpos =
-            (uint32_t *)(realloc(W.lpos, (size_t)nl * 2 * sizeof(uint32_t)));
-        if (!W.lpos)
+    if (nl > opt_scratch.lcap) {
+        opt_scratch.lpos = (uint32_t *)(realloc(
+            opt_scratch.lpos, (size_t)nl * 2 * sizeof(uint32_t)));
+        if (!opt_scratch.lpos)
             abort();
-        W.lcap = nl * 2;
+        opt_scratch.lcap = nl * 2;
     }
 }
 
@@ -365,15 +374,15 @@ static bool liveness(codegen_context *e)
     bool changed;
 
     grow(n + 1, e->label_count + 1);
-    memset(W.lpos, 0, (size_t)e->label_count * sizeof(uint32_t));
+    memset(opt_scratch.lpos, 0, (size_t)e->label_count * sizeof(uint32_t));
     /*
 	 * Each record's roles and registers; labels something jumps to (+ asm,
 	 * label addresses), as the others (scopes, inlining) split nothing.
 	 */
     {
-        record_register_mask *rr = W.rr, *ww = W.ww;
-        uint16_t *rop = W.ro;
-        uint32_t *lpos = W.lpos;
+        record_register_mask *rr = opt_scratch.rr, *ww = opt_scratch.ww;
+        uint16_t *rop = opt_scratch.ro;
+        uint32_t *lpos = opt_scratch.lpos;
 
         for (uint32_t k = 0; k < n; k++) {
             const a64_record *i = &in[k];
@@ -394,65 +403,67 @@ static bool liveness(codegen_context *e)
         const a64_record *i = &in[k];
 
         if (prev != BR_NONE ||
-            (i->opcode == A64_OP_LABEL && W.lpos[i->label])) {
+            (i->opcode == A64_OP_LABEL && opt_scratch.lpos[i->label])) {
             if (nb)
-                W.be[nb - 1] = k - 1;
-            W.bs[nb++] = k;
+                opt_scratch.be[nb - 1] = k - 1;
+            opt_scratch.bs[nb++] = k;
         }
-        W.blk[k] = nb - 1;
+        opt_scratch.blk[k] = nb - 1;
         if (i->opcode == A64_OP_LABEL)
-            W.lpos[i->label] = nb; /* the label's block + 1 */
+            opt_scratch.lpos[i->label] = nb; /* the label's block + 1 */
         prev = BT[i->opcode];
     }
     if (!n)
         return false;
-    W.be[nb - 1] = n - 1;
+    opt_scratch.be[nb - 1] = n - 1;
     for (uint32_t b = 0; b < nb; b++) {
-        const a64_record *l = &in[W.be[b]];
+        const a64_record *l = &in[opt_scratch.be[b]];
         int k = brkind(l);
 
-        W.s0[b] = W.s1[b] = -1;
+        opt_scratch.s0[b] = opt_scratch.s1[b] = -1;
         if (k == BR_NONE || k == BR_COND)
-            W.s0[b] = b + 1 < nb ? (int32_t)b + 1 : -1;
+            opt_scratch.s0[b] = b + 1 < nb ? (int32_t)b + 1 : -1;
         if (k == BR_UNCOND || k == BR_COND) {
-            if (W.lpos[l->label] == UINT32_MAX)
+            if (opt_scratch.lpos[l->label] == UINT32_MAX)
                 return false; /* a branch to a label not in the records */
-            W.s1[b] = (int32_t)W.lpos[l->label] - 1;
+            opt_scratch.s1[b] = (int32_t)opt_scratch.lpos[l->label] - 1;
         }
         {
             record_register_mask use = 0, def = 0;
-            const record_register_mask *rr = W.rr, *ww = W.ww;
+            const record_register_mask *rr = opt_scratch.rr,
+                                       *ww = opt_scratch.ww;
 
-            for (uint32_t j = W.be[b] + 1; j-- > W.bs[b];) {
+            for (uint32_t j = opt_scratch.be[b] + 1; j-- > opt_scratch.bs[b];) {
                 use = (use & ~ww[j]) | rr[j];
                 def |= ww[j];
             }
-            W.use[b] = W.in[b] = use, W.def[b] = def;
+            opt_scratch.use[b] = opt_scratch.in[b] = use,
+            opt_scratch.def[b] = def;
         }
-        W.out[b] = 0;
+        opt_scratch.out[b] = 0;
     }
     do {
         changed = false;
         for (uint32_t b = nb; b-- > 0;) {
             record_register_mask o = 0, i;
 
-            if (b == nb - 1 && brkind(&in[W.be[b]]) != BR_UNCOND)
+            if (b == nb - 1 && brkind(&in[opt_scratch.be[b]]) != BR_UNCOND)
                 o |= retreads; /* falls into the epilogue: the return value */
-            if (W.s0[b] >= 0)
-                o |= W.in[W.s0[b]];
-            if (W.s1[b] >= 0)
-                o |= W.in[W.s1[b]];
-            i = W.use[b] | (o & ~W.def[b]);
-            if (o != W.out[b] || i != W.in[b])
+            if (opt_scratch.s0[b] >= 0)
+                o |= opt_scratch.in[opt_scratch.s0[b]];
+            if (opt_scratch.s1[b] >= 0)
+                o |= opt_scratch.in[opt_scratch.s1[b]];
+            i = opt_scratch.use[b] | (o & ~opt_scratch.def[b]);
+            if (o != opt_scratch.out[b] || i != opt_scratch.in[b])
                 changed = true;
-            W.out[b] = o, W.in[b] = i;
+            opt_scratch.out[b] = o, opt_scratch.in[b] = i;
         }
     } while (changed);
     for (uint32_t b = 0; b < nb; b++) {
-        record_register_mask l = W.out[b], *la = W.la;
-        const record_register_mask *rr = W.rr, *ww = W.ww;
+        record_register_mask l = opt_scratch.out[b], *la = opt_scratch.la;
+        const record_register_mask *rr = opt_scratch.rr, *ww = opt_scratch.ww;
 
-        for (uint32_t j = W.be[b] + 1; j-- > W.bs[b];) {
+        for (uint32_t j = opt_scratch.be[b] + 1; j-- > opt_scratch.bs[b];) {
             la[j] = l;
             l = (l & ~ww[j]) | rr[j];
         }
@@ -498,7 +509,7 @@ static bool a64_copy_rewrite(void *ctx, uint32_t j, uint8_t t, uint8_t v,
                              bool apply)
 {
     codegen_context *e = (codegen_context *)ctx;
-    unsigned ro = W.ro[j];
+    unsigned ro = opt_scratch.ro[j];
 
     if (!apply)
         return !(ro & OP_ASM) && can_rewrite(&e->records[j], ro, t);
@@ -511,21 +522,21 @@ static bool backward(codegen_context *e, uint32_t k)
 {
     a64_record *in = e->records;
     int v = in[k].rd, t = in[k].rn;
-    uint32_t b = W.blk[k];
+    uint32_t b = opt_scratch.blk[k];
 
-    if (!(TEMPS & RB(t)) || (W.la[k] & RB(t)))
+    if (!(TEMPS & RB(t)) || (opt_scratch.la[k] & RB(t)))
         return false;
-    for (uint32_t j = k; j-- > W.bs[b];) {
+    for (uint32_t j = k; j-- > opt_scratch.bs[b];) {
         a64_record *i = &in[j];
         unsigned ro;
         record_register_mask r, w;
 
         if (i->opcode == DELETED)
             continue;
-        ro = W.ro[j];
+        ro = opt_scratch.ro[j];
         if (ro & (OP_ALL | OP_CALL))
             return false;
-        r = W.rr[j], w = W.ww[j];
+        r = opt_scratch.rr[j], w = opt_scratch.ww[j];
         if (w & RB(t)) {
             if (!(ro & RD_W) || i->rd != t || (ro & (RD_R | RA_W | RN_W)) ||
                 (w & ~RB(t)))
@@ -533,9 +544,9 @@ static bool backward(codegen_context *e, uint32_t k)
             if (w & RB(v))
                 return false;
             i->rd = (uint8_t)v;
-            W.ww[j] = RB(v);
+            opt_scratch.ww[j] = RB(v);
             for (uint32_t q = j; q < k; q++)
-                W.la[q] |= RB(v);
+                opt_scratch.la[q] |= RB(v);
             in[k].opcode = DELETED;
             return true;
         }
@@ -656,11 +667,11 @@ static void slots(codegen_context *e)
     }
     if (!record_slot_values_begin(&SL.values, ncell))
         return;
-    nb = W.blk[n - 1] + 1;
+    nb = opt_scratch.blk[n - 1] + 1;
     for (uint32_t b = 0; b < nb; b++) {
         uint32_t gen = b + 1;
 
-        for (uint32_t k = W.bs[b]; k <= W.be[b]; k++) {
+        for (uint32_t k = opt_scratch.bs[b]; k <= opt_scratch.be[b]; k++) {
             a64_record *i = &in[k];
             int32_t ci = SL.rc[k];
             record_slot_value *a =
@@ -680,11 +691,11 @@ static void slots(codegen_context *e)
 
                     if (r != ZR)
                         for (uint32_t q = a->position; q < k; q++)
-                            W.la[q] |= RB(r);
+                            opt_scratch.la[q] |= RB(r);
                     a->position = k; /* (r is live up to here now) */
                     load_from_reg(i, r);
-                    W.ro[k] = (uint16_t)roles(i);
-                    W.rr[k] = reads(i, W.ro[k]);
+                    opt_scratch.ro[k] = (uint16_t)roles(i);
+                    opt_scratch.rr[k] = reads(i, opt_scratch.ro[k]);
                     SL.rc[k] = -1;
                     if (i->opcode == A64_OP_MOV && i->size == 1 &&
                         i->rd == i->rn) {
@@ -694,7 +705,7 @@ static void slots(codegen_context *e)
                 }
             }
             /* (a load made a mov writes the same register); OP_ALL may write any */
-            w = (W.rr[k] == GPRS ? GPRS : W.ww[k]) & GPRS;
+            w = (opt_scratch.rr[k] == GPRS ? GPRS : opt_scratch.ww[k]) & GPRS;
             for (; w; w &= w - 1)
                 ver[__builtin_ctzll(w)]++;
             if (SL.rc[k] < 0) {
@@ -702,7 +713,7 @@ static void slots(codegen_context *e)
                     i->opcode == A64_OP_STLO || i->opcode == A64_OP_STP ||
                     i->opcode == A64_OP_STF || i->opcode == A64_OP_BL ||
                     i->opcode == A64_OP_BLR || i->opcode == A64_OP_TLV ||
-                    i->opcode == A64_OP_RAW || W.rr[k] == GPRS)
+                    i->opcode == A64_OP_RAW || opt_scratch.rr[k] == GPRS)
                     mver++; /* may write an escaped cell */
                 continue;
             }
@@ -998,33 +1009,33 @@ static void xblock(codegen_context *e, uint32_t b, xf *f, uint8_t *red)
 {
     const a64_record *in = e->records;
 
-    for (uint32_t k = W.bs[b]; k <= W.be[b]; k++) {
+    for (uint32_t k = opt_scratch.bs[b]; k <= opt_scratch.be[b]; k++) {
         const a64_record *i = &in[k];
         unsigned z, s;
         int rd = i->rd;
 
         if (i->opcode == DELETED)
             continue;
-        if (W.rr[k] == GPRS) { /* OP_ALL */
+        if (opt_scratch.rr[k] == GPRS) { /* OP_ALL */
             memset(f, XU, sizeof(*f));
             continue;
         }
-        if (!W.ww[k])
+        if (!opt_scratch.ww[k])
             continue;
         if (XT[i->opcode])
             red[k] = (uint8_t)xredundant(f, i);
-        if (W.ww[k] == RB(rd) && rd < 31 && (COPYOK & RB(rd)) &&
+        if (opt_scratch.ww[k] == RB(rd) && rd < 31 && (COPYOK & RB(rd)) &&
             xresult(f, i, &z, &s)) {
             f->z[rd] = (uint8_t)z, XS(f)[rd] = (uint8_t)s;
             continue;
         }
-        xkill(f, W.ww[k]);
+        xkill(f, opt_scratch.ww[k]);
     }
 }
 
 static void exts(codegen_context *e)
 {
-    uint32_t n = e->record_count, nb = W.blk[n - 1] + 1;
+    uint32_t n = e->record_count, nb = opt_scratch.blk[n - 1] + 1;
     xf f;
     bool changed;
     uint32_t nc = 0;
@@ -1048,7 +1059,7 @@ static void exts(codegen_context *e)
     XF.red = (uint8_t *)grow_to(XF.red, &XF.capr, n, 1);
     memset(XF.red, 0, n);
     for (uint32_t b = 0; b < nb; b++) {
-        const a64_record *l = &e->records[W.bs[b]];
+        const a64_record *l = &e->records[opt_scratch.bs[b]];
 
         XF.vis[b] = b == 0 || (l->opcode == A64_OP_LABEL &&
                                (e->label_reference_counts[l->label] &
@@ -1074,7 +1085,7 @@ static void exts(codegen_context *e)
             f = XF.in[b];
             xblock(e, b, &f, XF.red);
             for (int q = 0; q < 2; q++) {
-                int32_t sb = q ? W.s1[b] : W.s0[b];
+                int32_t sb = q ? opt_scratch.s1[b] : opt_scratch.s0[b];
                 xf *t;
 
                 if (sb < 0)
@@ -1183,14 +1194,14 @@ static bool pure(const a64_record *i)
 static void dead(codegen_context *e)
 {
     a64_record *in = e->records;
-    uint32_t nb = W.blk[e->record_count - 1] + 1;
+    uint32_t nb = opt_scratch.blk[e->record_count - 1] + 1;
 
     for (uint32_t b = 0; b < nb; b++) {
-        record_register_mask live = W.out[b];
+        record_register_mask live = opt_scratch.out[b];
 
-        if (b == nb - 1 && brkind(&in[W.be[b]]) != BR_UNCOND)
+        if (b == nb - 1 && brkind(&in[opt_scratch.be[b]]) != BR_UNCOND)
             live |= retreads;
-        for (uint32_t k = W.be[b] + 1; k-- > W.bs[b];) {
+        for (uint32_t k = opt_scratch.be[b] + 1; k-- > opt_scratch.bs[b];) {
             a64_record *i = &in[k];
 
             if (i->opcode == DELETED)
@@ -1199,7 +1210,7 @@ static void dead(codegen_context *e)
                 i->opcode = DELETED;
                 continue;
             }
-            live = (live & ~W.ww[k]) | W.rr[k];
+            live = (live & ~opt_scratch.ww[k]) | opt_scratch.rr[k];
         }
     }
 }
@@ -1433,21 +1444,23 @@ static bool fplain(const a64_record *i)
 static int32_t fdefof(codegen_context *e, uint32_t k, int r)
 {
     const a64_record *in = e->records;
-    uint32_t lo = W.bs[W.blk[k]], n = 0;
+    uint32_t lo = opt_scratch.bs[opt_scratch.blk[k]], n = 0;
     bool scr = false; /* a record between may have rebuilt x16/x17 */
 
-    if (r >= 29 || ((W.la[k] & RB(r)) && !(W.ww[k] & RB(r))))
+    if (r >= 29 ||
+        ((opt_scratch.la[k] & RB(r)) && !(opt_scratch.ww[k] & RB(r))))
         return -1;
     for (uint32_t j = k; j-- > lo && n < 32;) {
         if (in[j].opcode == DELETED)
             continue;
         n++;
-        if (W.ro[j] & OP_SLOW)
+        if (opt_scratch.ro[j] & OP_SLOW)
             return -1;
-        if (W.ww[j] & RB(r))
-            return W.ww[j] == RB(r) && (!scr || !(RB(r) & FSCR)) ? (int32_t)j
-                                                                 : -1;
-        if (W.rr[j] & RB(r))
+        if (opt_scratch.ww[j] & RB(r))
+            return opt_scratch.ww[j] == RB(r) && (!scr || !(RB(r) & FSCR))
+                       ? (int32_t)j
+                       : -1;
+        if (opt_scratch.rr[j] & RB(r))
             return -1;
         scr |= !fplain(&in[j]);
     }
@@ -1457,16 +1470,16 @@ static int32_t fdefof(codegen_context *e, uint32_t k, int r)
 /* the record last writing r before k in its block (a constant's MOVI), whoever else reads r */
 static const a64_record *fwriter(codegen_context *e, uint32_t k, int r)
 {
-    uint32_t lo = W.bs[W.blk[k]], n = 0;
+    uint32_t lo = opt_scratch.bs[opt_scratch.blk[k]], n = 0;
     bool scr = false;
 
     for (uint32_t j = k; j-- > lo && n < 32;) { /* (bounded, as fdefof) */
         if (e->records[j].opcode == DELETED)
             continue;
         n++;
-        if (W.ro[j] & OP_SLOW)
+        if (opt_scratch.ro[j] & OP_SLOW)
             return NULL;
-        if (W.ww[j] & RB(r))
+        if (opt_scratch.ww[j] & RB(r))
             return !scr || !(RB(r) & FSCR) ? &e->records[j] : NULL;
         scr |= !fplain(&e->records[j]);
     }
@@ -1479,7 +1492,8 @@ static bool fkept(codegen_context *e, uint32_t d, uint32_t k,
 {
     for (uint32_t j = d + 1; j < k; j++)
         if (e->records[j].opcode != DELETED &&
-            ((W.ww[j] & src) || ((src & FSCR) && !fplain(&e->records[j]))))
+            ((opt_scratch.ww[j] & src) ||
+             ((src & FSCR) && !fplain(&e->records[j]))))
             return false;
     return true;
 }
@@ -1487,14 +1501,14 @@ static bool fkept(codegen_context *e, uint32_t d, uint32_t k,
 static void fdone(codegen_context *e, uint32_t d, uint32_t k)
 {
     a64_record *in = e->records;
-    record_register_mask src = W.rr[d];
+    record_register_mask src = opt_scratch.rr[d];
 
     in[d].opcode = DELETED;
-    W.rr[d] = W.ww[d] = 0;
-    W.ro[k] = (uint16_t)roles(&in[k]);
-    W.rr[k] = reads(&in[k], W.ro[k]);
+    opt_scratch.rr[d] = opt_scratch.ww[d] = 0;
+    opt_scratch.ro[k] = (uint16_t)roles(&in[k]);
+    opt_scratch.rr[k] = reads(&in[k], opt_scratch.ro[k]);
     for (uint32_t j = d; j < k; j++)
-        W.la[j] |= src;
+        opt_scratch.la[j] |= src;
 }
 
 static inline bool fgpr(int r)
@@ -1668,7 +1682,7 @@ static bool fold1(codegen_context *e, uint32_t k)
 
         if (!fkept(e, (uint32_t)d, k, RB(f.src)) ||
             !fkept(e, (uint32_t)d2, k, RB(g.src)) ||
-            (W.rr[lo == (uint32_t)d ? d2 : d] & RB(in[lo].rd)))
+            (opt_scratch.rr[lo == (uint32_t)d ? d2 : d] & RB(in[lo].rd)))
             return false;
         /* (the later definition must not read the earlier one's register: it reads its own source) */
         if (in[d].rd == g.src || in[d2].rd == f.src)
@@ -1895,7 +1909,7 @@ static void fmulk(codegen_context *e, uint32_t k)
             continue;
         }
         /* the first record in the constant's place: a there already (live through d) */
-        if (!fkept(e, (uint32_t)d, k, RB(a)) || !(W.la[d] & RB(a)))
+        if (!fkept(e, (uint32_t)d, k, RB(a)) || !(opt_scratch.la[d] & RB(a)))
             continue;
         if (sh) { /* add r, a, a, lsl n; lsl d, r, sh */
             in[d] =
@@ -1914,10 +1928,10 @@ static void fmulk(codegen_context *e, uint32_t k)
             *i = VCC_LITERAL(a64_record, .opcode = A64_OP_SUB, .size = i->size,
                              .rd = i->rd, .rn = (uint8_t)r, .rm = (uint8_t)a);
         }
-        W.ro[d] = (uint16_t)roles(&in[d]);
-        W.rr[d] = reads(&in[d], W.ro[d]);
-        W.ro[k] = (uint16_t)roles(i);
-        W.rr[k] = reads(i, W.ro[k]);
+        opt_scratch.ro[d] = (uint16_t)roles(&in[d]);
+        opt_scratch.rr[d] = reads(&in[d], opt_scratch.ro[d]);
+        opt_scratch.ro[k] = (uint16_t)roles(i);
+        opt_scratch.rr[k] = reads(i, opt_scratch.ro[k]);
         return;
     }
 }
@@ -2045,11 +2059,11 @@ static void fbswap(codegen_context *e, uint32_t k)
             continue;
         unsigned op = in[j].opcode;
 
-        if ((W.ro[j] & OP_SLOW) || op == A64_OP_ST || op == A64_OP_STX ||
-            op == A64_OP_STP || op == A64_OP_STLO || op == A64_OP_STF ||
-            op == A64_OP_BL || op == A64_OP_BLR ||
-            ((W.rr[j] | W.ww[j]) & RB(i->rd)) ||
-            (j < lastld && (W.ww[j] & RB(b[0].base))))
+        if ((opt_scratch.ro[j] & OP_SLOW) || op == A64_OP_ST ||
+            op == A64_OP_STX || op == A64_OP_STP || op == A64_OP_STLO ||
+            op == A64_OP_STF || op == A64_OP_BL || op == A64_OP_BLR ||
+            ((opt_scratch.rr[j] | opt_scratch.ww[j]) & RB(i->rd)) ||
+            (j < lastld && (opt_scratch.ww[j] & RB(b[0].base))))
             return;
     }
     for (int q = 0; q < nch;
@@ -2071,16 +2085,16 @@ static void fbswap(codegen_context *e, uint32_t k)
     }
     for (int q = 0; q < nch; q++) {
         in[ch[q]].opcode = DELETED;
-        W.rr[ch[q]] = W.ww[ch[q]] = 0;
+        opt_scratch.rr[ch[q]] = opt_scratch.ww[ch[q]] = 0;
     }
     in[first] =
         VCC_LITERAL(a64_record, .opcode = A64_OP_LD, .size = (uint8_t)lg,
                     .rd = (uint8_t)rd, .rn = (uint8_t)base, .immediate = lo);
-    W.ro[first] = (uint16_t)roles(&in[first]);
-    W.rr[first] = reads(&in[first], W.ro[first]);
-    W.ww[first] = writes(&in[first], W.ro[first]);
+    opt_scratch.ro[first] = (uint16_t)roles(&in[first]);
+    opt_scratch.rr[first] = reads(&in[first], opt_scratch.ro[first]);
+    opt_scratch.ww[first] = writes(&in[first], opt_scratch.ro[first]);
     in[k].opcode = DELETED;
-    W.rr[k] = W.ww[k] = 0;
+    opt_scratch.rr[k] = opt_scratch.ww[k] = 0;
     if (!le)
         in[at[0]] = VCC_LITERAL(
             a64_record, .opcode = (uint8_t)(n == 2 ? A64_OP_REV16 : A64_OP_REV),
@@ -2096,12 +2110,12 @@ static void fbswap(codegen_context *e, uint32_t k)
 
         if (in[j].opcode == DELETED)
             continue;
-        W.ro[j] = (uint16_t)roles(&in[j]);
-        W.rr[j] = reads(&in[j], W.ro[j]);
-        W.ww[j] = writes(&in[j], W.ro[j]);
+        opt_scratch.ro[j] = (uint16_t)roles(&in[j]);
+        opt_scratch.rr[j] = reads(&in[j], opt_scratch.ro[j]);
+        opt_scratch.ww[j] = writes(&in[j], opt_scratch.ro[j]);
     }
     for (uint32_t j = first; j < k; j++)
-        W.la[j] |= RB(rd);
+        opt_scratch.la[j] |= RB(rd);
 }
 
 static void fold(codegen_context *e)
@@ -2258,12 +2272,12 @@ static void copies(codegen_context *e)
         .stride = sizeof(a64_record),
         .op_offset = offsetof(a64_record, opcode),
         .deleted_op = DELETED,
-        .flags = W.ro,
-        .flags_stride = sizeof(*W.ro),
+        .flags = opt_scratch.ro,
+        .flags_stride = sizeof(*opt_scratch.ro),
         .opaque_mask = OP_ALL,
-        .read = W.rr,
-        .live = W.la,
-        .write = W.ww,
+        .read = opt_scratch.rr,
+        .live = opt_scratch.la,
+        .write = opt_scratch.ww,
         .rewrite = a64_copy_rewrite,
         .ctx = e,
     };
@@ -2275,11 +2289,13 @@ static void copies(codegen_context *e)
             continue;
         }
         if (is_copy(&in[k])) {
-            if (!(W.la[k] & RB(in[k].rd)) && in[k].rd != 29 && in[k].rd != 30)
+            if (!(opt_scratch.la[k] & RB(in[k].rd)) && in[k].rd != 29 &&
+                in[k].rd != 30)
                 in[k].opcode = DELETED; /* dead */
             else if (TEMPS & RB(in[k].rd))
-                record_copy_forward(&scan, k, W.be[W.blk[k]], in[k].rd,
-                                    in[k].rn);
+                record_copy_forward(&scan, k,
+                                    opt_scratch.be[opt_scratch.blk[k]],
+                                    in[k].rd, in[k].rn);
         }
     }
     for (uint32_t k = 0; k < e->record_count; k++)
@@ -2411,8 +2427,8 @@ VPRIV void opt_function(codegen_context *e)
     A64_RECORD_PASS_BEGIN(e);
     for (uint32_t k = 0; k < e->record_count; k++)
         if (in[k].opcode == A64_OP_LD && in[k].shift == A64_SPILL_RECORD &&
-            !(W.la[k] & RB(in[k].rd))) {
-            for (uint32_t j = k; j-- > W.bs[W.blk[k]];)
+            !(opt_scratch.la[k] & RB(in[k].rd))) {
+            for (uint32_t j = k; j-- > opt_scratch.bs[opt_scratch.blk[k]];)
                 if (in[j].opcode == A64_OP_ST &&
                     in[j].shift == A64_SPILL_RECORD && in[j].rd == in[k].rd &&
                     in[j].immediate == in[k].immediate) {

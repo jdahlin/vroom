@@ -34,7 +34,7 @@ VPRIV void ld_output_sections_adjust(struct ld_context *ctx)
             uint64_t a = ld_expression_value_resolve(
                 ctx, ld_expression_eval(ctx, os->align_expression));
             if (a > os->address_alignment)
-                os->address_alignment = a;
+                os->address_alignment = (uint32_t)a;
         }
         bool empty = true;
         for (uint32_t k = 0; k < os->commands.n && empty; k++)

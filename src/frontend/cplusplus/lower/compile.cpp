@@ -90,7 +90,8 @@ static void compile_predefines(const cplusplus_compile_options *o,
     const char *s = o->predefines, *end = s + o->predefines_length;
     const char *builtin_end = s + o->search->predef_cmdl;
     while (s < end) {
-        const char *eol = static_cast<const char *>(memchr(s, '\n', end - s));
+        const char *eol = static_cast<const char *>(
+            memchr(s, '\n', static_cast<size_t>(end - s)));
         const char *next = end;
         if (eol)
             next = eol + 1;

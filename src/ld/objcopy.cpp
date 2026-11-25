@@ -21,6 +21,7 @@
  * (name, size, address); symbols that llvm-nm treats as format specific
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
+#include "common/attributes.h"
 #include "common/cmdlib.h"
 #include "common/literal.h"
 #include "ld/ld.h"
@@ -261,7 +262,7 @@ static void objcopy_string_table_reserve(objcopy_string_table *t, uint32_t n)
 }
 static uint32_t objcopy_string_table_add(objcopy_string_table *t, const char *s)
 {
-    uint32_t len = strlen(s), h = vhash_string(s, len);
+    uint32_t len = (uint32_t)strlen(s), h = vhash_string(s, len);
     if (!t->hash_table || (t->count + 1) * 2 > t->hash_mask)
         objcopy_string_table_grow(t);
     uint32_t j = h & t->hash_mask;
@@ -284,7 +285,7 @@ static uint32_t objcopy_string_table_add(objcopy_string_table *t, const char *s)
 static uint64_t objcopy_string_table_find(const objcopy_string_table *t,
                                           const char *s)
 {
-    uint32_t len = strlen(s), h = vhash_string(s, len);
+    uint32_t len = (uint32_t)strlen(s), h = vhash_string(s, len);
     if (!len)
         return 0;
     uint32_t j = h & t->hash_mask;
@@ -594,7 +595,7 @@ static int objcopy_file_write(int dirfd, const char *path, const uint8_t *b,
             objcopy_error_report("write '%s': %s", path, strerror(errno));
             return 1;
         }
-        off += w;
+        off += (uint64_t)w;
     }
     /* rename over the target: the input may be the output */
     if (renameat(dirfd, tmp, dirfd, path)) {
@@ -878,7 +879,7 @@ static int objcopy_run(int dirfd)
                 if (sec[k].parent_segment < 0 ||
                     seg[sec[k].parent_segment].original_offset >
                         seg[i].original_offset)
-                    sec[k].parent_segment = i;
+                    sec[k].parent_segment = (int)i;
     }
     uint32_t ehs = e.program_header_count, phs = e.program_header_count + 1;
     seg[ehs] = VCC_LITERAL(objcopy_segment, .original_offset = 0,
@@ -899,7 +900,7 @@ static int objcopy_run(int dirfd)
             if (objcopy_segment_is_before(pa, ch) &&
                 (ch->parent_segment < 0 ||
                  objcopy_segment_is_before(pa, &seg[ch->parent_segment])))
-                ch->parent_segment = p;
+                ch->parent_segment = (int)p;
         }
     }
 
@@ -911,7 +912,7 @@ static int objcopy_run(int dirfd)
                                  objcopy_options.dump_sections[i]);
             continue;
         }
-        size_t nl = eq - objcopy_options.dump_sections[i];
+        size_t nl = (size_t)(eq - objcopy_options.dump_sections[i]);
         uint32_t k;
         for (k = 1; k < ns; k++)
             if (strlen(sec[k].name) == nl &&
@@ -986,7 +987,7 @@ static int objcopy_run(int dirfd)
         const elf_symbol *ys = (const elf_symbol *)st->data;
         const char *str =
             (const char *)e.file_bytes + e.section_headers[st->link].sh_offset;
-        nsym = st->size / sizeof(elf_symbol);
+        nsym = (uint32_t)(st->size / sizeof(elf_symbol));
         sym = own.symbols =
             (objcopy_symbol *)objcopy_zeroed_alloc(nsym, sizeof *sym);
         own.symbol_count = nsym;
@@ -1031,8 +1032,9 @@ static int objcopy_run(int dirfd)
 
                 if ((size_t)(eq - objcopy_options.redefine_symbols[r]) ==
                         strlen(y->name) &&
-                    !strncmp(y->name, objcopy_options.redefine_symbols[r],
-                             eq - objcopy_options.redefine_symbols[r])) {
+                    !strncmp(
+                        y->name, objcopy_options.redefine_symbols[r],
+                        (size_t)(eq - objcopy_options.redefine_symbols[r]))) {
                     free(y->new_name);
                     y->new_name = strdup(eq + 1);
                     break;
@@ -1163,6 +1165,10 @@ static int objcopy_run(int dirfd)
     for (uint32_t k = 1; k < ns; k++)
         if (!sec[k].removed)
             sec[k].new_index = ++nkept;
+    if (nkept + 1 >= SHN_LORESERVE) { /* e_shnum: no extended numbering */
+        objcopy_error_report("too many output sections (%u)", nkept + 1);
+        return 1;
+    }
     /* string tables */
     VCLEANUP(objcopy_string_table_free)
     objcopy_string_table names = {0}, symnames = {0};
@@ -1202,7 +1208,7 @@ static int objcopy_run(int dirfd)
                     continue;
                 uint16_t shndx = y->original_section_index;
                 if (shndx && shndx < 0xff00)
-                    shndx = shndx < ns ? sec[shndx].new_index : 0;
+                    shndx = shndx < ns ? (uint16_t)sec[shndx].new_index : 0;
                 d[y->new_index] = VCC_LITERAL(
                     elf_symbol,
                     .st_name =
@@ -1329,15 +1335,15 @@ static int objcopy_run(int dirfd)
     oh->e_machine = eh->e_machine;
     oh->e_version = eh->e_version;
     oh->e_entry = eh->e_entry;
-    oh->e_phnum = e.program_header_count;
+    oh->e_phnum = (uint16_t)e.program_header_count;
     oh->e_phoff = e.program_header_count ? seg[phs].offset : 0;
     oh->e_phentsize = e.program_header_count ? sizeof(elf_program_header) : 0;
     oh->e_flags = eh->e_flags;
     oh->e_ehsize = sizeof(elf_file_header);
     oh->e_shentsize = sizeof(elf_section_header);
     oh->e_shoff = shoff;
-    oh->e_shnum = nkept + 1;
-    oh->e_shstrndx = sec[shstr_i].new_index;
+    oh->e_shnum = (uint16_t)(nkept + 1);
+    oh->e_shstrndx = (uint16_t)sec[shstr_i].new_index;
     for (uint32_t i = 0; i < e.program_header_count; i++) {
         elf_program_header *p = (elf_program_header *)(b + seg[phs].offset) + i;
         *p = seg[i].program_header;
@@ -1645,7 +1651,7 @@ static bool nm_coff_symbols(const uint8_t *p, size_t n, bool undef, bool defd,
                 free(v);
                 return false;
             }
-            name = (char *)s;
+            name = VUNCONST(char *, s);
         }
         bool external = klass == IMAGE_SYM_CLASS_EXTERNAL,
              weak_external = klass == IMAGE_SYM_CLASS_WEAK_EXTERNAL;
@@ -1837,18 +1843,18 @@ static void nm_symbols_print(FILE *out, nm_symbol *v, uint32_t m,
         memcpy(buf + len, pfx, pl);
         len += pl;
         if (s->defined)
-            len += sprintf(buf + len, "%0*llx ", width,
-                           (unsigned long long)s->addr);
+            len += (size_t)(sprintf(buf + len, "%0*llx ", width,
+                                    (unsigned long long)s->addr));
         else
-            len += sprintf(buf + len, "%*s ", width, "");
+            len += (size_t)sprintf(buf + len, "%*s ", width, "");
         if (size) {
             if (s->defined)
-                len += sprintf(buf + len, "%0*llx ", width,
-                               (unsigned long long)s->size);
+                len += (size_t)(sprintf(buf + len, "%0*llx ", width,
+                                        (unsigned long long)s->size));
             else
-                len += sprintf(buf + len, "%*s ", width, "");
+                len += (size_t)sprintf(buf + len, "%*s ", width, "");
         }
-        len += sprintf(buf + len, "%c %s\n", s->type, s->name);
+        len += (size_t)sprintf(buf + len, "%c %s\n", s->type, s->name);
     }
     fwrite(buf, 1, len, out);
     free(buf);
@@ -1982,7 +1988,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
             (const elf_symbol *)(e.file_bytes + st->sh_offset);
         const char *str = (const char *)e.file_bytes +
                           e.section_headers[st->sh_link].sh_offset;
-        uint32_t n = st->sh_size / sizeof(elf_symbol);
+        uint32_t n = (uint32_t)(st->sh_size / sizeof(elf_symbol));
         nm_symbol *v = (nm_symbol *)objcopy_zeroed_alloc(n, sizeof *v);
         uint32_t m = 0;
         /* -D: symbol versions as llvm-nm (name@@VER defined, name@VER hidden or undefined) */

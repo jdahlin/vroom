@@ -14,8 +14,9 @@
 /* one line at a time from all threads and all links of the process */
 static pthread_mutex_t ld_diagnostics_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void ld_diagnostic_print(struct ld_diagnostics *d, const char *kind,
-                                const char *fmt, va_list ap)
+static __attribute__((format(printf, 3, 0))) void
+ld_diagnostic_print(struct ld_diagnostics *d, const char *kind, const char *fmt,
+                    va_list ap)
 {
     va_list aq;
     char small[512], *m = small;

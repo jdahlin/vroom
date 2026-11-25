@@ -1441,10 +1441,10 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
                     if (t.kind != type_kind::class_type &&
                         t.kind != type_kind::enumeration)
                         continue;
-                    for (entity_index c = entity_table[t.entity].enclosing; c;
-                         c = entity_table[c].enclosing)
-                        if (entity_table[c].kind == entity_kind::class_type &&
-                            !entity_table[c].name)
+                    for (entity_index c2 = entity_table[t.entity].enclosing; c2;
+                         c2 = entity_table[c2].enclosing)
+                        if (entity_table[c2].kind == entity_kind::class_type &&
+                            !entity_table[c2].name)
                             return CONST_UNKNOWN;
                 }
             }
@@ -2663,7 +2663,7 @@ constness semantic_analysis::evaluate_array_pointer(constant_evaluation &state,
                 v.kind = constant_value_kind::pointer;
                 v.count = 1;
                 v.base = opaque_array_base + array;
-                v.extent = t.bound;
+                v.extent = static_cast<uint32_t>(t.bound);
                 v.offset = 0;
                 v.first = element_place | v.base;
                 return constness::constant;

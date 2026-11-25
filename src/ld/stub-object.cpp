@@ -76,7 +76,7 @@ VPRIV ld_object *ld_stub_object_create(struct ld_context *ctx,
     ld_object *o = (ld_object *)ld_region_alloc(sizeof *o);
     o->path = "<vroom-stubs>";
     o->file_bytes = b;
-    o->size = (uint8_t *)shstr + 32 + datasz - b;
+    o->size = (size_t)((uint8_t *)shstr + 32 + datasz - b);
     o->section_headers = sh;
     o->section_header_count = 5;
     o->section_name_table = shstr;

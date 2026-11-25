@@ -352,16 +352,16 @@ analysis_result semantic_analysis::overloaded_operator(
     if (operators_held) {
         /* (the detail names the first declaration not analysed that may
            declare an operator function: --why follows it) */
-        char at[256] = "a declaration not analysed";
+        char at2[256] = "a declaration not analysed";
         if (operators_held_at) {
             source_position where = tokens.position(operators_held_at);
-            snprintf(at, sizeof at,
+            snprintf(at2, sizeof at2,
                      "an operator function may be declared by the "
                      "declaration at %s:%u:%u, not analysed",
                      where.file_name, where.line, where.column);
         }
         analysis_result refused =
-            not_supported_because(n, "over.match.oper", at);
+            not_supported_because(n, "over.match.oper", at2);
         unsupported[unsupported.size() - 1].holder = operators_holder;
         return refused;
     }

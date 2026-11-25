@@ -95,7 +95,7 @@ uint32_t c_lowering::typeinfo_class_vtable(const char *name)
     for (size_t i = 0; i < runtime_vtable_names.size(); i++)
         if (!strcmp(runtime_vtable_names[i], name))
             return runtime_vtables[i];
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     uint32_t s =
         ast_builder_symbol(c, AST_SYMBOL_VARIABLE, name, strlen(name),
                            ast_builder_type_array(c, vp, 3, true),
@@ -114,7 +114,7 @@ uint32_t c_lowering::string_symbol_pointer(uint32_t s, ast_qualified_type array,
     uint32_t object = c_variable(c, s, array);
     address_taken(object);
     return cast(cast(object, pointer_to(element), AST_CAST_ARRAY_DECAY),
-                pointer_to(v), AST_CAST_POINTER_TO_POINTER);
+                pointer_to(void_type), AST_CAST_POINTER_TO_POINTER);
 }
 
 /*
@@ -134,7 +134,7 @@ uint32_t c_lowering::typeinfo(type_index t, token_index at)
         if (typeinfo_types[i] == t)
             return typeinfo_symbols[i];
     const struct type r = analysis.type_table[t];
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     owned_buffer name;
     if (!itanium_typeinfo_name(analysis, tokens.pp, t, 0, name.get()))
         return fail("a std::type_info object whose symbol is not mangled", at);
@@ -356,8 +356,8 @@ uint32_t c_lowering::typeinfo_address(type_index t, token_index at)
     size_t i = 0;
     while (typeinfo_symbols[i] != s)
         i++;
-    return cast(element_address(s, typeinfo_arrays[i], 0), pointer_to(v),
-                AST_CAST_POINTER_TO_POINTER);
+    return cast(element_address(s, typeinfo_arrays[i], 0),
+                pointer_to(void_type), AST_CAST_POINTER_TO_POINTER);
 }
 
 } // namespace cplusplus::lowering

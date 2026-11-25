@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "common/attributes.h"
 #include "common/intern.h"
 #include "frontend/lex/lex.h"
 #include "utils/fixdep.h"
@@ -126,7 +127,7 @@ static char *fixdep_configs_scan(const char *text)
 /* f's names, computed once per file (the cache entry is immortal); a racing thread may scan too */
 static const char *fixdep_file_configs(const lex_file *f)
 {
-    lex_file *w = (lex_file *)f;
+    lex_file *w = VUNCONST(lex_file *, f);
     char *names = __atomic_load_n(&w->fixdep, __ATOMIC_ACQUIRE), *exp = NULL;
 
     if (names)

@@ -423,7 +423,7 @@ VPRIV codegen_value ld_cast(codegen_context *e, codegen_value v,
         if (v.kind == CODEGEN_VALUE_CONSTANT) {
             i128 x = codegen_integer_truncate(c, v.integer, from);
 
-            return codegen_value_constant(vsoftfloat_of_integer(x, sg));
+            return codegen_value_constant((i128)vsoftfloat_of_integer(x, sg));
         }
         if (fs == 16) {
             fn = sg ? CODEGEN_LIBRARY_FLOATTITF : CODEGEN_LIBRARY_FLOATUNTITF,

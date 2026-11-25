@@ -652,7 +652,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         return result;
     }
     owned_array<SyntaxRef> bodies;
-    entity_index first_member_entity = entity_table.size();
+    entity_index first_member_entity =
+        static_cast<entity_index>(entity_table.size());
     size_t nested_start = nested_bodies.size();
     auto spec = n.class_specifier().member_specification();
     token_index outer_members_first = defining_members_first;
@@ -690,7 +691,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             result = worse(result, not_supported(member));
             continue;
         }
-        entity_index before_member = entity_table.size();
+        entity_index before_member =
+            static_cast<entity_index>(entity_table.size());
         analysis_result declared =
             member_declaration(c, declaration, access, bodies);
         /* [temp.inst]/3: a specialization's member class is declared, not
@@ -797,11 +799,11 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 template_arguments[instantiation.first_argument + i];
             if (arg.kind != template_argument::kind_t::type)
                 continue;
-            const auto type = type_table[arg.type.unqualified()];
+            const auto type2 = type_table[arg.type.unqualified()];
             /* no require_complete: an argument named only stays so
                ([temp.inst]/2) */
-            if (type.kind == type_kind::class_type &&
-                !entity_table[type.entity].size) {
+            if (type2.kind == type_kind::class_type &&
+                !entity_table[type2.entity].size) {
                 incomplete_argument = true;
                 break;
             }
@@ -1024,10 +1026,10 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
     if (sole && defining_class) {
         /* [class.nest]: a nested class declared; one declared before in
            the class is named again */
-        entity_index e = entity_table.find(defining_class, name);
-        if (e && entity_table[e].hidden_type)
-            e = entity_table[e].hidden_type;
-        if (!e) {
+        entity_index e4 = entity_table.find(defining_class, name);
+        if (e4 && entity_table[e4].hidden_type)
+            e4 = entity_table[e4].hidden_type;
+        if (!e4) {
             /* [class.nest]/3: "If class X is defined in a namespace scope,
                a nested class Y may be declared in class X and later defined
                in the definition of class X or be later defined in a
@@ -1040,27 +1042,27 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
             type = entity_table[c].type.unqualified();
             return analysis_result::well_formed;
         }
-        if (entity_table[e].kind != entity_kind::class_type ||
-            entity_table[e].enclosing != defining_class)
+        if (entity_table[e4].kind != entity_kind::class_type ||
+            entity_table[e4].enclosing != defining_class)
             return not_supported(n, "class.nest");
-        c = e;
+        c = e4;
     } else if (sole) {
         /* [basic.scope.pdecl]/7.1: only the scope that contains the
            declaration is searched: a class of an enclosing scope is not
            the one declared */
-        entity_index e = entity_table.find(target, name);
-        if (e && (entity_table[e].kind == entity_kind::none ||
-                  entity_table.bound_by_using(target, name)))
+        entity_index e3 = entity_table.find(target, name);
+        if (e3 && (entity_table[e3].kind == entity_kind::none ||
+                   entity_table.bound_by_using(target, name)))
             return not_supported(n, "basic.lookup.elab");
-        if (e && entity_table[e].kind == entity_kind::class_type &&
-            entity_table[e].enclosing == target) {
-            c = e;
-        } else if (e && entity_table[e].hidden_type) {
-            c = entity_table[e].hidden_type;
+        if (e3 && entity_table[e3].kind == entity_kind::class_type &&
+            entity_table[e3].enclosing == target) {
+            c = e3;
+        } else if (e3 && entity_table[e3].hidden_type) {
+            c = entity_table[e3].hidden_type;
             if (entity_table[c].kind != entity_kind::class_type)
                 return not_supported(n, "basic.lookup.elab");
-        } else if (e && entity_table[e].kind != entity_kind::variable &&
-                   entity_table[e].kind != entity_kind::function) {
+        } else if (e3 && entity_table[e3].kind != entity_kind::variable &&
+                   entity_table[e3].kind != entity_kind::function) {
             /* a typedef-name, an enumeration, a namespace of the name:
                clang's error, by more than one rule */
             return not_supported(n, "basic.lookup.elab");
@@ -1098,9 +1100,9 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
             /* declared in target; a name bound there by a declaration
                analysis did not follow, or by a using-declaration, may be
                the class's */
-            entity_index e = entity_table.find(target, name);
-            if (e && (entity_table[e].kind == entity_kind::none ||
-                      entity_table.bound_by_using(target, name)))
+            entity_index e2 = entity_table.find(target, name);
+            if (e2 && (entity_table[e2].kind == entity_kind::none ||
+                       entity_table.bound_by_using(target, name)))
                 return not_supported(n, "basic.lookup.elab");
             c = declare_class(target, name, is_union);
             declared(c);
@@ -1207,8 +1209,8 @@ bool semantic_analysis::is_aggregate(entity_index c) const
     if (x.base_count && !b.has(language_feature::aggregates_with_bases))
         return false;
     for (uint32_t i = 0; i < x.base_count; i++) {
-        const entity &b = entity_table[class_bases[x.first_base + i]];
-        if (b.virtual_base || b.access)
+        const entity &b2 = entity_table[class_bases[x.first_base + i]];
+        if (b2.virtual_base || b2.access)
             return false;
     }
     for (uint32_t i = 0; i < x.member_count; i++) {
@@ -1327,17 +1329,18 @@ bool semantic_analysis::accessible_here(entity_index member,
        access to names outside the function as does the enclosing
        function" */
     /* the use is in a member of class k */
-    auto as_member_of = [&](entity_index k) -> bool {
-        if (k == x.enclosing)
+    auto as_member_of = [&](entity_index member_class) -> bool {
+        if (member_class == x.enclosing)
             return true;
         if (x.access != 1)
             return false;
         bool ambiguous = false;
-        if (!base_step(k, x.enclosing, ambiguous))
+        if (!base_step(member_class, x.enclosing, ambiguous))
             return false;
-        if (!object_class || !x.nonstatic_member || object_class == k)
+        if (!object_class || !x.nonstatic_member ||
+            object_class == member_class)
             return true;
-        return base_step(object_class, k, ambiguous) != 0;
+        return base_step(object_class, member_class, ambiguous) != 0;
     };
     /* [class.friend]/2, [class.access]/6: the template-head of a friend
        class template belongs to the befriended entity */
@@ -2257,7 +2260,7 @@ analysis_result semantic_analysis::member_declarator(
         first.kind = entity_kind::variable;
         first.type = type;
         first.claimable = declarations_claimable;
-        declared.append(first);
+        declared_names.append(first);
     } else {
         if (s.inline_)
             /* [dcl.inline]/5: "The inline specifier shall not appear on a
@@ -2296,11 +2299,11 @@ analysis_result semantic_analysis::member_declarator(
                (an incomplete argument is fine: D<E> in E, with D's member
                function bodies instantiated only when used, /4) */
             entity_index done = 0;
-            analysis_result r = define_class_outside(
+            analysis_result r2 = define_class_outside(
                 SyntaxRef(), entity_table[record.entity].instantiation - 1,
                 done);
-            if (r != analysis_result::well_formed)
-                return r;
+            if (r2 != analysis_result::well_formed)
+                return r2;
             size = size_of_type(type);
         }
         bool is_reference = record.kind == type_kind::lvalue_reference ||
@@ -2731,8 +2734,8 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         declaration_deduced = saved;
         if (r != analysis_result::well_formed)
             return r;
-        if (!declared.empty() && declared.back().entity == e)
-            declared.back().type = type;
+        if (!declared_names.empty() && declared_names.back().entity == e)
+            declared_names.back().type = type;
         deduced = true;
     }
     uint32_t cv = cv_of(type_table, type);
@@ -2885,7 +2888,7 @@ analysis_result semantic_analysis::static_member_definition(
         d.kind = entity_kind::variable;
         d.type = type;
         d.claimable = declarations_claimable;
-        declared.append(d);
+        declared_names.append(d);
         return analysis_result::well_formed;
     }
     /* [basic.def.odr]/1 */
@@ -2915,7 +2918,7 @@ analysis_result semantic_analysis::static_member_definition(
     d.kind = entity_kind::variable;
     d.type = type;
     d.claimable = declarations_claimable;
-    declared.append(d);
+    declared_names.append(d);
     return analysis_result::well_formed;
 }
 

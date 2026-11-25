@@ -109,12 +109,12 @@ static void x64_encode_register(XOp *operand, int r, int size)
     operand->kind = XK_REG;
     if (X64_REGISTER_IS_XMM(r)) {
         operand->cls = XR_XMM;
-        operand->reg = r - XMM0;
+        operand->reg = (uint8_t)(r - XMM0);
         operand->size = 16;
     } else {
         operand->cls = XR_GPR;
-        operand->reg = r;
-        operand->size = size;
+        operand->reg = (uint8_t)r;
+        operand->size = (uint8_t)size;
         operand->needrex = size == 1 && r >= 4;
     }
 }
@@ -149,7 +149,7 @@ static void x64_encode_memory(XOp *operand, codegen_commit_context *R,
 {
     memset(operand, 0, sizeof *operand);
     operand->kind = XK_MEM;
-    operand->base = i->registers[1];
+    operand->base = (int8_t)i->registers[1];
     operand->index = -1;
     operand->scale = 1;
     operand->hasv = 1;
@@ -162,8 +162,8 @@ static void x64_encode_memory(XOp *operand, codegen_commit_context *R,
         operand->v.c = i->offset;
     }
     if (i->opcode == X64_OP_LDX || i->opcode == X64_OP_STX) {
-        operand->index = i->registers[3];
-        operand->scale = 1u << i->shift;
+        operand->index = (int8_t)i->registers[3];
+        operand->scale = (uint8_t)(1u << i->shift);
     }
 }
 
@@ -429,8 +429,8 @@ VPRIV int x64_function_commit(codegen_commit_context *R, const char *p,
         case X64_OP_FSUB:
         case X64_OP_FMUL:
         case X64_OP_FDIV: {
-            static const char *const op[] = {"add", "sub", "mul", "div"};
-            snprintf(name, sizeof name, "%s%s", op[i->opcode - X64_OP_FADD],
+            static const char *const op2[] = {"add", "sub", "mul", "div"};
+            snprintf(name, sizeof name, "%s%s", op2[i->opcode - X64_OP_FADD],
                      sz == 4 ? "ss" : "sd");
             mn = name;
             sz = 0;

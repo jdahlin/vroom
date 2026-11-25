@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "common/attributes.h"
 #include "common/fail.h"
 #include "common/response-files.h"
 
@@ -41,8 +42,8 @@ bool vresponse_files_expand(int *pargc, char ***pargv, int dirfd,
     /* n == i throughout: out[n] is written only after argv[i] is read, and
 	 * after the first expansion out and argv are the same vector */
     int argc = *pargc, n = 0, nexp = 0;
-    char **argv = *pargv,
-         **out = (char **)(vresponse_alloc(keep, (argc + 1) * sizeof *out));
+    char **argv = *pargv, **out = (char **)(vresponse_alloc(
+                              keep, ((size_t)(argc + 1)) * sizeof *out));
     for (int i = 0; i < argc; i++) {
         const char *a = argv[i];
         char *text = NULL;
@@ -67,7 +68,7 @@ bool vresponse_files_expand(int *pargc, char ***pargv, int dirfd,
                 close(fd);
         }
         if (!text) {
-            out[n++] = (char *)a;
+            out[n++] = VUNCONST(char *, a);
             continue;
         }
         /* split in place: a word never grows when its quotes are removed */
@@ -99,11 +100,11 @@ bool vresponse_files_expand(int *pargc, char ***pargv, int dirfd,
         }
         /* the words replace @FILE; an @ among them is expanded on the next pass */
         int rest = argc - i - 1;
-        char **nargv = (char **)(vresponse_alloc(keep, (n + nw + rest + 1) *
-                                                           sizeof *nargv));
-        memcpy(nargv, out, n * sizeof *nargv);
-        memcpy(nargv + n, words, nw * sizeof *nargv);
-        memcpy(nargv + n + nw, argv + i + 1, rest * sizeof *nargv);
+        char **nargv = (char **)(vresponse_alloc(
+            keep, ((size_t)(n + nw + rest + 1)) * sizeof *nargv));
+        memcpy(nargv, out, (size_t)n * sizeof *nargv);
+        memcpy(nargv + n, words, (size_t)nw * sizeof *nargv);
+        memcpy(nargv + n + nw, argv + i + 1, (size_t)rest * sizeof *nargv);
         nargv[n + nw + rest] = NULL;
         argv = out = nargv, argc = n + nw + rest;
         i = n - 1; /* rescan from the first word */

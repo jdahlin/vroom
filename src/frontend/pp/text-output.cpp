@@ -631,7 +631,7 @@ pp_pragma_message_render(const char *s, size_t n, char *out, size_t cap)
                                                : (s[1] | 32) - 'a' + 10);
                         }
                         nu = v < 0x80 ? 1 : v < 0x800 ? 2 : v < 0x10000 ? 3 : 4;
-                        if (v > 0x10ffff || o + 4 * nu + 4 > cap)
+                        if (v > 0x10ffff || o + (size_t)(4 * nu) + 4 > cap)
                             return 0;
                         if (nu == 1)
                             u8[0] = (unsigned char)v;
@@ -691,15 +691,15 @@ static inline void pp_token_render(pp *p, const ptok *t)
 
     if (unlikely(p->output_text_mode > 1) &&
         t->kind != PP_TOKEN_KIND_DIRECTIVE_LINE) {
-        pp_context *fc = &p->contexts[p->context_depth - 1];
+        pp_context *fc2 = &p->contexts[p->context_depth - 1];
 
-        if (fc->type == PP_CONTEXT_FILE &&
+        if (fc2->type == PP_CONTEXT_FILE &&
             !(t->flags & PP_TOKEN_FLAG_FROM_MACRO) &&
-            p->files[fc->file_index].comment_position &&
-            t->s >= p->files[fc->file_index].comment_position &&
-            t->s < fc->source + fc->lex_file->size) {
-            pp_comments_flush(p, fc, t->s);
-            p->files[fc->file_index].comment_position = t->s + t->len;
+            p->files[fc2->file_index].comment_position &&
+            t->s >= p->files[fc2->file_index].comment_position &&
+            t->s < fc2->source + fc2->lex_file->size) {
+            pp_comments_flush(p, fc2, t->s);
+            p->files[fc2->file_index].comment_position = t->s + t->len;
         }
         p->comment_starts_line =
             0; /* taken by a comment printed now, else by this token */

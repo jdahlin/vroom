@@ -19,7 +19,7 @@ CC_PRIVATE void cc_declaration_specifiers_unknown_type_report(
     cc *c, cc_declaration_specifiers *ds, bool allow_sc)
 {
     bool ud = c->undecl_ty;
-    uint32_t kw, loc = tok(c)->loc, s;
+    uint32_t kw = 0, loc = tok(c)->loc, s;
 
     c->undecl_ty = 0;
     s = cc_undeclared_report(
@@ -465,7 +465,7 @@ cc_declaration_specifiers_tag_semicolon_recover(cc *c, int kind)
         return;
     if (c->ntk < 1)
         c->ntk = 1;
-    memmove(t + 1, t, c->ntk * sizeof(*t));
+    memmove(t + 1, t, (size_t)c->ntk * sizeof(*t));
     c->ntk++;
     t[0] = VCC_LITERAL(ptok, .s = ";", .len = 1, .loc = e,
                        .kind = LEX_TOKEN_SEMICOLON);
@@ -554,14 +554,14 @@ cc_declaration_specifiers_implicit_int_error(cc *c)
 {
     uint32_t i = 0, at = tok(c)->loc;
 
-    while (i < 16 &&
-           (cc_token_peek(c, i)->kind == LEX_TOKEN_STAR ||
-            cc_token_peek(c, i)->kind == LEX_TOKEN_LEFT_PAREN ||
-            cc_token_kind_is_qualifier(cc_token_keyword(cc_token_peek(c, i)))))
+    while (i < 16 && (cc_token_peek(c, (int)i)->kind == LEX_TOKEN_STAR ||
+                      cc_token_peek(c, (int)i)->kind == LEX_TOKEN_LEFT_PAREN ||
+                      cc_token_kind_is_qualifier(
+                          cc_token_keyword(cc_token_peek(c, (int)i)))))
         i++;
-    if (cc_token_peek(c, i)->kind == LEX_TOKEN_IDENTIFIER &&
-        !cc_token_keyword(cc_token_peek(c, i)))
-        at = cc_token_peek(c, i)->loc;
+    if (cc_token_peek(c, (int)i)->kind == LEX_TOKEN_IDENTIFIER &&
+        !cc_token_keyword(cc_token_peek(c, (int)i)))
+        at = cc_token_peek(c, (int)i)->loc;
     if (c->o->std == 23)
         cc_report_error(c, at,
                         "a type specifier is required for all declarations");
@@ -941,20 +941,21 @@ again:
                     cc_declaration_specifiers_tag_body_end(c, kind);
                     if (unlikely(cc_extension_is_enabled(
                             c, "gnu-empty-struct", cc_warning_group_gnu))) {
-                        const tag *r = &c->tags[ti];
-                        bool named = false;
+                        const tag *r2 = &c->tags[ti];
+                        bool named2 = false;
 
-                        for (uint32_t i = 0; i < r->nfield && !named; i++)
-                            named = r->f[i].name ||
-                                    (!r->f[i].bitfield &&
-                                     cc_type_is_record(c, r->f[i].ty));
-                        if (!named)
+                        for (uint32_t i = 0; i < r2->nfield && !named2; i++)
+                            named2 = r2->f[i].name ||
+                                     (!r2->f[i].bitfield &&
+                                      cc_type_is_record(c, r2->f[i].ty));
+                        if (!named2)
                             cc_report_extension(
                                 c, "gnu-empty-struct", cc_warning_group_gnu,
                                 loc,
-                                r->nfield ? "%s without named members is a GNU "
-                                            "extension"
-                                          : "empty %s is a GNU extension",
+                                r2->nfield
+                                    ? "%s without named members is a GNU "
+                                      "extension"
+                                    : "empty %s is a GNU extension",
                                 kind == AST_TYPE_UNION ? "union" : "struct");
                     }
                 }

@@ -23,7 +23,7 @@ static void ld_merge_pieces_split(void *arg, size_t i)
                                     is->name);
                     return;
                 }
-                q = z - d + 1;
+                q = (uint64_t)(z - d + 1);
             } else {
                 while (q + es <= n) {
                     bool zero = true;
@@ -65,12 +65,12 @@ static void ld_merge_pieces_split(void *arg, size_t i)
             p = q;
         }
     } else {
-        cnt = n / es;
+        cnt = (uint32_t)(n / es);
         m->input_offsets = (uint32_t *)ld_region_alloc(cnt * 4);
         m->hash = (uint32_t *)ld_region_alloc(cnt * 4);
         m->output_offsets = (uint32_t *)ld_region_alloc(cnt * 4);
         for (uint32_t k = 0; k < cnt; k++) {
-            m->input_offsets[k] = k * es;
+            m->input_offsets[k] = (uint32_t)(k * es);
             m->hash[k] = (uint32_t)vdigest_xxh3(d + (uint64_t)k * es, es) >> 1;
         }
     }
@@ -81,7 +81,7 @@ static void ld_merge_pieces_split(void *arg, size_t i)
 static void ld_merge_shard_deduplicate(void *arg, size_t job_i)
 {
     struct ld_context *ctx = (struct ld_context *)arg;
-    uint32_t mi = job_i / 32, shard = job_i % 32;
+    uint32_t mi = (uint32_t)(job_i / 32), shard = job_i % 32;
     ld_merge_section *mg = &ctx->inputs.merge_sections.v[mi];
     uint32_t total = 0;
     for (uint32_t k = 0; k < mg->members.n; k++)

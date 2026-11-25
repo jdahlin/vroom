@@ -94,7 +94,7 @@ static void overflow_wide_operand(codegen_context *e, uint32_t n, int64_t sl)
         if (bits < 64)
             a64_record_emit_bitfield(e, sign ? A64_OP_SBFM : A64_OP_UBFM, 1,
                                      v.register_number, v.register_number, 0,
-                                     bits - 1);
+                                     (int)(bits - 1));
         if (sign)
             shift_imm(e, A64_OP_ASRV, 1, v.register_high, v.register_number,
                       63);
@@ -103,7 +103,7 @@ static void overflow_wide_operand(codegen_context *e, uint32_t n, int64_t sl)
     } else if (bits < 128) {
         a64_record_emit_bitfield(e, sign ? A64_OP_SBFM : A64_OP_UBFM, 1,
                                  v.register_high, v.register_high, 0,
-                                 bits - 65);
+                                 (int)(bits - 65));
     }
     if (sign)
         shift_imm(e, A64_OP_ASRV, 1, ext, v.register_high, 63);
@@ -226,14 +226,14 @@ static codegen_value gen_overflow_wide(codegen_context *e, const node *x,
     if (bits <= 64) {
         if (bits < 64)
             a64_record_emit_bitfield(e, sign ? A64_OP_SBFM : A64_OP_UBFM, 1, lo,
-                                     lo, 0, bits - 1);
+                                     lo, 0, (int)(bits - 1));
         if (sign)
             shift_imm(e, A64_OP_ASRV, 1, hi, lo, 63);
         else
             a64_record_emit_move_immediate(e, 1, hi, 0);
     } else if (bits < 128) {
         a64_record_emit_bitfield(e, sign ? A64_OP_SBFM : A64_OP_UBFM, 1, hi, hi,
-                                 0, bits - 65);
+                                 0, (int)(bits - 65));
     }
     if (sign)
         shift_imm(e, A64_OP_ASRV, 1, b, hi, 63);
@@ -779,7 +779,7 @@ static codegen_value gen_atomic(codegen_context *e, const node *x,
     }
     case CC_BUILTIN_ATOMIC_STORE_N:
     case CC_BUILTIN_ATOMIC_STORE: {
-        int r;
+        int r = 0;
 
         if (id == CC_BUILTIN_ATOMIC_STORE) {
             int rv = toreg(e, &v1);
@@ -839,7 +839,7 @@ static codegen_value gen_atomic(codegen_context *e, const node *x,
         if (n < 4)
             extend(e, cmpv, cmpv, (int)n, false),
                 extend(e, old, old, (int)n, false);
-        a64_record_emit_three_registers(e, A64_OP_SUBS, xs, ZR, old, cmpv);
+        a64_record_emit_three_registers(e, A64_OP_SUBS, (int)xs, ZR, old, cmpv);
         ok = treg(e);
         a64_record_emit_condition_set(e, ok, A64_CONDITION_EQ);
         a64_branch_compare_zero_emit(e, true, 0, ok, l);
@@ -875,7 +875,8 @@ static codegen_value gen_atomic(codegen_context *e, const node *x,
                 cmpv); /* casal b/h zero-extends old */
             tfree(e, cmpv);
         } else {
-            a64_record_emit_three_registers(e, A64_OP_SUBS, xs, ZR, old, re);
+            a64_record_emit_three_registers(e, A64_OP_SUBS, (int)xs, ZR, old,
+                                            re);
         }
         a64_record_emit_condition_set(e, old, A64_CONDITION_EQ);
         res = codegen_value_register(old);
@@ -1009,7 +1010,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
                                 .align = codegen_type_alignment(c, re),
                                 .offset = (int64_t)i *
                                           (int64_t)codegen_type_size(c, re)};
-            codegen_value v;
+            codegen_value v3;
 
             if (x->aux == CC_BUILTIN_SHUFFLEVECTOR) {
                 int64_t k = (int64_t)c->ipool[N(arg[2 + i])->a];
@@ -1023,9 +1024,9 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
                 if (codegen_type_is_bool_vector(c, at)) {
                     int64_t j = k < (int64_t)na ? k : k - na;
                     s.offset = j / 8, s.is_bitfield = 1, s.width = 1,
-                    s.bit_offset = j % 8;
+                    s.bit_offset = (uint16_t)(j % 8);
                 }
-                v = k < 0 ? codegen_value_constant(0) : load(e, &s, ae);
+                v3 = k < 0 ? codegen_value_constant(0) : load(e, &s, ae);
             } else {
                 codegen_lvalue s = {
                     .kind = CODEGEN_LVALUE_REGISTER,
@@ -1043,14 +1044,14 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
                 if (codegen_type_is_bool_vector(c, at))
                     s.offset = i / 8, s.is_bitfield = 1, s.width = 1,
                     s.bit_offset = i % 8;
-                v = cast(e, load(e, &s, ae), ae, re,
-                         KIND(c, re) == AST_TYPE_BOOL ? AST_CAST_BOOL : ck);
+                v3 = cast(e, load(e, &s, ae), ae, re,
+                          KIND(c, re) == AST_TYPE_BOOL ? AST_CAST_BOOL : ck);
             }
             if (codegen_type_is_bool_vector(c, x->ty))
                 d.offset = i / 8, d.is_bitfield = 1, d.width = 1,
                 d.bit_offset = i % 8;
-            store(e, &d, re, &v);
-            val_free(e, &v);
+            store(e, &d, re, &v3);
+            val_free(e, &v3);
         }
         tfree(e, ra);
         if (rb >= 0)
@@ -1410,7 +1411,7 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
             case CC_BUILTIN_CLZLL:
                 if (!u)
                     goto runtime;
-                res = __builtin_clzll((uint64_t)u) - (64 - bits);
+                res = (unsigned)(__builtin_clzll((uint64_t)u)) - (64 - bits);
                 break;
             case CC_BUILTIN_CTZ:
             case CC_BUILTIN_CTZL:

@@ -37,7 +37,7 @@ VPRIV void ld_atomic_u64_min(_Atomic uint64_t *p, uint64_t v)
 }
 VPRIV void ld_atomic_u8_min(_Atomic uint8_t *p, uint8_t v)
 {
-    v = ~v;
+    v = (uint8_t)~v;
     uint8_t cur = atomic_load_explicit(p, memory_order_relaxed);
     while (v > cur && !atomic_compare_exchange_weak(p, &cur, v))
         ;

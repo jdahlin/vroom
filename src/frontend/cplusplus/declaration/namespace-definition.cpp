@@ -356,7 +356,7 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
             components.append(x);
             continue;
         }
-        if (p.keyword_of(t) == standard_keyword::inline_)
+        if (syntax_parser.keyword_of(t) == standard_keyword::inline_)
             inline_next = true;
     }
     if (components.empty()) {

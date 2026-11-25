@@ -36,7 +36,7 @@ bool preprocessor::begins_module_directive(const preprocessing_token &next)
 bool preprocessor::names_object_like_macro(const preprocessing_token &t)
 {
     int32_t m = identifiers[identifier(t)].macro;
-    return m >= 0 && !macros[m].function_like;
+    return m >= 0 && !macros[static_cast<size_t>(m)].function_like;
 }
 
 } // namespace cplusplus

@@ -348,14 +348,15 @@ static unsigned a64_encode_record(const a64_record *i, uint32_t *w,
         return 1;
     case A64_OP_LDX:
     case A64_OP_STX: /* register offset */
-        w[0] =
-            (uint32_t)i->size << 30 | 0x38200800u |
-            (i->opcode == A64_OP_STX ? 0
-                                     : a64_load_opcodes[i->size][i->condition])
-                << 22 |
-            a64_encode_register_field(i->rm) << 16 | (uint32_t)i->ra << 13 |
-            (i->shift ? 1u << 12 : 0) | a64_encode_register_field(i->rn) << 5 |
-            a64_encode_register_field(i->rd);
+        w[0] = (uint32_t)i->size << 30 | 0x38200800u |
+               (unsigned)((i->opcode == A64_OP_STX
+                               ? 0
+                               : a64_load_opcodes[i->size][i->condition])
+                          << 22) |
+               a64_encode_register_field(i->rm) << 16 | (uint32_t)i->ra << 13 |
+               (i->shift ? 1u << 12 : 0) |
+               a64_encode_register_field(i->rn) << 5 |
+               a64_encode_register_field(i->rd);
         return 1;
     case A64_OP_LDP:
     case A64_OP_STP:

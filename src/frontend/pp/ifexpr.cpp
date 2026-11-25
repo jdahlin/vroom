@@ -491,7 +491,7 @@ VPRIV bool pp_if_evaluate(pp *p, const pp_context *fc, uint32_t b, uint32_t e)
     if (!E.failed && E.lookahead.kind != LEX_TOKEN_EOF) {
         /* clang: at the token, the operand before it underlined */
         diag_span sp = {E.primary_first, pp_token_end_find(p, E.primary_last)};
-        diag_info d = {
+        diag_info d2 = {
             "error", E.lookahead.loc,
             &sp,     E.primary_first && E.primary_last >= E.primary_first,
             NULL,    0,
@@ -501,10 +501,10 @@ VPRIV bool pp_if_evaluate(pp *p, const pp_context *fc, uint32_t b, uint32_t e)
 
         if (E.lookahead.flags &
             PP_TOKEN_FLAG_FROM_MACRO) /* (the note at the macro's body token) */
-            d.ms = pp_token_spell(&E.lookahead, tmp, &ml),
-            d.mlen = (uint32_t)ml;
+            d2.ms = pp_token_spell(&E.lookahead, tmp, &ml),
+            d2.mlen = (uint32_t)ml;
 
-        diag_report_extended(p, &d,
+        diag_report_extended(p, &d2,
                              "token is not a valid binary operator in a "
                              "preprocessor subexpression");
     }

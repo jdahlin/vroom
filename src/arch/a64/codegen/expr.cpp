@@ -177,7 +177,7 @@ static codegen_value gen_cond_spill(codegen_context *e, uint32_t n)
                            A64_REGISTER_FRAME, sl);
     if (wide) {
         v.kind = CODEGEN_VALUE_REGISTER_PAIR;
-        v.register_high = treg(e);
+        v.register_high = (uint8_t)treg(e);
         a64_record_emit_memory(e, A64_OP_LD, 3, 0, v.register_high,
                                A64_REGISTER_FRAME, sl + 8);
     }
@@ -221,7 +221,7 @@ static codegen_value gen_cond_expr(codegen_context *e, uint32_t n)
             a64_record_emit_move(e, 1, test.register_number, r);
             if (wide) {
                 test.kind = CODEGEN_VALUE_REGISTER_PAIR;
-                test.register_high = treg(e);
+                test.register_high = (uint8_t)treg(e);
                 a64_record_emit_move(e, 1, test.register_high, r2);
             }
             test_zero(e, &test, t, lend, true);
@@ -873,12 +873,12 @@ static codegen_value bitint_value(codegen_context *e, codegen_value v,
             if (bits < 128)
                 a64_record_emit_bitfield(e, sgn ? A64_OP_SBFM : A64_OP_UBFM, 1,
                                          v.register_high, v.register_high, 0,
-                                         bits - 65);
+                                         (int)(bits - 65));
         } else if (bits < 64) {
             int r = toreg(e, &v);
 
             a64_record_emit_bitfield(e, sgn ? A64_OP_SBFM : A64_OP_UBFM, 1, r,
-                                     r, 0, bits - 1);
+                                     r, 0, (int)(bits - 1));
         }
     }
     return v;
@@ -1469,9 +1469,10 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
                                 bit < src.width ? bit : src.width - 1;
                             part.offset += (src.bit_offset + start) / 8;
                             part.bit_offset = (src.bit_offset + start) % 8;
-                            part.width = bit >= src.width      ? 1
-                                         : src.width - bit < 8 ? src.width - bit
-                                                               : 8;
+                            part.width = (uint16_t)(bit >= src.width ? 1
+                                                    : src.width - bit < 8
+                                                        ? src.width - bit
+                                                        : 8);
                             part.is_signed =
                                 src.is_signed && bit + 8 >= src.width;
                             v = load(
@@ -1528,8 +1529,8 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
                                     .offset = sl + (int64_t)(i * es)};
 
                 if (codegen_type_is_bool_vector(c, x->ty))
-                    l.offset = sl + i / 8, l.is_bitfield = 1, l.width = 1,
-                    l.bit_offset = i % 8;
+                    l.offset = sl + (int64_t)(i / 8), l.is_bitfield = 1,
+                    l.width = 1, l.bit_offset = i % 8;
                 store(e, &l, et, &v);
             }
             val_free(e, &v);

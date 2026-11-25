@@ -431,8 +431,8 @@ static int k_sve(Ctx *c, const char *mn, size_t n)
 			if (MN("mov") && k == 2 && isp(&o[1]) && !sz_(&o[1]))	/* orr Pd, Pn/z, Pn, Pn */
 				OUT(0x25804000u | R(&o[1]) << 16 | R(&o[1]) << 10 | R(&o[1]) << 5 | R(&o[0]));
 			if (k == 3 && isp(&o[2]) && !sz_(&o[2]) && o[1].kind == A64O_REG && o[1].cls == A64_P && !o[1].arr) {
-				if (mn[0] == 'n' && o[1].pq == 1) OUT(0x25004200u | s | R(&o[1]) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
-				if (mn[0] == 'm' && o[1].pq == 1) OUT(0x25004000u | s | R(&o[2]) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
+				if (mn[0] == 'n' && o[1].pq == 1) OUT(0x25004200u | (unsigned)s | R(&o[1]) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
+				if (mn[0] == 'm' && o[1].pq == 1) OUT(0x25004000u | (unsigned)s | R(&o[2]) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
 				if (MN("mov") && o[1].pq == 2) OUT(0x25004210u | R(&o[0]) << 16 | R(&o[1]) << 10 | R(&o[2]) << 5 | R(&o[0]));
 			}
 			BADOPS;

@@ -15,7 +15,7 @@ static bool x86_header_builtin(cc *c, uint32_t name)
     for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++)
         if ((size_t)cc_identifier_length(name) == strlen(names[i]) &&
             !memcmp(cc_identifier_string(name), names[i],
-                    cc_identifier_length(name)))
+                    (size_t)cc_identifier_length(name)))
             return true;
     return false;
 }

@@ -490,7 +490,7 @@ analysis_result semantic_analysis::deduce_return(SyntaxRef at,
     function_state.returns = deduced;
     entity_index f = function_state.function;
     entity_table[f].type = function_returning(entity_table[f].type, deduced);
-    for (declared_name &d : this->declared)
+    for (declared_name &d : this->declared_names)
         if (d.entity == f)
             d.type = entity_table[f].type;
     return analysis_result::well_formed;

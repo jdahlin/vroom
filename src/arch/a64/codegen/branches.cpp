@@ -12,7 +12,8 @@ VPRIV uint32_t a64_label_new(codegen_context *e)
     return e->label_count++;
 }
 
-static void a64_label_back_edge_fail(codegen_context *e, uint32_t l)
+static __attribute__((noreturn)) void
+a64_label_back_edge_fail(codegen_context *e, uint32_t l)
 {
     codegen_fatal_report(
         e, e->current_location, "internal: jump back to label %u, %s", l,

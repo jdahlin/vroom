@@ -116,11 +116,11 @@ VPRIV bool virbuild_byte_or_reduce(virbuild_vectorize_state *S)
     uint32_t bits = virbuild_block_insn_append(e, pre, VIR_OP_OR, VIR_TYPE_I64,
                                                0, lo, hi, 0);
     for (unsigned shift = 32; shift >= 8; shift /= 2) {
-        uint32_t hi = virbuild_block_insn_append(
+        uint32_t hi2 = virbuild_block_insn_append(
             e, pre, VIR_OP_LSHR, VIR_TYPE_I64, 0, bits,
             virbuild_constant_integer(e, VIR_TYPE_I64, shift), 0);
         bits = virbuild_block_insn_append(e, pre, VIR_OP_OR, VIR_TYPE_I64, 0,
-                                          bits, hi, 0);
+                                          bits, hi2, 0);
     }
     uint32_t byte = virbuild_block_insn_append(e, pre, VIR_OP_EXT, VIR_TYPE_I32,
                                                0, bits, 0, 0);

@@ -36,7 +36,7 @@ VPRIV void ld_comdat_groups_deduplicate(struct ld_context *ctx)
             if (!(w[0] & 1)) /* GRP_COMDAT */
                 continue;
             const char *name = o->string_table + o->symbols[h->sh_info].st_name;
-            uint32_t len = strlen(name), hh = ld_name_hash(name, len);
+            uint32_t len = (uint32_t)strlen(name), hh = ld_name_hash(name, len);
 
             if (!tab || (n + 1) * 2 > mask) {
                 uint32_t m = tab ? (mask + 1) * 2 : 1024;
@@ -98,7 +98,8 @@ VPRIV void ld_object_symbols_resolve(void *arg, size_t i)
         ld_global_symbol *gs = &ctx->symbols.globals[g];
         uint64_t k = ld_symbol_key(o->index, s);
         ld_atomic_u64_min(&gs->first_occurrence, k);
-        ld_atomic_u8_min(&gs->visibility_rank, ld_visibility_rank(y->st_other));
+        ld_atomic_u8_min(&gs->visibility_rank,
+                         (uint8_t)ld_visibility_rank(y->st_other));
         if (y->st_shndx == SHN_COMMON && ctx->options.relocatable)
             ld_error_report(ctx, "%s: common symbol %s not supported with -r",
                             o->path, o->string_table + y->st_name);

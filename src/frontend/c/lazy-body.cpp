@@ -192,7 +192,8 @@ static void cc_lazy_body_parse(cc *c, uint32_t i)
     c->pack[0] = L->pack, c->packid[0] = 0;
     cc_token_fetch(c, &c->tk[0]);
     c->ntk = 1;
-    c->syms[s].flags &= ~(AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_LAZY);
+    c->syms[s].flags &=
+        (uint32_t)(~(AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_LAZY));
     struct cc_recovery_point *rec = c->rec;
 
     c->rec = NULL; /* another token stream: no recovery outside the body */

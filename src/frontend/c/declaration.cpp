@@ -565,13 +565,13 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
             if (!c->o->implicit_int) {
                 uint32_t i = 0;
 
-                while (cc_token_peek(c, i)->kind ==
+                while (cc_token_peek(c, (int)i)->kind ==
                        LEX_TOKEN_STAR) /* clang: at the name in "*p = 1;" */
                     i++;
                 cc_report_error(
                     c,
-                    cc_token_peek(c, i)->kind == LEX_TOKEN_IDENTIFIER
-                        ? cc_token_peek(c, i)->loc
+                    cc_token_peek(c, (int)i)->kind == LEX_TOKEN_IDENTIFIER
+                        ? cc_token_peek(c, (int)i)->loc
                         : ds.loc,
                     "type specifier missing, defaults to 'int'; ISO C99 and "
                     "later do not support implicit int [-Wimplicit-int]");
@@ -906,7 +906,7 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
                 bool ok = true;
 
                 if (st && !ds.constexpr_ && v &&
-                    c->errors - c->nconv == nerr - nconv0) {
+                    (uint32_t)c->errors - c->nconv == (uint32_t)nerr - nconv0) {
                     c->sie = c->errors != nerr;
                     ok = cc_initializer_static_is_ok(c, y->ty, v, &bad);
                     c->sie = false;

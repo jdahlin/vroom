@@ -49,34 +49,36 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
     keyword_kinds.resize(static_cast<size_t>(size));
     extension_kinds.resize(static_cast<size_t>(size));
     for (int i = 0; i < size; i++) {
-        keyword_kinds[i] = standard_keyword::extension;
-        extension_kinds[i] = extension_keyword::none;
+        keyword_kinds[static_cast<size_t>(i)] = standard_keyword::extension;
+        extension_kinds[static_cast<size_t>(i)] = extension_keyword::none;
     }
     /* (each row found in the lexer's table by its spelling, in the rows'
        order: a later row of the same spelling wins, as before) */
     for (const named &n : standard) {
         int i = keyword_of_spelling(n.spelling);
         if (i >= 0)
-            keyword_kinds[i] = n.keyword;
+            keyword_kinds[static_cast<size_t>(i)] = n.keyword;
     }
     for (const alternate &a : alternates) {
         int i = keyword_of_spelling(a.spelling);
         if (i >= 0 && behavior.has(a.from))
-            keyword_kinds[i] = a.keyword;
+            keyword_kinds[static_cast<size_t>(i)] = a.keyword;
     }
     for (const own &o : owns) {
         int i = keyword_of_spelling(o.spelling);
         if (i >= 0 && behavior.has(o.from))
-            extension_kinds[i] = o.keyword;
+            extension_kinds[static_cast<size_t>(i)] = o.keyword;
     }
     /* [ext:clang_type_trait_names]: the token stream makes a trait's
        keyword an identifier when no '(' follows */
     if (behavior.has(extension::clang_type_trait_names)) {
         tokens.revertible_keywords.resize(static_cast<size_t>(size));
         for (int i = 0; i < size; i++)
-            tokens.revertible_keywords[i] =
-                extension_kinds[i] == extension_keyword::type_trait ||
-                extension_kinds[i] == extension_keyword::type_transformation;
+            tokens.revertible_keywords[static_cast<size_t>(i)] =
+                extension_kinds[static_cast<size_t>(i)] ==
+                    extension_keyword::type_trait ||
+                extension_kinds[static_cast<size_t>(i)] ==
+                    extension_keyword::type_transformation;
     }
     /* [impl.clang] a typedef-name every translation unit starts with, as
        clang's predeclared builtin type: <stdarg.h> declares va_list with
@@ -109,7 +111,7 @@ extension_keyword parser::extension_keyword_of(const token &t) const
     if (t.kind != token_kind::keyword || t.keyword < 0 ||
         static_cast<size_t>(t.keyword) >= extension_kinds.size())
         return extension_keyword::none;
-    return extension_kinds[t.keyword];
+    return extension_kinds[static_cast<size_t>(t.keyword)];
 }
 
 bool parser::at(extension_keyword k, unsigned ahead)
@@ -143,7 +145,7 @@ standard_keyword parser::keyword_of(const token &t) const
     if (t.kind != token_kind::keyword || t.keyword < 0 ||
         static_cast<size_t>(t.keyword) >= keyword_kinds.size())
         return standard_keyword::none;
-    return keyword_kinds[t.keyword];
+    return keyword_kinds[static_cast<size_t>(t.keyword)];
 }
 
 bool parser::at(preprocessing_op_or_punc op, unsigned ahead)

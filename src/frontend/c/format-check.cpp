@@ -449,7 +449,8 @@ CC_PRIVATE uint32_t cc_format_check_attribute(cc *c, uint32_t fs)
     if (c->o->no_builtin || y->kind != AST_SYMBOL_FUNCTION ||
         y->sc == AST_STORAGE_STATIC || !y->name)
         return 0;
-    nm = cc_identifier_string(y->name), len = cc_identifier_length(y->name);
+    nm = cc_identifier_string(y->name),
+    len = (uint32_t)cc_identifier_length(y->name);
     if (cc_library_builtin_is_disabled(c->o, nm, len))
         return 0;
     if (len < 6 || len > 9 || !strchr("psafv", nm[0]))
@@ -982,7 +983,8 @@ CC_PRIVATE void cc_format_check(cc *c, uint32_t fs, const uint32_t *args,
                     char nc = fl[strlen(fl) - 1], lm = 0;
 
                     for (uint32_t q = td; q && !lm; q = c->syms[q].tdef) {
-                        size_t l = cc_identifier_length(c->syms[q].name);
+                        size_t l =
+                            (size_t)cc_identifier_length(c->syms[q].name);
                         const char *nm = cc_identifier_string(c->syms[q].name);
 
                         if ((l == 6 && !memcmp(nm, "size_t", 6)) ||

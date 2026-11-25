@@ -78,7 +78,7 @@ CC_PRIVATE void cc_type_spell(cc *c, ast_qualified_type t, const char *inner,
     case AST_TYPE_SVE_BUILTIN:
         cc_type_qualifiers_spell(&b, AST_QUALIFIED_TYPE_QUALIFIERS(t));
         vbuffer_append(&b, cc_identifier_string(x->aux),
-                       cc_identifier_length(x->aux));
+                       (size_t)cc_identifier_length(x->aux));
         if (inner[0]) {
             vbuffer_string_append(&b, " ");
             vbuffer_string_append(&b, inner);
@@ -178,7 +178,7 @@ CC_PRIVATE void cc_type_spell(cc *c, ast_qualified_type t, const char *inner,
         cc_type_qualifiers_spell(&b, AST_QUALIFIED_TYPE_QUALIFIERS(t));
         if (td) {
             vbuffer_append(&b, cc_identifier_string(c->syms[td].name),
-                           cc_identifier_length(c->syms[td].name));
+                           (size_t)cc_identifier_length(c->syms[td].name));
             if (inner[0]) {
                 vbuffer_string_append(&b, " ");
                 vbuffer_string_append(&b, inner);

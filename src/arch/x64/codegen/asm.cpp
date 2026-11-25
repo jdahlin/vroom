@@ -532,7 +532,7 @@ VPRIV void x64_asm(codegen_context *e, uint32_t n)
             codegen_lvalue s = {.kind = CODEGEN_LVALUE_FRAME,
                                 .align = 8,
                                 .offset = o->address_parked_slot =
-                                    walk_slot_temporary(e, 8, 8)};
+                                    (int32_t)walk_slot_temporary(e, 8, 8)};
 
             x64_record_emit_memory(e, X64_OP_ST, 8, o->lvalue.register_number,
                                    &s, false);

@@ -125,6 +125,17 @@ const char *lex_token_name(int kind)
 #else
 #define LEX_TABLE static
 #endif
+#ifdef LEX_X86_SIMD
+/* x86-simd.S reads these */
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern const uint8_t lex_low_nibble_table[16], lex_high_nibble_table[16];
+extern uint8_t lex_structure_table[128], lex_group_table[64];
+#ifdef __cplusplus
+}
+#endif
+#endif
 LEX_TABLE const uint8_t lex_low_nibble_table[16] = {
     0x26, 0x07, 0x07, 0x07, 0x17, 0x07, 0x07, 0x07,
     0x07, 0x47, 0x83, 0x41, 0x41, 0x81, 0x11, 0x09,
@@ -303,7 +314,7 @@ static inline size_t lex_comment_end_find(const char *s, size_t p)
                      vorrq_u8(vceqq_u8(v, bs), vceqzq_u8(v))));
 
         if (m)
-            return p + (__builtin_ctzll(m) >> 2);
+            return p + (size_t)(__builtin_ctzll(m) >> 2);
     }
 }
 
@@ -318,7 +329,7 @@ static inline size_t lex_line_end_find(const char *s, size_t p)
             vorrq_u8(vorrq_u8(vceqq_u8(v, nl), vceqq_u8(v, cr)), vceqzq_u8(v)));
 
         if (m)
-            return p + (__builtin_ctzll(m) >> 2);
+            return p + (size_t)(__builtin_ctzll(m) >> 2);
     }
 }
 
@@ -335,7 +346,7 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
         uint64_t m = lex_nibbles_first_index(hit);
 
         if (m)
-            return p + (__builtin_ctzll(m) >> 2);
+            return p + (size_t)(__builtin_ctzll(m) >> 2);
     }
 }
 
@@ -847,7 +858,7 @@ static size_t lex_quoted_end(const char *s, size_t n, size_t p, uint8_t q,
         uint8_t c;
 
         p = lex_quote_find(s, p, q);
-        c = s[p];
+        c = (uint8_t)s[p];
         if (c == q)
             return p + 1;
         if (c == '\\') {
@@ -887,7 +898,7 @@ static size_t lex_raw_string_end(const char *s, size_t n, size_t p, size_t *bad)
 {
     size_t d = p + 1, dl = 0, i;
 
-    while (dl < 16 && lex_character_is_raw_delimiter(s[d + dl]))
+    while (dl < 16 && lex_character_is_raw_delimiter((uint8_t)s[d + dl]))
         dl++;
     if (s[d + dl] != '(') {
         for (i = d; i < n && s[i] != '"'; i++)
@@ -1232,7 +1243,7 @@ static uint32_t lex_tokenize_mode(const char *s, size_t n, lex_token *out,
     }
 
     for (int i = 0; i < LEX_MASK_COUNT; i++)
-        m[i] = (uint64_t *)lex_scratch + i * nb;
+        m[i] = (uint64_t *)lex_scratch + (size_t)i * nb;
     /*
 	 * Masks are computed lazily, CHUNK blocks ahead of the window, so the
 	 * bytes of comments (a third of kernel headers) are never classified:
@@ -1351,11 +1362,11 @@ fast:
 
             memcpy(&c01, s + at, 2);
             /* kind without branches: ktab knows identifiers and numbers too */
-            const unsigned kind = kt[c01];
+            const unsigned kind2 = kt[c01];
             t->off = (uint32_t)at;
             t->len = e - o;
             t->id = 0;
-            t->kind = (uint8_t)kind;
+            t->kind = (uint8_t)kind2;
             t->flags = (uint8_t)(f | pend);
             pend = 0;
 #if defined(__aarch64__)
@@ -1363,7 +1374,7 @@ fast:
             __asm__("" : "+r"(t));
 #endif
             il[ni] = (uint32_t)(uintptr_t)t;
-            ni += kind == LEX_TOKEN_IDENTIFIER;
+            ni += kind2 == LEX_TOKEN_IDENTIFIER;
             t++;
 
 #if defined(__x86_64__)
@@ -1432,7 +1443,7 @@ l_prefix:
     if (unlikely(s[p] == '"' || s[p] == '\'' || s[p] == '\\') &&
         (q = lex_literal_prefixed_end(s, n, st, p, &fl, &kind))) {
         p = q;
-        EMIT(kind);
+        EMIT((uint8_t)kind);
     }
     EMIT_IDENT();
 l_digit:
@@ -1481,7 +1492,7 @@ l_squote:
 lit:
     if (q) {
         p = q;
-        EMIT(kind);
+        EMIT((uint8_t)kind);
     }
     p = bad;
     EMIT(LEX_TOKEN_UNKNOWN);

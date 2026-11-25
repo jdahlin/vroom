@@ -497,7 +497,8 @@ VPRIV int pp_builtin_macro_expand(pp *p, const pp_macro *m, ptok *t)
                 "'__has_embed' must be used within a preprocessing directive");
             return 1;
         }
-        pp_token_number_make(p, t, pp_embed_has_query(p, fc, t->loc));
+        pp_token_number_make(
+            p, t, (unsigned long long)pp_embed_has_query(p, fc, t->loc));
         break;
     case PP_BUILTIN_IS_IDENTIFIER:
         if (!pp_feature_argument_read(p, buf, sizeof(buf), t->loc))

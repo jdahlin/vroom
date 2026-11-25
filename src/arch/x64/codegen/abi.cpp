@@ -351,7 +351,7 @@ VPRIV void x64_abi_classify_named(codegen_context *e, ast_qualified_type t,
 		   arguments. Results use a hidden pointer; larger arguments are
 		   packed by-value memory rather than ordinary SIMD vectors. */
         a->is_in_memory = true;
-        a->bool_lane_count = blanes <= 128 ? blanes : 0;
+        a->bool_lane_count = (uint8_t)(blanes <= 128 ? blanes : 0);
         return;
     }
     if (codegen_type_is_vector(c, t) && (size == 32 || size == 64)) {
@@ -406,8 +406,6 @@ static int x64_abi_registers_need(const walk_argument *a, int cl)
 }
 
 /* fldt / fstpt of l (fp.c's x87 records) */
-VPRIV void x64_x87ld(codegen_context *e, const codegen_lvalue *l);
-VPRIV void x64_x87st(codegen_context *e, const codegen_lvalue *l);
 
 /* ---------------- calls ---------------- */
 
@@ -581,8 +579,8 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
                 codegen_lvalue src = x64_fr(a[k].slot + bit / 8);
                 codegen_lvalue dst = {.kind = CODEGEN_LVALUE_REGISTER,
                                       .register_number = RSP,
-                                      .offset =
-                                          place[k] + 8 * (bit - bregs[k])};
+                                      .offset = place[k] +
+                                                8 * (bit - (uint32_t)bregs[k])};
                 x64_record_emit_memory(e, X64_OP_LD, 1, R11, &src, false);
                 if (bit % 8)
                     x64_record_emit_three_registers(e, X64_OP_SHRI, 8, R11, R11,

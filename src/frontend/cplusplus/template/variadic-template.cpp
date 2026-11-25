@@ -506,26 +506,26 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
                              n.first_token());
         return analysis_result::well_formed;
     }
-    auto combine = [&](expression_meaning left, expression_meaning right,
+    auto combine = [&](expression_meaning lhs, expression_meaning rhs,
                        expression_meaning &out) {
         if (!comma)
-            return builtin_binary(n, at, op, left, right, out);
-        /* [expr.comma]/1: "the left expression is a discarded-value
-           expression"; the result is the right operand's */
-        out = right;
-        if (left.evaluation != constness::constant &&
-            (left.evaluation == constness::not_constant ||
-             right.evaluation != constness::not_constant)) {
-            out.evaluation = left.evaluation;
+            return builtin_binary(n, at, op, lhs, rhs, out);
+        /* [expr.comma]/1: "the lhs expression is a discarded-value
+           expression"; the result is the rhs operand's */
+        out = rhs;
+        if (lhs.evaluation != constness::constant &&
+            (lhs.evaluation == constness::not_constant ||
+             rhs.evaluation != constness::not_constant)) {
+            out.evaluation = lhs.evaluation;
             out.entity = 0;
         }
-        if (left.evaluation != constness::constant)
+        if (lhs.evaluation != constness::constant)
             out.entity = 0;
         out.beyond_integral_constant = true;
         out.zero_literal = false;
         out.string_literal = 0;
-        out.node = expression_node(semantic_kind::comma, out, at, left.node,
-                                   right.node);
+        out.node =
+            expression_node(semantic_kind::comma, out, at, lhs.node, rhs.node);
         return analysis_result::well_formed;
     };
     expression_meaning acc;
