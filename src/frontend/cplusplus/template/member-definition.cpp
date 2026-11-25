@@ -665,10 +665,10 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
                         tokens[nested.end_token() + 1].op_or_punc));
             }
             /* (the overload this definition is the member's) */
-            entity_index first = 0;
+            entity_index first2 = 0;
             if (lookup_id)
-                first = entity_table.find(owner, lookup_id);
-            for (entity_index f = first;
+                first2 = entity_table.find(owner, lookup_id);
+            for (entity_index f = first2;
                  f && !defined && entity_table[f].kind == entity_kind::function;
                  f = entity_table[f].next_overload)
                 if (declared_by(f, o.definition) ||

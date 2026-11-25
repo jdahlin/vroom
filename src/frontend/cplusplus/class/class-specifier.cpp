@@ -2734,8 +2734,8 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         declaration_deduced = saved;
         if (r != analysis_result::well_formed)
             return r;
-        if (!declared.empty() && declared.back().entity == e)
-            declared.back().type = type;
+        if (!declared_names.empty() && declared_names.back().entity == e)
+            declared_names.back().type = type;
         deduced = true;
     }
     uint32_t cv = cv_of(type_table, type);
