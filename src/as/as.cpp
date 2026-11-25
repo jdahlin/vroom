@@ -972,10 +972,12 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 as_context *as_new(void)
 {
     as_context *a = (as_context *)as_region_reserve(sizeof *a);
-    vregion_init(&a->expansion_text, as_region_reserve((size_t)1 << 32),
-                 (size_t)1 << 32);
-    vregion_init(&a->definitions, as_region_reserve((size_t)1 << 30),
-                 (size_t)1 << 30);
+    a->expansion_text.base = (uint8_t *)(as_region_reserve((size_t)1 << 32));
+    a->expansion_text.cap = (size_t)1 << 32;
+    a->definitions.base = (uint8_t *)(as_region_reserve((size_t)1 << 30));
+    a->definitions.cap = (size_t)1 << 30;
+    vregion_asan_start(&a->expansion_text); /* (used: 0, a fresh mapping) */
+    vregion_asan_start(&a->definitions);
     a->statement_buffer.base = (uint8_t *)(as_region_reserve((size_t)1 << 24));
     a->statement_buffer.cap = (size_t)1 << 24;
     return a;

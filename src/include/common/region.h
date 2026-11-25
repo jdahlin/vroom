@@ -50,7 +50,7 @@ static inline void vregion_asan_extend(vregion *r, size_t end)
 #endif
 
 /* an empty region over [base, base + cap) */
-static inline VNONNULL(1) void vregion_init(vregion *r, void *base, size_t cap)
+static inline void vregion_init(vregion *r, void *base, size_t cap)
 {
     r->base = (uint8_t *)base;
     r->used = 0;
@@ -61,20 +61,34 @@ static inline VNONNULL(1) void vregion_init(vregion *r, void *base, size_t cap)
 #endif
 }
 
-/* back to used bytes (used <= r->used): what was allocated past it is gone */
-static inline VNONNULL(1) void vregion_truncate(vregion *r, size_t used)
+/* ASan: start poisoning a region whose base, used and cap were set by hand */
+static inline void vregion_asan_start(vregion *r)
 {
 #if VCC_ASAN
+    r->poisoned = r->used;
+    vregion_asan_extend(r, r->used);
+#else
+    (void)r;
+#endif
+}
+
+/* back to used bytes (used <= r->used): what was allocated past it is gone */
+#if VCC_ASAN
+static inline void vregion_truncate(vregion *r, size_t used)
+{
     if (r->poisoned > used)
         VASAN_POISON(r->base + used, r->poisoned - used);
     else
         r->poisoned = used;
-#endif
     r->used = used;
 }
+#else
+/* the plain store: an inline function changes the code clang makes around it */
+#define vregion_truncate(r, u) ((void)((r)->used = (u)))
+#endif
 
 /* the whole reservation addressable again, before it is unmapped or handed back */
-static inline VNONNULL(1) void vregion_unpoison(vregion *r)
+static inline void vregion_unpoison(vregion *r)
 {
 #if VCC_ASAN
     if (r->poisoned)

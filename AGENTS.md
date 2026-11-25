@@ -541,9 +541,15 @@ region, 4 GB arenas, all MAP_NORESERVE) need no special handling; on Linux
 (CI) run ASan with `ASAN_OPTIONS=detect_leaks=0` (LeakSanitizer is on by
 default there; vcc exits with its arenas mapped) and the default 8 MB stack
 (`ulimit -s unlimited` leaves `vstack_guard_low()` without a stack bottom).  A TSan batch takes
-65-100 s (15-20x the normal build), an ASan suite 12-25 s.  Limits: ASan does
-not see over-reads inside our own mmap'ed arenas (they are never poisoned),
-only in malloc, globals and the stack.  Contract that ASan checks: strings
+65-100 s (15-20x the normal build), an ASan suite 12-25 s.  The bump arenas are
+poisoned in ASan builds (`include/common/asan.h`): vregion/varena
+(`region.h`: preprocessor, assembler, object writer), the C front end's heap
+and vlink's regions keep a 1 MB window past the allocation point poisoned and
+unpoison each allocation as it goes out; a reset or mark goes through
+`vregion_truncate`, and a released job region is unpoisoned.  Not poisoned:
+the text buffers (`text-buffer.h`), VIR's per-thread arrays and the C front
+end's per-TU arrays, whose users grow them by index after their own capacity
+check.  Contract that ASan checks: strings
 handed to `vintern*`/`lex_file_get` must be readable 16 (or 8) bytes past their
 length (`vintern_cstr` pads a literal).  No suppressions are needed today;
 put any in `src/tsan.supp`, one reason per entry, and run with

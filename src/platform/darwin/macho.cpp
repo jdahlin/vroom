@@ -132,9 +132,10 @@ static void *zalloc(ElfObj *o, size_t n)
         elf_error(o, "out of memory");
         return NULL;
     }
-    void *p = vregion_take(r, at, n);
-    memset(p, 0, n);
-    return p;
+    r->used = at + n;
+    VASAN_UNPOISON(r->base + at, n);
+    memset(r->base + at, 0, n);
+    return r->base + at;
 }
 
 static int pfx(const ElfSec *se, const char *p)

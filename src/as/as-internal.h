@@ -276,7 +276,11 @@ static inline void *as_region_alloc(vregion *r, size_t n)
     size_t u = (r->used + 7) & ~(size_t)7;
     if (u + n > r->cap || u + n < u)
         vjob_fail("assembly too large (expansion or statement buffer full)");
-    return vregion_take(r, u, n);
+    r->used = u + n;
+#if VCC_ASAN
+    (void)vregion_take(r, u, n);
+#endif
+    return r->base + u;
 }
 
 /* ASCII classes without libc's locale lookups (hot in the scanner) */

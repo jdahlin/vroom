@@ -26,13 +26,23 @@ void elf_error(ElfObj *o, const char *fmt, ...)
 ElfObj *elf_new(void)
 {
     ElfObj *o = (ElfObj *)reserve(sizeof *o);
-    vregion_init(&o->arena, reserve(ARENA_CAP), ARENA_CAP);
-    vregion_init(&o->secs, reserve(SEC_CAP), SEC_CAP);
+    o->arena.base = (uint8_t *)reserve(ARENA_CAP);
+    o->arena.cap = ARENA_CAP;
+    vregion_asan_start(&o->arena); /* (used: 0, a fresh mapping) */
+    o->secs.base = (uint8_t *)reserve(SEC_CAP);
+    o->secs.cap = SEC_CAP;
+    vregion_asan_start(&o->secs); /* (used: 0, a fresh mapping) */
     o->frags.base = (uint8_t *)(reserve(FRAG_CAP * sizeof(ElfFrag)));
     o->frags.cap = FRAG_CAP * sizeof(ElfFrag);
-    vregion_init(&o->syms, reserve(SYMS_CAP), SYMS_CAP);
-    vregion_init(&o->fixes, reserve(FIX_CAP), FIX_CAP);
-    vregion_init(&o->regs, reserve(SYMS_CAP), SYMS_CAP);
+    o->syms.base = (uint8_t *)reserve(SYMS_CAP);
+    o->syms.cap = SYMS_CAP;
+    vregion_asan_start(&o->syms); /* (used: 0, a fresh mapping) */
+    o->fixes.base = (uint8_t *)reserve(FIX_CAP);
+    o->fixes.cap = FIX_CAP;
+    vregion_asan_start(&o->fixes); /* (used: 0, a fresh mapping) */
+    o->regs.base = (uint8_t *)reserve(SYMS_CAP);
+    o->regs.cap = SYMS_CAP;
+    vregion_asan_start(&o->regs); /* (used: 0, a fresh mapping) */
     o->machine = EM_AARCH64;
     elf_reset(o);
     return o;
@@ -57,12 +67,12 @@ void elf_free(ElfObj *o)
 void elf_reset(ElfObj *o)
 {
     vregion_truncate(&o->arena, 0);
-    vregion_truncate(&o->syms, 0);
-    vregion_truncate(&o->secs, 0);
-    vregion_truncate(&o->fixes, 0);
-    (void)rpush(&o->syms, sizeof(ElfSym), 1); /* entry 0 of each: null */
-    (void)rpush(&o->secs, sizeof(ElfSec), 1);
-    (void)rpush(&o->fixes, sizeof(ElfFix), 1);
+    vregion_truncate(&o->syms, sizeof(ElfSym)); /* entry 0 of each: null */
+    vregion_truncate(&o->secs, sizeof(ElfSec));
+    vregion_truncate(&o->fixes, sizeof(ElfFix));
+    VASAN_UNPOISON(o->syms.base, sizeof(ElfSym));
+    VASAN_UNPOISON(o->secs.base, sizeof(ElfSec));
+    VASAN_UNPOISON(o->fixes.base, sizeof(ElfFix));
     o->nsec = 1;
     o->nfrag = FRAG_CAP - 1;
     o->nsym = 1;
