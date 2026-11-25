@@ -151,7 +151,10 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
     }
     expression_meaning m;
     unevaluated++;
+    bool saved_atomic = atomic_object_operand;
+    atomic_object_operand = true;
     analysis_result r = expression(operand, m);
+    atomic_object_operand = saved_atomic;
     unevaluated--;
     if (r != analysis_result::well_formed)
         return r;
