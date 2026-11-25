@@ -3739,7 +3739,8 @@ class semantic_analysis
                                         const qualified_type *types,
                                         uint32_t count, bool nothrow,
                                         bool &value);
-    bool class_destructible(entity_index c, bool &throws);
+    bool class_destructible(entity_index c, bool &throws,
+                            bool subobject = false);
     bool default_initializer_pending(entity_index c) const;
     bool same_or_derived_class(const expression_meaning &a, entity_index c);
     analysis_result

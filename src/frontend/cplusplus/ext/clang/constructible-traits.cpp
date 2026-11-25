@@ -25,13 +25,15 @@ namespace cplusplus
    destructor, and those of its subobjects when it is implicit, is neither
    deleted nor inaccessible) and, nothrow, whether that cannot throw
    ([except.spec]/8: an implicit destructor throws when a subobject's does).
-   throws is set when a destructor's exception specification allows it. */
-bool semantic_analysis::class_destructible(entity_index c, bool &throws)
+   throws is set when a destructor's exception specification allows it.
+   subobject: c's access was checked from the class it is a subobject of */
+bool semantic_analysis::class_destructible(entity_index c, bool &throws,
+                                           bool subobject)
 {
     const entity &x = entity_table[c];
     if (x.destructor) {
         const entity &d = entity_table[x.destructor];
-        if (d.deleted || !accessible(x.destructor))
+        if (d.deleted || (!subobject && !accessible(x.destructor)))
             return false;
         if (!d.implicit) {
             if (!type_table[d.type.unqualified()].non_throwing)
@@ -42,7 +44,8 @@ bool semantic_analysis::class_destructible(entity_index c, bool &throws)
     owned_array<entity_index> classes;
     subobject_classes(c, classes);
     for (entity_index k : classes)
-        if (!class_destructible(k, throws))
+        if (subobject_destructor_inaccessible(c, k) ||
+            !class_destructible(k, throws, true))
             return false;
     return true;
 }
