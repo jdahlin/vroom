@@ -367,6 +367,7 @@ bool semantic_analysis::conversion_function_to_class(
     entity_index c1 = type_table[to.unqualified()].entity;
     owned_array<entity_index> candidates;
     owned_array<entity_index> conv_templates;
+    conversion_receiver = type_table[a.type.unqualified()].entity;
     if (!visible_conversion_functions(type_table[a.type.unqualified()].entity,
                                       candidates, &conv_templates) ||
         !deduce_conversion_templates(conv_templates, to, candidates)) {

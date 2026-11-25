@@ -5392,6 +5392,13 @@ class semantic_analysis
        analysed: a specialization named there needs no definition
        ([temp.inst]/5) */
     unsigned unevaluated = 0;
+    /* the conversion function templates (index << 32 | destination type)
+       whose default template-arguments are being substituted for a
+       conversion: deduce_conversion_templates */
+    owned_array<uint64_t> defaulting_conversions;
+    /* the class whose conversion functions deduce_conversion_templates
+       considers (set by conversion_function_for) */
+    entity_index conversion_receiver = 0;
     /* a static_assert's condition is analysed: its temporaries live only in
        the constant evaluation, nothing is lowered for them */
     unsigned constant_only = 0;
