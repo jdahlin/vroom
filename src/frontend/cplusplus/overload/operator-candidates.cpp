@@ -503,9 +503,7 @@ analysis_result semantic_analysis::overloaded_operator(
                     if (visible)
                         group.append(t);
                 }
-                for (const template_name_function &x : template_name_functions)
-                    if (x.name == held)
-                        set.append(x.function);
+                inline_set_functions(held, set);
             }
             owned_array<expression_meaning> in_order;
             for (size_t i = 0; i < count; i++)

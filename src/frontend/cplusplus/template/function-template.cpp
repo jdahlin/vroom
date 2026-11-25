@@ -396,9 +396,16 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     /* (a nominated namespace's own directives lead on: an inline namespace
        within an inline namespace is no reason by itself, only a namespace
        reached that declares the name or has names not known) */
+    /* (the scope's inline namespace set is no reason either:
+       [namespace.def]/7 "Members of an inline namespace can be used in most
+       respects as though they were members of the enclosing namespace", and
+       a call of the name gathers the set's templates and functions,
+       function_template_overloads and inline_set_functions) */
     if (own && entity_table[outer].has_using_directive) {
         owned_array<entity_index> reached;
+        owned_array<bool> inline_set;
         reached.append(outer);
+        inline_set.append(true);
         for (size_t i = 0; own && i < reached.size(); i++) {
             if (!entity_table[reached[i]].has_using_directive)
                 continue;
@@ -411,14 +418,32 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                         seen = true;
                 if (seen)
                     continue;
+                const entity &nominated = entity_table[u.nominated];
+                bool member = inline_set[i] && nominated.inline_ &&
+                              nominated.enclosing == reached[i];
                 reached.append(u.nominated);
-                if (entity_table[u.nominated].unknown_names ||
-                    entity_table.find(u.nominated, name))
+                inline_set.append(member);
+                if (nominated.unknown_names ||
+                    (!member && entity_table.find(u.nominated, name)))
                     own = false;
             }
         }
     }
-    if (prior && group.empty() && own &&
+    /* [namespace.def]/7: the templates function_template_overloads adds
+       from an inline namespace of the scope (or of the scope's enclosing
+       namespace) are another scope's declarations, held by that scope's
+       name: they join calls of this one by lookup ([namespace.udir]/2), and
+       what this declaration does to the scope's own set leaves them */
+    owned_array<uint32_t> local;
+    for (uint32_t g : group) {
+        bool held_here = false;
+        for (entity_index h = prior; h; h = entity_table[h].using_shadow_of)
+            if (function_templates[g - 1].name == h)
+                held_here = true;
+        if (held_here)
+            local.append(g);
+    }
+    if (prior && local.empty() && own &&
         entity_table[prior].kind == entity_kind::function &&
         entity_table[prior].enclosing == outer &&
         !entity_table[prior].nonstatic_member &&
@@ -438,7 +463,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         entity_table.bind(outer, name, held);
     }
     record.name = held;
-    bool overload = (!group.empty() || !functions.empty()) && own &&
+    bool overload = (!local.empty() || !functions.empty()) && own &&
                     held == prior &&
                     entity_table[held].kind == entity_kind::none;
     if (overload)
@@ -448,7 +473,7 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             x.function = f;
             template_name_functions.append(x);
         }
-    for (uint32_t g : group)
+    for (uint32_t g : local)
         function_templates[g - 1].unusable = !overload;
     if (!overload && (!held || held < before ||
                       entity_table[held].kind != entity_kind::none)) {

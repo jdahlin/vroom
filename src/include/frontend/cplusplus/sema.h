@@ -6007,6 +6007,13 @@ class semantic_analysis
        a held name, in declaration order */
     void function_template_overloads(entity_index held,
                                      owned_array<uint32_t> &out) const;
+    /* [temp.over]/1 with [namespace.def]/7: the non-template functions a
+       call of a held name weighs, its own (template_name_functions) and,
+       for a namespace's name, those of the name in each namespace of the
+       inline namespace set around it, added to out (each once with what
+       out holds) */
+    void inline_set_functions(entity_index held,
+                              owned_array<entity_index> &out) const;
     /* [temp.func.order] in a call of the given number of arguments
        ([temp.deduct.partial]/3.1): 1 when f is more specialized than g,
        -1 when g is more than f, 0 when neither; unknown set when analysis

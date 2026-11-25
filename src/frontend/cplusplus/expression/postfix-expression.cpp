@@ -2020,10 +2020,9 @@ analysis_result semantic_analysis::template_call(
                 return not_supported(n, "over.oper");
         }
     }
-    for (const template_name_function &x : template_name_functions)
-        if (x.name == function_templates[function_template - 1].name &&
-            !template_id)
-            functions.append(x.function);
+    if (!template_id)
+        inline_set_functions(function_templates[function_template - 1].name,
+                             functions);
     /* [basic.lookup.argdep]/3: the non-template functions argument-dependent
        lookup found are candidates too */
     if (!template_id)

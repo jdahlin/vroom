@@ -691,6 +691,67 @@ void semantic_analysis::function_template_overloads(
     }
 }
 
+void semantic_analysis::inline_set_functions(
+    entity_index held, owned_array<entity_index> &out) const
+{
+    if (!held)
+        return;
+    auto add = [&](entity_index f) {
+        for (entity_index g : out)
+            if (g == f)
+                return;
+        out.append(f);
+    };
+    auto add_held = [&](entity_index h) {
+        for (const template_name_function &x : template_name_functions)
+            if (x.name == h)
+                add(x.function);
+    };
+    add_held(held);
+    entity_index scope = entity_table[held].enclosing;
+    if (!is_namespace(scope))
+        return;
+    /* [namespace.def]/7: "Members of an inline namespace can be used in
+       most respects as though they were members of the enclosing
+       namespace": the namespace that is no inline one, then its inline
+       namespaces and theirs (as function_template_overloads takes their
+       templates) */
+    while (scope && entity_table[scope].kind == entity_kind::namespace_entity &&
+           entity_table[scope].inline_)
+        scope = entity_table[scope].enclosing;
+    owned_array<entity_index> set;
+    set.append(scope);
+    for (size_t i = 0; i < set.size(); i++) {
+        if (!entity_table[set[i]].has_using_directive)
+            continue;
+        for (const using_directive_record &u : using_directives) {
+            const entity &nominated = entity_table[u.nominated];
+            if (u.scope != set[i] || !nominated.inline_ ||
+                nominated.enclosing != set[i])
+                continue;
+            bool seen = false;
+            for (entity_index other : set)
+                if (other == u.nominated)
+                    seen = true;
+            if (!seen)
+                set.append(u.nominated);
+        }
+    }
+    uint32_t name = entity_table[held].name;
+    for (entity_index s : set) {
+        entity_index e = entity_table.find(s, name);
+        if (!e || e == held)
+            continue;
+        if (entity_table[e].kind == entity_kind::function) {
+            owned_array<entity_index> chain;
+            overload_set(e, chain);
+            for (entity_index f : chain)
+                add(f);
+        } else if (entity_table[e].kind == entity_kind::none)
+            add_held(e);
+    }
+}
+
 uint32_t semantic_analysis::class_template_of(entity_index e) const
 {
     if (!e)
