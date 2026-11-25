@@ -469,6 +469,16 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
        declaration's that clang answers */
     if (defining_defaulted_member && source_location_uses != locations_before)
         entity_table[e].initializer_located = true;
+    /* [dcl.init]/17.6.1: a prvalue of the class that is no constructor
+       call (a function call's result) initializes the member itself,
+       whatever the class's constructors do, as in a mem-initializer */
+    if (constructed && !aggregate_value_stored(record.entity, value.node) &&
+        semantics[value.node].kind == semantic_kind::call &&
+        semantics[value.node].category == value_category::prvalue &&
+        semantics[value.node].type.unqualified() == type.unqualified()) {
+        statement = subobject_store(object, type, at, value.node, true);
+        return analysis_result::well_formed;
+    }
     if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         (semantics[value.node].kind != semantic_kind::construct ||
          semantics[value.node].a))
