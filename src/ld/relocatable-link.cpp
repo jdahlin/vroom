@@ -295,7 +295,7 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
             shs += strlen(r->name) + 6;
         }
     }
-    if (sh > 0xff00) {
+    if (sh >= SHN_LORESERVE) { /* e_shnum, st_shndx: 16 bits below it */
         ld_error_report(ctx, "-r: too many output sections (%u)", sh);
         return 1;
     }

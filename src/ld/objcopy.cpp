@@ -1164,6 +1164,10 @@ static int objcopy_run(int dirfd)
     for (uint32_t k = 1; k < ns; k++)
         if (!sec[k].removed)
             sec[k].new_index = ++nkept;
+    if (nkept + 1 >= SHN_LORESERVE) { /* e_shnum: no extended numbering */
+        objcopy_error_report("too many output sections (%u)", nkept + 1);
+        return 1;
+    }
     /* string tables */
     VCLEANUP(objcopy_string_table_free)
     objcopy_string_table names = {0}, symnames = {0};

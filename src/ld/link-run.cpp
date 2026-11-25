@@ -222,6 +222,13 @@ VPRIV int ld_link_run(struct ld_context *ctx, int argc, char **argv)
             ctx->script.sections.v[ctx->script.commands.v[c].index]
                 .section_header_index = ctx->layout.output_sections.n;
         }
+    /* e_shnum and st_shndx are 16 bits below SHN_LORESERVE; more needs
+       extended numbering (sh_size of section 0, SHT_SYMTAB_SHNDX) */
+    if (ctx->layout.output_sections.n + 1 >= SHN_LORESERVE) {
+        ld_error_report(ctx, "too many output sections (%u)",
+                        ctx->layout.output_sections.n + 1);
+        return 1;
+    }
 
     ld_addresses_assign(ctx);
     int pass = 0;
