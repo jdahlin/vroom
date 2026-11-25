@@ -1009,8 +1009,7 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
                constructor, which may be elided but shall be viable
                ([dcl.init]/17.6.3, [class.copy.elision]/1): not
                analysed */
-            if (direct ||
-                tokens.files.behavior.edition <
+            if (tokens.files.behavior.edition <
                     standard_edition::cplusplus_17 ||
                 s.kind != conversion_sequence::form::user_defined ||
                 s.ambiguous || s.function != found.function)
