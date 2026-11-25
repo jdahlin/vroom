@@ -278,12 +278,23 @@ bool semantic_analysis::copy_assignment_deleted(entity_index c)
             k == type_kind::rvalue_reference)
             return true;
     }
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (entity_index k : classes)
-        if (entity_table[k].kind == entity_kind::class_type &&
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        entity_index k = type_table[entity_table[class_bases[x.first_base + i]]
+                                        .type.unqualified()]
+                             .entity;
+        if (k && entity_table[k].kind == entity_kind::class_type &&
             copy_assignment_deleted(k))
             return true;
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.base_subobject)
+            continue;
+        entity_index k = element_class(m.type);
+        if (k && entity_table[k].kind == entity_kind::class_type &&
+            copy_assignment_deleted(k))
+            return true;
+    }
     return false;
 }
 
