@@ -913,10 +913,28 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            (template<class D> struct base { ... static_cast<D *>(this) ...
            }; struct d : base<d>) is complete only after it: the bodies
            wait for the end of the translation unit (instantiate_pending) */
-        for (SyntaxRef body : bodies)
-            if (body && !queue_body_until_used(body))
-                postponed_bodies.append(postponed_body{c, body, postponed_scope,
-                                                       postponed_declaration});
+        for (SyntaxRef body : bodies) {
+            if (!body || queue_body_until_used(body))
+                continue;
+            bool placeholder = false;
+            for (entity_index f = first_member_entity; f < entity_table.size();
+                 f++) {
+                const entity &member = entity_table[f];
+                if (member.kind == entity_kind::function &&
+                    member.enclosing == c && member.placeholder_return &&
+                    declared_by(f, body)) {
+                    placeholder = true;
+                    break;
+                }
+            }
+            if (placeholder && !incomplete_argument) {
+                instantiated_member_body(c, body);
+                current_declaration = outer_declaration;
+                continue;
+            }
+            postponed_bodies.append(postponed_body{c, body, postponed_scope,
+                                                   postponed_declaration});
+        }
         for (size_t i = nested_start; i < nested_bodies.size(); i++)
             postponed_bodies.append(
                 postponed_body{nested_bodies[i].c, nested_bodies[i].body,
