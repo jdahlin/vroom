@@ -571,9 +571,11 @@ analysis_result semantic_analysis::best_viable_function(
             type_table.parameters(entity_table[x.function].type.unqualified());
         const qualified_type *py =
             type_table.parameters(entity_table[y.function].type.unqualified());
-        for (uint32_t k = 0; k < tx.parameter_count; k++)
-            if (px[k] != py[k])
-                return false;
+        if (!substituting || order_unknown) {
+            for (uint32_t k = 0; k < tx.parameter_count; k++)
+                if (px[k] != py[k])
+                    return false;
+        }
         /* a function's own return type or parameter written with decltype
            may fail substitution ([temp.deduct]/8), which the candidate
            set here does not always see: the tie is then not claimed.

@@ -668,6 +668,8 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                 return of_form(sequence::form::bad);
             s = class_sequence(
                 a, qualified_type::make(t1.unqualified(), cv_none), true);
+            if (s.kind == sequence::form::unknown)
+                s.user_defined_if_viable = true;
             if (s.kind != sequence::form::user_defined)
                 return s;
             lvalue = false;
