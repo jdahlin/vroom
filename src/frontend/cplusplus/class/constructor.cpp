@@ -1316,6 +1316,7 @@ analysis_result semantic_analysis::construct(
         if (k.unknown_defaults || !k.first_default ||
             !default_argument_nodes[k.first_default + i])
             return not_supported(at, "dcl.fct.default");
+        default_argument_used(default_argument_nodes[k.first_default + i]);
         nodes.append(bind_call_site(default_argument_nodes[k.first_default + i],
                                     at.first_token()));
     }

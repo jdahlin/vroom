@@ -144,6 +144,14 @@ void semantic_analysis::mark_needed(entity_index function)
     entity_table[function].member_definition_needed = true;
 }
 
+void semantic_analysis::default_argument_used(uint32_t node)
+{
+    for (const default_argument_need_range &r : default_argument_need_ranges)
+        if (r.node == node)
+            for (uint32_t i = 0; i < r.count; i++)
+                mark_needed(default_argument_needed[r.first + i]);
+}
+
 /* [class.virtual]/17 with [basic.def.odr]/5: a class's virtual functions
    are needed by its virtual table, which an object of the class (or of a
    class derived from it, whose constructor uses the base's) wants: some
@@ -202,6 +210,30 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
         require_complete(m.type);
         if (m.category == value_category::prvalue)
             require_destructor_definition(m.type);
+    } else if (default_argument_unevaluated &&
+               unevaluated == default_argument_unevaluated) {
+        /* (a default argument's: needed by the call that uses it) */
+        entity_index function = 0;
+        if ((kind == semantic_kind::entity ||
+             kind == semantic_kind::member_pointer) &&
+            a && entity_table[a].kind == entity_kind::function)
+            function = a;
+        else if (kind == semantic_kind::construct ||
+                 kind == semantic_kind::destroy ||
+                 kind == semantic_kind::bound_member_function)
+            function = b;
+        if (function)
+            default_argument_needed.append(function);
+        if (m.category == value_category::prvalue) {
+            qualified_type object = m.type;
+            while (type_table[object.unqualified()].kind == type_kind::array)
+                object = type_table[object.unqualified()].operand;
+            const struct type &record = type_table[object.unqualified()];
+            if (record.kind == type_kind::class_type &&
+                entity_table[record.entity].destructor)
+                default_argument_needed.append(
+                    entity_table[record.entity].destructor);
+        }
     }
     semantic_node n;
     n.kind = kind;

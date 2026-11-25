@@ -3087,6 +3087,19 @@ class semantic_analysis
        [entity::first_default .. + its parameter count), 0 for a parameter
        without one */
     owned_array<uint32_t> default_argument_nodes;
+    /* [basic.def.odr]/8, [temp.inst]/4: the functions a default argument
+       names (its constructors, destructors, functions called) are needed
+       by a call that uses it, not by the declaration, which analyses it
+       unevaluated: kept per argument's node (a range of
+       default_argument_needed), marked needed by default_argument_used */
+    struct default_argument_need_range {
+        uint32_t node = 0, first = 0, count = 0;
+    };
+    owned_array<default_argument_need_range> default_argument_need_ranges;
+    owned_array<entity_index> default_argument_needed;
+    /* the unevaluated depth of the default argument analysed (0: none) */
+    unsigned default_argument_unevaluated = 0;
+    void default_argument_used(uint32_t node);
     owned_array<parameter_meaning> function_parameters;
     /* [temp.variadic]/2: the name of the function parameter pack of no
        parameters function_parameters has, 0 if none */

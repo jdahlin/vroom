@@ -2239,10 +2239,12 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
     /* [expr.call]/7: "If there is no corresponding argument, the default
        argument for the parameter is used." ([dcl.fct.default]/9: evaluated
        at each call) */
-    for (size_t i = arguments.size(); i < count; i++)
-        argument_nodes.append(bind_call_site(
-            default_argument_nodes[entity_table[called].first_default + i],
-            n.first_token()));
+    for (size_t i = arguments.size(); i < count; i++) {
+        uint32_t used =
+            default_argument_nodes[entity_table[called].first_default + i];
+        default_argument_used(used);
+        argument_nodes.append(bind_call_site(used, n.first_token()));
+    }
     if (called && bit_count_builtin(called)) {
         VTRY_SET(r, bit_count_arguments(n, called, argument_nodes));
     }
