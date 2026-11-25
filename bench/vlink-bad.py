@@ -67,6 +67,8 @@ def obj_cases(o):
                                  relaoff, '<Q', u('<Q', o, tgt + 32) - 1)
     yield 'r_offset-huge', put(o, relaoff, '<Q', 1 << 40)
     yield 'sh_addralign-3', put(o, tgt + 48, '<Q', 3)
+    yield 'sh_addralign-2^32', put(o, tgt + 48, '<Q', 1 << 32)
+    yield 'sh_entsize-2^32', put(o, tgt + 56, '<Q', 1 << 32)
     # section 0 is the file's to describe: e_shstrndx and sh_link may name it
     sh0 = put(put(put(o, shoff + 4, '<I', 3), shoff + 24, '<Q', 0x7fffffff00000000), shoff + 32, '<Q', 1)
     yield 'shstrndx-0-strtab-huge', put(sh0, 0x3e, '<H', 0)

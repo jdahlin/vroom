@@ -87,6 +87,13 @@ VPRIV bool ld_object_is_valid(struct ld_context *ctx, ld_object *o,
         if (h->sh_addralign & (h->sh_addralign - 1))
             LD_OBJECT_INVALID(
                 "%s: section %u: sh_addralign is not a power of 2", o->path, s);
+        /* both are 32 bits in an input section, as lld's */
+        if (h->sh_addralign > UINT32_MAX)
+            LD_OBJECT_INVALID("%s: section %u: sh_addralign is too large",
+                              o->path, s);
+        if (h->sh_entsize > UINT32_MAX)
+            LD_OBJECT_INVALID("%s: section %u: sh_entsize is too large",
+                              o->path, s);
     }
     if (shstrndx >= o->section_header_count ||
         !ld_string_table_is_valid(o, shstrndx))
