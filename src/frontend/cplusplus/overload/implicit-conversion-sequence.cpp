@@ -487,9 +487,20 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         for (const overload_candidate &k : specializations)
             constructors.append(k.function);
     }
+    /* (the constructors before this index are no templates'
+       specializations) */
+    size_t first_specialization = constructors.size();
+    if (entity_table[c1].constructor_templates) {
+        first_specialization = 0;
+        for (entity_index k = entity_table[c1].first_constructor; k;
+             k = entity_table[k].next_constructor)
+            first_specialization++;
+    }
     sequence best = of_form(sequence::form::bad);
-    bool unique = true, unknown = false;
-    for (entity_index k : constructors) {
+    bool unique = true, unknown = false, best_specialization = false;
+    for (size_t index = 0; index < constructors.size(); index++) {
+        entity_index k = constructors[index];
+        bool specialization = index >= first_specialization;
         const struct type &f = type_table[entity_table[k].type.unqualified()];
         /* [over.match.copy]/1.1: "the converting constructors of T" */
         if (entity_table[k].explicit_)
@@ -507,14 +518,26 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         if (best.kind == sequence::form::bad) {
             best = first;
             best.function = k;
+            best_specialization = specialization;
             continue;
         }
         int c = compare_conversions(first, best);
         if (c < 0) {
             best = first;
             best.function = k;
+            best_specialization = specialization;
             unique = true;
-        } else if (c == 0) {
+        } else if (c == 0 && best_specialization && !specialization) {
+            /* [over.match.best]/2.4: of conversions alike, "F1 is not a
+               function template specialization and F2 is a function
+               template specialization" makes F1 better (json's
+               basic_json(value_t) over basic_json(CompatibleType&&) for
+               a value_t) */
+            best = first;
+            best.function = k;
+            best_specialization = false;
+            unique = true;
+        } else if (c == 0 && !(specialization && !best_specialization)) {
             unique = false;
         }
     }
