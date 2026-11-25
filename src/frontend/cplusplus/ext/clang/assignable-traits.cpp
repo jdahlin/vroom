@@ -204,13 +204,24 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
             /* [over.match.ref]/1: a direct-initialization also considers
                the explicit conversion functions, which the binding does
                not */
+            qualified_type target_referred =
+                type_table[t.unqualified()].operand;
             for (entity_index f = own_conversion_functions(uc); f;
-                 f = entity_table[f].next_overload)
-                if (which != 2 && entity_table[f].explicit_)
-                    return not_supported_because(
-                        n, "over.match.ref",
-                        "a reference-temporary trait through an explicit "
-                        "conversion function");
+                 f = entity_table[f].next_overload) {
+                if (which != 2 && entity_table[f].explicit_) {
+                    qualified_type ret =
+                        type_table[entity_table[f].type.unqualified()].operand;
+                    const struct type &rr = type_table[ret.unqualified()];
+                    if (rr.kind == type_kind::lvalue_reference ||
+                        rr.kind == type_kind::rvalue_reference)
+                        ret = rr.operand;
+                    if (ret.unqualified() == target_referred.unqualified())
+                        return not_supported_because(
+                            n, "over.match.ref",
+                            "a reference-temporary trait through an explicit "
+                            "conversion function");
+                }
+            }
         }
         from.node =
             expression_node(semantic_kind::constant, from, n.first_token());
