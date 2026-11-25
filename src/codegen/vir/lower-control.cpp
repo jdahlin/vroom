@@ -92,7 +92,7 @@ VPRIV int virbuild_spget(codegen_context *e)
 {
     virbuild_fail(e, VIRBUILD_FAILURE(stack_pointer));
 }
-VPRIV void virbuild_spset(codegen_context *e, int r)
+VPRIV __attribute__((noreturn)) void virbuild_spset(codegen_context *e, int r)
 {
     (void)r;
     virbuild_fail(e, VIRBUILD_FAILURE(stack_pointer));
@@ -102,7 +102,8 @@ VPRIV codegen_value virbuild_setjmp(codegen_context *e, int rbuf)
     (void)rbuf;
     virbuild_fail(e, VIRBUILD_FAILURE(setjmp));
 }
-VPRIV void virbuild_longjmp(codegen_context *e, int rbuf)
+VPRIV __attribute__((noreturn)) void virbuild_longjmp(codegen_context *e,
+                                                      int rbuf)
 {
     (void)rbuf;
     virbuild_fail(e, VIRBUILD_FAILURE(longjmp));

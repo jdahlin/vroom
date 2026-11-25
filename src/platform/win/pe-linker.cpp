@@ -78,7 +78,7 @@ typedef struct pe_arena_block {
 } pe_arena_block;
 static pe_arena_block *pe_arena;
 
-static void pe_oom(void)
+static __attribute__((noreturn)) void pe_oom(void)
 {
     fputs("vlink: out of memory\n", stderr);
     exit(1);

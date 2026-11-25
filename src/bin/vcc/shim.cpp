@@ -53,7 +53,7 @@ static char shim_request_buffer[sizeof(struct vccd_request_header) +
 static char **shim_argv;
 
 /* the real shell, in this process: nothing has been written or run yet */
-static void shim_real_shell_exec(void)
+static __attribute__((noreturn)) void shim_real_shell_exec(void)
 {
     const char *sh = getenv("VSH_REAL");
 
@@ -66,7 +66,7 @@ static void shim_real_shell_exec(void)
 }
 #endif
 
-static void shim_die(const char *msg)
+static __attribute__((noreturn)) void shim_die(const char *msg)
 {
     (void)!write(2, msg, strlen(msg));
     _exit(127);
@@ -225,9 +225,10 @@ int main(int argc, char **argv)
         if (vccd_socket_default(ddir, sizeof(ddir), dsock, sizeof(dsock), mk)) {
 #ifdef VSH
             shim_real_shell_exec();
-#endif
+#else
             shim_die("vcc: no private vccd directory (set VCC_SOCK or start "
                      "vccd)\n");
+#endif
         }
         path = dsock;
     }

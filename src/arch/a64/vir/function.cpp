@@ -145,7 +145,7 @@ static void vl_target_after_blocks(void *ctx)
         }
 }
 
-static void vl_target_fail(void *ctx, const char *why)
+static __attribute__((noreturn)) void vl_target_fail(void *ctx, const char *why)
 {
     a64_vir_fail((a64_vir_context *)ctx, why);
 }
