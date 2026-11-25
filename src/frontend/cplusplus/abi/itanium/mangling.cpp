@@ -314,6 +314,18 @@ bool itanium_mangler::encoding(entity_index e)
     if ((x.kind == entity_kind::function || x.kind == entity_kind::variable) &&
         x.instantiation)
         return specialization_encoding(e);
+    /* [impl.clang] a function whose symbol is not mangled (C language
+       linkage, main; mangled_name), named in an <expr-primary>'s L _Z
+       <encoding> E: its unqualified name alone, no function type, in any
+       namespace ([dcl.link]/7) */
+    if (x.kind == entity_kind::function && x.name && !x.instantiation) {
+        size_t length = 0;
+        const char *identifier = spelling(x.name, &length);
+        bool is_main =
+            !x.enclosing && length == 4 && !memcmp(identifier, "main", 4);
+        if (x.c_language_linkage || is_main)
+            return source_name(x.name);
+    }
     if (!name(e))
         return false;
     if (x.kind == entity_kind::variable)

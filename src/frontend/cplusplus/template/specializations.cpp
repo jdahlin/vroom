@@ -984,6 +984,24 @@ analysis_result semantic_analysis::named_specialization(
     }
     const function_template f = function_templates[ft - 1];
     const entity t = entity_table[f.entity];
+    /* [temp.arg]/1: the arguments written from a trailing template
+       parameter pack's position on are its elements (f<int, float> of
+       template<class... T> void f(): one pack of two), as
+       template_id_arguments gathers them */
+    if (f.parameter_count &&
+        template_parameter_is_pack(f.first_parameter + f.parameter_count - 1)) {
+        uint32_t p = f.parameter_count - 1;
+        if (values.size() > p &&
+            !(values.size() == p + 1 &&
+              values[p].kind == template_argument::kind_t::pack)) {
+            owned_array<template_argument> elements;
+            for (size_t i = p; i < values.size(); i++)
+                elements.append(values[i]);
+            values.resize(p);
+            values.append(make_pack(elements.data(),
+                                    static_cast<uint32_t>(elements.size())));
+        }
+    }
     /* [temp.deduct.decl]/1: a member function template's cv-qualifiers
        are part of the function type compared (the declarator's are
        refused above) */
