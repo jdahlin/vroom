@@ -1118,6 +1118,48 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
             text("az");
         return dependent_expression(operand);
     }
+    /* [abi:expressions] f<args> named unqualified (a callee): an
+       <unresolved-name>'s <simple-id>, <source-name> <template-args>,
+       each argument a type or X <expression> E */
+    if (expression.is(syntax_kind::simple_template_id) &&
+        expression.size() >= 3 && expression[0].is_identifier()) {
+        /* (a function template's name; an alias or class template's
+           names a type, a functional cast: not mangled yet) */
+        entity_index named = analysis.constraint_name(
+            analysis.entity_table[encoding_template].enclosing,
+            expression[0].token());
+        if (!named || !analysis.names_function_template(named))
+            return false;
+        if (!source_name(analysis.token_identifier(expression[0].token())))
+            return false;
+        text("I");
+        owned_array<SyntaxElement> written;
+        for (uint32_t i = 2; i + 1 < expression.size(); i++) {
+            if (expression[i].is(syntax_kind::template_argument_list))
+                for (auto x : expression[i].elements())
+                    written.append(x);
+            else
+                written.append(expression[i]);
+        }
+        for (SyntaxElement a : written) {
+            if (a.is(preprocessing_op_or_punc::COMMA))
+                continue;
+            if (a.is(syntax_kind::type_id)) {
+                if (!type_operand(a))
+                    return false;
+                continue;
+            }
+            bool literal = a.is_token() && !a.is_identifier();
+            if (!literal)
+                text("X");
+            if (!dependent_expression(a))
+                return false;
+            if (!literal)
+                text("E");
+        }
+        text("E");
+        return true;
+    }
     /* [abi:expressions] the named casts,
 
            <expression> ::= dc <type> <expression>

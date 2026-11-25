@@ -6483,6 +6483,12 @@ class semantic_analysis
         return entity_table[template_parameter_entities[f.first_parameter + i]]
             .name;
     }
+    /* whether the name held by entity held denotes a function template
+       (a non-member's, as a callee's unresolved name is mangled) */
+    bool names_function_template(entity_index held) const
+    {
+        return function_template_of(held) != 0;
+    }
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
     {
