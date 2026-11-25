@@ -1171,6 +1171,12 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
         text("_");
         return true;
     }
+    /* a non-type template parameter: its <template-param>
+       ([abi:mangle.template-param]) */
+    if (expression.is_identifier())
+        if (entity_index pe = analysis.constraint_parameter(encoding_template,
+                                                            expression.token()))
+            return constraint_parameter(encoding_template, pe);
 
     owned_buffer spelling;
     analysis.token_spelling(expression.token(), spelling.get());
