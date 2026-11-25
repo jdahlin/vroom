@@ -608,6 +608,21 @@ analysis_result semantic_analysis::id_expression(token_index t,
                                    "same entity is ill-formed",
                                    "namespace.udir");
     entity_index e = found.entity;
+    if (!e && found.unknown_entity) {
+        const entity &ue = entity_table[found.unknown_entity];
+        if (ue.kind == entity_kind::none && ue.argument_bound &&
+            type_table[ue.type.unqualified()].kind ==
+                type_kind::pointer_to_member) {
+            m.type = ue.type;
+            m.category = value_category::prvalue;
+            if (ue.value)
+                m.node = expression_node(semantic_kind::member_pointer, m, t,
+                                         static_cast<uint32_t>(ue.value));
+            else
+                m.node = expression_node(semantic_kind::constant, m, t, 0);
+            return analysis_result::well_formed;
+        }
+    }
     if (!e && !found.unknown)
         e = library_builtin(name);
     /* [lex.name]/3: a name spelled __builtin_ is the implementation's; a
