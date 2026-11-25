@@ -209,12 +209,13 @@ void c_lowering::guarded_initialization(const semantic_node &n,
 {
     entity_index e = n.a;
     entity_index function = enclosing_function(e);
-    if (!function || analysis.entity_table[function].inline_) {
-        /* [abi:guards]: the guard and the variable are COMDAT with the
-           inline function, which C's code generator does not make yet */
-        fail("a guarded local static in an inline function", n.at);
+    if (!function) {
+        fail("a guarded local static outside a function", n.at);
         return;
     }
+    bool weak_guard =
+        analysis.entity_table[function].inline_ &&
+        analysis.entity_table[function].linkage_of_name != linkage::internal;
     bool constant = !n.b || constant_initializer(n.b);
     if (!constant && node(n.b).kind == semantic_kind::initializer_list &&
         record(analysis.entity_table[e].type).kind == type_kind::array) {
@@ -251,11 +252,22 @@ void c_lowering::guarded_initialization(const semantic_node &n,
         ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
     ast_qualified_type i64p = pointer_to(i64);
     ast_qualified_type int_type = ast_builder_type_basic(AST_TYPE_INT);
-    uint32_t guard =
-        ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
-                           guard_name.size(), i64, AST_STORAGE_STATIC, 0, 1);
+    uint32_t guard = 0;
+    if (weak_guard) {
+        guard =
+            ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
+                               guard_name.size(), i64, AST_STORAGE_NONE,
+                               AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
+                                   AST_SYMBOL_FLAG_DEFINED,
+                               1);
+        ast_builder_toplevel(c, guard);
+    } else {
+        guard = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
+                                   guard_name.size(), i64, AST_STORAGE_STATIC,
+                                   0, 1);
+        ast_builder_symbol_flags_add(c, guard, AST_SYMBOL_FLAG_DEFINED);
+    }
     ast_builder_symbol_assembler_name(c, guard, written.data(), written.size());
-    ast_builder_symbol_flags_add(c, guard, AST_SYMBOL_FLAG_DEFINED);
     ast_builder_symbol_keep(c, guard);
     auto guard_address = [&]() {
         return address_of(c_variable(c, guard, i64), i64p);
