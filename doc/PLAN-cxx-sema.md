@@ -1658,6 +1658,12 @@ lines:
   gains 18 agreeing declarations and 18 verified types/constants, dropping
   `[class.copy.assign]` refusals by 27.  The JSON include now reaches
   `[class.copy.elision]` in libc++ `path_iterator.h`.
+  `return_statement` now checks all `[class.copy.ctor]/8` suppressors of an
+  implicitly-declared move constructor (defaulted copy constructor, copy/move
+  assignment, user-declared destructor) before refusing an lvalue return.
+  Test `return-defaulted-copy-no-move` (4/4 at `-O0..3`); the JSON include
+  now clears `<filesystem>` and reaches `[temp.class.spec]` in libc++
+  `__ranges/movable_box.h`.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land

@@ -283,6 +283,7 @@ lower SemaCXX/ptrauth-incomplete-virtual-member-function-return-arg-type.cpp -st
 lower SemaCXX/trivial-constructor.cpp -std=c++11 -Wno-deprecated-builtins: vpp -S defines ['_ZTI2T4', '_ZTS2T4', '_ZTT2T4'] clang -O0 does not, not []
 lower SemaCXX/warn-float-conversion.cpp -std=gnu++17 -Wno-conversion -Wfloat-overflow-conversion -DOVERFLOW: vpp -S defines ['_ZN5CheckIcE4SafeEv', '_ZN5CheckIfE4SafeEv'] clang -O0 does not, not []
 lower SemaCXX/warn-float-conversion.cpp -std=gnu++17 -Wno-literal-conversion -Wfloat-conversion -DFLOAT_CONVERSION -DZERO -DBOOL -DCONSTANT_BOOL -DOVERFLOW: vpp -S defines ['_ZN5CheckIcE4SafeEv', '_ZN5CheckIfE4SafeEv'] clang -O0 does not, not []
+lower SemaCXX/warn-large-by-value-copy.cpp -std=gnu++17: vpp -S defines ['_ZN11rdar85480506NonPODC2ERKS0_'] clang -O0 does not, not ['_ZN11rdar85480506NonPODC2EOS0_']
 lower SemaCXX/warn-pure-virtual-call-from-ctor-dtor.cpp -std=gnu++17 -Wcall-to-pure-virtual-from-ctor-dtor: vpp -S defines [] clang -O0 does not, not ['_ZN2TAIiEC2Ev', '_ZN2TCC2Ev']
 lower SemaTemplate/GH161657.cpp -std=c++20: vpp -S defines ['_ZZ3foovENK3$_0clEv'] clang -O0 does not, not ['_ZNK1SIiE3$_0clEv']
 lower SemaTemplate/defaulted-destructor-in-temporary.cpp -std=c++11: vpp -S defines [] clang -O0 does not, not ['_ZN3StrD2Ev']
@@ -491,9 +492,9 @@ verdict CXX/over/over.match/over.match.funcs/over.match.oper/p3.cpp -std=c++11: 
 verdict CXX/over/over.over/p1.cpp -std=c++1z -DNOEXCEPT=noexcept: ill-formed for us, accepted by clang: line 14 (7 declarations)
 verdict CXX/special/class.copy/p12-0x.cpp -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 76 (6 declarations)
 verdict CXX/special/class.copy/p12-0x.cpp -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted: ill-formed for us, accepted by clang: line 76 (6 declarations)
-verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 123 (3 declarations)
-verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 123 (3 declarations)
-verdict CXX/special/class.copy/p25-0x.cpp -std=c++2b -DDEDUCING_THIS -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 201 (1 declarations)
+verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 105 (5 declarations)
+verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (5 declarations)
+verdict CXX/special/class.copy/p25-0x.cpp -std=c++2b -DDEDUCING_THIS -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (3 declarations)
 verdict CXX/temp/temp.decls/temp.variadic/metafunctions.cpp -std=c++11: ill-formed for us, accepted by clang: line 271 (1 declarations)
 verdict CXX/temp/temp.decls/temp.variadic/multi-level-substitution.cpp -std=c++11: ill-formed for us, accepted by clang: line 43 (3 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/cwg1170.cpp -std=c++11: ill-formed for us, accepted by clang: line 39 (2 declarations)
