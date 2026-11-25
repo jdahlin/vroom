@@ -310,6 +310,9 @@ CC_PRIVATE void cc_translation_unit_free(cc *c)
                                              c->ntoplevel, c->toplevel));
     vjob_region_release(&cc_regions[14],
                         CC_TRANSLATION_UNIT_USED_BYTES(c->ntlasm, c->tlasm));
+#if VCC_ASAN
+    VASAN_UNPOISON(c->heap, (size_t)(c->heap_poisoned - c->heap));
+#endif
     vjob_region_release(&cc_regions[15], (size_t)(c->hp - c->heap) + 64);
     vjob_region_release(&cc_regions[16],
                         ((size_t)c->nty + 2) * 8 *

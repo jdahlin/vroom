@@ -88,16 +88,16 @@ static inline void vregion_truncate(vregion *r, size_t used)
 #endif
 
 /* the whole reservation addressable again, before it is unmapped or handed back */
+#if VCC_ASAN
 static inline void vregion_unpoison(vregion *r)
 {
-#if VCC_ASAN
     if (r->poisoned)
         VASAN_UNPOISON(r->base, r->poisoned);
     r->poisoned = 0;
-#else
-    (void)r;
-#endif
 }
+#else
+#define vregion_unpoison(r) ((void)(r))
+#endif
 
 /* the n bytes at offset u (aligned, u + n <= cap checked by the caller) */
 static inline VUSE

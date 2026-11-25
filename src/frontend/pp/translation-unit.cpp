@@ -305,6 +305,8 @@ void pp_close(pp *p)
         p); /* a record still waiting for its notes (no summary ran) */
     /* back to the thread: the stacks and tmp (reused all along the TU) as they are */
     vjob_region_release(&pp_translation_unit_regions[1], VJOB_REGION_SCRATCH);
+    vregion_unpoison(&p->permanent_region); /* (ASan: what it poisoned) */
+    vregion_unpoison(&p->temporary_region);
     vjob_region_release(&pp_translation_unit_regions[2],
                         p->permanent_region.used + 64);
     vjob_region_release(&pp_translation_unit_regions[3], VJOB_REGION_SCRATCH);

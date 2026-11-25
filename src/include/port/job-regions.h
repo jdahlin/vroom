@@ -119,9 +119,6 @@ static inline VUSE VNONNULL(1) void *vjob_region_acquire(vjob_region *r,
 static inline void vjob_region_release(vjob_region *r, size_t used)
 {
     r->busy = 0;
-    /* a vregion over it poisoned what it did not hand out (common/region.h);
-       unpoisoning a whole reservation clears its shadow cheaply */
-    VASAN_UNPOISON(r->p, r->cap);
     if (__builtin_expect(vjob_region_debug(), 0))
         vjob_region_debug_release(r, used);
     if (used == VJOB_REGION_SCRATCH)
