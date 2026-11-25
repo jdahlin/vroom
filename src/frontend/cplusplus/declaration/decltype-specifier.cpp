@@ -316,6 +316,23 @@ void semantic_analysis::collect_written_casts(
 void semantic_analysis::collect_written_bindings(
     SyntaxRef n, owned_array<written_binding> &found, bool every_name)
 {
+    /* a pack expansion's pattern written as a type-id (tuple<_Tp&&...>):
+       the pack expansion of its type, the pack's name standing for the
+       pack's type (the mangler's Dp <type>, a substitution candidate; cast
+       the type-id's node) */
+    if (n.is(syntax_kind::type_id)) {
+        size_t unsupported_before = unsupported.size();
+        qualified_type t;
+        analysis_result r = type_id(n, t);
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed) {
+            written_binding b;
+            b.cast = n.index().index();
+            b.type =
+                qualified_type::make(type_table.pack_expansion_of(t), cv_none);
+            found.append(b);
+        }
+    }
     collect_written_casts(n, found);
     for (token_index t = n.first_token(); t < n.end_token(); t++) {
         if (tokens[t].kind != token_kind::identifier)

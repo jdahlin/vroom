@@ -1735,6 +1735,25 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
                     text("E");
                     continue;
                 }
+                /* a pattern written as a type-id (tup<T&&...>): the pack
+                   expansion of its type, Dp <type> (collect_written_bindings) */
+                if (analysis.entity_table[own].kind ==
+                    entity_kind::dependent_written) {
+                    const entity &w = analysis.entity_table[own];
+                    bool found = false;
+                    for (uint32_t b = 0; b < w.member_count && !found; b++) {
+                        const auto &x =
+                            analysis.written_bindings[w.first_member + b];
+                        if (x.identifier || x.cast != w.value)
+                            continue;
+                        if (!type(x.type))
+                            return false;
+                        found = true;
+                    }
+                    if (!found)
+                        return false;
+                    continue;
+                }
                 /* (a template pack: not mangled yet) */
                 if (analysis.entity_table[own].kind !=
                     entity_kind::typedef_name)
