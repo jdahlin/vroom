@@ -193,6 +193,14 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
                               "each template-parameter after one with a "
                               "default template-argument shall have one",
                               "temp.param");
+    /* [temp.inst]/15's specifications are instantiated by nothing yet: a
+       definition whose own needs itself without end is refused rather
+       than accepted (its body is not analysed here) */
+    if (noexcept_needs_itself(n.first_token(), n.end_token(), name))
+        return not_supported_because(
+            n, "temp.inst",
+            "an exception specification that needs itself through its own "
+            "template");
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     entity_index t = record.entity;

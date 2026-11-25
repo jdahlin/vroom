@@ -4144,10 +4144,11 @@ class semantic_analysis
     };
     owned_array<pending_noexcept> pending_noexcepts;
     bool noexcept_needs_complete_class(SyntaxRef n);
-    /* whether the noexcept-specifier n of a member of class template
-       specialization c asks noexcept of the template specialized with c
+    /* whether a noexcept-specifier in the tokens [first, end) of class
+       template C (name) asks noexcept of the template specialized with
        itself, C<C>: a specification that needs another, without end */
-    bool noexcept_needs_itself(SyntaxRef n, entity_index c) const;
+    bool noexcept_needs_itself(token_index first, token_index end,
+                               uint32_t name) const;
     bool names_parameter_of_class(SyntaxRef n, entity_index c);
     analysis_result member_noexcept_specifiers(entity_index c);
     /* the noexcept-specifiers left value-dependent in templates' own

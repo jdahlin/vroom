@@ -733,7 +733,9 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
        that needs itself without end is not accepted for that */
     if (exceptions && may_qualify && defining_class &&
         entity_table[defining_class].instantiation &&
-        noexcept_needs_itself(exceptions, defining_class))
+        noexcept_needs_itself(exceptions.first_token() - 1,
+                              exceptions.end_token(),
+                              entity_table[defining_class].name))
         return not_supported_because(
             exceptions, "temp.inst",
             "an exception specification that needs itself through its own "
