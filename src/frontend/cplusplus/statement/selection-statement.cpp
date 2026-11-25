@@ -34,7 +34,29 @@ node_index parser::selection_statement()
         add_token();
     } else if (if_ && (at(standard_keyword::consteval_) ||
                        at(preprocessing_op_or_punc::EXCLAMATION))) {
-        return beyond_this_step();
+        /* P1938R3 (C++23), [stmt.if]: if !_opt consteval compound-statement
+           (else compound-statement)_opt: no parentheses, and both
+           substatements are compound-statements (clang: "expected { after
+           else"); n4861 has not got it yet */
+        accept(preprocessing_op_or_punc::EXCLAMATION);
+        if (!accept(standard_keyword::consteval_))
+            return expected("'consteval' after 'if !'", "stmt.if");
+        if (!at(preprocessing_op_or_punc::LEFT_BRACE))
+            return expected("a compound-statement after 'if consteval'",
+                            "stmt.if");
+        compound_statement();
+        if (failed())
+            return 0;
+        if (accept(standard_keyword::else_)) {
+            if (!at(preprocessing_op_or_punc::LEFT_BRACE))
+                return expected("a compound-statement after else of an "
+                                "if consteval",
+                                "stmt.if");
+            compound_statement();
+            if (failed())
+                return 0;
+        }
+        return finish_node(syntax_kind::selection_statement, mark, first);
     }
     if (!accept(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
         if (if_)
@@ -97,6 +119,12 @@ struct statement_parts {
 analysis_result semantic_analysis::selection_statement(SelectionStatement n,
                                                        uint32_t &built)
 {
+    /* P1938R3: if consteval (the parser keeps its substatements; their
+       rules, an immediate function context, are not written yet) */
+    if (n.size() >= 3 && n[0].is_token() &&
+        (n[1].is(preprocessing_op_or_punc::EXCLAMATION) ||
+         (n[1].is_token() && n[1].keyword() == standard_keyword::consteval_)))
+        return not_supported_because(n, "stmt.if", "if consteval");
     if (n.size() < 5 || !n[0].is_token())
         return not_supported_because(
             n, "stmt.if", "a selection statement with too few parts");
@@ -108,9 +136,7 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
         open = 2;
     if (n.size() < open + 4 ||
         !n[open].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
-        /* if consteval */
-        return not_supported_because(n, "stmt.if",
-                                     "if consteval or a missing parenthesis");
+        return not_supported_because(n, "stmt.if", "a missing parenthesis");
     bool is_switch = n[0].keyword() == standard_keyword::switch_;
     statement_parts parts;
     uint32_t i = open + 1;
