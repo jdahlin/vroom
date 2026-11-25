@@ -1384,6 +1384,18 @@ analysis_result semantic_analysis::template_callee(
     name = 0;
     function_template = 0;
     qualified = false;
+    if (auto op = callee.operator_function_id()) {
+        /* [over.call.func]/3: operator<(a, b) names the function templates
+           of that operator found by unqualified lookup too */
+        declarator_meaning function_name;
+        VTRY(r, operator_function_id(op, function_name));
+        name = function_name.id;
+        lookup_result x =
+            lookup_unqualified(tokens.identifier(name), lookup_filter::any);
+        if (!x.entity)
+            function_template = function_template_of(x.unknown_entity);
+        return analysis_result::well_formed;
+    }
     if (callee.is_token()) {
         if (tokens[callee.token()].kind != token_kind::identifier)
             return analysis_result::well_formed;
@@ -1979,6 +1991,26 @@ analysis_result semantic_analysis::template_call(
         tokens[name + 1].kind == token_kind::operator_or_punctuator &&
         preprocessing_op_or_punc_primary(tokens[name + 1].op_or_punc) ==
             preprocessing_op_or_punc::LESS;
+    /* (the token after operator is the operator's own, operator<: a
+       template-id only where written arguments follow it) */
+    {
+        size_t length = 0;
+        const char *spelled = identifier_text(tokens.identifier(name), &length);
+        if (length > 8 && memcmp(spelled, "operator", 8) == 0) {
+            template_id = static_cast<bool>(written_at);
+            /* [over.oper]/6: an operator function shall have a parameter of
+               class or enumeration type; of a specialization that has none
+               (clang: substitution failure at the use) not analysed */
+            bool user_defined = false;
+            for (const expression_meaning &e : early) {
+                type_index t = referenced_type(e.type).unqualified();
+                user_defined |= type_table[t].kind == type_kind::class_type ||
+                                type_table[t].kind == type_kind::enumeration;
+            }
+            if (!user_defined)
+                return not_supported(n, "over.oper");
+        }
+    }
     for (const template_name_function &x : template_name_functions)
         if (x.name == function_templates[function_template - 1].name &&
             !template_id)
