@@ -110,8 +110,8 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
             return assignment_use::deleted;
         return assignment_use::usable;
     }
-    if (entity_table[found.entity].member_templates)
-        return assignment_use::unknown;
+    bool has_templates = entity_table[found.entity].member_templates;
+    bool other_class_op = false;
     /* the candidates for the source: a const lvalue binds to X, const X&;
        an xvalue also to X&& */
     entity_index copy = 0, moving = 0, nonconst_copy = 0;
@@ -158,8 +158,10 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
         } else if (r.kind == type_kind::class_type ||
                    (r.kind == type_kind::lvalue_reference &&
                     referred.kind == type_kind::class_type)) {
-            /* another class: viable through a conversion not analysed */
-            return assignment_use::unknown;
+            /* another class: viable through a conversion not analysed,
+               but strictly worse than an exact-match copy/move operator=
+               ([over.ics.rank]/3.2) */
+            other_class_op = true;
         }
         /* operator=(int) and the like: no candidate for this source */
     }
@@ -201,6 +203,12 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
         count = movings;
     }
     if (count > 1)
+        return assignment_use::unknown;
+    /* [over.match.best]/2.4, [over.ics.rank]/3.2: a non-template exact-match
+       copy/move operator= beats member templates and operators taking another
+       class; otherwise their viability is not analysed */
+    if ((has_templates && (!count || (move && !movings))) ||
+        (other_class_op && !count))
         return assignment_use::unknown;
     /* an xvalue does not bind to X&: no viable function */
     if (chosen && chosen == nonconst_copy && move)
