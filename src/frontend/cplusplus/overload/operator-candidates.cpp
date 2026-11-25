@@ -799,7 +799,8 @@ analysis_result semantic_analysis::overloaded_operator(
             }
             conversion_sequence seq =
                 implicit_conversion_sequence(arguments[ai], params[pi], false);
-            if (seq.kind != sequence::form::standard || seq.rank != 0)
+            if (seq.kind != conversion_sequence::form::standard ||
+                seq.rank != 0)
                 beats_builtin = false;
         }
         if (!beats_builtin)
