@@ -400,16 +400,97 @@ analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
     flag_set checked(explicit_declaration_names, false);
     SyntaxElement clause;
     bool direct = false, list = false;
-    if (!initializer_form(init, clause, direct, list))
+    if (!initializer_form(init, clause, direct, list)) {
+        InitializerParts parts(init);
+        bool done = false;
+        if (parts.form == InitializerParts::syntax_form::equals &&
+            parts.braced_list()) {
+            VTRY(dr, deduce_initializer_list(parts.braced_list(), e, type,
+                                             value, done));
+        }
+        if (done)
+            return analysis_result::well_formed;
         /* copy-list-initialization (std::initializer_list<U>), an
            expression-list or braced-init-list of other than one
            expression */
         return not_supported_because(init.index(), "dcl.type.auto.deduct",
                                      "auto from a list or several expressions");
+    }
     expression_meaning m;
     VTRY(r, expression(clause, m));
     return deduced_initialization(init, m, names_entity(clause), direct, list,
                                   e, type, value);
+}
+
+/*
+ * [dcl.type.auto.deduct]/2, [temp.deduct.call]: "auto x = { ... }" deduces
+ * std::initializer_list<U>, U deduced from every element alike.  A local
+ * variable of plain (cv) auto only; done is false for what is left.
+ */
+analysis_result
+semantic_analysis::deduce_initializer_list(SyntaxElement braced, entity_index e,
+                                           qualified_type &type,
+                                           initialized_value &value, bool &done)
+{
+    done = false;
+    if (type_table[type.unqualified()].kind != type_kind::placeholder ||
+        !entity_table[e].automatic || declaration_deduced.unqualified())
+        return analysis_result::well_formed;
+    for (token_index t = current_declaration.first_token();
+         t < braced.first_token(); t++)
+        if (tokens[t].kind == token_kind::keyword &&
+            syntax_parser.keyword_of(tokens[t]) == standard_keyword::decltype_)
+            return analysis_result::well_formed;
+    owned_array<SyntaxElement> clauses;
+    owned_array<uint32_t> packs;
+    designation_set designations;
+    VTRY(gathered, list_clauses(braced, clauses, &packs, &designations));
+    if (designations.any || clauses.empty())
+        return analysis_result::well_formed;
+    for (uint32_t x : packs)
+        if (x != no_expansion)
+            return analysis_result::well_formed;
+    qualified_type element;
+    for (SyntaxElement c : clauses) {
+        if (c.is(syntax_kind::braced_init_list))
+            return analysis_result::well_formed;
+        expression_meaning m;
+        unevaluated++;
+        analysis_result r = expression(c, m);
+        unevaluated--;
+        if (r != analysis_result::well_formed)
+            return r;
+        const struct type of = type_table[m.type.unqualified()];
+        if (of.kind != type_kind::fundamental &&
+            of.kind != type_kind::enumeration && of.kind != type_kind::pointer)
+            return analysis_result::well_formed;
+        qualified_type decayed =
+            qualified_type::make(m.type.unqualified(), cv_none);
+        if (element.unqualified() && !(element == decayed))
+            return analysis_result::well_formed;
+        element = decayed;
+    }
+    uint32_t list_template = 0;
+    VTRY(found, std_class_template(current_declaration, "initializer_list",
+                                   list_template));
+    if (!list_template)
+        return analysis_result::well_formed;
+    template_argument argument;
+    argument.kind = template_argument::kind_t::type;
+    argument.type = element;
+    entity_index c = 0;
+    VTRY(made, instantiate_class(current_declaration, list_template, &argument,
+                                 1, c));
+    require_complete(c);
+    if (entity_table[c].kind != entity_kind::class_type ||
+        !entity_table[c].size)
+        return analysis_result::well_formed;
+    type = qualified_type::make(entity_table[c].type.unqualified(), type.cv());
+    declaration_deduced =
+        qualified_type::make(entity_table[c].type.unqualified(), cv_none);
+    entity_table[e].type = type;
+    done = true;
+    return list_initialization(braced, type, false, value);
 }
 
 /* ... the initializer's expression analysed as m (named: names_entity of

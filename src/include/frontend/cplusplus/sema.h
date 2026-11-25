@@ -6239,6 +6239,11 @@ class semantic_analysis
        (not known when they are not plain expressions) */
     analysis_result braced_deduction_elements(SyntaxElement list,
                                               expression_meaning &m);
+    analysis_result deduce_initializer_list(SyntaxElement braced,
+                                            entity_index e,
+                                            qualified_type &type,
+                                            initialized_value &value,
+                                            bool &done);
     owned_array<expression_meaning> braced_elements;
     /* ... deduced from the argument m of parameter type p: 1 deduced, 0
        a non-deduced context, -1 deduction failed */
