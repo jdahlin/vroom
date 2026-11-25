@@ -49,6 +49,7 @@
  */
 #include "common/literal.h"
 #include "common/response-files.h"
+#include <stdarg.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -98,11 +99,16 @@ typedef struct ar_request {
     int64_t now;
 } ar_request;
 
-static void ar_error_report(ar_request *q, const char *fmt, const char *s,
-                            const char *t)
+static __attribute__((format(printf, 2, 3))) void
+ar_error_report(ar_request *q, const char *fmt, ...)
 {
     char line[4200];
-    int n = snprintf(line, sizeof(line), fmt, s, t);
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
 
     q->failed = true;
     if (q->errfd >= 0 && n > 0)

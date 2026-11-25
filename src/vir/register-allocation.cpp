@@ -487,10 +487,17 @@ static inline void vir_alloc_fix_get(const vir_allocator *a, uint32_t i,
         a->registers->fixed(a->function, i, x, a->registers->context);
 }
 
-static bool vir_alloc_failure_set(vir_allocator *a, const char *fmt, uint32_t x)
+static __attribute__((format(printf, 2, 3))) bool
+vir_alloc_failure_set(vir_allocator *a, const char *fmt, ...)
 {
-    if (!a->failed)
-        snprintf(a->out->error_message, sizeof(a->out->error_message), fmt, x);
+    if (!a->failed) {
+        va_list ap;
+
+        va_start(ap, fmt);
+        vsnprintf(a->out->error_message, sizeof(a->out->error_message), fmt,
+                  ap);
+        va_end(ap);
+    }
     a->failed = true;
     return false;
 }
@@ -2492,7 +2499,7 @@ bool vir_alloc(vir_function *f, const vir_loops *lp,
     if (!nb || !vir_alloc_preconditions_check(a))
         return false;
     if (!vir_cfg_build(f) || !vir_dominators_build(f))
-        return vir_alloc_failure_set(a, "bad control-flow graph%s", 0);
+        return vir_alloc_failure_set(a, "bad control-flow graph");
     /* successors (CSR), loop end positions, blocks with no earlier predecessor */
     for (uint32_t b = 0; b < nb; b++) {
         vir_insn t = f->insns[vir_alloc_block_last(f, b)];

@@ -318,8 +318,9 @@ struct diag_record {
 };
 __attribute__((format(printf, 4, 5))) diag_record *
 diag_record_begin(pp *p, int level, uint32_t loc, const char *fmt, ...);
-diag_record *diag_record_begin_va(pp *p, int level, uint32_t loc,
-                                  const char *fmt, va_list ap);
+__attribute__((format(printf, 4, 0))) diag_record *
+diag_record_begin_va(pp *p, int level, uint32_t loc, const char *fmt,
+                     va_list ap);
 void diag_record_label_add(pp *p, diag_record *d, uint32_t b, uint32_t e,
                            const char *label);
 void diag_record_fixit_add(pp *p, diag_record *d, uint32_t b, uint32_t e,
