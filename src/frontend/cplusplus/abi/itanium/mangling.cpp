@@ -225,6 +225,8 @@ class itanium_mangler
     void member_qualifiers(const entity &x);
     bool prefix(entity_index scope);
     bool class_enum_type(qualified_type t);
+    bool std_of_char(qualified_type t, const char *name, size_t n) const;
+    const char *std_abbreviation(entity_index c) const;
     bool dependent_member_name(entity_index e);
     bool dependent_member_prefix(type_index q);
     void discriminator(uint64_t n);
@@ -1530,6 +1532,31 @@ bool itanium_mangler::prefix(entity_index scope)
     }
     if (is_class && substitution(c.type))
         return true;
+    /* ::std::string and the char streams as a prefix: their abbreviation,
+       no candidate (_ZNSs4sizeEv); ::std::allocator<T> and another
+       ::std::basic_string Sa or Sb and the arguments, a candidate as a
+       whole */
+    if (is_class && c.name && c.instantiation) {
+        if (const char *whole = std_abbreviation(scope)) {
+            text(whole);
+            return true;
+        }
+        size_t length = 0;
+        const char *identifier = spelling(c.name, &length);
+        const char *code = nullptr;
+        if (length == 9 && !memcmp(identifier, "allocator", 9))
+            code = "Sa";
+        if (length == 12 && !memcmp(identifier, "basic_string", 12))
+            code = "Sb";
+        if (c.instantiation && is_std(c.enclosing) &&
+            !in_inline_namespace(scope) && code) {
+            text(code);
+            if (!template_args(scope))
+                return false;
+            add_candidate(c.type);
+            return true;
+        }
+    }
     if (is_class && c.instantiation &&
         substitution(analysis.specialized_template(scope))) {
         if (!template_args(scope))
@@ -1669,6 +1696,74 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
     return true;
 }
 
+/* whether t is ::std::NAME<char> (NAME of length n: char_traits,
+   allocator), outside an inline namespace */
+bool itanium_mangler::std_of_char(qualified_type t, const char *name,
+                                  size_t n) const
+{
+    const struct type &r = record(t);
+    if (t.cv() || r.kind != type_kind::class_type)
+        return false;
+    entity_index c = r.entity;
+    const entity &x = analysis.entity_table[c];
+    if (!x.instantiation || !x.name || !is_std(x.enclosing) ||
+        in_inline_namespace(c))
+        return false;
+    size_t length = 0;
+    const char *identifier = spelling(x.name, &length);
+    if (length != n || memcmp(identifier, name, n) ||
+        analysis.specialization_argument_count(c) != 1 ||
+        analysis.specialization_pack(c, 0))
+        return false;
+    qualified_type a = analysis.specialization_argument(c, 0);
+    const struct type &ar = record(a);
+    return !a.cv() && ar.kind == type_kind::fundamental &&
+           ar.fundamental == fundamental_type::char_;
+}
+
+/* [abi:mangling-compression]'s abbreviation of class c, a specialization
+   of ::std (no inline namespace) as a whole: Ss, Si, So or Sd; nullptr for
+   another */
+const char *itanium_mangler::std_abbreviation(entity_index c) const
+{
+    const entity &x = analysis.entity_table[c];
+    if (x.kind != entity_kind::class_type || !x.instantiation || !x.name ||
+        !is_std(x.enclosing) || in_inline_namespace(c))
+        return nullptr;
+    size_t length = 0;
+    const char *identifier = spelling(x.name, &length);
+    static const struct {
+        const char *name;
+        uint32_t arguments;
+        const char *code;
+    } whole[] = {
+        {"basic_string", 3, "Ss"},
+        {"basic_istream", 2, "Si"},
+        {"basic_ostream", 2, "So"},
+        {"basic_iostream", 2, "Sd"},
+    };
+    for (const auto &w : whole) {
+        if (length != strlen(w.name) || memcmp(identifier, w.name, length) ||
+            analysis.specialization_argument_count(c) != w.arguments)
+            continue;
+        for (uint32_t i = 0; i < w.arguments; i++)
+            if (analysis.specialization_pack(c, i))
+                return nullptr;
+        qualified_type first = analysis.specialization_argument(c, 0);
+        const struct type &fr = record(first);
+        if (first.cv() || fr.kind != type_kind::fundamental ||
+            fr.fundamental != fundamental_type::char_ ||
+            !std_of_char(analysis.specialization_argument(c, 1), "char_traits",
+                         11) ||
+            (w.arguments == 3 &&
+             !std_of_char(analysis.specialization_argument(c, 2), "allocator",
+                          9)))
+            return nullptr;
+        return w.code;
+    }
+    return nullptr;
+}
+
 bool itanium_mangler::class_enum_type(qualified_type t)
 {
     entity_index c = record(t).entity;
@@ -1680,7 +1775,11 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return false;
     entity_index local_class = 0;
     entity_index local = local_function(c, &local_class);
-    if (!x.name && !x.linkage_name && !x.lambda && c != local_class)
+    /* (an unnamed class of a class is its Ut _ unnamed-type-name,
+       unqualified_name_untagged) */
+    if (!x.name && !x.linkage_name && !x.lambda && c != local_class &&
+        !(x.kind == entity_kind::class_type && x.enclosing &&
+          table[x.enclosing].kind == entity_kind::class_type))
         return false;
     /* [abi:mangling-compression]: a template's name seen before, with its
        prefix, is a <substitution> before the arguments */
@@ -1735,22 +1834,26 @@ bool itanium_mangler::class_enum_type(qualified_type t)
          * So, Sd) are not made, so those are not mangled */
         size_t length = 0;
         const char *identifier = spelling(x.name, &length);
-        uint32_t count = analysis.specialization_argument_count(c);
-        bool string = length == 12 && !memcmp(identifier, "basic_string", 12);
         if (length == 9 && !memcmp(identifier, "allocator", 9)) {
             text("Sa");
             return template_args(c);
         }
-        if (string && count < 3) {
+        /* <substitution> ::= Ss # std::basic_string<char,
+                                    std::char_traits<char>, std::allocator<char> >
+                          ::= Si # std::basic_istream<char, std::char_traits<char> >
+                          ::= So # std::basic_ostream<char, std::char_traits<char> >
+                          ::= Sd # std::basic_iostream<char, std::char_traits<char> >
+           the whole specialization (std_abbreviation); another
+           basic_string is Sb and its arguments, another stream its
+           name */
+        if (const char *whole = std_abbreviation(c)) {
+            text(whole);
+            return true;
+        }
+        if (length == 12 && !memcmp(identifier, "basic_string", 12)) {
             text("Sb");
             return template_args(c);
         }
-        bool stream =
-            (length == 13 && (!memcmp(identifier, "basic_istream", 13) ||
-                              !memcmp(identifier, "basic_ostream", 13))) ||
-            (length == 14 && !memcmp(identifier, "basic_iostream", 14));
-        if (string || stream)
-            return false;
     }
     if (x.enclosing == 0 || is_std(x.enclosing))
         return unscoped_name(c) && class_template_args(c);

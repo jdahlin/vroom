@@ -530,6 +530,13 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         c = entity_table.make(entity_kind::class_type, 0, scope);
         entity_table[c].type = qualified_type::make(
             type_table.of_entity(type_kind::class_type, c), cv_none);
+        /* [impl.clang] one that is a member of a class has the class's
+           linkage all the same: its Ut _ name is the same in every
+           translation unit, and a specialization with it as an argument
+           is the template's (func<foo::Ut_> linkonce_odr) */
+        if (scope && entity_table[scope].kind == entity_kind::class_type)
+            entity_table[c].linkage_of_name =
+                entity_table[scope].linkage_of_name;
     } else if (c) {
         redeclared = true;
         entity &prior = entity_table[c];
@@ -2443,6 +2450,19 @@ analysis_result semantic_analysis::member_typedef(
     entity_table.add_declaration(e, declaration);
     entity_table.bind(c, name, e);
     last_declared = e;
+    /* [dcl.typedef]/9: the first typedef-name of an unnamed class (or
+       enumeration) the declaration defines is its name for linkage
+       purposes, as at namespace scope (declare) */
+    const struct type &record = type_table[type.unqualified()];
+    if (!type.cv() && (record.kind == type_kind::class_type ||
+                       record.kind == type_kind::enumeration)) {
+        entity &named = entity_table[record.entity];
+        if (!named.name && !named.linkage_name && named.enclosing == c &&
+            !named.lambda) {
+            named.linkage_name = name;
+            named.linkage_of_name = entity_table[c].linkage_of_name;
+        }
+    }
     return analysis_result::well_formed;
 }
 

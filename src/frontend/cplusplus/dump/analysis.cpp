@@ -358,7 +358,8 @@ static void dump_type_claims(const semantic_analysis &analysis,
  *
  * (itanium_symbol_name); bench/cxx-sema.py has clang -O0 compile a file
  * it accepts and checks each defined one against its object's symbols.
- * An entity whose symbol needs rules not written yet is "unsupported".
+ * An entity whose symbol needs rules not written yet is "unsupported", a
+ * tab and FILE:LINE:COLUMN of its name.
  */
 static void dump_symbols(const semantic_analysis &analysis,
                          token_stream &tokens, vbuffer *out)
@@ -386,7 +387,14 @@ static void dump_symbols(const semantic_analysis &analysis,
         seen.append(d.entity);
         symbol.clear();
         if (!itanium_symbol_name(analysis, tokens.pp, d.entity, symbol.get())) {
-            vbuffer_string_append(out, "unsupported\n");
+            /* (and where the name is declared) */
+            vbuffer_string_append(out, "unsupported");
+            if (d.id) {
+                source_position at = tokens.position(d.id);
+                vbuffer_format_append(out, "\t%s:%u:%u", at.file_name, at.line,
+                                      at.column);
+            }
+            vbuffer_string_append(out, "\n");
             continue;
         }
         vbuffer_append(out, symbol.data(), symbol.size());
