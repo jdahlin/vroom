@@ -559,11 +559,11 @@ analysis_result semantic_analysis::best_viable_function(
         if (!x.template_index || !y.template_index ||
             x.template_index == y.template_index)
             return false;
-        bool unknown = false;
+        bool order_unknown = false;
         int order =
             function_template_order(x.template_index, y.template_index,
-                                    n - (x.member && y.member), unknown);
-        if (unknown || order != 0 || !x.function || !y.function)
+                                    n - (x.member && y.member), order_unknown);
+        if (order_unknown || order != 0 || !x.function || !y.function)
             return false;
         /* the specializations take the same parameter types, so every
            argument's conversion sequence is the same: nothing else in

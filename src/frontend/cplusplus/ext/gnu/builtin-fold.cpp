@@ -306,12 +306,13 @@ constness semantic_analysis::evaluate_string_builtin(constant_evaluation &state,
             return c;
     }
     auto op = static_cast<builtin_string_op>(b.which);
-    auto element_at = [&state](const constant_value &p, uint64_t i,
+    auto element_at = [&state](const constant_value &pointer, uint64_t i,
                                uint64_t &value) {
-        if (!p.count || !p.extent || p.offset + i >= p.extent)
+        if (!pointer.count || !pointer.extent ||
+            pointer.offset + i >= pointer.extent)
             return false;
         value = static_cast<uint64_t>(
-            state.elements[p.base + p.offset + i].integer);
+            state.elements[pointer.base + pointer.offset + i].integer);
         return true;
     };
     qualified_type from = semantics[nodes[0]].type;

@@ -1327,17 +1327,18 @@ bool semantic_analysis::accessible_here(entity_index member,
        access to names outside the function as does the enclosing
        function" */
     /* the use is in a member of class k */
-    auto as_member_of = [&](entity_index k) -> bool {
-        if (k == x.enclosing)
+    auto as_member_of = [&](entity_index member_class) -> bool {
+        if (member_class == x.enclosing)
             return true;
         if (x.access != 1)
             return false;
         bool ambiguous = false;
-        if (!base_step(k, x.enclosing, ambiguous))
+        if (!base_step(member_class, x.enclosing, ambiguous))
             return false;
-        if (!object_class || !x.nonstatic_member || object_class == k)
+        if (!object_class || !x.nonstatic_member ||
+            object_class == member_class)
             return true;
-        return base_step(object_class, k, ambiguous) != 0;
+        return base_step(object_class, member_class, ambiguous) != 0;
     };
     /* [class.friend]/2, [class.access]/6: the template-head of a friend
        class template belongs to the befriended entity */

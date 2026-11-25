@@ -1444,7 +1444,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
     /* [class.base.init]/2: the distinct members of an anonymous struct
        share its unnamed object's slot: their initializations run in the
        order written */
-    auto set_slot = [&](size_t slot, token_index at, uint32_t statement) {
+    auto set_slot = [&](size_t slot, token_index where, uint32_t statement) {
         if (!initialized[slot]) {
             initialized[slot] = statement;
             return;
@@ -1452,7 +1452,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         owned_array<uint32_t> both;
         both.append(initialized[slot]);
         both.append(statement);
-        initialized[slot] = block_statement(at, both);
+        initialized[slot] = block_statement(where, both);
     };
     for (size_t idx = 0; idx < items.size(); idx++) {
         SyntaxElement item = items[idx];
