@@ -215,6 +215,7 @@ class itanium_mangler
     bool dependent_value(entity_index d);
     bool dependent_value_expr(entity_index d);
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
+    bool template_arg_of(entity_index c, uint32_t i, uint32_t element);
     bool template_template_arg(entity_index t, uint32_t parameter);
     void template_param(uint64_t position)
     {
@@ -278,8 +279,11 @@ class itanium_mangler
 bool itanium_mangler::mangled_name(entity_index e)
 {
     const entity &x = analysis.entity_table[e];
+    if (x.kind == entity_kind::none)
+        return refuse("an entity the analysis no longer knows (its name "
+                      "held by a declaration it did not analyse)");
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
-        return false;
+        return refuse("an entity that is neither a function nor a variable");
     if (x.typeinfo_of)
         return typeinfo_name(x.typeinfo_of);
     /* (a closure type's constructor or destructor has its class's name:
@@ -1821,8 +1825,13 @@ bool itanium_mangler::name(entity_index e)
         table[scope].kind == entity_kind::namespace_entity)
         return nested_name(e);
     entity_index function = enclosing_function(table, e);
+    if (!function && table[scope].kind == entity_kind::none)
+        return refuse("a member of a class the analysis no longer knows "
+                      "(its name held by a declaration it did not "
+                      "analyse)");
     if (!function)
-        return false;
+        return refuse("an entity whose scope is neither a class, a "
+                      "namespace nor a function");
     return local_name(e, function);
 }
 
@@ -2666,6 +2675,14 @@ bool itanium_mangler::dependent_value(entity_index d)
 }
 
 bool itanium_mangler::template_arg(entity_index c, uint32_t i, uint32_t element)
+{
+    if (template_arg_of(c, i, element))
+        return true;
+    return refuse("a template argument of a form it has no rule for");
+}
+
+bool itanium_mangler::template_arg_of(entity_index c, uint32_t i,
+                                      uint32_t element)
 {
     uint64_t v = 0;
     bool negative = false;
@@ -3835,8 +3852,26 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
         template_param(analysis.entity_table[r.entity].value);
         done = true;
     }
-    if (!done)
-        return false;
+    if (!done) {
+        /* (what kind of type, for refuse) */
+        static const struct {
+            type_kind kind;
+            const char *text;
+        } kinds[] = {
+            {type_kind::class_type, "a class type"},
+            {type_kind::enumeration, "an enumeration type"},
+            {type_kind::dependent, "a dependent type"},
+            {type_kind::placeholder, "a placeholder type"},
+            {type_kind::function, "a function type"},
+            {type_kind::pointer_to_member, "a pointer-to-member type"},
+            {type_kind::pack_expansion, "a pack expansion type"},
+        };
+        const char *what = "a type of a kind it has no rule for";
+        for (const auto &k : kinds)
+            if (r.kind == k.kind)
+                what = k.text;
+        return refuse(what);
+    }
     add_candidate(t, member_class);
     return true;
 }
