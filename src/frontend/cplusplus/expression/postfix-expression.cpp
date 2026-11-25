@@ -1355,12 +1355,12 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         operands.append(f);
         for (size_t i = 0; i < arguments.size(); i++) {
             SyntaxElement a = arguments[i];
-            if (a.is(syntax_kind::braced_init_list))
-                return not_supported_because(
-                    n, "over.ics.list",
-                    "a braced argument to an overloaded call operator");
             expression_meaning e;
-            if (i < expanded.size() && expanded.size() == arguments.size()) {
+            if (a.is(syntax_kind::braced_init_list)) {
+                /* [over.ics.list]: left to overload resolution and call_with
+                   via operand_syntax */
+            } else if (i < expanded.size() &&
+                       expanded.size() == arguments.size()) {
                 /* [temp.variadic]/5: an element of a pack expansion,
                    analysed above */
                 e = expanded[i];

@@ -948,7 +948,7 @@ analysis_result semantic_analysis::overloaded_operator(
     size_t chosen = 0;
     bool none_viable = false;
     r = best_viable_function(n, candidates, nullptr, arguments, chosen,
-                             &none_viable);
+                             &none_viable, true, &argument_syntax);
     if (r == analysis_result::well_formed && deleted_copy) {
         /* the deleted copy assignment operator is viable for the left
            operand and the class's own type on the right: with no other
