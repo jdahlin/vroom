@@ -2125,6 +2125,10 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
         return false;
 
     const entity &prefix = analysis.entity_table[r.entity];
+    /* typename __remove_cvref(T)::name: the transformation's own <type>,
+       as clang writes it */
+    if (prefix.kind == entity_kind::type_transformation)
+        return type(t);
     if (prefix.kind != entity_kind::template_specialization &&
         prefix.kind != entity_kind::dependent_member)
         return false;
