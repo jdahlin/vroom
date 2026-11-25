@@ -410,7 +410,7 @@ bool semantic_analysis::deduce_conversion_templates(
             }
             if (!deduce_type(ret, dest, values, set, true))
                 continue;
-            /* [temp.deduct.general]/5: a parameter not deduced takes its
+            /* [temp.deduct]/5: a parameter not deduced takes its
                default template-argument ([temp.deduct.conv] deduces the
                rest as a call does); with none, deduction fails */
             bool all_set = true;
