@@ -5238,6 +5238,9 @@ class semantic_analysis
            ([temp.inst]/2: no completely-defined type is needed there):
            declared, defined by complete_instantiation when a use needs it */
         bool lazy = false;
+        /* named before its template was defined: the use that needs it
+           complete defines it (complete_instantiation) */
+        bool named_before_definition = false;
         /* ... and where it was named, for what its definition reports */
         SyntaxRef lazy_at = 0;
     };

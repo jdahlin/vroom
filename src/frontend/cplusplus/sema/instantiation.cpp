@@ -763,6 +763,7 @@ analysis_result semantic_analysis::instantiate_class(
             type_table.of_entity(type_kind::class_type, c), cv_none);
         entity_table[c].instantiation = index + 1;
         instantiations[index].specialization = c;
+        instantiations[index].named_before_definition = !defined_by;
         /* (declared while the specializations of a class are declared:
            the use that needs it complete defines it) */
         if ((lazy_return || declaring_specializations) && defined_by) {
@@ -785,8 +786,42 @@ void semantic_analysis::complete_instantiation(entity_index c)
     if (!x.instantiation || x.defined || x.size)
         return;
     uint32_t index = x.instantiation - 1;
-    if (!instantiations[index].lazy || instantiations[index].defining)
+    if (instantiations[index].defining)
         return;
+    if (!instantiations[index].lazy) {
+        /* [temp.inst]/2: named before its template was defined (libc++'s
+           streampos, in iosfwd, before <__ios/fpos.h> defines fpos), it
+           was made an incomplete class: the use that needs it complete
+           names it again, where the template defines it now */
+        const instantiation_record record = instantiations[index];
+        if (!record.named_before_definition || record.has_failure ||
+            !record.specialization ||
+            !function_templates
+                 [entity_table[record.template_entity].instantiation - 1]
+                     .definition)
+            return;
+        owned_array<template_argument> again;
+        for (uint32_t i = 0; i < record.argument_count; i++) {
+            const template_argument &a =
+                template_arguments[record.first_argument + i];
+            /* (one made incomplete by an argument still being defined stays
+               so: the argument's definition ends first) */
+            if (a.kind == template_argument::kind_t::type) {
+                const struct type &arg = type_table[a.type.unqualified()];
+                if (arg.kind == type_kind::class_type &&
+                    entity_table[arg.entity].kind == entity_kind::class_type &&
+                    (!entity_table[arg.entity].size ||
+                     !entity_table[arg.entity].defined))
+                    return;
+            }
+            again.append(a);
+        }
+        entity_index done = 0;
+        instantiate_class(current_declaration,
+                          entity_table[record.template_entity].instantiation,
+                          again.data(), record.argument_count, done);
+        return;
+    }
     instantiations[index].lazy = false;
     entity_index done = 0;
     define_class_outside(instantiations[index].lazy_at, index, done);
