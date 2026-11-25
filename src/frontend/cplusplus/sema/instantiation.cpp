@@ -999,6 +999,19 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
        needed by one [impl.clang] */
     bool vtable_elsewhere = entity_table[scope].explicitly_instantiated ==
                             instantiation_kind::declaration;
+    if (tokens.identifier(name) == entity_table[scope].name) {
+        if (entity_index d = entity_table[scope].destructor)
+            if (entity_table[d].member_definition_needed ||
+                (entity_table[d].virtual_ && !vtable_elsewhere) ||
+                explicitly_instantiated(d) == instantiation_kind::definition)
+                return true;
+        for (entity_index k = entity_table[scope].first_constructor; k;
+             k = entity_table[k].next_constructor)
+            if (entity_table[k].member_definition_needed ||
+                explicitly_instantiated(k) == instantiation_kind::definition)
+                return true;
+        return false;
+    }
     entity_index first = entity_table.find(scope, tokens.identifier(name));
     /* (a constructor, destructor or operator is found by no such name here:
        defined with the unit) */
