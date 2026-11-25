@@ -287,7 +287,11 @@ enum class entity_kind : uint8_t {
        8 &&, 9 ||, 10 >, 15 <, 16 <=, 17 >=, 18 == and 19 != with the
        operands enclosing and name; 11 sizeof(type); 12 a literal; 13
        Q::f(); 14 ! of enclosing; 20 a static data member no longer
-       dependent (name the member) */
+       dependent (name the member); 21 Q::template f<args>() (type Q, name
+       f, the arguments dependent_value_arguments'); value 1 or 3 with
+       0x10000 set: Q an alias template's specialization as written (the
+       alias's identifier plus one in the upper half, its arguments
+       dependent_value_arguments', type the class it denotes) */
     dependent_value,
     /* not an entity: a dependent type in a template's own declaration
        known only by how it is written: [temp.dep.type]/10.3
@@ -1826,6 +1830,12 @@ class semantic_analysis
 
     types type_table;
     entities entity_table;
+    /* a dependent value's written template arguments (types): those of an
+       alias template's specialization as the qualifier, Q<args>::name
+       (dependent_alias_value), and of a member function template called,
+       Q::template f<args>() (dependent_value_call_value); the entity's
+       first_member and member_count */
+    owned_array<qualified_type> dependent_value_arguments;
     /* [expr.const]/4: the values of the variables marked wide_value */
     struct wide_variable {
         entity_index entity = 0;
@@ -5762,6 +5772,8 @@ class semantic_analysis
                                                    bool negated,
                                                    entity_index scope = 0);
     owned_array<entity_index> dependent_values;
+    bool written_type_arguments(SyntaxElement id,
+                                owned_array<qualified_type> &out);
     analysis_result substituted_parameter_type(uint32_t template_index,
                                                uint32_t position,
                                                const template_argument *before,

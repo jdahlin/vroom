@@ -383,6 +383,61 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
             }
         }
     }
+    /* Q<args>::template f<args>(): [abi:expressions]' call of an
+       <unresolved-name>, Q the qualifier's class (libc++'s
+       __check_pair_construction<_T1, _T2>::template
+       __is_pair_constructible<_U1, _U2>()) */
+    if (written.is(syntax_kind::postfix_expression) && written.size() == 3 &&
+        written[0].is(syntax_kind::qualified_id) &&
+        written[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        written[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        SyntaxElement qid = written[0];
+        SyntaxElement member = qid[qid.size() - 1];
+        if ((qid.size() == 2 ||
+             (qid.size() == 3 && qid[1].is(standard_keyword::template_))) &&
+            qid[0].is(syntax_kind::nested_name_specifier) &&
+            qid[0].size() == 2 &&
+            qid[0][0].is(syntax_kind::simple_template_id) &&
+            member.is(syntax_kind::simple_template_id) &&
+            member[0].is_identifier()) {
+            size_t unsupported_before = unsupported.size();
+            type_index q = 0;
+            analysis_result r = template_type(qid[0][0], 0, false, q);
+            unsupported.resize(unsupported_before);
+            owned_array<qualified_type> arguments;
+            if (r != analysis_result::well_formed ||
+                (type_table[q].kind != type_kind::class_type &&
+                 type_table[q].kind != type_kind::dependent) ||
+                !written_type_arguments(member, arguments))
+                return e;
+            qualified_type type = qualified_type::make(q, cv_none);
+            uint32_t name = tokens.identifier(member[0].token());
+            for (entity_index d : dependent_values) {
+                const entity &x = entity_table[d];
+                if (x.value != 21 || x.type != type || x.name != name ||
+                    x.member_count != arguments.size())
+                    continue;
+                bool same = true;
+                for (uint32_t i = 0; i < x.member_count; i++)
+                    if (!(dependent_value_arguments[x.first_member + i] ==
+                          arguments[i]))
+                        same = false;
+                if (same)
+                    return d;
+            }
+            entity_table[e].type = type;
+            entity_table[e].name = name;
+            entity_table[e].value = 21;
+            entity_table[e].first_member =
+                static_cast<uint32_t>(dependent_value_arguments.size());
+            entity_table[e].member_count =
+                static_cast<uint32_t>(arguments.size());
+            for (qualified_type a : arguments)
+                dependent_value_arguments.append(a);
+            dependent_values.append(e);
+            return e;
+        }
+    }
     bool negated = false;
     if (written.is(syntax_kind::unary_expression) && written.size() == 2 &&
         written[0].is(preprocessing_op_or_punc::EXCLAMATION)) {
@@ -473,6 +528,54 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
     type_index q = 0;
     analysis_result r = template_type(spec_node, ns_scope, ns_scope != 0, q);
     unsupported.resize(unsupported_before);
+    /* (an alias template's specialization: clang mangles the qualifier
+       as written, the alias's name and arguments) */
+    uint32_t alias = 0;
+    owned_array<qualified_type> alias_arguments;
+    if (r == analysis_result::well_formed && !level &&
+        spec_node[0].is_identifier()) {
+        lookup_result found;
+        uint32_t id = tokens.identifier(spec_node[0].token());
+        if (ns_scope)
+            found = lookup_qualified(ns_scope, id, lookup_filter::any);
+        else
+            found = lookup_unqualified(id, lookup_filter::any);
+        entity_index held = found.entity;
+        if (!held)
+            held = found.unknown_entity;
+        if (held && alias_template_of(held) &&
+            written_type_arguments(spec_node, alias_arguments))
+            alias = id + 1;
+    }
+    if (r == analysis_result::well_formed && alias &&
+        (type_table[q].kind == type_kind::dependent ||
+         type_table[q].kind == type_kind::class_type)) {
+        qualified_type type = qualified_type::make(q, cv_none);
+        uint32_t name = tokens.identifier(member.token());
+        uint64_t value = 0x10001;
+        if (negated)
+            value = 0x10003;
+        if (ns_depth > 1)
+            value |= static_cast<uint64_t>(ns_depth) << 8;
+        value |= static_cast<uint64_t>(alias) << 32;
+        for (entity_index d : dependent_values)
+            if (entity_table[d].type == type && entity_table[d].name == name &&
+                entity_table[d].value == value &&
+                entity_table[d].enclosing == ns_scope)
+                return d;
+        entity_table[e].type = type;
+        entity_table[e].name = name;
+        entity_table[e].value = value;
+        entity_table[e].enclosing = ns_scope;
+        entity_table[e].first_member =
+            static_cast<uint32_t>(dependent_value_arguments.size());
+        entity_table[e].member_count =
+            static_cast<uint32_t>(alias_arguments.size());
+        for (qualified_type a : alias_arguments)
+            dependent_value_arguments.append(a);
+        dependent_values.append(e);
+        return e;
+    }
     if (r == analysis_result::well_formed &&
         type_table[q].kind == type_kind::class_type && !level)
         return static_member_value_entity(type_table[q].entity,
@@ -503,6 +606,35 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
     entity_table[e].enclosing = ns_scope;
     dependent_values.append(e);
     return e;
+}
+
+/* the written template arguments of template-id id, each a type-id
+   (its own unsupported records left out); false if one is not */
+bool semantic_analysis::written_type_arguments(SyntaxElement id,
+                                               owned_array<qualified_type> &out)
+{
+    owned_array<SyntaxElement> written;
+    for (uint32_t i = 2; i + 1 < id.size(); i++) {
+        if (id[i].is(syntax_kind::template_argument_list))
+            for (SyntaxElement x : id[i].elements())
+                written.append(x);
+        else
+            written.append(id[i]);
+    }
+    for (SyntaxElement a : written) {
+        if (a.is(preprocessing_op_or_punc::COMMA))
+            continue;
+        if (!a.is(syntax_kind::type_id))
+            return false;
+        size_t unsupported_before = unsupported.size();
+        qualified_type t;
+        analysis_result r = type_id(a, t);
+        unsupported.resize(unsupported_before);
+        if (r != analysis_result::well_formed)
+            return false;
+        out.append(t);
+    }
+    return true;
 }
 
 /* an operand of a value-dependent argument that is not dependent itself:

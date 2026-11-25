@@ -1785,6 +1785,59 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
         text("nt");
         return dependent_value_expr(x.enclosing);
     }
+    auto written_arguments = [&]() {
+        text("I");
+        for (uint32_t i = 0; i < x.member_count; i++)
+            if (!type(analysis.dependent_value_arguments[x.first_member + i]))
+                return false;
+        text("E");
+        return true;
+    };
+    if (x.value == 21) {
+        /* [abi:expressions] Q::template f<args>(), Q a class template's
+           specialization:
+
+               <expression> ::= cl <expression>+ E
+               <unresolved-name> ::= [gs] sr <unresolved-qualifier-level>+ E <base-unresolved-name>
+         */
+        entity_index c = record(x.type).entity;
+        text("clsr");
+        if (!source_name(analysis.entity_table[c].name) ||
+            !template_args(c, 0, false))
+            return false;
+        text("E");
+        if (!source_name(x.name) || !written_arguments())
+            return false;
+        text("E");
+        return true;
+    }
+    if ((x.value & 0xffffffffu & ~0xff00u) == 0x10001 ||
+        (x.value & 0xffffffffu & ~0xff00u) == 0x10003) {
+        /* [!] [ns::] A<args>::name, A an alias template: its name and
+           arguments as written (clang) */
+        if (x.value & 2)
+            text("nt");
+        text("sr");
+        if (x.enclosing) {
+            uint32_t depth = static_cast<uint32_t>((x.value >> 8) & 0xff);
+            if (!depth)
+                depth = 1;
+            owned_array<entity_index> chain;
+            entity_index s = x.enclosing;
+            for (uint32_t i = 0; i < depth && s; i++) {
+                chain.append(s);
+                s = analysis.entity_table[s].enclosing;
+            }
+            for (size_t i = chain.size(); i-- > 0;)
+                if (!source_name(analysis.entity_table[chain[i]].name))
+                    return false;
+        }
+        if (!source_name(static_cast<uint32_t>(x.value >> 32) - 1) ||
+            !written_arguments())
+            return false;
+        text("E");
+        return source_name(x.name);
+    }
     entity_index q = record(x.type).entity;
     const entity &spec = analysis.entity_table[q];
     if (x.value == 4 || x.value == 6) {
