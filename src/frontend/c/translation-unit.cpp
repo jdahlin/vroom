@@ -30,16 +30,14 @@ static void cc_heap_poison_ahead(cc *c, char *end)
 CC_PRIVATE void *cc_heap_allocate(cc *c, size_t n)
 {
     char *r;
-    size_t asked = n;
-
     n = (n + 15) & ~(size_t)15;
     if (unlikely(c->hp + n > c->hend))
         cc_report_fatal(c, c->prevloc,
                         "translation unit too large (front-end heap full)");
     r = c->hp;
     c->hp += n;
-    VASAN_UNPOISON(r, asked);
-    (void)asked;
+    VASAN_UNPOISON(r,
+                   n); /* (a declaration-cache snapshot copies the padding) */
     cc_heap_poison_ahead(c, c->hp);
     return r;
 }

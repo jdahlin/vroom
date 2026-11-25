@@ -436,6 +436,8 @@ static void driver_snapshot_restore(cc *c, const driver_snapshot *s,
     driver_snapshot_coder k = {NULL, 0, c->heap, base, false};
     char *img[DRIVER_SNAPSHOT_ARRAY_COUNT];
 
+    /* ASan: the heap past this TU's first allocations is poisoned */
+    VASAN_UNPOISON(c->heap, s->arrays[DRIVER_SNAPSHOT_ARRAY_HEAP].bytes);
     for (int a = 0; a < DRIVER_SNAPSHOT_ARRAY_COUNT; a++) {
         size_t n;
         char *to = a == DRIVER_SNAPSHOT_ARRAY_HEAP
@@ -478,6 +480,14 @@ static void driver_snapshot_restore(cc *c, const driver_snapshot *s,
     c->case_base = keep.case_base;
     c->heap = keep.heap, c->hend = keep.hend, c->ptrc = keep.ptrc;
     c->hp = c->heap + s->arrays[DRIVER_SNAPSHOT_ARRAY_HEAP].bytes;
+#if VCC_ASAN
+    /* (the snapshot's own heap_poisoned came with the state) */
+    if ((size_t)(c->hend - c->hp) > VASAN_WINDOW)
+        c->heap_poisoned = c->hp + VASAN_WINDOW;
+    else
+        c->heap_poisoned = c->hend;
+    VASAN_POISON(c->hp, (size_t)(c->heap_poisoned - c->hp));
+#endif
     c->dc = keep.dc;
     c->drb = keep.drb, c->ndrb = keep.ndrb,
     c->cdrb = keep.cdrb; /* (VCC_DRCOV: this TU's) */
