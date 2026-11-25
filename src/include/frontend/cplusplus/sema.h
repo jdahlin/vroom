@@ -5491,6 +5491,10 @@ class semantic_analysis
        instantiations nest ([temp.inst]/16) */
     uint32_t instantiating = 0;
     unsigned instantiation_depth = 0;
+    /* how deep overloaded operators nest in their own candidates' analysis
+       (a default template argument whose expression uses the operator:
+       [temp.deduct]/7, [implimits] bounds it) */
+    unsigned overloaded_operator_depth = 0;
     /* the state enter_instantiation saves and leave_instantiation puts
        back */
     struct instantiation_context {
@@ -6332,6 +6336,8 @@ class semantic_analysis
                                         bool argument_dependent);
     bool member_definition_wanted(const postponed_body &b);
     token_index member_definition_name(const template_member_definition &o);
+    uint32_t member_definition_lookup_id(const template_member_definition &o,
+                                         token_index name);
     void define_waiting_members(entity_index scope, token_index name,
                                 bool define = true);
     analysis_result defer_or_define_member(uint32_t m, uint32_t index,
@@ -7294,6 +7300,9 @@ class semantic_analysis
     /* [class.copy.assign]/12: the implicit copy assignment of class c
        assigns its members as the built-in operator does (no member's
        assignment is a user-provided operator=) */
+    /* X& operator=(X&&) = default of a class whose subobjects are
+       assigned bitwise: an rvalue is assigned by the bytes too */
+    bool moved_bitwise(entity_index c);
     bool assigned_bitwise(entity_index c);
     /* ---- [over.literal] literal operators (literal-operator.cpp) ---- */
     /* the name of the literal operator of the literal suffix identifier

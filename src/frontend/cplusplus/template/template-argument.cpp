@@ -1210,6 +1210,13 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
             at, "temp.arg.nontype",
             "an address argument that does not name an entity");
     const entity x = entity_table[e];
+    /* /3: "... the result of a typeid expression" */
+    if (x.typeinfo_of)
+        return ill_formed(at,
+                          "the reference or pointer value shall not refer to "
+                          "or be the address of the result of a typeid "
+                          "expression",
+                          "temp.arg.nontype");
     if ((x.kind != entity_kind::variable && x.kind != entity_kind::function) ||
         x.instantiation || x.next_overload || !is_namespace(x.enclosing) ||
         x.c11_thread_local)

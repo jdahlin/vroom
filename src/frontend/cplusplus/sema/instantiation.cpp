@@ -1033,6 +1033,37 @@ void semantic_analysis::define_waiting_members(entity_index scope,
     }
 }
 
+/* the name a member definition's member is looked up by in the
+   specialization: its identifier, or for an operator function the
+   operator's name ([over.oper]/1: operator @ names the function; the
+   definition's name token is then the keyword operator, which for a
+   conversion function names it as its declaration did) */
+uint32_t semantic_analysis::member_definition_lookup_id(
+    const template_member_definition &o, token_index name)
+{
+    token_index op = 0;
+    if (name &&
+        syntax_parser.keyword_of(tokens[name]) == standard_keyword::operator_ &&
+        name + 1 < o.definition.end_token() &&
+        tokens[name + 1].kind == token_kind::operator_or_punctuator) {
+        op = name;
+    } else if (name) {
+        /* (a conversion function is entered under the keyword's name) */
+        return tokens.identifier(name);
+    } else if (o.definition.is(syntax_kind::function_definition)) {
+        SyntaxRef nested = out_of_class_nested(o.definition, nullptr);
+        if (nested && nested.end_token() + 1 < o.definition.end_token() &&
+            syntax_parser.keyword_of(tokens[nested.end_token()]) ==
+                standard_keyword::operator_)
+            op = nested.end_token();
+    }
+    if (!op || op + 1 >= o.definition.end_token() ||
+        tokens[op + 1].kind != token_kind::operator_or_punctuator)
+        return 0;
+    return operator_name(
+        preprocessing_op_or_punc_primary(tokens[op + 1].op_or_punc));
+}
+
 /* whether a member the definition may define is needed: one named so in the
    specialization with its definition needed, or explicitly instantiated */
 bool semantic_analysis::member_definition_wanted(const postponed_body &b)
@@ -1040,20 +1071,7 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     const template_member_definition o =
         template_member_definitions[b.member_definition - 1];
     token_index name = member_definition_name(o);
-    uint32_t lookup_id = 0;
-    if (name) {
-        lookup_id = tokens.identifier(name);
-    } else if (o.definition.is(syntax_kind::function_definition)) {
-        SyntaxRef nested = out_of_class_nested(o.definition, nullptr);
-        if (nested && nested.end_token() + 1 < o.definition.end_token() &&
-            tokens[nested.end_token()].kind == token_kind::keyword &&
-            tokens[nested.end_token()].keyword ==
-                static_cast<int16_t>(standard_keyword::operator_) &&
-            tokens[nested.end_token() + 1].kind ==
-                token_kind::operator_or_punctuator)
-            lookup_id = operator_name(preprocessing_op_or_punc_primary(
-                tokens[nested.end_token() + 1].op_or_punc));
-    }
+    uint32_t lookup_id = member_definition_lookup_id(o, name);
     if (!lookup_id)
         return true;
     entity_index scope = instantiations[b.instantiation].specialization;

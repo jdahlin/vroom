@@ -502,6 +502,15 @@ bool semantic_analysis::copy_assignment_operator(entity_index f,
     return t.kind == type_kind::class_type && t.entity == c;
 }
 
+bool semantic_analysis::moved_bitwise(entity_index c)
+{
+    /* [class.copy.assign]/9: trivial when no subobject's assignment is an
+       operator function and the class has no virtual function */
+    const entity &x = entity_table[c];
+    return x.defaulted_move_assignment && !x.dynamic &&
+           !assignment_not_trivial(c);
+}
+
 bool semantic_analysis::assigned_bitwise(entity_index c)
 {
     /* [class.copy.assign]/9.1: a class with virtual functions: its

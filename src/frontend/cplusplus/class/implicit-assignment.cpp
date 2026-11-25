@@ -323,8 +323,11 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
             user_move = true;
     }
     /* [class.copy.assign]/1: a user-declared copy assignment operator;
-       none is implicitly declared, nor a move one (/3.3) */
-    if (user_copy)
+       none is implicitly declared, nor a move one (/3.3), but one declared
+       defaulted ([dcl.fct.def.default]/5: "explicitly-defaulted functions
+       ... are collectively called defaulted functions"; its definition is
+       the implicit one's, /3) */
+    if (user_copy && !x.defaulted_move_assignment)
         return analysis_result::well_formed;
     bool defaulted_copy = x.defaulted_copy_assignment;
     bool defaulted_move = x.defaulted_move_assignment;
@@ -370,8 +373,15 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
         assignment_use moving =
             subobject_assignment(k, c, true, move_non_throwing, nonconst_form);
         if (copying == assignment_use::unknown ||
-            moving == assignment_use::unknown)
+            moving == assignment_use::unknown) {
+            /* (the defaulted move assignment beside a user-declared copy
+               one is declared all the same: else the copy one, deleted,
+               would be chosen; a body that cannot be formed leaves it
+               undefined, implicit_assignment_definitions) */
+            if (user_copy && !user_move && moving != assignment_use::deleted)
+                declare_implicit_assignment(c, true, false, false);
             return analysis_result::well_formed;
+        }
         if (copying == assignment_use::deleted)
             copy_deleted = true;
         if (moving == assignment_use::deleted)
@@ -382,6 +392,13 @@ analysis_result semantic_analysis::implicit_assignments(entity_index c)
     if (!defaulted_copy &&
         (user_move_constructor || user_move || defaulted_move))
         copy_deleted = true;
+    if (user_copy) {
+        /* (only the defaulted move assignment operator: /7 deletes it as
+           an implicit one would be, and overload resolution ignores it) */
+        if (!user_move && !move_deleted)
+            declare_implicit_assignment(c, true, false, move_non_throwing);
+        return analysis_result::well_formed;
+    }
     declare_implicit_assignment(c, false, copy_deleted, copy_non_throwing,
                                 nonconst_form);
     /* /3: the move assignment operator; /7: "A defaulted move assignment
