@@ -489,9 +489,22 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         used(t, held);
         return analysis_result::well_formed;
     }
-    if (found.unknown && !found.ambiguous && held && !defining_class &&
-        is_namespace(q.entity) && function_template_of(held)) {
+    bool class_base_template_using = false;
+    if (found.unknown && !found.ambiguous && held && defining_class &&
+        !is_namespace(q.entity) &&
+        entity_table[q.entity].kind == entity_kind::class_type &&
+        member_function_template_of(held)) {
+        bool amb = false;
+        if (base_step(defining_class, q.entity, amb))
+            class_base_template_using = true;
+    }
+    if (found.unknown && !found.ambiguous && held &&
+        ((!defining_class && is_namespace(q.entity) &&
+          function_template_of(held)) ||
+         class_base_template_using)) {
         entity_index scope = current_scope;
+        if (defining_class)
+            scope = defining_class;
         entity_index prior = entity_table.find(scope, name);
         if (!prior) {
             entity_table.bind(scope, name, held, true);
@@ -511,7 +524,8 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 return not_supported_because(
                     n, "over",
                     "a template name using over a non-function declaration");
-            } else if (!function_template_of(prior)) {
+            } else if (!function_template_of(prior) &&
+                       !member_function_template_of(prior)) {
                 /* a name whose function templates are all unusable (it
                    also names something calls of them cannot resolve)
                    stays so: what joins it is unusable too, and a call of
