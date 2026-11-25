@@ -451,6 +451,9 @@ class c_lowering
 
     /* declaring every function's symbol, which uses none */
     bool declaring_symbols = false;
+    void qualified_entity_name(entity_index e, vbuffer *out) const;
+    void describe_entity(entity_index e, const char *lead,
+                         const owned_buffer &why);
     uint32_t fail(const char *what, token_index at)
     {
         if (!failure.what) {

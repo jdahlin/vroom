@@ -137,11 +137,23 @@ static void report_failure(int fd, token_stream &tokens,
                 "%s:%u:%u: error: the C++ front end does not handle %s "
                 "yet\n",
                 at.file_name, at.line, at.column, why.what);
+    else if (why.entity_text[0])
+        /* (which entity, and the first construct its symbol or definition
+           needs that has no rule yet) */
+        dprintf(fd,
+                "%s:%u:%u: error: C++ code generation does not handle %s "
+                "yet: %s\n",
+                at.file_name, at.line, at.column, why.what, why.entity_text);
     else
         dprintf(fd,
                 "%s:%u:%u: error: C++ code generation does not handle %s "
                 "yet\n",
                 at.file_name, at.line, at.column, why.what);
+    if (why.entity_at) {
+        source_position declared = tokens.position(why.entity_at);
+        dprintf(fd, "%s:%u:%u: note: declared here\n", declared.file_name,
+                declared.line, declared.column);
+    }
     if (why.file && *why.file) {
         const char *file = strstr(why.file, "/src/");
         if (file)

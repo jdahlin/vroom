@@ -127,6 +127,13 @@ def group_of(r):
     if r.get('subclause'):
         return '[%s] %s' % (r['subclause'], r.get('site', ''))
     text = re.sub(r'\s+', ' ', r['message'])
+    # a lowering refusal naming the entity: grouped by the construct the
+    # mangler (or the analysis) did not handle, not by the entity
+    m = re.search(r': the mangler does not handle (.*)$', text)
+    if m:
+        return 'symbol not mangled: ' + m.group(1)[:150]
+    if text.startswith('C++ code generation does not handle a template member'):
+        return 'C++ code generation: a template member whose definition was not instantiated'
     if r.get('site'):
         text += ' ' + r['site']
     return text[:110]

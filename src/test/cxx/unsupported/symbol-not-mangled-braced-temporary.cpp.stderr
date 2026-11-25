@@ -1,0 +1,2 @@
+symbol-not-mangled-braced-temporary.cpp:15:3: error: C++ code generation does not handle an entity whose symbol is not mangled yet: function template specialization 'dd::E<...>::op<...>': the mangler does not handle the expression 'Result { }' (postfix-expression) in the return type
+symbol-not-mangled-braced-temporary.cpp:10:3: note: declared here

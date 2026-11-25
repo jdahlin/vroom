@@ -70,6 +70,11 @@ class itanium_mangler
     }
 
     bool mangled_name(entity_index e);
+    /* the first construct the mangler had no rule for (refuse), and the
+       part of the symbol it was in; nullptr none */
+    const char *refused = nullptr;
+    const char *refused_in = nullptr;
+    owned_buffer refused_text;
     /* [abi:mangling-special-vtables]: <special-name> ::= TI <type>, the
        std::type_info object of typeid(<type>) */
     bool typeinfo_name(type_index t, int what = 0)
@@ -192,6 +197,11 @@ class itanium_mangler
                       fundamental_type &keyword_type);
     /* (set by type_operand when a type it mangled is dependent) */
     bool operand_dependent = false;
+    /* the part of the symbol being mangled, for refuse */
+    const char *mangling_part = "the name";
+    bool refuse(const char *what);
+    void refuse_expression(SyntaxElement x);
+    bool dependent_expression_of(SyntaxElement c);
     /* (the dependent values being mangled, dependent_value) */
     uint32_t dependent_value_depth = 0;
     const char *binary_operator_code(SyntaxElement op) const;
@@ -451,8 +461,14 @@ bool itanium_mangler::specialization_encoding(entity_index e)
        [abi:mangle.function-type]'s exception for constructors and conversion
        operators) */
     if (table[e].special == special_member::none &&
-        !table[e].conversion_function && !type(record(pattern).operand))
-        return false;
+        !table[e].conversion_function) {
+        const char *outer_part = mangling_part;
+        mangling_part = "the return type";
+        bool typed = type(record(pattern).operand);
+        mangling_part = outer_part;
+        if (!typed)
+            return false;
+    }
     if (!bare_function_type(pattern))
         return false;
     /* [impl.clang] a generic lambda's or a function template's trailing
@@ -1147,7 +1163,59 @@ int itanium_mangler::unresolved_qualifier(SyntaxElement q)
     return 0;
 }
 
+/* the construct the mangler has no rule for, the first one only (the
+   innermost that failed): what, in mangling_part */
+bool itanium_mangler::refuse(const char *what)
+{
+    if (!refused) {
+        refused = what;
+        refused_in = mangling_part;
+    }
+    return false;
+}
+
+/* a dependent expression not mangled: its tokens as written (up to 60
+   characters) and its kind */
+void itanium_mangler::refuse_expression(SyntaxElement x)
+{
+    if (refused)
+        return;
+    refused_text.clear();
+    vbuffer_string_append(refused_text.get(), "the expression '");
+    token_index first = x.first_token();
+    token_index end = first + 1;
+    if (x.is_node())
+        end = x.end_token();
+    for (token_index t = first; t < end; t++) {
+        if (refused_text.size() > 70) {
+            vbuffer_string_append(refused_text.get(), " ...");
+            break;
+        }
+        if (t != first)
+            vbuffer_string_append(refused_text.get(), " ");
+        owned_buffer spelled;
+        analysis.token_spelling(t, spelled.get());
+        vbuffer_append(refused_text.get(), spelled.data(), spelled.size());
+    }
+    vbuffer_string_append(refused_text.get(), "'");
+    if (x.is_node()) {
+        vbuffer_string_append(refused_text.get(), " (");
+        vbuffer_string_append(refused_text.get(), syntax_kind_name(x.kind()));
+        vbuffer_string_append(refused_text.get(), ")");
+    }
+    vbuffer_append(refused_text.get(), "", 1);
+    refuse(refused_text.data());
+}
+
 bool itanium_mangler::dependent_expression(SyntaxElement expression)
+{
+    if (dependent_expression_of(expression))
+        return true;
+    refuse_expression(expression);
+    return false;
+}
+
+bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
 {
     /* [abi:expressions]: ( type-id ) cast-expression, cv <type>
        <expression>, the type analysed with the alias's names bound */
@@ -1299,7 +1367,10 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
         bool dependent = false;
         if (!written_template_args(expression, dependent))
             return false;
-        return dependent;
+        if (!dependent)
+            return refuse("a call of a specialization its arguments "
+                          "resolve (clang's L _Z <encoding> E)");
+        return true;
     }
     /* [abi:expressions] the named casts,
 
@@ -2242,15 +2313,24 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             if (pack == 1 ||
                 analysis.dependent_parameter_type(function, i, declared)) {
                 text("TpTn");
-                if (!type(value_type))
+                const char *outer_part = mangling_part;
+                mangling_part = "a non-type template parameter's type";
+                bool typed = type(value_type);
+                mangling_part = outer_part;
+                if (!typed)
                     return false;
             }
         } else if (function &&
                    analysis.dependent_parameter_type(function, i, declared)) {
             if (pack)
-                return false;
+                return refuse("a non-type template parameter pack of a "
+                              "dependent type");
             text("Tn");
-            if (!type(declared))
+            const char *outer_part = mangling_part;
+            mangling_part = "a non-type template parameter's type";
+            bool typed = type(declared);
+            mangling_part = outer_part;
+            if (!typed)
                 return false;
         }
         /* [impl.clang]: a type-parameter with a type-constraint, "Tk"
@@ -3447,6 +3527,18 @@ void itanium_mangler::discriminator(uint64_t n)
  */
 bool itanium_mangler::bare_function_type(qualified_type t)
 {
+    struct part_scope {
+        const char *&part;
+        const char *saved;
+        part_scope(const char *&p, const char *now) : part(p), saved(p)
+        {
+            part = now;
+        }
+        ~part_scope()
+        {
+            part = saved;
+        }
+    } in_types(mangling_part, "the parameter or return types");
     const struct type &f = record(t);
     if (f.kind != type_kind::function)
         return false;
@@ -3496,7 +3588,10 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
     if (r.kind == type_kind::dependent &&
         analysis.entity_table[r.entity].alias_expansion.unqualified()) {
         if (dependent_value_depth)
-            return false;
+            return refuse("an alias template's specialization of dependent "
+                          "arguments and a non-dependent type in a "
+                          "value-dependent template argument (clang "
+                          "evaluates it)");
         qualified_type x = analysis.entity_table[r.entity].alias_expansion;
         return type(qualified_type::make(x.unqualified(), x.cv() | t.cv()),
                     member_class);
@@ -4193,6 +4288,23 @@ bool itanium_symbol_name(const semantic_analysis &analysis,
 {
     itanium_mangler m(analysis, pp, out, variant);
     return m.mangled_name(e);
+}
+
+bool itanium_symbol_name(const semantic_analysis &analysis,
+                         const preprocessor &pp, entity_index e, vbuffer *out,
+                         int variant, vbuffer *why)
+{
+    itanium_mangler m(analysis, pp, out, variant);
+    if (m.mangled_name(e))
+        return true;
+    if (!m.refused) {
+        vbuffer_string_append(why, "a construct it has no rule for");
+        return false;
+    }
+    vbuffer_string_append(why, m.refused);
+    vbuffer_string_append(why, " in ");
+    vbuffer_string_append(why, m.refused_in);
+    return false;
 }
 
 bool itanium_reference_temporary_name(const semantic_analysis &analysis,

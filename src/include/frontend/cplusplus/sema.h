@@ -7321,6 +7321,11 @@ const char *itanium_class_layout(semantic_analysis &analysis, entity_index c);
 bool itanium_symbol_name(const semantic_analysis &analysis,
                          const preprocessor &pp, entity_index e, vbuffer *out,
                          int variant = 2);
+/* the same; when it is false, why: the first construct the mangler has no
+   rule for and the part of the symbol it is in */
+bool itanium_symbol_name(const semantic_analysis &analysis,
+                         const preprocessor &pp, entity_index e, vbuffer *out,
+                         int variant, vbuffer *why);
 /* [abi:mangling-special-temporaries]: the symbol of the index-th
    lifetime-extended temporary of variable e (from 0): GR <object name>
    [<seq-id>] _, the first without a seq-id, the next 0, 1, ... */
