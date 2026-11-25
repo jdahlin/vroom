@@ -1449,7 +1449,10 @@ bool semantic_analysis::accessible_here(entity_index member,
             if (friend_names_class(f, friend_head.scope, friend_head.name) &&
                 as_member_of(f.granting))
                 return true;
-    entity_index starts[4] = {0, defining_class, 0, access_class};
+    /* (a default argument is checked in its function's declaration:
+       [class.access]/8, a friend function's has the friend's access) */
+    entity_index starts[5] = {0, defining_class, 0, access_class,
+                              default_argument_function};
     if (function_state.active)
         starts[0] = function_state.function;
     if (!is_namespace(current_scope))
