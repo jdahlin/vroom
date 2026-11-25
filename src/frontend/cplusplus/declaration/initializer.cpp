@@ -1013,6 +1013,21 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
         VTRY_SET(r, to_base(at.first_token(), target.entity, m));
         same = true;
     }
+    /* /17.6.3: "If the conversion cannot be done or is ambiguous, the
+       initialization is ill-formed": a copy-initialization of a class
+       with no constructor and no base class from an unrelated class none
+       of whose conversion functions yields it (above), where a
+       substitution is tried
+       (is_assignable<S&, const U> of libc++ and json: false; elsewhere an
+       overload candidate the analysis takes for this one may be the
+       cause); other forms not analysed */
+    if (!same && !direct && substituting &&
+        type_table[m.type.unqualified()].kind == type_kind::class_type &&
+        !entity_table[target.entity].base_count)
+        return ill_formed(at,
+                          "the initialization is ill-formed if the "
+                          "conversion cannot be done",
+                          "dcl.init");
     if (!same)
         return not_supported(at, "dcl.init");
     VTRY_SET(r, operand_value(at, m));

@@ -382,17 +382,6 @@ uint32_t semantic_analysis::expression_node_make(uint32_t tag, uint64_t word,
    node by its kind and children.  Equal structures are one index [impl.clang] */
 uint32_t semantic_analysis::expression_structure(SyntaxElement e)
 {
-    enum : uint32_t {
-        tag_none = 1,
-        tag_token,
-        tag_parameter,
-        tag_entity,
-        tag_identifier,
-        tag_floating,
-        tag_node,
-        tag_children,
-        tag_literal = 16,
-    };
     while (e.is_node() && SyntaxRef(e).size() == 1)
         e = SyntaxRef(e)[0];
     if (!e)
@@ -901,6 +890,52 @@ void semantic_analysis::hold_names(SyntaxRef declaration)
         SyntaxRef alias = alias_declaration_of(declaration);
         if (alias.size() > 1 && alias[1].is_identifier())
             ids.append(alias[1].token());
+    } else if (declaration.is(syntax_kind::explicit_instantiation)) {
+        /* [temp.explicit]/1, /3: an explicit instantiation names a
+           specialization of a template declared before: the names outside
+           parentheses, brackets, braces and template-argument-lists (the
+           template's, the member's); the classes its template-arguments
+           name are used, and holding them would leave them, and the
+           symbols of their members, unknown */
+        int depth = 0;
+        int angles = 0;
+        for (token_index t = declaration.first_token();
+             t < declaration.end_token(); t++) {
+            const token &tok = tokens[t];
+            if (tok.kind == token_kind::operator_or_punctuator) {
+                switch (preprocessing_op_or_punc_primary(tok.op_or_punc)) {
+                case preprocessing_op_or_punc::LEFT_PARENTHESIS:
+                case preprocessing_op_or_punc::LEFT_BRACKET:
+                case preprocessing_op_or_punc::LEFT_BRACE:
+                    depth++;
+                    break;
+                case preprocessing_op_or_punc::RIGHT_PARENTHESIS:
+                case preprocessing_op_or_punc::RIGHT_BRACKET:
+                case preprocessing_op_or_punc::RIGHT_BRACE:
+                    depth--;
+                    break;
+                case preprocessing_op_or_punc::LESS:
+                    if (!depth)
+                        angles++;
+                    break;
+                case preprocessing_op_or_punc::GREATER:
+                    if (!depth && angles)
+                        angles--;
+                    break;
+                case preprocessing_op_or_punc::GREATER_GREATER:
+                    if (!depth && angles)
+                        angles--;
+                    if (!depth && angles)
+                        angles--;
+                    break;
+                default:
+                    break;
+                }
+                continue;
+            }
+            if (tok.kind == token_kind::identifier && !depth && !angles)
+                ids.append(t);
+        }
     } else if (!by_declarator && !class_template) {
         /* the declarators are not known (a declaration not parsed, or of
            a kind analysis has no rules for: a template, a

@@ -401,6 +401,15 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 entity_kind::class_type)
             class_named = type_table[named].entity;
     }
+    if ((parenthesized || braced) && n[0].is(syntax_kind::typename_specifier)) {
+        /* [temp.res]/3 with [expr.type.conv]/1: typename Q::name(args), the
+           type the typename-specifier denotes */
+        VTRY(r, typename_type(n[0], named, named_cv));
+        if (type_table[named].kind == type_kind::class_type &&
+            entity_table[type_table[named].entity].kind ==
+                entity_kind::class_type)
+            class_named = type_table[named].entity;
+    }
     if ((parenthesized || braced) && n[0].is_token()) {
         const token &t = tokens[n[0].token()];
         if (t.kind == token_kind::identifier) {
@@ -1450,6 +1459,13 @@ analysis_result semantic_analysis::member_callee(
         name = id.token();
     } else if (SyntaxElement t = id.simple_template_id().template_name()) {
         name = t.token();
+    } else if (auto function = id.operator_function_id()) {
+        /* [over.call]: operator@(args), an operator function's name
+           called as a function (json's operator[](T* key) calling
+           operator[](key_type(key))) */
+        declarator_meaning function_name;
+        VTRY(r, operator_function_id(function, function_name));
+        name = function_name.id;
     } else {
         return analysis_result::well_formed;
     }
@@ -2011,10 +2027,9 @@ analysis_result semantic_analysis::template_call(
                 return not_supported(n, "over.oper");
         }
     }
-    for (const template_name_function &x : template_name_functions)
-        if (x.name == function_templates[function_template - 1].name &&
-            !template_id)
-            functions.append(x.function);
+    if (!template_id)
+        inline_set_functions(function_templates[function_template - 1].name,
+                             functions);
     /* [basic.lookup.argdep]/3: the non-template functions argument-dependent
        lookup found are candidates too */
     if (!template_id)
@@ -2231,10 +2246,12 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
     /* [expr.call]/7: "If there is no corresponding argument, the default
        argument for the parameter is used." ([dcl.fct.default]/9: evaluated
        at each call) */
-    for (size_t i = arguments.size(); i < count; i++)
-        argument_nodes.append(bind_call_site(
-            default_argument_nodes[entity_table[called].first_default + i],
-            n.first_token()));
+    for (size_t i = arguments.size(); i < count; i++) {
+        uint32_t used =
+            default_argument_nodes[entity_table[called].first_default + i];
+        default_argument_used(used);
+        argument_nodes.append(bind_call_site(used, n.first_token()));
+    }
     if (called && bit_count_builtin(called)) {
         VTRY_SET(r, bit_count_arguments(n, called, argument_nodes));
     }
@@ -2272,6 +2289,13 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
         constexpr_calls++;
     }
     uint32_t callee = f.node;
+    /* [over.match]/3, [basic.def.odr]/8: the function overload resolution
+       chose is the one called, and needed; the name's node was made for
+       the first of the set and names the chosen one only since (a static
+       member function's overload declared after the first) */
+    if (!member && called && !unevaluated &&
+        entity_table[called].kind == entity_kind::function)
+        mark_needed(called);
     if (member) {
         /* the member function, as an lvalue of its type; the object's
            address is its implicit object argument ([over.match.funcs]/4) */

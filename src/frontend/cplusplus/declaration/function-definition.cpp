@@ -285,12 +285,17 @@ void walk_constexpr_body(const semantic_tree &tree, uint32_t n,
    restores needs_deferred_by) */
 void semantic_analysis::defer_needs_of_instantiated_body(entity_index f)
 {
-    if (!defer_next_body_needs)
-        return;
+    /* (a body analysed while another's needs wait, an instantiation that
+       body asked for: its needs are its own function's, which may be
+       needed without the other, emitted_functions_needed) */
+    bool defer = defer_next_body_needs || needs_deferred_by;
     defer_next_body_needs = false;
-    if (f && !entity_table[f].member_definition_needed &&
-        !entity_table[f].virtual_)
+    if (!defer || !f)
+        return;
+    if (!entity_table[f].member_definition_needed && !entity_table[f].virtual_)
         needs_deferred_by = f;
+    else
+        needs_deferred_by = 0;
 }
 
 /* the function being defined, last_declared, holds the reason a refused

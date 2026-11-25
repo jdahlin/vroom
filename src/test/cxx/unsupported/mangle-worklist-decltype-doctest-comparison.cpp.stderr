@@ -1,0 +1,2 @@
+mangle-worklist-decltype-doctest-comparison.cpp:14:39: error: C++ code generation does not handle an entity whose symbol is not mangled yet: function template specialization 'dd::detail::E<...>::op<...>': the mangler does not handle a call of a specialization its arguments resolve (clang's L _Z <encoding> E) in the return type
+mangle-worklist-decltype-doctest-comparison.cpp:11:3: note: declared here

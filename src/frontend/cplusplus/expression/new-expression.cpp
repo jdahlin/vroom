@@ -678,7 +678,11 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         } else if (has_list) {
             /* [dcl.init]/17.6.2: the constructor called with the expanded
                expression-list as its arguments. */
-            if (c && entity_table[c].first_constructor)
+            /* (a class whose constructors are templates only, as one
+               whose implicit copy constructor is not declared:
+               libc++'s __shared_ptr_emplace) */
+            if (c && (entity_table[c].first_constructor ||
+                      entity_table[c].constructor_templates))
                 r = construct(n, type, list, object.node, value);
             else if (list.size() == 1)
                 r = initialize_with(n, list[0], type, true, false, value);

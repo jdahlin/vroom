@@ -153,6 +153,11 @@ uint32_t c_lowering::read(uint32_t n)
         value.value = analysis.entity_table[x.a].value;
         return constant(value);
     }
+    /* (one of a 128-bit value: the evaluator's, wide_variables) */
+    if (x.kind == semantic_kind::entity &&
+        analysis.entity_table[x.a].kind == entity_kind::variable &&
+        analysis.entity_table[x.a].wide_value)
+        return wide_integer(x.type, analysis.wide_variable_value(x.a));
     return expression(n);
 }
 

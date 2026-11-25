@@ -224,6 +224,9 @@ analysis_result semantic_analysis::alias_template_specialization(
             /* the template-id itself, dependent: substituted again with
                each instantiation, where a failure is the deduction's */
             type = dependent_specialization(ft.entity, arguments);
+            /* (the type it denotes, which [impl.clang] clang mangles) */
+            entity_table[type_table[type].entity].alias_expansion =
+                qualified_type::make(t.unqualified(), cv_none);
             if (cv)
                 *cv = t.cv();
             return analysis_result::well_formed;

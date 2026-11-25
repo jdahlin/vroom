@@ -1299,6 +1299,17 @@ int64_t cpp_attribute_value(const implementation_defined_behavior &b,
     strip(scope, scope_length);
     if (!std_scope)
         strip(name, length);
+    /* [impl.clang] _Clang is the clang attribute-namespace (libc++'s
+       [[_Clang::__preferred_name__(string)]]); NOT CLANG'S YET: only for
+       preferred_name, which the analysis follows (__PRETTY_FUNCTION__'s
+       std::string); for the others the answer stays 0, so libc++ does not
+       write them */
+    if (scope_length == 6 && !memcmp(scope, "_Clang", 6)) {
+        if (length != 14 || memcmp(name, "preferred_name", 14))
+            return 0;
+        scope = "clang";
+        scope_length = 5;
+    }
     if (!scope_length)
         for (const auto &a : table18)
             if (strlen(a.name) == length && !memcmp(a.name, name, length))

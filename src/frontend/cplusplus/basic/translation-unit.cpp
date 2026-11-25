@@ -630,6 +630,18 @@ analysis_result semantic_analysis::declare(
         if (!c.name && !c.linkage_name) {
             c.linkage_name = name;
             c.linkage_of_name = linkage::external;
+            /* (and its unnamed member classes have it now,
+               class_specifier) */
+            for (entity_index k = record.entity + 1; k < entity_table.size();
+                 k++) {
+                entity &m = entity_table[k];
+                if (m.kind == entity_kind::class_type && !m.name &&
+                    !m.linkage_name && !m.lambda && m.enclosing &&
+                    entity_table[m.enclosing].kind == entity_kind::class_type &&
+                    entity_table[m.enclosing].linkage_of_name ==
+                        linkage::external)
+                    m.linkage_of_name = linkage::external;
+            }
         }
     }
     if (kind != entity_kind::function && s.inline_ &&

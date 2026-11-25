@@ -287,7 +287,11 @@ enum class entity_kind : uint8_t {
        8 &&, 9 ||, 10 >, 15 <, 16 <=, 17 >=, 18 == and 19 != with the
        operands enclosing and name; 11 sizeof(type); 12 a literal; 13
        Q::f(); 14 ! of enclosing; 20 a static data member no longer
-       dependent (name the member) */
+       dependent (name the member); 21 Q::template f<args>() (type Q, name
+       f, the arguments dependent_value_arguments'); value 1 or 3 with
+       0x10000 set: Q an alias template's specialization as written (the
+       alias's identifier plus one in the upper half, its arguments
+       dependent_value_arguments', type the class it denotes) */
     dependent_value,
     /* not an entity: a dependent type in a template's own declaration
        known only by how it is written: [temp.dep.type]/10.3
@@ -502,6 +506,10 @@ struct entity {
        of the instantiated body makes it ill-formed (clang: "in
        instantiation of ... requested here") */
     SyntaxRef member_needed_by = 0;
+    /* [temp.alias]/2, /4: an alias template's specialization kept for its
+       dependent arguments (CWG 1558) whose type-id is not dependent: that
+       type, which clang mangles ([impl.clang]) */
+    qualified_type alias_expansion;
     /* the preprocessor's identifier number, 0 for an unnamed entity */
     uint32_t name = 0;
     /* the entity whose scope the name is declared in (a namespace, a
@@ -548,6 +556,11 @@ struct entity {
        template-declaration or explicit-specialization declared it: what
        it denotes needs [temp]'s rules */
     bool held_by_template = false;
+    /* [expr.const]/4: a variable usable in constant expressions whose
+       128-bit integer value `value` cannot hold: usable stays unknown for
+       every reader of value, and the evaluator reads the value from
+       semantic_analysis::wide_variables */
+    bool wide_value = false;
     /* [temp.dep]: in an instantiation, a name whose meaning came from the
        template arguments: a template-parameter's name bound to its
        argument, a local variable, parameter or this declared with one; a
@@ -1821,6 +1834,19 @@ class semantic_analysis
 
     types type_table;
     entities entity_table;
+    /* a dependent value's written template arguments (types): those of an
+       alias template's specialization as the qualifier, Q<args>::name
+       (dependent_alias_value), and of a member function template called,
+       Q::template f<args>() (dependent_value_call_value); the entity's
+       first_member and member_count */
+    owned_array<qualified_type> dependent_value_arguments;
+    /* [expr.const]/4: the values of the variables marked wide_value */
+    struct wide_variable {
+        entity_index entity = 0;
+        unsigned __int128 value = 0;
+    };
+    owned_array<wide_variable> wide_variables;
+    unsigned __int128 wide_variable_value(entity_index e) const;
     owned_array<analysed_declaration> declarations;
     owned_array<unsupported_construct> unsupported;
     /* the names held (note_held) by the declarations being analysed */
@@ -2866,7 +2892,7 @@ class semantic_analysis
                               uint32_t name, uint64_t value);
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
-    type_index dependent_written_type(SyntaxRef n);
+    type_index dependent_written_type(SyntaxRef n, bool every_name = false);
     bool names_dependent_entity(token_index first, token_index end) const;
     bool pack_depends(entity_index pack) const;
     owned_array<entity_index> dependent_members;
@@ -2884,12 +2910,44 @@ class semantic_analysis
         /* a cast-expression's type-id analysed there (identifier 0): the
            cast's syntax node */
         uint32_t cast = 0;
+        /* a name bound to a pack: the position plus one of the alias
+           template's parameter it is (sizeof...(P) mangles it); 0 else */
+        uint32_t pack_position = 0;
     };
     owned_array<written_binding> written_bindings;
+    /* the tags of an expression's structure (expression_structure): a
+       node (word its syntax_kind, a its first tag_children: a the child,
+       b the next), a token (word its kind << 48, keyword << 24 and
+       op_or_punc), a non-type template parameter (word its position), an
+       entity or identifier (a), a literal (tag_literal plus its
+       literal_kind: word its value, a its fundamental_type) */
+    enum structure_tag : uint32_t {
+        tag_none = 1,
+        tag_token,
+        tag_parameter,
+        tag_entity,
+        tag_identifier,
+        tag_floating,
+        tag_node,
+        tag_children,
+        tag_literal = 16,
+    };
+    /* the parts of structure s: its tag, word, a and b */
+    void expression_structure_parts(uint32_t s, uint32_t &tag, uint64_t &word,
+                                    uint32_t &a, uint32_t &b) const
+    {
+        tag = expression_nodes[s].tag;
+        word = expression_nodes[s].word;
+        a = expression_nodes[s].a;
+        b = expression_nodes[s].b;
+    }
 
   private:
+    /* (every_name: each name of a type, not only those of a dependent
+       one: a value kept as written, dependent_value_entity) */
     void collect_written_bindings(SyntaxRef n,
-                                  owned_array<written_binding> &found);
+                                  owned_array<written_binding> &found,
+                                  bool every_name = false);
     void collect_written_casts(SyntaxElement x,
                                owned_array<written_binding> &found);
     /* a block scope in the current one, made current */
@@ -3065,6 +3123,19 @@ class semantic_analysis
        [entity::first_default .. + its parameter count), 0 for a parameter
        without one */
     owned_array<uint32_t> default_argument_nodes;
+    /* [basic.def.odr]/8, [temp.inst]/4: the functions a default argument
+       names (its constructors, destructors, functions called) are needed
+       by a call that uses it, not by the declaration, which analyses it
+       unevaluated: kept per argument's node (a range of
+       default_argument_needed), marked needed by default_argument_used */
+    struct default_argument_need_range {
+        uint32_t node = 0, first = 0, count = 0;
+    };
+    owned_array<default_argument_need_range> default_argument_need_ranges;
+    owned_array<entity_index> default_argument_needed;
+    /* the unevaluated depth of the default argument analysed (0: none) */
+    unsigned default_argument_unevaluated = 0;
+    void default_argument_used(uint32_t node);
     owned_array<parameter_meaning> function_parameters;
     /* [temp.variadic]/2: the name of the function parameter pack of no
        parameters function_parameters has, 0 if none */
@@ -3792,6 +3863,7 @@ class semantic_analysis
     owned_array<deferred_need> deferred_needs;
     void mark_needed(entity_index function);
     bool pass_deferred_needs();
+    bool emitted_functions_needed();
     /* set by a default member initializer that is ill-formed: an error of
        the class itself ([class.mem]/6), not a reason a defaulted
        constructor is deleted */
@@ -5343,6 +5415,9 @@ class semantic_analysis
         entity_index name = 0, function = 0;
     };
     owned_array<template_name_function> template_name_functions;
+    /* an initializer of a 128-bit integer type the evaluator finds
+       constant with a value 64 bits do not hold: e keeps it (wide_value) */
+    bool keep_wide_value(entity_index e, uint32_t node);
     /* per template-parameter: a type parameter's typedef-name of its
        template_parameter type, or a non-type parameter's entity (kind
        none, so that the template's own declarator cannot use its value;
@@ -5747,6 +5822,8 @@ class semantic_analysis
                                                    bool negated,
                                                    entity_index scope = 0);
     owned_array<entity_index> dependent_values;
+    bool written_type_arguments(SyntaxElement id,
+                                owned_array<qualified_type> &out);
     analysis_result substituted_parameter_type(uint32_t template_index,
                                                uint32_t position,
                                                const template_argument *before,
@@ -6007,6 +6084,13 @@ class semantic_analysis
        a held name, in declaration order */
     void function_template_overloads(entity_index held,
                                      owned_array<uint32_t> &out) const;
+    /* [temp.over]/1 with [namespace.def]/7: the non-template functions a
+       call of a held name weighs, its own (template_name_functions) and,
+       for a namespace's name, those of the name in each namespace of the
+       inline namespace set around it, added to out (each once with what
+       out holds) */
+    void inline_set_functions(entity_index held,
+                              owned_array<entity_index> &out) const;
     /* [temp.func.order] in a call of the given number of arguments
        ([temp.deduct.partial]/3.1): 1 when f is more specialized than g,
        -1 when g is more than f, 0 when neither; unknown set when analysis
@@ -6376,6 +6460,29 @@ class semantic_analysis
        when it cannot be (a typedef-name clang prints is lost) */
     bool predefined_name_text(entity_index f, predefined_name_form form,
                               owned_buffer &out) const;
+    /* __PRETTY_FUNCTION__'s characters per function, made where the
+       analysis meets it (keep_pretty_function) */
+    struct pretty_text {
+        entity_index function = 0;
+        uint32_t first = 0, length = 0;
+    };
+    owned_array<pretty_text> pretty_texts;
+    owned_buffer pretty_characters;
+    bool keep_pretty_function(entity_index f);
+    /* [impl.clang] preferred_name(N) on a class template's
+       declaration: the typedef-name N clang prints for the specialization
+       N denotes (libc++'s std::string for basic_string<char>) */
+    struct preferred_name {
+        entity_index template_entity = 0, name = 0;
+    };
+    owned_array<preferred_name> preferred_names;
+    /* (true when there is one and each names a typedef of a specialization
+       of t; none is kept otherwise) */
+    bool note_preferred_names(entity_index t, token_index first,
+                              token_index end);
+    /* the number of class specialization c's template arguments clang
+       prints: the trailing ones equal to their defaults left out */
+    uint32_t shown_template_arguments(entity_index c);
     /* the name of template-parameter i of template entity t (0: none) */
     uint32_t template_parameter_name(entity_index t, uint32_t i) const
     {
@@ -6383,6 +6490,39 @@ class semantic_analysis
             function_templates[entity_table[t].instantiation - 1];
         return entity_table[template_parameter_entities[f.first_parameter + i]]
             .name;
+    }
+    /* [namespace.qual]/2: what name names in namespace ns, a member of ns
+       or of an unnamed or inline namespace of it (their using-directives,
+       [namespace.unnamed]/1, [namespace.def]/5), the first found; 0 none */
+    entity_index namespace_member(entity_index ns, uint32_t name) const
+    {
+        if (entity_index e = entity_table.find(ns, name))
+            return e;
+        for (const using_directive_record &u : using_directives)
+            if (u.scope == ns && u.nominated != ns &&
+                entity_table[u.nominated].kind ==
+                    entity_kind::namespace_entity &&
+                (!entity_table[u.nominated].name ||
+                 entity_table[u.nominated].inline_))
+                if (entity_index e = namespace_member(u.nominated, name))
+                    return e;
+        return 0;
+    }
+    /* whether the name held by entity held denotes a variable template */
+    bool names_variable_template(entity_index held) const
+    {
+        return variable_template_of(held) != 0;
+    }
+    /* whether type t names a template parameter (is dependent) */
+    bool type_depends_on_template_parameter(qualified_type t) const
+    {
+        return depends_on_template_parameter(t);
+    }
+    /* whether the name held by entity held denotes a function template
+       (a non-member's, as a callee's unresolved name is mangled) */
+    bool names_function_template(entity_index held) const
+    {
+        return function_template_of(held) != 0;
     }
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
@@ -6503,10 +6643,9 @@ class semantic_analysis
        argument */
     bool dependent_parameter_type(entity_index t, uint32_t i,
                                   qualified_type &type) const;
-    /* the concept-name of the function template t's template-parameter
-       at i, a type-parameter with a type-constraint ([temp.param]/1),
-       or 0 */
-    token_index parameter_type_constraint(entity_index t, uint32_t i) const;
+    /* the type-constraint ([temp.param]/1) of the function template t's
+       template-parameter at i, a type-parameter, or 0 */
+    SyntaxRef parameter_type_constraint(entity_index t, uint32_t i) const;
     /* whether the argument is a template ([temp.arg.template]/1): the
        class template, or in a template's own declaration the template
        template-parameter it names (also its position plus one in
@@ -7182,6 +7321,11 @@ const char *itanium_class_layout(semantic_analysis &analysis, entity_index c);
 bool itanium_symbol_name(const semantic_analysis &analysis,
                          const preprocessor &pp, entity_index e, vbuffer *out,
                          int variant = 2);
+/* the same; when it is false, why: the first construct the mangler has no
+   rule for and the part of the symbol it is in */
+bool itanium_symbol_name(const semantic_analysis &analysis,
+                         const preprocessor &pp, entity_index e, vbuffer *out,
+                         int variant, vbuffer *why);
 /* [abi:mangling-special-temporaries]: the symbol of the index-th
    lifetime-extended temporary of variable e (from 0): GR <object name>
    [<seq-id>] _, the first without a seq-id, the next 0, 1, ... */

@@ -65,7 +65,7 @@ CXX_SKIP = {
                         '([basic.indet]/2), clang++ -O2 deletes main',
 }
 NOT_YET = re.compile(r'error: (?:the rules of \[([^\]]+)\] are not implemented yet|'
-                     r'C\+\+ code generation does not handle (.*) yet)')
+                     r'C\+\+ code generation does not handle (.*?) yet)')
 
 state = {}
 

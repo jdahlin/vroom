@@ -315,9 +315,6 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     VTRY(r, named_specialization(n, inner, lead, true, false, s, index));
     /* [temp.expl.spec]/14 (Note): the template's exception specification
        is instantiated for the comparison: not here */
-    if (dependent_exception_specification(
-            instantiations[index].template_entity))
-        return not_supported(n, "except.spec");
     entity_index e = instantiations[index].specialization;
     if (!defines)
         return analysis_result::well_formed;
@@ -718,6 +715,18 @@ analysis_result semantic_analysis::named_specialization(
     bool extern_, specified &s, uint32_t &index, entity_index friend_of)
 {
     index = 0;
+    /* the explicit arguments of the declarator-id's template-id, noted for a
+       call (template_callee_parts), are no call's: the next call of the
+       name would take them as its own */
+    struct written_arguments_clear {
+        semantic_analysis &a;
+        ~written_arguments_clear()
+        {
+            a.overloaded_written.clear();
+            a.overloaded_written_expansion.clear();
+            a.overloaded_written_at = 0;
+        }
+    } clear_written = {*this};
     const char *rule = "temp.explicit";
     if (specialization)
         rule = "temp.expl.spec";
@@ -900,8 +909,15 @@ analysis_result semantic_analysis::named_specialization(
                 if (!unique)
                     break;
                 const function_template &c = function_templates[g - 1];
-                if (entity_table[c.entity].enclosing != owner_scope ||
-                    c.primary || entity_table[c.entity].member_cv)
+                /* ([namespace.def]/5: a member of an inline namespace of
+                   the owner is a member of the owner too: libc++'s std::swap
+                   is std::__1::swap) */
+                entity_index home = entity_table[c.entity].enclosing;
+                while (home != owner_scope && home &&
+                       entity_table[home].inline_)
+                    home = entity_table[home].enclosing;
+                if (home != owner_scope || c.primary ||
+                    entity_table[c.entity].member_cv)
                     continue;
                 owned_array<template_argument> trial;
                 owned_array<bool> trial_set;
@@ -914,6 +930,22 @@ analysis_result semantic_analysis::named_specialization(
                                              text_expansion) !=
                             analysis_result::well_formed ||
                         text.size() > c.parameter_count)
+                        continue;
+                    /* [temp.arg.explicit]: a parameter beyond the written
+                       arguments that has no default is deduced from the
+                       declared type; the arguments cannot be completed
+                       here (analysing them would record a refusal), and a
+                       template so is not taken */
+                    bool completable = true;
+                    for (size_t i = text.size(); i < c.parameter_count; i++) {
+                        template_parameter_parts form;
+                        if (!template_parameter_form(
+                                template_parameter_nodes[c.first_parameter + i],
+                                form) ||
+                            (!form.has_default && !form.pack))
+                            completable = false;
+                    }
+                    if (!completable)
                         continue;
                     size_t uses = name_uses.size();
                     analysis_result w =
@@ -952,13 +984,35 @@ analysis_result semantic_analysis::named_specialization(
     }
     const function_template f = function_templates[ft - 1];
     const entity t = entity_table[f.entity];
+    /* [temp.arg]/1: the arguments written from a trailing template
+       parameter pack's position on are its elements (f<int, float> of
+       template<class... T> void f(): one pack of two), as
+       template_id_arguments gathers them */
+    if (f.parameter_count &&
+        template_parameter_is_pack(f.first_parameter + f.parameter_count - 1)) {
+        uint32_t p = f.parameter_count - 1;
+        if (values.size() > p &&
+            !(values.size() == p + 1 &&
+              values[p].kind == template_argument::kind_t::pack)) {
+            owned_array<template_argument> elements;
+            for (size_t i = p; i < values.size(); i++)
+                elements.append(values[i]);
+            values.resize(p);
+            values.append(make_pack(elements.data(),
+                                    static_cast<uint32_t>(elements.size())));
+        }
+    }
     /* [temp.deduct.decl]/1: a member function template's cv-qualifiers
        are part of the function type compared (the declarator's are
        refused above) */
     if (t.member_cv)
         return not_supported_because(n, "temp.deduct.decl",
                                      "a cv-qualified member function template");
-    if (t.enclosing != owner_scope || f.primary)
+    entity_index template_home = t.enclosing;
+    while (template_home != owner_scope && template_home &&
+           entity_table[template_home].inline_)
+        template_home = entity_table[template_home].enclosing;
+    if (template_home != owner_scope || f.primary)
         return not_supported_because(
             n, rule, "the template is a member of another scope or primary");
     /* [temp.deduct.decl]/1: the arguments from the function type */

@@ -83,6 +83,77 @@ bool c_lowering::typeinfo_in_runtime(type_index t) const
                type_kind::fundamental;
 }
 
+/* the scopes of entity e, outermost first, and its name, as a reader writes
+   them ("ns::C<...>::f"; an unnamed namespace "(anonymous namespace)") */
+void c_lowering::qualified_entity_name(entity_index e, vbuffer *out) const
+{
+    const entity &x = analysis.entity_table[e];
+    if (x.enclosing &&
+        analysis.entity_table[x.enclosing].kind != entity_kind::function) {
+        qualified_entity_name(x.enclosing, out);
+        vbuffer_string_append(out, "::");
+    }
+    size_t length = 0;
+    const char *text = "";
+    if (x.name)
+        text = analysis.identifier_text(x.name, &length);
+    if (!x.name && x.kind == entity_kind::namespace_entity)
+        vbuffer_string_append(out, "(anonymous namespace)");
+    else if (!x.name && x.special != special_member::none)
+        vbuffer_string_append(out, "(special member)");
+    else if (!x.name)
+        vbuffer_string_append(out, "(unnamed)");
+    else
+        vbuffer_append(out, text, length);
+    if (x.instantiation && x.kind != entity_kind::namespace_entity)
+        vbuffer_string_append(out, "<...>");
+}
+
+/* the failure's description of entity e: its kind and name, then the
+   reason (lead and why), and where e is declared */
+void c_lowering::describe_entity(entity_index e, const char *lead,
+                                 const owned_buffer &why)
+{
+    if (failure.entity_text[0])
+        return;
+    const entity &x = analysis.entity_table[e];
+    owned_buffer text;
+    const char *kind = "variable";
+    if (x.kind == entity_kind::function) {
+        kind = "function";
+        if (x.special == special_member::destructor)
+            kind = "destructor";
+        else if (x.special != special_member::none)
+            kind = "constructor";
+        else if (x.conversion_function)
+            kind = "conversion function";
+        else if (x.operator_function)
+            kind = "operator function";
+    }
+    vbuffer_string_append(text.get(), kind);
+    if (x.instantiation)
+        vbuffer_string_append(text.get(), " template specialization");
+    vbuffer_string_append(text.get(), " '");
+    qualified_entity_name(e, text.get());
+    vbuffer_string_append(text.get(), "': ");
+    vbuffer_string_append(text.get(), lead);
+    vbuffer_append(text.get(), why.data(), why.size());
+    size_t n = text.size();
+    if (n >= sizeof(failure.entity_text))
+        n = sizeof(failure.entity_text) - 1;
+    memcpy(failure.entity_text, text.data(), n);
+    failure.entity_text[n] = 0;
+    entity_index declared = e;
+    if (x.instantiation && x.kind == entity_kind::function &&
+        analysis.specialized_template(e))
+        declared = analysis.specialized_template(e);
+    const entity &d = analysis.entity_table[declared];
+    if (d.first_declaration)
+        failure.entity_at =
+            analysis.entity_table.declaration(d.first_declaration)
+                .node.first_token();
+}
+
 /* the C symbol of a function or variable, made at its first use: named by
    its symbol (itanium_symbol_name) if it has one, by its identifier if it
    is automatic */
@@ -111,9 +182,15 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
                     "aggregate it initializes",
                     at);
     if (x.member_body_deferred && !declaring_symbols &&
-        analysis.explicitly_instantiated(e) != instantiation_kind::declaration)
-        return fail("a template member whose definition was not instantiated",
-                    at);
+        analysis.explicitly_instantiated(e) !=
+            instantiation_kind::declaration) {
+        fail("a template member whose definition was not instantiated", at);
+        owned_buffer why;
+        vbuffer_string_append(why.get(),
+                              "the analysis found no use that needs it");
+        describe_entity(e, "", why);
+        return 0;
+    }
     if (!declaring_symbols)
         for (const dropped_function &d : dropped_functions)
             if (d.entity == e) {
@@ -171,8 +248,13 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         *slot = typeinfo(x.typeinfo_of, at);
         return *slot;
     }
-    if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), variant))
-        return fail("an entity whose symbol is not mangled", at);
+    owned_buffer why;
+    if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), variant,
+                             why.get())) {
+        fail("an entity whose symbol is not mangled", at);
+        describe_entity(e, "the mangler does not handle ", why);
+        return 0;
+    }
     int kind = AST_SYMBOL_VARIABLE;
     if (x.kind == entity_kind::function)
         kind = AST_SYMBOL_FUNCTION;

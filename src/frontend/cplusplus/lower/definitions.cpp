@@ -109,14 +109,30 @@ bool c_lowering::function_definition_or_drop(entity_index e)
        one that nothing uses has no code, as clang makes none; an
        implicitly declared special member is inline, [class.default.ctor]/1,
        [class.copy.ctor]/10, [class.dtor]/8) */
-    bool droppable = x.kind == entity_kind::function && x.definition &&
-                     (x.inline_ || x.implicit || instantiated_member ||
-                      (x.linkage_of_name == linkage::internal &&
-                       analysis.token_in_system_header(node(x.definition).at)));
+    /* ([temp.explicit]/10: an explicit instantiation definition is
+       emitted whether used or not: never dropped) */
+    bool droppable =
+        x.kind == entity_kind::function && x.definition &&
+        analysis.explicitly_instantiated(e) != instantiation_kind::definition &&
+        (x.inline_ || x.implicit || instantiated_member ||
+         (x.linkage_of_name == linkage::internal &&
+          analysis.token_in_system_header(node(x.definition).at)));
     if (!droppable)
         return function_definition(e);
     /* (a use lowered before this definition: its symbol is called) */
     bool used = used_symbols[e];
+    /* [basic.def.odr]/11: an inline function nothing odr-uses (the
+       analysis found no need of it, emitted_functions_needed) has no code,
+       as clang emits none; lowered after all only if a definition lowered
+       since calls it */
+    if (!used && !lowering_waiting && x.inline_ &&
+        !x.member_definition_needed) {
+        for (entity_index w : waiting_functions)
+            if (w == e)
+                return true;
+        waiting_functions.append(e);
+        return true;
+    }
     if (function_definition(e))
         return true;
     if (!failure.what || used)
@@ -212,6 +228,27 @@ bool c_lowering::function_definition(entity_index e)
     return true;
 }
 
+/* a value of a 128-bit integer type t: ((unsigned __int128)high << 64) |
+   low, converted to t, which C folds */
+uint32_t c_lowering::wide_integer(qualified_type t, unsigned __int128 v)
+{
+    ast_qualified_type u = ast_builder_type_basic(AST_TYPE_UINT128);
+    ast_qualified_type ull =
+        ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
+    uint32_t high =
+        cast(ast_builder_integer(c, ull, static_cast<int64_t>(v >> 64)), u,
+             AST_CAST_INTEGER);
+    uint32_t low = cast(ast_builder_integer(c, ull, static_cast<int64_t>(v)), u,
+                        AST_CAST_INTEGER);
+    uint32_t shifted =
+        make(AST_NODE_BINARY, u, high,
+             ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_INT), 64),
+             0, LEX_TOKEN_LESS_LESS, 0);
+    uint32_t value =
+        make(AST_NODE_BINARY, u, shifted, low, 0, LEX_TOKEN_PIPE, 0);
+    return cast(value, type(t, 0), AST_CAST_INTEGER);
+}
+
 bool c_lowering::variable_definition(entity_index e)
 {
     const entity &x = analysis.entity_table[e];
@@ -220,6 +257,14 @@ bool c_lowering::variable_definition(entity_index e)
         return false;
     if (!static_zero_initialization(x, s, 0))
         return false;
+    if (x.wide_value) {
+        /* [basic.start.static]/2: constant-initialized with a 128-bit
+           value the evaluator found (semantic_analysis::wide_variables) */
+        ast_builder_symbol_body(
+            c, s, wide_integer(x.type, analysis.wide_variable_value(e)));
+        ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+        return true;
+    }
     if (x.definition) {
         /* [basic.start.static]/2: constant initialization; anything else is
            dynamic initialization, which needs code before main */
@@ -375,9 +420,31 @@ bool c_lowering::translation_unit()
         if (!function_definition_or_drop(d.entity))
             return false;
     }
+    if (!lower_waiting_functions())
+        return false;
     if (!complete_variants())
         return false;
     return !failure.what;
+}
+
+/* the waiting functions a lowered definition uses, until none is left
+   that one uses; the others have no code */
+bool c_lowering::lower_waiting_functions()
+{
+    scoped_value<bool> waiting(lowering_waiting, true);
+    for (bool progress = true; progress;) {
+        progress = false;
+        for (size_t i = 0; i < waiting_functions.size(); i++) {
+            entity_index e = waiting_functions[i];
+            if (!e || !used_symbols[e])
+                continue;
+            waiting_functions[i] = 0;
+            progress = true;
+            if (!function_definition_or_drop(e))
+                return false;
+        }
+    }
+    return true;
 }
 
 } // namespace cplusplus::lowering

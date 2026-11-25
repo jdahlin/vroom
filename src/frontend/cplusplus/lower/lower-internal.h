@@ -451,6 +451,9 @@ class c_lowering
 
     /* declaring every function's symbol, which uses none */
     bool declaring_symbols = false;
+    void qualified_entity_name(entity_index e, vbuffer *out) const;
+    void describe_entity(entity_index e, const char *lead,
+                         const owned_buffer &why);
     uint32_t fail(const char *what, token_index at)
     {
         if (!failure.what) {
@@ -835,8 +838,16 @@ class c_lowering
         lowering_failure failure;
     };
     owned_array<dropped_function> dropped_functions;
+    /* [basic.def.odr]/11: the inline functions the analysis did not find
+       needed, lowered at the end only if a lowered definition uses them
+       (lower_waiting_functions); 0 for one lowered */
+    owned_array<entity_index> waiting_functions;
+    bool lowering_waiting = false;
+    bool lower_waiting_functions();
     bool variable_definition(entity_index e);
     bool constant_initializer(uint32_t n) const;
+    bool wide_constant_arithmetic(uint32_t n) const;
+    uint32_t wide_integer(qualified_type t, unsigned __int128 v);
     bool address_constant(uint32_t n) const;
     bool nonnull_address(uint32_t n) const;
     bool null_pointer(uint32_t n) const;

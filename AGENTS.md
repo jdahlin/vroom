@@ -360,6 +360,7 @@ bench/cxx-sema.py selftest          # the type and layout claims' paths through 
 bench/cxx-run.py -j 6 [-O 0123] [PAT]  # src/test/cxx/run: vpp -c (the driver: frontend/cplusplus lowered to C's AST, frontend/c/ast-builder.h) at -O0..3 vs clang++ -O2, run under qemu; -O0 symbols = clang's; /* cxx-run-flags: */ in a test adds flags for both (<10 s)
 bench/cxx-include-guard.py [-v]      # the C++ preprocessor's multiple-include guard skip: src/test/cxx/include-guard, text and diagnostics vs clang -E -P (<1 s)
 bench/cxx-thread.py [-v] [PAT]     # src/test/cxx/thread: C++ programs that need threads, built by vpp, linked by clang++ -pthread, self-checking (a variable that should be thread-local or a local emitted as a shared static; <5 s)
+bench/cxx-mangle.py -j 3 [-v] [--bless] [PAT]   # clang's Itanium mangling tests (CodeGenCXX/*mangl*.cpp, not Microsoft's; fetch-testsuites.sh llvm): per file vpp -c's _Z symbols = clang++ -O0's, or the first refusal; per symbol -fcxx-dump=symbols verified/refuted/unsupported/missing; passing list bench/cxx-mangle.passing, a lost pass is an error; cache build/cxx-mangle.json; not in CI (needs work/testsuites)
 bench/cxx-c-suites.py -j 6 [-O 02] [--bless] [PAT]   # C5.1: the C suites' programs as C++ (those clang++ -O0 builds): vpp -x c++ -c runs as clang++ -O2's under qemu, -O0 symbols clang++'s; passing list bench/cxx-c-suites.passing, a lost pass is an error; what is missing by subclause (~3 min cold, ~25 s warm)
 bench/cxx-syntax-audit.py [-j N]    # clang-tidy custom checks (src/frontend/cplusplus/syntax-audit.clang-tidy): an element's index() as a condition, a view stored in a field (~2 s; the net behind them is -DVCC_CHECK_SYNTAX_VIEWS in cxx-run/cxx-sema)
 bench/cxx-fe-bench.py [--save F|--against F]   # the C++ front end's user-mode instructions (perf stat, vpp -fsyntax-only over src/test/cxx/run), deterministic to 0.003%: the gate for changes to its data structures, budget +0.5%
@@ -457,6 +458,7 @@ bench/ffmpeg/run.py --target win64 all   # WIN8: FFmpeg C fallbacks for mingw32 
 bench/vnm-coff.py -j 6              # vnm on COFF objects, archives and import records vs llvm-nm (the sysroot's libraries; ~8 s)
 bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3 at vcc -O1, -O2, -O3, loops vectorized (~20 s)
 bench/vcpkg/build.py [-j N] [--clang] [-v] [PAT]   # microsoft/vcpkg-tool (C++17, 119 TUs; work/vcpkg-tool, work/vcpkg-deps-{fmt,cmrc,curl}: git clone --depth 1): vpp -x c++ -c per TU, refusals grouped by reason; --clang is the reference (all 119 build)
+bench/cxx-json.py [-v] [--force] [PAT]     # nlohmann/json's 71 test TUs (work/cxx/json/src/tests) by vpp -x c++ -std=c++17 -c against libc++, one at a time (nice, 60 s each): ok or the first error (refused subclause, vcc file:line), grouped by first error; cached in build/cxx-json.json (a rerun compiles only what changed; the full run ~1.5 min)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
 `vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (3 s

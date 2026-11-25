@@ -123,10 +123,14 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
         SyntaxElement inner = operand;
         while (inner.is_node() && inner.size() == 1)
             inner = inner[0];
+        /* ([temp.over.link]/5: in the template's own declaration it is
+           the expression's decltype all the same, a distinct type the
+           mangling spells as written, [abi:mangle.decltype]) */
         if (inner.is_node() && inner.is(syntax_kind::unary_expression) &&
             inner.size() > 1 &&
             (inner[0].is(standard_keyword::sizeof_) ||
-             inner[0].is(standard_keyword::alignof_))) {
+             inner[0].is(standard_keyword::alignof_)) &&
+            (instantiating || class_instantiating || substituting)) {
             type = qualified_type::make(
                 type_table.fundamental(fundamental_type::unsigned_long_int),
                 cv_none);
@@ -214,6 +218,35 @@ void semantic_analysis::collect_written_casts(
 {
     if (!x.is_node())
         return;
+    /* sizeof ( type-id ), alignof ( type-id ) and the named casts
+       (static_cast < type-id > ( e )): the type-id's type, for the mangler
+       (cast the type-id's node) */
+    SyntaxElement operand_type_id;
+    if (x.is(syntax_kind::unary_expression) && x.size() == 4 &&
+        (x[0].is(standard_keyword::sizeof_) ||
+         x[0].is(standard_keyword::alignof_)) &&
+        x[2].is(syntax_kind::type_id))
+        operand_type_id = x[2];
+    if (x.is(syntax_kind::postfix_expression) && x.size() == 7 &&
+        (x[0].is(standard_keyword::static_cast_) ||
+         x[0].is(standard_keyword::dynamic_cast_) ||
+         x[0].is(standard_keyword::const_cast_) ||
+         x[0].is(standard_keyword::reinterpret_cast_)) &&
+        x[2].is(syntax_kind::type_id))
+        operand_type_id = x[2];
+    if (operand_type_id) {
+        size_t unsupported_before = unsupported.size();
+        qualified_type t;
+        analysis_result r = type_id(operand_type_id, t);
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed) {
+            written_binding b;
+            SyntaxRef ar = operand_type_id;
+            b.cast = ar.index().index();
+            b.type = t;
+            found.append(b);
+        }
+    }
     if (x.is(syntax_kind::cast_expression) && x.size() == 4 &&
         x[1].is(syntax_kind::type_id)) {
         size_t unsupported_before = unsupported.size();
@@ -225,6 +258,23 @@ void semantic_analysis::collect_written_casts(
             SyntaxRef r2 = x;
             b.cast = r2.index().index();
             b.type = t;
+            found.append(b);
+        }
+    }
+    /* Q<args>:: in a nested-name-specifier, Q a class template: its
+       (dependent) specialization, for the mangler (cast the template-id's
+       node) */
+    if (x.is(syntax_kind::nested_name_specifier) && x.size() == 2 &&
+        x[0].is(syntax_kind::simple_template_id)) {
+        size_t unsupported_before = unsupported.size();
+        type_index q = 0;
+        analysis_result r = template_type(x[0], 0, false, q);
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed) {
+            written_binding b;
+            SyntaxRef ar = x[0];
+            b.cast = ar.index().index();
+            b.type = qualified_type::make(q, cv_none);
             found.append(b);
         }
     }
@@ -248,27 +298,96 @@ void semantic_analysis::collect_written_casts(
             found.append(b);
             SyntaxElement id = x[x.size() - 1];
             uint32_t count = 0;
+            /* the arguments, a pack expansion of a pack an alias
+               template's instantiation bound (Rest...) one per element, as
+               clang lists them */
+            owned_array<SyntaxElement> written;
+            owned_array<bool> expansion;
             for (uint32_t i = 2; i + 1 < id.size() && ok; i++) {
-                if (id[i].is(preprocessing_op_or_punc::COMMA))
-                    continue;
                 if (id[i].is(syntax_kind::template_argument_list)) {
-                    ok = false;
-                    break;
+                    ok = expansion_list(id[i], written, expansion);
+                } else if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
+                    if (written.empty() || expansion.back())
+                        ok = false;
+                    else
+                        expansion.back() = true;
+                } else if (!id[i].is(preprocessing_op_or_punc::COMMA)) {
+                    written.append(id[i]);
+                    expansion.append(false);
                 }
-                qualified_type t;
-                ok = type_id(id[i], t) == analysis_result::well_formed;
-                if (ok) {
-                    written_binding a;
-                    a.cast = r.index().index();
-                    a.element = ++count;
-                    a.type = t;
-                    found.append(a);
+            }
+            for (size_t w = 0; w < written.size() && ok; w++) {
+                SyntaxElement a = written[w];
+                bool expanded = expansion[w];
+                if (a.is(syntax_kind::type_id) && a.size() == 2 &&
+                    a[1].is(preprocessing_op_or_punc::ELLIPSIS))
+                    expanded = true;
+                uint32_t times = 1;
+                if (expanded) {
+                    token_index first = a.first_token();
+                    token_index end = a.end_token();
+                    if (end > first + 1 &&
+                        SyntaxElement::from_token(end - 1).is(
+                            preprocessing_op_or_punc::ELLIPSIS))
+                        end--;
+                    bool own = false;
+                    ok = expansion_count(first, end, times, &own) && !own;
+                }
+                for (uint32_t k = 0; k < times && ok; k++) {
+                    qualified_type t;
+                    {
+                        expansion_scope expanding_scope(*this, expanded, k,
+                                                        true);
+                        ok = type_id(a, t) == analysis_result::well_formed;
+                    }
+                    if (ok) {
+                        written_binding a2;
+                        a2.cast = r.index().index();
+                        a2.element = ++count;
+                        a2.type = t;
+                        found.append(a2);
+                    }
                 }
             }
         }
         unsupported.resize(unsupported_before);
         if (!ok)
             found.resize(before);
+    }
+    /* a template argument written as a type-id that is not a name
+       (std::declval<_Iter&>()): its type, for the mangler (cast the
+       type-id's node) */
+    if (x.is(syntax_kind::simple_template_id) && x.size() >= 3) {
+        owned_array<SyntaxElement> written;
+        for (uint32_t i = 2; i + 1 < x.size(); i++) {
+            if (x[i].is(syntax_kind::template_argument_list))
+                for (SyntaxElement y : x[i].elements())
+                    written.append(y);
+            else
+                written.append(x[i]);
+        }
+        for (SyntaxElement a : written) {
+            if (!a.is(syntax_kind::type_id))
+                continue;
+            SyntaxElement inner = a;
+            while (
+                inner.is_node() && inner.size() == 1 &&
+                inner.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
+                inner = inner[0];
+            if (inner.is_token())
+                continue;
+            size_t unsupported_before = unsupported.size();
+            qualified_type t;
+            analysis_result r = type_id(a, t);
+            unsupported.resize(unsupported_before);
+            if (r != analysis_result::well_formed)
+                continue;
+            written_binding b;
+            SyntaxRef ar = a;
+            b.cast = ar.index().index();
+            b.type = t;
+            found.append(b);
+        }
     }
     for (SyntaxElement c : x.elements())
         collect_written_casts(c, found);
@@ -279,8 +398,25 @@ void semantic_analysis::collect_written_casts(
    alias template used in another template's declaration), or to a pack of
    such types */
 void semantic_analysis::collect_written_bindings(
-    SyntaxRef n, owned_array<written_binding> &found)
+    SyntaxRef n, owned_array<written_binding> &found, bool every_name)
 {
+    /* a pack expansion's pattern written as a type-id (tuple<_Tp&&...>):
+       the pack expansion of its type, the pack's name standing for the
+       pack's type (the mangler's Dp <type>, a substitution candidate; cast
+       the type-id's node) */
+    if (n.is(syntax_kind::type_id)) {
+        size_t unsupported_before = unsupported.size();
+        qualified_type t;
+        analysis_result r = type_id(n, t);
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed) {
+            written_binding b;
+            b.cast = n.index().index();
+            b.type =
+                qualified_type::make(type_table.pack_expansion_of(t), cv_none);
+            found.append(b);
+        }
+    }
     collect_written_casts(n, found);
     for (token_index t = n.first_token(); t < n.end_token(); t++) {
         if (tokens[t].kind != token_kind::identifier)
@@ -300,8 +436,9 @@ void semantic_analysis::collect_written_bindings(
             bool own = r.kind == type_kind::template_parameter &&
                        entity_table[r.entity].name == id &&
                        !entity_table[e].type.cv();
-            if (entity_table[e].kind == entity_kind::typedef_name && !own &&
-                depends_on_template_parameter(entity_table[e].type)) {
+            if (entity_table[e].kind == entity_kind::typedef_name &&
+                (every_name || (!own && depends_on_template_parameter(
+                                            entity_table[e].type)))) {
                 written_binding b;
                 b.identifier = id;
                 b.type = entity_table[e].type;
@@ -317,8 +454,17 @@ void semantic_analysis::collect_written_bindings(
             written_binding b;
             b.identifier = id;
             b.element = i;
+            b.pack_position = entity_table[pack].first_member;
             if (a)
                 b.type = entity_table[a].type;
+            found.append(b);
+        }
+        if (!entity_table[pack].member_count) {
+            /* (an empty pack: its name and position alone) */
+            written_binding b;
+            b.identifier = id;
+            b.element = UINT32_MAX - 1;
+            b.pack_position = entity_table[pack].first_member;
             found.append(b);
         }
     }
@@ -326,10 +472,11 @@ void semantic_analysis::collect_written_bindings(
 
 /* the dependent type of decltype-specifier n: one for the operands of the
    same tokens and the same bindings of its names */
-type_index semantic_analysis::dependent_written_type(SyntaxRef n)
+type_index semantic_analysis::dependent_written_type(SyntaxRef n,
+                                                     bool every_name)
 {
     owned_array<written_binding> bindings;
-    collect_written_bindings(n, bindings);
+    collect_written_bindings(n, bindings, every_name);
     for (entity_index e : dependent_written_types) {
         auto y =
             SyntaxRef(node_index(static_cast<uint32_t>(entity_table[e].value)));
@@ -345,6 +492,7 @@ type_index semantic_analysis::dependent_written_type(SyntaxRef n)
                 written_bindings[entity_table[e].first_member + i];
             same = a.identifier == bindings[i].identifier &&
                    a.cast == bindings[i].cast &&
+                   a.pack_position == bindings[i].pack_position &&
                    a.element == bindings[i].element &&
                    a.type == bindings[i].type;
         }

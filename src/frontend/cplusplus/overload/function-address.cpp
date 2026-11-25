@@ -83,9 +83,7 @@ bool semantic_analysis::function_set_at(token_index at, function_set &out) const
             if (!function_templates[t - 1].friend_declaration)
                 visible.append(t);
         out.templates = static_cast<owned_array<uint32_t> &&>(visible);
-        for (const template_name_function &x : template_name_functions)
-            if (x.name == found.unknown_entity)
-                out.functions.append(x.function);
+        inline_set_functions(found.unknown_entity, out.functions);
         if (found.entity)
             overload_set(found.entity, out.functions);
         return true;
@@ -134,9 +132,7 @@ bool semantic_analysis::named_function_set(SyntaxElement e,
                 !member_function_template_of(found.unknown_entity))
                 return false;
             function_template_overloads(found.unknown_entity, out.templates);
-            for (const template_name_function &x : template_name_functions)
-                if (x.name == found.unknown_entity)
-                    out.functions.append(x.function);
+            inline_set_functions(found.unknown_entity, out.functions);
             if (found.entity)
                 overload_set(found.entity, out.functions);
             return !out.templates.empty() || !out.functions.empty();

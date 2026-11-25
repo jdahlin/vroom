@@ -1,0 +1,2 @@
+mangle-worklist-decltype-implicit-this-member.cpp:14:39: error: C++ code generation does not handle an entity whose symbol is not mangled yet: function template specialization 'dd::detail::E<...>::op<...>': the mangler does not handle the expression 'namespace' in the return type
+mangle-worklist-decltype-implicit-this-member.cpp:11:3: note: declared here

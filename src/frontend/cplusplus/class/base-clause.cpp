@@ -375,6 +375,10 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         token_index id = named_ids[si];
         entity_index base = named_bases[si];
         const entity &bx = entity_table[base];
+        /* (a class whose definition the analysis could not follow: not
+           known to be incomplete) */
+        if (!bx.size && bx.kind != entity_kind::class_type)
+            return not_supported(specifier.index(), "class.derived");
         if (!bx.size)
             return ill_formed_at_token(id,
                                        "the class-or-decltype shall denote a "

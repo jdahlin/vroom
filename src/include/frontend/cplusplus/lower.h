@@ -32,6 +32,11 @@ struct lowering_failure {
     bool later_step = false;
     /* the analysis's (analysis_complete), not code generation's */
     bool front_end = false;
+    /* an entity lowering needs but cannot name: what it is and why
+       (symbol_refusal), "" if none; and where it is declared, 0 if not
+       known */
+    char entity_text[512] = {};
+    token_index entity_at = 0;
 };
 
 /* whether every declaration of the translation unit is well-formed; false,

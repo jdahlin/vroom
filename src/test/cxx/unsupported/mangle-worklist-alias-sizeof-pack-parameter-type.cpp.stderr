@@ -1,0 +1,2 @@
+mangle-worklist-alias-sizeof-pack-parameter-type.cpp:16:28: error: the rules of [temp.deduct.call] are not implemented yet
+mangle-worklist-alias-sizeof-pack-parameter-type.cpp:16:28: note: refused by vcc's frontend/cplusplus/template/argument-deduction.cpp:N (deduce_from_call)

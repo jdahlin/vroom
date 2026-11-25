@@ -181,6 +181,9 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
         } at_call = {++call_site_depth};
         entity_index outer_function = default_argument_function;
         default_argument_function = f;
+        scoped_value<unsigned> recording(default_argument_unevaluated,
+                                         unevaluated);
+        size_t needs_before = default_argument_needed.size();
         analysis_result r = initialize_from(p.declaration, p.default_argument,
                                             type, false, false, value);
         default_argument_function = outer_function;
@@ -194,6 +197,14 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
             return analysis_result::well_formed;
         }
         nodes[i] = wrap_call_site(value.node, first, site_nodes);
+        if (default_argument_needed.size() != needs_before) {
+            default_argument_need_range needs;
+            needs.node = nodes[i];
+            needs.first = static_cast<uint32_t>(needs_before);
+            needs.count = static_cast<uint32_t>(default_argument_needed.size() -
+                                                needs_before);
+            default_argument_need_ranges.append(needs);
+        }
     }
     /* /4: "In a given function declaration, each parameter subsequent to a
        parameter with a default argument shall have a default argument

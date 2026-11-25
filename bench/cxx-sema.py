@@ -786,7 +786,7 @@ def check_symbols(test, opts, clang, vpp):
 
 # the driver's message when lowering has no rule (lower/compile.cpp)
 NOT_LOWERED = re.compile(r'^[^\n]*:\d+:\d+: error: (?:the rules of (\[[^\]]*\]) are not implemented yet|'
-                         r'C\+\+ code generation does not handle (.*) yet)$', re.M)
+                         r'C\+\+ code generation does not handle (.*?) yet)(?:: .*)?$', re.M)
 
 
 def object_symbols(nm, obj, cwd):

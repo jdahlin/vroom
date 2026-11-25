@@ -92,7 +92,10 @@ bool c_lowering::without_linkage(qualified_type t) const
         switch (r.kind) {
         case type_kind::class_type: {
             const entity &x = analysis.entity_table[r.entity];
+            /* (an unnamed member class of a class with linkage has its
+               class's, class_specifier) */
             return !x.name && !x.linkage_name &&
+                   x.linkage_of_name != linkage::external &&
                    !visible_local_class(analysis.entity_table, r.entity);
         }
         case type_kind::pointer:

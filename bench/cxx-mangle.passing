@@ -1,0 +1,13 @@
+# bench/cxx-mangle.py: clang mangling tests whose symbols are clang's
+# (rewritten by --bless; one that stops passing is an error)
+2004-03-09-UnmangledBuiltinMethods.cpp
+mangle-98.cpp
+mangle-alignof.cpp
+mangle-extern-local.cpp
+mangle-extreme.cpp
+mangle-lambdas-in-dmi-local-class.cpp
+mangle-local-class-names.cpp
+mangle-nullptr-arg.cpp
+mangle-ref-qualifiers.cpp
+mangle-std-externc.cpp
+mangle-system-header.cpp
