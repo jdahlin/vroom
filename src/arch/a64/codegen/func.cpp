@@ -683,14 +683,14 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
                                 .rd = R_X16,
                                 .rn = SP,
                                 .immediate = total - 16};
-                a64_record a = {.opcode = A64_OP_ANDI,
-                                .size = 1,
-                                .rd = SP,
-                                .rn = R_X16,
-                                .immediate = -(int64_t)e->frame_alignment};
+                a64_record a2 = {.opcode = A64_OP_ANDI,
+                                 .size = 1,
+                                 .rd = SP,
+                                 .rn = R_X16,
+                                 .immediate = -(int64_t)e->frame_alignment};
 
                 a64_record_print(c, b, &i, s, e->raw.p);
-                a64_record_print(c, b, &a, s, e->raw.p);
+                a64_record_print(c, b, &a2, s, e->raw.p);
             } else if (total > 16) {
                 a64_record i = {.opcode = A64_OP_SUBI,
                                 .size = 1,
@@ -766,8 +766,8 @@ VPRIV void a64_function_finish(codegen_context *e, uint32_t s)
             } else if (i->condition == A64_NOP_CFI_RESTORE) {
                 vtext_string_append(b, "\t.cfi_restore_state\n");
             } else {
-                for (int k = 0; k < ncs; k++)
-                    vtext_format_append(b, "\t.cfi_restore w%d\n", cs[k]);
+                for (int k2 = 0; k2 < ncs; k2++)
+                    vtext_format_append(b, "\t.cfi_restore w%d\n", cs[k2]);
                 if (!leaf && !a64_frame_shape.is_stack_pointer_leaf)
                     vtext_string_append(
                         b, "\t.cfi_restore w29\n\t.cfi_restore w30\n");
@@ -869,7 +869,7 @@ static void a64_local_registers_choose(codegen_context *e, uint32_t s, int max)
         return;
     k = em_select_locals(e, s, cand, (unsigned)max, em_local_gpr_type);
     for (unsigned i = 0; i < k; i++) {
-        int r = 28 - i;
+        int r = (int)(28 - i);
 
         e->local_register_symbols[i] = cand[i];
         e->local_register_numbers[i] = (uint8_t)r;
@@ -878,7 +878,7 @@ static void a64_local_registers_choose(codegen_context *e, uint32_t s, int max)
         e->temporaries_reserved |= 1u << (16 - i);
         e->callee_saved_used |= 1u << r;
     }
-    e->local_register_candidate_count = k;
+    e->local_register_candidate_count = (int)k;
 }
 
 /* true: out of temporaries with register variables, generate it again without */
@@ -997,10 +997,11 @@ static bool emit_function1(codegen_context *e, uint32_t s, int nlreg)
                 if (!(k % 8))
                     a64_record_emit_move_immediate(e, 1, acc, 0);
                 if (k < ab.register_count)
-                    a64_record_emit_move(e, 0, r, ab.register_number + k);
+                    a64_record_emit_move(e, 0, r,
+                                         (int)(ab.register_number + k));
                 else
                     a64_record_emit_memory(e, A64_OP_LD, 0, 0, r, R_FP,
-                                           16 + ab.stack_offset +
+                                           (unsigned)(16 + ab.stack_offset) +
                                                (k - ab.register_count) * 8);
                 a64_record_emit_bitfield(e, A64_OP_UBFM, 1, r, r, 0, 0);
                 a64_record_emit_three_registers_shifted(e, A64_OP_ORR, 1, acc,
@@ -1041,7 +1042,7 @@ static bool emit_function1(codegen_context *e, uint32_t s, int nlreg)
                 break;
             }
             for (int k = 0; k < ab.register_count; k++) {
-                int lg = ab.float_member_size && ab.size - 8 * k < 8
+                int lg = ab.float_member_size && ab.size - (uint32_t)(8 * k) < 8
                              ? 2
                              : 3; /* an Apple float HFA's last part */
 

@@ -527,7 +527,7 @@ void preprocessor::directive_define(const preprocessing_token &directive)
        program is ill-formed": [impl.clang] clang warns */
     int32_t previous = identifiers[m.name].macro;
     if (previous >= 0 && !system_header_at(name.location) && !m.predefined) {
-        const macro_definition &old = macros[previous];
+        const macro_definition &old = macros[static_cast<size_t>(previous)];
         if (is_language_defined(old))
             diagnostics.issue(diagnostic_id::ext_pp_redef_builtin_macro,
                               name.location);
@@ -561,10 +561,11 @@ void preprocessor::warn_unused_macro(int32_t macro)
 {
     for (size_t i = 0; i < unused_candidates.size(); i++)
         if (unused_candidates[i].macro == macro) {
-            if (!macros[macro].used)
-                diagnostics.issue_as(diagnostic_id::pp_macro_not_used,
-                                     macros[macro].location,
-                                     unused_candidates[i].severity);
+            if (!macros[static_cast<size_t>(macro)].used)
+                diagnostics.issue_as(
+                    diagnostic_id::pp_macro_not_used,
+                    macros[static_cast<size_t>(macro)].location,
+                    unused_candidates[i].severity);
             unused_candidates[i] = unused_candidates.back();
             unused_candidates.resize(unused_candidates.size() - 1);
             return;
@@ -693,7 +694,7 @@ void preprocessor::directive_undef(const preprocessing_token &directive)
            undefine what an option turns off (-fno-exceptions:
            __cpp_exceptions) */
         bool in_predefines = inclusions.back().file->index == predefines_file;
-        if (is_language_defined(macros[m]) &&
+        if (is_language_defined(macros[static_cast<size_t>(m)]) &&
             !system_header_at(name.location) && !in_predefines)
             diagnostics.issue(diagnostic_id::ext_pp_undef_builtin_macro,
                               name.location);

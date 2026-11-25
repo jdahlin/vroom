@@ -43,7 +43,7 @@ void pp_refactor_tokens(pp *p, int fd)
     for (uint32_t i = 0; i < f->ntok; i++) {
         const lex_token *t = &f->tok[i];
         vbuffer_format_append(&out, "T %u %u %u\n", t->off, t->len,
-                              t->flags & LEX_TOKEN_FLAG_SPLICED);
+                              (unsigned)(t->flags & LEX_TOKEN_FLAG_SPLICED));
     }
     vbuffer_flush(&out);
 }

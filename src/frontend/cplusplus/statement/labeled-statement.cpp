@@ -116,7 +116,7 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
         semantics[built].value = tokens.identifier(first);
         return r;
     }
-    standard_keyword k = p.keyword_of(t);
+    standard_keyword k = syntax_parser.keyword_of(t);
     if (k != standard_keyword::case_ && k != standard_keyword::default_)
         return not_supported(n, "stmt.label");
     jump_point here;

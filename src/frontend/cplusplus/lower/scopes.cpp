@@ -16,9 +16,9 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
     for (size_t i = live.size(); i-- > mark;) {
         const scope_record &r = live[i];
         if (r.kind == scope_record::subobjects) {
-            uint32_t destructions = statement(r.symbol);
-            if (destructions)
-                out.append(destructions);
+            uint32_t destructions2 = statement(r.symbol);
+            if (destructions2)
+                out.append(destructions2);
             continue;
         }
         if (r.kind != scope_record::object)
@@ -26,7 +26,7 @@ void c_lowering::destroy(size_t mark, owned_array<uint32_t> &out,
         uint32_t destroyed = destruction(r.symbol, r.object_type, at);
         if (destroyed && r.guard) {
             /* the lowering destroys it here: the unwinding cleanup is off */
-            ast_qualified_type vp = pointer_to(v);
+            ast_qualified_type vp = pointer_to(void_type);
             out.append(c_statement(
                 c, assign(vp, c_variable(c, r.guard, vp),
                           cast(ast_builder_integer(
@@ -120,8 +120,8 @@ uint32_t c_lowering::counted_loop(uint32_t i, ast_qualified_type t,
         step = make(AST_NODE_POST_INCREMENT, t, index(), 0, 0, 0, 0);
     }
     uint32_t step_body[2] = {step, body};
-    return ast_builder_node(c, AST_NODE_FOR, v, c_statement(c, init), cond,
-                            ast_builder_list(c, step_body, 2), 0, 0);
+    return ast_builder_node(c, AST_NODE_FOR, void_type, c_statement(c, init),
+                            cond, ast_builder_list(c, step_body, 2), 0, 0);
 }
 
 bool c_lowering::leaving_objects() const

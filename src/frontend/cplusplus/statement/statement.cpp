@@ -597,7 +597,7 @@ bool semantic_analysis::code_align_argument(token_index at) const
     tokens.spelling(at + 1, digits.get());
     uint64_t value = 0;
     for (size_t i = 0; i < digits.size(); i++) {
-        unsigned char ch = digits.data()[i];
+        unsigned char ch = static_cast<unsigned char>(digits.data()[i]);
         if (ch < '0' || ch > '9')
             return false;
         value = value * 10 + (ch - '0');

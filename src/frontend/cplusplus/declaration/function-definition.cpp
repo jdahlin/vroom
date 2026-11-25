@@ -525,9 +525,9 @@ analysis_result semantic_analysis::analyse_function_body_of(
             if (literal_type(returns) == constness::not_constant)
                 literal = false;
             type_index ft = entity_table[f].type.unqualified();
-            const qualified_type *parameters = type_table.parameters(ft);
+            const qualified_type *parameters3 = type_table.parameters(ft);
             for (uint32_t i = 0; i < type_table[ft].parameter_count; i++)
-                if (literal_type(parameters[i]) == constness::not_constant)
+                if (literal_type(parameters3[i]) == constness::not_constant)
                     literal = false;
         }
         if (!literal)
@@ -586,9 +586,9 @@ analysis_result semantic_analysis::analyse_function_body_of(
                                            "literal type",
                                            "dcl.constexpr"));
             type_index ft = entity_table[f].type.unqualified();
-            const qualified_type *parameters = type_table.parameters(ft);
+            const qualified_type *parameters2 = type_table.parameters(ft);
             for (uint32_t i = 0; i < type_table[ft].parameter_count; i++)
-                if (literal_type(parameters[i]) == constness::not_constant)
+                if (literal_type(parameters2[i]) == constness::not_constant)
                     result = worse(
                         result,
                         ill_formed_at_token(first_token(compound),

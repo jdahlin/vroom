@@ -753,8 +753,9 @@ static void pe_baserel_blocks(pe_baserel *v, uint32_t n)
         pe_wr32(c->bytes, page);
         pe_wr32(c->bytes + 4, size);
         for (uint32_t k = i; k < j; k++)
-            pe_wr16(c->bytes + 8 + (k - i) * 2,
-                    (uint16_t)(v[k].type << 12 | (v[k].rva - page)));
+            pe_wr16(
+                c->bytes + 8 + (k - i) * 2,
+                (uint16_t)((uint32_t)(v[k].type << 12) | (v[k].rva - page)));
         pe_output_add(pe_reloc, c);
         i = j;
     }

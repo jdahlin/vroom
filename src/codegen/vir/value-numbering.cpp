@@ -175,7 +175,7 @@ VPRIV void virbuild_block_values_number(codegen_context *e,
                     }
                 }
             }
-        } else if ((eff & ~VIR_EFFECT_UF) == VIR_EFFECT_P &&
+        } else if ((eff & (uint32_t)(~VIR_EFFECT_UF)) == VIR_EFFECT_P &&
                    op != VIR_OP_BPARAM && op != VIR_OP_PARAM &&
                    op != VIR_OP_PROJ) {
             vir_insn in = V->insns[q].insn;

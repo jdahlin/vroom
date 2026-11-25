@@ -1086,22 +1086,22 @@ static bool cc_bit_cast_lane_read(cc_bit_cast_state *state, cc *c, uint32_t n,
                                              : l % r;
             break;
         case LEX_TOKEN_EQUAL_EQUAL:
-            result = -(l == r);
+            result = (u128)(-(l == r));
             break;
         case LEX_TOKEN_EXCLAMATION_EQUAL:
-            result = -(l != r);
+            result = (u128)(-(l != r));
             break;
         case LEX_TOKEN_LESS:
-            result = -(sg ? a.i < b.i : l < r);
+            result = (u128)(-(sg ? a.i < b.i : l < r));
             break;
         case LEX_TOKEN_LESS_EQUAL:
-            result = -(sg ? a.i <= b.i : l <= r);
+            result = (u128)(-(sg ? a.i <= b.i : l <= r));
             break;
         case LEX_TOKEN_GREATER:
-            result = -(sg ? a.i > b.i : l > r);
+            result = (u128)(-(sg ? a.i > b.i : l > r));
             break;
         case LEX_TOKEN_GREATER_EQUAL:
-            result = -(sg ? a.i >= b.i : l >= r);
+            result = (u128)(-(sg ? a.i >= b.i : l >= r));
             break;
         default:
             return false;

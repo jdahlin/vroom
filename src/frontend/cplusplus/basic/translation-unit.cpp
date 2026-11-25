@@ -1002,7 +1002,7 @@ analysis_result semantic_analysis::declare(
     /* a qualified name's claim would be looked up where the declaration
        is, not in its namespace */
     d.claimable = declarations_claimable && !qualified;
-    declared.append(d);
+    declared_names.append(d);
     return analysis_result::well_formed;
 }
 
@@ -1282,7 +1282,7 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
     d.kind = kind;
     d.type = type;
     d.claimable = declarations_claimable;
-    declared.append(d);
+    declared_names.append(d);
     return analysis_result::well_formed;
 }
 
@@ -1413,7 +1413,7 @@ analysis_result semantic_analysis::declare_local(
     d.kind = kind;
     d.type = type;
     d.claimable = declarations_claimable;
-    declared.append(d);
+    declared_names.append(d);
     return analysis_result::well_formed;
 }
 

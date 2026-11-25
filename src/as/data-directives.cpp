@@ -482,7 +482,7 @@ VPRIV int as_directive_base64(as_context *a, const char *p, const char *e)
         uint32_t w = 0;
         int pad = 0;
         for (int j = 0; j < 4; j++) {
-            char c = buf[i + j];
+            char c = buf[i + (size_t)j];
             int v = c >= 'A' && c <= 'Z'               ? c - 'A'
                     : c >= 'a' && c <= 'z'             ? c - 'a' + 26
                     : c >= '0' && c <= '9'             ? c - '0' + 52

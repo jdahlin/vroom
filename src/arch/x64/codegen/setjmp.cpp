@@ -29,7 +29,8 @@ VPRIV codegen_value x64_setjmp(codegen_context *e, int rb)
         if (saved & (1u << q)) {
             int size = X64_REGISTER_IS_XMM(q) ? 16 : 8;
             slots[q] = walk_slot_permanent(
-                e, size, size); /* (read when longjmp returns here, later) */
+                e, (uint64_t)size,
+                (uint32_t)size); /* (read when longjmp returns here, later) */
             codegen_lvalue slot = {.kind = CODEGEN_LVALUE_FRAME,
                                    .offset = slots[q]};
             x64_record_emit_memory(e, X64_OP_ST, size, q, &slot, false);

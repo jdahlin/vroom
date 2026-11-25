@@ -20,8 +20,6 @@
 
 static const uint8_t x64w_gpr[4] = {RCX, RDX, R8, R9};
 
-VPRIV void x64_x87st(codegen_context *e, const codegen_lvalue *l); /* fp.c */
-
 VPRIV int x64w_argreg(int i)
 {
     return x64w_gpr[i];

@@ -171,7 +171,7 @@ int driver_tokens_compare(const char *ours, size_t on, const char *refpath)
     struct stat st;
     lex_file A, B;
     static _Thread_local char *ba, *bb;
-    uint64_t rh;
+    uint64_t rh = 0;
     int r, cached;
 
     if (fd < 0 || fstat(fd, &st)) {

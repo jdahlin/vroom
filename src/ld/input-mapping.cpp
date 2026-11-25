@@ -1,5 +1,6 @@
 /* Mapping input files and reading archives into the list of pending members. */
 
+#include "common/attributes.h"
 #include "common/literal.h"
 #include "ld-internal.h"
 
@@ -20,8 +21,8 @@ VPRIV uint8_t *ld_file_map(struct ld_context *ctx, const char *path,
         return NULL;
     }
     *size = m.n;
-    return m.n ? (uint8_t *)m.p
-               : (uint8_t *)""; /* an empty file is not a failure */
+    return m.n ? VUNCONST(uint8_t *, m.p)
+               : VUNCONST(uint8_t *, ""); /* an empty file is not a failure */
 }
 
 /* the members of the archive at path into the pending list: by path for a thin archive, else as

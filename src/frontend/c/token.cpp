@@ -188,7 +188,6 @@ cc_token_expect_fail(cc *c, const char *what)
         cc_recovery_jump(c);
     }
     cc_report_fatal(c, c->tk[0].loc, "expected %s", what);
-    abort();
 }
 
 CC_PRIVATE __attribute__((noinline, cold, noreturn)) void
@@ -234,10 +233,10 @@ CC_PRIVATE bool cc_token_expect_semicolon(cc *c, const char *after)
          c->tk[0].kind == LEX_TOKEN_RIGHT_SQUARE) &&
         cc_token_peek(c, 1)->kind == LEX_TOKEN_SEMICOLON) {
         /* clang: "f);": the stray ')' (or ']') and the ';' are consumed */
-        diag_fixit fx = {c->tk[0].loc, c->tk[0].loc + 1, "",
-                         DIAG_APPLICABILITY_MAYBE}; /* (or a '(' was lost) */
+        diag_fixit fx2 = {c->tk[0].loc, c->tk[0].loc + 1, "",
+                          DIAG_APPLICABILITY_MAYBE}; /* (or a '(' was lost) */
 
-        report(c, "error", c->tk[0].loc, NULL, 0, &fx,
+        report(c, "error", c->tk[0].loc, NULL, 0, &fx2,
                !(c->tk[0].flags & PP_TOKEN_FLAG_FROM_MACRO),
                "extraneous '%s' before ';'",
                c->tk[0].kind == LEX_TOKEN_RIGHT_PAREN ? ")" : "]");

@@ -89,7 +89,7 @@ static bool cc_expression_is_noreturn(cc *c, uint32_t n, bool reach,
 
 /* a condition's constant value: 1 true, 0 false, -1 not constant (clang's CFG prunes
    the branches of a constant condition) */
-CC_PRIVATE int cc_condition_value(cc *c, uint32_t n)
+static int cc_condition_value(cc *c, uint32_t n)
 {
     const node *x;
     cc_value v;
@@ -176,7 +176,7 @@ static void cc_switch_case_values(cc *c, uint32_t n, i128 *v, uint32_t *nv,
 }
 
 /* a default label of this switch (not of a nested one) */
-CC_PRIVATE bool cc_switch_has_default(cc *c, uint32_t n)
+static bool cc_switch_has_default(cc *c, uint32_t n)
 {
     const node *x;
 

@@ -35,7 +35,8 @@ CC_PRIVATE void cc_function_object_size_locals(cc *c, uint32_t sym0,
             x->op == AST_NODE_POST_DECREMENT) {
             const node *a = AST_NODE(x->a);
             if (a->op == AST_NODE_VARIABLE)
-                c->syms[a->a].flags &= ~AST_SYMBOL_FLAG_OBJECT_SIZE_INITIALIZER;
+                c->syms[a->a].flags &=
+                    (uint32_t)(~AST_SYMBOL_FLAG_OBJECT_SIZE_INITIALIZER);
         }
     }
 }

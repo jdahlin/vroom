@@ -1,4 +1,5 @@
 /* Build native host programs with the compiler and linker in this process. */
+#include "common/attributes.h"
 #include "vccd-internal.h"
 
 /* options that take the next argv entry */
@@ -41,21 +42,21 @@ static int vccd_host_linux_startup(const struct vccd_request *r, char **lav,
     for (int i = 1; i < r->argc; i++) {
         const char *a = r->argv[i];
         if (!strncmp(a, "-L", 2)) {
-            lav[nl++] = (char *)a;
+            lav[nl++] = VUNCONST(char *, a);
             if (!a[2] && i + 1 < r->argc)
                 lav[nl++] = r->argv[++i];
         } else if (vccd_host_option_takes_value(a))
             i++;
     }
-    lav[nl++] = (char *)"-L" HOST_LIBRARY_DIR;
-    lav[nl++] = (char *)"-L/usr/lib64";
-    lav[nl++] = (char *)"-L/usr/lib";
-    lav[nl++] = (char *)"--dynamic-linker";
-    lav[nl++] = (char *)HOST_INTERPRETER;
+    lav[nl++] = VUNCONST(char *, "-L" HOST_LIBRARY_DIR);
+    lav[nl++] = VUNCONST(char *, "-L/usr/lib64");
+    lav[nl++] = VUNCONST(char *, "-L/usr/lib");
+    lav[nl++] = VUNCONST(char *, "--dynamic-linker");
+    lav[nl++] = VUNCONST(char *, HOST_INTERPRETER);
     if (pie)
-        lav[nl++] = (char *)"-pie";
-    lav[nl++] = (char *)(pie ? "-l:Scrt1.o" : "-l:crt1.o");
-    lav[nl++] = (char *)"-l:crti.o";
+        lav[nl++] = VUNCONST(char *, "-pie");
+    lav[nl++] = VUNCONST(char *, (pie ? "-l:Scrt1.o" : "-l:crt1.o"));
+    lav[nl++] = VUNCONST(char *, "-l:crti.o");
     return nl;
 }
 #endif
@@ -139,7 +140,7 @@ VPRIV int vccd_host_program_compile(const struct vccd_request *r)
     cav[0] = (char *)r->argv[0];
     lav[0] = "vld";
     lav[1] = "-o";
-    lav[2] = (char *)out;
+    lav[2] = VUNCONST(char *, out);
 #ifdef HOST_INTERPRETER
     nl = vccd_host_linux_startup(r, lav, nl, pie);
 #endif
@@ -159,7 +160,7 @@ VPRIV int vccd_host_program_compile(const struct vccd_request *r)
                 continue;
             }
 #endif
-            lav[nl++] = (char *)a;
+            lav[nl++] = VUNCONST(char *, a);
             if (!a[2] && i + 1 < r->argc)
                 lav[nl++] = (char *)r->argv[++i];
             continue;
@@ -181,7 +182,7 @@ VPRIV int vccd_host_program_compile(const struct vccd_request *r)
             goto done;
         }
         if (a[0] == '-' && a[1]) {
-            cav[nc++] = (char *)a;
+            cav[nc++] = VUNCONST(char *, a);
             if (vccd_host_option_takes_value(a) && i + 1 < r->argc)
                 cav[nc++] = (char *)r->argv[++i];
             continue;
@@ -190,7 +191,7 @@ VPRIV int vccd_host_program_compile(const struct vccd_request *r)
             lav[nl++] = tmp[source_slot++];
             continue;
         }
-        lav[nl++] = (char *)a; /* an object */
+        lav[nl++] = VUNCONST(char *, a); /* an object */
     }
     for (int i = 1; i < r->argc && !status; i++) {
         const char *a = r->argv[i];
@@ -213,7 +214,7 @@ VPRIV int vccd_host_program_compile(const struct vccd_request *r)
         close(fd);
         int k = nc;
         cav[k++] = "-c";
-        cav[k++] = (char *)a;
+        cav[k++] = VUNCONST(char *, a);
         cav[k++] = "-o";
         cav[k++] = tmp[ntmp];
         cav[k] = NULL;
@@ -226,8 +227,8 @@ VPRIV int vccd_host_program_compile(const struct vccd_request *r)
         status = driver_job_run(k, cav, &e);
     }
 #ifdef HOST_INTERPRETER
-    lav[nl++] = (char *)"-lc";
-    lav[nl++] = (char *)"-l:crtn.o";
+    lav[nl++] = VUNCONST(char *, "-lc");
+    lav[nl++] = VUNCONST(char *, "-l:crtn.o");
 #endif
     lav[nl] = NULL;
     if (!status)

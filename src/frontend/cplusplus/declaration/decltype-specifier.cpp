@@ -255,8 +255,8 @@ void semantic_analysis::collect_written_casts(
         unsupported.resize(unsupported_before);
         if (r == analysis_result::well_formed) {
             written_binding b;
-            SyntaxRef r = x;
-            b.cast = r.index().index();
+            SyntaxRef r2 = x;
+            b.cast = r2.index().index();
             b.type = t;
             found.append(b);
         }

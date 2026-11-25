@@ -602,7 +602,6 @@ VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops)
         }
     }
     return as_error_report(a, "invalid instruction mnemonic '%s'", mn);
-    return X64_NEXT;
 }
 
 /* Scalar ModRM instructions from compiler records have a known width and
@@ -640,9 +639,10 @@ static bool x64_numeric_modrm(as_context *a, enum X64Op op, int size,
     }
 
     int width = extend ? reg->size : size;
-    unsigned base = memory ? rm->base : rm->reg;
+    unsigned base = memory ? (unsigned)rm->base : rm->reg;
     unsigned rex =
-        0x40 | ((width == 8) << 3) | ((reg->reg & 8) >> 1) | (base >> 3);
+        (unsigned)(0x40 | ((width == 8) << 3) | ((reg->reg & 8) >> 1)) |
+        (base >> 3);
     bool byte_rex = reg->needrex || (!memory && rm->needrex);
     unsigned mod = 3, disp_size = 0;
     bool sib = false;
@@ -664,17 +664,20 @@ static bool x64_numeric_modrm(as_context *a, enum X64Op op, int size,
     if (width == 2)
         *p++ = 0x66;
     if (emit_rex)
-        *p++ = rex;
+        *p++ = (uint8_t)rex;
     if (escape)
         *p++ = 0x0f;
     *p++ = opcode;
-    *p++ = (mod << 6) | ((reg->reg & 7) << 3) | (sib ? 4 : base & 7);
+    *p++ = (uint8_t)((mod << 6) | ((unsigned)((reg->reg & 7) << 3)) |
+                     (sib ? 4 : base & 7));
     if (sib) {
         unsigned shift = rm->scale == 8   ? 3
                          : rm->scale == 4 ? 2
                                           : rm->scale == 2;
-        *p++ = (shift << 6) | ((rm->index < 0 ? 4 : rm->index & 7) << 3) |
-               (base & 7);
+        *p++ =
+            (uint8_t)((shift << 6) |
+                      ((unsigned)((rm->index < 0 ? 4 : rm->index & 7) << 3)) |
+                      (base & 7));
     }
     if (disp_size == 1)
         *p = (uint8_t)rm->v.c;
@@ -714,7 +717,8 @@ int as_x64_mov_immediate(as_context *a, int reg, int size, int64_t value)
     a->x64_operand_size = 0;
     bool sign_extend = size != 4 && fits32(value);
     bool imm64 = size != 4 && !sign_extend && (uint64_t)value > UINT32_MAX;
-    uint8_t rex = 0x40 | ((sign_extend || imm64) ? 8 : 0) | (reg >> 3);
+    uint8_t rex =
+        (uint8_t)(0x40 | ((sign_extend || imm64) ? 8 : 0) | (reg >> 3));
     uint32_t frag = a->fragment_current;
     elf_code(a->object, frag);
     size_t length = (rex != 0x40) + 1 + sign_extend + (imm64 ? 8 : 4);
@@ -728,7 +732,7 @@ int as_x64_mov_immediate(as_context *a, int reg, int size, int64_t value)
         *p++ = 0xb8 | (reg & 7);
     }
     if (imm64)
-        vbytes_store_u64(p, value);
+        vbytes_store_u64(p, (uint64_t)value);
     else
         vbytes_store_u32(p, (uint32_t)value);
     return 0;

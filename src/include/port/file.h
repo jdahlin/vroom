@@ -47,11 +47,11 @@ static inline bool vfile_map_fd(int fd, vfile_mapping *m, struct stat *st)
     if (fstat(fd, st))
         return false;
     if (st->st_size) {
-        p = mmap(NULL, st->st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        p = mmap(NULL, (size_t)st->st_size, PROT_READ, MAP_PRIVATE, fd, 0);
         if (p == MAP_FAILED)
             return false;
         m->p = (const unsigned char *)p;
-        m->n = st->st_size;
+        m->n = (size_t)st->st_size;
     }
     return true;
 }

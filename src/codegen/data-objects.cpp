@@ -96,7 +96,7 @@ static void codegen_data_initializer_store(codegen_context *e, uint64_t off,
                 "initializer element is not a compile-time constant");
         for (uint64_t k = 0; k < T(c, ty)->n; k++)
             if (cv.i)
-                codegen_data_bits_or(e, off + k / 8, 1u << (k % 8));
+                codegen_data_bits_or(e, off + k / 8, (uint8_t)(1u << (k % 8)));
         return;
     }
     if (x->op == AST_NODE_INITIALIZER) {
@@ -119,8 +119,8 @@ static void codegen_data_initializer_store(codegen_context *e, uint64_t off,
                         uint64_t at = off + k / 8;
                         unsigned m = 1u << (k % 8);
                         codegen_data_bits_or(e, at, 0);
-                        e->data.p[at] =
-                            (char)((e->data.p[at] & ~m) | (cv.i ? m : 0));
+                        e->data.p[at] = (char)(((unsigned)e->data.p[at] & ~m) |
+                                               (cv.i ? m : 0));
                     }
                 }
                 return;
@@ -254,7 +254,7 @@ static void codegen_data_initializer_store(codegen_context *e, uint64_t off,
         case CC_VALUE_INTEGER:
             if (codegen_type_is_bitint_big(c, ty)) {
                 for (int i = 0; i < n; i += 8)
-                    codegen_data_store(e, off + i,
+                    codegen_data_store(e, off + (uint64_t)i,
                                        i < 16
                                            ? (uint64_t)((u128)cv.i >> (8 * i))
                                        : cv.i < 0 ? UINT64_MAX
@@ -352,8 +352,8 @@ static void codegen_data_initializer_store(codegen_context *e, uint64_t off,
                                     1,
                                 (uint32_t)n);
                 e->relocation_count++;
-                if (off + n > e->relocation_end)
-                    e->relocation_end = off + n;
+                if (off + (uint64_t)n > e->relocation_end)
+                    e->relocation_end = off + (uint64_t)n;
                 codegen_reference_note(
                     e, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_LABEL,
                                               cv.label - 1));

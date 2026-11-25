@@ -2126,7 +2126,8 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
     }
     if (!pa)
         codegen_fatal_report(e, y->loc, "out of memory");
-    W->canary = e->unit->options->sprot ? walk_slot_temporary(e, 8, 8) : 0;
+    W->canary =
+        e->unit->options->sprot ? (int32_t)walk_slot_temporary(e, 8, 8) : 0;
     W->stack_pointer_needed = e->unit->options->sprot == 3;
     if (KIND(c, W->return_type) != AST_TYPE_VOID) {
         int k = KIND(c, W->return_type);

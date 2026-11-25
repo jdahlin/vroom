@@ -231,7 +231,7 @@ static int as_value_evaluate_in_layout(as_context *a, as_value v, int64_t *out,
 static int as_variable_item_evaluate(as_context *a, struct as_variable_item *v,
                                      int64_t *val)
 {
-    int64_t x = v->value.c, o1, o2;
+    int64_t x = v->value.c, o1 = 0, o2 = 0;
     uint32_t s1 = 0, s2 = 0;
     if (v->value.add && as_symbol_section_offset(a, v->value.add, &s1, &o1))
         return -1;
@@ -345,7 +345,7 @@ VPRIV void as_variable_items_finish(as_context *a)
                 uint64_t big = v->code == 16 ? 5 : 6;
                 as_value t = v->value;
                 uint32_t sc;
-                int64_t to;
+                int64_t to = 0;
 
                 as_value_fold(a, &t);
                 ns = v->size;

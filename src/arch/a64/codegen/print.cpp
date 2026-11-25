@@ -226,12 +226,12 @@ static bool a64_print_text_is_register(const char *p, size_t n)
     if (n < 2 || n > 3 || !strchr("bhsdqvwxz", p[0]) || p[1] < '0' ||
         p[1] > '9')
         return false;
-    unsigned r = p[1] - '0';
+    unsigned r = (unsigned)(p[1] - '0');
 
     if (n == 3) {
         if (p[2] < '0' || p[2] > '9' || p[1] == '0')
             return false;
-        r = r * 10 + (p[2] - '0');
+        r = r * 10 + ((unsigned)(p[2] - '0'));
     }
     return r < 32;
 }

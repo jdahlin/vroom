@@ -1281,8 +1281,8 @@ VPRIV codegen_value x64_pcmpstr(codegen_context *e, uint32_t n)
         if ((live & fixed) & (1u << r)) {
             int size = r >= XMM0 ? 16 : 8;
             codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
-                                .offset = saved[r] =
-                                    walk_slot_temporary(e, size, size)};
+                                .offset = saved[r] = walk_slot_temporary(
+                                    e, (uint64_t)size, (uint32_t)size)};
             x64_store(e, r, &l, size);
         }
     e->x64_context->temporaries_in_use |= fixed;

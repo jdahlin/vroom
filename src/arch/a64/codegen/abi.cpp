@@ -176,7 +176,7 @@ VPRIV void a64_abi_bool_vector_return(codegen_context *e, ast_qualified_type t,
             a64_record_emit_memory(e, A64_OP_ST, a64_size_log2(stride), 0, r,
                                    A64_REGISTER_FRAME, sl + i * stride);
         else
-            a64_record_emit_move(e, 0, i, r);
+            a64_record_emit_move(e, 0, (int)i, r);
     }
     if (simd)
         vr_load(e, n == 16 ? 16 : 8, 0, A64_REGISTER_FRAME, sl);
@@ -199,10 +199,10 @@ VPRIV void a64_abi_bool_vector_result_store(codegen_context *e,
             a64_record_emit_memory(e, A64_OP_LD, a64_size_log2(stride), 0, r,
                                    A64_REGISTER_FRAME, tmp + i * stride);
         else
-            a64_record_emit_move(e, 0, r, i);
+            a64_record_emit_move(e, 0, r, (int)i);
         a64_record_emit_bitfield(e, A64_OP_UBFM, 1, r, r, 0, 0);
         a64_record_emit_three_registers_shifted(e, A64_OP_ORR, 1, acc, acc, r,
-                                                0, i);
+                                                0, (int)i);
     }
     a64_record_emit_memory(e, A64_OP_ST, n > 8 ? 1 : 0, 0, acc,
                            A64_REGISTER_FRAME, sl);
@@ -297,11 +297,11 @@ VPRIV void a64_abi_argument_classify(codegen_context *e, ast_qualified_type t,
     if (codegen_type_is_bool_vector(c, t) && size >= 8 && size <= 16) {
         if (e->next_vector_register < 8) {
             a->kind = A64_ABI_ARGUMENT_HFA,
-            a->register_number = e->next_vector_register++,
-            a->register_count = 1, a->float_member_size = size;
+            a->register_number = (uint8_t)e->next_vector_register++,
+            a->register_count = 1, a->float_member_size = (uint8_t)size;
             return;
         }
-        n = size / 8;
+        n = (int)(size / 8);
         goto stack;
     }
     if (codegen_type_is_record_like(c, t)) {

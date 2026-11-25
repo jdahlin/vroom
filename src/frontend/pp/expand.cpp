@@ -1094,7 +1094,7 @@ static int pp_macro_body_substitute(pp *p, const pp_macro *m, const ptok *name,
             cur = p->scratch_tokens[i++];
 
             while (i + 1 < e && pp_paste_operator_is(&p->scratch_tokens[i])) {
-                ptok r;
+                ptok r2;
 
                 if (p->options->asm_mode &&
                     !pp_paste_is_valid(&cur, &p->scratch_tokens[i + 1])) {
@@ -1104,8 +1104,8 @@ static int pp_macro_body_substitute(pp *p, const pp_macro *m, const ptok *name,
                     i += 2;
                     continue;
                 }
-                r = pp_paste_tokens(p, &cur, &p->scratch_tokens[i + 1]);
-                cur = r;
+                r2 = pp_paste_tokens(p, &cur, &p->scratch_tokens[i + 1]);
+                cur = r2;
                 i += 2;
             }
             p->scratch_tokens[w++] = cur;

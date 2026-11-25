@@ -178,7 +178,7 @@ void diag_summary_print(pp *p)
                      p->warning_count, p->warning_count > 1 ? "s" : "");
     if (unlikely(p->options->dsink && p->options->dsink->ndup) &&
         n < (int)sizeof(b))
-        n += snprintf(b + n, sizeof(b) - n,
+        n += snprintf(b + n, sizeof(b) - (size_t)n,
                       "%u header warning%s left out: printed by another TU of "
                       "this build.\n",
                       p->options->dsink->ndup,

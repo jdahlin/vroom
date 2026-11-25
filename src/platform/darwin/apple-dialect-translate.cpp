@@ -387,14 +387,14 @@ char *macho_dialect_translate(const char *t, size_t n, size_t *outn)
             if (!done && dt_word(s, c, ".comm")) {
                 const char *f[8], *fe[8];
                 int k = dt_fields(s + 5, c, f, fe);
-                char t[48];
+                char t2[48];
 
                 db_s(&b, "\t.comm\t");
                 dt_operands(&b, f[0], fe[0]);
-                snprintf(t, sizeof t, ", %ld, %ld\n",
+                snprintf(t2, sizeof t2, ", %ld, %ld\n",
                          k > 1 ? dt_num(f[1], fe[1]) : 0,
                          1L << (k > 2 ? dt_num(f[2], fe[2]) : 0));
-                db_s(&b, t);
+                db_s(&b, t2);
                 done = true;
             }
             if (!done && dt_word(s, c, ".private_extern")) {

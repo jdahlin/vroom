@@ -313,10 +313,8 @@ VPRIV void virbuild_pass_switch_read(virbuild_pass_switch *w, const char *s)
             (virbuild_passes[i].flags & VIRBUILD_PASS_FLAG_ON_VIR) &&
             !virbuild_passes[i + 1].vir)
             w->verify = (w->verify & ~(1ull << i)) | 1ull << (i + 1);
-    w->skip &=
-        (VIRBUILD_PASS_COUNT < 64 ? (1ull << VIRBUILD_PASS_COUNT) - 1 : ~0ull);
-    w->verify &=
-        (VIRBUILD_PASS_COUNT < 64 ? (1ull << VIRBUILD_PASS_COUNT) - 1 : ~0ull);
+    w->skip &= (1ull << VIRBUILD_PASS_COUNT) - 1; /* at most 32 rows */
+    w->verify &= (1ull << VIRBUILD_PASS_COUNT) - 1;
     w->active = w->skip || w->verify || w->time;
     if (w->time)
         pthread_once(&virbuild_pass_read_cost_once,

@@ -2479,7 +2479,8 @@ static void vir_parse_function(vir_parse_state *p)
                 vir_parse_insn(p, ty);
                 if (p->constant_definitions.n != cb) { /* a named constant */
                     p->constant_definitions.v[cb].insn.type = (uint8_t)ty;
-                    p->constant_definitions.v[cb].name = vt - p->tokens.v;
+                    p->constant_definitions.v[cb].name =
+                        (uint32_t)(vt - p->tokens.v);
                     vir_parse_value_define(p, vt, 2, cb);
                 } else if (p->blocks.n != before) {
                     vir_parse_value_define(p, vt, 1, before);

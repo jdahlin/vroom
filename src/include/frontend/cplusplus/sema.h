@@ -1859,7 +1859,7 @@ class semantic_analysis
     {
         return in_system_header(at);
     }
-    owned_array<declared_name> declared;
+    owned_array<declared_name> declared_names;
     owned_array<analysed_expression> expressions;
     /* the semantic tree of every definition analysed */
     semantic_tree semantics;
@@ -1975,12 +1975,12 @@ class semantic_analysis
     {
         if (!tree[n].child_count || !tree.children(n)[0].is_token())
             return standard_keyword::none;
-        return p.keyword_of(tokens[tree.children(n)[0].index()]);
+        return syntax_parser.keyword_of(tokens[tree.children(n)[0].index()]);
     }
     /* whether x is the keyword k */
     bool is_keyword(SyntaxElement x, standard_keyword k) const
     {
-        return x.is_token() && p.keyword_of(tokens[x.token()]) == k;
+        return x.is_token() && syntax_parser.keyword_of(tokens[x.token()]) == k;
     }
     /* whether a class is trivially copyable and has a trivial destructor:
        its objects are copied as their bytes, passed in registers */
@@ -2084,7 +2084,7 @@ class semantic_analysis
     /* the syntax tree analysed */
     const parser &parsed() const
     {
-        return p;
+        return syntax_parser;
     }
     /* a token's spelling, as written (an entity's abi_tag, its section) */
     size_t token_spelling(token_index i, vbuffer *out) const
@@ -7279,7 +7279,7 @@ class semantic_analysis
 
     const syntax_tree &tree;
     token_stream &tokens;
-    const parser &p;
+    const parser &syntax_parser;
     diagnostic_consumer &diagnostics;
     const SyntaxContext syntax_cx;
     SyntaxScope syntax_scope{syntax_cx};

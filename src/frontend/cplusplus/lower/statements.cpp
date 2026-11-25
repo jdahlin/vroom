@@ -8,7 +8,7 @@ namespace cplusplus::lowering
 
 uint32_t c_lowering::block(const uint32_t *items, uint32_t count)
 {
-    return ast_builder_node(c, AST_NODE_BLOCK, v, 0,
+    return ast_builder_node(c, AST_NODE_BLOCK, void_type, 0,
                             ast_builder_list(c, items, count), count, 0, 0);
 }
 
@@ -186,9 +186,10 @@ uint32_t c_lowering::loop(uint32_t cond_node, uint32_t step_node,
         }
         uint32_t body = loop_body(body_node, false);
         if (!step_node && cond)
-            return ast_builder_node(c, AST_NODE_WHILE, v, cond, body, 0, 0, 0);
+            return ast_builder_node(c, AST_NODE_WHILE, void_type, cond, body, 0,
+                                    0, 0);
         uint32_t step_body[2] = {step, body};
-        return ast_builder_node(c, AST_NODE_FOR, v, 0, cond,
+        return ast_builder_node(c, AST_NODE_FOR, void_type, 0, cond,
                                 ast_builder_list(c, step_body, 2), 0, 0);
     }
     size_t mark = live.size();
@@ -206,7 +207,7 @@ uint32_t c_lowering::loop(uint32_t cond_node, uint32_t step_node,
     uint32_t body = statement(body_node);
     owned_array<uint32_t> leave;
     destroy(mark + 1, leave, at);
-    leave.append(ast_builder_node(c, AST_NODE_BREAK, v, 0, 0, 0, 0, 0));
+    leave.append(ast_builder_node(c, AST_NODE_BREAK, void_type, 0, 0, 0, 0, 0));
     items.append(if_statement(cond, body, block(leave)));
     if (step_node) {
         uint32_t step = full_value(step_node, true);
@@ -218,7 +219,7 @@ uint32_t c_lowering::loop(uint32_t cond_node, uint32_t step_node,
     destroy(mark + 1, items, at);
     live.resize(mark);
     uint32_t step_body[2] = {0, block(items)};
-    return ast_builder_node(c, AST_NODE_FOR, v, 0, 0,
+    return ast_builder_node(c, AST_NODE_FOR, void_type, 0, 0,
                             ast_builder_list(c, step_body, 2), 0, 0);
 }
 
@@ -734,7 +735,7 @@ uint32_t c_lowering::statement(uint32_t index)
         if (n.kind == semantic_kind::if_statement)
             made = if_statement(cond, statement(n.b), statement(n.c));
         else
-            made = ast_builder_node(c, AST_NODE_SWITCH, v, cond,
+            made = ast_builder_node(c, AST_NODE_SWITCH, void_type, cond,
                                     loop_body(n.b, true), 0, 0, 0);
         if (items.empty() && live.size() == mark)
             return made;
@@ -750,7 +751,8 @@ uint32_t c_lowering::statement(uint32_t index)
         uint32_t cond = full_value(n.b, false);
         if (!cond)
             return 0;
-        return ast_builder_node(c, AST_NODE_DO, v, truth(cond), body, 0, 0, 0);
+        return ast_builder_node(c, AST_NODE_DO, void_type, truth(cond), body, 0,
+                                0, 0);
     }
     case semantic_kind::for_statement: {
         /* [stmt.for]/1: { init-statement while (condition) { statement
@@ -774,8 +776,8 @@ uint32_t c_lowering::statement(uint32_t index)
         return ast_builder_case_range(c, lo, hi, statement(n.a));
     }
     case semantic_kind::default_label:
-        return ast_builder_node(c, AST_NODE_DEFAULT, v, 0, 0, statement(n.a), 0,
-                                0);
+        return ast_builder_node(c, AST_NODE_DEFAULT, void_type, 0, 0,
+                                statement(n.a), 0, 0);
     case semantic_kind::identifier_label: {
         uint32_t l = label(static_cast<uint32_t>(n.value));
         return ast_builder_label_define(c, l, statement(n.a));
@@ -786,8 +788,8 @@ uint32_t c_lowering::statement(uint32_t index)
            are the first ones live (a jump into an object's scope past its
            declaration is ill-formed, [stmt.dcl]/3) */
         uint32_t identifier = static_cast<uint32_t>(n.value);
-        uint32_t jump = ast_builder_node(c, AST_NODE_GOTO, v, label(identifier),
-                                         0, 0, 0, 0);
+        uint32_t jump = ast_builder_node(c, AST_NODE_GOTO, void_type,
+                                         label(identifier), 0, 0, 0, 0);
         if (!leaving_objects())
             return jump;
         if (!label_paths_made) {
@@ -827,11 +829,11 @@ uint32_t c_lowering::statement(uint32_t index)
         int op = AST_NODE_CONTINUE;
         if (is_break)
             op = AST_NODE_BREAK;
-        uint32_t jump = ast_builder_node(c, op, v, 0, 0, 0, 0, 0);
+        uint32_t jump = ast_builder_node(c, op, void_type, 0, 0, 0, 0, 0);
         size_t mark = leaving(is_break);
         if (!is_break && mark && live[mark - 1].continue_label) {
             /* to the step, the condition's variable still live */
-            jump = ast_builder_node(c, AST_NODE_GOTO, v,
+            jump = ast_builder_node(c, AST_NODE_GOTO, void_type,
                                     live[mark - 1].continue_label, 0, 0, 0, 0);
             mark = live[mark - 1].continue_mark;
         }
@@ -880,7 +882,8 @@ uint32_t c_lowering::statement(uint32_t index)
                 return 0;
         }
         if (!leaving_objects() && items.empty())
-            return ast_builder_node(c, AST_NODE_RETURN, v, value, 0, 0, 0, 0);
+            return ast_builder_node(c, AST_NODE_RETURN, void_type, value, 0, 0,
+                                    0, 0);
         /* [stmt.return]/3: "The copy-initialization of the result of the
            call is sequenced before the destruction of temporaries at the
            end of the full-expression established by the operand of the
@@ -888,7 +891,8 @@ uint32_t c_lowering::statement(uint32_t index)
            destruction of local variables ([stmt.jump]) of the block
            enclosing the return statement." */
         uint32_t result = 0;
-        if (value && AST_QUALIFIED_TYPE_UNQUALIFIED(type_of(value)) != v) {
+        if (value &&
+            AST_QUALIFIED_TYPE_UNQUALIFIED(type_of(value)) != void_type) {
             ast_qualified_type t = type_of(value);
             uint32_t held = c_local(c, t);
             items.append(c_declare(c, held, value));
@@ -899,8 +903,8 @@ uint32_t c_lowering::statement(uint32_t index)
         for (uint32_t a : after)
             items.append(a);
         destroy(0, items, n.at);
-        items.append(
-            ast_builder_node(c, AST_NODE_RETURN, v, result, 0, 0, 0, 0));
+        items.append(ast_builder_node(c, AST_NODE_RETURN, void_type, result, 0,
+                                      0, 0, 0));
         return block(items);
     }
     default:

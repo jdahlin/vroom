@@ -1098,9 +1098,10 @@ static codegen_value walk_lvalue_load(codegen_context *e,
     if (codegen_type_is_record(c, t) &&
         (T(c, t)->flags & AST_TYPE_FLAG_ATOMIC)) {
         int size = walk_atomic_record_size(e, t);
-        codegen_lvalue tmp = {.kind = CODEGEN_LVALUE_FRAME,
-                              .align = (uint32_t)size,
-                              .offset = walk_slot_temporary(e, size, size)};
+        codegen_lvalue tmp = {
+            .kind = CODEGEN_LVALUE_FRAME,
+            .align = (uint32_t)size,
+            .offset = walk_slot_temporary(e, (uint64_t)size, (uint32_t)size)};
         int rp = WALK_LOWER(laddr)(e, l);
         int value = WALK_LOWER(atomic)(e, WALK_ATOMIC_LOAD, size, rp, -1, -1);
 
@@ -1267,9 +1268,10 @@ static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
                         unsigned start = bit < src.width ? bit : src.width - 1;
                         part.offset += (src.bit_offset + start) / 8;
                         part.bit_offset = (src.bit_offset + start) % 8;
-                        part.width = bit >= src.width      ? 1
-                                     : src.width - bit < 8 ? src.width - bit
-                                                           : 8;
+                        part.width =
+                            (uint16_t)(bit >= src.width      ? 1
+                                       : src.width - bit < 8 ? src.width - bit
+                                                             : 8);
                         part.is_signed = src.is_signed && bit + 8 >= src.width;
                         part.is_bitfield = 0;
                         v = walk_bitfield_split_load(e, part, part.bit_offset,
@@ -2232,14 +2234,15 @@ VPRIV codegen_value walk_lvalue_store_memory(codegen_context *e,
         uint64_t payload = codegen_type_size(
             e->compile_context,
             AST_QUALIFIED_TYPE(T(e->compile_context, t)->n, 0));
-        codegen_lvalue tmp = {.kind = CODEGEN_LVALUE_FRAME,
-                              .align = (uint32_t)size,
-                              .offset = walk_slot_temporary(e, size, size)};
+        codegen_lvalue tmp = {
+            .kind = CODEGEN_LVALUE_FRAME,
+            .align = (uint32_t)size,
+            .offset = walk_slot_temporary(e, (uint64_t)size, (uint32_t)size)};
         int snapshot = WALK_LOWER(laddr)(e, &tmp);
         int value;
 
         /* Padding belongs to the atomic representation, not the RHS object. */
-        WALK_LOWER(zero)(e, snapshot, size);
+        WALK_LOWER(zero)(e, snapshot, (uint64_t)size);
         WALK_LOWER(copy)(e, snapshot, rs, payload);
         WALK_LOWER(tfree)(e, rs);
         value = WALK_LOWER(treg)(e);
@@ -2322,8 +2325,8 @@ static codegen_value walk_assignment_emit(codegen_context *e, uint32_t n)
 {
     cc *c = e->compile_context;
     const node *x = N(n);
-    uint32_t as;
-    int64_t ak;
+    uint32_t as = 0;
+    int64_t ak = 0;
     bool ael = !x->aux && walk_array_element_of(e, x->a, &as, &ak);
     codegen_value v = walk_assignment_emit_inner(e, n);
     walk_state *W = e->walk_state;
@@ -2962,9 +2965,9 @@ static codegen_value walk_call_emit(codegen_context *e, uint32_t n)
                 if (N(sa)->op == AST_NODE_STRING &&
                     N(sb)->op == AST_NODE_STRING &&
                     c->strs[N(sa)->a].esz == 1 && c->strs[N(sb)->a].esz == 1) {
-                    int r = strcmp(c->strs[N(sa)->a].s, c->strs[N(sb)->a].s);
+                    int r3 = strcmp(c->strs[N(sa)->a].s, c->strs[N(sb)->a].s);
 
-                    return codegen_value_constant(r < 0 ? -1 : r > 0);
+                    return codegen_value_constant(r3 < 0 ? -1 : r3 > 0);
                 }
             }
             if (na == 3 && walk_memory_call_inline(e, n, kind, &mv))
@@ -3995,7 +3998,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 
             if (codegen_type_is_bool_vector(c, x->ty))
                 dl.offset += i / 8, dl.is_bitfield = 1, dl.width = 1,
-                                    dl.bit_offset = i % 8;
+                                    dl.bit_offset = (uint16_t)(i % 8);
             else
                 dl.offset += i * (int64_t)codegen_type_size(c, re);
             if (sh) {
@@ -4009,7 +4012,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
                 if (codegen_type_is_bool_vector(c, at)) {
                     int64_t j = k < na ? k : k - na;
                     sl.offset = j / 8, sl.is_bitfield = 1, sl.width = 1,
-                    sl.bit_offset = j % 8;
+                    sl.bit_offset = (uint16_t)(j % 8);
                 }
                 v = walk_lvalue_reload(e, &sl, ae);
             } else {
@@ -4017,7 +4020,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
                 sl.offset = i * (int64_t)codegen_type_size(c, ae);
                 if (codegen_type_is_bool_vector(c, at))
                     sl.offset = i / 8, sl.is_bitfield = 1, sl.width = 1,
-                    sl.bit_offset = i % 8;
+                    sl.bit_offset = (uint16_t)(i % 8);
                 v = walk_value_convert(e, walk_lvalue_reload(e, &sl, ae), ae,
                                        re);
             }
@@ -4249,13 +4252,13 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
                       !walk_type_is_signed(c, tb);
             codegen_value a = walk_value_convert(e, walk_value_emit(e, arg[0]),
                                                  ta, w),
-                          b = walk_value_convert(e, walk_value_emit(e, arg[1]),
-                                                 tb, w),
+                          b4 = walk_value_convert(e, walk_value_emit(e, arg[1]),
+                                                  tb, w),
                           r, d;
             codegen_lvalue hi;
             int rr, s;
 
-            r = WALK_LOWER(wbin)(e, op, true, a, b);
+            r = WALK_LOWER(wbin)(e, op, true, a, b4);
             d = walk_value_emit(e, arg[2]);
             {
                 codegen_lvalue l = walk_lvalue_from_value(e, d, tr);
@@ -4286,7 +4289,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
         int op = x->aux == CC_BUILTIN_ADD_OVERFLOW   ? LEX_TOKEN_PLUS
                  : x->aux == CC_BUILTIN_SUB_OVERFLOW ? LEX_TOKEN_MINUS
                                                      : LEX_TOKEN_STAR;
-        codegen_value a, b, r, lo, back;
+        codegen_value a, b3, r, lo, back;
         codegen_lvalue l;
         int rr, cp, rs;
 
@@ -4294,8 +4297,8 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
             walk_type_size(c, tr) > 8 || !WALK_LOWER(i128mem)())
             walk_unsupported_fail(e, n, "a 128-bit overflow builtin");
         a = walk_value_convert(e, walk_value_emit(e, arg[0]), ta, w);
-        b = walk_value_convert(e, walk_value_emit(e, arg[1]), tb, w);
-        r = WALK_LOWER(wbin)(e, op, true, a, b);
+        b3 = walk_value_convert(e, walk_value_emit(e, arg[1]), tb, w);
+        r = WALK_LOWER(wbin)(e, op, true, a, b3);
         l = walk_lvalue_from_value(e, walk_value_emit(e, arg[2]), tr);
         rr = walk_value_to_register(e, &r);
         cp = WALK_LOWER(treg)(e);
@@ -4531,12 +4534,12 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
         ast_qualified_type at = N(arg[0])->ty, bt = N(arg[1])->ty;
         ast_qualified_type ct = walk_operation_type(c, LEX_TOKEN_PLUS, at, bt);
         codegen_value a = walk_value_emit(e, arg[0]),
-                      b = walk_right_operand_emit(e, &a, arg[1], at);
+                      b2 = walk_right_operand_emit(e, &a, arg[1], at);
 
         a = walk_value_convert(e, a, at, ct);
-        b = walk_value_convert(e, b, bt, ct);
+        b2 = walk_value_convert(e, b2, bt, ct);
         return WALK_LOWER(fcmp)(e, ops[x->aux - CC_BUILTIN_ISGREATER], ct, a,
-                                b);
+                                b2);
     }
     case CC_BUILTIN_VA_START: {
         int r = walk_valist_emit(e, arg[0]);

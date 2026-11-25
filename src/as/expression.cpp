@@ -7,6 +7,7 @@
  * what is known now: absolute symbols, equal symbols and two symbols defined in the same frag; a
  * difference across frags stays a value for the fixup or variable-item code.  Parsing never allocates
  * outside the context and reports through as_error_report. */
+#include "common/attributes.h"
 #include "common/literal.h"
 #include "as-internal.h"
 
@@ -62,8 +63,8 @@ static int as_value_is_deferred_symbol(as_context *a, const as_value *v)
 /* a value the layout settles: a constant, a label difference, a deferred expression */
 VPRIV int as_value_is_deferrable(as_context *a, const as_value *v)
 {
-    return as_value_is_absolute(a, (as_value *)v) || (v->add && v->sub) ||
-           as_value_is_deferred_symbol(a, v);
+    return as_value_is_absolute(a, VUNCONST(as_value *, v)) ||
+           (v->add && v->sub) || as_value_is_deferred_symbol(a, v);
 }
 
 /* x op y as a temporary the layout defines (x and y deferrable) */

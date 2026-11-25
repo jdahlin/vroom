@@ -59,7 +59,7 @@ uint32_t c_lowering::expression(uint32_t index)
         }
         destroy(mark, items, n.at);
         live.resize(mark);
-        return statement_expression(v, block(items));
+        return statement_expression(void_type, block(items));
     }
     case semantic_kind::entity: {
         entity_index e = n.a;

@@ -223,7 +223,7 @@ CC_PRIVATE uint32_t cc_undeclared_report(cc *c, const char *msg, uint32_t id,
         char *fs = (char *)(cc_heap_allocate(c, (size_t)m + 1));
         diag_fixit fx;
 
-        memcpy(fs, t, m), fs[m] = 0;
+        memcpy(fs, t, (size_t)m), fs[m] = 0;
         fx = VCC_LITERAL(diag_fixit, r.b, r.e, fs, DIAG_APPLICABILITY_MAYBE);
         report(c, "error", loc, &r, 1, &fx, 1,
                tn ? "unknown type name '%.*s'; did you mean '%s'?"

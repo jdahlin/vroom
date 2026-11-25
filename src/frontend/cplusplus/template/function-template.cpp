@@ -413,8 +413,8 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 if (u.scope != reached[i])
                     continue;
                 bool seen = false;
-                for (entity_index r : reached)
-                    if (r == u.nominated)
+                for (entity_index r2 : reached)
+                    if (r2 == u.nominated)
                         seen = true;
                 if (seen)
                     continue;

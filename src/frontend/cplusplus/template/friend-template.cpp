@@ -61,7 +61,8 @@ analysis_result semantic_analysis::friend_class_template(entity_index c,
            simple-type-specifier or typename-specifier (a keyword other than
            typename has no rules here) */
         if (x.is_token() &&
-            p.keyword_of(tokens[x.token()]) != standard_keyword::none &&
+            syntax_parser.keyword_of(tokens[x.token()]) !=
+                standard_keyword::none &&
             !is_keyword(x, standard_keyword::typename_))
             return not_supported(n, "temp.friend");
         other_type = true;
@@ -590,7 +591,7 @@ bool semantic_analysis::constraint_names_enclosing_parameter(
             return true;
     }
     for (token_index t = tree[head].end_token; t < tree[n].end_token; t++) {
-        if (p.keyword_of(tokens[t]) != standard_keyword::requires_)
+        if (syntax_parser.keyword_of(tokens[t]) != standard_keyword::requires_)
             continue;
         token_index end = tree[n].end_token;
         /* a definition: up to its body */

@@ -37,14 +37,15 @@ VPRIV void x64_vir_switch_lower(x64_vir_context *L, uint32_t block,
     if (vir_switch_is_dense(f, in, &lo, &span)) {
         uint32_t table = walk_label_new(e);
         if (selector != R10 || (size == 4 && !x64_last_u32(e, R10)))
-            x64_record_emit_three_registers(e, X64_OP_MOV, size, R10, selector,
-                                            X64_REGISTER_NONE);
+            x64_record_emit_three_registers(e, X64_OP_MOV, (int)size, R10,
+                                            selector, X64_REGISTER_NONE);
         if (lo) {
             x64_record_emit_move_immediate(
                 e, R11, size == 4 ? (int64_t)(int32_t)lo : (int64_t)lo);
-            x64_record_emit_three_registers(e, X64_OP_SUB, size, R10, R10, R11);
+            x64_record_emit_three_registers(e, X64_OP_SUB, (int)size, R10, R10,
+                                            R11);
         }
-        x64_vir_constant_compare_emit(L, R10, size, span);
+        x64_vir_constant_compare_emit(L, R10, (int)size, span);
         record *r = x64_record_emit(e, X64_OP_JCC);
         r->condition = X64_CONDITION_A;
         r->label = labels[0];
@@ -79,11 +80,12 @@ VPRIV void x64_vir_switch_lower(x64_vir_context *L, uint32_t block,
             if (a != h) {
                 x64_record_emit_move_immediate(
                     e, R11, size == 4 ? (int64_t)(int32_t)a : (int64_t)a);
-                x64_record_emit_three_registers(e, X64_OP_SUB, size, R10,
+                x64_record_emit_three_registers(e, X64_OP_SUB, (int)size, R10,
                                                 selector, R11);
                 reg = R10;
             }
-            x64_vir_constant_compare_emit(L, reg, size, a == h ? a : h - a);
+            x64_vir_constant_compare_emit(L, reg, (int)size,
+                                          a == h ? a : h - a);
             record *r = x64_record_emit(e, X64_OP_JCC);
             r->condition = a == h ? X64_CONDITION_E : X64_CONDITION_BE;
             r->label = labels[k + 1];

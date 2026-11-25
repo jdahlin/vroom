@@ -30,8 +30,8 @@ VPRIV bool a64_switch_values(codegen_context *e, uint32_t n)
                      : p.element_bytes == 2 ? 1
                                             : 0;
     if (shift)
-        a64_record_emit_bitfield(e, A64_OP_UBFM, 1, r, r, 64 - shift,
-                                 63 - shift);
+        a64_record_emit_bitfield(e, A64_OP_UBFM, 1, r, r, (int)(64 - shift),
+                                 (int)(63 - shift));
     int base = treg(e);
     a64_reference_address_emit(
         e, base, CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_TABLE, n), 0);

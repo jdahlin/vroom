@@ -47,7 +47,8 @@
 #endif
 #endif
 
-#define CC_IDENTIFIER(id) cc_identifier_length(id), cc_identifier_string(id)
+#define CC_IDENTIFIER(id)                                                      \
+    cc_identifier_length((uint32_t)(id)), cc_identifier_string((uint32_t)(id))
 
 /* a TU's tables */
 CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o);

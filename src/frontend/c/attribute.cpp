@@ -557,14 +557,14 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c,
             case CC_ATTRIBUTE_VISIBILITY:
                 cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
                 {
-                    uint32_t sloc = tok(c)->loc;
+                    uint32_t sloc2 = tok(c)->loc;
                     uint32_t s = cc_attribute_string_parse(c, aid);
 
                     if (an == CC_ATTRIBUTE_SECTION &&
                         c->o->target == PP_DARWIN && s &&
                         !strchr(c->strs[s - 1].s, ','))
                         cc_report_error(
-                            c, sloc,
+                            c, sloc2,
                             "argument to 'section' attribute is not valid for "
                             "this target: "
                             "mach-o section specifier requires a segment and "
@@ -747,7 +747,7 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c,
 
                 cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
                 if (cc_token_is(c, LEX_TOKEN_IDENTIFIER)) {
-                    size_t l = cc_identifier_length(tok(c)->id);
+                    size_t l = (size_t)(cc_identifier_length(tok(c)->id));
                     const char *n = cc_identifier_string(tok(c)->id);
 
                     if ((l == 6 && !memcmp(n, "printf", 6)) ||

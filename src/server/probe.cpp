@@ -106,8 +106,8 @@ static ssize_t vccd_probe_stdin_read(const struct vccd_request *r, char *buf,
         if (k < 0)
             return -1;
         if (k == 0)
-            return n;
-        n += k;
+            return (ssize_t)n;
+        n += (size_t)k;
         if (n == size)
             return -1;
     }
@@ -248,11 +248,12 @@ VPRIV int vccd_probe_cc_answer(const struct vccd_request *r, int kind)
                                        "probe input too large");
             return 1;
         }
-        ok = kind == VCCD_PROBE_AS ? vccd_capabilities_as_source_probe(src, len)
-                                   : vccd_capabilities_c_source_probe(src, len);
+        ok = kind == VCCD_PROBE_AS
+                 ? vccd_capabilities_as_source_probe(src, (size_t)len)
+                 : vccd_capabilities_c_source_probe(src, (size_t)len);
         if (ok < 0) {
             atomic_fetch_add(&vccd_probe_compile_count, 1);
-            return vccd_probe_stdin_compile(r, src, len);
+            return vccd_probe_stdin_compile(r, src, (size_t)len);
         }
         if (!ok) {
             vccd_request_message_write(r, "%s: error: %s\n",

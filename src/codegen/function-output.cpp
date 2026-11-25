@@ -220,7 +220,7 @@ VPRIV void codegen_constructor_entry_append(cc *c, tbuf *b, uint32_t s,
         vtext_string_append(b,
                             fini ? "\t.section\t.dtors" : "\t.section\t.ctors");
         if (a && a->prio)
-            vtext_format_append(b, ".%05u", 65535 - a->prio);
+            vtext_format_append(b, ".%05d", 65535 - a->prio);
         vtext_string_append(b, ",\"dw\"\n\t.p2align\t3\n\t.quad\t");
         codegen_symbol_name_append(c, b, s);
         vtext_char_append(b, '\n');

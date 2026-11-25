@@ -32,9 +32,10 @@ static void qualifier_form(SyntaxRef nested, char (&out)[16])
 {
     size_t n = 0;
     for (size_t k = 0; k < nested.size() && n < 12; k++) {
-        if (nested[k].is(syntax_kind::simple_template_id))
+        if (nested[static_cast<uint32_t>(k)].is(
+                syntax_kind::simple_template_id))
             out[n++] = 't';
-        else if (nested[k].is_identifier())
+        else if (nested[static_cast<uint32_t>(k)].is_identifier())
             out[n++] = 'i';
     }
     out[n] = 0;
@@ -880,9 +881,11 @@ VPRIV bool made_of_template_parameter(const types &table, qualified_type t,
     case type_kind::pointer_to_member:
         /* [temp.dep.type]/9: a pointer to member of a dependent class, or
            to a dependent member type */
-        if (!r.entity && made_of_template_parameter(
-                             table, qualified_type::make(r.bound, cv_none),
-                             parameters, from))
+        if (!r.entity &&
+            made_of_template_parameter(
+                table,
+                qualified_type::make(static_cast<type_index>(r.bound), cv_none),
+                parameters, from))
             return true;
         return made_of_template_parameter(table, r.operand, parameters, from);
     case type_kind::pointer:
@@ -1628,7 +1631,8 @@ bool semantic_analysis::pack_only_expanded(uint32_t name, token_index first,
         /* sizeof...(A) names the pack and expands it ([expr.sizeof]/5) */
         if (t >= first + 3 && t + 1 < end &&
             tokens[t - 3].kind == token_kind::keyword &&
-            p.keyword_of(tokens[t - 3]) == standard_keyword::sizeof_ &&
+            syntax_parser.keyword_of(tokens[t - 3]) ==
+                standard_keyword::sizeof_ &&
             is(t - 2, preprocessing_op_or_punc::ELLIPSIS) &&
             is(t - 1, preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
             is(t + 1, preprocessing_op_or_punc::RIGHT_PARENTHESIS))

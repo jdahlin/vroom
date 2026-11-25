@@ -193,7 +193,7 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         /* a local static: [basic.stc.static]/1, its symbol the mangled one
            (codegen writes an assembler name as given) */
         owned_buffer written;
-        if (target == PP_DARWIN)
+        if (target_id == PP_DARWIN)
             vbuffer_string_append(written.get(), "_");
         vbuffer_append(written.get(), name.data(), name.size());
         owned_buffer identifier;
@@ -347,8 +347,8 @@ uint32_t c_lowering::special_call(entity_index e, uint32_t object,
     for (uint32_t i = 0; i < count; i++)
         all.append(arguments[i]);
     uint32_t n = static_cast<uint32_t>(all.size());
-    return make(AST_NODE_CALL, v, callee, ast_builder_list(c, all.data(), n), n,
-                0, 0);
+    return make(AST_NODE_CALL, void_type, callee,
+                ast_builder_list(c, all.data(), n), n, 0, 0);
 }
 
 } // namespace cplusplus::lowering

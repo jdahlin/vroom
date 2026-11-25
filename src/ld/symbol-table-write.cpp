@@ -14,12 +14,12 @@ static void ld_global_symbol_record_store(struct ld_context *ctx, elf_symbol *d,
     uint16_t shndx;
     uint64_t val, size = s->size;
     if (s->state == LD_SYMBOL_STATE_SCRIPT) {
-        shndx =
-            s->expression_value.kind == LD_VALUE_KIND_ABSOLUTE ? SHN_ABS
-            : s->expression_value.kind == LD_VALUE_KIND_OUTPUT_SECTION
-                ? ld_output_section_header_index(ctx, s->expression_value.index)
-                : ld_symbol_section_index_of_input_section(
-                      ctx, s->expression_value.index);
+        shndx = s->expression_value.kind == LD_VALUE_KIND_ABSOLUTE ? SHN_ABS
+                : s->expression_value.kind == LD_VALUE_KIND_OUTPUT_SECTION
+                    ? (uint16_t)ld_output_section_header_index(
+                          ctx, s->expression_value.index)
+                    : ld_symbol_section_index_of_input_section(
+                          ctx, s->expression_value.index);
         val = ld_global_symbol_address(ctx, g);
         size = 0;
     } else if (s->state == LD_SYMBOL_STATE_OBJECT && !s->demoted) {
@@ -77,9 +77,10 @@ static void ld_local_symbols_write(void *arg, size_t i)
 static void ld_global_symbols_write(void *arg, size_t c)
 {
     struct ld_context *ctx = (struct ld_context *)arg;
-    uint32_t b = c * 4096, e = b + 4096 < ctx->symbol_table.global_count
-                                   ? b + 4096
-                                   : ctx->symbol_table.global_count;
+    uint32_t b = (uint32_t)(c * 4096),
+             e = b + 4096 < ctx->symbol_table.global_count
+                     ? b + 4096
+                     : ctx->symbol_table.global_count;
     for (uint32_t i = b; i < e; i++)
         ld_global_symbol_record_store(
             ctx,
@@ -140,11 +141,11 @@ VPRIV void ld_symbol_table_build(struct ld_context *ctx)
                                                    sizeof(uint32_t)));
     for (uint32_t i = 0; i < ctx->inputs.objects.n; i++) {
         ld_object *o = ctx->inputs.objects.v[i];
-        o->first_local_output_index = idx;
+        o->first_local_output_index = (uint32_t)idx;
         o->string_offset = str;
         str += o->local_string_bytes;
         idx += o->kept_local_count;
-        hnext[i] = idx;
+        hnext[i] = (uint32_t)idx;
         if (o->kept_local_count)
             idx += hcount[i];
     }
@@ -170,12 +171,12 @@ VPRIV void ld_symbol_table_build(struct ld_context *ctx)
             at = hnext[s->object]++;
         } else if (s->state == LD_SYMBOL_STATE_OBJECT) {
             if (grp_next[s->object] == LD_NONE) {
-                grp_next[s->object] = idx;
+                grp_next[s->object] = (uint32_t)idx;
                 idx += hcount[s->object];
             }
             at = grp_next[s->object]++;
         } else {
-            at = idx++;
+            at = (uint32_t)(idx++);
         }
         ctx->symbol_table.globals[ctx->symbol_table.global_count++] =
             VCC_LITERAL(ld_global_symbol_output, .global_symbol = g,
@@ -184,7 +185,7 @@ VPRIV void ld_symbol_table_build(struct ld_context *ctx)
     /* thunk symbols */
     uint64_t thunk0 = idx;
     idx += 2 * (uint64_t)ctx->relocations.thunks.n;
-    ctx->symbol_table.local_count = idx;
+    ctx->symbol_table.local_count = (uint32_t)idx;
     /* globals, and string offsets in insertion order */
     uint32_t h = 0;
     for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {

@@ -371,7 +371,8 @@ VPRIV void pp_header_cache_region_begin(pp *p, pp_header_cache_key *k)
     L->text_at_start = r->token_count;
     L->uses_level = 0;
     L->ndirs = 0;
-    L->nfile = p->file_context_count - 1; /* before the region's file */
+    L->nfile =
+        (uint32_t)(p->file_context_count - 1); /* before the region's file */
     atomic_fetch_add_explicit(&pp_header_cache_statistics.miss, 1,
                               memory_order_relaxed);
 }

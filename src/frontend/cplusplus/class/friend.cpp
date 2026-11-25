@@ -227,9 +227,10 @@ analysis_result semantic_analysis::friend_type(entity_index c, SyntaxRef n,
             token_index t = x.token();
             if (is_keyword(x, standard_keyword::const_) ||
                 is_keyword(x, standard_keyword::volatile_) ||
-                p.extension_keyword_of(tokens[t]) ==
+                syntax_parser.extension_keyword_of(tokens[t]) ==
                     extension_keyword::restrict ||
-                p.extension_keyword_of(tokens[t]) == extension_keyword::atomic)
+                syntax_parser.extension_keyword_of(tokens[t]) ==
+                    extension_keyword::atomic)
                 return ill_formed_at_token(
                     t,
                     "a friend declaration that does not declare a function "
@@ -237,7 +238,7 @@ analysis_result semantic_analysis::friend_type(entity_index c, SyntaxRef n,
                     "class.friend");
             /* [class.friend]/8 (and [dcl.stc]/1's storage-class-specifiers,
                typedef, inline, constexpr: no form of /3 has them) */
-            standard_keyword k = p.keyword_of(tokens[t]);
+            standard_keyword k = syntax_parser.keyword_of(tokens[t]);
             if (k != standard_keyword::none && k != standard_keyword::friend_ &&
                 k != standard_keyword::typename_ && !is_simple_type_keyword(k))
                 return ill_formed_at_token(

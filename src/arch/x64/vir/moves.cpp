@@ -25,8 +25,8 @@ VPRIV int64_t x64_vir_constant_bits(const vir_insn *i)
 VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s)
 {
     record *r = x64_record_emit(L->context, X64_OP_RAW);
-    r->offset = L->context->raw.n;
-    r->reference = strlen(s);
+    r->offset = (int32_t)L->context->raw.n;
+    r->reference = (uint32_t)strlen(s);
     vtext_string_append(&L->context->raw, s);
 }
 
@@ -108,16 +108,16 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
             L->context, X64_OP_MOV, x64_vir_type_size(i->type), d,
             L->general_temporary, X64_REGISTER_NONE);
     } else if (i->op == VIR_OP_ICONST) {
-        uint64_t bits = x64_vir_constant_bits(i);
+        uint64_t bits = (uint64_t)x64_vir_constant_bits(i);
         /* A 32-bit destination zero-extends, and MOV preserves flags across edits. */
         x64_record_emit_three_registers(L->context, X64_OP_MOVI,
                                         bits <= UINT32_MAX ? 4 : 8, d,
                                         X64_REGISTER_NONE, X64_REGISTER_NONE)
-            ->immediate = bits;
+            ->immediate = (int64_t)bits;
     } else if (i->op == VIR_OP_SYMADDR &&
                CODEGEN_REFERENCE_KIND(i->a) >= CODEGEN_REFERENCE_TLS_LE) {
         record *r = x64_record_emit(L->context, X64_OP_TLS);
-        r->registers[0] = d;
+        r->registers[0] = (uint8_t)d;
         if (CODEGEN_REFERENCE_KIND(i->a) == CODEGEN_REFERENCE_TLS_BASE)
             r->condition = 3;
         if (CODEGEN_REFERENCE_KIND(i->a) == CODEGEN_REFERENCE_TLS_OFFSET)
@@ -208,9 +208,10 @@ VPRIV void vx_edge_moves(x64_vir_context *L, uint32_t g)
         bool ds = m->dst & VIR_LOCATION_SLOT, ss = m->src & VIR_LOCATION_SLOT;
         uint32_t d = m->dst & ~VIR_LOCATION_SLOT,
                  s = m->src & ~VIR_LOCATION_SLOT;
-        uint8_t tmp = vir_register_class(L->function->insns[m->value].type)
+        uint8_t tmp =
+            (uint8_t)(vir_register_class(L->function->insns[m->value].type)
                           ? VIR_REGISTER_MAKE(1, 14)
-                          : L->general_temporary;
+                          : L->general_temporary);
         unsigned bit = m->kind == VIR_EDIT_REMATERIALIZE ? 4
                        : m->kind == VIR_EDIT_EXCHANGE    ? 10
                        : ds                              ? 5
@@ -219,27 +220,27 @@ VPRIV void vx_edge_moves(x64_vir_context *L, uint32_t g)
         vx_mark(L, true, bit, ed->from, ed->first + j, m->value, m->dst, m->src,
                 ed->to);
         if (m->kind == VIR_EDIT_REMATERIALIZE) {
-            x64_vir_constant_materialize(L, ds ? tmp : d, m->value);
+            x64_vir_constant_materialize(L, ds ? tmp : (uint8_t)d, m->value);
             if (ds)
                 x64_vir_slot_access(L, false, tmp, d);
         } else if (m->kind == VIR_EDIT_EXCHANGE) {
             /* Exchanges are register-only; use the second reserved scratch. */
             x64_mov(L->context, x64_vir_register_number(tmp),
-                    x64_vir_register_number(d));
-            x64_mov(L->context, x64_vir_register_number(d),
-                    x64_vir_register_number(s));
-            x64_mov(L->context, x64_vir_register_number(s),
+                    x64_vir_register_number((uint8_t)d));
+            x64_mov(L->context, x64_vir_register_number((uint8_t)d),
+                    x64_vir_register_number((uint8_t)s));
+            x64_mov(L->context, x64_vir_register_number((uint8_t)s),
                     x64_vir_register_number(tmp));
         } else if (ds && ss) {
             x64_vir_slot_access(L, true, tmp, s);
             x64_vir_slot_access(L, false, tmp, d);
         } else if (ds)
-            x64_vir_slot_access(L, false, s, d);
+            x64_vir_slot_access(L, false, (uint8_t)s, d);
         else if (ss)
-            x64_vir_slot_access(L, true, d, s);
+            x64_vir_slot_access(L, true, (uint8_t)d, s);
         else
-            x64_mov(L->context, x64_vir_register_number(d),
-                    x64_vir_register_number(s));
+            x64_mov(L->context, x64_vir_register_number((uint8_t)d),
+                    x64_vir_register_number((uint8_t)s));
         vx_probe(L, bit);
         vx_mark(L, false, bit, 0, 0, 0, 0, 0, 0);
     }

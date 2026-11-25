@@ -527,11 +527,11 @@ static void vir_print_insn_append(vir_print_state *p, const vir_insn *in,
                 n = 0;
         }
         for (uint32_t i = 0; i < n; i++) {
-            uint32_t t = f->extra[in->a + 2 + i];
+            uint32_t t2 = f->extra[in->a + 2 + i];
 
-            if (t) {
+            if (t2) {
                 vir_print_append(p, " catch ");
-                vir_print_symbol_append(p, t - 1, 0);
+                vir_print_symbol_append(p, t2 - 1, 0);
             } else
                 vir_print_append(p, " catchall");
         }

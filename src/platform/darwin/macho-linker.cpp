@@ -224,10 +224,10 @@ static inline void macho_u64_store(void *p, uint64_t v)
 }
 static inline void macho_u32_store_big_endian(uint8_t *p, uint32_t v)
 {
-    p[0] = v >> 24;
-    p[1] = v >> 16;
-    p[2] = v >> 8;
-    p[3] = v;
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
 }
 static inline void macho_u64_store_big_endian(uint8_t *p, uint64_t v)
 {
@@ -349,11 +349,13 @@ static char *macho_file_read(struct macho_context *ctx, const char *path,
 
 static uint32_t macho_version_parse(const char *s)
 {
-    uint32_t x = (uint32_t)strtoul(s, (char **)&s, 10) << 16;
-    if (*s == '.')
-        x |= ((uint32_t)strtoul(s + 1, (char **)&s, 10) & 0xff) << 8;
-    if (*s == '.')
-        x |= (uint32_t)strtoul(s + 1, (char **)&s, 10) & 0xff;
+    char *end;
+    uint32_t x = (uint32_t)strtoul(s, &end, 10) << 16;
+
+    if (*end == '.')
+        x |= ((uint32_t)strtoul(end + 1, &end, 10) & 0xff) << 8;
+    if (*end == '.')
+        x |= (uint32_t)strtoul(end + 1, &end, 10) & 0xff;
     return x;
 }
 

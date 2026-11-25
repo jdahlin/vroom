@@ -215,7 +215,8 @@ static inline void obj_set_format(ElfObj *o, int f)
 } /* kept across elf_reset */
 #include "common/fail.h" /* vjob_fail: input-driven overflow (an arena or region full) ends the job */
 void elf_free(ElfObj *o);
-void elf_error(ElfObj *o, const char *fmt, ...);
+__attribute__((format(printf, 2, 3))) void elf_error(ElfObj *o, const char *fmt,
+                                                     ...);
 
 /* Sections.  elf_section() returns the existing section for (name, group)
  * or creates it; returns its id (== its subsection-0 frag). */

@@ -22,7 +22,7 @@ VPRIV bool vccd_fd_read_full(int fd, char *p, size_t n)
         if (r <= 0)
             return false;
         p += r;
-        n -= r;
+        n -= (size_t)r;
     }
     return true;
 }
@@ -37,7 +37,7 @@ VPRIV bool vccd_fd_write_full(int fd, const char *p, size_t n)
         if (r <= 0)
             return false;
         p += r;
-        n -= r;
+        n -= (size_t)r;
     }
     return true;
 }
@@ -122,7 +122,7 @@ VPRIV bool vccd_request_split(char *raw, char **strs, struct vccd_request *r)
         return false;
     r->cwd = strs[0];
     r->argv = strs + 1;
-    r->argc = h->argc;
+    r->argc = (int)h->argc;
     /* argv and envp each need a NULL terminator: shift envp up by one */
     for (i = n; i > 1 + h->argc; i--)
         strs[i] = strs[i - 1];
@@ -142,7 +142,7 @@ VPRIV void vccd_request_message_write(const struct vccd_request *r,
 
     if (n > 0)
         (void)!write(r->fds[2], line,
-                     n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
+                     n < (int)sizeof(line) ? (size_t)n : (int)sizeof(line) - 1);
 }
 VPRIV double vccd_clock_milliseconds(void)
 {

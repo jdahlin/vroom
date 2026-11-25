@@ -44,7 +44,7 @@ VPRIV void ld_script_program_headers_create(struct ld_context *ctx)
                     ctx, "section header '%s' is not listed in PHDRS", cur[k]);
                 continue;
             }
-            ld_segment_section_add(ctx, p, oi);
+            ld_segment_section_add(ctx, (int)p, oi);
             if (!ctx->script.segments.v[p].flags)
                 ctx->layout.program_headers.v[p].p_flags |=
                     ld_output_section_segment_flags(os);

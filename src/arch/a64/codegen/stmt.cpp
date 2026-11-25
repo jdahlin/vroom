@@ -771,10 +771,10 @@ static void gen_return(codegen_context *e, const node *x)
                 v = load(e, &l, rt);
             }
         }
-        int hn, hb = codegen_type_is_record_like(c, rt) &&
-                             !a64_abi_result_is_indirect(c, rt)
-                         ? a64_abi_hfa_classify(c, rt, &hn)
-                         : 0;
+        int hn = 0, hb = codegen_type_is_record_like(c, rt) &&
+                                 !a64_abi_result_is_indirect(c, rt)
+                             ? a64_abi_hfa_classify(c, rt, &hn)
+                             : 0;
 
         if (codegen_type_is_bool_vector(c, rt) &&
             !a64_abi_result_is_indirect(c, rt)) {

@@ -172,8 +172,9 @@ CC_PRIVATE bool cc_builtin_object_size_pointer_bound(cc *c, uint32_t n,
         if (s->kind != AST_SYMBOL_FUNCTION ||
             !(s->flags & AST_SYMBOL_FLAG_GLOBAL) ||
             s->sc == AST_STORAGE_STATIC || s->asmname ||
-            cc_library_builtin_is_disabled(c->o, cc_identifier_string(s->name),
-                                           cc_identifier_length(s->name)))
+            cc_library_builtin_is_disabled(
+                c->o, cc_identifier_string(s->name),
+                (size_t)cc_identifier_length(s->name)))
             return false;
         const char *name = cc_identifier_string(s->name);
         uint32_t ai = 0;

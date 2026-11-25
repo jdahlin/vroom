@@ -15,6 +15,7 @@
  * (shell.c); anything vccd declines, any other argv, and a missing vccd run
  * the real shell, $VSH_REAL (default /bin/sh), with the same arguments.
  */
+#include "common/attributes.h"
 #include "driver/options-help.h"
 #include "ld/options-help.h"
 #include "common/cmdlib.h"
@@ -53,20 +54,20 @@ static char shim_request_buffer[sizeof(struct vccd_request_header) +
 static char **shim_argv;
 
 /* the real shell, in this process: nothing has been written or run yet */
-static void shim_real_shell_exec(void)
+static __attribute__((noreturn)) void shim_real_shell_exec(void)
 {
     const char *sh = getenv("VSH_REAL");
 
     if (!sh)
         sh = "/bin/sh";
-    shim_argv[0] = (char *)sh;
+    shim_argv[0] = VUNCONST(char *, sh);
     execv(sh, shim_argv);
     (void)!write(2, "vsh: cannot run the real shell\n", 31);
     _exit(127);
 }
 #endif
 
-static void shim_die(const char *msg)
+static __attribute__((noreturn)) void shim_die(const char *msg)
 {
     (void)!write(2, msg, strlen(msg));
     _exit(127);
@@ -133,7 +134,7 @@ static int shim_vccd_start(const char *dir, const struct sockaddr_un *sa)
             close(s);
         s = -1;
         if (t == 0) {
-            av[0] = v, av[1] = "--sock", av[2] = (char *)sa->sun_path,
+            av[0] = v, av[1] = "--sock", av[2] = VUNCONST(char *, sa->sun_path),
             av[3] = NULL;
             nul = open("/dev/null", O_RDWR | O_CLOEXEC);
             log = open(lg, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
@@ -200,7 +201,7 @@ int main(int argc, char **argv)
     struct iovec iov;
     struct msghdr m = {0};
     struct cmsghdr *c;
-    int32_t status;
+    int32_t status = 0;
     size_t off, got;
     ssize_t n;
     char **e;
@@ -225,9 +226,10 @@ int main(int argc, char **argv)
         if (vccd_socket_default(ddir, sizeof(ddir), dsock, sizeof(dsock), mk)) {
 #ifdef VSH
             shim_real_shell_exec();
-#endif
+#else
             shim_die("vcc: no private vccd directory (set VCC_SOCK or start "
                      "vccd)\n");
+#endif
         }
         path = dsock;
     }
@@ -253,11 +255,11 @@ int main(int argc, char **argv)
         p = shim_string_append(p, *e);
     { /* the client's umask, for files the server creates (last: it wins) */
         char um[16] = "VCC_UMASK=";
-        mode_t m = umask(0);
+        mode_t m2 = umask(0);
 
-        umask(m);
-        um[10] = (char)('0' + (m >> 6 & 7)),
-        um[11] = (char)('0' + (m >> 3 & 7)), um[12] = (char)('0' + (m & 7));
+        umask(m2);
+        um[10] = (char)('0' + (m2 >> 6 & 7)),
+        um[11] = (char)('0' + (m2 >> 3 & 7)), um[12] = (char)('0' + (m2 & 7));
         p = shim_string_append(p, um);
     }
 
@@ -269,16 +271,16 @@ int main(int argc, char **argv)
     }
     h->process_group = (uint32_t)getpgrp();
     h->magic = VCCD_PROTOCOL_MAGIC;
-    h->argc = argc;
-    h->envc = e - environ + 1;
-    h->payload_len = p - (shim_request_buffer + sizeof(*h));
+    h->argc = (uint32_t)argc;
+    h->envc = (uint32_t)(e - environ + 1);
+    h->payload_len = (uint32_t)(p - (shim_request_buffer + sizeof(*h)));
 
     /* VCCD_STATUS_RETRY: the server restarts itself (memory) and has not run
 	   the request; it listens again on the same socket in a moment */
     for (int tries = 0;; tries++) {
         memset(cbuf, 0, sizeof(cbuf));
         iov.iov_base = shim_request_buffer;
-        iov.iov_len = p - shim_request_buffer;
+        iov.iov_len = (size_t)(p - shim_request_buffer);
         m.msg_iov = &iov;
         m.msg_iovlen = 1;
         m.msg_control = cbuf;
@@ -309,7 +311,7 @@ int main(int argc, char **argv)
         if (n < 0 && errno != EPIPE && errno != ECONNRESET)
             shim_die("vcc: sendmsg failed\n");
         for (off = n < 0 ? iov.iov_len : (size_t)n; off < iov.iov_len;
-             off += n) {
+             off += (size_t)n) {
             n = send(s, shim_request_buffer + off, iov.iov_len - off,
                      SHIM_SEND_NOSIGNAL);
             if (n < 0 && errno == EINTR) {
@@ -322,7 +324,7 @@ int main(int argc, char **argv)
                 shim_die("vcc: write failed\n");
         }
 
-        for (got = 0; got < sizeof(status); got += n) {
+        for (got = 0; got < sizeof(status); got += (size_t)n) {
             n = read(s, (char *)&status + got, sizeof(status) - got);
             if (n < 0 && errno == EINTR) {
                 n = 0;

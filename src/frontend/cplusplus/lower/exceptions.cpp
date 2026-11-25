@@ -13,10 +13,10 @@ uint32_t c_lowering::throw_expression(const semantic_node &n)
 {
     if (!in_function || !ast_builder_exceptions_enabled(c))
         return fail("a throw-expression without exceptions", n.at);
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     if (!n.a)
-        return runtime_call(cxa_rethrow, "__cxa_rethrow", v, nullptr, nullptr,
-                            0);
+        return runtime_call(cxa_rethrow, "__cxa_rethrow", void_type, nullptr,
+                            nullptr, 0);
     qualified_type object = n.computation;
     ast_qualified_type t = type(object, n.at), pointer = pointer_to(t);
     ast_qualified_type size_type = ast_builder_type_basic(AST_TYPE_LONG);
@@ -43,7 +43,8 @@ uint32_t c_lowering::throw_expression(const semantic_node &n)
             return 0;
         items.append(c_statement(c, done));
     }
-    ast_qualified_type dt = ast_builder_type_function(c, v, &vp, 1, false);
+    ast_qualified_type dt =
+        ast_builder_type_function(c, void_type, &vp, 1, false);
     qualified_type element;
     entity_index destructor = element_destructor(object, element);
     uint32_t function = cast(ast_builder_integer(c, size_type, 0),
@@ -61,12 +62,12 @@ uint32_t c_lowering::throw_expression(const semantic_node &n)
     uint32_t arguments[3] = {
         cast(c_variable(c, p, pointer), vp, AST_CAST_POINTER_TO_POINTER), info,
         function};
-    uint32_t thrown =
-        runtime_call(cxa_throw, "__cxa_throw", v, parameters, arguments, 3);
+    uint32_t thrown = runtime_call(cxa_throw, "__cxa_throw", void_type,
+                                   parameters, arguments, 3);
     if (!thrown)
         return 0;
     items.append(c_statement(c, thrown));
-    return statement_expression(v, block(items));
+    return statement_expression(void_type, block(items));
 }
 
 /* [except.handle]/10: the exception object a handler's variable is initialized from: *(T *)p, p what
@@ -75,7 +76,7 @@ uint32_t c_lowering::exception_object(const semantic_node &n)
 {
     if (!exception_symbol)
         return fail("an exception object outside a handler", n.at);
-    ast_qualified_type vp = pointer_to(v), t = type(n.type, n.at);
+    ast_qualified_type vp = pointer_to(void_type), t = type(n.type, n.at);
     uint32_t held = c_variable(c, exception_symbol, vp);
     uint32_t pointer = held;
     if (record(n.type).kind == type_kind::pointer)
@@ -98,7 +99,7 @@ uint32_t c_lowering::try_statement(const semantic_node &n)
     uint32_t body = statement(n.a);
     if (!body)
         return 0;
-    ast_qualified_type vp = pointer_to(v);
+    ast_qualified_type vp = pointer_to(void_type);
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     uint32_t exception = c_local(c, vp);
     owned_array<ast_builder_catch> handlers;
@@ -148,9 +149,10 @@ uint32_t c_lowering::unwind_function(entity_index destructor,
     for (size_t i = 0; i < unwind_destructors.size(); i++)
         if (unwind_destructors[i] == destructor)
             return unwind_functions[i];
-    ast_qualified_type vp = pointer_to(v), vpp = pointer_to(vp);
+    ast_qualified_type vp = pointer_to(void_type), vpp = pointer_to(vp);
     ast_qualified_type t = type(object, at), pointer = pointer_to(t);
-    ast_qualified_type ft = ast_builder_type_function(c, v, &vpp, 1, false);
+    ast_qualified_type ft =
+        ast_builder_type_function(c, void_type, &vpp, 1, false);
     owned_buffer name;
     vbuffer_string_append(name.get(), ".Lcxx_unwind");
     if (!unwind_functions.empty())
@@ -192,7 +194,7 @@ uint32_t c_lowering::guard_object(uint32_t s, qualified_type object,
     uint32_t f = unwind_function(destructor, object, at);
     if (!f)
         return 0;
-    ast_qualified_type vp = pointer_to(v), t = type(object, at);
+    ast_qualified_type vp = pointer_to(void_type), t = type(object, at);
     uint32_t address = cast(address_of(c_variable(c, s, t), pointer_to(t)), vp,
                             AST_CAST_POINTER_TO_POINTER);
     uint32_t guard = c_local(c, vp);

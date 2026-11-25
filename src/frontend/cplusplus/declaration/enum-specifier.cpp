@@ -692,8 +692,8 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
            (Apple's availability) is passed over */
         if (id.is(syntax_kind::enumerator)) {
             auto attrs = id;
-            for (uint32_t i = 1; i < id.size(); i++)
-                if (!class_head_attributes_without_effect(attrs[i]))
+            for (uint32_t i2 = 1; i2 < id.size(); i2++)
+                if (!class_head_attributes_without_effect(attrs[i2]))
                     return not_supported(n, "dcl.enum");
             id = attrs[0];
         }

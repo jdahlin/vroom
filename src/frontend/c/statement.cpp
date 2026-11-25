@@ -989,13 +989,16 @@ CC_PRIVATE uint32_t cc_statement_parse(cc *c)
                     if (!hit) {
                         diag_span r = cc_node_range(c, cnd);
 
-                        report(c, "warning", r.b, NULL, 0, NULL, 0,
-                               cc_type_is_signed(c, AST_NODE(cnd)->ty)
-                                   ? "no case matching constant switch "
-                                     "condition '%lld'"
-                                   : "no case matching constant switch "
-                                     "condition '%llu'",
-                               (long long)cv.i);
+                        if (cc_type_is_signed(c, AST_NODE(cnd)->ty))
+                            report(c, "warning", r.b, NULL, 0, NULL, 0,
+                                   "no case matching constant switch "
+                                   "condition '%lld'",
+                                   (long long)cv.i);
+                        else
+                            report(c, "warning", r.b, NULL, 0, NULL, 0,
+                                   "no case matching constant switch "
+                                   "condition '%llu'",
+                                   (unsigned long long)cv.i);
                     }
                 }
             }

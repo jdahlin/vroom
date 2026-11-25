@@ -403,8 +403,9 @@ VPRIV void x64_vir_memory_block_lower(x64_vir_context *L, const vir_insn *i,
         int scratch = width == 16 ? XMM0 + 14 : L->general_temporary;
 
         if (copy)
-            x64_record_emit_memory(e, X64_OP_LD, width, scratch, &from, false);
-        x64_record_emit_memory(e, X64_OP_ST, width, scratch, &to, false);
+            x64_record_emit_memory(e, X64_OP_LD, (int)width, scratch, &from,
+                                   false);
+        x64_record_emit_memory(e, X64_OP_ST, (int)width, scratch, &to, false);
         from.offset += width;
         to.offset += width;
         off += width;

@@ -423,7 +423,7 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             }
         } else if (t.kind == token_kind::keyword) {
             simple_type_keywords k;
-            switch (p.keyword_of(t)) {
+            switch (syntax_parser.keyword_of(t)) {
             case standard_keyword::signed_:
                 k.signed_ = 1;
                 break;
@@ -1176,8 +1176,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                        the argument is analysed for its parameter
                        ([over.over], call_with) */
                     e.overload_name = named_set.at;
-                    for (entity_index f : named_set.functions)
-                        types.append(entity_table[f].type);
+                    for (entity_index f2 : named_set.functions)
+                        types.append(entity_table[f2].type);
                 } else if (!a.is(syntax_kind::braced_init_list)) {
                     VTRY_SET(r, passed_expression(a, e));
                     types.append(e.type);
@@ -1621,8 +1621,8 @@ analysis_result semantic_analysis::template_callee_parts(
             overloaded_written_expansion.clear();
             for (SyntaxElement a : written)
                 overloaded_written.append(a);
-            for (bool x : expansion)
-                overloaded_written_expansion.append(x);
+            for (bool x3 : expansion)
+                overloaded_written_expansion.append(x3);
             overloaded_written_at = id.index();
             return analysis_result::well_formed;
         }
@@ -1653,16 +1653,16 @@ analysis_result semantic_analysis::template_callee_parts(
                 function_template, static_cast<uint32_t>(specified.size()));
             if (position == UINT32_MAX)
                 return not_supported(id.index(), "temp.arg.explicit");
-            template_argument x;
+            template_argument x2;
             analysis_result r = analysis_result::well_formed;
             {
-                expansion_scope scope(*this, expansion[w], k, true);
+                expansion_scope scope2(*this, expansion[w], k, true);
                 r = template_argument_for(id.index(), function_template,
-                                          position, a, specified.data(), x);
+                                          position, a, specified.data(), x2);
             }
             if (r != analysis_result::well_formed)
                 return r;
-            specified.append(x);
+            specified.append(x2);
         }
     }
     return analysis_result::well_formed;

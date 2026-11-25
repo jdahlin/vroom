@@ -69,7 +69,7 @@ analysis_result semantic_analysis::jump_statement(JumpStatement n,
     if (!n.size() || !n[0].is_token())
         return not_supported(n, "stmt.jump");
     token_index at = n[0].token();
-    switch (p.keyword_of(tokens[at])) {
+    switch (syntax_parser.keyword_of(tokens[at])) {
     case standard_keyword::break_:
         /* [stmt.break]/1: "The break statement shall occur only in an
            iteration-statement or a switch statement" */

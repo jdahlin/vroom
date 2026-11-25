@@ -98,7 +98,7 @@ node_index syntax_tree::make(syntax_kind kind, const syntax_child *children,
         child_lists.append(children[i]);
     nodes.append(n);
     kind_counts[static_cast<size_t>(kind)]++;
-    return static_cast<node_index>(nodes.size() - 1);
+    return static_cast<node_index>(static_cast<uint32_t>(nodes.size() - 1));
 }
 
 bool syntax_tree::is_split(token_index t) const

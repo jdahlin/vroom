@@ -1,4 +1,5 @@
 /* vcc preprocessor: process-wide allocation, the per-file token skeleton, arenas */
+#include "common/attributes.h"
 #include "common/literal.h"
 #include "pp-internal.h"
 #include "common/vector.h"
@@ -216,7 +217,7 @@ static pp_skeleton *pp_skeleton_build(const lex_file *f)
 /* *fresh: built by this call (the file's first entry in the process) */
 VPRIV const pp_skeleton *pp_skeleton_get(const lex_file *f, bool *fresh)
 {
-    lex_file *w = (lex_file *)f;
+    lex_file *w = VUNCONST(lex_file *, f);
     void *fi = __atomic_load_n(&w->pp, __ATOMIC_ACQUIRE), *z = NULL;
 
     *fresh = false;
@@ -234,7 +235,7 @@ VPRIV const pp_skeleton *pp_skeleton_get(const lex_file *f, bool *fresh)
 VPRIV uint32_t pp_file_line_of_offset(const lex_file *f, const pp_skeleton *cfi,
                                       uint32_t off)
 {
-    pp_skeleton *fi = (pp_skeleton *)cfi;
+    pp_skeleton *fi = VUNCONST(pp_skeleton *, cfi);
     uint32_t *l = __atomic_load_n(&fi->line_offsets, __ATOMIC_ACQUIRE), n, lo,
              hi;
 
@@ -243,12 +244,12 @@ VPRIV uint32_t pp_file_line_of_offset(const lex_file *f, const pp_skeleton *cfi,
 
         const char *end = f->src + f->size;
         for (const char *p = f->src;
-             (p = (const char *)memchr(p, '\n', end - p)); p++)
+             (p = (const char *)memchr(p, '\n', (size_t)(end - p))); p++)
             c++;
         l = (uint32_t *)(pp_shared_allocate(((size_t)c + 1) * sizeof(*l)));
         c = 0;
         for (const char *p = f->src;
-             (p = (const char *)memchr(p, '\n', end - p)); p++)
+             (p = (const char *)memchr(p, '\n', (size_t)(end - p))); p++)
             l[c++] = (uint32_t)(p - f->src);
         __atomic_store_n(&fi->line_count, c,
                          __ATOMIC_RELAXED); /* a loser writes it too */

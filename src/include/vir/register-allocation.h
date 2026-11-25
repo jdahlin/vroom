@@ -32,7 +32,7 @@ enum {
 #define VIR_REGISTER_CLASS(r)                                                  \
     ((r) >> 6 & 1) /* 0 integer, 1 float (not for VR_* specials) */
 #define VIR_REGISTER_NUMBER(r) ((r) & 63)
-#define VIR_REGISTER_MAKE(c, n) ((uint8_t)((c) << 6 | (n)))
+#define VIR_REGISTER_MAKE(c, n) ((uint8_t)((unsigned)(c) << 6 | (unsigned)(n)))
 #define VIR_REGISTER_SCRATCH(c)                                                \
     ((c) ? VIR_REGISTER_SCRATCH1 : VIR_REGISTER_SCRATCH0)
 

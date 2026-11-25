@@ -33,7 +33,7 @@ VPRIV void ld_section_name_table_build(struct ld_context *ctx)
             continue;
         }
         memcpy(ctx->output.shstrtab + n, os->name, l + 1);
-        os->name_offset = n;
+        os->name_offset = (uint32_t)n;
         n += l + 1;
     }
     ctx->inputs.sections.v[ctx->output.shstrtab_section].size = n;
@@ -69,10 +69,10 @@ VPRIV void ld_headers_write(struct ld_context *ctx)
     eh->e_ehsize = sizeof(elf_file_header);
     eh->e_phentsize =
         ctx->layout.program_headers.n ? sizeof(elf_program_header) : 0;
-    eh->e_phnum = ctx->layout.program_headers.n;
+    eh->e_phnum = (uint16_t)ctx->layout.program_headers.n;
     eh->e_shentsize = sizeof(elf_section_header);
-    eh->e_shnum = ctx->layout.output_sections.n + 1;
-    eh->e_shstrndx = ctx->script.sections
+    eh->e_shnum = (uint16_t)(ctx->layout.output_sections.n + 1);
+    eh->e_shstrndx = (uint16_t)ctx->script.sections
                          .v[ld_input_section_output_section(
                              ctx, ctx->output.shstrtab_section)]
                          .section_header_index;

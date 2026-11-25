@@ -203,7 +203,7 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                 continue;
             }
             if (t.kind == token_kind::keyword &&
-                p.keyword_of(t) == standard_keyword::this_) {
+                syntax_parser.keyword_of(t) == standard_keyword::this_) {
                 record.at = c.token();
             } else if (t.kind == token_kind::identifier) {
                 name = c.token();
@@ -243,11 +243,15 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                 bool reference = c.size() == 3 &&
                                  c[0].is(preprocessing_op_or_punc::AMPERSAND);
                 size_t at = reference;
-                if (c.size() != at + 2 || !c[at].is_token() ||
-                    !c[at].is_identifier() ||
-                    !c[at + 1].is(preprocessing_op_or_punc::ELLIPSIS))
+                if (c.size() != at + 2 ||
+                    !c[static_cast<uint32_t>(at)].is_token() ||
+                    !c[static_cast<uint32_t>(at)].is_identifier() ||
+                    !c[static_cast<uint32_t>(at + 1)].is(
+                        preprocessing_op_or_punc::ELLIPSIS))
                     return not_supported(c.index(), "temp.variadic");
-                VTRY(packed, pack_capture(n, l, c[at].token(), reference));
+                VTRY(packed,
+                     pack_capture(n, l, c[static_cast<uint32_t>(at)].token(),
+                                  reference));
                 continue;
             }
         } else {
@@ -785,7 +789,7 @@ analysis_result semantic_analysis::implicit_captures(
                         preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
             if (unevaluated_depth < 0 && t > first &&
                 tokens[t - 1].kind == token_kind::keyword) {
-                standard_keyword kw = p.keyword_of(tokens[t - 1]);
+                standard_keyword kw = syntax_parser.keyword_of(tokens[t - 1]);
                 if (kw == standard_keyword::sizeof_ ||
                     kw == standard_keyword::alignof_ ||
                     kw == standard_keyword::decltype_ ||
@@ -804,8 +808,9 @@ analysis_result semantic_analysis::implicit_captures(
         }
         if (unevaluated_depth >= 0)
             continue;
-        bool names_this = tokens[t].kind == token_kind::keyword &&
-                          p.keyword_of(tokens[t]) == standard_keyword::this_;
+        bool names_this =
+            tokens[t].kind == token_kind::keyword &&
+            syntax_parser.keyword_of(tokens[t]) == standard_keyword::this_;
         capture_record record;
         if (!names_this) {
             if (tokens[t].kind != token_kind::identifier)

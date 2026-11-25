@@ -1176,7 +1176,7 @@ analysis_result semantic_analysis::gather_clauses(
        that follows it */
     owned_array<SyntaxElement> pending;
     for (size_t k = 0; k < n; k++) {
-        SyntaxElement c = node[k];
+        SyntaxElement c = node[static_cast<uint32_t>(k)];
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE,
                  preprocessing_op_or_punc::RIGHT_BRACE,
                  preprocessing_op_or_punc::COMMA,
@@ -1219,8 +1219,8 @@ analysis_result semantic_analysis::gather_clauses(
             !c.is(syntax_kind::lambda_expression))
             return not_supported(list, "dcl.init.aggr");
         uint32_t count = 1;
-        bool expansion =
-            k + 1 < n && node[k + 1].is(preprocessing_op_or_punc::ELLIPSIS);
+        bool expansion = k + 1 < n && node[static_cast<uint32_t>(k + 1)].is(
+                                          preprocessing_op_or_punc::ELLIPSIS);
         if (expansion) {
             if (!packs || !pending.empty() || c.is_token() ||
                 !expansion_count(c.first_token(), c.end_token(), count))
@@ -1648,7 +1648,8 @@ analysis_result semantic_analysis::class_list_initialization(
                 sz.type = f1;
                 sz.category = value_category::prvalue;
                 sz.evaluation = constness::constant;
-                sz.value = static_cast<int64_t>(clauses.size());
+                sz.value =
+                    static_cast<uint64_t>(static_cast<int64_t>(clauses.size()));
                 second_node = expression_node(semantic_kind::constant, sz, at);
             } else {
                 return not_supported(list, "dcl.init.list");
@@ -1909,7 +1910,7 @@ bool semantic_analysis::initializer_names_nothing(SyntaxRef init) const
             k.literal != literal_kind::user_defined_literal)
             continue;
         if (k.kind == token_kind::keyword) {
-            standard_keyword w = this->p.keyword_of(k);
+            standard_keyword w = this->syntax_parser.keyword_of(k);
             if (w == standard_keyword::true_ || w == standard_keyword::false_ ||
                 w == standard_keyword::nullptr_)
                 continue;

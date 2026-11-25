@@ -57,8 +57,8 @@ static int x64_legacy_gpr(const char *b, size_t n, XOp *o)
             return -1;
         o->needrex = size == 1;
     }
-    o->reg = reg;
-    o->size = size;
+    o->reg = (uint8_t)reg;
+    o->size = (uint8_t)size;
     return 0;
 }
 
@@ -93,7 +93,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
         return o->size ? 0 : -1;
     }
     if (n == 3 && b[0] == 'm' && b[1] == 'm' && b[2] >= '0' && b[2] <= '7') {
-        o->cls = XR_MM, o->reg = b[2] - '0', o->size = 8;
+        o->cls = XR_MM, o->reg = (uint8_t)(b[2] - '0'), o->size = 8;
         return 0;
     }
     if ((!strncmp(b, "xmm", 3) || !strncmp(b, "ymm", 3)) &&
@@ -106,7 +106,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
         return 0;
     }
     if (b[0] == 'k' && b[1] >= '0' && b[1] <= '7' && !b[2]) {
-        o->cls = XR_MASK, o->reg = b[1] - '0', o->size = 8;
+        o->cls = XR_MASK, o->reg = (uint8_t)(b[1] - '0'), o->size = 8;
         return 0;
     }
     if (!strncmp(b, "zmm", 3) && as_char_is_digit((unsigned char)b[3])) {
@@ -114,7 +114,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
         long r = strtol(b + 3, &end, 10);
         if (*end || r > 31)
             return -1;
-        o->cls = XR_ZMM, o->reg = r, o->size = 64;
+        o->cls = XR_ZMM, o->reg = (uint8_t)r, o->size = 64;
         return 0;
     }
     if (!strcmp(b, "rip")) {
@@ -484,7 +484,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
     int rex = 0x40 | (f->w ? 8 : 0) | (f->reg & 8 ? 4 : 0) |
               (f->oreg && (f->oreg - 1) & 8 ? 1 : 0);
     int seg = rm && rm->kind != XK_REG ? rm->seg : 0;
-    uint8_t modrm, sib;
+    uint8_t modrm = 0, sib = 0;
     int dispsz = 0, ripfix = 0;
     int64_t disp = 0;
     as_value dv;
@@ -570,7 +570,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
     uint8_t *p = direct ? elf_chunk_data(chunk) + chunk->used : bytes;
     uint8_t *out = p;
     if (seg)
-        *out++ = seg;
+        *out++ = (uint8_t)seg;
     if (rm && rm->kind == XK_MEM && rm->addr32)
         *out++ = 0x67;
     if (f->opsz16 && !f->vex)
@@ -591,9 +591,11 @@ VPRIV int x64_emit(as_context *a, XForm *f)
             if (rm->kind == XK_REG)
                 X = !(rm->reg & 16);
             *out++ = 0x62;
-            *out++ = R << 7 | X << 6 | B << 5 | !(f->reg & 16) << 4 | mm;
-            *out++ = W << 7 | (~f->vvvv & 15) << 3 | 4 | pp;
-            *out++ = f->zero << 7 | 0x40 | !(f->vvvv & 16) << 3 | f->mask;
+            *out++ =
+                (uint8_t)(R << 7 | X << 6 | B << 5 | !(f->reg & 16) << 4 | mm);
+            *out++ = (uint8_t)(W << 7 | (~f->vvvv & 15) << 3 | 4 | pp);
+            *out++ =
+                (uint8_t)(f->zero << 7 | 0x40 | !(f->vvvv & 16) << 3 | f->mask);
         } else if (X && B && !W && mm == 1) {
             *out++ = 0xc5;
             *out++ = (uint8_t)(R << 7 | tail);
@@ -605,9 +607,9 @@ VPRIV int x64_emit(as_context *a, XForm *f)
         *out++ = f->op[f->nop - 1];
     } else {
         if (f->rep)
-            *out++ = f->rep;
+            *out++ = (uint8_t)f->rep;
         if (rex != 0x40 || f->rex8)
-            *out++ = rex;
+            *out++ = (uint8_t)rex;
         for (int i = 0; i < f->nop; i++)
             *out++ = f->op[i];
         if (f->oreg)
@@ -622,7 +624,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
     /* All lengths are now known. Write the displacement and immediate straight
 	 * into the fragment, at the same offsets used by the relocations. */
     size_t head = (size_t)(out - p);
-    size_t length = head + dispsz + f->isz;
+    size_t length = head + (size_t)dispsz + (size_t)f->isz;
     if (direct) {
         chunk->used += (uint32_t)length;
         frag->size += length;
@@ -631,20 +633,22 @@ VPRIV int x64_emit(as_context *a, XForm *f)
         memcpy(p, bytes, head);
     }
     if (dispsz) {
-        x64_field_store(p + head, dsym ? 0 : disp, dispsz);
+        x64_field_store(p + head, dsym ? 0 : (uint64_t)disp, dispsz);
         if (dsym) {
             int type = x64_rtype(rm->mod, ripfix, 4, 1, f->w, f->gotx);
             if (ripfix)
                 dv.c = (int64_t)((uint64_t)dv.c - (uint64_t)(4 + f->isz));
-            elf_fixup_value(a->object, fr, off + head, p + head, type, &dv);
+            elf_fixup_value(a->object, fr, off + head, p + head, (uint32_t)type,
+                            &dv);
         }
     }
     if (f->isz) {
-        size_t at = head + dispsz;
-        x64_field_store(p + at, f->immsym ? 0 : f->imm, f->isz);
+        size_t at = head + (size_t)dispsz;
+        x64_field_store(p + at, f->immsym ? 0 : (uint64_t)f->imm, f->isz);
         if (f->immsym) {
             int type = x64_rtype(f->immmod, 0, f->isz, f->immsgn, f->w, 0);
-            elf_fixup_value(a->object, fr, off + at, p + at, type, &f->immv);
+            elf_fixup_value(a->object, fr, off + at, p + at, (uint32_t)type,
+                            &f->immv);
         }
     }
     return 0;

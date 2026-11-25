@@ -245,7 +245,7 @@ CC_PRIVATE const char *cc_library_builtin_symbol(const char *n, size_t length)
 CC_PRIVATE uint32_t cc_library_builtin_declare(cc *c, uint32_t id, uint32_t loc)
 {
     const struct cc_library_builtin_entry *b = cc_library_builtin_find(
-        cc_identifier_string(id), cc_identifier_length(id));
+        cc_identifier_string(id), (size_t)cc_identifier_length(id));
 
     if (!b)
         return 0;
@@ -298,10 +298,10 @@ CC_PRIVATE ast_qualified_type cc_library_implicit_type(cc *c, uint32_t id)
 
     if (c->o->no_builtin ||
         cc_library_builtin_is_disabled(c->o, cc_identifier_string(id),
-                                       cc_identifier_length(id)) ||
+                                       (size_t)cc_identifier_length(id)) ||
         (size_t)cc_identifier_length(id) >= sizeof nm)
         return 0;
-    memcpy(nm, cc_identifier_string(id), cc_identifier_length(id));
+    memcpy(nm, cc_identifier_string(id), (size_t)cc_identifier_length(id));
     nm[cc_identifier_length(id)] = 0;
     if (!(p = cc_builtin_library_signature(nm, &enc)))
         return 0;
@@ -392,7 +392,7 @@ cc_library_function_find(cc *c, uint32_t id)
 
     if (c->o->no_builtin ||
         cc_library_builtin_is_disabled(c->o, cc_identifier_string(id),
-                                       cc_identifier_length(id)))
+                                       (size_t)cc_identifier_length(id)))
         return NULL; /* disabled builtins have no implicit library declaration */
     CC_LIBRARY_BSEARCH(cc_library_functions, cc_identifier_string(id),
                        (size_t)cc_identifier_length(id), f);

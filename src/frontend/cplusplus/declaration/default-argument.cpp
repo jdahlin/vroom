@@ -114,7 +114,8 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
            a member function" */
         for (token_index t = first; t < end && member; t++)
             if (tokens[t].kind == token_kind::keyword &&
-                this->p.keyword_of(tokens[t]) == standard_keyword::this_)
+                this->syntax_parser.keyword_of(tokens[t]) ==
+                    standard_keyword::this_)
                 return ill_formed(p.declaration,
                                   "the keyword this shall not be used in a "
                                   "default argument of a member function",
@@ -127,7 +128,7 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
         auto unevaluated_operand = [&](token_index k) {
             if (tokens[k].kind != token_kind::keyword)
                 return false;
-            standard_keyword kw = this->p.keyword_of(tokens[k]);
+            standard_keyword kw = this->syntax_parser.keyword_of(tokens[k]);
             return kw == standard_keyword::sizeof_ ||
                    kw == standard_keyword::alignof_ ||
                    kw == standard_keyword::decltype_ ||

@@ -488,13 +488,17 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
     uint32_t level = 0;
     if (qualifier.size() >= 2)
         spec_at = qualifier.size() - 2;
-    if (qualifier.size() >= 4 && qualifier[spec_at].is_identifier() &&
-        qualifier[spec_at - 2].is(syntax_kind::simple_template_id)) {
-        level = tokens.identifier(qualifier[spec_at].token()) + 1;
+    if (qualifier.size() >= 4 &&
+        qualifier[static_cast<uint32_t>(spec_at)].is_identifier() &&
+        qualifier[static_cast<uint32_t>(spec_at - 2)].is(
+            syntax_kind::simple_template_id)) {
+        level = tokens.identifier(
+                    qualifier[static_cast<uint32_t>(spec_at)].token()) +
+                1;
         spec_at -= 2;
     }
-    if (qualifier.size() >= 2 &&
-        qualifier[spec_at].is(syntax_kind::simple_template_id)) {
+    if (qualifier.size() >= 2 && qualifier[static_cast<uint32_t>(spec_at)].is(
+                                     syntax_kind::simple_template_id)) {
         uint32_t qi = 0;
         bool qualified = false;
         if (qualifier[0].is(preprocessing_op_or_punc::COLON_COLON)) {
@@ -523,7 +527,7 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
             qi += 2;
         }
         ns_scope = scope;
-        spec_node = qualifier[spec_at];
+        spec_node = qualifier[static_cast<uint32_t>(spec_at)];
     } else {
         return e;
     }
@@ -998,7 +1002,7 @@ analysis_result semantic_analysis::template_argument_for(
         tr.fundamental == fundamental_type::std_nullptr_t) {
         /* (nullptr itself; another constant of the type is not followed) */
         if (!written.is_token() ||
-            this->p.keyword_of(tokens[written.token()]) !=
+            this->syntax_parser.keyword_of(tokens[written.token()]) !=
                 standard_keyword::nullptr_)
             return not_supported(at, "temp.arg.nontype");
         out.kind = template_argument::kind_t::value;

@@ -241,8 +241,9 @@ bool semantic_analysis::names_template_or_scope(token_index t) const
        template's head (class _And = _And, typename T>) is no member */
     if (t > defining_members_first && t + 1 < defining_members_end &&
         tokens[t - 1].kind == token_kind::keyword &&
-        (p.keyword_of(tokens[t - 1]) == standard_keyword::class_ ||
-         p.keyword_of(tokens[t - 1]) == standard_keyword::typename_) &&
+        (syntax_parser.keyword_of(tokens[t - 1]) == standard_keyword::class_ ||
+         syntax_parser.keyword_of(tokens[t - 1]) ==
+             standard_keyword::typename_) &&
         tokens[t + 1].kind == token_kind::operator_or_punctuator) {
         preprocessing_op_or_punc next =
             preprocessing_op_or_punc_primary(tokens[t + 1].op_or_punc);

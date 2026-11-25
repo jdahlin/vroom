@@ -5,6 +5,7 @@
 #ifndef VCC_DIRCACHE_H
 #define VCC_DIRCACHE_H
 #include <stddef.h>
+#include <stdatomic.h>
 /*
  * 0 if path cannot exist because its directory does not (known without a
  * syscall after the first probe of that directory), -1 if open() must
@@ -13,4 +14,5 @@
 int pp_directory_exists(const char *path, size_t len);
 void pp_directory_cache_flush(
     void); /* forget every directory (a new build); none in flight */
+extern _Atomic unsigned long pp_directory_probe_count; /* VPP_TIME */
 #endif

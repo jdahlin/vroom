@@ -219,8 +219,8 @@ VPRIV codegen_value x64_wbin(codegen_context *e, int op, bool sgn,
         int r;
 
         ra = x64_waddr(e, &a);
-        w0 = x64_wword(e, ra, 0);
-        w1 = x64_wword(e, ra, 8);
+        w0 = (int32_t)x64_wword(e, ra, 0);
+        w1 = (int32_t)x64_wword(e, ra, 8);
         x64_tfree(e, ra);
         v = x64_bin(e, LEX_TOKEN_AMPERSAND, 8, false, b,
                     codegen_value_constant(127));
@@ -300,33 +300,6 @@ VPRIV codegen_value x64_wbin(codegen_context *e, int op, bool sgn,
 
             return x64_wv(x64_laddr(e, &l));
         }
-    }
-    if (0) {
-        /* b is an int: __ashlti3, __lshrti3, __ashrti3 (a, (int)b) */
-        int64_t w[3];
-        int rc;
-
-        ra = x64_waddr(e, &a);
-        w[0] = x64_wword(e, ra, 0);
-        w[1] = x64_wword(e, ra, 8);
-        rc = x64_toreg(e, &b);
-        {
-            codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
-                                .align = 8,
-                                .offset = walk_slot_temporary(e, 8, 8)};
-
-            x64_record_emit_memory(e, X64_OP_ST, 8, rc, &d, false);
-            w[2] = (int64_t)d.offset;
-        }
-        x64_tfree(e, ra);
-        x64_tfree(e, rc);
-        rd = x64_wnew(e, &slot);
-        x64_lcall(e,
-                  op == LEX_TOKEN_LESS_LESS ? CODEGEN_LIBRARY_ASHLTI3
-                  : sgn                     ? CODEGEN_LIBRARY_ASHRTI3
-                                            : CODEGEN_LIBRARY_LSHRTI3,
-                  w, 3, -1, slot, 2, false);
-        return x64_wv(rd);
     }
     ra = x64_waddr(e, &a);
     rb = x64_waddr(e, &b);
@@ -686,7 +659,7 @@ VPRIV codegen_value x64_bigconst(codegen_context *e, ast_qualified_type t,
                      : i < 2     ? (uint64_t)((u128)small >> (i * 64))
                      : small < 0 ? UINT64_MAX
                                  : 0;
-        x64_record_emit_move_immediate(e, R11, w);
+        x64_record_emit_move_immediate(e, R11, (int64_t)w);
         x64_record_emit_memory(e, X64_OP_ST, 8, R11, &l, false);
     }
     x64_bignorm(e, rd, t);

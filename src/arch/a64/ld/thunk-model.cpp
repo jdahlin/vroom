@@ -71,9 +71,10 @@ VPRIV uint64_t a64_ld_thunk_destination(struct ld_context *ctx, uint32_t t)
 {
     a64_ld_thunk *th = &ctx->relocations.thunks.v[t];
     if (th->global_symbol != LD_NONE)
-        return ld_global_symbol_address(ctx, th->global_symbol) + th->addend;
+        return ld_global_symbol_address(ctx, th->global_symbol) +
+               (uint64_t)th->addend;
     return ld_input_section_address(ctx, th->input_section, th->value) +
-           th->addend;
+           (uint64_t)th->addend;
 }
 
 VPRIV bool a64_ld_branch_is_in_range(uint64_t src, uint64_t dst)

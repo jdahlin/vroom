@@ -308,7 +308,7 @@ static void coff_seh_info(ElfObj *o, CoffSehFrame *f)
         switch (k->op) {
         case SEH_PUSH_NONVOL:
             coff_seh_offset(o, frag, k->label, f->begin);
-            coff_seh_byte(o, frag, b | (k->reg & 15) << 4);
+            coff_seh_byte(o, frag, b | (unsigned)((k->reg & 15) << 4));
             break;
         case SEH_ALLOC_LARGE:
             coff_seh_offset(o, frag, k->label, f->begin);
@@ -332,14 +332,14 @@ static void coff_seh_info(ElfObj *o, CoffSehFrame *f)
         case SEH_SAVE_NONVOL:
         case SEH_SAVE_XMM128:
             coff_seh_offset(o, frag, k->label, f->begin);
-            coff_seh_byte(o, frag, b | (k->reg & 15) << 4);
+            coff_seh_byte(o, frag, b | (unsigned)((k->reg & 15) << 4));
             coff_seh_u16(o, frag,
                          (unsigned)((off >> 3) >> (k->op == SEH_SAVE_XMM128)));
             break;
         case SEH_SAVE_NONVOL_FAR:
         case SEH_SAVE_XMM128_FAR:
             coff_seh_offset(o, frag, k->label, f->begin);
-            coff_seh_byte(o, frag, b | (k->reg & 15) << 4);
+            coff_seh_byte(o, frag, b | (unsigned)((k->reg & 15) << 4));
             coff_seh_u16(
                 o, frag,
                 (unsigned)(off &

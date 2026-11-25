@@ -728,7 +728,8 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         fundamental_type result = fundamental_type::bool_;
         if (which == int(unary_trait_kind::array_rank))
             result = fundamental_type::unsigned_long_int;
-        m = integer_constant(result, value, n.first_token());
+        m = integer_constant(result, static_cast<uint64_t>(value),
+                             n.first_token());
         return analysis_result::well_formed;
     }
     /* ( type-id , type-id ) */

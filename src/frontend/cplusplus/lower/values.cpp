@@ -171,9 +171,9 @@ uint32_t c_lowering::discard(uint32_t n)
         return comma(type_of(b), discard(x.a), b);
     }
     if (x.kind == semantic_kind::conditional && x.b && is_glvalue(x))
-        return make(AST_NODE_CONDITIONAL, v, expression(x.a),
-                    cast(discard(x.b), v, AST_CAST_VOID),
-                    cast(discard(x.c), v, AST_CAST_VOID), 0, 0);
+        return make(AST_NODE_CONDITIONAL, void_type, expression(x.a),
+                    cast(discard(x.b), void_type, AST_CAST_VOID),
+                    cast(discard(x.c), void_type, AST_CAST_VOID), 0, 0);
     return expression(n);
 }
 
@@ -503,7 +503,7 @@ uint32_t c_lowering::conversion(const semantic_node &n)
     case conversion_kind::integral_to_pointer:
         return cast(expression(n.a), t, AST_CAST_INTEGER_TO_POINTER);
     case conversion_kind::to_void:
-        return cast(discard(n.a), v, AST_CAST_VOID);
+        return cast(discard(n.a), void_type, AST_CAST_VOID);
     }
     return fail("a conversion", n.at);
 }

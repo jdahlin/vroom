@@ -198,7 +198,7 @@ CC_PRIVATE void cc_field_uses_decl(cc *c, uint32_t tag, uint32_t idx,
 
     if (!fu_wanted(u, name))
         return;
-    for (uint32_t i = u->nnames; i-- > 0;)
+    for (uint32_t i = (uint32_t)u->nnames; i-- > 0;)
         if (u->names[i].loc == loc && u->names[i].id == name) {
             fu_add(c, FU_DECL, tag, idx, &u->names[i]);
             return;

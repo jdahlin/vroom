@@ -48,15 +48,15 @@ VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig,
             int align = 1 << VIR_GROUP_ALIGN_LOG2(w1);
             off = (off + align - 1) & -align;
             if (g < words) {
-                *stack = off + 8 * g;
+                *stack = (int)(off + 8 * (int)g);
                 return VIR_REGISTER_NONE;
             }
             off += (VIR_GROUP_SIZE(w1) + 7) & ~7u;
         } else {
             for (uint32_t j = 0; j < pieces; j++) {
-                uint8_t reg = VIR_GROUP_CLASS(w0, j) == VIR_CLASS_INT
-                                  ? x64_argument_register(ni++)
-                                  : VIR_REGISTER_MAKE(1, nf++);
+                uint8_t reg = (uint8_t)(VIR_GROUP_CLASS(w0, j) == VIR_CLASS_INT
+                                            ? x64_argument_register((int)(ni++))
+                                            : VIR_REGISTER_MAKE(1, nf++));
                 if (j == g)
                     return reg;
             }
@@ -143,7 +143,9 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
         x->clobbered[1] = (1u << 14) - 1;
     } else if (vir_op_is_call(i->op)) {
         uint32_t n = f->extra[i->c];
-        x->operand_count = n + 1;
+        x->operand_count =
+            (uint8_t)(n +
+                      1); /* below VIR_REGISTER_CONSTRAINT_MAX: x64_too_many_call_arguments */
         for (uint32_t k = 0; k < n; k++) {
             int stack;
             x->operands[k + 1] =
@@ -182,7 +184,7 @@ VPRIV void x64_vir_fixed_registers_get(const vir_function *f, uint32_t v,
         x->result =
             x64_vir_return_register(f->extra[f->insns[i->a].b + 1], i->b);
     } else if (i->op == VIR_OP_RET && f->extra[i->c]) {
-        x->operand_count = f->extra[i->c];
+        x->operand_count = (uint8_t)f->extra[i->c];
         for (uint32_t j = 0; j < x->operand_count; j++)
             x->operands[j] =
                 x64_vir_return_register(f->extra[f->signature + 1], j);
