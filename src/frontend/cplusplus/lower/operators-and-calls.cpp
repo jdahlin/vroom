@@ -607,9 +607,10 @@ uint32_t c_lowering::special_builtin(builtin_lowering lowering,
                 continue;
             uint32_t ptr = c_variable(c, tmp, u8p);
             if (off)
-                ptr = make(AST_NODE_BINARY, u8p, ptr,
-                           ast_builder_integer(c, sz_t, off), 0, LEX_TOKEN_PLUS,
-                           0);
+                ptr = make(
+                    AST_NODE_BINARY, u8p, ptr,
+                    ast_builder_integer(c, sz_t, static_cast<int64_t>(off)), 0,
+                    LEX_TOKEN_PLUS, 0);
             stmts.append(
                 c_statement(c, assign(u8, dereference(ptr, u8), zero)));
         }

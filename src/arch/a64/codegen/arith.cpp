@@ -748,7 +748,7 @@ static void a64_bignorm(codegen_context *e, ast_qualified_type t, int r)
                                  codegen_type_is_signed(e->compile_context, t)
                                      ? A64_OP_SBFM
                                      : A64_OP_UBFM,
-                                 1, r, r, 0, bits - 1);
+                                 1, r, r, 0, (int)(bits - 1));
 }
 
 static codegen_value a64_bigslot(codegen_context *e, int64_t sl)

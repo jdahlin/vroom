@@ -3316,8 +3316,8 @@ static int k_pac(Ctx *c, const Mn *m)
             FAIL("index must be a multiple of 8 in range [-4096, 4088].");
         unsigned u = (unsigned)(v / 8) & 0x3ff;
         *c->out = b | (u >> 9) << 22 | (u & 0x1ff) << 12 |
-                  (o[1].mode == A64M_PRE) << 11 | (unsigned)o[1].reg << 5 |
-                  R(&o[0]);
+                  (unsigned)((o[1].mode == A64M_PRE) << 11) |
+                  (unsigned)o[1].reg << 5 | R(&o[0]);
         return 0;
     }
     case 7: /* psb/tsb csync */

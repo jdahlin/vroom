@@ -554,7 +554,7 @@ VPRIV void virbuild_switch_bitset(codegen_context *e, int r, int size,
     uint32_t count = virbuild_value_convert(e, index, mask_ty);
     uint32_t member = virbuild_insn_append(
         e, VIR_OP_LSHR, mask_ty, 0,
-        virbuild_constant_integer(e, mask_ty, recipe->mask), count, 0);
+        virbuild_constant_integer(e, mask_ty, (int64_t)recipe->mask), count, 0);
     member = virbuild_insn_append(e, VIR_OP_AND, mask_ty, 0, member,
                                   virbuild_constant_integer(e, mask_ty, 1), 0);
     virbuild_branch_if(e, member, target, true);
@@ -658,7 +658,8 @@ static void virbuild_wide_unpack(codegen_context *e, codegen_value v,
     for (int k = 0; k < 2; k++) {
         if (v.kind == CODEGEN_VALUE_CONSTANT) {
             words[k] = virbuild_constant_integer(
-                e, VIR_TYPE_I64, (uint64_t)((u128)v.integer >> (k * 64)));
+                e, VIR_TYPE_I64,
+                (int64_t)((uint64_t)((u128)v.integer >> (k * 64))));
         } else {
             uint32_t ptr = virbuild_walker_value_get(e, &v, VIR_TYPE_PTR);
             if (k)
@@ -678,8 +679,9 @@ VPRIV codegen_value virbuild_wconst(codegen_context *e, i128 v)
 {
     virbuild_wide_target_check(e);
     return virbuild_wide_pack(
-        e, virbuild_constant_integer(e, VIR_TYPE_I64, (uint64_t)v),
-        virbuild_constant_integer(e, VIR_TYPE_I64, (uint64_t)((u128)v >> 64)));
+        e, virbuild_constant_integer(e, VIR_TYPE_I64, (int64_t)((uint64_t)v)),
+        virbuild_constant_integer(e, VIR_TYPE_I64,
+                                  (int64_t)((uint64_t)((u128)v >> 64))));
 }
 VPRIV codegen_value virbuild_wbitint(codegen_context *e, codegen_value v,
                                      unsigned bits, bool sgn)

@@ -61,7 +61,7 @@ void vdigest_sha256(const void *data, size_t len, uint8_t out[32])
     size_t tl = n < 56 ? 64 : 128;
     uint64_t bits = (uint64_t)len * 8;
     for (int i = 0; i < 8; i++)
-        t[tl - 1 - i] = (uint8_t)(bits >> (8 * i));
+        t[tl - 1 - (size_t)i] = (uint8_t)(bits >> (8 * i));
     sha_block(h, t);
     if (tl == 128)
         sha_block(h, t + 64);

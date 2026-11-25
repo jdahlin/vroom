@@ -140,7 +140,8 @@ semantic_analysis::defaulted_inequality(token_index at,
         if (of_class && k == 0)
             r = this_object(at, sides[k]);
         else
-            r = named_entity(at, parameters[k], sides[k], false);
+            r = named_entity(at, parameters[static_cast<size_t>(k)], sides[k],
+                             false);
         VTRY(r2, r);
     }
     analysis_result compared = binary_of(
@@ -408,7 +409,8 @@ analysis_result semantic_analysis::defaulted_equality(
             if (of_class && k == 0)
                 r = this_object(at, sides[k]);
             else
-                r = named_entity(at, parameters[k], sides[k], false);
+                r = named_entity(at, parameters[static_cast<size_t>(k)],
+                                 sides[k], false);
             if (r == analysis_result::well_formed && base)
                 r = to_base(at, base, sides[k]);
             else if (r == analysis_result::well_formed)

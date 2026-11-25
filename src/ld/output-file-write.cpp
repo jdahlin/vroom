@@ -26,7 +26,7 @@ VPRIV int ld_output_file_write(struct ld_context *ctx)
             close(fd);
             return 1;
         }
-        off += w;
+        off += (uint64_t)w;
     }
     close(fd);
     return 0;

@@ -48,14 +48,14 @@ VPRIV uint8_t x64_vir_argument_register(const vir_function *f, uint32_t sig,
             int align = 1 << VIR_GROUP_ALIGN_LOG2(w1);
             off = (off + align - 1) & -align;
             if (g < words) {
-                *stack = off + 8 * g;
+                *stack = (int)(off + 8 * (int)g);
                 return VIR_REGISTER_NONE;
             }
             off += (VIR_GROUP_SIZE(w1) + 7) & ~7u;
         } else {
             for (uint32_t j = 0; j < pieces; j++) {
                 uint8_t reg = (uint8_t)(VIR_GROUP_CLASS(w0, j) == VIR_CLASS_INT
-                                            ? x64_argument_register(ni++)
+                                            ? x64_argument_register((int)(ni++))
                                             : VIR_REGISTER_MAKE(1, nf++));
                 if (j == g)
                     return reg;

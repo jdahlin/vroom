@@ -46,8 +46,8 @@ static bool shell_token_push(struct shell_token_list *v, int kind, bool assign,
 {
     if (v->count == v->capacity) {
         int cap = v->capacity ? 2 * v->capacity : 64;
-        struct shell_token *t =
-            (struct shell_token *)(realloc(v->tokens, cap * sizeof(*t)));
+        struct shell_token *t = (struct shell_token *)(realloc(
+            v->tokens, (size_t)cap * sizeof(*t)));
 
         if (!t)
             return false;
@@ -109,7 +109,7 @@ static bool shell_tokenize(const char *s, struct shell_token_list *v)
             if (c == '\'') {
                 const char *e = strchr(s + 1, '\'');
 
-                if (!e || !vbuffer_append(&w, s + 1, e - s - 1))
+                if (!e || !vbuffer_append(&w, s + 1, (size_t)(e - s - 1)))
                     goto fail;
                 quoted = true;
                 s = e + 1;
@@ -121,7 +121,7 @@ static bool shell_tokenize(const char *s, struct shell_token_list *v)
                         goto fail;
                     e++;
                 }
-                if (!*e || !vbuffer_append(&w, s + 1, e - s - 1))
+                if (!*e || !vbuffer_append(&w, s + 1, (size_t)(e - s - 1)))
                     goto fail;
                 quoted = true;
                 s = e + 1;
@@ -198,8 +198,8 @@ static struct shell_command *shell_script_command_add(struct shell_script *sc)
 {
     if (sc->count == sc->capacity) {
         int cap = sc->capacity ? 2 * sc->capacity : 16;
-        struct shell_command *c =
-            (struct shell_command *)(realloc(sc->commands, cap * sizeof(*c)));
+        struct shell_command *c = (struct shell_command *)(realloc(
+            sc->commands, (size_t)cap * sizeof(*c)));
 
         if (!c)
             return NULL;
@@ -226,7 +226,7 @@ static char **shell_words_to_argv(struct shell_token *t, int n, vbuffer *extra)
             while (*p && *p != ' ' && *p != '\t' && *p != '\n')
                 p++;
         }
-    v = (char **)(malloc((n + nx + 1) * sizeof(*v)));
+    v = (char **)(malloc(((size_t)(n + nx + 1)) * sizeof(*v)));
     if (!v)
         return NULL;
     for (i = 0; i < n; i++)
@@ -499,7 +499,7 @@ static bool shell_fd_write_all(int fd, const char *p, size_t n)
         if (r <= 0)
             return false;
         p += r;
-        n -= r;
+        n -= (size_t)r;
     }
     return true;
 }
@@ -511,8 +511,9 @@ static void shell_error_report(int fd, const char *a, const char *b,
     int n = snprintf(line, sizeof(line), "%s%s%s\n", a, b, c);
 
     if (n > 0)
-        (void)shell_fd_write_all(
-            fd, line, n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
+        (void)shell_fd_write_all(fd, line,
+                                 n < (int)sizeof(line) ? (size_t)n
+                                                       : (int)sizeof(line) - 1);
 }
 
 /* "<a><b>': <strerror>" as coreutils (EPERM on a directory: unlink's answer on macOS) */

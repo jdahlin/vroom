@@ -149,7 +149,7 @@ static void x64_encode_memory(XOp *operand, codegen_commit_context *R,
 {
     memset(operand, 0, sizeof *operand);
     operand->kind = XK_MEM;
-    operand->base = i->registers[1];
+    operand->base = (int8_t)i->registers[1];
     operand->index = -1;
     operand->scale = 1;
     operand->hasv = 1;
@@ -162,7 +162,7 @@ static void x64_encode_memory(XOp *operand, codegen_commit_context *R,
         operand->v.c = i->offset;
     }
     if (i->opcode == X64_OP_LDX || i->opcode == X64_OP_STX) {
-        operand->index = i->registers[3];
+        operand->index = (int8_t)i->registers[3];
         operand->scale = (uint8_t)(1u << i->shift);
     }
 }

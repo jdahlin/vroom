@@ -258,7 +258,7 @@ static bool evaluate_defined(preprocessor &p,
     v.bits = m >= 0;
     v.is_unsigned = false;
     if (m >= 0)
-        p.macros[m].used = true;
+        p.macros[static_cast<size_t>(m)].used = true;
     if (parenthesized) {
         r.advance_unexpanded();
         if (!is_operator(r.token,
@@ -823,7 +823,7 @@ bool preprocessor::evaluate_defined_condition(const preprocessing_token &name,
     uint32_t operand = identifier(t);
     int32_t m = identifiers[operand].macro;
     if (m >= 0)
-        macros[m].used = true;
+        macros[static_cast<size_t>(m)].used = true;
     defined_condition_operand = operand; /* OPTIMIZATION: the guard */
     char name_text[16];
     snprintf(name_text, sizeof name_text, "%.*s", (int)directive.size(),
@@ -1264,7 +1264,7 @@ bool preprocessor::expansion_is_function_like(
     (void)t;
     for (size_t i = contexts.size(); i-- > 0;)
         if (contexts[i].macro >= 0)
-            return macros[contexts[i].macro].function_like;
+            return macros[static_cast<size_t>(contexts[i].macro)].function_like;
     return false;
 }
 

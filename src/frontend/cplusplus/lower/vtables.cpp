@@ -497,8 +497,9 @@ bool c_lowering::table_definition(const table_spec &t, uint32_t s,
     auto integer = [&](uint32_t index, int64_t value) {
         if (value)
             entry(index,
-                  cast(ast_builder_integer(c, ast_builder_type_ptrdiff(c),
-                                           static_cast<uint64_t>(value)),
+                  cast(ast_builder_integer(
+                           c, ast_builder_type_ptrdiff(c),
+                           static_cast<int64_t>(static_cast<uint64_t>(value))),
                        vp, AST_CAST_INTEGER_TO_POINTER));
     };
     for (uint32_t g = 0; g < d->group_count; g++) {

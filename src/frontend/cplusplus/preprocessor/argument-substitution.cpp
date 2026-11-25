@@ -137,7 +137,7 @@ uint32_t preprocessor::paste_operand(substitution &s, uint32_t at,
         return va_opt_end(at + 1, s.end) + 1;
     }
     if (e.parameter >= 0) {
-        const argument &a = s.arguments[e.parameter];
+        const argument &a = s.arguments[static_cast<size_t>(e.parameter)];
         if (a.begin == a.end)
             out.append(placemarker(e.token.location));
         for (uint32_t k = a.begin; k < a.end; k++)
@@ -160,7 +160,7 @@ preprocessing_token preprocessor::stringize_operand(substitution &s,
         va_opt(s, at, tokens);
         return stringize(tokens.data(), tokens.size(), where);
     }
-    const argument &a = s.arguments[e.parameter];
+    const argument &a = s.arguments[static_cast<size_t>(e.parameter)];
     return stringize(s.tokens.data() + a.begin, a.end - a.begin, where);
 }
 
@@ -242,7 +242,7 @@ void preprocessor::substitute_range(substitution &s, uint32_t i,
             continue;
         }
         if (e.parameter >= 0) {
-            argument &a = s.arguments[e.parameter];
+            argument &a = s.arguments[static_cast<size_t>(e.parameter)];
             uint32_t begin = a.begin, end = a.end;
             if (paste_follows) {
                 /* [cpp.concat]/2: the argument as it is, or a placemarker,

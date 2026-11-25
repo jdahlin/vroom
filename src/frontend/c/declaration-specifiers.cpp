@@ -465,7 +465,7 @@ cc_declaration_specifiers_tag_semicolon_recover(cc *c, int kind)
         return;
     if (c->ntk < 1)
         c->ntk = 1;
-    memmove(t + 1, t, c->ntk * sizeof(*t));
+    memmove(t + 1, t, (size_t)c->ntk * sizeof(*t));
     c->ntk++;
     t[0] = VCC_LITERAL(ptok, .s = ";", .len = 1, .loc = e,
                        .kind = LEX_TOKEN_SEMICOLON);
@@ -554,14 +554,14 @@ cc_declaration_specifiers_implicit_int_error(cc *c)
 {
     uint32_t i = 0, at = tok(c)->loc;
 
-    while (i < 16 &&
-           (cc_token_peek(c, i)->kind == LEX_TOKEN_STAR ||
-            cc_token_peek(c, i)->kind == LEX_TOKEN_LEFT_PAREN ||
-            cc_token_kind_is_qualifier(cc_token_keyword(cc_token_peek(c, i)))))
+    while (i < 16 && (cc_token_peek(c, (int)i)->kind == LEX_TOKEN_STAR ||
+                      cc_token_peek(c, (int)i)->kind == LEX_TOKEN_LEFT_PAREN ||
+                      cc_token_kind_is_qualifier(
+                          cc_token_keyword(cc_token_peek(c, (int)i)))))
         i++;
-    if (cc_token_peek(c, i)->kind == LEX_TOKEN_IDENTIFIER &&
-        !cc_token_keyword(cc_token_peek(c, i)))
-        at = cc_token_peek(c, i)->loc;
+    if (cc_token_peek(c, (int)i)->kind == LEX_TOKEN_IDENTIFIER &&
+        !cc_token_keyword(cc_token_peek(c, (int)i)))
+        at = cc_token_peek(c, (int)i)->loc;
     if (c->o->std == 23)
         cc_report_error(c, at,
                         "a type specifier is required for all declarations");

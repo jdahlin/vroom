@@ -244,12 +244,12 @@ VPRIV uint32_t pp_file_line_of_offset(const lex_file *f, const pp_skeleton *cfi,
 
         const char *end = f->src + f->size;
         for (const char *p = f->src;
-             (p = (const char *)memchr(p, '\n', end - p)); p++)
+             (p = (const char *)memchr(p, '\n', (size_t)(end - p))); p++)
             c++;
         l = (uint32_t *)(pp_shared_allocate(((size_t)c + 1) * sizeof(*l)));
         c = 0;
         for (const char *p = f->src;
-             (p = (const char *)memchr(p, '\n', end - p)); p++)
+             (p = (const char *)memchr(p, '\n', (size_t)(end - p))); p++)
             l[c++] = (uint32_t)(p - f->src);
         __atomic_store_n(&fi->line_count, c,
                          __ATOMIC_RELAXED); /* a loser writes it too */

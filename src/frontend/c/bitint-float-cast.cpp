@@ -305,7 +305,7 @@ CC_PRIVATE uint32_t cc_bitint_float_cast_build(cc *c, uint32_t input,
                 cc_bitint_cast_binary(
                     &b, LEX_TOKEN_GREATER_GREATER, raw,
                     cc_bitint_cast_int_node(&b, x87 ? 64 : p)),
-                cc_bitint_cast_u128_node(&b, 2 * bias + 1)),
+                cc_bitint_cast_u128_node(&b, (u128)(2 * bias + 1))),
             cc_type_basic(AST_TYPE_INT)));
     uint32_t exp = cc_bitint_cast_local_new(
         &b, cc_type_basic(AST_TYPE_INT),

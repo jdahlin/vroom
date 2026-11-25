@@ -873,12 +873,12 @@ static codegen_value bitint_value(codegen_context *e, codegen_value v,
             if (bits < 128)
                 a64_record_emit_bitfield(e, sgn ? A64_OP_SBFM : A64_OP_UBFM, 1,
                                          v.register_high, v.register_high, 0,
-                                         bits - 65);
+                                         (int)(bits - 65));
         } else if (bits < 64) {
             int r = toreg(e, &v);
 
             a64_record_emit_bitfield(e, sgn ? A64_OP_SBFM : A64_OP_UBFM, 1, r,
-                                     r, 0, bits - 1);
+                                     r, 0, (int)(bits - 1));
         }
     }
     return v;
@@ -1529,8 +1529,8 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
                                     .offset = sl + (int64_t)(i * es)};
 
                 if (codegen_type_is_bool_vector(c, x->ty))
-                    l.offset = sl + i / 8, l.is_bitfield = 1, l.width = 1,
-                    l.bit_offset = i % 8;
+                    l.offset = sl + (int64_t)(i / 8), l.is_bitfield = 1,
+                    l.width = 1, l.bit_offset = i % 8;
                 store(e, &l, et, &v);
             }
             val_free(e, &v);

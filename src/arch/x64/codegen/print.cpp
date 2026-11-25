@@ -1034,7 +1034,7 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
 
                 while (q < end && *q && *q != X_ASMFRAME)
                     q++;
-                vtext_append(b, p, q - p);
+                vtext_append(b, p, (size_t)(q - p));
                 if (q == end)
                     break;
                 if (*q == X_ASMFRAME) {

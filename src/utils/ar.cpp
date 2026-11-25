@@ -113,7 +113,7 @@ ar_error_report(ar_request *q, const char *fmt, ...)
     q->failed = true;
     if (q->errfd >= 0 && n > 0)
         (void)!write(q->errfd, line,
-                     n < (int)sizeof(line) ? n : (int)sizeof(line) - 1);
+                     n < (int)sizeof(line) ? (size_t)n : (int)sizeof(line) - 1);
 }
 
 static bool ar_member_list_push(ar_member_list *l, ar_member m)
@@ -176,7 +176,7 @@ static char *ar_path_normalize(const char *base, const char *path)
             s++;
         for (e = s; *e && *e != '/'; e++)
             ;
-        l = e - s;
+        l = (size_t)(e - s);
         if (l == 2 && s[0] == '.' && s[1] == '.') {
             while (n > 0 && out[n - 1] != '/')
                 n--;
@@ -1333,7 +1333,7 @@ write:
                 continue;
             ok = w > 0;
             p += w > 0 ? w : 0;
-            n -= w > 0 ? w : 0;
+            n -= w > 0 ? (size_t)w : 0;
         }
     }
     if (close(fd))
@@ -1526,7 +1526,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
             close(dfd);
         }
     }
-    if (!(files = (char **)(calloc(argc, sizeof(*files)))))
+    if (!(files = (char **)(calloc((size_t)argc, sizeof(*files)))))
         return 1;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -1658,7 +1658,7 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
                 rc = 1;
                 break;
             }
-            off += w;
+            off += (size_t)w;
         }
         if (b.failed)
             rc = 1;
@@ -1689,7 +1689,8 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
 
     {
         /* llvm-ar's computeNewArchiveMembers for r and m */
-        VAUTOFREE bool *used = (bool *)(calloc(nfiles + 1, sizeof(bool)));
+        VAUTOFREE bool *used =
+            (bool *)(calloc((size_t)(nfiles + 1), sizeof(bool)));
         long insert = -1;
 
         if (!used)
@@ -1756,11 +1757,12 @@ int ar_run(const char *cwd, int argc, char **argv, int outfd, int errfd)
                     return rc;
                 }
             if (insert < 0)
-                insert = res.count;
+                insert = (long)res.count;
             for (size_t j = 0; j < moved.count; j++)
                 ar_member_list_push(&res, VCC_LITERAL(ar_member, 0));
             memmove(res.members + insert + moved.count, res.members + insert,
-                    (res.count - moved.count - insert) * sizeof(ar_member));
+                    (res.count - moved.count - (size_t)insert) *
+                        sizeof(ar_member));
             memcpy(res.members + insert, moved.members,
                    moved.count * sizeof(ar_member));
             free(moved.members);

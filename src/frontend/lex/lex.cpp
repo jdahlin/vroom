@@ -858,7 +858,7 @@ static size_t lex_quoted_end(const char *s, size_t n, size_t p, uint8_t q,
         uint8_t c;
 
         p = lex_quote_find(s, p, q);
-        c = s[p];
+        c = (uint8_t)s[p];
         if (c == q)
             return p + 1;
         if (c == '\\') {
@@ -898,7 +898,7 @@ static size_t lex_raw_string_end(const char *s, size_t n, size_t p, size_t *bad)
 {
     size_t d = p + 1, dl = 0, i;
 
-    while (dl < 16 && lex_character_is_raw_delimiter(s[d + dl]))
+    while (dl < 16 && lex_character_is_raw_delimiter((uint8_t)s[d + dl]))
         dl++;
     if (s[d + dl] != '(') {
         for (i = d; i < n && s[i] != '"'; i++)
@@ -1243,7 +1243,7 @@ static uint32_t lex_tokenize_mode(const char *s, size_t n, lex_token *out,
     }
 
     for (int i = 0; i < LEX_MASK_COUNT; i++)
-        m[i] = (uint64_t *)lex_scratch + i * nb;
+        m[i] = (uint64_t *)lex_scratch + (size_t)i * nb;
     /*
 	 * Masks are computed lazily, CHUNK blocks ahead of the window, so the
 	 * bytes of comments (a third of kernel headers) are never classified:

@@ -233,7 +233,7 @@ VPRIV void virbuild_retrec(codegen_context *e, int raddr,
                              .offset = 8 * j);
             virbuild_load(e, q, &at, ty == VIR_TYPE_F32 ? 4 : 8, false);
             uint32_t v = virbuild_register_read(e, q, ty);
-            virbuild_variable_write(e, VIRBUILD_RESULT_VARIABLE + j,
+            virbuild_variable_write(e, (uint32_t)(VIRBUILD_RESULT_VARIABLE + j),
                                     e->vir_builder->current_block, v);
             virbuild_tfree(e, q);
         }

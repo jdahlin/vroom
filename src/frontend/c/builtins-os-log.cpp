@@ -194,7 +194,7 @@ static int cc_builtin_os_log_layout(cc *c, const char *f, size_t len,
         }
         int a = pos >= 0 ? pos : (int)next++;
         if ((unsigned)a < nargs)
-            CC_BUILTIN_OS_LOG_ADD(kind << 4 | flags, a, 0, 0);
+            CC_BUILTIN_OS_LOG_ADD((unsigned)kind << 4 | flags, a, 0, 0);
     }
 #undef CC_BUILTIN_OS_LOG_ADD
     for (int i = 0; i < n; i++)

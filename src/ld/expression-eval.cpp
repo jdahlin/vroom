@@ -9,7 +9,7 @@ static uint64_t ld_integer_log2_ceil(uint64_t x)
 {
     if (x <= 1)
         return 0;
-    return 64 - __builtin_clzll(x - 1);
+    return (uint64_t)(64 - __builtin_clzll(x - 1));
 }
 static uint64_t ld_alignment_check(struct ld_context *ctx, uint64_t a)
 {

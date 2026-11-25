@@ -919,7 +919,7 @@ static __attribute__((noinline)) uint32_t cc_assignment_rest_parse(cc *c,
         r = cc_assignment_parse(c);
         if (unlikely(pend)) {
             c->syms[pend].flags &=
-                ~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING; /* (after the right side: "z = z + 1" reads z first) */
+                (uint32_t)(~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING); /* (after the right side: "z = z + 1" reads z first) */
             c->uv_asg = 0;
         }
     }

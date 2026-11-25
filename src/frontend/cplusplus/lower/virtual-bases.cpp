@@ -31,11 +31,12 @@ uint32_t c_lowering::table_adjusted(uint32_t p, uint32_t again, int64_t index,
         return 0;
     uint32_t table = dereference(
         cast(p, pointer_to(bytes), AST_CAST_POINTER_TO_POINTER), bytes);
-    uint32_t offset =
-        make(AST_NODE_INDEX, ptrdiff,
-             cast(table, pointer_to(ptrdiff), AST_CAST_POINTER_TO_POINTER),
-             ast_builder_integer(c, ptrdiff, static_cast<uint64_t>(index)), 0,
-             0, AST_NODE_FLAG_LVALUE);
+    uint32_t offset = make(
+        AST_NODE_INDEX, ptrdiff,
+        cast(table, pointer_to(ptrdiff), AST_CAST_POINTER_TO_POINTER),
+        ast_builder_integer(c, ptrdiff,
+                            static_cast<int64_t>(static_cast<uint64_t>(index))),
+        0, 0, AST_NODE_FLAG_LVALUE);
     uint32_t at = make(AST_NODE_INDEX, byte,
                        cast(again, bytes, AST_CAST_POINTER_TO_POINTER), offset,
                        0, 0, AST_NODE_FLAG_LVALUE);
@@ -248,8 +249,9 @@ uint32_t c_lowering::offset_pointer(uint32_t p, int64_t offset,
 {
     ast_qualified_type byte = ast_builder_type_basic(AST_TYPE_CHAR);
     ast_qualified_type bytes = pointer_to(byte);
-    uint32_t by = ast_builder_integer(c, ast_builder_type_ptrdiff(c),
-                                      static_cast<uint64_t>(offset));
+    uint32_t by = ast_builder_integer(
+        c, ast_builder_type_ptrdiff(c),
+        static_cast<int64_t>(static_cast<uint64_t>(offset)));
     uint32_t at =
         make(AST_NODE_INDEX, byte, cast(p, bytes, AST_CAST_POINTER_TO_POINTER),
              by, 0, 0, AST_NODE_FLAG_LVALUE);

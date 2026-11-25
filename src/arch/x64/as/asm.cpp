@@ -93,7 +93,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
         return o->size ? 0 : -1;
     }
     if (n == 3 && b[0] == 'm' && b[1] == 'm' && b[2] >= '0' && b[2] <= '7') {
-        o->cls = XR_MM, o->reg = b[2] - '0', o->size = 8;
+        o->cls = XR_MM, o->reg = (uint8_t)(b[2] - '0'), o->size = 8;
         return 0;
     }
     if ((!strncmp(b, "xmm", 3) || !strncmp(b, "ymm", 3)) &&
@@ -106,7 +106,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
         return 0;
     }
     if (b[0] == 'k' && b[1] >= '0' && b[1] <= '7' && !b[2]) {
-        o->cls = XR_MASK, o->reg = b[1] - '0', o->size = 8;
+        o->cls = XR_MASK, o->reg = (uint8_t)(b[1] - '0'), o->size = 8;
         return 0;
     }
     if (!strncmp(b, "zmm", 3) && as_char_is_digit((unsigned char)b[3])) {
@@ -624,7 +624,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
     /* All lengths are now known. Write the displacement and immediate straight
 	 * into the fragment, at the same offsets used by the relocations. */
     size_t head = (size_t)(out - p);
-    size_t length = head + dispsz + f->isz;
+    size_t length = head + (size_t)dispsz + (size_t)f->isz;
     if (direct) {
         chunk->used += (uint32_t)length;
         frag->size += length;
@@ -633,20 +633,22 @@ VPRIV int x64_emit(as_context *a, XForm *f)
         memcpy(p, bytes, head);
     }
     if (dispsz) {
-        x64_field_store(p + head, dsym ? 0 : disp, dispsz);
+        x64_field_store(p + head, dsym ? 0 : (uint64_t)disp, dispsz);
         if (dsym) {
             int type = x64_rtype(rm->mod, ripfix, 4, 1, f->w, f->gotx);
             if (ripfix)
                 dv.c = (int64_t)((uint64_t)dv.c - (uint64_t)(4 + f->isz));
-            elf_fixup_value(a->object, fr, off + head, p + head, type, &dv);
+            elf_fixup_value(a->object, fr, off + head, p + head, (uint32_t)type,
+                            &dv);
         }
     }
     if (f->isz) {
-        size_t at = head + dispsz;
-        x64_field_store(p + at, f->immsym ? 0 : f->imm, f->isz);
+        size_t at = head + (size_t)dispsz;
+        x64_field_store(p + at, f->immsym ? 0 : (uint64_t)f->imm, f->isz);
         if (f->immsym) {
             int type = x64_rtype(f->immmod, 0, f->isz, f->immsgn, f->w, 0);
-            elf_fixup_value(a->object, fr, off + at, p + at, type, &f->immv);
+            elf_fixup_value(a->object, fr, off + at, p + at, (uint32_t)type,
+                            &f->immv);
         }
     }
     return 0;

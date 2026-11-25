@@ -860,9 +860,9 @@ cc_primary_symbol_build(cc *c, uint32_t s, uint32_t id, uint32_t loc)
         if (unlikely(y->flags & AST_SYMBOL_FLAG_UNINITIALIZED_PENDING)) {
             if (tok(c)->kind == LEX_TOKEN_PERIOD)
                 y->flags &=
-                    ~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING; /* s.m: initializes it for the analysis */
+                    (uint32_t)(~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING); /* s.m: initializes it for the analysis */
             else if (tok(c)->kind != LEX_TOKEN_EQUAL) {
-                y->flags &= ~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING;
+                y->flags &= (uint32_t)(~AST_SYMBOL_FLAG_UNINITIALIZED_PENDING);
                 c->uv_any |=
                     4; /* read (or &) before any assignment: run the analysis */
             } else if (!cc_uninitialized_is_assigned_deeper(c, s))

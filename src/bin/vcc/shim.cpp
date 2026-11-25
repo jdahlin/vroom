@@ -271,7 +271,7 @@ int main(int argc, char **argv)
     }
     h->process_group = (uint32_t)getpgrp();
     h->magic = VCCD_PROTOCOL_MAGIC;
-    h->argc = argc;
+    h->argc = (uint32_t)argc;
     h->envc = (uint32_t)(e - environ + 1);
     h->payload_len = (uint32_t)(p - (shim_request_buffer + sizeof(*h)));
 
@@ -280,7 +280,7 @@ int main(int argc, char **argv)
     for (int tries = 0;; tries++) {
         memset(cbuf, 0, sizeof(cbuf));
         iov.iov_base = shim_request_buffer;
-        iov.iov_len = p - shim_request_buffer;
+        iov.iov_len = (size_t)(p - shim_request_buffer);
         m.msg_iov = &iov;
         m.msg_iovlen = 1;
         m.msg_control = cbuf;
@@ -311,7 +311,7 @@ int main(int argc, char **argv)
         if (n < 0 && errno != EPIPE && errno != ECONNRESET)
             shim_die("vcc: sendmsg failed\n");
         for (off = n < 0 ? iov.iov_len : (size_t)n; off < iov.iov_len;
-             off += n) {
+             off += (size_t)n) {
             n = send(s, shim_request_buffer + off, iov.iov_len - off,
                      SHIM_SEND_NOSIGNAL);
             if (n < 0 && errno == EINTR) {
@@ -324,7 +324,7 @@ int main(int argc, char **argv)
                 shim_die("vcc: write failed\n");
         }
 
-        for (got = 0; got < sizeof(status); got += n) {
+        for (got = 0; got < sizeof(status); got += (size_t)n) {
             n = read(s, (char *)&status + got, sizeof(status) - got);
             if (n < 0 && errno == EINTR) {
                 n = 0;

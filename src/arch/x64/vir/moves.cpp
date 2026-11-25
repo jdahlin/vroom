@@ -108,12 +108,12 @@ VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
             L->context, X64_OP_MOV, x64_vir_type_size(i->type), d,
             L->general_temporary, X64_REGISTER_NONE);
     } else if (i->op == VIR_OP_ICONST) {
-        uint64_t bits = x64_vir_constant_bits(i);
+        uint64_t bits = (uint64_t)x64_vir_constant_bits(i);
         /* A 32-bit destination zero-extends, and MOV preserves flags across edits. */
         x64_record_emit_three_registers(L->context, X64_OP_MOVI,
                                         bits <= UINT32_MAX ? 4 : 8, d,
                                         X64_REGISTER_NONE, X64_REGISTER_NONE)
-            ->immediate = bits;
+            ->immediate = (int64_t)bits;
     } else if (i->op == VIR_OP_SYMADDR &&
                CODEGEN_REFERENCE_KIND(i->a) >= CODEGEN_REFERENCE_TLS_LE) {
         record *r = x64_record_emit(L->context, X64_OP_TLS);

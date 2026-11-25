@@ -563,7 +563,7 @@ analysis_result semantic_analysis::add_gnu_abi_tag(SyntaxRef at,
     if (tag.size() < 3 || tag.data()[0] != '"')
         return not_supported(at, "ext.gnu");
     for (size_t i = 1; i + 1 < tag.size(); i++) {
-        unsigned char ch = tag.data()[i];
+        unsigned char ch = static_cast<unsigned char>(tag.data()[i]);
         if (!(ch == '_' || (ch >= '0' && ch <= '9') ||
               ((ch | 32) >= 'a' && (ch | 32) <= 'z')))
             return not_supported(at, "ext.gnu");

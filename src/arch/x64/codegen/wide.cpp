@@ -659,7 +659,7 @@ VPRIV codegen_value x64_bigconst(codegen_context *e, ast_qualified_type t,
                      : i < 2     ? (uint64_t)((u128)small >> (i * 64))
                      : small < 0 ? UINT64_MAX
                                  : 0;
-        x64_record_emit_move_immediate(e, R11, w);
+        x64_record_emit_move_immediate(e, R11, (int64_t)w);
         x64_record_emit_memory(e, X64_OP_ST, 8, R11, &l, false);
     }
     x64_bignorm(e, rd, t);

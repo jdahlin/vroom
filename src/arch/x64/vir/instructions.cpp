@@ -434,10 +434,11 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             } else if (i->op == VIR_OP_MUL && k > 1 && !(k & (k - 1))) {
                 x64_record_emit_three_registers(e, X64_OP_SHLI, sz, d, a,
                                                 X64_REGISTER_NONE)
-                    ->immediate = __builtin_ctzll(k);
+                    ->immediate = __builtin_ctzll((unsigned long long)k);
             } else if (i->op == VIR_OP_MUL && (k == 3 || k == 5 || k == 9)) {
                 x64_record_emit_three_registers(e, X64_OP_LEASCALE, sz, d, a, a)
-                    ->shift = (uint8_t)__builtin_ctzll(k - 1);
+                    ->shift =
+                    (uint8_t)__builtin_ctzll((unsigned long long)(k - 1));
             } else
                 x64_record_emit_three_registers(e, immop[i->op], sz, d, a,
                                                 X64_REGISTER_NONE)
@@ -572,12 +573,12 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                         .offset = pos};
                     codegen_lvalue dst = {.kind = CODEGEN_LVALUE_REGISTER,
                                           .register_number = RSP,
-                                          .offset = off - 16 + pos};
+                                          .offset = (uint32_t)(off - 16) + pos};
                     x64_record_emit_memory(e, X64_OP_LD, width, tmp, &src,
                                            false);
                     x64_record_emit_memory(e, X64_OP_ST, width, tmp, &dst,
                                            false);
-                    pos += width;
+                    pos += (uint32_t)width;
                 }
                 continue;
             }
@@ -662,7 +663,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         }
         bool load = i->op != VIR_OP_STORE;
         int ty = load ? i->type : L->function->insns[i->b].type;
-        int width = vir_type_is_vector(ty)
+        int width = vir_type_is_vector((uint32_t)ty)
                         ? 16
                         : 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
         if (folded && L->memory_is_indexed) {

@@ -258,7 +258,7 @@ VPRIV int as_directive_symver(as_context *a, const char *p, const char *e)
     }
     a->symvers[a->symver_count].orig = yo;
     a->symvers[a->symver_count].ver = yv;
-    a->symvers[a->symver_count].rm = rm;
+    a->symvers[a->symver_count].rm = (uint32_t)rm;
     a->symver_count++;
     return 0;
 }

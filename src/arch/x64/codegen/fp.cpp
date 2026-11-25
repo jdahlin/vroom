@@ -902,7 +902,7 @@ VPRIV codegen_value x64_cvt(codegen_context *e, codegen_value v,
             x64_x87(e, X64_X87_SUB, NULL, 0);
             x64_x87(e, X64_X87_ISTP, &t, 8);
             x64_record_emit_memory(e, X64_OP_LD, 8, r, &t, false);
-            x64_record_emit_move_immediate(e, R11, UINT64_C(1) << 63);
+            x64_record_emit_move_immediate(e, R11, INT64_MIN);
             x64_record_emit_three_registers(e, X64_OP_XOR, 8, r, r, R11);
             x64_jump(e, done);
             x64_label(e, low);

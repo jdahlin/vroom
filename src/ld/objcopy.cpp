@@ -595,7 +595,7 @@ static int objcopy_file_write(int dirfd, const char *path, const uint8_t *b,
             objcopy_error_report("write '%s': %s", path, strerror(errno));
             return 1;
         }
-        off += w;
+        off += (uint64_t)w;
     }
     /* rename over the target: the input may be the output */
     if (renameat(dirfd, tmp, dirfd, path)) {
@@ -879,7 +879,7 @@ static int objcopy_run(int dirfd)
                 if (sec[k].parent_segment < 0 ||
                     seg[sec[k].parent_segment].original_offset >
                         seg[i].original_offset)
-                    sec[k].parent_segment = i;
+                    sec[k].parent_segment = (int)i;
     }
     uint32_t ehs = e.program_header_count, phs = e.program_header_count + 1;
     seg[ehs] = VCC_LITERAL(objcopy_segment, .original_offset = 0,
@@ -900,7 +900,7 @@ static int objcopy_run(int dirfd)
             if (objcopy_segment_is_before(pa, ch) &&
                 (ch->parent_segment < 0 ||
                  objcopy_segment_is_before(pa, &seg[ch->parent_segment])))
-                ch->parent_segment = p;
+                ch->parent_segment = (int)p;
         }
     }
 
@@ -912,7 +912,7 @@ static int objcopy_run(int dirfd)
                                  objcopy_options.dump_sections[i]);
             continue;
         }
-        size_t nl = eq - objcopy_options.dump_sections[i];
+        size_t nl = (size_t)(eq - objcopy_options.dump_sections[i]);
         uint32_t k;
         for (k = 1; k < ns; k++)
             if (strlen(sec[k].name) == nl &&
@@ -1032,8 +1032,9 @@ static int objcopy_run(int dirfd)
 
                 if ((size_t)(eq - objcopy_options.redefine_symbols[r]) ==
                         strlen(y->name) &&
-                    !strncmp(y->name, objcopy_options.redefine_symbols[r],
-                             eq - objcopy_options.redefine_symbols[r])) {
+                    !strncmp(
+                        y->name, objcopy_options.redefine_symbols[r],
+                        (size_t)(eq - objcopy_options.redefine_symbols[r]))) {
                     free(y->new_name);
                     y->new_name = strdup(eq + 1);
                     break;
@@ -1842,18 +1843,18 @@ static void nm_symbols_print(FILE *out, nm_symbol *v, uint32_t m,
         memcpy(buf + len, pfx, pl);
         len += pl;
         if (s->defined)
-            len += sprintf(buf + len, "%0*llx ", width,
-                           (unsigned long long)s->addr);
+            len += (size_t)(sprintf(buf + len, "%0*llx ", width,
+                                    (unsigned long long)s->addr));
         else
-            len += sprintf(buf + len, "%*s ", width, "");
+            len += (size_t)sprintf(buf + len, "%*s ", width, "");
         if (size) {
             if (s->defined)
-                len += sprintf(buf + len, "%0*llx ", width,
-                               (unsigned long long)s->size);
+                len += (size_t)(sprintf(buf + len, "%0*llx ", width,
+                                        (unsigned long long)s->size));
             else
-                len += sprintf(buf + len, "%*s ", width, "");
+                len += (size_t)sprintf(buf + len, "%*s ", width, "");
         }
-        len += sprintf(buf + len, "%c %s\n", s->type, s->name);
+        len += (size_t)sprintf(buf + len, "%c %s\n", s->type, s->name);
     }
     fwrite(buf, 1, len, out);
     free(buf);

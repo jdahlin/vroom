@@ -41,10 +41,10 @@ VPRIV uint32_t diag_columns_width(const char *s, uint32_t b, uint32_t e,
             uint32_t c = ch & (0x3f >> n);
             int k;
 
-            for (k = 0; k < n && i + 1 + k < e &&
-                        ((unsigned char)s[i + 1 + k] & 0xc0) == 0x80;
+            for (k = 0; k < n && i + 1 + (uint32_t)k < e &&
+                        ((unsigned char)s[i + 1 + (uint32_t)k] & 0xc0) == 0x80;
                  k++)
-                c = c << 6 | ((unsigned char)s[i + 1 + k] & 0x3f);
+                c = c << 6 | ((unsigned char)s[i + 1 + (uint32_t)k] & 0x3f);
             col += k == n ? diag_codepoint_width(c) : 1;
             i += (uint32_t)k;
         }

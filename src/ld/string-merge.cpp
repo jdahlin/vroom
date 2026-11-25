@@ -23,7 +23,7 @@ static void ld_merge_pieces_split(void *arg, size_t i)
                                     is->name);
                     return;
                 }
-                q = z - d + 1;
+                q = (uint64_t)(z - d + 1);
             } else {
                 while (q + es <= n) {
                     bool zero = true;

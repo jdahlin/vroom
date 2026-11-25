@@ -810,8 +810,8 @@ static bool vir_alloc_liveness_sweep(vir_allocator *a)
 
         if (p != VIR_BLOCK_NONE) {
             for (int c = 0; c < 2; c++)
-                if (ax.maxp[2 * l + c] > ax.maxp[2 * p + c])
-                    ax.maxp[2 * p + c] = ax.maxp[2 * l + c];
+                if (ax.maxp[2 * l + (uint32_t)c] > ax.maxp[2 * p + (uint32_t)c])
+                    ax.maxp[2 * p + (uint32_t)c] = ax.maxp[2 * l + (uint32_t)c];
             ax.lcall[p] |= ax.lcall[l];
         }
     }
@@ -1841,8 +1841,9 @@ static void vir_alloc_block_enter(vir_allocator *a, uint32_t b)
             uint32_t nr =
                          (uint32_t)__builtin_popcountll(a->registers->alloc[c]),
                      le = ax.lendpos[l];
-            uint32_t excess =
-                ax.maxp[2 * l + c] > nr ? ax.maxp[2 * l + c] - nr : 0;
+            uint32_t excess = ax.maxp[2 * l + (uint32_t)c] > nr
+                                  ? ax.maxp[2 * l + (uint32_t)c] - nr
+                                  : 0;
             uint64_t m = a->registers->alloc[c] & ~ax.fr[c];
 
             while (m && excess) {

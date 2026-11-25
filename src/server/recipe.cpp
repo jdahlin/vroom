@@ -24,7 +24,7 @@ static bool vccd_recipe_is_tool(void *ctx, const char *argv0)
          strcmp(b + 1, "var") && strcmp(b + 1, "vcc-nm") &&
          strcmp(b + 1, "vcc-objcopy")))
         return false;
-    n = b - argv0;
+    n = (size_t)(b - argv0);
     if (n == strlen(vccd_tool_directory) &&
         !memcmp(argv0, vccd_tool_directory, n))
         return true;
@@ -90,7 +90,7 @@ static int vccd_recipe_tool_run(void *ctx, char **argv, char **assign,
         bool dup = false;
 
         for (char **a = assign; *a && !dup; a++) {
-            size_t n = strchr(*a, '=') - *a + 1;
+            size_t n = (size_t)(strchr(*a, '=') - *a + 1);
 
             dup = !strncmp(*e, *a, n);
         }
@@ -101,8 +101,8 @@ static int vccd_recipe_tool_run(void *ctx, char **argv, char **assign,
     }
 #undef PUT
     h->magic = VCCD_PROTOCOL_MAGIC;
-    h->argc = argc;
-    h->envc = envc;
+    h->argc = (uint32_t)argc;
+    h->envc = (uint32_t)envc;
     h->payload_len = (uint32_t)(p - (vccd_recipe_request_buffer + sizeof(*h)));
     if (!vccd_request_split(vccd_recipe_request_buffer,
                             vccd_recipe_request_strings, &q)) {

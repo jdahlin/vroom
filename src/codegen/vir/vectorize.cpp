@@ -2202,7 +2202,7 @@ static void virbuild_vectorize_blocks_place(virbuild_vectorize_state *S)
     memmove(&V->block_order[at + 5], &V->block_order[at],
             (size_t)(V->block_order_count - at) * sizeof *V->block_order);
     for (int i = 0; i < 5; i++) {
-        V->block_order[at + i] = nb[i];
+        V->block_order[at + (uint32_t)i] = nb[i];
         V->blocks[nb[i]].is_reachable = 1;
     }
     V->block_order_count += 5;

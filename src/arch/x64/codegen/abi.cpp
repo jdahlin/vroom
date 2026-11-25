@@ -579,8 +579,8 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
                 codegen_lvalue src = x64_fr(a[k].slot + bit / 8);
                 codegen_lvalue dst = {.kind = CODEGEN_LVALUE_REGISTER,
                                       .register_number = RSP,
-                                      .offset =
-                                          place[k] + 8 * (bit - bregs[k])};
+                                      .offset = place[k] +
+                                                8 * (bit - (uint32_t)bregs[k])};
                 x64_record_emit_memory(e, X64_OP_LD, 1, R11, &src, false);
                 if (bit % 8)
                     x64_record_emit_three_registers(e, X64_OP_SHRI, 8, R11, R11,

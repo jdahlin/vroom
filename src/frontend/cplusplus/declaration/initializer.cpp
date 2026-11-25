@@ -1633,7 +1633,8 @@ analysis_result semantic_analysis::class_list_initialization(
                 sz.type = f1;
                 sz.category = value_category::prvalue;
                 sz.evaluation = constness::constant;
-                sz.value = static_cast<int64_t>(clauses.size());
+                sz.value =
+                    static_cast<uint64_t>(static_cast<int64_t>(clauses.size()));
                 second_node = expression_node(semantic_kind::constant, sz, at);
             } else {
                 return not_supported(list, "dcl.init.list");

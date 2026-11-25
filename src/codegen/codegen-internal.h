@@ -716,7 +716,7 @@ enum {
     FN___MAIN
 }; /* (MinGW: main calls __main first) */
 #define CODEGEN_FIXED_REFERENCE(k)                                             \
-    CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_NAME, 0x8000000u + (k))
+    CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_NAME, 0x8000000u + (uint32_t)(k))
 
 /* ---------------- object backend: records -> machine code ---------------- */
 

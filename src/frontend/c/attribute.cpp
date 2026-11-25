@@ -747,7 +747,7 @@ __attribute__((noinline)) CC_PRIVATE void cc_attribute_list_parse_slow(cc *c,
 
                 cc_token_expect(c, LEX_TOKEN_LEFT_PAREN, "'('");
                 if (cc_token_is(c, LEX_TOKEN_IDENTIFIER)) {
-                    size_t l = cc_identifier_length(tok(c)->id);
+                    size_t l = (size_t)(cc_identifier_length(tok(c)->id));
                     const char *n = cc_identifier_string(tok(c)->id);
 
                     if ((l == 6 && !memcmp(n, "printf", 6)) ||

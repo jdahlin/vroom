@@ -2043,7 +2043,7 @@ static void rel_apply(const trx *x, char *base, int a)
             v = r->slot[W_TY][q->arg] - 1;
             break;
         default:
-            v = (uint32_t)(v + d[q->op]);
+            v = (uint32_t)(v + (uint64_t)d[q->op]);
             break;
         }
         wrz(p, q->size, v);

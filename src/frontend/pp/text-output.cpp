@@ -631,7 +631,7 @@ pp_pragma_message_render(const char *s, size_t n, char *out, size_t cap)
                                                : (s[1] | 32) - 'a' + 10);
                         }
                         nu = v < 0x80 ? 1 : v < 0x800 ? 2 : v < 0x10000 ? 3 : 4;
-                        if (v > 0x10ffff || o + 4 * nu + 4 > cap)
+                        if (v > 0x10ffff || o + (size_t)(4 * nu) + 4 > cap)
                             return 0;
                         if (nu == 1)
                             u8[0] = (unsigned char)v;

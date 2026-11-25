@@ -40,7 +40,7 @@ VPRIV int as_error_report(as_context *a, const char *fmt, ...)
     va_list ap;
     va_start(ap, fmt);
     if ((size_t)k < sz)
-        vsnprintf(m + k, sz - k, fmt, ap);
+        vsnprintf(m + k, sz - (size_t)k, fmt, ap);
     va_end(ap);
     return -1;
 }

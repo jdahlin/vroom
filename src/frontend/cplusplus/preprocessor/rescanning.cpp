@@ -39,14 +39,14 @@ void preprocessor::push_tokens(const preprocessing_token *tokens, size_t count,
     contexts.append(
         {begin, begin + (uint32_t)count, begin, macro, barrier, false});
     if (macro >= 0)
-        macros[macro].being_replaced = true;
+        macros[static_cast<size_t>(macro)].being_replaced = true;
 }
 
 void preprocessor::pop_context()
 {
     token_context c = contexts[contexts.size() - 1];
     if (c.macro >= 0)
-        macros[c.macro].being_replaced = false;
+        macros[static_cast<size_t>(c.macro)].being_replaced = false;
     if (c.trailing_space && !c.barrier) {
         pending_flags = true;
         pending_white_space = true;
@@ -66,7 +66,7 @@ bool preprocessor::read_unexpanded(preprocessing_token &t)
             read_from_file = false;
             if (is_identifier(t) && !t.not_replaceable) {
                 int32_t m = identifiers[identifier(t)].macro;
-                if (m >= 0 && macros[m].being_replaced)
+                if (m >= 0 && macros[static_cast<size_t>(m)].being_replaced)
                     t.not_replaceable = true;
             }
             return true;
@@ -126,7 +126,7 @@ bool preprocessor::peek_left_parenthesis()
  */
 bool preprocessor::replace_macro(preprocessing_token &name, int32_t index)
 {
-    const macro_definition m = macros[index];
+    const macro_definition m = macros[static_cast<size_t>(index)];
     if (m.being_replaced) {
         name.not_replaceable = true;
         return false;
@@ -155,7 +155,7 @@ bool preprocessor::replace_macro(preprocessing_token &name, int32_t index)
         }
         substitute(name, m, arguments, argument_tokens, result);
     }
-    macros[index].used = true;
+    macros[static_cast<size_t>(index)].used = true;
     finish_replacement(name, result);
     push_tokens(result.data(), result.size(), index, false);
     if (!result.empty())

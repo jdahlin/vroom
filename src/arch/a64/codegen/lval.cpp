@@ -350,7 +350,7 @@ static codegen_value ldar_load(codegen_context *e, codegen_lvalue *l,
             .kind = CODEGEN_LVALUE_FRAME,
             .align = 1u << sz,
             .offset = a64_frame_slot_allocate(e, 1u << sz, 1u << sz)};
-        a64_lvalue_store(e, r, &tmp, 0, 1u << sz);
+        a64_lvalue_store(e, r, &tmp, 0, (int)(1u << sz));
         tfree(e, r);
         return laddr(e, &tmp);
     }
@@ -380,14 +380,14 @@ static void stlr_store(codegen_context *e, codegen_lvalue *l,
                 .kind = CODEGEN_LVALUE_FRAME,
                 .align = 1u << sz,
                 .offset = a64_frame_slot_allocate(e, 1u << sz, 1u << sz)};
-            a64_lvalue_store(e, ZR, &tmp, 0, 1u << sz);
+            a64_lvalue_store(e, ZR, &tmp, 0, (int)(1u << sz));
             codegen_value addr = laddr(e, &tmp);
             copy_mem(e, toreg(e, &addr), src.register_number, bytes);
             val_free(e, &addr);
             src = tmp;
         }
         r = treg(e);
-        a64_lvalue_load(e, r, &src, 1u << sz, 0);
+        a64_lvalue_load(e, r, &src, (int)(1u << sz), 0);
     } else {
         r = v->kind == CODEGEN_VALUE_CONSTANT && v->integer == 0 ? ZR
                                                                  : toreg(e, v);
@@ -511,17 +511,17 @@ static codegen_value bf_load_big(codegen_context *e, const codegen_lvalue *l,
             if (bits > 64)
                 bits = 64;
             int r = bf_read_word(e, l, (int)(off * 8), bits);
-            if (off * 8 + bits == l->width) {
+            if (off * 8 + (uint64_t)bits == l->width) {
                 if (l->is_signed) {
                     a64_record_emit_bitfield(e, A64_OP_SBFM, 1, r, r, 0,
                                              bits - 1);
                     shift_imm(e, A64_OP_ASRV, 1, fill, r, 63);
                 }
             }
-            a64_lvalue_store(e, r, &dst, off, 8);
+            a64_lvalue_store(e, r, &dst, (int64_t)off, 8);
             tfree(e, r);
         } else
-            a64_lvalue_store(e, fill, &dst, off, 8);
+            a64_lvalue_store(e, fill, &dst, (int64_t)off, 8);
     }
     tfree(e, fill);
     return laddr(e, &dst);
@@ -672,7 +672,7 @@ static void store1(codegen_context *e, codegen_lvalue *l, ast_qualified_type t,
                 bits = 64;
             src.offset = bit / 8;
             a64_lvalue_load(e, r, &src, 8, 0);
-            bf_write_word(e, l, bit, bits, r);
+            bf_write_word(e, l, (int)bit, (int)bits, r);
         }
         tfree(e, r);
         /* Assignment yields the converted field value without rereading a

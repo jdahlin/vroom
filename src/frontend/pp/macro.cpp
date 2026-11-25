@@ -18,10 +18,12 @@ static uint32_t pp_macro_hash(const pp_macro *m)
     for (uint32_t j = 0; j < m->body_count; j++) {
         const lex_token *v = &m->body[j];
         uint32_t x =
-            v->kind |
-            (v->flags & (LEX_TOKEN_FLAG_SPACE_BEFORE | LEX_TOKEN_FLAG_SPLICED))
-                << 8 |
-            (m->parameter_indices ? m->parameter_indices[j] : 0) << 16;
+            (uint32_t)(v->kind |
+                       (v->flags &
+                        (LEX_TOKEN_FLAG_SPACE_BEFORE | LEX_TOKEN_FLAG_SPLICED))
+                           << 8 |
+                       (m->parameter_indices ? m->parameter_indices[j] : 0)
+                           << 16);
 
         h = (h ^ x) * 0x100000001B3ull;
         h = (h ^ vintern_hash(m->source + v->off, v->len)) * 0x100000001B3ull;

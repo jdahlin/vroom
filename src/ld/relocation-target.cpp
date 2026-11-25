@@ -18,7 +18,7 @@ VPRIV void ld_relocation_target_find(struct ld_context *ctx, const ld_object *o,
             t->is_undefined = true;
             t->is_absolute = true;
             t->symbol_address = 0;
-            t->address = addend;
+            t->address = (uint64_t)addend;
             return;
         }
         t->is_absolute = ld_global_symbol_is_absolute(ctx, g);
@@ -26,16 +26,16 @@ VPRIV void ld_relocation_target_find(struct ld_context *ctx, const ld_object *o,
         if (s->state == LD_SYMBOL_STATE_OBJECT && s->input_section != LD_NONE) {
             ld_input_section *is = &ctx->inputs.sections.v[s->input_section];
             if (is->kind == LD_SECTION_KIND_MERGE_INPUT) {
-                t->address = ld_input_section_address(ctx, s->input_section,
-                                                      s->value + addend);
+                t->address = ld_input_section_address(
+                    ctx, s->input_section, s->value + (uint64_t)addend);
                 /* non-section symbol: piece of value, then + addend */
                 t->address =
                     ld_input_section_address(ctx, s->input_section, s->value) +
-                    addend;
+                    (uint64_t)addend;
                 return;
             }
         }
-        t->address = t->symbol_address + addend;
+        t->address = t->symbol_address + (uint64_t)addend;
         return;
     }
     const elf_symbol *y = &o->symbols[symidx];
@@ -44,14 +44,14 @@ VPRIV void ld_relocation_target_find(struct ld_context *ctx, const ld_object *o,
     if (y->st_shndx == SHN_ABS) {
         t->is_absolute = true;
         t->symbol_address = y->st_value;
-        t->address = t->symbol_address + addend;
+        t->address = t->symbol_address + (uint64_t)addend;
         return;
     }
     if (y->st_shndx == SHN_UNDEF || y->st_shndx >= 0xff00) {
         t->is_undefined = true;
         t->is_absolute = true;
         t->symbol_address = 0;
-        t->address = addend;
+        t->address = (uint64_t)addend;
         return;
     }
     uint32_t sec = o->first_input_section + y->st_shndx;
@@ -62,18 +62,18 @@ VPRIV void ld_relocation_target_find(struct ld_context *ctx, const ld_object *o,
         os == LD_NONE) {
         t->discarded = true;
         t->symbol_address = 0;
-        t->address = addend;
+        t->address = (uint64_t)addend;
         return;
     }
     if ((y->st_info & 15) == STT_SECTION) {
         t->symbol_address = ld_input_section_address(ctx, sec, 0);
         t->address = ld_input_section_address(ctx, sec, (uint64_t)addend);
         if (is->kind != LD_SECTION_KIND_MERGE_INPUT)
-            t->address = t->symbol_address + addend;
+            t->address = t->symbol_address + (uint64_t)addend;
         return;
     }
     t->symbol_address = ld_input_section_address(ctx, sec, y->st_value);
-    t->address = t->symbol_address + addend;
+    t->address = t->symbol_address + (uint64_t)addend;
 }
 
 /*
