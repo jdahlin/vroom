@@ -36,10 +36,13 @@ semantic_analysis::concept_definition(SyntaxRef n, ConceptDefinition definition)
     owned_array<SyntaxRef> parameters;
     VTRY(r, template_head_parameters(n, parameters, true));
     if (definition.size() != 5 || !definition[1].is_token())
-        return not_supported(n, "temp.concept");
+        return not_supported_because(
+            n, "temp.concept", "a concept definition of an unhandled form");
     uint32_t name = tokens.identifier(definition[1].token());
     if (entity_table.find(outer, name))
-        return not_supported(n, "temp.concept");
+        return not_supported_because(
+            n, "temp.concept",
+            "a concept whose name is already declared in the scope");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, name, index,
@@ -75,11 +78,14 @@ analysis_result semantic_analysis::concept_id(SyntaxRef n, uint32_t ct,
        into the normal form's atomic constraints, each only where it is
        checked; formed here as a whole, a failure is not known to be one */
     if (r == analysis_result::ill_formed && substituting)
-        return not_supported(n, "temp.constr.normal");
+        return not_supported_because(
+            n, "temp.constr.normal",
+            "a concept-id whose argument substitution failed");
     if (r != analysis_result::well_formed)
         return r;
     if (dependent_arguments(arguments))
-        return not_supported(n, "temp.constr");
+        return not_supported_because(n, "temp.constr",
+                                     "a concept-id with dependent arguments");
     bool satisfied = false;
     VTRY_SET(r, concept_satisfied(n, ct, arguments, satisfied));
     m = integer_constant(fundamental_type::bool_, satisfied, n.first_token());
@@ -99,7 +105,8 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
     satisfied = false;
     uint32_t parts = q.size();
     if (q.is_token() || (parts != 1 && parts < 3) || !q[0].is_token())
-        return not_supported(q, "temp.param");
+        return not_supported_because(q, "temp.param",
+                                     "a type-constraint of an unhandled form");
     entity_index named = constraint_concept(current_scope, q[0].token());
     uint32_t ct = 0;
     if (named)
@@ -110,7 +117,9 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
            template_parameter_is_pack(
                function_templates[ct - 1].first_parameter + 1))) ||
         template_parameter_is_pack(function_templates[ct - 1].first_parameter))
-        return not_supported(q, "temp.param");
+        return not_supported_because(q, "temp.param",
+                                     "a type-constraint naming no concept with "
+                                     "a suitable parameter list");
     owned_array<template_argument> arguments;
     template_argument first;
     first.kind = template_argument::kind_t::type;
@@ -127,7 +136,8 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
             return r;
     }
     if (dependent_arguments(arguments))
-        return not_supported(q, "temp.constr");
+        return not_supported_because(
+            q, "temp.constr", "a type-constraint with dependent arguments");
     return concept_satisfied(q, ct, arguments, satisfied);
 }
 
@@ -151,7 +161,8 @@ analysis_result semantic_analysis::requirement_satisfied(SyntaxElement r,
         result = typename_type(r, type, cv);
         if (result == analysis_result::well_formed &&
             depends_on_template_parameter(qualified_type::make(type, cv_none)))
-            return not_supported(r, "expr.prim.req");
+            return not_supported_because(
+                r, "expr.prim.req", "a type requirement that stays dependent");
     } else if (r.is(syntax_kind::simple_requirement)) {
         /* [expr.prim.req.simple]/1: "A simple-requirement asserts the
            validity of an expression", an unevaluated operand */
@@ -159,7 +170,8 @@ analysis_result semantic_analysis::requirement_satisfied(SyntaxElement r,
         result = expression(r[0], v);
         if (result == analysis_result::well_formed &&
             depends_on_template_parameter(v.type))
-            return not_supported(r, "expr.prim.req");
+            return not_supported_because(
+                r, "expr.prim.req", "a simple requirement of dependent type");
     } else if (r.is(syntax_kind::nested_requirement)) {
         /* [expr.prim.req.nested]/1: "A nested-requirement can be used to
            specify additional constraints in terms of local parameters" */
@@ -173,7 +185,9 @@ analysis_result semantic_analysis::requirement_satisfied(SyntaxElement r,
         result = expression(r[1], v);
         if (result == analysis_result::well_formed) {
             if (depends_on_template_parameter(v.type))
-                return not_supported(r, "expr.prim.req.compound");
+                return not_supported_because(r, "expr.prim.req.compound",
+                                             "a compound requirement whose "
+                                             "expression has a dependent type");
             for (uint32_t i = 3; i < r.size(); i++) {
                 if (r[i].is(standard_keyword::noexcept_)) {
                     bool throwing = false;
@@ -184,13 +198,17 @@ analysis_result semantic_analysis::requirement_satisfied(SyntaxElement r,
                            satisfied) {
                     qualified_type u;
                     if (!decltype_of(v, false, u))
-                        return not_supported(r, "expr.prim.req.compound");
+                        return not_supported_because(
+                            r, "expr.prim.req.compound",
+                            "a return-type-requirement with no decltype of the "
+                            "expression");
                     VTRY(t, type_constraint_satisfied(r[i][1], u, satisfied));
                 }
             }
         }
     } else {
-        return not_supported(r, "expr.prim.req");
+        return not_supported_because(r, "expr.prim.req",
+                                     "a requirement of an unknown kind");
     }
     if (result == analysis_result::ill_formed && undo_substitution(mark)) {
         satisfied = false;
@@ -216,12 +234,16 @@ analysis_result semantic_analysis::requires_expression(RequiresExpression n,
     if (n.size() < 2 || n.size() > 3 ||
         (!substituting &&
          names_dependent_entity(n.first_token(), n.end_token())))
-        return not_supported(n, "expr.prim.req");
+        return not_supported_because(n, "expr.prim.req",
+                                     "a requires-expression of unhandled form "
+                                     "or naming dependent entities");
     SyntaxElement list;
     if (n.size() == 3) {
         list = n[1];
         if (!list.is(syntax_kind::requirement_parameter_list))
-            return not_supported(n, "expr.prim.req");
+            return not_supported_because(
+                n, "expr.prim.req",
+                "a requires-expression with an unhandled parameter list");
     }
     /* { requirement-seq }: the requirements between the braces, or the
        requirement-seq's */
@@ -375,9 +397,13 @@ analysis_result semantic_analysis::constraint_satisfied(SyntaxElement e,
         t.fundamental != fundamental_type::bool_)
         /* ill-formed ([temp.constr.atomic]/3), which [impl.clang] clang reports
            at the constraint, not where its satisfaction is checked */
-        return not_supported(at, "temp.constr.atomic");
+        return not_supported_because(
+            at, "temp.constr.atomic",
+            "an atomic constraint whose type is not bool");
     if (value.evaluation != constness::constant)
-        return not_supported(at, "temp.constr.atomic");
+        return not_supported_because(
+            at, "temp.constr.atomic",
+            "an atomic constraint that is not a constant expression");
     satisfied = value.value != 0;
     return analysis_result::well_formed;
 }
@@ -719,7 +745,10 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         auto q = x.constraint;
         uint32_t parts = q.size();
         if ((parts != 1 && parts < 3) || !q[0].is_token())
-            return not_supported(x.constraint, "temp.param");
+            return not_supported_because(
+                x.constraint, "temp.param",
+                "a constrained parameter's type-constraint of an unhandled "
+                "form");
         entity_index named =
             constraint_concept(entity_table[ft.entity].enclosing, q[0].token());
         uint32_t ct = 0;
@@ -729,7 +758,9 @@ analysis_result semantic_analysis::template_constraints_satisfied(
             (parts == 1 && function_templates[ct - 1].parameter_count != 1) ||
             template_parameter_is_pack(
                 function_templates[ct - 1].first_parameter))
-            return not_supported(x.constraint, "temp.param");
+            return not_supported_because(x.constraint, "temp.param",
+                                         "a constrained parameter whose "
+                                         "concept is unknown or unsuitable");
         owned_array<template_argument> arguments;
         arguments.append(values[i]);
         analysis_result r = analysis_result::well_formed;
@@ -758,7 +789,9 @@ analysis_result semantic_analysis::template_constraints_satisfied(
                                words.size() * sizeof(uint64_t));
     for (uint32_t k : constraints_in_progress)
         if (k == key)
-            return not_supported(constraint, "temp.constr");
+            return not_supported_because(
+                constraint, "temp.constr",
+                "a constraint whose satisfaction depends on itself");
     constraints_in_progress.append(key);
     entity_index constraint_scope = scope;
     if (is_trailing && lambda_declarator) {

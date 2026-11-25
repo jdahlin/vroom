@@ -59,7 +59,10 @@ analysis_result semantic_analysis::compare_subobjects(
     const struct type &t = type_table[type.unqualified()];
     if (t.kind == type_kind::array) {
         if (!t.bound_known || t.variable_bound || t.bound > 64)
-            return not_supported(current_declaration, "class.compare.default");
+            return not_supported_because(
+                current_declaration, "class.compare.default",
+                "a defaulted comparison of an array member of unknown or "
+                "variable bound or more than 64 elements");
         for (uint64_t i = 0; i < t.bound; i++) {
             expression_meaning ex = x, ey = y;
             VTRY(r, array_element(current_declaration, at, ex, i));
@@ -132,7 +135,9 @@ semantic_analysis::defaulted_inequality(token_index at,
                                         bool of_class, uint32_t &block)
 {
     if (parameters.size() != 2u)
-        return not_supported(current_declaration, "class.compare.secondary");
+        return not_supported_because(
+            current_declaration, "class.compare.secondary",
+            "a defaulted != without exactly two parameters");
     expression_meaning sides[2], equal;
     size_t issued = diagnostics.messages.size();
     for (int k = 0; k < 2; k++) {
@@ -203,7 +208,10 @@ analysis_result semantic_analysis::three_way_step(
            compared by the synthesized three-way comparison ([class.spaceship]/3,
            [expr.spaceship]): not analysed */
         diagnostics.discard_since(issued);
-        return not_supported(current_declaration, "class.spaceship");
+        return not_supported_because(
+            current_declaration, "class.spaceship",
+            "a defaulted <=> where a subobject's <=> is unusable or does not "
+            "convert to the result type");
     }
     VTRY(r1, r);
     if (potential_constant(compared.node) == constness::not_constant)
@@ -258,7 +266,9 @@ analysis_result semantic_analysis::defaulted_three_way_end(
         c, tokens.pp.identifier(name, static_cast<uint32_t>(strlen(name))) + 1,
         ambiguous);
     if (!e || ambiguous)
-        return not_supported(current_declaration, "class.spaceship");
+        return not_supported_because(
+            current_declaration, "class.spaceship",
+            "a comparison category type without the expected result member");
     expression_meaning value;
     VTRY(r, named_entity(at, e, value, false));
     initialized_value result;
@@ -364,7 +374,10 @@ analysis_result semantic_analysis::defaulted_equality(
         entity_table[last_declared].kind == entity_kind::function &&
         entity_table[last_declared].enclosing == defaulted_comparison;
     if (!x.member_count || parameters.size() != 2u)
-        return not_supported(current_declaration, "class.compare.default");
+        return not_supported_because(
+            current_declaration, "class.compare.default",
+            "a defaulted comparison of a class with no members or without "
+            "exactly two parameters");
     bool three_way = entity_table[last_declared].name ==
                      operator_name(preprocessing_op_or_punc::SPACESHIP);
     if (entity_table[last_declared].name ==
@@ -373,7 +386,9 @@ analysis_result semantic_analysis::defaulted_equality(
     /* [class.eq]/3: the expanded list of subobjects: the direct base
        classes in order, then the members ([class.compare.default]/6) */
     if (x.virtual_base_count)
-        return not_supported(current_declaration, "class.compare.default");
+        return not_supported_because(
+            current_declaration, "class.compare.default",
+            "a defaulted comparison of a class with virtual bases");
     expression_meaning all;
     bool any = false, deleted = false;
     qualified_type category;
@@ -456,7 +471,9 @@ analysis_result semantic_analysis::defaulted_equality(
                                        block);
     }
     if (!any)
-        return not_supported(current_declaration, "class.compare.default");
+        return not_supported_because(
+            current_declaration, "class.compare.default",
+            "a defaulted comparison with no subobject to compare");
     /* [class.compare.default]/3: "A defaulted comparison operator function
        is constexpr-compatible if it satisfies the requirements for a
        constexpr function": its parameters are of literal types and each

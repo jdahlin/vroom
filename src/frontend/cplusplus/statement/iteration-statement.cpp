@@ -160,7 +160,8 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
 {
     standard_keyword k = leading_keyword(n);
     if (k == standard_keyword::none)
-        return not_supported(n, "stmt.iter");
+        return not_supported_because(
+            n, "stmt.iter", "an iteration statement with no leading keyword");
     entity_index outer = current_scope, statement_scope = 0;
     analysis_result result = analysis_result::well_formed;
     expression_meaning m;
@@ -169,7 +170,8 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
     if (k == standard_keyword::do_) {
         /* do statement while ( expression ) ; */
         if (n.size() != 7)
-            return not_supported(n, "stmt.do");
+            return not_supported_because(n, "stmt.do",
+                                         "a do statement of unexpected shape");
         function_state.loops++;
         function_state.breakable++;
         result = substatement(n.body(), 0, body);
@@ -185,20 +187,23 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
     }
     if (k == standard_keyword::while_) {
         if (n.size() != 5)
-            return not_supported(n, "stmt.while");
+            return not_supported_because(
+                n, "stmt.while", "a while statement of unexpected shape");
         if (n.while_condition().is(syntax_kind::condition))
             statement_scope = open_scope(0, false);
         result = condition(n.while_condition(), false, m);
     } else if (k == standard_keyword::for_) {
         if (n.size() < 6)
-            return not_supported(n, "stmt.for");
+            return not_supported_because(n, "stmt.for",
+                                         "a for statement with too few parts");
         for (uint32_t i = 0; i < n.size(); i++)
             if (n[i].is(syntax_kind::for_range_declaration))
                 return range_based_for(n, i, built);
         /* for ( init-statement condition_opt ; expression_opt ) statement:
            the init-statement ends with its own ; */
         if (!n.for_shaped())
-            return not_supported(n, "stmt.for");
+            return not_supported_because(n, "stmt.for",
+                                         "a for statement of unexpected shape");
         SyntaxElement init_syntax = n.for_init_statement();
         SyntaxElement cond = n.for_condition(), step = n.for_expression();
         bool has_cond = static_cast<bool>(cond),
@@ -218,7 +223,8 @@ analysis_result semantic_analysis::iteration_statement(IterationStatement n,
             step_node = e.node;
         }
     } else {
-        return not_supported(n, "stmt.iter");
+        return not_supported_because(
+            n, "stmt.iter", "a loop keyword other than do, while or for");
     }
     function_state.loops++;
     function_state.breakable++;
@@ -276,7 +282,9 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
         entity_index e = class_member_lookup(c, name, ambiguous);
         if (ambiguous || entity_table[e].kind != entity_kind::function)
             /* a member template, a data member, a type */
-            return not_supported(n, "stmt.ranged");
+            return not_supported_because(
+                n, "stmt.ranged",
+                "a begin or end member that is no plain function");
         overloaded_callee = at;
         r = member_access(at, e, f);
         overloaded_callee = 0;
@@ -284,7 +292,9 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
             return r;
         if (!f.node ||
             semantics[f.node].kind != semantic_kind::bound_member_function)
-            return not_supported(n, "stmt.ranged");
+            return not_supported_because(
+                n, "stmt.ranged",
+                "a begin or end member that gives no bound call");
         object = semantics[f.node].a;
         chosen = semantics[f.node].b;
         overload_set(chosen, set);
@@ -296,7 +306,9 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
         types.append(range.type);
         owned_array<entity_index> found;
         if (!argument_dependent_lookup(name, types, found))
-            return not_supported(n, "basic.lookup.argdep");
+            return not_supported_because(
+                n, "basic.lookup.argdep",
+                "begin or end with unknown argument-dependent lookup");
         for (entity_index e : found)
             overload_set(e, set);
         if (set.empty())
@@ -349,7 +361,8 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
                                                    uint32_t &built)
 {
     if (declaration + 5 != n.size())
-        return not_supported(n, "stmt.ranged");
+        return not_supported_because(n, "stmt.ranged",
+                                     "a range-based for of unexpected shape");
     SyntaxElement range_declaration = n[declaration];
     SyntaxElement initializer = n[declaration + 2];
     token_index at = n[declaration + 1].token();
@@ -371,7 +384,9 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
         items.append(init);
     } else if (declaration != 2) {
         current_scope = outer;
-        return not_supported(n, "stmt.ranged");
+        return not_supported_because(
+            n, "stmt.ranged",
+            "an unexpected part before the for-range-declaration");
     }
     auto failed = [&](analysis_result r) {
         current_scope = outer;
@@ -392,7 +407,8 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
             }
         }
         if (clauses.empty())
-            return failed(not_supported(n, "stmt.ranged"));
+            return failed(not_supported_because(n, "stmt.ranged",
+                                                "an empty braced range"));
         qualified_type elem;
         for (size_t i = 0; i < clauses.size(); i++) {
             expression_meaning item;
@@ -411,7 +427,9 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
             if (i == 0)
                 elem = t;
             else if (t != elem)
-                return failed(not_supported(n, "stmt.ranged"));
+                return failed(not_supported_because(
+                    n, "stmt.ranged",
+                    "a braced range with elements of different types"));
         }
         entity_index std_ns =
             entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
@@ -423,7 +441,9 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
         if (ilist_tmpl)
             ct = class_template_of(ilist_tmpl);
         if (!ct)
-            return failed(not_supported(n, "stmt.ranged"));
+            return failed(not_supported_because(
+                n, "stmt.ranged",
+                "a braced range with no std::initializer_list template"));
         template_argument targ;
         targ.kind = template_argument::kind_t::type;
         targ.type = elem;
@@ -492,12 +512,16 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
             require_complete(c);
             if (entity_table[c].kind != entity_kind::class_type ||
                 !entity_table[c].size)
-                return failed(not_supported(n, "stmt.ranged"));
+                return failed(not_supported_because(
+                    n, "stmt.ranged",
+                    "a range of an incomplete or unanalysed class"));
             bool ambiguous = false;
             member = class_member_lookup(c, begin_name, ambiguous) &&
                      class_member_lookup(c, end_name, ambiguous);
             if (ambiguous)
-                return failed(not_supported(n, "class.member.lookup"));
+                return failed(
+                    not_supported_because(n, "class.member.lookup",
+                                          "an ambiguous begin or end member"));
         }
         /* /1.3: "otherwise, begin-expr and end-expr are begin(range) and
            end(range), respectively, where begin and end are looked up in
@@ -581,7 +605,9 @@ analysis_result semantic_analysis::for_range_declaration(
         !at[0].is(syntax_kind::decl_specifier_seq) ||
         at.first_token() != first_token(at[0]))
         /* an attribute-specifier-seq */
-        return not_supported(at, "stmt.ranged");
+        return not_supported_because(
+            at, "stmt.ranged",
+            "an attribute or unexpected part in a for-range-declaration");
     specified s;
     placeholder_allowed = true;
     scoped_value<qualified_type> deduced(declaration_deduced, qualified_type());

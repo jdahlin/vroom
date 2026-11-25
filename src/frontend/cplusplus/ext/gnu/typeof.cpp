@@ -50,14 +50,18 @@ analysis_result semantic_analysis::gnu_typeof_type(SyntaxRef n,
                                                    qualified_type &type)
 {
     if (n.size() != 4)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu", "a typeof specifier that is not typeof ( operand )");
     SyntaxElement operand = n[2];
     if (operand.is(syntax_kind::type_id))
         return type_id(operand, type, nullptr);
     /* a type-dependent operand: as decltype's */
     if (names_dependent_entity(n.first_token(), n.end_token())) {
         if (instantiating || class_instantiating || substituting)
-            return not_supported(n, "temp.dep.expr");
+            return not_supported_because(
+                n, "temp.dep.expr",
+                "typeof of a dependent expression during instantiation or "
+                "substitution");
         type = qualified_type::make(dependent_written_type(n), cv_none);
         return analysis_result::well_formed;
     }
@@ -69,15 +73,18 @@ analysis_result semantic_analysis::gnu_typeof_type(SyntaxRef n,
     if (r != analysis_result::well_formed)
         return r;
     if (m.bit_field_width)
-        return not_supported(n, "class.bit");
+        return not_supported_because(n, "class.bit", "typeof of a bit-field");
     const struct type record = type_table[m.type.unqualified()];
     if (record.kind == type_kind::none ||
         record.kind == type_kind::placeholder ||
         record.kind == type_kind::dependent)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(n, "ext.gnu",
+                                     "typeof of an operand with no type, a "
+                                     "placeholder or a dependent type");
     /* [ext:clang_vla] see decltype_type */
     if (has_variable_bound(m.type))
-        return not_supported(n, "dcl.array");
+        return not_supported_because(
+            n, "dcl.array", "typeof of a type with a variable array bound");
     type = m.type;
     return analysis_result::well_formed;
 }

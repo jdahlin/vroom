@@ -184,13 +184,17 @@ analysis_result semantic_analysis::member_definition_of_template(
     /* (a constructor or destructor has no decl-specifier-seq) */
     if (!variable && ((parts.size() != 3 && parts.size() != 2) ||
                       !parts[parts.size() - 1].is(syntax_kind::function_body)))
-        return not_supported(n, "temp.mem.func");
+        return not_supported_because(
+            n, "temp.mem.func",
+            "a member definition of a class template of an unhandled form");
     /* [temp.param]/12: "A default template-argument shall not be specified
        in the template-parameter-lists of the definition of a member of a
        class template that appears outside of the member's class." */
     for (SyntaxRef x : parameters)
         if (template_parameter_has_default(x))
-            return not_supported(x, "temp.param");
+            return not_supported_because(x, "temp.param",
+                                         "a default template argument on a "
+                                         "member's out-of-class definition");
     /* ... nor in the member template's own template-head */
     if (inner) {
         owned_array<SyntaxRef> own;
@@ -215,13 +219,18 @@ analysis_result semantic_analysis::member_definition_of_template(
         if (!id) {
             id = out_of_class_member_class_function(definition);
             if (id && member_class_function_unjudged(parts))
-                return not_supported(n, "dcl.fct.default");
+                return not_supported_because(
+                    n, "dcl.fct.default",
+                    "an unjudged out-of-class definition of a member class's "
+                    "function");
         }
     }
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named))
-        return not_supported(n, "temp.mem.func");
+        return not_supported_because(
+            n, "temp.mem.func",
+            "a member definition whose template-id is not resolved");
     uint32_t ct = class_template_of(named);
     if (!ct) {
         analysis_result refused = not_supported(n, "temp.mem.func");
@@ -307,14 +316,20 @@ analysis_result semantic_analysis::member_definition_of_template(
         of.parameter_count != parameters.size() ||
         !same_template_parameters(first, of.first_parameter,
                                   of.parameter_count))
-        return not_supported(n, "temp.mem.func");
+        return not_supported_because(n, "temp.mem.func",
+                                     "a member definition whose parameters do "
+                                     "not match the class template's");
     for (uint32_t i = 0; i < mine_count; i++)
         if (!argument_is_parameter(mine[i],
                                    template_parameter_entities[first + i]))
-            return not_supported(n, "temp.mem.func");
+            return not_supported_because(n, "temp.mem.func",
+                                         "a member definition whose class "
+                                         "arguments are not its parameters");
     if (parameter_names_after_declarator(definition, after_declarator_id, first,
                                          of.first_parameter, mine_count))
-        return not_supported(n, "basic.lookup.qual");
+        return not_supported_because(
+            n, "basic.lookup.qual",
+            "renamed class template parameters used in a member definition");
     if (!variable && !inner && of.definition.is(syntax_kind::class_specifier)) {
         /* [temp.mem]/1: "A member template of a class template that is
            defined outside of its class template definition shall be
@@ -383,10 +398,14 @@ analysis_result semantic_analysis::member_definition_of_template(
                 continue;
             found = true;
             if (head_constraint(member) || trailing_constraint(member))
-                return not_supported(n, "temp.mem");
+                return not_supported_because(
+                    n, "temp.mem",
+                    "a member template definition with a constraint");
         }
         if (!found || head_constraint(inner) || trailing_constraint(inner))
-            return not_supported(n, "temp.mem");
+            return not_supported_because(
+                n, "temp.mem",
+                "a constrained or undeclared out-of-class member template");
     }
     if (!variable && inner && !out_of_class_member(definition) &&
         of.definition.is(syntax_kind::class_specifier)) {
@@ -399,7 +418,9 @@ analysis_result semantic_analysis::member_definition_of_template(
         SyntaxRef nested = out_of_class_nested(definition);
         SyntaxElement y_name = nested[2].simple_template_id().template_name();
         if (!y_name || !y_name.is_identifier())
-            return not_supported(n, "temp.mem");
+            return not_supported_because(
+                n, "temp.mem",
+                "a member class template definition with no template-name");
         uint32_t wanted = tokens.identifier(y_name.token());
         SyntaxRef declared = 0;
         for (auto member : of.definition.class_specifier()
@@ -417,21 +438,29 @@ analysis_result semantic_analysis::member_definition_of_template(
                 continue;
             if (declared || !member.is(syntax_kind::template_declaration) ||
                 member.size() != 2 || !member[0].is(syntax_kind::template_head))
-                return not_supported(n, "temp.mem");
+                return not_supported_because(
+                    n, "temp.mem",
+                    "a member class template not declared exactly once as a "
+                    "template");
             declared = member.index();
         }
         owned_array<SyntaxRef> mine_parameters, class_parameters;
         if (!declared || !template_head_list(inner[0], mine_parameters) ||
             !template_head_list(declared[0], class_parameters) ||
             mine_parameters.size() != class_parameters.size())
-            return not_supported(n, "temp.mem");
+            return not_supported_because(n, "temp.mem",
+                                         "a member class template definition "
+                                         "with an unmatched template-head");
         token_index declarator_name = 0;
         out_of_class_nested(definition, &declarator_name);
         for (uint32_t i = 0; i < mine_parameters.size(); i++) {
             SyntaxRef a = mine_parameters[i], b = class_parameters[i];
             if (!a.is(syntax_kind::type_parameter) ||
                 !b.is(syntax_kind::type_parameter))
-                return not_supported(n, "temp.mem");
+                return not_supported_because(
+                    n, "temp.mem",
+                    "a member class template's member with a non-type or "
+                    "template parameter");
             /* (class U, or an unnamed class: no name) */
             uint32_t names[2] = {0, 0};
             SyntaxRef both[2] = {a, b};
@@ -440,7 +469,10 @@ analysis_result semantic_analysis::member_definition_of_template(
                 if (both[k].end_token() - f == 1)
                     continue;
                 if (tokens[f + 1].kind != token_kind::identifier)
-                    return not_supported(n, "temp.mem");
+                    return not_supported_because(
+                        n, "temp.mem",
+                        "a member class template parameter of an unhandled "
+                        "form");
                 names[k] = tokens.identifier(f + 1);
             }
             uint32_t a_name = names[0], b_name = names[1];
@@ -451,7 +483,10 @@ analysis_result semantic_analysis::member_definition_of_template(
                 if (tokens[t].kind == token_kind::identifier &&
                     (tokens.identifier(t) == a_name ||
                      tokens.identifier(t) == b_name))
-                    return not_supported(n, "basic.lookup.qual");
+                    return not_supported_because(
+                        n, "basic.lookup.qual",
+                        "renamed member class template parameters used in the "
+                        "definition");
         }
     }
     template_member_definition record;
@@ -494,7 +529,9 @@ analysis_result semantic_analysis::define_plain_member_template(
 {
     /* [class.mfct]/2: in a namespace scope enclosing the class definition */
     if (!namespace_encloses(current_scope, entity_table[c].enclosing))
-        return not_supported(n, "class.mfct");
+        return not_supported_because(n, "class.mfct",
+                                     "a member template definition outside the "
+                                     "class's enclosing namespaces");
     return define_member_template_of(c, n, n, definition, false);
 }
 
@@ -537,7 +574,9 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
     const template_member_definition o = template_member_definitions[member];
     const instantiation_record x = instantiations[index];
     if (instantiation_depth >= 64)
-        return not_supported(o.declaration, "temp.inst");
+        return not_supported_because(
+            o.declaration, "temp.inst",
+            "member definition instantiations nested too deeply");
     bool member_variable_template =
         o.inner && o.definition.is(syntax_kind::simple_declaration) &&
         out_of_class_variable_member(o.definition);
@@ -759,7 +798,9 @@ semantic_analysis::define_member_of_member_class(uint32_t member,
     if (parameter_names_after_declarator(o.definition, declarator_name + 1,
                                          first, d.first_parameter,
                                          d.parameter_count))
-        return not_supported(o.declaration, "basic.lookup.qual");
+        return not_supported_because(o.declaration, "basic.lookup.qual",
+                                     "renamed class parameters used in a "
+                                     "member class's member definition");
     template_member_definition record;
     record.first_parameter = first;
     record.declaration = o.declaration;
@@ -845,7 +886,9 @@ semantic_analysis::member_definition_unsupported(SyntaxRef declaration,
                                                  bool recorded)
 {
     size_t unsupported_before = unsupported.size();
-    not_supported(declaration, "temp.inst");
+    not_supported_because(
+        declaration, "temp.inst",
+        "an out-of-class member definition that fails for a specialization");
     if (!recorded)
         return analysis_result::unsupported;
     for (analysed_declaration &d : declarations) {

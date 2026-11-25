@@ -191,7 +191,9 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
         VTRY(r, template_type(name, 0, false, t));
         id = name.first_token();
         if (type_table[t].kind != type_kind::class_type)
-            return not_supported(n, "class.derived");
+            return not_supported_because(
+                n, "class.derived",
+                "a base simple-template-id that does not name a class type");
         base = type_table[t].entity;
         return analysis_result::well_formed;
     }
@@ -203,12 +205,16 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
         VTRY(r, qualified_type_name(name, t, cv));
         id = name[1].first_token();
         if (type_table[t].kind != type_kind::class_type)
-            return not_supported(n, "class.derived");
+            return not_supported_because(
+                n, "class.derived",
+                "a qualified base template-id that does not name a class type");
         base = type_table[t].entity;
         return analysis_result::well_formed;
     }
     if (!name.is_token() && !name.is(syntax_kind::class_or_decltype))
-        return not_supported(n, "class.derived");
+        return not_supported_because(
+            n, "class.derived",
+            "a base specified by a node that is no class-or-decltype");
     size_t before = unsupported.size();
     analysis_result named = named_class(name, n, base, id);
     if (named == analysis_result::ill_formed)
@@ -228,7 +234,9 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
                 return held;
             }
         }
-        return not_supported(n, "class.derived");
+        return not_supported_because(
+            n, "class.derived",
+            "a base name for which no analysed class was found");
     }
     return analysis_result::well_formed;
 }
@@ -279,7 +287,9 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
                 continue;
             if (one.is(preprocessing_op_or_punc::ELLIPSIS)) {
                 if (expanded.empty())
-                    return not_supported(n, "temp.variadic");
+                    return not_supported_because(
+                        n, "temp.variadic",
+                        "an ellipsis with no preceding base-specifier");
                 expanded[expanded.size() - 1] = true;
                 continue;
             }
@@ -303,7 +313,9 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         }
         uint32_t count = 0;
         if (!expansion_count(first, end, count))
-            return not_supported(n, "temp.variadic");
+            return not_supported_because(
+                n, "temp.variadic",
+                "a base-specifier pack expansion whose length is not known");
         for (uint32_t e = 0; e < count; e++) {
             specifiers.append(listed[i]);
             elements.append(e);
@@ -353,7 +365,10 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
             for (uint32_t k = 0; k + 1 < b.size(); k++) {
                 if (!b[k].is_token())
                     /* an attribute-specifier-seq */
-                    return not_supported(specifier.index(), "class.derived");
+                    return not_supported_because(
+                        specifier.index(), "class.derived",
+                        "a base-specifier with a part before the name that is "
+                        "no keyword (such as an attribute)");
                 switch (b[k].keyword()) {
                 case standard_keyword::public_:
                     access = 0;
@@ -368,7 +383,10 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
                     is_virtual = true;
                     break;
                 default:
-                    return not_supported(specifier.index(), "class.derived");
+                    return not_supported_because(
+                        specifier.index(), "class.derived",
+                        "a base-specifier with a keyword other than an access "
+                        "specifier or virtual");
                 }
             }
         }
@@ -378,7 +396,9 @@ analysis_result semantic_analysis::base_clause(entity_index c, BaseClause n,
         /* (a class whose definition the analysis could not follow: not
            known to be incomplete) */
         if (!bx.size && bx.kind != entity_kind::class_type)
-            return not_supported(specifier.index(), "class.derived");
+            return not_supported_because(
+                specifier.index(), "class.derived",
+                "a base that names no class type and has no size");
         if (!bx.size)
             return ill_formed_at_token(id,
                                        "the class-or-decltype shall denote a "
@@ -694,15 +714,21 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
         bool ambiguous = false;
         entity_index step = base_step(c, base, ambiguous);
         if (!step)
-            return not_supported(current_declaration, "class.derived");
+            return not_supported_because(
+                current_declaration, "class.derived",
+                "a conversion to a class for which no base step is found");
         if (ambiguous)
-            return not_supported(current_declaration, "class.member.lookup");
+            return not_supported_because(
+                current_declaration, "class.member.lookup",
+                "a conversion to a base reached ambiguously");
         if (!nonvirtual_subobjects(c, base)) {
             /* through a virtual base: the virtual base base is, or the one
                with base among its non-virtual bases */
             entity_index v = virtual_route(c, base);
             if (!v)
-                return not_supported(current_declaration, "class.mi");
+                return not_supported_because(current_declaration, "class.mi",
+                                             "a conversion to a base with no "
+                                             "route through a virtual base");
             VTRY(r, to_virtual_base(at, c, v, m));
             continue;
         }
@@ -710,7 +736,10 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
         if (check_access && entity_table[step].access && current_class() != c &&
             !in_friend_of(c)) {
             if (current_class())
-                return not_supported(current_declaration, "class.access.base");
+                return not_supported_because(current_declaration,
+                                             "class.access.base",
+                                             "a conversion in a member of some "
+                                             "class to a non-public base");
             return ill_formed_at_token(at,
                                        "a base class is accessible only if "
                                        "an invented public member of it is",
@@ -731,7 +760,9 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
             result.node = expression_node(semantic_kind::member, result, at,
                                           m.node, step);
         } else if (m.category != value_category::lvalue) {
-            return not_supported(current_declaration, "class.temporary");
+            return not_supported_because(
+                current_declaration, "class.temporary",
+                "a conversion of a non-lvalue to an empty base");
         } else {
             /* an empty base, at the object's address: *(B *)&object */
             expression_meaning address;
@@ -770,19 +801,28 @@ analysis_result semantic_analysis::pointer_to_base(token_index at,
 {
     bool ambiguous = false;
     if (!base_step(from, to, ambiguous))
-        return not_supported(current_declaration, "class.derived");
+        return not_supported_because(
+            current_declaration, "class.derived",
+            "a pointer conversion to a class for which no base step is found");
     if (ambiguous)
-        return not_supported(current_declaration, "class.member.lookup");
+        return not_supported_because(
+            current_declaration, "class.member.lookup",
+            "a pointer conversion to a base reached ambiguously");
     if (!nonvirtual_subobjects(from, to)) {
         /* [conv.ptr]/3 through a virtual base: its offset is the object's
            ([abi:vtable-components] vbase offset), the rest of the way
            constant offsets */
         entity_index v = virtual_route(from, to);
         if (!v)
-            return not_supported(current_declaration, "conv.ptr");
+            return not_supported_because(current_declaration, "conv.ptr",
+                                         "a pointer conversion to a base with "
+                                         "no route through a virtual base");
         if (!virtual_base_accessible(from, v)) {
             if (current_class())
-                return not_supported(current_declaration, "class.access.base");
+                return not_supported_because(
+                    current_declaration, "class.access.base",
+                    "a pointer conversion in a member of some class to an "
+                    "inaccessible virtual base");
             return ill_formed_at_token(at,
                                        "if B is an inaccessible base class of "
                                        "D, a program that necessitates this "
@@ -824,7 +864,9 @@ analysis_result semantic_analysis::base_pointer_access(token_index at,
     if (!entity_table[step].access || current_class() == c || in_friend_of(c))
         return analysis_result::well_formed;
     if (current_class())
-        return not_supported(current_declaration, "class.access.base");
+        return not_supported_because(current_declaration, "class.access.base",
+                                     "a pointer conversion in a member of some "
+                                     "class to a non-public direct base");
     return ill_formed_at_token(at,
                                "if B is an inaccessible base class of D, a "
                                "program that necessitates this conversion is "
@@ -942,7 +984,9 @@ analysis_result semantic_analysis::accessible_path(
     const char *label, owned_array<entity_index> &steps)
 {
     if (!nonvirtual_path(derived, base, steps))
-        return not_supported(current_declaration, label);
+        return not_supported_because(
+            current_declaration, label,
+            "a path to a base for which no non-virtual route is found");
     for (size_t i = 0; access && i < steps.size(); i++) {
         VTRY(r, base_pointer_access(at, entity_table[steps[i]].enclosing,
                                     steps[i]));
@@ -1061,10 +1105,15 @@ analysis_result semantic_analysis::to_virtual_base(token_index at,
                                                    expression_meaning &m)
 {
     if (m.category != value_category::lvalue)
-        return not_supported(current_declaration, "class.temporary");
+        return not_supported_because(
+            current_declaration, "class.temporary",
+            "a conversion of a non-lvalue to a virtual base");
     if (!virtual_base_accessible(c, v)) {
         if (current_class())
-            return not_supported(current_declaration, "class.access.base");
+            return not_supported_because(
+                current_declaration, "class.access.base",
+                "a conversion in a member of some class to an inaccessible "
+                "virtual base");
         return ill_formed_at_token(at,
                                    "a base class is accessible only if an "
                                    "invented public member of it is",

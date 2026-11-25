@@ -96,7 +96,8 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
         n[1].is(syntax_kind::simple_template_id))
         return template_type(n[1], 0, false, type, &cv);
     if (count < 3 || count > 4 || !n[1].is(syntax_kind::nested_name_specifier))
-        return not_supported(n, "temp.res");
+        return not_supported_because(
+            n, "temp.res", "a typename-specifier of an unhandled form");
     SyntaxElement last = n[count - 1];
     if (last.is(syntax_kind::simple_template_id)) {
         /* typename nested-name-specifier template_opt simple-template-id:
@@ -122,13 +123,20 @@ analysis_result semantic_analysis::typename_type(SyntaxRef n, type_index &type,
             }
         }
         if (!scope.entity)
-            return not_supported(n, "temp.res");
+            return not_supported_because(
+                n, "temp.res",
+                "a typename-specifier whose nested-name-specifier names no "
+                "scope");
         return template_type(last, scope.entity, true, type, &cv);
     }
     if (count != 3)
-        return not_supported(n, "temp.res");
+        return not_supported_because(
+            n, "temp.res",
+            "a typename-specifier with extra tokens before its last name");
     if (!n[2].is_identifier())
-        return not_supported(n, "temp.res");
+        return not_supported_because(
+            n, "temp.res",
+            "a typename-specifier whose last name is not an identifier");
     token_index t = n[2].token();
     uint32_t name = tokens.identifier(t);
     nominated_scope scope;

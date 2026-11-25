@@ -1280,8 +1280,12 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 if (child.is(syntax_kind::alignment_specifier))
                     alignment = true;
         if (alignment)
-            return not_supported(c.index(), "dcl.align");
-        return not_supported(c.index());
+            return not_supported_because(
+                c.index(), "dcl.align",
+                "an alignment specifier among these specifiers");
+        return not_supported_because(
+            c.index(), syntax_kind_subclause(SyntaxRef(c.index()).kind()),
+            "a specifier that names no analysed type");
     }
     for (uint32_t i = 0; i < seq.size(); i++) {
         SyntaxElement c = seq[i];
@@ -1368,7 +1372,10 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                         if (!named_concept ||
                             function_templates[concept_of(named_concept) - 1]
                                     .parameter_count != 1)
-                            return not_supported(c[0].index(), "temp.param");
+                            return not_supported_because(
+                                c[0].index(), "temp.param",
+                                "a type-constraint that is no one-parameter "
+                                "concept");
                     }
                     bool decltype_auto =
                         !c[last].is_token() ||
@@ -1376,7 +1383,10 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     if (!allow_placeholder ||
                         !tokens.files.behavior.has(
                             language_feature::return_type_deduction))
-                        return not_supported(seq, "dcl.spec.auto");
+                        return not_supported_because(
+                            seq, "dcl.spec.auto",
+                            "a constrained or decltype(auto) placeholder here "
+                            "or before C++14");
                     class_type = placeholder_type(decltype_auto, named_concept)
                                      .unqualified();
                     r = analysis_result::well_formed;
@@ -1391,7 +1401,10 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 VTRY_SET(r, gnu_attribute_specifier(c, s));
                 continue;
             } else
-                return not_supported(c.index());
+                return not_supported_because(
+                    c.index(),
+                    syntax_kind_subclause(SyntaxRef(c.index()).kind()),
+                    "an unexpected node in a decl-specifier-seq");
             if (r != analysis_result::well_formed)
                 return r;
             if (named || !k.first)
@@ -1452,8 +1465,9 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                     name_lookup_detail(t, found);
                     return r;
                 }
-                return not_supported(seq, unknown_name_subclause(
-                                              unknown, "basic.lookup.unqual"));
+                return not_supported_because(
+                    seq, unknown_name_subclause(unknown, "basic.lookup.unqual"),
+                    "a name that names no type");
             }
             if (named || !k.first)
                 k.first = t;
@@ -1604,7 +1618,9 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                declaration of a non-static data member": analysed on a
                member-declaration's decl-specifier-seq (member_declarator) */
             if (!mutable_allowed)
-                return not_supported(seq, specifier_subclause(kw));
+                return not_supported_because(
+                    seq, specifier_subclause(kw),
+                    "mutable outside a member declaration");
             count(mutable_, t, "mutable");
             break;
         case standard_keyword::inline_:
@@ -1635,7 +1651,9 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                function": analysed on a member-declaration
                (member_declarator) */
             if (!virtual_allowed)
-                return not_supported(seq, specifier_subclause(kw));
+                return not_supported_because(
+                    seq, specifier_subclause(kw),
+                    "virtual outside a member function declaration");
             count(virtual_, t, "virtual");
             break;
         case standard_keyword::auto_: {
@@ -1680,7 +1698,9 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                         other_type = true;
                 }
                 if (other_type)
-                    return not_supported(seq, specifier_subclause(kw));
+                    return not_supported_because(
+                        seq, specifier_subclause(kw),
+                        "auto as a storage class before C++11");
             }
             if (named)
                 k.alone++;
@@ -1693,16 +1713,22 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                in the declaration of a constructor or conversion function
                within its class definition" */
             if (!explicit_allowed)
-                return not_supported(seq, specifier_subclause(kw));
+                return not_supported_because(
+                    seq, specifier_subclause(kw),
+                    "explicit outside a constructor or conversion function");
             count(explicit_, t, "explicit");
             break;
         case standard_keyword::friend_:
             if (!friend_allowed)
-                return not_supported(seq, specifier_subclause(kw));
+                return not_supported_because(
+                    seq, specifier_subclause(kw),
+                    "friend where no friend declaration is taken");
             count(friend_, t, "friend");
             break;
         default:
-            return not_supported(seq, specifier_subclause(kw));
+            return not_supported_because(
+                seq, specifier_subclause(kw),
+                "a specifier keyword with no rules here");
         }
     }
     /* [dcl.spec]/2: "At most one of the constexpr, consteval, and
@@ -1717,7 +1743,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
     constexpr_ += consteval_;
     if (parameter && (typedef_ || static_ || extern_ || inline_ || constexpr_ ||
                       c11_thread_local || constinit_ || thread_local_))
-        return not_supported(seq, "dcl.fct");
+        return not_supported_because(
+            seq, "dcl.fct", "a storage or function specifier on a parameter");
     /* [dcl.stc]/1: "At most one storage-class-specifier shall appear in a
        given decl-specifier-seq, except that thread_local may appear with
        static or extern." */
@@ -1833,7 +1860,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
             type = type_table.atomic_of(qualified_type::make(type, cv_none));
         }
     } else if (atomic_qualifier) {
-        return not_supported(seq, "ext.clang");
+        return not_supported_because(seq, "ext.clang",
+                                     "_Atomic with no type to apply to");
     }
     if (type)
         s.type = add_cv(qualified_type::make(type, cv_none), cv);
@@ -1868,10 +1896,14 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
                alias template, member_template_declaration) */
             if (!is_namespace(scope.entity) &&
                 entity_table[scope.entity].kind != entity_kind::class_type)
-                return not_supported(n, "temp.names");
+                return not_supported_because(
+                    n, "temp.names",
+                    "a template-id qualified by neither namespace nor class");
             return template_type(n[1], scope.entity, true, type, &cv);
         }
-        return not_supported(n, "dcl.type.simple");
+        return not_supported_because(
+            n, "dcl.type.simple",
+            "a qualified type specifier that is no name or template-id");
     }
     nominated_scope scope;
     VTRY(r, nested_name_specifier(n[0], scope, true));
@@ -1919,7 +1951,8 @@ analysis_result semantic_analysis::named_member_type(SyntaxRef n, token_index t,
     if (!e || (entity_table[e].kind != entity_kind::class_type &&
                entity_table[e].kind != entity_kind::enumeration &&
                entity_table[e].kind != entity_kind::typedef_name))
-        return not_supported(n, citation);
+        return not_supported_because(
+            n, citation, "a qualified name that finds no analysed type");
     if (entity_table[e].enclosing &&
         entity_table[entity_table[e].enclosing].kind ==
             entity_kind::class_type &&
@@ -1932,7 +1965,8 @@ analysis_result semantic_analysis::named_member_type(SyntaxRef n, token_index t,
     /* [ext:gnu_attributes] a qualified typedef-name's aligned */
     if (entity_table[e].kind == entity_kind::typedef_name &&
         entity_table[e].alignment)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu", "a qualified typedef-name with an aligned attribute");
     used(t, e);
     type = entity_table[e].type.unqualified();
     if (entity_table[e].kind == entity_kind::typedef_name)
@@ -1954,7 +1988,8 @@ analysis_result semantic_analysis::named_class(SyntaxElement name, SyntaxRef at,
     lookup_result found;
     if (name.is_token()) {
         if (tokens[name.token()].kind != token_kind::identifier)
-            return not_supported(at, "basic.lookup.qual");
+            return not_supported_because(at, "basic.lookup.qual",
+                                         "a base name that is no identifier");
         id = name.token();
         found = lookup_unqualified(tokens.identifier(id), lookup_filter::types);
     } else {
@@ -1962,7 +1997,9 @@ analysis_result semantic_analysis::named_class(SyntaxElement name, SyntaxRef at,
             !name[0].is(syntax_kind::nested_name_specifier) ||
             !name[1].is_identifier())
             /* a simple-template-id, a decltype-specifier */
-            return not_supported(at, "basic.lookup.qual");
+            return not_supported_because(
+                at, "basic.lookup.qual",
+                "a base specifier that is no plain or qualified name");
         nominated_scope scope;
         VTRY(r, nested_name_specifier(name[0], scope));
         id = name[1].token();
@@ -1977,16 +2014,20 @@ analysis_result semantic_analysis::named_class(SyntaxElement name, SyntaxRef at,
                                    "namespace.udir");
     entity_index e = found.entity;
     if (!e)
-        return not_supported(at, "basic.lookup.qual");
+        return not_supported_because(at, "basic.lookup.qual",
+                                     "a base class name that is not found");
     entity_index named = e;
     if (entity_table[e].kind == entity_kind::typedef_name) {
         const struct type &t = type_table[entity_table[e].type.unqualified()];
         if (t.kind != type_kind::class_type)
-            return not_supported(at, "basic.lookup.qual");
+            return not_supported_because(
+                at, "basic.lookup.qual",
+                "a base typedef-name of a non-class type");
         named = t.entity;
     }
     if (entity_table[named].kind != entity_kind::class_type)
-        return not_supported(at, "basic.lookup.qual");
+        return not_supported_because(at, "basic.lookup.qual",
+                                     "a base name that is no analysed class");
     if (entity_table[e].enclosing &&
         entity_table[entity_table[e].enclosing].kind ==
             entity_kind::class_type &&

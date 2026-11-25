@@ -51,7 +51,9 @@ analysis_result
 semantic_analysis::gnu_conditional_omitted(SyntaxRef n, expression_meaning &m)
 {
     if (n.size() != 4 || !n[1].is_token() || !n[2].is_token())
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "a ?: with omitted middle operand of unrecognized form");
     expression_meaning e2, e3;
     VTRY(r, expression(n[0], e2));
     VTRY_SET(r, expression(n[3], e3));

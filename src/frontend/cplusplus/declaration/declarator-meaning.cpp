@@ -58,7 +58,8 @@ analysis_result semantic_analysis::pointer_qualifier(SyntaxRef op,
         return analysis_result::well_formed;
     case extension_keyword::restrict:
         if (type_table[type.unqualified()].kind != type_kind::pointer)
-            return not_supported(op, "ext.gnu");
+            return not_supported_because(
+                op, "ext.gnu", "restrict on a type that is no pointer");
         type = add_cv(type, cv_restrict);
         return analysis_result::well_formed;
     case extension_keyword::atomic: {
@@ -69,7 +70,9 @@ analysis_result semantic_analysis::pointer_qualifier(SyntaxRef op,
         if (k == type_kind::atomic)
             return analysis_result::well_formed;
         if (k != type_kind::pointer)
-            return not_supported(op, "ext.clang");
+            return not_supported_because(
+                op, "ext.clang",
+                "a nullability or _Atomic qualifier on a non-pointer");
         qualified_type value =
             qualified_type::make(type.unqualified(), cv_none);
         VTRY(r, atomic_value_check(op, value));
@@ -85,7 +88,9 @@ analysis_result semantic_analysis::pointer_qualifier(SyntaxRef op,
     else if (kw == standard_keyword::volatile_)
         type = add_cv(type, cv_volatile);
     else
-        return not_supported(op, "ext");
+        return not_supported_because(
+            op, "ext",
+            "a pointer qualifier other than const, volatile or an extension");
     return analysis_result::well_formed;
 }
 
@@ -178,7 +183,9 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             continue;
         }
         if (c.is_attribute())
-            return not_supported(op, "dcl.attr");
+            return not_supported_because(
+                op, "dcl.attr",
+                "a standard attribute after a pointer operator");
         if (c.nested_name_specifier()) {
             /* [dcl.mptr]/1: "In a declaration T D where D has the form
                    nested-name-specifier * attribute-specifier-seq_opt
@@ -204,7 +211,9 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             }
             if (scope.global ||
                 entity_table[scope.entity].kind != entity_kind::class_type)
-                return not_supported(op, "dcl.mptr");
+                return not_supported_because(op, "dcl.mptr",
+                                             "a pointer to member of the "
+                                             "global namespace or a non-class");
             member_class = scope.entity;
             continue;
         }
@@ -260,20 +269,24 @@ analysis_result semantic_analysis::pointer_operator(SyntaxRef op,
             if (!tokens.files.behavior.has(language_feature::rvalue_references))
                 /* [ext.clang] an rvalue reference before C++11, an
                    extension (an error with -pedantic-errors) */
-                return not_supported(op, "ext.clang");
+                return not_supported_because(
+                    op, "ext.clang", "an rvalue reference before C++11");
             VTRY(r, misplaced_function_qualifiers(op, type, false));
             VTRY_SET(r, reference(op, true, type, m));
         } else if (c.cv_qualifier_seq()) {
             /* [dcl.ptr]/1: the cv-qualifiers apply to the pointer */
             for (auto q : c.elements()) {
                 if (!q.is_token())
-                    return not_supported(op, "dcl.ptr");
+                    return not_supported_because(
+                        op, "dcl.ptr",
+                        "a cv-qualifier that is no keyword token");
                 VTRY(r, pointer_qualifier(op, q.token(), type));
             }
         } else if (c.is_token()) {
             VTRY(r, pointer_qualifier(op, c.token(), type));
         } else {
-            return not_supported(op, "dcl.ptr");
+            return not_supported_because(
+                op, "dcl.ptr", "an unexpected part of a pointer operator");
         }
     }
     return analysis_result::well_formed;
@@ -463,10 +476,12 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
        [dcl.array]/1: "T ... shall not be ... an abstract class type"),
        where clang still reports it */
     if (abstract_class(type))
-        return not_supported(at, "class.abstract");
+        return not_supported_because(at, "class.abstract",
+                                     "an array of an abstract class");
     /* [ext:clang_vla] an array of variable length arrays: not analysed */
     if (has_variable_bound(type))
-        return not_supported(at, "dcl.array");
+        return not_supported_because(at, "dcl.array",
+                                     "an array of variable length arrays");
     if (!bound) {
         type = qualified_type::make(type_table.array_of_unknown_bound_of(type),
                                     cv_none);
@@ -485,7 +500,9 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
        analyses the declarator again with the parameter bound to it */
     if (entity_index named = value_parameter_named(bound)) {
         if (!is_integral(entity_table[named].type))
-            return not_supported(at, "temp.dep.constexpr");
+            return not_supported_because(
+                at, "temp.dep.constexpr",
+                "an array bound parameter that is not integral");
         type = qualified_type::make(
             type_table.array_of_parameter_bound(type, named), cv_none);
         return analysis_result::well_formed;
@@ -516,7 +533,8 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
     if (of_bound.kind == type_kind::enumeration ||
         of_bound.kind == type_kind::class_type ||
         of_bound.kind == type_kind::none)
-        return not_supported(at, "expr.const");
+        return not_supported_because(
+            at, "expr.const", "an array bound of enumeration or class type");
     if (!is_integral(m.type))
         return ill_formed(at,
                           "the constant-expression shall be a converted "
@@ -534,9 +552,12 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
            element type has none), whose bound is evaluated where it is
            declared and converted to std::size_t */
         if (!run_time_allowed || !m.node || !depends_on_run_time_state(m.node))
-            return not_supported(at, "expr.const");
+            return not_supported_because(
+                at, "expr.const",
+                "a non-constant array bound where none may be variable");
         if (has_variable_bound(type))
-            return not_supported(at, "dcl.array");
+            return not_supported_because(
+                at, "dcl.array", "a multidimensional variable length array");
         VTRY_SET(r, extension_used(diagnostic_id::sema_variable_length_array,
                                    at.first_token(), nullptr));
         type = qualified_type::make(
@@ -555,7 +576,8 @@ analysis_result semantic_analysis::array(SyntaxRef at, SyntaxElement bound,
                           "dcl.array");
     /* an array too large for the address space: clang's error, by size */
     if (value > (UINT64_C(1) << 40))
-        return not_supported(at, "dcl.array");
+        return not_supported_because(at, "dcl.array",
+                                     "an array bound too large");
     /* "N shall be greater than zero": zero is clang's extension */
     if (!value) {
         VTRY_SET(r, extension_used(diagnostic_id::sema_zero_length_array,
@@ -616,14 +638,18 @@ semantic_analysis::variable_length_declaration(SyntaxRef declaration,
                                                bool permitted, bool initialized)
 {
     if (!permitted || !variable_length_array(type))
-        return not_supported(declaration, "dcl.array");
+        return not_supported_because(
+            declaration, "dcl.array",
+            "a variable length array in this kind of declaration");
     if (initialized)
         return ill_formed(declaration,
                           "a variable length array shall not be initialized",
                           "ext.clang");
     qualified_type element = type_table[type.unqualified()].operand;
     if (!size_of_type(element) || has_variable_bound(element))
-        return not_supported(declaration, "dcl.array");
+        return not_supported_because(
+            declaration, "dcl.array",
+            "a variable length array of this element type");
     entity_index record = element_class(element);
     if (record) {
         /* the elements would be constructed and destroyed in a loop at
@@ -631,12 +657,16 @@ semantic_analysis::variable_length_declaration(SyntaxRef declaration,
         if (!is_class_entity(record) || destroys(record) ||
             (entity_table[record].first_constructor &&
              !trivial_defaulted_default_constructor(record)))
-            return not_supported(declaration, "dcl.init");
+            return not_supported_because(
+                declaration, "dcl.init",
+                "a variable length array of a non-trivial class");
     }
     /* [dcl.constexpr]: not a literal type's variable */
     if (function_state.function &&
         entity_table[function_state.function].constexpr_)
-        return not_supported(declaration, "dcl.constexpr");
+        return not_supported_because(
+            declaration, "dcl.constexpr",
+            "a variable length array in a constexpr function");
     return analysis_result::well_formed;
 }
 
@@ -1194,7 +1224,9 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
     VTRY(r, nested_name_specifier(nested, scope));
     if (at_block_scope() || function_state.active ||
         (defining_class && !friend_declarator))
-        return not_supported(nested, "dcl.meaning");
+        return not_supported_because(
+            nested, "dcl.meaning",
+            "a qualified declarator at block or class scope");
     /* [basic.lookup.qual]/3: what follows the qualified-id is looked up in
        its namespace, not in the class a friend declaration is in */
     defining_class = 0;
@@ -1206,7 +1238,9 @@ analysis_result semantic_analysis::declarator_qualifier(SyntaxRef nested,
     require_complete(scope.entity);
     const entity &c = entity_table[scope.entity];
     if (c.kind != entity_kind::class_type || !c.size)
-        return not_supported(nested, "basic.lookup.qual");
+        return not_supported_because(
+            nested, "basic.lookup.qual",
+            "a declarator qualified by an incomplete or non-class type");
     m.qualifier = scope.entity;
     return analysis_result::well_formed;
 }
@@ -1251,12 +1285,16 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                declares a pack ([temp.param]/17 for a non-type template
                parameter) */
             if (!pack_declarator || m.pack)
-                return not_supported(declaration, "temp.variadic");
+                return not_supported_because(
+                    declaration, "temp.variadic",
+                    "an ellipsis in a declarator that takes no pack");
             m.pack = d.token();
             return analysis_result::well_formed;
         }
         if (!d.is_identifier())
-            return not_supported(declaration, "dcl.decl");
+            return not_supported_because(
+                declaration, "dcl.decl",
+                "a declarator-id that is no identifier");
         m.has_id = true;
         m.id = d.token();
         return analysis_result::well_formed;
@@ -1267,12 +1305,14 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     case syntax_kind::ptr_abstract_declarator: {
         /* ptr-operator ptr-declarator */
         if (!d[0].ptr_operator())
-            return not_supported(n, "dcl.decl");
+            return not_supported_because(
+                n, "dcl.decl", "a pointer declarator with no pointer operator");
         analysis_result r = pointer_operator(d[0], type, m);
         if (r != analysis_result::well_formed || d.size() == 1)
             return r;
         if (d.size() != 2)
-            return not_supported(n, "dcl.decl");
+            return not_supported_because(
+                n, "dcl.decl", "a pointer declarator with extra parts");
         return declarator(declaration, d[1], type, m);
     }
     case syntax_kind::parameters_and_qualifiers: {
@@ -1297,7 +1337,9 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                named by a qualified template-id */
             VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
             if (!m.qualified_namespace)
-                return not_supported(n, "dcl.meaning");
+                return not_supported_because(
+                    n, "dcl.meaning",
+                    "a template-id not qualified by a namespace");
             declarator_template_id = false;
             m.template_id = q[1];
             m.has_id = true;
@@ -1305,7 +1347,9 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             return analysis_result::well_formed;
         }
         if (q.size() != 2 || !q.nested_name_specifier() || !q.identifier())
-            return not_supported(n, "dcl.meaning");
+            return not_supported_because(
+                n, "dcl.meaning",
+                "a qualified declarator-id that is no plain name");
         VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
         m.has_id = true;
         m.id = q.identifier().token();
@@ -1326,12 +1370,14 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             }
             auto literal = c.gnu_asm_label().string_literal();
             if (c.size() != 4 || !literal)
-                return not_supported(n, "ext.gnu");
+                return not_supported_because(
+                    n, "ext.gnu", "an asm label of unexpected shape");
             owned_buffer written;
             tokens.spelling(literal.token(), written.get());
             if (written.size() < 2 ||
                 memchr(written.data(), '\\', written.size()))
-                return not_supported(n, "ext.gnu");
+                return not_supported_because(
+                    n, "ext.gnu", "an asm label with an escape sequence");
             m.asm_label = literal.token();
         }
         return declarator(declaration, d[0], type, m);
@@ -1352,14 +1398,17 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
         /* [temp.expl.spec]/1: a specialization's template-id, the whole
            declarator (a variable template's) */
         if (!declarator_template_id || !d[0].is_identifier())
-            return not_supported(n);
+            return not_supported_because(
+                n, syntax_kind_subclause(n.kind()),
+                "a template-id declarator that is no specialization's");
         declarator_template_id = false;
         m.template_id = n;
         m.has_id = true;
         m.id = d[0].token();
         return analysis_result::well_formed;
     default:
-        return not_supported(n);
+        return not_supported_because(n, syntax_kind_subclause(n.kind()),
+                                     "a declarator of this kind");
     }
     /* the head: ( ptr-declarator ) or the declarator-id, or none in an
        abstract declarator; then the suffixes */
@@ -1372,7 +1421,9 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     if (d[0].is(punct::LEFT_PARENTHESIS)) {
         auto inner = parts.parenthesized();
         if (!inner)
-            return not_supported(n, "dcl.decl");
+            return not_supported_because(
+                n, "dcl.decl",
+                "empty or unexpected parentheses in a declarator");
         has_head = true;
         head = inner;
         i = 3;
@@ -1388,7 +1439,8 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
            parameter-declaration-clause, the parameter-declaration declares
            a function parameter pack" */
         if (!pack_declarator || m.pack)
-            return not_supported(n, "temp.variadic");
+            return not_supported_because(n, "temp.variadic",
+                                         "an ellipsis here declaring no pack");
         m.pack = parts.ellipsis().token();
         i = 1;
         if (id.is_identifier()) {
@@ -1450,10 +1502,13 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                              name.simple_template_id().template_name();
         if (q.size() != 2 || !q.nested_name_specifier() ||
             (!operator_name && !template_name && !name.is_identifier()))
-            return not_supported(q, "dcl.meaning");
+            return not_supported_because(
+                q, "dcl.meaning",
+                "a qualified declarator naming this kind of entity");
         VTRY(r, declarator_qualifier(q.nested_name_specifier(), m));
         if (m.destructor && !m.qualifier)
-            return not_supported(q, "class.dtor");
+            return not_supported_because(
+                q, "class.dtor", "a destructor qualified by a namespace");
         has_head = true;
         if (template_name) {
             m.template_id = name.index();
@@ -1483,7 +1538,9 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
     } else if (auto u = id.destructor_type_id()) {
         /* [class.dtor]/1: ~ class-name, in its class */
         if (!in_member_declarator || u.size() != 2 || !u.identifier())
-            return not_supported(id, "dcl.meaning");
+            return not_supported_because(
+                id, "dcl.meaning",
+                "a destructor name outside its member declaration");
         m.destructor = true;
         has_head = true;
         head = u.identifier();
@@ -1566,7 +1623,9 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
                     continue;
                 }
             }
-            return not_supported(n, "dcl.attr");
+            return not_supported_because(
+                n, "dcl.attr",
+                "an attribute in a declarator that has an effect");
         }
         if (c.parameters_and_qualifiers()) {
             /* [ext:gnu_attributes] after the parameters */
@@ -1583,7 +1642,8 @@ analysis_result semantic_analysis::declarator(SyntaxRef declaration,
             if (has_bound)
                 i++;
         } else {
-            return not_supported(n, "dcl.decl");
+            return not_supported_because(
+                n, "dcl.decl", "an unexpected suffix in a declarator");
         }
     }
     for (size_t k = suffixes.size(); k-- > 0;) {

@@ -102,15 +102,21 @@ analysis_result semantic_analysis::expression(SyntaxElement e,
     if (binary128) {
         /* [ext:gnu_float128] binary128 arithmetic is not analysed yet */
         if (e.is_token())
-            return not_supported(current_declaration, "ext.gnu");
-        return not_supported(e.index(), "ext.gnu");
+            return not_supported_because(current_declaration, "ext.gnu",
+                                         "a __float128 value in this use");
+        return not_supported_because(e.index(), "ext.gnu",
+                                     "a __float128 value in this use");
     }
     if ((k == type_kind::atomic && (m.category == value_category::prvalue ||
                                     !atomic_value_type(m.type))) ||
         k == type_kind::bit_int || k == type_kind::ext_vector) {
         if (e.is_token())
-            return not_supported(current_declaration, "ext.clang");
-        return not_supported(e.index(), "ext.clang");
+            return not_supported_because(
+                current_declaration, "ext.clang",
+                "a value of atomic prvalue, _BitInt or ext_vector type");
+        return not_supported_because(
+            e.index(), "ext.clang",
+            "a value of atomic prvalue, _BitInt or ext_vector type");
     }
     /* [expr.type]/2: "If a prvalue initially has the type "cv T", where T
        is a cv-unqualified non-class, non-array type, the type of the
@@ -195,7 +201,9 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
             syntax_parser.extension_keyword_of(t) ==
                 extension_keyword::predefined_name)
             return predefined_name(e.token(), m);
-        return not_supported(current_declaration, "expr.prim");
+        return not_supported_because(
+            current_declaration, "expr.prim",
+            "a primary expression starting with an unhandled token");
     }
     switch (e.kind()) {
     case syntax_kind::gnu_extension_expression:
@@ -268,7 +276,9 @@ analysis_result semantic_analysis::expression_kind(SyntaxElement e,
         return id_expression(function_name.id, m);
     }
     default:
-        return not_supported(e);
+        return not_supported_because(
+            e, syntax_kind_subclause(e.kind()),
+            "an expression of an unhandled syntactic kind");
     }
 }
 

@@ -295,7 +295,9 @@ semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
                  type_kind::class_type ||
              type_table[parameters[0].unqualified()].kind ==
                  type_kind::dependent))
-            return not_supported(n, subclause);
+            return not_supported_because(n, subclause,
+                                         "an allocation function whose first "
+                                         "parameter is class or dependent");
         if (!function.parameter_count || !(parameters[0] == size))
             return ill_formed(n,
                               "the first parameter of an allocation function "
@@ -304,7 +306,8 @@ semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
         if (x.default_arguments || x.unknown_defaults)
             /* the first parameter's default argument is ill-formed, the
                others' are not analysed */
-            return not_supported(n, subclause);
+            return not_supported_because(
+                n, subclause, "an allocation function with default arguments");
         allocation_declarations_analysed++;
         return analysis_result::well_formed;
     }
@@ -340,14 +343,19 @@ semantic_analysis::allocation_function_declaration(SyntaxRef n, entity_index f)
                               subclause);
         if (function.parameter_count != 2 || x.default_arguments ||
             x.unknown_defaults || function.variadic)
-            return not_supported(n, subclause);
+            return not_supported_because(n, subclause,
+                                         "a destroying operator delete with "
+                                         "extra parameters or defaults");
         allocation_declarations_analysed++;
         return analysis_result::well_formed;
     }
     if (!void_pointer)
-        return not_supported(n, subclause);
+        return not_supported_because(
+            n, subclause,
+            "a deallocation function whose first parameter is not void*");
     if (x.default_arguments || x.unknown_defaults)
-        return not_supported(n, subclause);
+        return not_supported_because(
+            n, subclause, "a deallocation function with default arguments");
     allocation_declarations_analysed++;
     return analysis_result::well_formed;
 }

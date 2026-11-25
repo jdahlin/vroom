@@ -295,21 +295,26 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
     VTRY(r, type_id(n[2], b));
     VTRY_SET(r, type_id(n[4], d));
     if (depends_on_template_parameter(b) || depends_on_template_parameter(d))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(n, "temp.dep.constexpr",
+                                     "a base-of trait of a dependent type");
     const struct type bk = type_table[b.unqualified()];
     const struct type dk = type_table[d.unqualified()];
     bool value = false;
     if (bk.kind == type_kind::class_type && dk.kind == type_kind::class_type) {
         if (entity_table[bk.entity].kind != entity_kind::class_type ||
             entity_table[dk.entity].kind != entity_kind::class_type)
-            return not_supported(n, "meta.rel");
+            return not_supported_because(
+                n, "meta.rel",
+                "a base-of trait on a class type whose entity is not a class");
         if (virtual_base) {
             /* __builtin_is_virtual_base_of(B, D): B is one of D's virtual
                bases, direct or indirect ([class.mi]/4); a class is none of
                its own */
             require_complete(dk.entity);
             if (!entity_table[dk.entity].size)
-                return not_supported(n, "meta.rel");
+                return not_supported_because(n, "meta.rel",
+                                             "a virtual-base-of trait with a "
+                                             "derived class that has no size");
             const entity &x = entity_table[dk.entity];
             for (uint32_t i = 0; i < x.virtual_base_count; i++)
                 if (type_table[entity_table[class_virtual_bases
@@ -322,7 +327,9 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
         } else {
             require_complete(dk.entity);
             if (!entity_table[dk.entity].size)
-                return not_supported(n, "meta.rel");
+                return not_supported_because(
+                    n, "meta.rel",
+                    "a base-of trait with a derived class that has no size");
             value = derives_from(dk.entity, bk.entity);
         }
         /* [meta.rel] is_pointer_interconvertible_base_of: "Derived is
@@ -334,7 +341,10 @@ analysis_result semantic_analysis::clang_base_of_trait(SyntaxRef n,
             bool layout = false;
             if (!class_property_trait(int(unary_trait_kind::is_standard_layout),
                                       d, layout))
-                return not_supported(n, "meta.rel");
+                return not_supported_because(
+                    n, "meta.rel",
+                    "a pointer-interconvertible base trait with unknown "
+                    "standard-layout property");
             value = layout;
         }
     }
@@ -1155,11 +1165,15 @@ semantic_analysis::clang_layout_compatible_trait(SyntaxRef n,
     VTRY(r, type_id(n[2], t));
     VTRY_SET(r, type_id(n[4], u));
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "__is_layout_compatible of a dependent type");
     bool known = true;
     bool answer = layout_compatible(t, u, known);
     if (!known)
-        return not_supported(n, "meta.rel");
+        return not_supported_because(n, "meta.rel",
+                                     "__is_layout_compatible of types whose "
+                                     "layout compatibility is unknown");
     m = integer_constant(fundamental_type::bool_, answer, n.first_token());
     return analysis_result::well_formed;
 }

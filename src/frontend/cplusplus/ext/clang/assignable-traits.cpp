@@ -87,7 +87,9 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
     VTRY(r, type_id(n[2], t));
     VTRY_SET(r, type_id(n[4], u));
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "an assignability trait of a dependent type");
     bool value = false;
     expression_meaning left = declval_meaning(t);
     expression_meaning right = declval_meaning(u);
@@ -107,7 +109,9 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
         if (lk.kind == type_kind::class_type) {
             require_complete(lk.entity);
             if (!entity_table[lk.entity].size)
-                return not_supported(n, "expr.ass");
+                return not_supported_because(n, "expr.ass",
+                                             "an assignability trait whose "
+                                             "left operand class has no size");
             /* [over.match.funcs]/5: an operator= without a reference
                qualifier takes an rvalue object */
             left.category = value_category::lvalue;
@@ -133,7 +137,10 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
             } else if (which == 2) {
                 triviality k = assignment_triviality(*this, result.node);
                 if (k == triviality::unknown)
-                    return not_supported(n, "meta.unary.prop");
+                    return not_supported_because(
+                        n, "meta.unary.prop",
+                        "a trivial-assignment trait whose assignment's "
+                        "triviality is unknown");
                 value = k == triviality::trivial;
             }
         } else {
@@ -159,7 +166,9 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
     VTRY(r, type_id(n[2], t));
     VTRY_SET(r, type_id(n[4], u));
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "a reference-temporary trait of a dependent type");
     bool value = false;
     const struct type tk = type_table[t.unqualified()];
     const struct type uk = type_table[u.unqualified()];
@@ -183,7 +192,9 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
             require_complete(type_table[from.type.unqualified()].entity);
             entity_index uc = type_table[from.type.unqualified()].entity;
             if (!entity_table[uc].size)
-                return not_supported(n, "dcl.init.ref");
+                return not_supported_because(n, "dcl.init.ref",
+                                             "a reference-temporary trait from "
+                                             "a class that has no size");
             /* before C++17 a class prvalue is copied or moved: not
                followed for a class that cannot be */
             if (!u_reference)
@@ -191,14 +202,20 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
                      k = entity_table[k].next_constructor)
                     if (entity_table[k].deleted &&
                         copy_or_move_constructor(uc, k))
-                        return not_supported(n, "dcl.init.ref");
+                        return not_supported_because(
+                            n, "dcl.init.ref",
+                            "a reference-temporary trait of a class with a "
+                            "deleted copy or move constructor");
             /* [over.match.ref]/1: a direct-initialization also considers
                the explicit conversion functions, which the binding does
                not */
             for (entity_index f = own_conversion_functions(uc); f;
                  f = entity_table[f].next_overload)
                 if (which != 2 && entity_table[f].explicit_)
-                    return not_supported(n, "over.match.ref");
+                    return not_supported_because(
+                        n, "over.match.ref",
+                        "a reference-temporary trait through an explicit "
+                        "conversion function");
         }
         from.node =
             expression_node(semantic_kind::constant, from, n.first_token());
@@ -208,7 +225,10 @@ semantic_analysis::clang_reference_temporary_trait(SyntaxRef n, int which,
         if (ok) {
             if (!made.node ||
                 semantics[made.node].kind != semantic_kind::bind_reference)
-                return not_supported(n, "dcl.init.ref");
+                return not_supported_because(
+                    n, "dcl.init.ref",
+                    "a reference-temporary trait whose initialization is not a "
+                    "reference binding");
             uint32_t target = semantics[made.node].a;
             /* a derived-to-base conversion of a temporary binds to it */
             while (target &&

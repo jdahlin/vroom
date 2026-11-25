@@ -39,11 +39,14 @@ analysis_result semantic_analysis::expression_statement(ExpressionStatement n,
         return analysis_result::well_formed;
     }
     if (n.size() != 2)
-        return not_supported(n, "stmt.expr");
+        return not_supported_because(
+            n, "stmt.expr", "an expression statement of unexpected shape");
     expression_meaning m;
     analysis_result r = expression(n[0], m);
     if (r == analysis_result::well_formed && destroyed_temporary(m))
-        return not_supported(n, "class.temporary");
+        return not_supported_because(
+            n, "class.temporary",
+            "a discarded temporary that needs destruction");
     built = statement_node(semantic_kind::expression_statement, n.first_token(),
                            m.node);
     return r;

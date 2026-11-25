@@ -299,7 +299,9 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
     /* [namespace.def]/1 (the grammar): a namespace-definition is a
        declaration of a namespace-body or the translation unit */
     if (!is_namespace(current_scope) || defining_class || function_state.active)
-        return not_supported(n, "namespace.def");
+        return not_supported_because(
+            n, "namespace.def",
+            "a namespace definition outside namespace scope");
     struct component {
         uint32_t name = 0;
         token_index at = 0;
@@ -324,7 +326,9 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
             gnu_attributes g;
             VTRY(r, gnu_attribute_specifier(c, g));
             if (g.flags || g.aligned || g.section)
-                return not_supported(n, "dcl.attr");
+                return not_supported_because(
+                    n, "dcl.attr",
+                    "a GNU attribute on a namespace that has an effect");
             continue;
         }
         if (!c.is_token()) {
@@ -334,7 +338,9 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
                nodiscard on a namespace) is passed over */
             if (attributes_without_effect(c))
                 continue;
-            return not_supported(n, "dcl.attr");
+            return not_supported_because(
+                n, "dcl.attr",
+                "an attribute on a namespace that has an effect");
         }
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE))
             body = true;
@@ -342,10 +348,12 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
             head.append(c);
     }
     if (!body)
-        return not_supported(n, "namespace.def");
+        return not_supported_because(n, "namespace.def",
+                                     "a namespace definition with no body");
     for (SyntaxElement c : head) {
         if (!c.is_token())
-            return not_supported(n, "namespace.def");
+            return not_supported_because(
+                n, "namespace.def", "a namespace head part that is no token");
         const token &t = tokens[c.token()];
         if (t.kind == token_kind::identifier) {
             component x;
@@ -396,7 +404,9 @@ analysis_result semantic_analysis::namespace_definition(SyntaxRef n)
         if (e) {
             const entity &prior = entity_table[e];
             if (prior.kind == entity_kind::none)
-                return not_supported(n, "basic.scope.declarative");
+                return not_supported_because(
+                    n, "basic.scope.declarative",
+                    "a namespace name held by an unanalysed declaration");
             /* [basic.scope.declarative]/4: "Given a set of declarations in
                a single declarative region, each of which specifies the same
                unqualified name, they shall all refer to the same entity, or
@@ -474,7 +484,9 @@ analysis_result semantic_analysis::named_namespace(SyntaxRef at,
         nominated_scope scope;
         VTRY(r, nested_name_specifier(qualifier, scope));
         if (!is_namespace(scope.entity))
-            return not_supported(at, "basic.lookup.udir");
+            return not_supported_because(
+                at, "basic.lookup.udir",
+                "a namespace name qualified by something not a namespace");
         found = lookup_in_namespace(scope.entity, tokens.identifier(name),
                                     lookup_filter::namespaces);
     } else {
@@ -491,7 +503,8 @@ analysis_result semantic_analysis::named_namespace(SyntaxRef at,
        rules for declares */
     if (!found.entity ||
         entity_table[found.entity].kind != entity_kind::namespace_entity)
-        return not_supported(at, "basic.lookup.udir");
+        return not_supported_because(at, "basic.lookup.udir",
+                                     "a name that finds no namespace");
     used(name, found.entity);
     n = found.entity;
     return analysis_result::well_formed;
@@ -518,7 +531,8 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
         return r;
     };
     if (defining_class)
-        return unknown(not_supported(n, "namespace.udir"));
+        return unknown(not_supported_because(n, "namespace.udir",
+                                             "a using-directive in a class"));
     SyntaxRef qualifier = 0;
     token_index name = 0;
     for (auto c : n.elements()) {
@@ -528,12 +542,14 @@ analysis_result semantic_analysis::using_directive(UsingDirective n)
         }
         if (!c.is_token())
             /* an attribute-specifier-seq */
-            return unknown(not_supported(n, "dcl.attr"));
+            return unknown(not_supported_because(
+                n, "dcl.attr", "an attribute on a using-directive"));
         if (c.is_identifier())
             name = c.token();
     }
     if (!name)
-        return unknown(not_supported(n, "namespace.udir"));
+        return unknown(not_supported_because(
+            n, "namespace.udir", "a using-directive with no namespace name"));
     entity_index nominated = 0;
     analysis_result r = named_namespace(n, qualifier, name, nominated);
     if (r != analysis_result::well_formed)
@@ -565,7 +581,9 @@ analysis_result
 semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
 {
     if (defining_class || n.size() < 4 || !n[1].is_identifier())
-        return not_supported(n, "namespace.alias");
+        return not_supported_because(
+            n, "namespace.alias",
+            "a namespace alias in a class or of unexpected shape");
     token_index alias = n[1].token();
     SyntaxRef qualifier = 0;
     token_index name = 0;
@@ -574,13 +592,17 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
         if (named.size() != 2 ||
             !named[0].is(syntax_kind::nested_name_specifier) ||
             !named[1].is_token())
-            return not_supported(n, "namespace.alias");
+            return not_supported_because(
+                n, "namespace.alias",
+                "a qualified namespace specifier of unexpected shape");
         qualifier = named[0].index();
         name = named[1].token();
     } else if (named.is_token() && named.is_identifier()) {
         name = named.token();
     } else {
-        return not_supported(n, "namespace.alias");
+        return not_supported_because(
+            n, "namespace.alias",
+            "a namespace alias of something that is no name");
     }
     entity_index nominated = 0;
     VTRY(r, named_namespace(n, qualifier, name, nominated));
@@ -589,7 +611,9 @@ semantic_analysis::namespace_alias_definition(NamespaceAliasDefinition n)
     entity_index prior = entity_table.find(scope, alias_name);
     if (prior) {
         if (entity_table[prior].kind == entity_kind::none)
-            return not_supported(n, "basic.scope.declarative");
+            return not_supported_because(
+                n, "basic.scope.declarative",
+                "an alias name held by an unanalysed declaration");
         if (prior == nominated)
             /* /3: the alias again; (or the namespace's own name in its
                scope, which [ext.clang] clang accepts too) */

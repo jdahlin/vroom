@@ -94,11 +94,14 @@ semantic_analysis::deduction_guide_candidate(TemplateDeclaration t,
     /* a template-name of a class template, which the guide's simple-template-id
        names too ([temp.deduct.guide]/3) */
     if (!ct || function_templates[ct - 1].is_alias)
-        return not_supported(t, "temp.deduct.guide");
+        return not_supported_because(
+            t, "temp.deduct.guide",
+            "a deduction guide for a name that is no class template");
     owned_array<SyntaxRef> parameters;
     VTRY(head, template_head_parameters(t, parameters, true, true, true, true));
     if (trailing_constraint(t) || head_constraint(t))
-        return not_supported(t, "temp.constr");
+        return not_supported_because(t, "temp.constr",
+                                     "a deduction guide with a constraint");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY(declared, template_parameter_scope(t, parameters, outer, 0, index,

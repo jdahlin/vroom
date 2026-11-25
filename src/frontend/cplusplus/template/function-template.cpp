@@ -104,7 +104,9 @@ analysis_result semantic_analysis::function_template_attributes(
         (gnu_flags & ~(gnu_function_symbol_flags | allowed)) || s.aligned ||
         m.aligned || s.section || m.section || m.asm_label ||
         (s.abi_tag && m.abi_tag && s.abi_tag != m.abi_tag))
-        return not_supported(n, subclause);
+        return not_supported_because(
+            n, subclause,
+            "a function template with an unhandled specifier or attribute");
     abi_tag = m.abi_tag;
     if (!abi_tag)
         abi_tag = s.abi_tag;
@@ -142,7 +144,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
        where the template-head has none */
     uint32_t trailing = static_cast<bool>(trailing_constraint(n));
     if (trailing && head_constraint(n))
-        return not_supported(n, "temp.constr");
+        return not_supported_because(
+            n, "temp.constr",
+            "a function template with requires-clauses both in head and after");
     if (tail.size() != 3 + trailing ||
         !tail[0].is(syntax_kind::decl_specifier_seq) || tail[1].is_token() ||
         (defines && !tail[2 + trailing].is(syntax_kind::function_body)) ||
@@ -150,7 +154,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
          (!tail[2].is(preprocessing_op_or_punc::SEMICOLON) ||
           (!tail[1].is(syntax_kind::noptr_declarator,
                        syntax_kind::ptr_declarator, syntax_kind::declarator)))))
-        return not_supported(n, "temp.fct");
+        return not_supported_because(
+            n, "temp.fct",
+            "a function template declaration of an unhandled form");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     entity_index lookup_outer = outer;
@@ -169,7 +175,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
     if (!m.has_id || m.qualifier || m.qualified_namespace ||
         m.allocation != allocation_function::none || function_cv ||
         type_table[type.unqualified()].kind != type_kind::function)
-        return not_supported(n, "temp.fct");
+        return not_supported_because(
+            n, "temp.fct",
+            "a function template declarator of an unhandled form");
     if (m.literal_operator) {
         if (parameters.size() != 1 || !template_parameter_is_pack(first) ||
             entity_table[template_parameter_entities[first]].kind !=
@@ -178,10 +186,13 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                 entity_table[template_parameter_entities[first]].type) !=
                 fundamental_type::char_ ||
             type_table[type.unqualified()].parameter_count != 0)
-            return not_supported(n, "over.literal");
+            return not_supported_because(
+                n, "over.literal",
+                "a literal operator template with an unhandled parameter list");
     }
     if (c_language)
-        return not_supported(n, "temp.fct");
+        return not_supported_because(
+            n, "temp.fct", "a function template with C language linkage");
     uint32_t gnu_flags = 0;
     token_index abi_tag = 0;
     VTRY_SET(r, function_template_attributes(n, s, m, gnu_inline_flags,
@@ -221,7 +232,10 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             for (uint32_t i = 0; i < ft.parameter_count; i++)
                 if (type_table[list[i].unqualified()].kind ==
                     type_kind::pack_expansion)
-                    return not_supported(n, "temp.variadic");
+                    return not_supported_because(
+                        n, "temp.variadic",
+                        "a function parameter pack with several template "
+                        "parameter packs");
             for (uint32_t i = 0; i < parameters.size(); i++)
                 if (template_parameter_is_pack(first + i) &&
                     !pack_only_expanded(
@@ -229,7 +243,10 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                             .name,
                         definition[lead].first_token(),
                         definition[lead + 1].end_token()))
-                    return not_supported(n, "temp.variadic");
+                    return not_supported_because(
+                        n, "temp.variadic",
+                        "several template parameter packs not only used in "
+                        "pack expansions");
             packs = 0;
         }
         bool pack = packs == 1;
@@ -245,7 +262,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                                        last) &&
             !pack_only_expanded(pack_name, tail[0].first_token(),
                                 tail[0].end_token()))
-            return not_supported(n, "temp.variadic");
+            return not_supported_because(
+                n, "temp.variadic",
+                "a pack in the return type not only used in pack expansions");
         for (uint32_t i = 0; i < ft.parameter_count; i++) {
             const struct type pt = type_table[list[i].unqualified()];
             if (pt.kind != type_kind::pack_expansion) {
@@ -254,13 +273,18 @@ semantic_analysis::function_template_definition(SyntaxRef n,
                                                &entity_table, last) &&
                     !pack_only_expanded(pack_name, tail[1].first_token(),
                                         tail[1].end_token()))
-                    return not_supported(n, "temp.variadic");
+                    return not_supported_because(
+                        n, "temp.variadic",
+                        "a pack in a parameter type not only used in pack "
+                        "expansions");
                 continue;
             }
             if (!pack || ft.variadic ||
                 !made_of_template_parameter(type_table, pt.operand,
                                             &entity_table, last))
-                return not_supported(n, "temp.variadic");
+                return not_supported_because(
+                    n, "temp.variadic",
+                    "a function parameter pack of an unhandled form");
         }
     }
     uint32_t name = tokens.identifier(m.id);
@@ -291,7 +315,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         /* [namespace.udecl]/13: one a using-declaration introduced joins
            the overload set with this one unless they are equivalent */
         if (same && entity_table[f.entity].enclosing != outer)
-            return not_supported(n, "namespace.udecl");
+            return not_supported_because(n, "namespace.udecl",
+                                         "a function template equivalent to "
+                                         "one from a using-declaration");
         if (same)
             earlier = g;
     }
@@ -300,16 +326,22 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         const entity old = entity_table[f.entity];
         if (f.definition && defines)
             /* [basic.def.odr]/1: a second definition */
-            return not_supported(n, "basic.def.odr");
+            return not_supported_because(
+                n, "basic.def.odr",
+                "a second definition of a function template");
         /* (default arguments of one declaration, which the other's
            declarator the specializations are made from has not) */
         if (defaults || f.default_arguments)
-            return not_supported(n, "dcl.fct.default");
+            return not_supported_because(
+                n, "dcl.fct.default",
+                "a redeclared function template with default arguments");
         /* (equivalent_template: the same template-head and function
            type) */
         if (old.enclosing != outer || old.constexpr_ != s.constexpr_ ||
             (s.static_ && old.linkage_of_name != linkage::internal))
-            return not_supported(n, "temp.over.link");
+            return not_supported_because(
+                n, "temp.over.link",
+                "a redeclaration with a different scope, constexpr or linkage");
         /* [except.spec]/4 */
         VTRY(compatible,
              compatible_exceptions(
@@ -328,7 +360,9 @@ semantic_analysis::function_template_definition(SyntaxRef n,
         /* [dcl.inline]/5: an inline declaration after the definition is
            ill-formed; one before it makes the template inline */
         if (s.inline_ && !old.inline_ && f.definition)
-            return not_supported(n, "dcl.inline");
+            return not_supported_because(n, "dcl.inline",
+                                         "an inline redeclaration after a "
+                                         "function template's definition");
         if (s.inline_)
             entity_table[f.entity].inline_ = true;
         entity_table.add_declaration(f.entity, n);
@@ -521,14 +555,20 @@ semantic_analysis::function_template_id_value(SyntaxRef n, uint32_t ft,
         overloaded_written.clear();
         overloaded_written_expansion.clear();
         overloaded_written_at = 0;
-        return not_supported(n, "over.over");
+        return not_supported_because(
+            n, "over.over",
+            "a function template-id naming no single specialization here");
     }
     if (specified.size() != function_templates[ft - 1].parameter_count)
-        return not_supported(n, "over.over");
+        return not_supported_because(
+            n, "over.over",
+            "a template-id with not all template arguments in a value use");
     for (const template_argument &a : specified)
         if (made_of_template_parameter(type_table, a.type) ||
             a.template_entity || a.kind == template_argument::kind_t::pack)
-            return not_supported(n, "temp.dep");
+            return not_supported_because(
+                n, "temp.dep",
+                "a function template-id with dependent or pack arguments");
     entity_index e = 0;
     VTRY(r, instantiate(n, function_templates[ft - 1].entity, specified.data(),
                         static_cast<uint32_t>(specified.size()), e));

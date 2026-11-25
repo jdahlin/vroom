@@ -806,7 +806,8 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
     to = qualified_type::make(to.unqualified(), cv_none);
     const struct type target = type_table[to.unqualified()];
     if (binary128_conversion(m.type, to))
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(at, "ext.gnu",
+                                     "a conversion involving __float128");
     if (m.type.unqualified() == to.unqualified() &&
         (binary128_or_complex(to) || target.kind == type_kind::vector)) {
         /* the identity: the value is passed on as it is */
@@ -822,10 +823,14 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
         entity_index e = enumeration_of(m.type);
         if (target.kind == type_kind::enumeration || !e) {
             if (!enumeration_of(to) && target.kind == type_kind::enumeration)
-                return not_supported(at, "dcl.enum");
+                return not_supported_because(
+                    at, "dcl.enum",
+                    "a conversion to an enumeration type that is not known");
             if (!e &&
                 type_table[m.type.unqualified()].kind == type_kind::enumeration)
-                return not_supported(at, "dcl.enum");
+                return not_supported_because(
+                    at, "dcl.enum",
+                    "a conversion from an enumeration type that is not known");
             /* [conv.integral]/1: "A prvalue of an integer type can be
                converted to a prvalue of another integer type.": an
                enumeration is none; no standard conversion makes one */
@@ -834,11 +839,16 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                 type_table[m.type.unqualified()].kind !=
                     type_kind::enumeration &&
                 type_table[m.type.unqualified()].kind != type_kind::class_type)
-                return not_supported(at, "conv");
+                return not_supported_because(
+                    at, "conv",
+                    "an integer or enumeration conversion from an unhandled "
+                    "type");
             return ill_formed(at, rule, "dcl.init");
         }
         if (target.kind != type_kind::fundamental)
-            return not_supported(at, "conv");
+            return not_supported_because(
+                at, "conv",
+                "an enumeration converted to a type that is not fundamental");
         /* [conv.integral]/1: "A prvalue of an unscoped enumeration type
            can be converted to a prvalue of an integer type."; [conv.bool],
            [conv.fpint]/2 likewise.  A scoped one converts implicitly to
@@ -888,7 +898,9 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
             }
             if (from == fundamental_type::none &&
                 type_table[m.type.unqualified()].kind != type_kind::pointer)
-                return not_supported(at, "conv");
+                return not_supported_because(
+                    at, "conv",
+                    "an arithmetic or bool conversion from an unhandled type");
             return ill_formed(at, rule, "dcl.init");
         }
         if (t == fundamental_type::std_nullptr_t) {
@@ -903,20 +915,26 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                 return analysis_result::well_formed;
             }
             if (is_integral(m.type) && m.evaluation != constness::not_constant)
-                return not_supported(at, "conv.ptr");
+                return not_supported_because(at, "conv.ptr",
+                                             "a non-constant-folded integer "
+                                             "converted to std::nullptr_t");
             if (from == fundamental_type::none &&
                 type_table[m.type.unqualified()].kind != type_kind::pointer)
-                return not_supported(at, "conv");
+                return not_supported_because(
+                    at, "conv",
+                    "a conversion to std::nullptr_t from an unhandled type");
             return ill_formed(at, rule, "dcl.init");
         }
-        return not_supported(at, "conv");
+        return not_supported_because(
+            at, "conv", "a conversion to a fundamental type that has no rules");
     }
     bool handled = false;
     analysis_result member = member_pointer_conversion(at, m, to, handled);
     if (handled || member != analysis_result::well_formed)
         return member;
     if (target.kind != type_kind::pointer)
-        return not_supported(at, "conv");
+        return not_supported_because(
+            at, "conv", "a conversion to a target type that has no rules");
     /* [conv.ptr]/1: "A null pointer constant is an integer literal with
        value zero or a prvalue of type std::nullptr_t.  A null pointer
        constant can be converted to a pointer type" */
@@ -982,7 +1000,10 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                 tp.kind == type_kind::function ||
                 fp.kind == type_kind::enumeration ||
                 tp.kind == type_kind::enumeration)
-                return not_supported(at, "conv.ptr");
+                return not_supported_because(
+                    at, "conv.ptr",
+                    "a pointer conversion between class, function or "
+                    "enumeration pointees");
             return ill_formed(at, rule, "dcl.init");
         }
         bool same = m.type == to;
@@ -1000,7 +1021,9 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
     if (is_integral(m.type) && m.evaluation != constness::not_constant)
         /* an integral constant expression with value zero: a null pointer
            constant in C++03, clang's extension after */
-        return not_supported(at, "conv.ptr");
+        return not_supported_because(
+            at, "conv.ptr",
+            "an integral constant expression used as a null pointer constant");
     if (from == fundamental_type::none) {
         /* [expr.prim.lambda.closure]/8: a generic lambda without a
            lambda-capture has a conversion function template to pointer to
@@ -1020,7 +1043,8 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
         if (fc.kind == type_kind::class_type && fc.entity &&
             !has_conversion_functions(fc.entity))
             return ill_formed(at, rule, "dcl.init");
-        return not_supported(at, "conv");
+        return not_supported_because(
+            at, "conv", "a conversion to pointer from a type with no rules");
     }
     return ill_formed(at, rule, "dcl.init");
 }

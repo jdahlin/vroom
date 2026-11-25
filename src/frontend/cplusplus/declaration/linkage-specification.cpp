@@ -26,7 +26,8 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
 {
     if (n.size() < 3 || !n[1].is_token()) {
         hold_names(n);
-        return not_supported(n, "dcl.link");
+        return not_supported_because(
+            n, "dcl.link", "a linkage-specification with no string-literal");
     }
     /* [dcl.link]/4: "A linkage-specification shall inhabit a namespace
        scope." */
@@ -41,7 +42,8 @@ analysis_result semantic_analysis::linkage_specification(LinkageSpecification n)
            conditionally-supported, with implementation-defined
            semantics." */
         hold_names(n);
-        return not_supported(n, "dcl.link");
+        return not_supported_because(
+            n, "dcl.link", "a language linkage other than \"C\" and \"C++\"");
     }
     owned_array<SyntaxRef> inner;
     bool braces = false;

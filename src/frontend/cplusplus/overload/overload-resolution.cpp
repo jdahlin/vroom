@@ -242,7 +242,9 @@ analysis_result semantic_analysis::best_viable_function(
             defaults = entity_table[c.function].default_arguments;
         if (c.function && entity_table[c.function].unknown_defaults &&
             n < count + first)
-            return not_supported(at, "dcl.fct.default");
+            return not_supported_because(
+                at, "dcl.fct.default",
+                "a call relying on default arguments that are not known");
         viability v = viability::viable;
         /* [over.match.viable]/2: "If there are m arguments in the list, all
            candidate functions having exactly m parameters are viable.  A
@@ -538,7 +540,9 @@ analysis_result semantic_analysis::best_viable_function(
     }
     if (w == candidates.size()) {
         if (unknown)
-            return not_supported(at, "over.best.ics");
+            return not_supported_because(
+                at, "over.best.ics",
+                "no viable function while a candidate's viability is unknown");
         if (none_viable) {
             *none_viable = true;
             return analysis_result::well_formed;
@@ -618,14 +622,18 @@ analysis_result semantic_analysis::best_viable_function(
             /* [impl.clang] an ambiguity a reversed candidate makes is
                resolved for the non-reversed one with a warning
                (-Wambiguous-reversed-operator) */
-            return not_supported(at, "over.match.oper");
+            return not_supported_because(
+                at, "over.match.oper",
+                "an ambiguity involving a rewritten operator candidate");
         if (!better(w, i) &&
             (candidates[w].template_index || candidates[i].template_index) &&
             !unconstrained_tie(w, i))
             /* two specializations neither more specialized (or partial
                ordering analysis cannot tell): clang's ambiguity, not
                claimed */
-            return not_supported(at, "temp.func.order");
+            return not_supported_because(at, "temp.func.order",
+                                         "template specializations that "
+                                         "partial ordering does not separate");
         bool user_defined2 = false;
         for (size_t k = 0; k < width; k++)
             if (ics[w * width + k].kind ==
@@ -641,12 +649,16 @@ analysis_result semantic_analysis::best_viable_function(
         if (!better(w, i) && to_arrays)
             /* /3.1: lists to arrays of different bounds (CWG1307), not
                ranked here */
-            return not_supported(at, "over.ics.rank");
+            return not_supported_because(
+                at, "over.ics.rank",
+                "an ambiguity between list conversions to arrays");
         if (!better(w, i) && user_defined2)
             /* /3.3: two user-defined conversion sequences of different
                functions are indistinguishable; clang's ambiguity is not
                claimed */
-            return not_supported(at, "over.ics.rank");
+            return not_supported_because(at, "over.ics.rank",
+                                         "an ambiguity between different "
+                                         "user-defined conversion sequences");
         if (!better(w, i))
             return ill_formed(at,
                               "overload resolution fails when no viable "
@@ -656,15 +668,21 @@ analysis_result semantic_analysis::best_viable_function(
     }
     for (size_t i = 0; i < candidates.size(); i++)
         if (state[i] == viability::unknown && !better(w, i))
-            return not_supported(at, "over.best.ics");
+            return not_supported_because(at, "over.best.ics",
+                                         "a candidate of unknown viability "
+                                         "that the best one does not beat");
     if (order_unknown)
-        return not_supported(at, "temp.func.order");
+        return not_supported_because(
+            at, "temp.func.order",
+            "a best function that depends on an unknown partial ordering");
     /* [over.best.ics]/10: "If a function that uses the ambiguous conversion
        sequence is selected as the best viable function, the call will be
        ill-formed" (clang's diagnostic names the conversions: not analysed) */
     for (size_t i = 0; i < width; i++)
         if (ics[w * width + i].ambiguous)
-            return not_supported(at, "over.best.ics");
+            return not_supported_because(
+                at, "over.best.ics",
+                "a best function that uses an ambiguous conversion sequence");
     chosen = w;
     return analysis_result::well_formed;
 }

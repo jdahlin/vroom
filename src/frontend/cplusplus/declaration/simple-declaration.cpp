@@ -703,7 +703,8 @@ semantic_analysis::static_assert_declaration(StaticAssertDeclaration n)
 {
     /* static_assert ( constant-expression [, string-literal] ) ; */
     if (n.size() < 5)
-        return not_supported(n, "dcl.pre");
+        return not_supported_because(n, "dcl.pre",
+                                     "a static_assert of unexpected shape");
     bool constant = false, value = false;
     constant_only++;
     analysis_result r = bool_constant_expression(n, n[2], constant, value);
@@ -761,15 +762,19 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
         VTRY(r, gnu_attribute_specifier(n[2], g));
         if (g.flags || g.aligned || g.section || g.abi_tag ||
             !g.ext_vector.given())
-            return not_supported(n, "dcl.attr");
+            return not_supported_because(
+                n, "dcl.attr",
+                "a __declspec or attribute before a using alias");
         type_at = 4;
     }
     if (n.size() != type_at + 2 ||
         !n[type_at].is(syntax_kind::defining_type_id))
-        return not_supported(n, "dcl.attr");
+        return not_supported_because(
+            n, "dcl.attr", "an alias-declaration of unexpected shape");
     auto id = n[type_at];
     if (!id.size() || id.size() > 2 || id[0].is_token())
-        return not_supported(n, "dcl.typedef");
+        return not_supported_because(
+            n, "dcl.typedef", "an alias with no defining-type-id specifiers");
     /* (a simple-template-id counts as declares_class too: the
        class-specifiers and elaborated-type-specifiers are looked for) */
     for (SyntaxElement k : id[0].elements()) {
@@ -777,19 +782,22 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
                  syntax_kind::elaborated_type_specifier,
                  syntax_kind::enum_specifier,
                  syntax_kind::elaborated_enum_specifier))
-            return not_supported(n, "dcl.typedef");
+            return not_supported_because(
+                n, "dcl.typedef", "a type defined or elaborated in this alias");
     }
     specified s;
     VTRY(r, decl_specifier_seq(id[0], s, false));
     if (!s.has_type || s.declares_enumeration || s.typedef_ || s.static_ ||
         s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)
-        return not_supported(n, "dcl.typedef");
+        return not_supported_because(n, "dcl.typedef",
+                                     "these specifiers in this alias");
     type = s.type;
     if (id.size() == 2) {
         declarator_meaning m;
         r = declarator(current_declaration, id[1], type, m);
         if (r == analysis_result::well_formed && m.has_id)
-            return not_supported(n, "dcl.name");
+            return not_supported_because(
+                n, "dcl.name", "an alias type-id that declares a name");
         if (r != analysis_result::well_formed)
             return r;
     }
@@ -801,7 +809,8 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
 analysis_result semantic_analysis::alias_declaration(AliasDeclaration n)
 {
     if (defining_class)
-        return not_supported(n, "class.mem");
+        return not_supported_because(n, "class.mem",
+                                     "an alias-declaration in a class here");
     qualified_type type;
     VTRY(r, alias_type(n, type));
     specified s;
@@ -963,12 +972,15 @@ analysis_result
 semantic_analysis::function_definition(FunctionDefinition definition)
 {
     if (!definition)
-        return not_supported(current_declaration, "dcl.fct.def.general");
+        return not_supported_because(current_declaration, "dcl.fct.def.general",
+                                     "a missing function definition");
     SyntaxRef n = definition;
     uint32_t k = leading_gnu_attributes(n);
     SyntaxTail tail(n, k);
     if (k >= n.size())
-        return not_supported(n, "dcl.fct.def.general");
+        return not_supported_because(
+            n, "dcl.fct.def.general",
+            "a function definition with only attributes");
     if (!tail[0].is(syntax_kind::decl_specifier_seq))
         /* [class.mem]/12: a constructor or destructor (or a conversion
            function) defined outside its class */
@@ -982,18 +994,22 @@ semantic_analysis::function_definition(FunctionDefinition definition)
            function */
         return special_member_definition(n, k + 1);
     if (!n.size())
-        return not_supported(n, "dcl.fct.def.general");
+        return not_supported_because(n, "dcl.fct.def.general",
+                                     "a function definition with no parts");
     VTRY(r, init_declarators(n, tail[0], true));
     entity_index f = last_declared;
     if (!f || entity_table[f].kind != entity_kind::function)
-        return not_supported(n, "dcl.fct.def.general");
+        return not_supported_because(
+            n, "dcl.fct.def.general",
+            "a function definition that declares no function");
     /* function-body: compound-statement, = delete ; a ctor-initializer, a
        function-try-block and = default are not analysed yet */
     auto body = definition.function_body();
     if (body.deleted())
         return deleted_definition(n, f);
     if (!body.plain())
-        return not_supported(n, "dcl.fct.def.general");
+        return not_supported_because(n, "dcl.fct.def.general",
+                                     "this form of function body");
     size_t unsupported_before = unsupported.size();
     analysis_result result =
         analyse_function_body(n, body.compound_statement());
@@ -1264,14 +1280,18 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
         if (s.typedef_ ||
             (s.static_ && !(anonymous && is_namespace(current_scope))) ||
             s.extern_ || s.inline_ || s.constexpr_ || s.type.cv())
-            return not_supported(declaration, "dcl.pre");
+            return not_supported_because(
+                declaration, "dcl.pre",
+                "a storage class or qualifier on an unnamed class declaration");
         /* [class.union.anon]/1: an anonymous union declares an unnamed
            object (an unnamed struct so, clang's extension); in a
            namespace, a static one is a variable ([class.union.anon]/3) */
         if (anonymous) {
             if (is_namespace(current_scope))
                 return anonymous_union_member(current_scope, declaration, s, 0);
-            return not_supported(declaration, "class.union.anon");
+            return not_supported_because(
+                declaration, "class.union.anon",
+                "an unnamed union outside a namespace");
         }
         return analysis_result::well_formed;
     }
@@ -1307,7 +1327,9 @@ analysis_result semantic_analysis::init_declarator(SyntaxRef declaration,
     bool initialized = false;
     if (item.is(syntax_kind::init_declarator, syntax_kind::member_declarator)) {
         if (item.size() != 2 || item[1].is(syntax_kind::requires_clause))
-            return not_supported(item.index(), "dcl.decl");
+            return not_supported_because(
+                item.index(), "dcl.decl",
+                "an init-declarator with a requires-clause or extra parts");
         d = item[0];
         init = item[1];
         initialized = true;
@@ -1381,7 +1403,8 @@ analysis_result semantic_analysis::declare_with_initializer(
                                                 variable_length, initialized));
     }
     if (!m.has_id)
-        return not_supported(declaration, "dcl.meaning");
+        return not_supported_because(declaration, "dcl.meaning",
+                                     "a declarator that declares no name");
     bool has_default_arguments = false;
     for (const parameter_meaning &p : function_parameters)
         if (p.default_argument)
@@ -1398,7 +1421,9 @@ analysis_result semantic_analysis::declare_with_initializer(
             for (entity_index f : set)
                 entity_table[f].unknown_defaults = true;
         }
-        return not_supported(declaration, "dcl.fct.default");
+        return not_supported_because(
+            declaration, "dcl.fct.default",
+            "default arguments on a redeclared function here");
     }
     if (tokens.files.behavior.microsoft_extensions && s.declares_class) {
         /* Microsoft's class-virt-specifiers, struct X sealed { }: the
@@ -1407,7 +1432,9 @@ analysis_result semantic_analysis::declare_with_initializer(
         tokens.spelling(m.id, spelling.get());
         if ((spelling.size() == 6 && !memcmp(spelling.data(), "sealed", 6)) ||
             (spelling.size() == 8 && !memcmp(spelling.data(), "abstract", 8)))
-            return not_supported(declaration, "dcl.type.elab");
+            return not_supported_because(
+                declaration, "dcl.type.elab",
+                "a sealed or abstract class specifier");
     }
     /* [ext:gnu_attributes] the declaration's and the declarator's */
     uint64_t aligned = m.aligned;
@@ -1419,14 +1446,17 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (m.mode) {
         /* mode: the type of a typedef-name or of a variable */
         if (m.qualifier || m.qualified_namespace)
-            return not_supported(declaration, "ext.gnu");
+            return not_supported_because(
+                declaration, "ext.gnu", "a mode attribute on a qualified name");
         r = gnu_mode_type(declaration, m.mode, type);
         if (r != analysis_result::well_formed)
             return r;
     }
     if (m.vector_bytes) {
         if (m.qualifier || m.qualified_namespace)
-            return not_supported(declaration, "ext.gnu");
+            return not_supported_because(
+                declaration, "ext.gnu",
+                "a vector_size attribute on a qualified name");
         r = gnu_vector_type(declaration, m.vector_bytes, type);
         if (r != analysis_result::well_formed)
             return r;
@@ -1434,7 +1464,9 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (m.ext_vector.given() || s.ext_vector.given()) {
         /* [ext:clang_ext_vector_type] only a typedef-name's */
         if (!s.typedef_ || m.qualifier || m.qualified_namespace)
-            return not_supported(declaration, "ext.clang");
+            return not_supported_because(
+                declaration, "ext.clang",
+                "ext_vector_type on a declaration that is no typedef");
         gnu_attributes g;
         g.ext_vector = m.ext_vector;
         if (!g.ext_vector.given())
@@ -1473,7 +1505,9 @@ analysis_result semantic_analysis::declare_with_initializer(
            members are packed whatever it says: taken as the type's own */
         if (aligned && aligned < natural &&
             type_table[type.unqualified()].kind != type_kind::vector)
-            return not_supported(declaration, "ext.gnu");
+            return not_supported_because(
+                declaration, "ext.gnu",
+                "an alignment below the vector type's own");
         if (aligned > natural)
             typedef_alignment = static_cast<uint32_t>(aligned);
         uint32_t inherited =
@@ -1504,7 +1538,9 @@ analysis_result semantic_analysis::declare_with_initializer(
     if ((aligned && (s.typedef_ || is_function_type)) ||
         ((aligned || others) && (m.qualifier || m.qualified_namespace)) ||
         (gnu_flags && m.qualified_namespace))
-        return not_supported(declaration, "ext.gnu");
+        return not_supported_because(
+            declaration, "ext.gnu",
+            "a GNU attribute on this typedef, function or qualified name");
     /* [basic.lookup.qual]/3: "names following the qualified-id are looked up in
        the scope of the member's class or namespace": the initializer of a
        static data member, or of a namespace's variable, defined by a qualified
@@ -1532,7 +1568,9 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (m.qualifier &&
         type_table[type.unqualified()].kind == type_kind::function) {
         if (initialized)
-            return not_supported(declaration, "dcl.init");
+            return not_supported_because(
+                declaration, "dcl.init",
+                "an initializer on a member function's redeclaration");
         return member_redeclaration(declaration, m.id, m.qualifier, type, s,
                                     m.exceptions, definition);
     }
@@ -1577,7 +1615,8 @@ analysis_result semantic_analysis::declare_with_initializer(
                                    "noreturn applies to a function only",
                                    "dcl.attr.noreturn");
     if ((gnu_flags & gnu_noreturn) && kind != entity_kind::function)
-        return not_supported(declaration, "ext.gnu");
+        return not_supported_because(declaration, "ext.gnu",
+                                     "noreturn on something not a function");
     /* [ext:gnu_attributes] require_constant_initialization: on a variable
        with static or thread storage duration (clang: "only applies to
        global variables"), the declarator's own definition, not a member
@@ -1591,7 +1630,9 @@ analysis_result semantic_analysis::declare_with_initializer(
          (at_block_scope() && !s.static_ && !s.extern_ &&
           !s.c11_thread_local) ||
          (!initialized && element_class(type))))
-        return not_supported(declaration, "ext.gnu");
+        return not_supported_because(
+            declaration, "ext.gnu",
+            "require_constant_initialization on this declaration");
     /* [dcl.constinit]/1: "The constinit specifier shall be applied only
        to a declaration of a variable with static or thread storage
        duration." */
@@ -1625,7 +1666,8 @@ analysis_result semantic_analysis::declare_with_initializer(
                                        "literal type",
                                        "dcl.constexpr");
         if (record.kind == type_kind::none)
-            return not_supported(declaration, "basic.types");
+            return not_supported_because(declaration, "basic.types",
+                                         "an object whose type is unknown");
         /* an object of class type default-initialized: its default
            constructor ([dcl.init]/7.1), which the evaluator does not run
            here yet, except a trivial one of a class without non-static
@@ -1643,7 +1685,9 @@ analysis_result semantic_analysis::declare_with_initializer(
                 (c.dynamic || c.member_count ||
                  (c.first_constructor &&
                   !trivial_defaulted_default_constructor(record.entity))))
-                return not_supported(declaration, "dcl.init");
+                return not_supported_because(
+                    declaration, "dcl.init",
+                    "default-initialization of this class object");
         } else if (!initialized && !constexpr_member_redeclaration(m))
             return ill_formed_at_token(m.id,
                                        "a constexpr object shall be "
@@ -1654,7 +1698,9 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (initialized && kind != entity_kind::variable)
         /* an initializer for a typedef-name or a function: a rule not found
            yet */
-        return not_supported(declaration, "dcl.init");
+        return not_supported_because(
+            declaration, "dcl.init",
+            "an initializer on a typedef-name or function");
     {
         /* a reference to an array of unknown bound: [ext.clang] clang gives it
            the bound of the braced-init-list it is bound to */
@@ -1665,7 +1711,9 @@ analysis_result semantic_analysis::declare_with_initializer(
             type_table[referred.operand.unqualified()].kind ==
                 type_kind::array &&
             !type_table[referred.operand.unqualified()].bound_known)
-            return not_supported(declaration, "dcl.init.ref");
+            return not_supported_because(
+                declaration, "dcl.init.ref",
+                "a reference to an array of unknown bound");
     }
     entity_index declared_entity = 0;
     if (m.qualifier && (instantiating || variable_instantiating)) {
@@ -1742,7 +1790,9 @@ analysis_result semantic_analysis::declare_with_initializer(
            defined before, not analysed */
         entity &x = entity_table[declared_entity];
         if (x.first_declaration != x.last_declaration && !x.constinit_)
-            return not_supported(declaration, "dcl.constinit");
+            return not_supported_because(
+                declaration, "dcl.constinit",
+                "constinit added on a later declaration");
         x.constinit_ = true;
     }
     if (r == analysis_result::well_formed && placeholder &&
@@ -1759,14 +1809,18 @@ analysis_result semantic_analysis::declare_with_initializer(
            duration it is an error (clang: "'section' attribute only
            applies to functions, global variables ...") */
         if ((gnu_flags & gnu_section) && x.automatic)
-            return not_supported(declaration, "ext.gnu");
+            return not_supported_because(
+                declaration, "ext.gnu",
+                "a section attribute on an automatic variable");
         if ((gnu_flags & (gnu_abi_tag | gnu_hidden_visibility)) &&
             (x.automatic ||
              (x.abi_tag && abi_tag && !same_abi_tag(x.abi_tag, abi_tag)) ||
              (m.qualifier && abi_tag != 0 && x.abi_tag == 0)))
             /* a local's, a second tag, or a tag the member's declaration
                lacks (clang: it must precede the definition) */
-            return not_supported(declaration, "ext.gnu");
+            return not_supported_because(
+                declaration, "ext.gnu",
+                "an abi_tag or visibility attribute on this declaration");
         /* "constructor" and "destructor" apply to a function, "cleanup" to
            a variable of automatic storage duration whose type needs no
            destruction of its own (the function runs, then C++'s
@@ -1775,13 +1829,17 @@ analysis_result semantic_analysis::declare_with_initializer(
         if ((gnu_flags & (gnu_constructor | gnu_destructor)) &&
             (x.kind != entity_kind::function ||
              ((gnu_flags & gnu_constructor) && (gnu_flags & gnu_destructor))))
-            return not_supported(declaration, "ext.gnu");
+            return not_supported_because(declaration, "ext.gnu",
+                                         "a constructor or destructor "
+                                         "attribute not alone on a function");
         if (gnu_flags & gnu_cleanup) {
             entity_index k = element_class(x.type);
             if (x.kind != entity_kind::variable || !x.automatic ||
                 (k && !trivial_class(k)) ||
                 !gnu_cleanup_takes_pointer(cleanup_function))
-                return not_supported(declaration, "ext.gnu");
+                return not_supported_because(
+                    declaration, "ext.gnu",
+                    "a cleanup attribute on this variable or function");
             x.gnu_cleanup = cleanup_function;
         }
         x.gnu_flags |= gnu_flags;
@@ -1819,7 +1877,9 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (s.cxx_thread_local && function_state.active &&
             function_state.function &&
             entity_table[function_state.function].constexpr_)
-            return not_supported(declaration, "dcl.constexpr");
+            return not_supported_because(
+                declaration, "dcl.constexpr",
+                "thread_local in a constexpr function");
         if (s.cxx_thread_local) {
             /* [basic.stc.thread]/2: the object is destroyed when its
                thread exits, by a destructor whose access and deletion
@@ -1831,7 +1891,9 @@ analysis_result semantic_analysis::declare_with_initializer(
             if (k.kind == type_kind::class_type &&
                 entity_table[k.entity].destructor &&
                 !entity_table[entity_table[k.entity].destructor].implicit)
-                return not_supported(declaration, "basic.stc.thread");
+                return not_supported_because(
+                    declaration, "basic.stc.thread",
+                    "a thread_local object with a user destructor");
         }
         x.c11_thread_local = true;
     }
@@ -1843,9 +1905,12 @@ analysis_result semantic_analysis::declare_with_initializer(
         if (s.typedef_ || x.automatic || m.qualifier || m.qualified_namespace ||
             (x.kind != entity_kind::function &&
              x.kind != entity_kind::variable))
-            return not_supported(declaration, "ext.gnu");
+            return not_supported_because(declaration, "ext.gnu",
+                                         "an asm label on this declaration");
         if (x.asm_label && !same_token_spelling(x.asm_label, m.asm_label))
-            return not_supported(declaration, "ext.gnu");
+            return not_supported_because(
+                declaration, "ext.gnu",
+                "a redeclaration with a different asm label");
         x.asm_label = m.asm_label;
     }
     /* [dcl.array]/8: the bound of an earlier declaration (declare took it)
@@ -1871,7 +1936,9 @@ analysis_result semantic_analysis::declare_with_initializer(
     /* [ext:clang_vla] a variable length array is an automatic variable's */
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&
         variable_length_array(type) && !entity_table[declared_entity].automatic)
-        return not_supported(declaration, "dcl.array");
+        return not_supported_because(
+            declaration, "dcl.array",
+            "a variable length array that is not automatic");
     /* the declaration statement's variables (statement) */
     if (r == analysis_result::well_formed && function_state.active &&
         kind == entity_kind::variable && declared_in_scope == current_scope &&
@@ -1916,7 +1983,9 @@ analysis_result semantic_analysis::declare_with_initializer(
                constructor's definition is ill-formed ([class.ctor]/7 there),
                reported at the class */
             if (!tokens.files.behavior.has(language_feature::rvalue_references))
-                return not_supported(declaration, "class.default.ctor");
+                return not_supported_because(
+                    declaration, "class.default.ctor",
+                    "a deleted default constructor before C++11");
             return ill_formed(declaration,
                               "the defaulted default constructor is defined "
                               "as deleted",
@@ -1933,12 +2002,16 @@ analysis_result semantic_analysis::declare_with_initializer(
                 (!entity_table[declared_entity].automatic ||
                  !(array.operand == object) || !array.bound_known ||
                  !array.bound))
-                return not_supported(declaration, "dcl.init");
+                return not_supported_because(
+                    declaration, "dcl.init",
+                    "default construction of this array");
             owned_array<expression_meaning> none;
             initialized_value value;
             VTRY_SET(r, construct(declaration, object, none, 0, value));
             if (s.constexpr_ && entity_table[declared_entity].automatic)
-                return not_supported(declaration, "dcl.init");
+                return not_supported_because(
+                    declaration, "dcl.init",
+                    "a constexpr local default-initialized by a constructor");
             /* [basic.start.static]/2: constant initialization for a static
                variable default-initialized by a constexpr constructor */
             if (!entity_table[declared_entity].automatic && value.node) {
@@ -1951,7 +2024,9 @@ analysis_result semantic_analysis::declare_with_initializer(
                     /* (a constexpr variable whose initialization is not
                        followed is not known to be unusable) */
                     entity_table[declared_entity].usable = constness::unknown;
-                    return not_supported(declaration, "dcl.init");
+                    return not_supported_because(
+                        declaration, "dcl.init",
+                        "a constexpr initialization that is not followed");
                 }
                 /* [expr.const]/3: a constexpr variable is usable in constant
                    expressions; the evaluator reads the object's value from
@@ -1973,7 +2048,9 @@ analysis_result semantic_analysis::declare_with_initializer(
            C++11 is not analysed */
         entity_index k = element_class(entity_table[declared_entity].type);
         if (is_class_entity(k) && !assigned_bitwise(k))
-            return not_supported(declaration, "stmt.dcl");
+            return not_supported_because(
+                declaration, "stmt.dcl",
+                "a jump-relevant class variable before C++11");
     }
     /* [ext:gnu_labels_as_values] a computed goto shall not leave the scope
        of a variable with a non-trivial destructor (clang's "jump exits
@@ -2121,7 +2198,9 @@ analysis_result semantic_analysis::declare_with_initializer(
             !(element == type);
         if (!value.node) {
             if (s.constexpr_)
-                return not_supported(declaration, expr_const_reason());
+                return not_supported_because(
+                    declaration, expr_const_reason(),
+                    "a constexpr variable with no initializer value");
         } else if (of_class ||
                    type_table[type.unqualified()].kind == type_kind::complex) {
             /* an object of class type: the evaluator checks that its
@@ -2145,7 +2224,9 @@ analysis_result semantic_analysis::declare_with_initializer(
                 if (data)
                     value.node = data;
             } else if (!entity_table[declared_entity].automatic) {
-                return not_supported(declaration, "basic.start.static");
+                return not_supported_because(
+                    declaration, "basic.start.static",
+                    "static initialization that is not shown constant");
             }
         } else if (s.constexpr_ &&
                    keep_wide_value(declared_entity, value.node)) {
@@ -2205,7 +2286,9 @@ analysis_result semantic_analysis::declare_with_initializer(
                                        "constant initialization",
                                        "dcl.constinit");
         if (value.evaluation != constness::constant)
-            return not_supported(declaration, "dcl.constinit");
+            return not_supported_because(
+                declaration, "dcl.constinit",
+                "constinit initialization not known to be constant");
     }
     /* [dcl.constexpr]/10: "In any constexpr variable declaration, the
        full-expression of the initialization shall be a constant

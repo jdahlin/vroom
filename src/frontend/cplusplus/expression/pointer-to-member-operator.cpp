@@ -28,7 +28,9 @@ analysis_result semantic_analysis::member_pointer_operator(
     if (!is_member_pointer(right.type)) {
         if (fundamental_of(right.type) == fundamental_type::none &&
             !is_pointer(right.type))
-            return not_supported(n, "expr.mptr.oper");
+            return not_supported_because(
+                n, "expr.mptr.oper",
+                ".* or ->* with a right operand that is not a member pointer");
         return ill_formed(n,
                           "the second operand shall be of type pointer to "
                           "member of T",
@@ -49,7 +51,9 @@ analysis_result semantic_analysis::member_pointer_operator(
                     .kind != type_kind::class_type) {
             if (fundamental_of(object.type) == fundamental_type::none &&
                 !is_pointer(object.type))
-                return not_supported(n, "expr.mptr.oper");
+                return not_supported_because(
+                    n, "expr.mptr.oper",
+                    "->* with a left operand that is not a pointer to class");
             return ill_formed(n,
                               "the first operand of ->* shall be of type "
                               "pointer to U where U is either T or a class "
@@ -62,7 +66,9 @@ analysis_result semantic_analysis::member_pointer_operator(
             type_kind::class_type) {
             if (fundamental_of(object.type) == fundamental_type::none &&
                 !is_pointer(object.type))
-                return not_supported(n, "expr.mptr.oper");
+                return not_supported_because(
+                    n, "expr.mptr.oper",
+                    ".* with a left operand that is not of class type");
             return ill_formed(n,
                               "the first operand of .* shall be a glvalue of "
                               "class T or of a class of which T is an "
@@ -81,7 +87,9 @@ analysis_result semantic_analysis::member_pointer_operator(
             (aggregate_prvalue(object) ||
              entity_table[type_table[object.type.unqualified()].entity]
                  .destructor))
-            return not_supported(n, "class.temporary");
+            return not_supported_because(
+                n, "class.temporary",
+                ".* on a class prvalue that is a temporary object");
         /* /6: "The result of a .* expression whose second operand is a
            pointer to a data member is an lvalue if the first operand is an
            lvalue and an xvalue otherwise." */
@@ -95,7 +103,9 @@ analysis_result semantic_analysis::member_pointer_operator(
     require_complete(t);
     require_complete(u);
     if (!entity_table[t].size || !entity_table[u].size)
-        return not_supported(n, "expr.mptr.oper");
+        return not_supported_because(
+            n, "expr.mptr.oper",
+            ".* or ->* through a base class where a class is incomplete");
     if (u != t) {
         if (!base_subobjects(u, t))
             return ill_formed(n,

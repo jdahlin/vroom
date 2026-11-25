@@ -74,11 +74,15 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
         (!specialization &&
          ((!is_namespace(x.enclosing) && !member) ||
           (at_block_scope() && !member) || function_state.active)))
-        return not_supported(n, "dcl.fct.default");
+        return not_supported_because(
+            n, "dcl.fct.default",
+            "a default argument on this kind of function declaration");
     const struct type &function = type_table[x.type.unqualified()];
     size_t count = function.parameter_count;
     if (function_parameters.size() != count)
-        return not_supported(n, "dcl.fct.default");
+        return not_supported_because(
+            n, "dcl.fct.default",
+            "parameters that do not match the function type's count");
     /* the default arguments the function has so far, and this
        declaration's */
     owned_array<uint32_t> nodes;
@@ -159,13 +163,18 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                 x.enclosing, tokens.identifier(t), lookup_filter::any);
             if (found.unknown || found.ambiguous ||
                 (found.entity && entity_table[found.entity].nonstatic_member))
-                return not_supported(p.declaration, "dcl.fct.default");
+                return not_supported_because(
+                    p.declaration, "dcl.fct.default",
+                    "a default argument naming a non-static or unknown class "
+                    "member");
         }
         for (token_index t = first; t < end; t++)
             for (const parameter_meaning &q : function_parameters)
                 if (q.id && tokens[t].kind == token_kind::identifier &&
                     tokens.identifier(t) == tokens.identifier(q.id))
-                    return not_supported(p.declaration, "dcl.fct.default");
+                    return not_supported_because(
+                        p.declaration, "dcl.fct.default",
+                        "a default argument naming a parameter");
         qualified_type type =
             type_table.parameters(entity_table[f].type.unqualified())[i];
         initialized_value value;

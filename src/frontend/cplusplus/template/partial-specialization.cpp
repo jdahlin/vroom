@@ -46,7 +46,10 @@ analysis_result semantic_analysis::variable_partial_specialization(
     if (qualifier) {
         SyntaxElement template_name = id.simple_template_id().template_name();
         if (!template_name)
-            return not_supported(n, "temp.class.spec");
+            return not_supported_because(
+                n, "temp.class.spec",
+                "a qualified variable partial specialization with no "
+                "template-name");
         x = lookup_in_namespace(qualifier,
                                 tokens.identifier(template_name.token()),
                                 lookup_filter::any);
@@ -54,17 +57,23 @@ analysis_result semantic_analysis::variable_partial_specialization(
         if (!named)
             named = x.unknown_entity;
         if (x.ambiguous)
-            return not_supported(n, "temp.class.spec");
+            return not_supported_because(
+                n, "temp.class.spec",
+                "an ambiguous name of a variable partial specialization");
     } else {
         template_id_name(id, x, named);
     }
     uint32_t vt = variable_template_of(named);
     if (!vt)
-        return not_supported(n, "temp.class.spec");
+        return not_supported_because(
+            n, "temp.class.spec",
+            "a partial specialization naming no variable template");
     const function_template primary = function_templates[vt - 1];
     if (parameters.empty() || function_templates[vt - 1].name != named ||
         entity_table[primary.entity].enclosing != outer)
-        return not_supported(n, "temp.class.spec");
+        return not_supported_because(n, "temp.class.spec",
+                                     "a variable partial specialization with "
+                                     "no parameters or elsewhere");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
@@ -81,13 +90,18 @@ analysis_result semantic_analysis::variable_partial_specialization(
        an argument (<I + 5, I * 2>) is not deducible: not judged */
     for (const template_argument &a : arguments) {
         if (a.template_entity && entity_table[a.template_entity].expression)
-            return not_supported(n, "temp.class.spec");
+            return not_supported_because(
+                n, "temp.class.spec",
+                "a partial specialization argument that is an expression");
         if (a.kind != template_argument::kind_t::pack || a.count == UINT32_MAX)
             continue;
         for (uint32_t k = 0; k < a.count; k++) {
             entity_index d = pack_arguments[a.value + k].template_entity;
             if (d && entity_table[d].expression)
-                return not_supported(n, "temp.class.spec");
+                return not_supported_because(
+                    n, "temp.class.spec",
+                    "a partial specialization pack argument containing an "
+                    "expression");
         }
     }
     bool dependent = dependent_arguments(arguments);
@@ -95,7 +109,9 @@ analysis_result semantic_analysis::variable_partial_specialization(
                                       parameters.size());
     /* [temp.class.spec]/9: more specialized than the primary */
     if (!dependent || identity)
-        return not_supported(n, "temp.class.spec");
+        return not_supported_because(
+            n, "temp.class.spec",
+            "a variable partial specialization not more specialized");
     if (permuted_arguments(n, arguments, first, parameters.size()))
         return ill_formed(n,
                           "variable template partial specialization is not "
@@ -355,7 +371,8 @@ analysis_result semantic_analysis::class_specialization_definition(
     bool member = entity_table[outer].kind == entity_kind::class_type;
     if ((!is_namespace(outer) && !(member && !parameters.empty())) ||
         defining_class)
-        return not_supported(n, rule);
+        return not_supported_because(
+            n, rule, "a class specialization in this scope or inside a class");
     /* [temp.expl.spec]/17: a member class of a class template
        specialization, template<> struct S<int>::M ... */
     if (parameters.empty() && n.size() == 4 &&
@@ -382,7 +399,8 @@ analysis_result semantic_analysis::class_specialization_definition(
         nested_part = specifier[1];
         written = specifier[2];
     } else if (!written.is_node()) {
-        return not_supported(n, rule);
+        return not_supported_because(
+            n, rule, "a class specialization head that is not a name");
     } else if (written.qualified_class_head_name() && written.size() == 2 &&
                written[0].is(syntax_kind::nested_name_specifier) &&
                written[1].is(syntax_kind::simple_template_id)) {
@@ -399,7 +417,8 @@ analysis_result semantic_analysis::class_specialization_definition(
                 return nr;
         }
         if (!is_class_entity(ns.entity) && !is_namespace(ns.entity))
-            return not_supported(n, rule);
+            return not_supported_because(
+                n, rule, "a specialization qualified by no class or namespace");
         /* [temp.expl.spec]/2: in a namespace enclosing the primary's */
         if (is_namespace(ns.entity) &&
             !namespace_encloses(current_scope, ns.entity) &&
@@ -415,7 +434,9 @@ analysis_result semantic_analysis::class_specialization_definition(
     entity_index named = 0;
     if (qualified_head) {
         if (!written.size() || !written[0].is_token())
-            return not_supported(n, rule);
+            return not_supported_because(n, rule,
+                                         "a qualified specialization name that "
+                                         "is not a plain template-id");
         x = lookup_qualified(outer, tokens.identifier(written[0].token()),
                              lookup_filter::any);
         if (x.unknown)
@@ -423,7 +444,9 @@ analysis_result semantic_analysis::class_specialization_definition(
         else
             named = x.entity;
     } else if (!template_id_name(written, x, named)) {
-        return not_supported(n, rule);
+        return not_supported_because(
+            n, rule,
+            "a class specialization whose template-id is not resolved");
     }
     uint32_t ct = class_template_of(named);
     /* [temp.class.spec]/6, [temp.expl.spec]/3: declared where the
@@ -444,7 +467,9 @@ analysis_result semantic_analysis::class_specialization_definition(
     /* ... or in the namespace its inline namespaces are members of
        ([namespace.memdef]/3, [temp.expl.spec]/2) */
     if (!declared_in_scope_of(function_templates[ct - 1].entity, outer))
-        return not_supported(n, rule);
+        return not_supported_because(
+            n, rule,
+            "a specialization of a class template declared in another scope");
     const function_template primary = function_templates[ct - 1];
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
@@ -485,7 +510,9 @@ analysis_result semantic_analysis::class_specialization_definition(
                 deduces = true;
         }
         if (expressions2 && !deduces)
-            return not_supported(n, "temp.class.spec");
+            return not_supported_because(n, "temp.class.spec",
+                                         "a partial specialization whose "
+                                         "parameters are only in expressions");
     }
     bool dependent = dependent_arguments(arguments);
     bool identity = primary_arguments(n, primary.declaration, arguments, first,
@@ -494,7 +521,9 @@ analysis_result semantic_analysis::class_specialization_definition(
        specialization shall be more specialized than the primary template"
        (primary_arguments) */
     if (parameters.empty() == dependent || identity)
-        return not_supported(n, rule);
+        return not_supported_because(
+            n, rule,
+            "specialization arguments whose dependence does not fit its head");
     if (!parameters.empty() &&
         permuted_arguments(n, arguments, first, parameters.size()))
         return ill_formed(n,
@@ -536,7 +565,9 @@ analysis_result semantic_analysis::class_specialization_definition(
             }
             matching_partial = false;
             if (match)
-                return not_supported(n, rule);
+                return not_supported_because(n, rule,
+                                             "a specialization declared after "
+                                             "a matching one was instantiated");
         }
     /* [temp.class.spec]/1: a partial specialization declared only is
        recorded by its definition */
@@ -570,7 +601,8 @@ analysis_result semantic_analysis::class_specialization_definition(
         if (!defines)
             return analysis_result::well_formed;
         if (o.definition)
-            return not_supported(n, rule);
+            return not_supported_because(
+                n, rule, "a redefinition of an explicit specialization");
         o.declaration = n;
         o.definition = specifier;
         return analysis_result::well_formed;
@@ -840,12 +872,17 @@ analysis_result semantic_analysis::matching_specialization(
         matching_partial = false;
         matching_substituted = false;
         if (deduction_unknowns != unknowns)
-            return not_supported(at, "temp.deduct.type");
+            return not_supported_because(
+                at, "temp.deduct.type",
+                "a partial specialization whose deduction is unknown");
         /* [temp.deduct.type]/8: noexcept(B) of a function type in the
            pattern, value-dependent: the type keeps no B to deduce, so a
            mismatch is not known to be one */
         if (!match && value_dependent_noexcept_in(s.declaration))
-            return not_supported(at, "temp.deduct.type");
+            return not_supported_because(
+                at, "temp.deduct.type",
+                "a mismatch involving a value-dependent noexcept "
+                "specification");
         if (!match)
             continue;
         if (!s.parameter_count) {
@@ -857,7 +894,9 @@ analysis_result semantic_analysis::matching_specialization(
            determine is not deduced (clang's "can never be used") */
         for (uint32_t i = 0; i < s.parameter_count; i++)
             if (!set[i])
-                return not_supported(at, "temp.class.spec");
+                return not_supported_because(
+                    at, "temp.class.spec",
+                    "a partial specialization with an undeduced parameter");
         bool substituted = false;
         VTRY(again, substitute_specialization(k + 1, d, arguments, count,
                                               substituted));
@@ -898,14 +937,18 @@ analysis_result semantic_analysis::matching_specialization(
             bool backward =
                 class_at_least_as_specialized(found[j], found[i], unknown);
             if (unknown)
-                return not_supported(at, "temp.class.order");
+                return not_supported_because(
+                    at, "temp.class.order",
+                    "partial specializations whose ordering is unknown");
             best = forward && !backward;
         }
         if (best)
             chosen = i;
     }
     if (chosen == found.size())
-        return not_supported(at, "temp.class.order");
+        return not_supported_because(
+            at, "temp.class.order",
+            "no most specialized partial specialization");
     pattern = found[chosen];
     deduced.clear();
     for (uint32_t i = 0; i < function_templates[pattern - 1].parameter_count;

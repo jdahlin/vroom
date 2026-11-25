@@ -96,14 +96,16 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
         lead++;
     }
     if (lead >= n.size())
-        return not_supported(n, "stmt.label");
+        return not_supported_because(n, "stmt.label",
+                                     "a label with no statement parts");
     SyntaxTail m(n, lead);
     token_index first = m[0].token();
     const token &t = tokens[first];
     SyntaxElement last = n[n.size() - 1];
     if (t.kind == token_kind::identifier) {
         if (m.size() != 3)
-            return not_supported(n, "stmt.label");
+            return not_supported_because(
+                n, "stmt.label", "an identifier label of unexpected shape");
         for (label_record &l : function_state.labels)
             if (l.point.at == first) {
                 l.point.scope = current_scope;
@@ -118,7 +120,8 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
     }
     standard_keyword k = syntax_parser.keyword_of(t);
     if (k != standard_keyword::case_ && k != standard_keyword::default_)
-        return not_supported(n, "stmt.label");
+        return not_supported_because(
+            n, "stmt.label", "a label that is no identifier, case or default");
     jump_point here;
     here.scope = current_scope;
     here.at = first;
@@ -139,7 +142,8 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
     bool is_range = false;
     if (k == standard_keyword::default_) {
         if (m.size() != 3)
-            return not_supported(n, "stmt.label");
+            return not_supported_because(n, "stmt.label",
+                                         "a default label of unexpected shape");
         /* [stmt.switch]/3: "There shall be at most one label of the form
            default : within a switch statement." */
         if (function_state.switches[innermost].has_default)
@@ -156,7 +160,8 @@ analysis_result semantic_analysis::labeled_statement(LabeledStatement n,
             high = m[3];
             is_range = true;
         } else if (m.size() != 4) {
-            return not_supported(n, "stmt.switch");
+            return not_supported_because(n, "stmt.switch",
+                                         "a case label of unexpected shape");
         }
         result = case_label(n, m[1], high, innermost, lo, hi);
         kind = semantic_kind::case_label;
@@ -193,7 +198,8 @@ analysis_result semantic_analysis::case_value(SyntaxRef n, SyntaxElement value,
     VTRY(r, expression(value, m));
     fundamental_type adjusted = function_state.switches[innermost].type;
     if (adjusted == fundamental_type::none)
-        return not_supported(n, "stmt.switch");
+        return not_supported_because(
+            n, "stmt.switch", "a case in a switch with no condition type");
     VTRY_SET(r, operand_value(n, m));
     const char *rule = "the constant-expression shall be a converted "
                        "constant expression of the adjusted type of the "
@@ -205,7 +211,9 @@ analysis_result semantic_analysis::case_value(SyntaxRef n, SyntaxElement value,
     if (!is_integral(m.type)) {
         if (fundamental_of(m.type) == fundamental_type::none &&
             !is_pointer(m.type))
-            return not_supported(n, "stmt.switch");
+            return not_supported_because(
+                n, "stmt.switch",
+                "a case value of class or other non-integral type");
         return ill_formed(n, rule, "stmt.switch");
     }
     bool constant = false;
@@ -214,7 +222,8 @@ analysis_result semantic_analysis::case_value(SyntaxRef n, SyntaxElement value,
         return ill_formed(n, rule, "stmt.switch");
     VTRY_SET(r, converted_constant_expression(n, m, adjusted, constant));
     if (!constant)
-        return not_supported(n, "expr.const");
+        return not_supported_because(
+            n, "expr.const", "a case value not converted as a constant");
     out = m.value;
     return analysis_result::well_formed;
 }

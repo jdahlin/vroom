@@ -45,7 +45,8 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     owned_array<SyntaxRef> parameters;
     /* class-head: class-key identifier base-clause_opt */
     if (!specifier.size() || !specifier[0].is(syntax_kind::class_head))
-        return not_supported(n, "temp.class");
+        return not_supported_because(n, "temp.class",
+                                     "a class template with no class-head");
     auto head = specifier[0];
     SyntaxElement head_name = class_head_name(head);
     bool specialization =
@@ -75,18 +76,24 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
     }
     if (auto qualified = head_name.qualified_class_head_name()) {
         if (!qualified.nested_name_specifier() || !qualified.identifier())
-            return not_supported(n, "temp.class");
+            return not_supported_because(n, "temp.class",
+                                         "a qualified class template head with "
+                                         "no qualifier or identifier");
         nominated_scope ns;
         VTRY_SET(r, nested_name_specifier(
                         qualified.nested_name_specifier().index(), ns));
         if (!is_class_entity(ns.entity) && !is_namespace(ns.entity))
-            return not_supported(n, "temp.class");
+            return not_supported_because(n, "temp.class",
+                                         "a qualified class template in a "
+                                         "scope not a class or namespace");
         outer = ns.entity;
         head_name = qualified.identifier();
     }
     if (!head_name.is_token() ||
         tokens[head_name.token()].kind != token_kind::identifier)
-        return not_supported(n, "temp.class");
+        return not_supported_because(
+            n, "temp.class",
+            "a class template head whose name is not an identifier");
     uint32_t name = tokens.identifier(head_name.token());
     /* [temp.mem]/3: "A member function template shall not be virtual.":
        diagnosed in the definition, which is analysed only per
@@ -143,7 +150,9 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
             !same_template_parameters(first, d.first_parameter,
                                       d.parameter_count) ||
             !same_constraints(d.declaration, n))
-            return not_supported(n, "temp.class");
+            return not_supported_because(n, "temp.class",
+                                         "a class template definition that "
+                                         "differs from its declaration");
         /* [dcl.align]/5: the alignment of the declaration applies to the
            class; a definition that names none is not analysed */
         if (d.alignas_declared) {
@@ -152,7 +161,10 @@ semantic_analysis::class_template_definition(SyntaxRef n, SyntaxRef specifier)
                 if (SyntaxElement::from_token(t).is(standard_keyword::alignas_))
                     named = true;
             if (!named)
-                return not_supported(n, "temp.class");
+                return not_supported_because(
+                    n, "temp.class",
+                    "a class template definition without its declaration's "
+                    "alignas");
         }
         VTRY(merged, merge_template_defaults(n, d.first_parameter, first,
                                              d.parameter_count, true));
@@ -241,7 +253,9 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
            partial specialization declared, its definition later */
         standard_keyword k = elaborated[0].keyword();
         if (k != standard_keyword::class_ && k != standard_keyword::struct_)
-            return not_supported(n, "temp.class.spec");
+            return not_supported_because(
+                n, "temp.class.spec",
+                "a partial specialization declaration of a union or enum");
         owned_array<SyntaxRef> list;
         VTRY(r, template_head_parameters(n, list, true, true, true, true));
         return class_specialization_definition(n, elaborated, list);
@@ -301,11 +315,15 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
     }
     if (elaborated.size() != at + 1 || !elaborated[0].is_token() ||
         !elaborated[at].is_identifier())
-        return not_supported(n, "temp.class");
+        return not_supported_because(
+            n, "temp.class",
+            "a class template declaration of an unhandled form");
     standard_keyword key = elaborated[0].keyword();
     if (key != standard_keyword::class_ && key != standard_keyword::struct_ &&
         key != standard_keyword::union_)
-        return not_supported(n, "temp.class");
+        return not_supported_because(
+            n, "temp.class",
+            "a class template declaration with an unhandled class-key");
     owned_array<SyntaxRef> parameters;
     /* [temp.pre]/9: a requires-clause in its template-head */
     uint32_t name = tokens.identifier(elaborated[at].token());
@@ -323,17 +341,23 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
         uint32_t ct = class_template_of(held);
         if (!ct || function_templates[ct - 1].name != held ||
             function_templates[ct - 1].primary)
-            return not_supported(n, "temp.class");
+            return not_supported_because(n, "temp.class",
+                                         "a class template declaration of a "
+                                         "name declared as something else");
         const function_template d = function_templates[ct - 1];
         if (entity_table[d.entity].enclosing != outer ||
             d.parameter_count != parameters.size() ||
             !same_template_parameters(first, d.first_parameter,
                                       d.parameter_count) ||
             !same_constraints(d.declaration, n))
-            return not_supported(n, "temp.class");
+            return not_supported_because(
+                n, "temp.class",
+                "a class template redeclaration that differs from the first");
         for (SyntaxRef x : parameters)
             if (template_parameter_has_default(x))
-                return not_supported(n, "temp.param");
+                return not_supported_because(n, "temp.param",
+                                             "a default template argument in a "
+                                             "class template redeclaration");
         if (alignment_declared)
             function_templates[ct - 1].alignas_declared = true;
         entity_table.add_declaration(d.entity, n);
@@ -342,7 +366,9 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
     /* [temp.param]/14 (a later declaration may not supply the defaults
        before) */
     if (default_missing_after_one(parameters))
-        return not_supported(n, "temp.param");
+        return not_supported_because(
+            n, "temp.param",
+            "a class template parameter with no default after a defaulted one");
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     record.is_class = true;

@@ -1175,10 +1175,14 @@ analysis_result semantic_analysis::predefined_name(token_index t,
         form = predefined_name_form::pretty;
     entity_index f = function_state.function;
     if (f && form == predefined_name_form::pretty && !keep_pretty_function(f))
-        return not_supported(current_declaration, "ext.clang");
+        return not_supported_because(current_declaration, "ext.clang",
+                                     "__PRETTY_FUNCTION__ in a function whose "
+                                     "printed name cannot be formed");
     owned_buffer text;
     if (!predefined_name_text(f, form, text))
-        return not_supported(current_declaration, "ext.clang");
+        return not_supported_because(
+            current_declaration, "ext.clang",
+            "a predefined function name whose text is not available");
     qualified_type element = qualified_type::make(
         type_table.fundamental(fundamental_type::char_), cv_const);
     m = expression_meaning();

@@ -438,7 +438,9 @@ semantic_analysis::implicit_assignment_definitions(entity_index c, SyntaxRef n)
            what analysis does not follow is left undefined, and a use of it
            is a refusal (lowering), never code without what the body did */
         if (r == analysis_result::ill_formed || unsupported.size() <= before)
-            not_supported(n, "class.copy.assign");
+            not_supported_because(n, "class.copy.assign",
+                                  "an implicit assignment operator whose "
+                                  "definition could not be formed");
         entity_table[f].defined = false;
         body_failures.append(unsupported[before]);
         entity_table[f].unsupported_body =
@@ -528,7 +530,10 @@ semantic_analysis::implicit_assignment(entity_index c, SyntaxRef n,
             continue;
         }
         if (k && !assigned_bitwise(k))
-            return not_supported(n, "class.copy.assign");
+            return not_supported_because(
+                n, "class.copy.assign",
+                "an implicit assignment of a non-class member or array that is "
+                "not assigned bytewise");
         /* /13.2, /13.3: an array of bytewise-assigned elements, or the
            scalar, as by the built-in assignment */
         VTRY_SET(r, operand_value(n, from));

@@ -339,7 +339,9 @@ analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
     /* [namespace.memdef]/3: a friend declaration is not found by an
        unqualified lookup, and an address names no argument for ADL */
     if (!qualified && function_templates[found - 1].friend_declaration)
-        return not_supported(id.index(), "namespace.memdef");
+        return not_supported_because(id.index(), "namespace.memdef",
+                                     "the address of a friend function "
+                                     "template by unqualified template-id");
     handled = true;
     owned_array<uint32_t> group;
     if (written_at)
@@ -348,7 +350,10 @@ analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
         group.append(found);
     for (uint32_t g : group)
         if (entity_table[function_templates[g - 1].entity].nonstatic_member)
-            return not_supported(id.index(), "over.over");
+            return not_supported_because(
+                id.index(), "over.over",
+                "the address of a template-id whose overloads include a "
+                "non-static member");
     owned_array<overload_candidate> candidates;
     owned_array<uint32_t> first;
     owned_array<template_argument> all;
@@ -369,7 +374,9 @@ analysis_result semantic_analysis::template_id_for_target(SyntaxElement e,
                                    "target",
                                    "over.over");
     if (candidates.size() > 1)
-        return not_supported(id.index(), "temp.func.order");
+        return not_supported_because(
+            id.index(), "temp.func.order",
+            "a template-id address matching several function templates");
     uint32_t g = candidates[0].template_index;
     uint32_t begin = first[0];
     uint32_t count = static_cast<uint32_t>(all.size()) - begin;
@@ -493,7 +500,9 @@ analysis_result semantic_analysis::target_expression(SyntaxElement e,
     VTRY(r, select_for_target(at, set, ft, how, chosen, template_index, deduced,
                               why, member_class));
     if (how == set_selection::unknown)
-        return not_supported(current_declaration, why);
+        return not_supported_because(current_declaration, why,
+                                     "an overload set whose selection for the "
+                                     "target type cannot be decided");
     if (how == set_selection::none)
         return ill_formed_at_token(set.at,
                                    "no function of the overload set has the "

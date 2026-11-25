@@ -271,7 +271,9 @@ analysis_result semantic_analysis::arithmetic(SyntaxRef n,
                        type_kind::enumeration;
         };
         if (!known(left) || !known(right))
-            return not_supported(n, "expr.compound");
+            return not_supported_because(
+                n, "expr.compound",
+                "an operator on an operand of an unhandled type");
         switch (op) {
         case preprocessing_op_or_punc::STAR:
         case preprocessing_op_or_punc::SLASH:
@@ -392,13 +394,16 @@ analysis_result semantic_analysis::composite_pointer_type(SyntaxRef at,
             composite = a.type;
         else if (x.operand.unqualified() != y.operand.unqualified() ||
                  u == type_kind::function || u == type_kind::array)
-            return not_supported(at, "expr.type");
+            return not_supported_because(
+                at, "expr.type",
+                "member pointers to different, function or array member types");
         else if (base_subobjects(x.entity, y.entity) || x.entity == y.entity)
             composite = a.type;
         else if (base_subobjects(y.entity, x.entity))
             composite = b.type;
         else
-            return not_supported(at, "expr.type");
+            return not_supported_because(
+                at, "expr.type", "member pointers to unrelated classes");
         if (a.type.unqualified() != b.type.unqualified()) {
             const struct type c = type_table[composite.unqualified()];
             composite = qualified_type::make(
@@ -440,23 +445,34 @@ analysis_result semantic_analysis::composite_pointer_type(SyntaxRef at,
             if (base_step(cx, cy, ambiguous))
                 base = y;
             else if (!base_step(cy, cx, ambiguous))
-                return not_supported(at, "expr.type");
+                return not_supported_because(at, "expr.type",
+                                             "pointers to unrelated classes in "
+                                             "a composite pointer type");
             if (ambiguous)
-                return not_supported(at, "expr.type");
+                return not_supported_because(
+                    at, "expr.type",
+                    "pointers with an ambiguous base class in a composite "
+                    "pointer type");
             qualified_type c =
                 qualified_type::make(base.unqualified(), x.cv() | y.cv());
             composite = qualified_type::make(type_table.pointer_to(c), cv_none);
         } else {
-            return not_supported(at, "expr.type");
+            return not_supported_because(
+                at, "expr.type",
+                "a composite pointer type of pointees that have no rules");
         }
     } else {
-        return not_supported(at, "expr.type");
+        return not_supported_because(
+            at, "expr.type",
+            "a composite pointer type of operand types that have no rules");
     }
     analysis_result r = implicit_conversion(at, a, composite, false);
     if (r == analysis_result::well_formed)
         r = implicit_conversion(at, b, composite, false);
     if (r == analysis_result::ill_formed)
-        return not_supported(at, "expr.type");
+        return not_supported_because(
+            at, "expr.type",
+            "an operand that does not convert to the composite pointer type");
     return r;
 }
 
@@ -509,7 +525,9 @@ analysis_result semantic_analysis::comparison(SyntaxRef n,
         if (!class_operand(left) && !class_operand(right) &&
             (fundamental_of(left.type) == fundamental_type::none ||
              fundamental_of(right.type) == fundamental_type::none))
-            return not_supported(n, "expr.compound");
+            return not_supported_because(
+                n, "expr.compound",
+                "a comparison with an operand of an unhandled type");
         if (equality)
             return ill_formed(n,
                               "the converted operands shall have arithmetic, "
@@ -523,7 +541,9 @@ analysis_result semantic_analysis::comparison(SyntaxRef n,
     }
     if (!equality && !(is_pointer(left.type) && is_pointer(right.type)))
         /* a relational comparison with a null pointer constant */
-        return not_supported(n, "expr.rel");
+        return not_supported_because(
+            n, "expr.rel",
+            "a relational comparison of operands that are not both pointers");
     VTRY(r, composite_pointer_type(n, left, right));
     m.evaluation = combined_constness(left.evaluation, right.evaluation);
     if (fundamental_of(left.type) == fundamental_type::std_nullptr_t &&
@@ -569,7 +589,9 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
         /* (a conversion between integral types may be narrowing) */
         else if (fundamental_of(left.type) != fundamental_of(right.type) ||
                  fundamental_of(left.type) != t)
-            return not_supported(n, "expr.spaceship");
+            return not_supported_because(
+                n, "expr.spaceship",
+                "a three-way comparison with no matching comparison category");
     } else if (is_pointer(left.type) && is_pointer(right.type)) {
         VTRY(r, composite_pointer_type(n, left, right));
         /* ([basic.compound]/3: an object pointer type includes cv void *) */
@@ -577,12 +599,16 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
         qualified_type y = type_table[right.type.unqualified()].operand;
         if (type_table[x.unqualified()].kind == type_kind::function ||
             type_table[y.unqualified()].kind == type_kind::function)
-            return not_supported(n, "expr.spaceship");
+            return not_supported_because(
+                n, "expr.spaceship",
+                "a three-way comparison of function pointers");
     } else if ((!class_operand(left) && !class_operand(right)) &&
                (fundamental_of(left.type) == fundamental_type::none ||
                 fundamental_of(right.type) == fundamental_type::none ||
                 is_pointer(left.type) || is_pointer(right.type))) {
-        return not_supported(n, "expr.spaceship");
+        return not_supported_because(
+            n, "expr.spaceship",
+            "a three-way comparison of operands of unhandled types");
     } else {
         return ill_formed(n,
                           "the operands shall have arithmetic, enumeration "
@@ -599,7 +625,9 @@ semantic_analysis::three_way_comparison(SyntaxRef n, expression_meaning &left,
             tokens.pp.identifier(name, static_cast<uint32_t>(strlen(name))) + 1,
             lookup_filter::any);
         if (found.ambiguous)
-            return not_supported(n, "namespace.qual");
+            return not_supported_because(
+                n, "namespace.qual",
+                "an ambiguous lookup of a comparison category type in std");
         category = found.entity;
     }
     require_complete(category);
@@ -642,10 +670,14 @@ analysis_result semantic_analysis::binary_built(analysis_result r,
 analysis_result semantic_analysis::binary(SyntaxRef n, expression_meaning &m)
 {
     if (n.size() != 3 || !n[1].is_token())
-        return not_supported(n, "expr.compound");
+        return not_supported_because(
+            n, "expr.compound",
+            "a binary expression not made of two operands and an operator");
     const token &t = tokens[n[1].token()];
     if (t.kind != token_kind::operator_or_punctuator)
-        return not_supported(n, "expr.compound");
+        return not_supported_because(
+            n, "expr.compound",
+            "a binary expression whose operator is not punctuation");
     preprocessing_op_or_punc op =
         preprocessing_op_or_punc_primary(t.op_or_punc);
     token_index at = n[1].token();
@@ -660,7 +692,9 @@ analysis_result semantic_analysis::binary(SyntaxRef n, expression_meaning &m)
         VTRY_SET(r, binary_operator_function(n, at, op, n[0], left, n[2], right,
                                              handled, m));
         if (!handled)
-            return not_supported(n, "over.over");
+            return not_supported_because(
+                n, "over.over",
+                "an overload set operand that no operator function accepts");
         return r;
     }
     VTRY_SET(r, expression(n[2], right));
@@ -815,7 +849,9 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
             if (substituting && incomplete_class_pointer(left) &&
                 incomplete_class_pointer(right))
                 return analysis_result::ill_formed;
-            return not_supported(n, "expr.add");
+            return not_supported_because(
+                n, "expr.add",
+                "pointer subtraction of pointees that have no rules");
         }
         if (x.unqualified() != y.unqualified())
             return ill_formed(n,
@@ -838,14 +874,18 @@ analysis_result semantic_analysis::builtin_binary(SyntaxRef n, token_index at,
     const expression_meaning &integer = *integer_operand;
     if (!is_integral(integer.type)) {
         if (fundamental_of(integer.type) == fundamental_type::none)
-            return not_supported(n, "expr.add");
+            return not_supported_because(
+                n, "expr.add",
+                "pointer arithmetic with an offset of an unhandled type");
         return ill_formed(n, rule, "expr.add");
     }
     if (rp && op == preprocessing_op_or_punc::MINUS)
         return ill_formed(n, rule, "expr.add");
     if (!complete_object(pointer))
         /* void * and function pointers: GCC's extensions */
-        return not_supported(n, "expr.add");
+        return not_supported_because(
+            n, "expr.add",
+            "pointer arithmetic on a pointer without a complete object type");
     /* [expr.add]/4: "When an expression J that has integral type is added
        to or subtracted from an expression P of pointer type, the result has
        the type of P." */
@@ -865,7 +905,8 @@ analysis_result semantic_analysis::conditional(SyntaxRef n,
     if (n.size() == 4)
         return gnu_conditional_omitted(n, m);
     if (n.size() != 5)
-        return not_supported(n, "expr.cond");
+        return not_supported_because(
+            n, "expr.cond", "a conditional expression of an unhandled form");
     expression_meaning c, e2, e3;
     analysis_result r = expression(n[0], c);
     VTRY_SET(r, contextual_bool(n, c));
@@ -970,16 +1011,22 @@ analysis_result semantic_analysis::conditional_conversion(
                         base_step(target.entity, source.entity, ambiguous) != 0;
     bool cv_included = (from.type.cv() & ~to.type.cv()) == 0;
     if (ambiguous)
-        return not_supported(n, "class.member.lookup");
+        return not_supported_because(
+            n, "class.member.lookup",
+            "a conditional operand conversion to an ambiguous base class");
     if (to.category == value_category::xvalue &&
         (to_is_base ||
          (source_class && has_conversion_functions(source.entity))))
         /* /4.2's rvalue reference bound directly */
-        return not_supported(n, "expr.cond");
+        return not_supported_because(n, "expr.cond",
+                                     "a conditional operand converted to an "
+                                     "xvalue of a base or by conversion");
     if (to.category == value_category::lvalue && source_class && !to_is_base &&
         converts_to_lvalue_reference(source.entity))
         /* /4.1 through a conversion function returning an lvalue reference */
-        return not_supported(n, "over.match.ref");
+        return not_supported_because(n, "over.match.ref",
+                                     "a conditional operand bound to a "
+                                     "reference by a conversion function");
     if (to_is_base && cv_included && to.category == value_category::lvalue &&
         from.category == value_category::lvalue) {
         possible = true;
@@ -1069,7 +1116,10 @@ analysis_result semantic_analysis::conditional_class_operands(
         if (t3.kind == type_kind::class_type)
             conversions = conversions || has_conversion_functions(t3.entity);
         if (conversions)
-            return not_supported(n, "over.match.oper");
+            return not_supported_because(
+                n, "over.match.oper",
+                "conditional operands of class type needing built-in operator "
+                "candidates");
         return ill_formed(n,
                           "the operands cannot be converted to a common type",
                           "expr.cond");
@@ -1213,13 +1263,16 @@ analysis_result semantic_analysis::conditional_operands(
                                   "null pointer constant have no composite "
                                   "pointer type",
                                   "expr.type");
-            return not_supported(n, "expr.cond");
+            return not_supported_because(n, "expr.cond",
+                                         "a conditional of a pointer and an "
+                                         "operand that is not pointer-like");
         }
         VTRY_SET(r, composite_pointer_type(n, e2, e3));
     } else {
         if (fundamental_of(e2.type) == fundamental_type::none ||
             fundamental_of(e3.type) == fundamental_type::none)
-            return not_supported(n, "expr.cond");
+            return not_supported_because(
+                n, "expr.cond", "conditional operands of unhandled types");
         return ill_formed(n,
                           "after the conversions, the operands have the same "
                           "type, arithmetic types, pointer types or "
@@ -1291,7 +1344,9 @@ analysis_result semantic_analysis::comma(SyntaxRef n, expression_meaning &m)
         }
         if (any && destroyed_temporary(m))
             /* the discarded left operand's temporary */
-            return not_supported(n, "class.temporary");
+            return not_supported_because(n, "class.temporary",
+                                         "a comma whose discarded left operand "
+                                         "is a destroyed temporary");
         uint32_t previous = m.node;
         if (any) {
             /* a discarded class prvalue is not "constant" as a value
@@ -1313,7 +1368,8 @@ analysis_result semantic_analysis::comma(SyntaxRef n, expression_meaning &m)
         any = true;
     }
     if (!any)
-        return not_supported(n, "expr.comma");
+        return not_supported_because(n, "expr.comma",
+                                     "a comma expression with no operands");
     /* the left operands are evaluated: one that is no constant expression
        makes the whole none */
     if (so_far != constness::constant) {

@@ -100,7 +100,8 @@ analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type,
                                            uint32_t *typedef_alignment)
 {
     if (!n.type_specifier_seq() || n.size() > 2)
-        return not_supported(n, "dcl.name");
+        return not_supported_because(n, "dcl.name",
+                                     "a type-id of an unexpected shape");
     /* [temp.variadic]/5: a template-argument's pack expansion, T ...
        (type_id_expansion: its pattern analysed) */
     uint32_t count = n.size();
@@ -115,7 +116,8 @@ analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type,
         placeholder_allowed = true;
     VTRY(r, decl_specifier_seq(n.type_specifier_seq(), s, false));
     if (!s.has_type)
-        return not_supported(n, "dcl.name");
+        return not_supported_because(n, "dcl.name",
+                                     "a type-id whose specifiers name no type");
     type = s.type;
     if (count == 1) {
         if (typedef_alignment)
@@ -125,7 +127,8 @@ analysis_result semantic_analysis::type_id(TypeId n, qualified_type &type,
     declarator_meaning m;
     r = declarator(current_declaration, n[1], type, m);
     if (r == analysis_result::well_formed && m.has_id)
-        return not_supported(n, "dcl.name");
+        return not_supported_because(
+            n, "dcl.name", "an abstract declarator that declares a name");
     if (typedef_alignment)
         *typedef_alignment =
             typedef_alignment_of(s.type.unqualified(), type, s.typedef_aligned);

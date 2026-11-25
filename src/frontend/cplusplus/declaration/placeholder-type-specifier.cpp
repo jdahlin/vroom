@@ -111,7 +111,9 @@ analysis_result semantic_analysis::deduced_type_supported(SyntaxRef at,
     if (record.kind == type_kind::array || record.kind == type_kind::function ||
         (record.kind == type_kind::fundamental &&
          record.fundamental == fundamental_type::void_))
-        return not_supported(at, "dcl.type.auto.deduct");
+        return not_supported_because(
+            at, "dcl.type.auto.deduct",
+            "a placeholder deduced as an array, function or void type");
     return analysis_result::well_formed;
 }
 
@@ -203,7 +205,8 @@ analysis_result semantic_analysis::placeholder_declaration(
     /* N3638 (C++14): a function's deduced return type */
     if (placeholder && kind == entity_kind::function &&
         !tokens.files.behavior.has(language_feature::return_type_deduction))
-        return not_supported(declaration, "dcl.spec.auto");
+        return not_supported_because(declaration, "dcl.spec.auto",
+                                     "a deduced return type before C++14");
     if (placeholder &&
         (kind == entity_kind::typedef_name || m.qualifier ||
          m.qualified_namespace ||
@@ -215,7 +218,9 @@ analysis_result semantic_analysis::placeholder_declaration(
          (m.operator_function && !in_member_template_declarator &&
           m.allocation != allocation_function::none) ||
          m.literal_operator || m.template_id || m.destructor))
-        return not_supported(declaration, "dcl.spec.auto");
+        return not_supported_because(
+            declaration, "dcl.spec.auto",
+            "a placeholder type in this kind of declaration");
     if (tokens[m.id].kind != token_kind::identifier)
         return analysis_result::well_formed;
     entity_index scope = current_scope;
@@ -228,12 +233,17 @@ analysis_result semantic_analysis::placeholder_declaration(
         for (entity_index f = prior; f; f = entity_table[f].next_overload)
             if (entity_table[f].kind == entity_kind::function &&
                 entity_table[f].placeholder_return)
-                return not_supported(declaration, "dcl.spec.auto");
+                return not_supported_because(
+                    declaration, "dcl.spec.auto",
+                    "a redeclaration without the placeholder of a deduced "
+                    "return type");
         return analysis_result::well_formed;
     }
     if (prior && (kind != entity_kind::function ||
                   !other_function_of_placeholder(prior, scope, type)))
-        return not_supported(declaration, "dcl.spec.auto");
+        return not_supported_because(
+            declaration, "dcl.spec.auto",
+            "a placeholder redeclaration of an earlier name");
     if (kind == entity_kind::variable && !initialized)
         return ill_formed_at_token(m.id,
                                    "the decl-specifier-seq shall be followed "
@@ -269,11 +279,15 @@ analysis_result semantic_analysis::deduce_placeholder(
     if (argument.kind == type_kind::none ||
         argument.kind == type_kind::placeholder ||
         argument.kind == type_kind::dependent || e.bit_field_width)
-        return not_supported(at, "dcl.type.auto.deduct");
+        return not_supported_because(
+            at, "dcl.type.auto.deduct",
+            "an initializer with no type to deduce from, or a bit-field");
     if (decltype_auto) {
         /* (T is the placeholder alone: placeholder_declaration) */
         if (!decltype_of(e, named, deduced))
-            return not_supported(at, "dcl.type.auto.deduct");
+            return not_supported_because(
+                at, "dcl.type.auto.deduct",
+                "an operand whose decltype(auto) type cannot be determined");
         replacement = deduced;
         return placeholder_constraint(at, named_concept, replacement);
     }
@@ -296,7 +310,9 @@ analysis_result semantic_analysis::deduce_placeholder(
     /* (a deduction deduce_type does not make may still succeed by
        [temp.deduct.call]/4's derived class or qualification conversion) */
     if (!deduce_type(p, a, values, set) || !set[0])
-        return not_supported(at, "dcl.type.auto.deduct");
+        return not_supported_because(
+            at, "dcl.type.auto.deduct",
+            "an initializer type the placeholder is not deduced from");
     replacement = values[0].type;
     deduced = replace_placeholder(declared, replacement);
     return placeholder_constraint(at, named_concept, replacement);
@@ -378,7 +394,8 @@ analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
                                                        initialized_value &value)
 {
     if (init.is_token())
-        return not_supported(current_declaration, "dcl.init");
+        return not_supported_because(current_declaration, "dcl.init",
+                                     "an initializer that is a single token");
     /* [temp.spec]/6: an initializer is checked */
     flag_set checked(explicit_declaration_names, false);
     SyntaxElement clause;
@@ -387,7 +404,8 @@ analysis_result semantic_analysis::deduced_initializer(SyntaxElement init,
         /* copy-list-initialization (std::initializer_list<U>), an
            expression-list or braced-init-list of other than one
            expression */
-        return not_supported(init.index(), "dcl.type.auto.deduct");
+        return not_supported_because(init.index(), "dcl.type.auto.deduct",
+                                     "auto from a list or several expressions");
     expression_meaning m;
     VTRY(r, expression(clause, m));
     return deduced_initialization(init, m, names_entity(clause), direct, list,
@@ -430,7 +448,9 @@ analysis_result semantic_analysis::deduced_initialization(
            variable's symbol is local, as declare() makes one of an unnamed
            class's */
         if (!closure)
-            return not_supported(n, "basic.link");
+            return not_supported_because(
+                n, "basic.link",
+                "auto from a type without linkage in an external variable");
         entity_table[e].linkage_of_name = linkage::internal;
         entity_table[e].unnamed_type_linkage = true;
     }
@@ -469,7 +489,9 @@ analysis_result semantic_analysis::deduce_return(SyntaxRef at,
                               "dcl.type.auto.deduct");
         /* (cv auto deduces cv void) */
         if (declared.cv())
-            return not_supported(at, "dcl.type.auto.deduct");
+            return not_supported_because(
+                at, "dcl.type.auto.deduct",
+                "a qualified auto deduced from a return with no value");
         deduced = qualified_type::make(
             type_table.fundamental(fundamental_type::void_), cv_none);
     } else {
@@ -600,25 +622,34 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
                                                    declarator_meaning &m)
 {
     if (n.size() != 2 || !n[1].is(syntax_kind::trailing_return_type))
-        return not_supported(n, "dcl.fct");
+        return not_supported_because(
+            n, "dcl.fct",
+            "a declarator that is no single trailing-return-type form");
     qualified_type auto_type = placeholder_type(false);
     /* (T other than auto: clang takes S(s)()->m, which [dcl.ambig.res]/1
        makes such a declaration, for an expression) */
     if (!(type == auto_type))
-        return not_supported(n, "dcl.fct");
+        return not_supported_because(
+            n, "dcl.fct",
+            "a trailing-return-type after a type other than plain auto");
     VTRY(r, declarator(declaration, n[0], type, m));
     const struct type f = type_table[type.unqualified()];
     /* (a type-id's abstract declarator has a derived-declarator-type-list:
        auto(*)() -> void is "pointer to function returning auto") */
     bool abstract = n.is(syntax_kind::abstract_declarator);
     if (abstract && !contains_placeholder(type))
-        return not_supported(n, "dcl.fct");
+        return not_supported_because(n, "dcl.fct",
+                                     "an abstract trailing-return-type "
+                                     "declarator without a placeholder");
     if (!abstract &&
         (f.kind != type_kind::function || !(f.operand == auto_type)))
-        return not_supported(n, "dcl.fct");
+        return not_supported_because(n, "dcl.fct",
+                                     "a trailing-return-type on a declarator "
+                                     "that is no function returning auto");
     auto trailing = n[1];
     if (trailing.size() != 2 || !trailing[1].is(syntax_kind::type_id))
-        return not_supported(n, "dcl.fct");
+        return not_supported_because(n, "dcl.fct",
+                                     "a trailing-return-type with no type-id");
     /* the type-id's own function declarators would replace the
        parameters and cv-qualifier-seq this declarator's has */
     owned_array<parameter_meaning> parameters;
@@ -653,7 +684,9 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
                           "array or function",
                           "dcl.fct");
     if (abstract_class(returned))
-        return not_supported(n, "class.abstract");
+        return not_supported_because(
+            n, "class.abstract",
+            "a trailing return type that is an abstract class");
     type = replace_placeholder(type, returned);
     return analysis_result::well_formed;
 }

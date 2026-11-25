@@ -344,7 +344,9 @@ analysis_result semantic_analysis::overloaded_operator(
     if (converts && !logical && !unary_prefix && !incdec &&
         (operands.size() != 2 || (member_only && !subscript) ||
          op == preprocessing_op_or_punc::SPACESHIP))
-        return not_supported(n, "over.built");
+        return not_supported_because(n, "over.built",
+                                     "a class conversion for a member-only, "
+                                     "<=> or non-binary built-in operator");
     if (member_only && !(subscript && converts) &&
         type_table[operands[0].type.unqualified()].kind !=
             type_kind::class_type)
@@ -394,7 +396,10 @@ analysis_result semantic_analysis::overloaded_operator(
             require_complete(c);
             if (entity_table[c].kind != entity_kind::class_type ||
                 !entity_table[c].size)
-                return not_supported(n, "over.match.oper");
+                return not_supported_because(
+                    n, "over.match.oper",
+                    "an operator on a left operand class that is incomplete or "
+                    "not a plain class");
             lookup_result found = lookup_qualified(c, name, lookup_filter::any);
             entity_index templates = 0;
             if (found.unknown && !found.ambiguous && !found.entity &&
@@ -418,14 +423,19 @@ analysis_result semantic_analysis::overloaded_operator(
                     candidates[i].reversed = reversed;
                 }
             } else if (found.unknown || found.ambiguous) {
-                return not_supported(n, "over.match.oper");
+                return not_supported_because(
+                    n, "over.match.oper",
+                    "an operator whose member lookup is unknown or ambiguous");
             }
             if (found.entity) {
                 if (entity_table[found.entity].kind != entity_kind::function ||
                     (!entity_table[found.entity].nonstatic_member &&
                      op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
                      op != preprocessing_op_or_punc::LEFT_BRACKET))
-                    return not_supported(n, "over.match.oper");
+                    return not_supported_because(
+                        n, "over.match.oper",
+                        "a member operator name that is not a usable member "
+                        "function");
                 overload_set(found.entity, members);
             }
         }
@@ -447,7 +457,9 @@ analysis_result semantic_analysis::overloaded_operator(
             function_template_of(found.unknown_entity))
             held_names.append(found.unknown_entity);
         else if (found.unknown || found.ambiguous) {
-            analysis_result refused = not_supported(n, "over.match.oper");
+            analysis_result refused = not_supported_because(
+                n, "over.match.oper",
+                "an operator whose non-member lookup is unknown or ambiguous");
             if (found.unknown_entity)
                 last_unsupported_held_by(found.unknown_entity);
             return refused;
@@ -457,7 +469,10 @@ analysis_result semantic_analysis::overloaded_operator(
             const entity &x = entity_table[found.entity];
             if (x.kind != entity_kind::function || !is_namespace(x.enclosing) ||
                 !is_namespace(found.found_in))
-                return not_supported(n, "over.match.oper");
+                return not_supported_because(
+                    n, "over.match.oper",
+                    "a non-member operator name that is not a namespace-scope "
+                    "function");
             set.append(found.entity);
         }
         owned_array<qualified_type> types;
@@ -483,13 +498,18 @@ analysis_result semantic_analysis::overloaded_operator(
         if (!held_names.empty())
             known = held_names[0];
         if (!argument_dependent_lookup(name, types, set, known, &held_names))
-            return not_supported(n, "basic.lookup.argdep");
+            return not_supported_because(n, "basic.lookup.argdep",
+                                         "an operator whose argument-dependent "
+                                         "lookup could not be completed");
         if (!held_names.empty()) {
             owned_array<uint32_t> group;
             owned_array<entity_index> associated_classes, associated_spaces;
             if (!associated_namespaces(types, associated_classes,
                                        associated_spaces))
-                return not_supported(n, "basic.lookup.argdep");
+                return not_supported_because(
+                    n, "basic.lookup.argdep",
+                    "an operator whose associated namespaces could not be "
+                    "determined");
             for (entity_index held : held_names) {
                 owned_array<uint32_t> one;
                 function_template_overloads(held, one);
@@ -623,7 +643,10 @@ analysis_result semantic_analysis::overloaded_operator(
                     return analysis_result::well_formed;
                 owned_array<entity_index> fns;
                 if (!visible_conversion_functions(ot.entity, fns))
-                    return not_supported(n, "over.built");
+                    return not_supported_because(
+                        n, "over.built",
+                        "a built-in operator on a class whose conversion "
+                        "functions are unknown");
                 qualified_type target;
                 for (entity_index f : fns) {
                     if (entity_table[f].explicit_)
@@ -643,15 +666,24 @@ analysis_result semantic_analysis::overloaded_operator(
                     if (!target.unqualified())
                         target = unq;
                     else if (target != unq)
-                        return not_supported(n, "over.built");
+                        return not_supported_because(
+                            n, "over.built",
+                            "a built-in operator on a class converting to "
+                            "several types");
                 }
                 if (!target.unqualified())
-                    return not_supported(n, "over.built");
+                    return not_supported_because(
+                        n, "over.built",
+                        "a built-in operator on a class with no non-class "
+                        "conversion target");
                 bool converted = false;
                 VTRY(cr, conversion_function_call(n, op_val, target, false,
                                                   converted));
                 if (!converted)
-                    return not_supported(n, "over.built");
+                    return not_supported_because(
+                        n, "over.built",
+                        "a built-in operator whose class operand conversion "
+                        "could not be formed");
                 return analysis_result::well_formed;
             };
             expression_meaning lhs = operands[0];
@@ -679,7 +711,9 @@ analysis_result semantic_analysis::overloaded_operator(
         return analysis_result::well_formed;
     }
     if (converts && candidates.empty())
-        return not_supported(n, "over.built");
+        return not_supported_because(
+            n, "over.built",
+            "a built-in operator through a conversion with no candidates");
     bool deleted_copy = false;
     if (op == preprocessing_op_or_punc::EQUAL) {
         /* [class.copy.assign]/2: "If the class definition does not
@@ -770,7 +804,10 @@ analysis_result semantic_analysis::overloaded_operator(
                     operands.size() != 2 ||
                     operands[1].type.unqualified() !=
                         operands[0].type.unqualified())
-                    return not_supported(n, "class.copy.assign");
+                    return not_supported_because(
+                        n, "class.copy.assign",
+                        "an assignment where the implicit copy assignment may "
+                        "also be viable");
                 deleted_copy = true;
             }
         }
@@ -807,11 +844,15 @@ analysis_result semantic_analysis::overloaded_operator(
                               "operator is defined as deleted",
                               "class.copy.assign");
         if (!movable)
-            return not_supported(n, "class.copy.assign");
+            return not_supported_because(
+                n, "class.copy.assign",
+                "a deleted copy assignment against another viable operator=");
     }
     if (r == analysis_result::well_formed && none_viable && converts)
         /* a built-in candidate may be viable through the conversion */
-        return not_supported(n, "over.built");
+        return not_supported_because(n, "over.built",
+                                     "no viable operator function while a "
+                                     "conversion may allow a built-in one");
     if (r == analysis_result::well_formed && !none_viable && converts &&
         !unary_prefix) {
         /* [over.ics.rank]/2: a viable operator function that binds every
@@ -844,7 +885,9 @@ analysis_result semantic_analysis::overloaded_operator(
                 beats_builtin = false;
         }
         if (!beats_builtin)
-            return not_supported(n, "over.built");
+            return not_supported_because(n, "over.built",
+                                         "a viable operator function that may "
+                                         "not beat the built-in candidates");
     }
     if (r == analysis_result::well_formed && none_viable && member_only &&
         op != preprocessing_op_or_punc::EQUAL &&
@@ -854,7 +897,9 @@ analysis_result semantic_analysis::overloaded_operator(
            built-in subscript or a surrogate call viable.  Assignment's
            built-in candidates require a non-class left operand without a
            user-defined conversion, so this does not apply to operator=. */
-        return not_supported(n, "over.match.oper");
+        return not_supported_because(
+            n, "over.match.oper",
+            "no viable member operator on a class with conversion functions");
     if (r == analysis_result::well_formed && none_viable &&
         op == preprocessing_op_or_punc::EQUAL &&
         (operands[0].type.cv() & cv_const))
@@ -876,12 +921,17 @@ analysis_result semantic_analysis::overloaded_operator(
         /* [over.match.best]/2: a non-member's parameter reached by a
            user-defined conversion is no better than the built-in's */
         if (c.template_index)
-            return not_supported(n, "over.built");
+            return not_supported_because(
+                n, "over.built",
+                "a unary operator template chosen against built-in conversion "
+                "candidates");
         conversion_sequence s = implicit_conversion_sequence(
             arguments[0],
             type_table.parameters(entity_table[f].type.unqualified())[0], true);
         if (s.kind != conversion_sequence::form::standard)
-            return not_supported(n, "over.built");
+            return not_supported_because(n, "over.built",
+                                         "a unary non-member operator reached "
+                                         "by a user-defined conversion");
     }
     if (c.template_index) {
         /* [temp.inst]/4: the specialization chosen is referenced: its
@@ -932,20 +982,28 @@ analysis_result semantic_analysis::overloaded_operator(
             conversion_sequence s =
                 implicit_conversion_sequence(ordered[i], parameters[i], true);
             if (s.kind != conversion_sequence::form::standard || s.rank != 0)
-                return not_supported(n, "over.built");
+                return not_supported_because(
+                    n, "over.built",
+                    "a built-in candidate chosen without exact match on every "
+                    "operand");
         }
         if (is_comparison(op) && operands.size() == 2 &&
             operands[0].type.unqualified() == operands[1].type.unqualified() &&
             (type.parameter_count != 2 ||
              stripped(parameters[0]) != operands[0].type.unqualified() ||
              stripped(parameters[1]) != operands[1].type.unqualified()))
-            return not_supported(n, "over.built");
+            return not_supported_because(
+                n, "over.built",
+                "a built-in candidate against a non-member operator on an "
+                "enumeration");
     }
     bool from_three_way =
         c.rewritten && x.implemented == preprocessing_op_or_punc::SPACESHIP;
     if (from_three_way && !any_class)
         /* an enumeration's built-in candidates against a rewritten one */
-        return not_supported(n, "over.match.oper");
+        return not_supported_because(
+            n, "over.match.oper",
+            "a rewritten operator candidate on enumeration operands only");
     if (c.rewritten && !from_three_way) {
         /* /9: "If a rewritten operator== candidate is selected by overload
            resolution for an operator @, its return type shall be cv bool" */
@@ -955,7 +1013,10 @@ analysis_result semantic_analysis::overloaded_operator(
             if (is_integral(result) || enumeration_of(result))
                 /* [impl.clang] an integral or unscoped enumeration type is
                    accepted, with a warning */
-                return not_supported(n, "over.match.oper");
+                return not_supported_because(
+                    n, "over.match.oper",
+                    "a rewritten operator== returning an integer or "
+                    "enumeration, not bool");
             return ill_formed(n,
                               "a rewritten operator== candidate selected by "
                               "overload resolution shall have the return type "
@@ -995,7 +1056,10 @@ analysis_result semantic_analysis::overloaded_operator(
             /* the temporary's destructor is an instantiated member's
                definition still to be made ([temp.inst]/4), whose errors
                this expression's declaration owns: not analysed */
-            return not_supported(n, "class.temporary");
+            return not_supported_because(
+                n, "class.temporary",
+                "an operator on a prvalue whose destructor definition is not "
+                "yet made");
         expression_meaning address;
         address.type =
             qualified_type::make(type_table.pointer_to(e.type), cv_none);
@@ -1066,7 +1130,10 @@ analysis_result semantic_analysis::overloaded_operator(
             VTRY_SET(r, overloaded_operator(n, at, op, false, cmp_syn, cmp_ops,
                                             cmp_handled, m));
             if (!cmp_handled)
-                return not_supported(n, "over.match.oper");
+                return not_supported_because(
+                    n, "over.match.oper",
+                    "a comparison rewritten through operator<=> with no "
+                    "handled operator");
             handled = true;
             return analysis_result::well_formed;
         }

@@ -55,7 +55,9 @@ analysis_result semantic_analysis::member_pointer_conversion(
         if (source.kind == type_kind::fundamental &&
             !(is_integral(m.type) && m.evaluation != constness::not_constant))
             return ill_formed(at, rule, "dcl.init");
-        return not_supported(at, "conv.mem");
+        return not_supported_because(
+            at, "conv.mem",
+            "a conversion to member pointer from a type that is not one");
     }
     if (m.type.unqualified() == to.unqualified()) {
         m.type = to;
@@ -69,7 +71,9 @@ analysis_result semantic_analysis::member_pointer_conversion(
         }
         if (similar(m.type, to))
             return ill_formed(at, rule, "dcl.init");
-        return not_supported(at, "conv.mem");
+        return not_supported_because(at, "conv.mem",
+                                     "a member pointer conversion to another "
+                                     "member type of the same class");
     }
     qualified_type via = qualified_type::make(
         type_table.pointer_to_member(d, source.operand), cv_none);
@@ -79,7 +83,9 @@ analysis_result semantic_analysis::member_pointer_conversion(
         entity_table[d].kind != entity_kind::class_type ||
         entity_table[b].kind != entity_kind::class_type ||
         !entity_table[d].size)
-        return not_supported(at, "conv.mem");
+        return not_supported_because(at, "conv.mem",
+                                     "a member pointer conversion to another "
+                                     "member type or incomplete class");
     if (!base_subobjects(d, b))
         return ill_formed(at,
                           "a pointer to member of B converts to a pointer to "

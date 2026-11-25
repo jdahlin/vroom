@@ -53,7 +53,9 @@ analysis_result semantic_analysis::gnu_label_address(SyntaxRef n,
                                                      expression_meaning &m)
 {
     if (!function_state.active || n.size() != 2 || !n[1].is_identifier())
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "a label address outside a function body or without a label name");
     goto_record g;
     g.name = tokens.identifier(n[1].token());
     g.point.scope = current_scope;
@@ -78,7 +80,9 @@ analysis_result semantic_analysis::gnu_computed_goto(SyntaxRef n,
                                                      uint32_t &built)
 {
     if (!function_state.active || n.size() != 4)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "a computed goto outside a function body or of unrecognized form");
     expression_meaning m;
     VTRY(r, expression(n[2], m));
     VTRY_SET(r, operand_value(n, m));
@@ -133,7 +137,11 @@ analysis_result semantic_analysis::check_indirect_gotos()
             if (!target)
                 continue;
             if (!target->analysed) {
-                result = worse(result, not_supported(g.node, "stmt.dcl"));
+                result = worse(
+                    result,
+                    not_supported_because(
+                        g.node, "stmt.dcl",
+                        "a computed goto to a label that was not analysed"));
                 continue;
             }
             bool exits = false;
@@ -156,7 +164,11 @@ analysis_result semantic_analysis::check_indirect_gotos()
                 const implementation_defined_behavior &b =
                     tokens.files.behavior;
                 if (b.microsoft_extensions || b.microsoft_compatibility) {
-                    result = worse(result, not_supported(g.node, "stmt.dcl"));
+                    result =
+                        worse(result, not_supported_because(
+                                          g.node, "stmt.dcl",
+                                          "a computed goto past a variable's "
+                                          "declaration in Microsoft mode"));
                     break;
                 }
                 result = worse(

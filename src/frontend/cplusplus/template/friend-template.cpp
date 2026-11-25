@@ -64,11 +64,15 @@ analysis_result semantic_analysis::friend_class_template(entity_index c,
             syntax_parser.keyword_of(tokens[x.token()]) !=
                 standard_keyword::none &&
             !is_keyword(x, standard_keyword::typename_))
-            return not_supported(n, "temp.friend");
+            return not_supported_because(
+                n, "temp.friend",
+                "a friend class template with a keyword type specifier");
         other_type = true;
     }
     if (elaborated && other_type)
-        return not_supported(n, "temp.friend");
+        return not_supported_because(n, "temp.friend",
+                                     "a friend template with both an "
+                                     "elaborated and another type specifier");
     /* [temp.pre]/2: "The declaration in a template-declaration (if any)
        shall declare or define a function, a class, or a variable": template
        <class U> friend S<U>; declares none */
@@ -78,7 +82,9 @@ analysis_result semantic_analysis::friend_class_template(entity_index c,
                           "elaborated-type-specifier",
                           "temp.pre");
     if (!is_class_key(leading_keyword(elaborated)))
-        return not_supported(n, "temp.friend");
+        return not_supported_because(
+            n, "temp.friend",
+            "a friend class template declared with the key enum");
     if (elaborated.size() == 2 &&
         elaborated[1].is(syntax_kind::simple_template_id))
         /* /7: "Friend declarations shall not declare partial
@@ -90,18 +96,24 @@ analysis_result semantic_analysis::friend_class_template(entity_index c,
     if (elaborated.size() == 3 && elaborated[2].is_identifier())
         return qualified_friend_class_template(c, n, elaborated);
     if (elaborated.size() != 2 || !elaborated[1].is_identifier())
-        return not_supported(n, "temp.friend");
+        return not_supported_because(
+            n, "temp.friend",
+            "a friend class template not named by a single identifier");
     uint32_t name = tokens.identifier(elaborated[1].token());
     entity_index space = enclosing_namespace(c);
     if (entity_table[space].unknown_names ||
         tokens.files.behavior.microsoft_extensions)
-        return not_supported(n, "temp.friend");
+        return not_supported_because(
+            n, "temp.friend",
+            "a friend class template in a namespace with unknown names");
     if (entity_index prior = entity_table.find(space, name)) {
         /* a class template of the namespace: its name is held
            (class_template_of); anything else bound there is not analysed */
         if (!class_template_of(prior) ||
             entity_table.bound_by_using(space, name))
-            return not_supported(n, "temp.friend");
+            return not_supported_because(n, "temp.friend",
+                                         "a friend class template whose name "
+                                         "is not just a class template");
     }
     /* every specialization of the class template of that name: a
        specialization is a class of the template's scope with its name
@@ -147,7 +159,9 @@ analysis_result semantic_analysis::qualified_friend_class_template(
     entity_index c, TemplateDeclaration n, SyntaxElement elaborated)
 {
     if (!elaborated[1].is(syntax_kind::nested_name_specifier))
-        return not_supported(n, "temp.friend");
+        return not_supported_because(
+            n, "temp.friend",
+            "a qualified friend class template with no nested-name-specifier");
     bool earlier_id = false;
     SyntaxElement last = last_component(elaborated[1], earlier_id);
     if (last.is(syntax_kind::simple_template_id))
@@ -160,14 +174,18 @@ analysis_result semantic_analysis::qualified_friend_class_template(
     for (SyntaxElement x : elaborated[1].elements())
         if (!x.is_token() && !x.is_identifier())
             /* decltype(...):: */
-            return not_supported(n, "temp.friend");
+            return not_supported_because(
+                n, "temp.friend",
+                "a friend template with a decltype nested-name-specifier");
     nominated_scope ns;
     VTRY(r, nested_name_specifier(elaborated[1].index(), ns));
     entity_index scope = ns.entity;
     if (!scope || ns.dependent ||
         (!is_namespace(scope) &&
          entity_table[scope].kind != entity_kind::class_type))
-        return not_supported(n, "temp.friend");
+        return not_supported_because(n, "temp.friend",
+                                     "a qualified friend class template in a "
+                                     "dependent or unknown scope");
     uint32_t name = tokens.identifier(elaborated[2].token());
     entity_index prior = entity_table.find(scope, name);
     if (!prior && is_namespace(scope)) {
@@ -186,7 +204,9 @@ analysis_result semantic_analysis::qualified_friend_class_template(
     }
     if (!prior || !class_template_of(prior) ||
         entity_table.bound_by_using(scope, name))
-        return not_supported(n, "temp.friend");
+        return not_supported_because(n, "temp.friend",
+                                     "a qualified friend class template naming "
+                                     "no declared class template");
     befriend_by_name(c, scope, name);
     return analysis_result::well_formed;
 }
@@ -223,10 +243,14 @@ analysis_result semantic_analysis::dependent_member_friend(
     lookup_result found;
     entity_index named = 0;
     if (!template_id_name(id, found, named) || found.ambiguous || !named)
-        return not_supported(n, "temp.friend");
+        return not_supported_because(n, "temp.friend",
+                                     "a friend member of a dependent type with "
+                                     "an unresolved template-id");
     uint32_t ct = class_template_of(named);
     if (!ct)
-        return not_supported(n, "temp.friend");
+        return not_supported_because(
+            n, "temp.friend",
+            "a friend member of a dependent type of no class template");
     owned_array<SyntaxRef> parameters;
     entity_index saved_class = defining_class;
     defining_class = 0;
@@ -245,7 +269,9 @@ analysis_result semantic_analysis::dependent_member_friend(
     for (SyntaxElement x : id.elements())
         if (x.is(syntax_kind::template_argument_list) &&
             !expansion_list(x, written, expansion))
-            return not_supported(n, "temp.friend");
+            return not_supported_because(
+                n, "temp.friend",
+                "a friend member of a type whose arguments cannot be listed");
     if (written.empty())
         for (uint32_t i = 2; i + 1 < id.size(); i++) {
             written.append(id[i]);
@@ -258,7 +284,9 @@ analysis_result semantic_analysis::dependent_member_friend(
             if (tokens[t].kind == token_kind::identifier)
                 name_at = t;
         if (!name_at)
-            return not_supported(n, "temp.friend");
+            return not_supported_because(
+                n, "temp.friend",
+                "a friend template with an unnamed template parameter");
         bool named_in_c = false;
         for (size_t a = 0; a < written.size(); a++) {
             /* a pack expansion: an ellipsis after the argument, or ending
@@ -637,7 +665,9 @@ analysis_result semantic_analysis::friend_function_template(
     if (!inner.is(syntax_kind::member_declaration,
                   syntax_kind::function_definition) ||
         (inner.size() != lead + 3 && !trailing))
-        return not_supported(n, "temp.friend");
+        return not_supported_because(
+            n, "temp.friend",
+            "a friend function template declaration of an unhandled form");
     /* [temp.friend]/1: a member function template of another class befriended:
        template <class T> friend R G::f(P); */
     if (inner.is(syntax_kind::member_declaration) &&
@@ -695,13 +725,19 @@ analysis_result semantic_analysis::friend_function_template(
                 if (dr != analysis_result::well_formed)
                     return dr;
                 if (!m.has_id || m.qualifier != target)
-                    return not_supported(n, "temp.friend");
+                    return not_supported_because(
+                        n, "temp.friend",
+                        "a friend member template whose declarator names "
+                        "another scope");
                 entity_index held =
                     entity_table.find(target, tokens.identifier(m.id));
                 if (held)
                     held = member_templates_of(held);
                 if (!held)
-                    return not_supported(n, "temp.friend");
+                    return not_supported_because(
+                        n, "temp.friend",
+                        "a friend member template the named class does not "
+                        "declare");
                 owned_array<uint32_t> group;
                 function_template_overloads(held, group);
                 for (uint32_t g : group) {
@@ -716,7 +752,9 @@ analysis_result semantic_analysis::friend_function_template(
                     befriend_template(c, f.entity);
                     return analysis_result::well_formed;
                 }
-                return not_supported(n, "temp.friend");
+                return not_supported_because(n, "temp.friend",
+                                             "a friend member template that "
+                                             "matches no member declaration");
             }
         }
     }
