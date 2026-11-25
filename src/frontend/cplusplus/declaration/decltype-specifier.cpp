@@ -261,6 +261,23 @@ void semantic_analysis::collect_written_casts(
             found.append(b);
         }
     }
+    /* Q<args>:: in a nested-name-specifier, Q a class template: its
+       (dependent) specialization, for the mangler (cast the template-id's
+       node) */
+    if (x.is(syntax_kind::nested_name_specifier) && x.size() == 2 &&
+        x[0].is(syntax_kind::simple_template_id)) {
+        size_t unsupported_before = unsupported.size();
+        type_index q = 0;
+        analysis_result r = template_type(x[0], 0, false, q);
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed) {
+            written_binding b;
+            SyntaxRef ar = x[0];
+            b.cast = ar.index().index();
+            b.type = qualified_type::make(q, cv_none);
+            found.append(b);
+        }
+    }
     /* typename Q::template X<args> ([temp.dep.type]/9): the qualifier's
        type (element 0) and the type arguments, for the mangler */
     if (x.is(syntax_kind::typename_specifier) && x.size() >= 3 &&
@@ -281,21 +298,55 @@ void semantic_analysis::collect_written_casts(
             found.append(b);
             SyntaxElement id = x[x.size() - 1];
             uint32_t count = 0;
+            /* the arguments, a pack expansion of a pack an alias
+               template's instantiation bound (Rest...) one per element, as
+               clang lists them */
+            owned_array<SyntaxElement> written;
+            owned_array<bool> expansion;
             for (uint32_t i = 2; i + 1 < id.size() && ok; i++) {
-                if (id[i].is(preprocessing_op_or_punc::COMMA))
-                    continue;
                 if (id[i].is(syntax_kind::template_argument_list)) {
-                    ok = false;
-                    break;
+                    ok = expansion_list(id[i], written, expansion);
+                } else if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
+                    if (written.empty() || expansion.back())
+                        ok = false;
+                    else
+                        expansion.back() = true;
+                } else if (!id[i].is(preprocessing_op_or_punc::COMMA)) {
+                    written.append(id[i]);
+                    expansion.append(false);
                 }
-                qualified_type t;
-                ok = type_id(id[i], t) == analysis_result::well_formed;
-                if (ok) {
-                    written_binding a;
-                    a.cast = r.index().index();
-                    a.element = ++count;
-                    a.type = t;
-                    found.append(a);
+            }
+            for (size_t w = 0; w < written.size() && ok; w++) {
+                SyntaxElement a = written[w];
+                bool expanded = expansion[w];
+                if (a.is(syntax_kind::type_id) && a.size() == 2 &&
+                    a[1].is(preprocessing_op_or_punc::ELLIPSIS))
+                    expanded = true;
+                uint32_t times = 1;
+                if (expanded) {
+                    token_index first = a.first_token();
+                    token_index end = a.end_token();
+                    if (end > first + 1 &&
+                        SyntaxElement::from_token(end - 1).is(
+                            preprocessing_op_or_punc::ELLIPSIS))
+                        end--;
+                    bool own = false;
+                    ok = expansion_count(first, end, times, &own) && !own;
+                }
+                for (uint32_t k = 0; k < times && ok; k++) {
+                    qualified_type t;
+                    {
+                        expansion_scope expanding_scope(*this, expanded, k,
+                                                        true);
+                        ok = type_id(a, t) == analysis_result::well_formed;
+                    }
+                    if (ok) {
+                        written_binding a2;
+                        a2.cast = r.index().index();
+                        a2.element = ++count;
+                        a2.type = t;
+                        found.append(a2);
+                    }
                 }
             }
         }
@@ -403,8 +454,17 @@ void semantic_analysis::collect_written_bindings(
             written_binding b;
             b.identifier = id;
             b.element = i;
+            b.pack_position = entity_table[pack].first_member;
             if (a)
                 b.type = entity_table[a].type;
+            found.append(b);
+        }
+        if (!entity_table[pack].member_count) {
+            /* (an empty pack: its name and position alone) */
+            written_binding b;
+            b.identifier = id;
+            b.element = UINT32_MAX - 1;
+            b.pack_position = entity_table[pack].first_member;
             found.append(b);
         }
     }
@@ -432,6 +492,7 @@ type_index semantic_analysis::dependent_written_type(SyntaxRef n,
                 written_bindings[entity_table[e].first_member + i];
             same = a.identifier == bindings[i].identifier &&
                    a.cast == bindings[i].cast &&
+                   a.pack_position == bindings[i].pack_position &&
                    a.element == bindings[i].element &&
                    a.type == bindings[i].type;
         }

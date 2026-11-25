@@ -506,6 +506,10 @@ struct entity {
        of the instantiated body makes it ill-formed (clang: "in
        instantiation of ... requested here") */
     SyntaxRef member_needed_by = 0;
+    /* [temp.alias]/2, /4: an alias template's specialization kept for its
+       dependent arguments (CWG 1558) whose type-id is not dependent: that
+       type, which clang mangles ([impl.clang]) */
+    qualified_type alias_expansion;
     /* the preprocessor's identifier number, 0 for an unnamed entity */
     uint32_t name = 0;
     /* the entity whose scope the name is declared in (a namespace, a
@@ -2906,6 +2910,9 @@ class semantic_analysis
         /* a cast-expression's type-id analysed there (identifier 0): the
            cast's syntax node */
         uint32_t cast = 0;
+        /* a name bound to a pack: the position plus one of the alias
+           template's parameter it is (sizeof...(P) mangles it); 0 else */
+        uint32_t pack_position = 0;
     };
     owned_array<written_binding> written_bindings;
     /* the tags of an expression's structure (expression_structure): a
@@ -6500,6 +6507,16 @@ class semantic_analysis
                 if (entity_index e = namespace_member(u.nominated, name))
                     return e;
         return 0;
+    }
+    /* whether the name held by entity held denotes a variable template */
+    bool names_variable_template(entity_index held) const
+    {
+        return variable_template_of(held) != 0;
+    }
+    /* whether type t names a template parameter (is dependent) */
+    bool type_depends_on_template_parameter(qualified_type t) const
+    {
+        return depends_on_template_parameter(t);
     }
     /* whether the name held by entity held denotes a function template
        (a non-member's, as a callee's unresolved name is mangled) */

@@ -149,8 +149,13 @@ void semantic_analysis::bind_template_argument(entity_index scope,
             entity_table[e].argument_bound = true;
             elements.append(e);
         }
-        make_bound_pack(scope, name, elements.data(),
-                        static_cast<uint32_t>(elements.size()));
+        entity_index bound_pack =
+            make_bound_pack(scope, name, elements.data(),
+                            static_cast<uint32_t>(elements.size()));
+        /* (the parameter's position plus one, for the mangler:
+           collect_written_bindings) */
+        entity_table[bound_pack].first_member =
+            static_cast<uint32_t>(entity_table[parameter].value) + 1;
         return;
     }
     if (!name)
@@ -972,6 +977,20 @@ analysis_result semantic_analysis::template_argument_for(
         if (!e)
             e = find_pack(tokens.identifier(t));
         if (!e)
+            continue;
+        /* [temp.dep.constexpr]/2 with [expr.sizeof]/5: sizeof...(P) of a
+           pack an instantiation bound is its number of elements, whatever
+           they are: no dependence ([impl.clang] folded,
+           sizeof...(_Args) != 0 in libc++'s _Or) */
+        if (entity_table[e].kind == entity_kind::pack && t >= first + 3 &&
+            tokens[t - 1].kind == token_kind::operator_or_punctuator &&
+            preprocessing_op_or_punc_primary(tokens[t - 1].op_or_punc) ==
+                preprocessing_op_or_punc::LEFT_PARENTHESIS &&
+            tokens[t - 2].kind == token_kind::operator_or_punctuator &&
+            preprocessing_op_or_punc_primary(tokens[t - 2].op_or_punc) ==
+                preprocessing_op_or_punc::ELLIPSIS &&
+            this->syntax_parser.keyword_of(tokens[t - 3]) ==
+                standard_keyword::sizeof_)
             continue;
         const entity &named = entity_table[e];
         /* (or an alias template's parameter bound to such an argument) */
