@@ -6305,6 +6305,8 @@ class semantic_analysis
                                         bool argument_dependent);
     bool member_definition_wanted(const postponed_body &b);
     token_index member_definition_name(const template_member_definition &o);
+    uint32_t member_definition_lookup_id(const template_member_definition &o,
+                                         token_index name);
     void define_waiting_members(entity_index scope, token_index name,
                                 bool define = true);
     analysis_result defer_or_define_member(uint32_t m, uint32_t index,
