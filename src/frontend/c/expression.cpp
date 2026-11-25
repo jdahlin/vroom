@@ -810,7 +810,6 @@ static __attribute__((noinline, cold, noreturn)) void
 cc_primary_invalid_report(cc *c, const ptok *t)
 {
     cc_report_fatal(c, t->loc, "expected expression");
-    abort();
 }
 
 /* a name bound to s (already consumed) */

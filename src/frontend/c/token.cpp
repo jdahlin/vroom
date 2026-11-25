@@ -188,7 +188,6 @@ cc_token_expect_fail(cc *c, const char *what)
         cc_recovery_jump(c);
     }
     cc_report_fatal(c, c->tk[0].loc, "expected %s", what);
-    abort();
 }
 
 CC_PRIVATE __attribute__((noinline, cold, noreturn)) void

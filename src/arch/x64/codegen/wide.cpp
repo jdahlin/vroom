@@ -301,33 +301,6 @@ VPRIV codegen_value x64_wbin(codegen_context *e, int op, bool sgn,
             return x64_wv(x64_laddr(e, &l));
         }
     }
-    if (0) {
-        /* b is an int: __ashlti3, __lshrti3, __ashrti3 (a, (int)b) */
-        int64_t w[3];
-        int rc;
-
-        ra = x64_waddr(e, &a);
-        w[0] = x64_wword(e, ra, 0);
-        w[1] = x64_wword(e, ra, 8);
-        rc = x64_toreg(e, &b);
-        {
-            codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
-                                .align = 8,
-                                .offset = walk_slot_temporary(e, 8, 8)};
-
-            x64_record_emit_memory(e, X64_OP_ST, 8, rc, &d, false);
-            w[2] = (int64_t)d.offset;
-        }
-        x64_tfree(e, ra);
-        x64_tfree(e, rc);
-        rd = x64_wnew(e, &slot);
-        x64_lcall(e,
-                  op == LEX_TOKEN_LESS_LESS ? CODEGEN_LIBRARY_ASHLTI3
-                  : sgn                     ? CODEGEN_LIBRARY_ASHRTI3
-                                            : CODEGEN_LIBRARY_LSHRTI3,
-                  w, 3, -1, slot, 2, false);
-        return x64_wv(rd);
-    }
     ra = x64_waddr(e, &a);
     rb = x64_waddr(e, &b);
     if (op == LEX_TOKEN_SLASH || op == LEX_TOKEN_PERCENT) {
