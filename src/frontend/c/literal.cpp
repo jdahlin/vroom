@@ -581,6 +581,8 @@ CC_PRIVATE uint32_t cc_literal_string_build(cc *c, const ptok *tokens,
             cc_report_fatal(c, t->loc,
                             "translation unit too large (front-end heap full)");
         }
+        /* decoded in place, allocated after: addressable under ASan */
+        VASAN_UNPOISON(buf + n, sl * 4 + 16);
 
         while (*s != '"')
             s++;

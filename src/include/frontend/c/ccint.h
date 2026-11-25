@@ -7,6 +7,7 @@
 #include <setjmp.h>
 #include "frontend/c/cc.h"
 #include "frontend/ast.h"
+#include "common/asan.h"
 #include "common/intern.h"
 #include "frontend/c/keywords.h"
 
@@ -166,6 +167,9 @@ struct cc {
         paren; /* per node: its outermost parentheses, bytes before span.b / after span.e (0: none) */
 
     char *heap, *hp, *hend; /* bump allocator for everything else */
+#if VCC_ASAN
+    char *heap_poisoned; /* [hp, heap_poisoned) is poisoned (common/asan.h) */
+#endif
     struct cc_declarator_operation
         *dops; /* declarator op stack (frontend/c/declarator.cpp) */
     uint32_t ndops, capdops;

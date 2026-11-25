@@ -7,9 +7,30 @@
 static vjob_region_pool cc_region_pool = VJOB_REGION_POOL_INIT(22);
 static _Thread_local vjob_region *cc_regions;
 
+/* ASan: keep at least half a window past end poisoned (common/region.h does the same) */
+static void cc_heap_poison_ahead(cc *c, char *end)
+{
+#if VCC_ASAN
+    char *stop = c->hend;
+
+    if (end + VASAN_WINDOW / 2 <= c->heap_poisoned)
+        return;
+    if ((size_t)(c->hend - end) > VASAN_WINDOW)
+        stop = end + VASAN_WINDOW;
+    if (c->heap_poisoned < end)
+        c->heap_poisoned = end;
+    if (stop > c->heap_poisoned)
+        VASAN_POISON(c->heap_poisoned, (size_t)(stop - c->heap_poisoned));
+    c->heap_poisoned = stop;
+#else
+    (void)c, (void)end;
+#endif
+}
+
 CC_PRIVATE void *cc_heap_allocate(cc *c, size_t n)
 {
     char *r;
+    size_t asked = n;
 
     n = (n + 15) & ~(size_t)15;
     if (unlikely(c->hp + n > c->hend))
@@ -17,6 +38,9 @@ CC_PRIVATE void *cc_heap_allocate(cc *c, size_t n)
                         "translation unit too large (front-end heap full)");
     r = c->hp;
     c->hp += n;
+    VASAN_UNPOISON(r, asked);
+    (void)asked;
+    cc_heap_poison_ahead(c, c->hp);
     return r;
 }
 
@@ -75,6 +99,10 @@ CC_PRIVATE void cc_translation_unit_init(cc *c, pp *p, const cc_options *o)
     c->paren = (struct cc_node_parentheses *)(vjob_region_acquire(
         &cc_regions[21], (size_t)1 << 30, "cc.paren"));
     c->hend = c->heap + ((size_t)1 << 32);
+#if VCC_ASAN
+    c->heap_poisoned = c->heap;
+#endif
+    cc_heap_poison_ahead(c, c->heap);
     c->capdops = 4096;
     c->dops = (struct cc_declarator_operation *)(cc_heap_allocate(
         c, c->capdops * sizeof(cc_declarator_operation)));

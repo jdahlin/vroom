@@ -1,5 +1,6 @@
 /* Per-thread bump arenas that every allocation of a link comes from, and the release of big mappings. */
 
+#include "common/asan.h"
 #include "common/attributes.h"
 #include "ld-internal.h"
 
@@ -22,8 +23,10 @@ static __thread unsigned ld_region_thread_generation;
 bool ld_keep_mappings;
 VPRIV void ld_region_unmap(const void *p, size_t n)
 {
-    if (!ld_keep_mappings)
+    if (!ld_keep_mappings) {
+        VASAN_UNPOISON(p, n);
         munmap(VUNCONST(void *, p), n);
+    }
 }
 
 VPRIV void *ld_region_large_alloc(size_t n)
@@ -40,6 +43,8 @@ VPRIV void *ld_region_large_alloc(size_t n)
 /* zeroed memory from this thread's arena */
 VPRIV void *ld_region_alloc(size_t n)
 {
+    size_t asked = n;
+
     n = (n + 15) & ~(size_t)15;
     if (ld_region_thread_generation !=
         atomic_load_explicit(&ld_region_generation, memory_order_relaxed)) {
@@ -59,9 +64,13 @@ VPRIV void *ld_region_alloc(size_t n)
         }
         ld_region_current = (uint8_t *)b + 32;
         ld_region_end = (uint8_t *)b + bs;
+        /* ASan: what the block has not handed out yet is poisoned */
+        VASAN_POISON(ld_region_current, bs - 32);
     }
     void *p = ld_region_current;
     ld_region_current += n;
+    VASAN_UNPOISON(p, asked);
+    (void)asked;
     return p;
 }
 VPRIV void ld_regions_free(void)
