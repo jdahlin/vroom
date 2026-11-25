@@ -962,6 +962,19 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                 base_step(fp.entity, tp.entity, ambiguous))
                 return pointer_to_base(at.first_token(), fp.entity, tp.entity,
                                        to, m);
+            /* [conv.ptr]/3: "A prvalue of type "pointer to cv D", where D
+               is a complete class type, can be converted to a prvalue of
+               type "pointer to cv B", where B is a base class of D": a
+               complete class's pointer to that of a class that is none of
+               its bases has no conversion (as the implicit conversion
+               sequence finds, implicit-conversion-sequence.cpp) */
+            if (fp.kind == type_kind::class_type &&
+                tp.kind == type_kind::class_type &&
+                entity_table[fp.entity].kind == entity_kind::class_type &&
+                entity_table[tp.entity].kind == entity_kind::class_type &&
+                entity_table[fp.entity].size &&
+                !base_step(fp.entity, tp.entity, ambiguous))
+                return ill_formed(at, rule, "dcl.init");
             /* a function pointer conversion: not analysed yet */
             if (fp.kind == type_kind::class_type ||
                 fp.kind == type_kind::function ||
