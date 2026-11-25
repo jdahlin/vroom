@@ -900,6 +900,31 @@ bool itanium_mangler::type_operand(SyntaxElement a)
     if (inner.is_token()) {
         if (const auto *b = bound(inner))
             return type(b->type);
+        /* a simple-type-specifier keyword alone (unsigned(4), int()):
+           [dcl.type.simple]'s type of it */
+        static const struct {
+            standard_keyword keyword;
+            fundamental_type type;
+        } alone[] = {
+            {standard_keyword::void_, fundamental_type::void_},
+            {standard_keyword::bool_, fundamental_type::bool_},
+            {standard_keyword::char_, fundamental_type::char_},
+            {standard_keyword::wchar_t_, fundamental_type::wchar_t_},
+            {standard_keyword::char8_t_, fundamental_type::char8_t_},
+            {standard_keyword::char16_t_, fundamental_type::char16_t_},
+            {standard_keyword::char32_t_, fundamental_type::char32_t_},
+            {standard_keyword::short_, fundamental_type::short_int},
+            {standard_keyword::int_, fundamental_type::int_},
+            {standard_keyword::signed_, fundamental_type::int_},
+            {standard_keyword::unsigned_, fundamental_type::unsigned_int},
+            {standard_keyword::long_, fundamental_type::long_int},
+            {standard_keyword::float_, fundamental_type::float_},
+            {standard_keyword::double_, fundamental_type::double_},
+        };
+        if (inner.keyword() != standard_keyword::none)
+            for (const auto &k : alone)
+                if (inner.keyword() == k.keyword)
+                    return builtin_type(k.type);
         if (!inner.is_identifier())
             return false;
         entity_index pe =
@@ -1093,6 +1118,34 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
             text("az");
         return dependent_expression(operand);
     }
+    /* [abi:expressions] the named casts,
+
+           <expression> ::= dc <type> <expression>
+                        ::= sc <type> <expression>
+                        ::= cc <type> <expression>
+                        ::= rc <type> <expression>
+     */
+    if (expression.is(syntax_kind::postfix_expression) &&
+        expression.size() == 7 && expression[0].is_token() &&
+        punctuator(expression[1], preprocessing_op_or_punc::LESS) &&
+        expression[2].is(syntax_kind::type_id) &&
+        expression[4].is(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+        static const struct {
+            standard_keyword keyword;
+            const char *code;
+        } casts[] = {
+            {standard_keyword::dynamic_cast_, "dc"},
+            {standard_keyword::static_cast_, "sc"},
+            {standard_keyword::const_cast_, "cc"},
+            {standard_keyword::reinterpret_cast_, "rc"},
+        };
+        for (const auto &k : casts)
+            if (expression[0].is(k.keyword)) {
+                text(k.code);
+                return type_operand(expression[2]) &&
+                       dependent_expression(expression[5]);
+            }
+    }
     /* [abi:expressions] T(e), T(e, ...), T a type: a functional cast,
 
            <expression> ::= cv <type> <expression>
@@ -1100,7 +1153,8 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
      */
     if (expression.is(syntax_kind::postfix_expression) &&
         expression.size() == 4 && expression[0].is_token() &&
-        expression[0].is_identifier() &&
+        (expression[0].is_identifier() ||
+         expression[0].keyword() != standard_keyword::none) &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[3].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
         size_t before = out->n;
@@ -1145,7 +1199,8 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
        parameter: cv <type> _ E */
     if (expression.is(syntax_kind::postfix_expression) &&
         expression.size() == 3 && expression[0].is_token() &&
-        expression[0].is_identifier() &&
+        (expression[0].is_identifier() ||
+         expression[0].keyword() != standard_keyword::none) &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
         size_t before = out->n;
@@ -2296,12 +2351,30 @@ bool itanium_mangler::template_arg(entity_index c, uint32_t i, uint32_t element)
            its address (a pointer's argument) the second, ad
            ([abi:mangling-operator]'s & as a unary operator) before the
            first, as X <expression> E ([abi:mangle.template-arg]) */
+        /* [impl.clang] an array's first element (int b[3] as an int*
+           argument, [conv.array]): the address of the subobject, X ad so
+           <element type> L _Z <encoding> E E E ([abi:expressions]' sub-object
+           expression, offset 0 left out) */
+        const struct type &object = record(analysis.entity_table[named].type);
+        const struct type &parameter_type =
+            record(analysis.specialization_argument(c, i, element));
+        bool element_of =
+            !reference && object.kind == type_kind::array &&
+            parameter_type.kind == type_kind::pointer &&
+            record(parameter_type.operand).kind != type_kind::array;
         if (!reference)
             text("Xad");
+        if (element_of) {
+            text("so");
+            if (!type(object.operand))
+                return false;
+        }
         text("L_Z");
         if (!encoding(named))
             return false;
         text("E");
+        if (element_of)
+            text("E");
         if (!reference)
             text("E");
         return true;
