@@ -526,9 +526,10 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
                 (pointee == type_kind::template_parameter && pr.operand.cv()))
                 return false;
         }
-        /* (a T* that does not deduce from a class pointer: a T deduced
-           otherwise elsewhere, no base to try) */
-        if (k == type_kind::class_type && pr.kind == type_kind::pointer &&
+        /* (a T* that does not deduce from a class or function pointer: a T
+           deduced otherwise elsewhere, no base to try) */
+        if ((k == type_kind::class_type || k == type_kind::function) &&
+            pr.kind == type_kind::pointer &&
             table[pr.operand.unqualified()].kind ==
                 type_kind::template_parameter)
             return false;
