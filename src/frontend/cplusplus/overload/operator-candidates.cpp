@@ -86,6 +86,38 @@ bool semantic_analysis::converts_to_non_class(entity_index c,
     return false;
 }
 
+/* [over.call.object]/2: only a non-explicit conversion to a function
+   pointer or function reference supplies a surrogate call candidate.  A
+   conversion template or a class whose members are unknown may supply one. */
+bool semantic_analysis::converts_to_callable(entity_index c) const
+{
+    const entity &x = entity_table[c];
+    if (x.kind != entity_kind::class_type)
+        return true;
+    for (uint32_t i = 0; i < x.base_count; i++)
+        if (converts_to_callable(
+                type_table[entity_table[class_bases[x.first_base + i]]
+                               .type.unqualified()]
+                    .entity))
+            return true;
+    for (entity_index f = own_conversion_functions(c); f;
+         f = entity_table[f].next_overload) {
+        if (!entity_table[f].conversion_function)
+            return true;
+        if (entity_table[f].explicit_)
+            continue;
+        expression_meaning value = conversion_function_result(f);
+        const struct type &to = type_table[value.type.unqualified()];
+        if (to.kind == type_kind::function &&
+            value.category != value_category::prvalue)
+            return true;
+        if (to.kind == type_kind::pointer &&
+            type_table[to.operand.unqualified()].kind == type_kind::function)
+            return true;
+    }
+    return false;
+}
+
 /*
  * [over.call.object]/2: "for each non-explicit conversion function declared
  * in T or in a base class of T ... to pointer to function, ... a surrogate
@@ -179,11 +211,17 @@ analysis_result semantic_analysis::overloaded_operator(
                    op == preprocessing_op_or_punc::AMPERSAND_AMPERSAND ||
                    op == preprocessing_op_or_punc::BAR_BAR;
     bool converts = false;
-    for (const expression_meaning &e : operands) {
-        const struct type &t = type_table[e.type.unqualified()];
-        if (t.kind == type_kind::class_type &&
-            converts_to_non_class(t.entity, logical))
-            converts = true;
+    if (op == preprocessing_op_or_punc::LEFT_PARENTHESIS) {
+        const struct type &t = type_table[operands[0].type.unqualified()];
+        if (t.kind == type_kind::class_type)
+            converts = converts_to_callable(t.entity);
+    } else {
+        for (const expression_meaning &e : operands) {
+            const struct type &t = type_table[e.type.unqualified()];
+            if (t.kind == type_kind::class_type &&
+                converts_to_non_class(t.entity, logical))
+                converts = true;
+        }
     }
     /* [over.call.object]/2: a captureless lambda's surrogate call function
        ([expr.prim.lambda.closure]/7) has its const function call

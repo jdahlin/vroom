@@ -1617,7 +1617,12 @@ lines:
   destructors and explicit instantiations still use the earlier eager path;
   their point-of-instantiation and explicit-specialization handling remain.
   Regression: `temp.inst-late-member-definition.cpp`.  A minimal JSON include
-  still stops on instantiated libc++ `std::function` member definitions.
+  passes libc++ `std::function`'s call operator after restricting surrogate
+  call candidates to non-explicit conversions of the callable object to a
+  function pointer or reference ([over.call.object]/2); conversions of call
+  arguments cannot create them.  Tests `call-argument-conversions` and
+  `over.call.object-surrogate-conversion`.  JSON still stops on an
+  instantiated libc++ `__tree` member definition.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land

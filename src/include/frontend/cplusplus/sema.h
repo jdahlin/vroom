@@ -6754,6 +6754,7 @@ class semantic_analysis
     /* ... a base class of c does */
     bool base_has_conversion_functions(entity_index c) const;
     bool converts_to_non_class(entity_index c, bool explicit_counts) const;
+    bool converts_to_callable(entity_index c) const;
     /* whether class c may bind to a non-const lvalue reference to a non-class
        type: a conversion function returning an lvalue reference
        ([over.match.ref]) */
