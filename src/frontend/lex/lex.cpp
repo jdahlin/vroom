@@ -314,7 +314,7 @@ static inline size_t lex_comment_end_find(const char *s, size_t p)
                      vorrq_u8(vceqq_u8(v, bs), vceqzq_u8(v))));
 
         if (m)
-            return p + (__builtin_ctzll(m) >> 2);
+            return p + (size_t)(__builtin_ctzll(m) >> 2);
     }
 }
 
@@ -329,7 +329,7 @@ static inline size_t lex_line_end_find(const char *s, size_t p)
             vorrq_u8(vorrq_u8(vceqq_u8(v, nl), vceqq_u8(v, cr)), vceqzq_u8(v)));
 
         if (m)
-            return p + (__builtin_ctzll(m) >> 2);
+            return p + (size_t)(__builtin_ctzll(m) >> 2);
     }
 }
 
@@ -346,7 +346,7 @@ static inline size_t lex_quote_find(const char *s, size_t p, uint8_t q)
         uint64_t m = lex_nibbles_first_index(hit);
 
         if (m)
-            return p + (__builtin_ctzll(m) >> 2);
+            return p + (size_t)(__builtin_ctzll(m) >> 2);
     }
 }
 
