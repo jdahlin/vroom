@@ -1439,19 +1439,17 @@ bool semantic_analysis::dependent_parameter_type(entity_index t, uint32_t i,
     return false;
 }
 
-token_index semantic_analysis::parameter_type_constraint(entity_index t,
-                                                         uint32_t i) const
+SyntaxRef semantic_analysis::parameter_type_constraint(entity_index t,
+                                                       uint32_t i) const
 {
     for (const function_template &ft : function_templates) {
         if (ft.entity != t || i >= ft.parameter_count)
             continue;
         template_parameter_parts x;
         if (!template_parameter_form(
-                template_parameter_nodes[ft.first_parameter + i], x) ||
-            !x.constraint || x.constraint.size() != 1 ||
-            !x.constraint[0].is_token())
+                template_parameter_nodes[ft.first_parameter + i], x))
             return 0;
-        return x.constraint[0].token();
+        return x.constraint;
     }
     return 0;
 }

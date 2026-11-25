@@ -1856,15 +1856,23 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
         }
         /* [impl.clang]: a type-parameter with a type-constraint, "Tk"
            and the concept's name before the argument (clang 17 and later,
-           as Tn) */
-        token_index q = 0;
+           as Tn), with the concept's template arguments after the first
+           (template<D<int>>: Tk1DIiE) */
+        SyntaxRef q = 0;
         if (function)
             q = analysis.parameter_type_constraint(function, i);
         if (q) {
-            if (pack)
+            /* (the type-constraint's concept-name, then its <,
+               arguments and > when there are any) */
+            if (pack || !q.size() || !q[0].is_identifier())
                 return false;
             text("Tk");
-            if (!source_name(analysis.token_identifier(q)))
+            if (!source_name(analysis.token_identifier(q[0].token())))
+                return false;
+            if (q.size() > 1 &&
+                (q.size() < 3 ||
+                 !punctuator(q[1], preprocessing_op_or_punc::LESS) ||
+                 !constraint_template_args(function, q)))
                 return false;
         }
         if (!pack) {
@@ -2210,8 +2218,20 @@ bool itanium_mangler::template_arg(entity_index c, uint32_t i, uint32_t element)
         text("E");
         return true;
     }
+    qualified_type of = analysis.specialization_argument(c, i, element);
+    if (record(of).kind == type_kind::pointer_to_member && v) {
+        /* [abi:mangle.template-arg] a pointer to member &C::m (its value
+           the member, member_pointer_argument): the address of the
+           member's external name, X ad L _Z <encoding> E E; a null one is
+           the <expr-primary> below, L <type> 0 E */
+        text("XadL_Z");
+        if (!encoding(static_cast<entity_index>(v)))
+            return false;
+        text("EE");
+        return true;
+    }
     text("L");
-    if (!type(analysis.specialization_argument(c, i, element)))
+    if (!type(of))
         return false;
     if (negative)
         text("n");

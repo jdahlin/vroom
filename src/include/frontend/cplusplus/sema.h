@@ -6602,10 +6602,9 @@ class semantic_analysis
        argument */
     bool dependent_parameter_type(entity_index t, uint32_t i,
                                   qualified_type &type) const;
-    /* the concept-name of the function template t's template-parameter
-       at i, a type-parameter with a type-constraint ([temp.param]/1),
-       or 0 */
-    token_index parameter_type_constraint(entity_index t, uint32_t i) const;
+    /* the type-constraint ([temp.param]/1) of the function template t's
+       template-parameter at i, a type-parameter, or 0 */
+    SyntaxRef parameter_type_constraint(entity_index t, uint32_t i) const;
     /* whether the argument is a template ([temp.arg.template]/1): the
        class template, or in a template's own declaration the template
        template-parameter it names (also its position plus one in
