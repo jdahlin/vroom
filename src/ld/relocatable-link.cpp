@@ -102,8 +102,9 @@ static void ld_relocatable_locals_write(void *arg, size_t i)
                 shndx = SHN_UNDEF;
                 val = 0;
             } else {
-                shndx = ctx->relocatable.sections.v[is->output_section]
-                            .section_header_index;
+                shndx =
+                    (uint16_t)ctx->relocatable.sections.v[is->output_section]
+                        .section_header_index;
                 val += is->offset;
             }
         }
@@ -142,8 +143,9 @@ static void ld_relocatable_globals_write(void *arg, size_t c)
             } else {
                 ld_input_section *is =
                     &ctx->inputs.sections.v[s->input_section];
-                shndx = ctx->relocatable.sections.v[is->output_section]
-                            .section_header_index;
+                shndx =
+                    (uint16_t)ctx->relocatable.sections.v[is->output_section]
+                        .section_header_index;
                 val = is->offset + ctx->inputs.objects.v[s->object]
                                        ->symbols[s->symbol_index]
                                        .st_value;
@@ -495,8 +497,8 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
     eh->e_shoff = shoff_r;
     eh->e_ehsize = sizeof(elf_file_header);
     eh->e_shentsize = sizeof(elf_section_header);
-    eh->e_shnum = ctx->relocatable.section_header_count;
-    eh->e_shstrndx = ctx->relocatable.shstrtab_index;
+    eh->e_shnum = (uint16_t)ctx->relocatable.section_header_count;
+    eh->e_shstrndx = (uint16_t)ctx->relocatable.shstrtab_index;
     if (atomic_load(&ctx->diagnostics.error_count)) {
         munmap(ctx->relocatable.image, fsize);
         return 1;

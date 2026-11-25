@@ -109,12 +109,12 @@ static void x64_encode_register(XOp *operand, int r, int size)
     operand->kind = XK_REG;
     if (X64_REGISTER_IS_XMM(r)) {
         operand->cls = XR_XMM;
-        operand->reg = r - XMM0;
+        operand->reg = (uint8_t)(r - XMM0);
         operand->size = 16;
     } else {
         operand->cls = XR_GPR;
-        operand->reg = r;
-        operand->size = size;
+        operand->reg = (uint8_t)r;
+        operand->size = (uint8_t)size;
         operand->needrex = size == 1 && r >= 4;
     }
 }
@@ -163,7 +163,7 @@ static void x64_encode_memory(XOp *operand, codegen_commit_context *R,
     }
     if (i->opcode == X64_OP_LDX || i->opcode == X64_OP_STX) {
         operand->index = i->registers[3];
-        operand->scale = 1u << i->shift;
+        operand->scale = (uint8_t)(1u << i->shift);
     }
 }
 

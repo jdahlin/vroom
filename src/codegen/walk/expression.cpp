@@ -1267,9 +1267,10 @@ static codegen_value walk_cast_emit(codegen_context *e, uint32_t n)
                         unsigned start = bit < src.width ? bit : src.width - 1;
                         part.offset += (src.bit_offset + start) / 8;
                         part.bit_offset = (src.bit_offset + start) % 8;
-                        part.width = bit >= src.width      ? 1
-                                     : src.width - bit < 8 ? src.width - bit
-                                                           : 8;
+                        part.width =
+                            (uint16_t)(bit >= src.width      ? 1
+                                       : src.width - bit < 8 ? src.width - bit
+                                                             : 8);
                         part.is_signed = src.is_signed && bit + 8 >= src.width;
                         part.is_bitfield = 0;
                         v = walk_bitfield_split_load(e, part, part.bit_offset,

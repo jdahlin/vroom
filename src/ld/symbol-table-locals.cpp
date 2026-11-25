@@ -74,7 +74,7 @@ VPRIV uint16_t ld_symbol_section_index_of_input_section(struct ld_context *ctx,
     uint32_t os = ld_input_section_output_section(ctx, sec);
     if (os == LD_NONE || os == LD_OUTPUT_SECTION_DISCARD)
         return 0;
-    return ctx->script.sections.v[os].section_header_index;
+    return (uint16_t)ctx->script.sections.v[os].section_header_index;
 }
 
 VPRIV void ld_symbol_record_store(elf_symbol *d, uint8_t *strbuf,

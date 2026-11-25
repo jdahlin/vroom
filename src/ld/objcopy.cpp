@@ -1207,7 +1207,7 @@ static int objcopy_run(int dirfd)
                     continue;
                 uint16_t shndx = y->original_section_index;
                 if (shndx && shndx < 0xff00)
-                    shndx = shndx < ns ? sec[shndx].new_index : 0;
+                    shndx = shndx < ns ? (uint16_t)sec[shndx].new_index : 0;
                 d[y->new_index] = VCC_LITERAL(
                     elf_symbol,
                     .st_name =
@@ -1334,15 +1334,15 @@ static int objcopy_run(int dirfd)
     oh->e_machine = eh->e_machine;
     oh->e_version = eh->e_version;
     oh->e_entry = eh->e_entry;
-    oh->e_phnum = e.program_header_count;
+    oh->e_phnum = (uint16_t)e.program_header_count;
     oh->e_phoff = e.program_header_count ? seg[phs].offset : 0;
     oh->e_phentsize = e.program_header_count ? sizeof(elf_program_header) : 0;
     oh->e_flags = eh->e_flags;
     oh->e_ehsize = sizeof(elf_file_header);
     oh->e_shentsize = sizeof(elf_section_header);
     oh->e_shoff = shoff;
-    oh->e_shnum = nkept + 1;
-    oh->e_shstrndx = sec[shstr_i].new_index;
+    oh->e_shnum = (uint16_t)(nkept + 1);
+    oh->e_shstrndx = (uint16_t)sec[shstr_i].new_index;
     for (uint32_t i = 0; i < e.program_header_count; i++) {
         elf_program_header *p = (elf_program_header *)(b + seg[phs].offset) + i;
         *p = seg[i].program_header;

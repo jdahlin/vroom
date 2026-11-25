@@ -271,8 +271,8 @@ VPRIV void ld_dynamic_sections_write(struct ld_context *ctx)
             d->st_shndx =
                 s->expression_value.kind == LD_VALUE_KIND_ABSOLUTE ? SHN_ABS
                 : s->expression_value.kind == LD_VALUE_KIND_OUTPUT_SECTION
-                    ? ld_output_section_header_index(ctx,
-                                                     s->expression_value.index)
+                    ? (uint16_t)ld_output_section_header_index(
+                          ctx, s->expression_value.index)
                     : ld_symbol_section_index_of_input_section(
                           ctx, s->expression_value.index);
             d->st_value = ld_global_symbol_address(ctx, g);

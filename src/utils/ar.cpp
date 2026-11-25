@@ -361,7 +361,7 @@ static bool ar_member_file_add(ar_request *q, const char *path,
 
 static uint16_t ar_load_u16_le(const unsigned char *p)
 {
-    return p[0] | p[1] << 8;
+    return (uint16_t)(p[0] | p[1] << 8);
 }
 static uint32_t ar_load_u32_le(const unsigned char *p)
 {

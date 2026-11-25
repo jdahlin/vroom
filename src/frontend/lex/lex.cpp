@@ -1443,7 +1443,7 @@ l_prefix:
     if (unlikely(s[p] == '"' || s[p] == '\'' || s[p] == '\\') &&
         (q = lex_literal_prefixed_end(s, n, st, p, &fl, &kind))) {
         p = q;
-        EMIT(kind);
+        EMIT((uint8_t)kind);
     }
     EMIT_IDENT();
 l_digit:
@@ -1492,7 +1492,7 @@ l_squote:
 lit:
     if (q) {
         p = q;
-        EMIT(kind);
+        EMIT((uint8_t)kind);
     }
     p = bad;
     EMIT(LEX_TOKEN_UNKNOWN);

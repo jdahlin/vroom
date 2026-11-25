@@ -351,7 +351,7 @@ VPRIV void x64_abi_classify_named(codegen_context *e, ast_qualified_type t,
 		   arguments. Results use a hidden pointer; larger arguments are
 		   packed by-value memory rather than ordinary SIMD vectors. */
         a->is_in_memory = true;
-        a->bool_lane_count = blanes <= 128 ? blanes : 0;
+        a->bool_lane_count = (uint8_t)(blanes <= 128 ? blanes : 0);
         return;
     }
     if (codegen_type_is_vector(c, t) && (size == 32 || size == 64)) {

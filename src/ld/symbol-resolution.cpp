@@ -98,7 +98,8 @@ VPRIV void ld_object_symbols_resolve(void *arg, size_t i)
         ld_global_symbol *gs = &ctx->symbols.globals[g];
         uint64_t k = ld_symbol_key(o->index, s);
         ld_atomic_u64_min(&gs->first_occurrence, k);
-        ld_atomic_u8_min(&gs->visibility_rank, ld_visibility_rank(y->st_other));
+        ld_atomic_u8_min(&gs->visibility_rank,
+                         (uint8_t)ld_visibility_rank(y->st_other));
         if (y->st_shndx == SHN_COMMON && ctx->options.relocatable)
             ld_error_report(ctx, "%s: common symbol %s not supported with -r",
                             o->path, o->string_table + y->st_name);

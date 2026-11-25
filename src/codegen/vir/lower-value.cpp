@@ -544,7 +544,7 @@ VPRIV void virbuild_switch_bitset(codegen_context *e, int r, int size,
     if (recipe->lo)
         index = virbuild_insn_append(
             e, VIR_OP_SUB, ty, 0, index,
-            virbuild_constant_integer(e, ty, recipe->lo), 0);
+            virbuild_constant_integer(e, ty, (int64_t)recipe->lo), 0);
     /* Compare at the selector width before narrowing the shift count. */
     uint32_t inside = virbuild_insn_append(
         e, VIR_OP_ICMP, VIR_TYPE_I32,

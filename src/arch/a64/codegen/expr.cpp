@@ -177,7 +177,7 @@ static codegen_value gen_cond_spill(codegen_context *e, uint32_t n)
                            A64_REGISTER_FRAME, sl);
     if (wide) {
         v.kind = CODEGEN_VALUE_REGISTER_PAIR;
-        v.register_high = treg(e);
+        v.register_high = (uint8_t)treg(e);
         a64_record_emit_memory(e, A64_OP_LD, 3, 0, v.register_high,
                                A64_REGISTER_FRAME, sl + 8);
     }
@@ -221,7 +221,7 @@ static codegen_value gen_cond_expr(codegen_context *e, uint32_t n)
             a64_record_emit_move(e, 1, test.register_number, r);
             if (wide) {
                 test.kind = CODEGEN_VALUE_REGISTER_PAIR;
-                test.register_high = treg(e);
+                test.register_high = (uint8_t)treg(e);
                 a64_record_emit_move(e, 1, test.register_high, r2);
             }
             test_zero(e, &test, t, lend, true);
@@ -1469,9 +1469,10 @@ static codegen_value gen_inner(codegen_context *e, uint32_t n)
                                 bit < src.width ? bit : src.width - 1;
                             part.offset += (src.bit_offset + start) / 8;
                             part.bit_offset = (src.bit_offset + start) % 8;
-                            part.width = bit >= src.width      ? 1
-                                         : src.width - bit < 8 ? src.width - bit
-                                                               : 8;
+                            part.width = (uint16_t)(bit >= src.width ? 1
+                                                    : src.width - bit < 8
+                                                        ? src.width - bit
+                                                        : 8);
                             part.is_signed =
                                 src.is_signed && bit + 8 >= src.width;
                             v = load(

@@ -421,7 +421,7 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
             if (op == VIRBUILD_PROMOTE_NO_CONVERSION) {
                 V->forward[q] = v;
             } else {
-                x->insn.op = op;
+                x->insn.op = (uint8_t)op;
                 x->insn.flags = op == VIR_OP_EXT
                                     ? (x->insn.flags & (3 | VIR_INSN_FLAG_MS))
                                     : 0;

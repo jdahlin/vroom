@@ -224,10 +224,10 @@ static inline void macho_u64_store(void *p, uint64_t v)
 }
 static inline void macho_u32_store_big_endian(uint8_t *p, uint32_t v)
 {
-    p[0] = v >> 24;
-    p[1] = v >> 16;
-    p[2] = v >> 8;
-    p[3] = v;
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
 }
 static inline void macho_u64_store_big_endian(uint8_t *p, uint64_t v)
 {

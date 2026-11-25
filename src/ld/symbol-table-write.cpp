@@ -14,12 +14,12 @@ static void ld_global_symbol_record_store(struct ld_context *ctx, elf_symbol *d,
     uint16_t shndx;
     uint64_t val, size = s->size;
     if (s->state == LD_SYMBOL_STATE_SCRIPT) {
-        shndx =
-            s->expression_value.kind == LD_VALUE_KIND_ABSOLUTE ? SHN_ABS
-            : s->expression_value.kind == LD_VALUE_KIND_OUTPUT_SECTION
-                ? ld_output_section_header_index(ctx, s->expression_value.index)
-                : ld_symbol_section_index_of_input_section(
-                      ctx, s->expression_value.index);
+        shndx = s->expression_value.kind == LD_VALUE_KIND_ABSOLUTE ? SHN_ABS
+                : s->expression_value.kind == LD_VALUE_KIND_OUTPUT_SECTION
+                    ? (uint16_t)ld_output_section_header_index(
+                          ctx, s->expression_value.index)
+                    : ld_symbol_section_index_of_input_section(
+                          ctx, s->expression_value.index);
         val = ld_global_symbol_address(ctx, g);
         size = 0;
     } else if (s->state == LD_SYMBOL_STATE_OBJECT && !s->demoted) {

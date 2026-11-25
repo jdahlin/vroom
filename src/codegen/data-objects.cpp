@@ -96,7 +96,7 @@ static void codegen_data_initializer_store(codegen_context *e, uint64_t off,
                 "initializer element is not a compile-time constant");
         for (uint64_t k = 0; k < T(c, ty)->n; k++)
             if (cv.i)
-                codegen_data_bits_or(e, off + k / 8, 1u << (k % 8));
+                codegen_data_bits_or(e, off + k / 8, (uint8_t)(1u << (k % 8)));
         return;
     }
     if (x->op == AST_NODE_INITIALIZER) {

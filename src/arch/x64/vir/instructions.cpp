@@ -174,7 +174,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                 e, X64_OP_TESTM, L->test_size, X64_REGISTER_NONE,
                 L->memory_base, X64_REGISTER_NONE);
             r->registers[3] =
-                L->memory_is_indexed ? L->memory_index : X64_REGISTER_NONE;
+                (uint8_t)(L->memory_is_indexed ? L->memory_index
+                                               : X64_REGISTER_NONE);
             r->shift = L->memory_shift;
             r->offset = L->memory_offset;
             r->reference = (uint32_t)L->test_immediate;
@@ -211,7 +212,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                 record *r = x64_record_emit_three_registers(
                     e, X64_OP_LDX, L->big_endian_width, d, at.register_number,
                     X64_REGISTER_NONE);
-                r->registers[3] = L->big_endian_index;
+                r->registers[3] = (uint8_t)L->big_endian_index;
                 r->shift = L->big_endian_shift;
                 r->offset = at.offset;
             } else
@@ -245,7 +246,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             x64_vir_fold_edits_check(L, b, v + 1, X64_REGISTER_NONE) &&
             x64_vir_fold_edits_check(L, b, v + 2, X64_REGISTER_NONE)) {
             L->test_value = v + 2;
-            L->test_size = 1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags);
+            L->test_size = (uint8_t)(1 << VIR_INSN_FLAG_WIDTH_LOG2(i->flags));
             L->test_immediate = k;
             x64_vir_load_address(L, i->a, a);
             return;
@@ -292,7 +293,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         if (ok) {
             L->compare_memory_value = v + 1;
             L->compare_memory_unsigned = narrow_unsigned;
-            L->compare_memory_size = width;
+            L->compare_memory_size = (uint8_t)width;
             L->compare_memory_side = side;
             x64_vir_load_address(L, i->a, a);
             return;
@@ -304,7 +305,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         if (width) {
             x64_vir_load_address(L, i->a, a);
             L->big_endian_value = end;
-            L->big_endian_width = width;
+            L->big_endian_width = (uint8_t)width;
             L->big_endian_base = L->memory_base;
             L->big_endian_offset = L->memory_offset;
             L->big_endian_is_indexed = L->memory_is_indexed;
@@ -320,7 +321,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         unsigned width = x64_vir_big_endian_address_match(L, b, v, &end);
         if (width) {
             L->big_endian_value = end;
-            L->big_endian_width = width;
+            L->big_endian_width = (uint8_t)width;
             L->big_endian_base = a;
             L->big_endian_offset = 0;
             L->big_endian_is_indexed = !x64_vir_value_immediate(
@@ -380,7 +381,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         L->scaled_value = v + 1;
         L->scaled_skip = v + 1;
         L->scaled_index = d;
-        L->scaled_shift = signed_scale;
+        L->scaled_shift = (uint8_t)signed_scale;
         return;
     }
     if ((i->op == VIR_OP_MUL || i->op == VIR_OP_SHL) &&
@@ -397,11 +398,11 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                                  : k == 1 || k == 2 || k == 4 || k == 8)) {
             L->scaled_value = v;
             L->scaled_index = a;
-            L->scaled_shift = i->op == VIR_OP_SHL ? k
-                              : k == 8            ? 3
-                              : k == 4            ? 2
-                              : k == 2            ? 1
-                                                  : 0;
+            L->scaled_shift = (uint8_t)(i->op == VIR_OP_SHL ? k
+                                        : k == 8            ? 3
+                                        : k == 4            ? 2
+                                        : k == 2            ? 1
+                                                            : 0);
             return;
         }
     }
@@ -436,7 +437,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                     ->immediate = __builtin_ctzll(k);
             } else if (i->op == VIR_OP_MUL && (k == 3 || k == 5 || k == 9)) {
                 x64_record_emit_three_registers(e, X64_OP_LEASCALE, sz, d, a, a)
-                    ->shift = __builtin_ctzll(k - 1);
+                    ->shift = (uint8_t)__builtin_ctzll(k - 1);
             } else
                 x64_record_emit_three_registers(e, immop[i->op], sz, d, a,
                                                 X64_REGISTER_NONE)
@@ -581,9 +582,9 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                 continue;
             }
             if (r == VIR_REGISTER_NONE) {
-                r = vir_register_class(L->function->insns[value].type)
-                        ? VIR_REGISTER_MAKE(1, 14)
-                        : L->general_temporary;
+                r = (uint8_t)(vir_register_class(L->function->insns[value].type)
+                                  ? VIR_REGISTER_MAKE(1, 14)
+                                  : L->general_temporary);
                 if (value < L->function->constant_count)
                     x64_vir_constant_materialize(L, r, value);
                 else
@@ -655,7 +656,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         codegen_lvalue at = x64_vir_memory_operand(L, i->a, a);
         bool folded = L->memory_value == i->a;
         if (folded) {
-            at.register_number = L->memory_base;
+            at.register_number = (uint8_t)L->memory_base;
             at.offset = L->memory_offset;
             L->memory_value = 0;
         }
@@ -669,7 +670,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                 e, load ? X64_OP_LDX : X64_OP_STX, width,
                 load ? d : X64_REGISTER_NONE, at.register_number,
                 load ? X64_REGISTER_NONE : c);
-            r->registers[3] = L->memory_index;
+            r->registers[3] = (uint8_t)L->memory_index;
             r->shift = L->memory_shift;
             r->condition = !!(i->flags & VIR_INSN_FLAG_MS);
             r->offset = at.offset;
@@ -781,7 +782,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                 e, X64_OP_CMPM, L->compare_memory_size, X64_REGISTER_NONE,
                 L->memory_base, other);
             r->registers[3] =
-                L->memory_is_indexed ? L->memory_index : X64_REGISTER_NONE;
+                (uint8_t)(L->memory_is_indexed ? L->memory_index
+                                               : X64_REGISTER_NONE);
             r->shift = L->memory_shift;
             r->offset = L->memory_offset;
             r->condition = L->compare_memory_side;
@@ -822,7 +824,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         if (cc < 2)
             x64_record_emit_three_registers(
                 e, X64_OP_FSETCC, 4, d, X64_REGISTER_NONE, X64_REGISTER_NONE)
-                ->condition = cc;
+                ->condition = (uint8_t)cc;
         else
             x64_record_emit_three_registers(
                 e, X64_OP_SETCC, 4, d, X64_REGISTER_NONE, X64_REGISTER_NONE)
@@ -907,7 +909,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         }
         x64_record_emit_three_registers(e, X64_OP_CVTI2F, sz, d, a,
                                         X64_REGISTER_NONE)
-            ->shift = from;
+            ->shift = (uint8_t)from;
         return;
     }
     case VIR_OP_F2S:
@@ -915,7 +917,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         int to = i->op == VIR_OP_F2U ? 8 : sz;
         x64_record_emit_three_registers(e, X64_OP_CVTF2I, to, d, a,
                                         X64_REGISTER_NONE)
-            ->shift = x64_vir_type_size(L->function->insns[i->a].type);
+            ->shift = (uint8_t)x64_vir_type_size(L->function->insns[i->a].type);
         if (i->op == VIR_OP_F2U)
             x64_record_emit_three_registers(e, X64_OP_MOV, 4, d, d,
                                             X64_REGISTER_NONE);

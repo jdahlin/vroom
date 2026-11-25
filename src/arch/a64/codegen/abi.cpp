@@ -297,8 +297,8 @@ VPRIV void a64_abi_argument_classify(codegen_context *e, ast_qualified_type t,
     if (codegen_type_is_bool_vector(c, t) && size >= 8 && size <= 16) {
         if (e->next_vector_register < 8) {
             a->kind = A64_ABI_ARGUMENT_HFA,
-            a->register_number = e->next_vector_register++,
-            a->register_count = 1, a->float_member_size = size;
+            a->register_number = (uint8_t)e->next_vector_register++,
+            a->register_count = 1, a->float_member_size = (uint8_t)size;
             return;
         }
         n = size / 8;

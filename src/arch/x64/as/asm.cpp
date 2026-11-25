@@ -57,8 +57,8 @@ static int x64_legacy_gpr(const char *b, size_t n, XOp *o)
             return -1;
         o->needrex = size == 1;
     }
-    o->reg = reg;
-    o->size = size;
+    o->reg = (uint8_t)reg;
+    o->size = (uint8_t)size;
     return 0;
 }
 
@@ -114,7 +114,7 @@ static int x64_regname(const char *s, size_t n, XOp *o)
         long r = strtol(b + 3, &end, 10);
         if (*end || r > 31)
             return -1;
-        o->cls = XR_ZMM, o->reg = r, o->size = 64;
+        o->cls = XR_ZMM, o->reg = (uint8_t)r, o->size = 64;
         return 0;
     }
     if (!strcmp(b, "rip")) {
@@ -570,7 +570,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
     uint8_t *p = direct ? elf_chunk_data(chunk) + chunk->used : bytes;
     uint8_t *out = p;
     if (seg)
-        *out++ = seg;
+        *out++ = (uint8_t)seg;
     if (rm && rm->kind == XK_MEM && rm->addr32)
         *out++ = 0x67;
     if (f->opsz16 && !f->vex)
@@ -591,9 +591,11 @@ VPRIV int x64_emit(as_context *a, XForm *f)
             if (rm->kind == XK_REG)
                 X = !(rm->reg & 16);
             *out++ = 0x62;
-            *out++ = R << 7 | X << 6 | B << 5 | !(f->reg & 16) << 4 | mm;
-            *out++ = W << 7 | (~f->vvvv & 15) << 3 | 4 | pp;
-            *out++ = f->zero << 7 | 0x40 | !(f->vvvv & 16) << 3 | f->mask;
+            *out++ =
+                (uint8_t)(R << 7 | X << 6 | B << 5 | !(f->reg & 16) << 4 | mm);
+            *out++ = (uint8_t)(W << 7 | (~f->vvvv & 15) << 3 | 4 | pp);
+            *out++ =
+                (uint8_t)(f->zero << 7 | 0x40 | !(f->vvvv & 16) << 3 | f->mask);
         } else if (X && B && !W && mm == 1) {
             *out++ = 0xc5;
             *out++ = (uint8_t)(R << 7 | tail);
@@ -605,9 +607,9 @@ VPRIV int x64_emit(as_context *a, XForm *f)
         *out++ = f->op[f->nop - 1];
     } else {
         if (f->rep)
-            *out++ = f->rep;
+            *out++ = (uint8_t)f->rep;
         if (rex != 0x40 || f->rex8)
-            *out++ = rex;
+            *out++ = (uint8_t)rex;
         for (int i = 0; i < f->nop; i++)
             *out++ = f->op[i];
         if (f->oreg)
