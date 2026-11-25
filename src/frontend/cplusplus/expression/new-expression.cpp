@@ -708,7 +708,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                 if (entity_table[initialization.b].implicit ||
                     entity_table[c].defaulted_default_constructor)
                     initialization.op = 1;
-            } else if (c) {
+            } else if (c && (entity_table[c].constructor_templates ||
+                             abstract_class(type))) {
                 return not_supported_because(
                     n, "dcl.init",
                     "a value-initialized new of a class without a constructor");
@@ -760,6 +761,7 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         if (v.kind == semantic_kind::construct)
             v.a = object.node;
         else if (c && v.kind != semantic_kind::initializer_list &&
+                 v.kind != semantic_kind::zero &&
                  !(v.kind == semantic_kind::conversion &&
                    v.op ==
                        static_cast<uint8_t>(conversion_kind::lvalue_to_rvalue)))
