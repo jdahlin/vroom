@@ -602,7 +602,6 @@ VPRIV int x64_i_movx(as_context *a, char *mn, XOp *o, int nops)
         }
     }
     return as_error_report(a, "invalid instruction mnemonic '%s'", mn);
-    return X64_NEXT;
 }
 
 /* Scalar ModRM instructions from compiler records have a known width and
