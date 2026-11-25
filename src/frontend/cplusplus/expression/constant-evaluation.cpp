@@ -515,10 +515,15 @@ constness semantic_analysis::evaluate_wide_binary(
                 r = a >> static_cast<int>(n);
             break;
         }
-        /* [expr.shift]/2: congruent to E1 x 2^E2 modulo 2^N (C++20) */
+        /* [expr.shift]/2: congruent to E1 x 2^E2 modulo 2^N (C++20);
+           before, a signed E1 "has ... non-negative value, and E1 x 2^E2
+           is representable in the corresponding unsigned type of the
+           result type" (C++17 [expr.shift]/2, CWG1457), else undefined:
+           no bit set is shifted out of the 128 */
         if (is_signed &&
-            !tokens.files.behavior.has(language_feature::modular_left_shift))
-            return CONST_UNKNOWN;
+            !tokens.files.behavior.has(language_feature::modular_left_shift) &&
+            (sa < 0 || (n && (a >> (128 - static_cast<int>(n))) != 0)))
+            return CONST_NOT_CONSTANT;
         r = a << static_cast<int>(n);
         break;
     }
