@@ -1385,25 +1385,11 @@ analysis_result semantic_analysis::construct(
         initialized_value one;
         if (written_arguments &&
             (*written_arguments)[i].is(syntax_kind::braced_init_list)) {
-            const struct type &pr = type_table[p[i].unqualified()];
-            if (pr.kind == type_kind::lvalue_reference ||
-                pr.kind == type_kind::rvalue_reference) {
-                qualified_type inner =
-                    qualified_type::make(pr.operand.unqualified(), cv_none);
-                initialized_value temp;
-                VTRY(r, list_initialization((*written_arguments)[i], inner,
-                                            true, temp));
-                expression_meaning arg;
-                arg.type = inner;
-                arg.category = value_category::prvalue;
-                arg.evaluation = temp.evaluation;
-                arg.node = temp.node;
-                VTRY(r2, initialize_with(at, arg, p[i], false, false, one));
-            } else {
-                qualified_type pt = p[i];
-                VTRY(r, list_initialization((*written_arguments)[i], pt, true,
-                                            one));
-            }
+            /* copy-list-initialization, as a call's argument
+               ([dcl.init.list]/3.10 for a reference parameter) */
+            qualified_type pt = p[i];
+            VTRY(r,
+                 list_initialization((*written_arguments)[i], pt, false, one));
         } else {
             VTRY(r, initialize_with(at, arguments[i], p[i], false, false, one));
         }
