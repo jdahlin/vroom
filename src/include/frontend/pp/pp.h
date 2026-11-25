@@ -17,6 +17,7 @@
 #include <setjmp.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 
 #include "frontend/lex/lex.h"
 
@@ -477,5 +478,9 @@ void pp_lazy_body_token_get(pp *p, pp_lazy *z, ptok *t);
 
 /* the token's spelling without splices; buf must hold t->len bytes */
 const char *pp_token_spell(const ptok *t, char *buf, size_t *len);
+
+/* VPP_TIME counters (include.cpp): include lookups, guard skips */
+extern _Atomic unsigned long pp_include_lookup_count,
+    pp_include_guard_skip_count;
 
 #endif

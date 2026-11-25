@@ -125,6 +125,17 @@ const char *lex_token_name(int kind)
 #else
 #define LEX_TABLE static
 #endif
+#ifdef LEX_X86_SIMD
+/* x86-simd.S reads these */
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern const uint8_t lex_low_nibble_table[16], lex_high_nibble_table[16];
+extern uint8_t lex_structure_table[128], lex_group_table[64];
+#ifdef __cplusplus
+}
+#endif
+#endif
 LEX_TABLE const uint8_t lex_low_nibble_table[16] = {
     0x26, 0x07, 0x07, 0x07, 0x17, 0x07, 0x07, 0x07,
     0x07, 0x47, 0x83, 0x41, 0x41, 0x81, 0x11, 0x09,

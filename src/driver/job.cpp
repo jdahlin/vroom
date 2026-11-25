@@ -19,6 +19,7 @@
  */
 #include "driver-internal.h"
 #include "frontend/cplusplus/compile.h"
+#include "frontend/pp/dircache.h"
 
 /* -g's compilation directory: the client's (vccd) or the process' (into buf) */
 static const char *driver_debug_directory(const driver_environment *env,
@@ -466,9 +467,6 @@ static void driver_job_preprocess(struct driver_job *job, pp *p,
         }
     }
     if (getenv("VPP_TIME")) {
-        extern _Atomic unsigned long pp_include_lookup_count,
-            pp_include_guard_skip_count, pp_directory_probe_count;
-
         dprintf(job->errfd,
                 "vpp: %.1f ms, %zu bytes out; include candidates %lu, %lu "
                 "ruled out by the directory cache (%lu dirs probed)\n",
