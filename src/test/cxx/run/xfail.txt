@@ -1,1 +1,2 @@
 # expected failures of bench/cxx-run.py: NAME<TAB>vcc first error
+over.match.oper-unary-on-incomplete-class	the rules of [over.match.oper] are not implemented yet: an operator on a left operand class that is incomplete or not a plain class
