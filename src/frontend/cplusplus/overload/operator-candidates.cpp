@@ -704,10 +704,25 @@ analysis_result semantic_analysis::overloaded_operator(
             /* a copy assignment operator declared defaulted has no
                candidate here, and is no implicit one */
             bool implicit_viable = true;
+            const struct type &right_record =
+                type_table[operands[1 % operands.size()].type.unqualified()];
+            bool ambiguous_base = false;
+            /* (a right operand of another class, none derived from c: its
+               conversion to const X& decides as for one of no class) */
+            bool other_class =
+                operands.size() == 2 &&
+                right_record.kind == type_kind::class_type &&
+                right_record.entity != c &&
+                entity_table[right_record.entity].kind ==
+                    entity_kind::class_type &&
+                entity_table[right_record.entity].size &&
+                !base_step(right_record.entity, c, ambiguous_base) &&
+                !ambiguous_base;
             if (!entity_table[c].defaulted_copy_assignment &&
                 !entity_table[c].defaulted_move_assignment &&
                 operands.size() == 2 &&
-                type_table[operands[1].type.unqualified()].entity == 0) {
+                (type_table[operands[1].type.unqualified()].entity == 0 ||
+                 other_class)) {
                 /* [over.match.viable]/4: the implicit X& operator=(const
                    X&) (and X&&) is no candidate when the right operand, of
                    no class type, has no implicit conversion sequence to
@@ -721,6 +736,33 @@ analysis_result semantic_analysis::overloaded_operator(
                     implicit_conversion_sequence(operands[1], parameter, true);
                 if (s.kind == conversion_sequence::form::bad)
                     implicit_viable = false;
+            }
+            /* [class.copy.assign]/2, /9: the implicit copy assignment of
+               a class assigned bitwise, its right operand of the class's
+               own type, where no declared operator= is viable (libc++'s
+               ostreambuf_iterator, whose operator=(_CharT) takes no
+               iterator): the built-in copy (class_assignment) */
+            if (implicit_viable && !declares_move &&
+                !entity_table[c].defaulted_copy_assignment &&
+                operands.size() == 2 &&
+                operands[1].type.unqualified() ==
+                    operands[0].type.unqualified() &&
+                assigned_bitwise(c)) {
+                owned_array<expression_meaning> trial;
+                for (const expression_meaning &e : operands)
+                    trial.append(e);
+                size_t ignored = 0;
+                bool none = false;
+                size_t unsupported_before = unsupported.size();
+                analysis_result t = analysis_result::well_formed;
+                {
+                    diagnostics_suppressed_if hush(diagnostics, true);
+                    t = best_viable_function(n, candidates, nullptr, trial,
+                                             ignored, &none);
+                }
+                unsupported.resize(unsupported_before);
+                if (t == analysis_result::well_formed && none)
+                    return analysis_result::well_formed;
             }
             if (implicit_viable) {
                 if (!declares_move ||
