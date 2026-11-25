@@ -279,7 +279,7 @@ void semantic_analysis::collect_written_casts(
    alias template used in another template's declaration), or to a pack of
    such types */
 void semantic_analysis::collect_written_bindings(
-    SyntaxRef n, owned_array<written_binding> &found)
+    SyntaxRef n, owned_array<written_binding> &found, bool every_name)
 {
     collect_written_casts(n, found);
     for (token_index t = n.first_token(); t < n.end_token(); t++) {
@@ -300,8 +300,9 @@ void semantic_analysis::collect_written_bindings(
             bool own = r.kind == type_kind::template_parameter &&
                        entity_table[r.entity].name == id &&
                        !entity_table[e].type.cv();
-            if (entity_table[e].kind == entity_kind::typedef_name && !own &&
-                depends_on_template_parameter(entity_table[e].type)) {
+            if (entity_table[e].kind == entity_kind::typedef_name &&
+                (every_name || (!own && depends_on_template_parameter(
+                                            entity_table[e].type)))) {
                 written_binding b;
                 b.identifier = id;
                 b.type = entity_table[e].type;
@@ -326,10 +327,11 @@ void semantic_analysis::collect_written_bindings(
 
 /* the dependent type of decltype-specifier n: one for the operands of the
    same tokens and the same bindings of its names */
-type_index semantic_analysis::dependent_written_type(SyntaxRef n)
+type_index semantic_analysis::dependent_written_type(SyntaxRef n,
+                                                     bool every_name)
 {
     owned_array<written_binding> bindings;
-    collect_written_bindings(n, bindings);
+    collect_written_bindings(n, bindings, every_name);
     for (entity_index e : dependent_written_types) {
         auto y =
             SyntaxRef(node_index(static_cast<uint32_t>(entity_table[e].value)));

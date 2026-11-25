@@ -933,6 +933,34 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
     }
     if (expression.is(syntax_kind::fold_expression))
         return dependent_fold(expression);
+    /* [abi:expressions] a clang type trait of types, as clang mangles it:
+       a vendor extended expression, u <source-name> <template-arg>* E
+       (__is_same(T, U): u9__is_same <T> <U> E) */
+    if (expression.is(syntax_kind::clang_type_trait_expression) &&
+        expression.size() >= 4 && expression[0].is_token()) {
+        owned_buffer name;
+        analysis.token_spelling(expression[0].token(), name.get());
+        text("u");
+        number(name.size());
+        vbuffer_append(out, name.data(), name.size());
+        for (uint32_t i = 2; i + 1 < expression.size(); i++) {
+            SyntaxElement a = expression[i];
+            if (a.is(preprocessing_op_or_punc::COMMA))
+                continue;
+            if (!a.is(syntax_kind::type_id))
+                return false;
+            while (a.is_node() && a.size() == 1 &&
+                   a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
+                a = a[0];
+            const auto *b = bound(a);
+            if (!b)
+                return false;
+            if (!type(b->type))
+                return false;
+        }
+        text("E");
+        return true;
+    }
     /* [abi:expressions] <unary operator-name> <expression> */
     if (expression.is(syntax_kind::unary_expression) &&
         expression.size() == 2) {
@@ -1900,8 +1928,27 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
 
 bool itanium_mangler::dependent_value(entity_index d)
 {
-    if (!analysis.entity_table[d].value)
-        return false;
+    if (!analysis.entity_table[d].value) {
+        /* an expression kept as written (dependent_value_entity): X
+           <expression> E, the names an alias template bound in it as
+           their types */
+        const struct type &w = record(analysis.entity_table[d].type);
+        if (w.kind != type_kind::dependent ||
+            analysis.entity_table[w.entity].kind !=
+                entity_kind::dependent_written)
+            return false;
+        SyntaxRef n = SyntaxRef(node_index(
+            static_cast<uint32_t>(analysis.entity_table[w.entity].value)));
+        uint32_t saved_first = written_first, saved_count = written_count;
+        written_first = analysis.entity_table[w.entity].first_member;
+        written_count = analysis.entity_table[w.entity].member_count;
+        text("X");
+        bool done = dependent_expression(n);
+        written_first = saved_first;
+        written_count = saved_count;
+        text("E");
+        return done;
+    }
     text("X");
     if (!dependent_value_expr(d))
         return false;

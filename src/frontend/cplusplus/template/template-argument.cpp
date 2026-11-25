@@ -223,6 +223,13 @@ static uint64_t dependent_comparison_value(SyntaxElement op)
 entity_index semantic_analysis::dependent_value_entity(SyntaxElement written)
 {
     entity_index e = dependent_value_structure(written);
+    /* (no structure above: the expression as written, with the names an
+       alias template's instantiation bound in it, which mangling spells
+       ([abi:expressions]): a dependent_written type the entity's) */
+    if (!entity_table[e].value && !entity_table[e].type.unqualified() &&
+        !written.is_token())
+        entity_table[e].type = qualified_type::make(
+            dependent_written_type(written, true), cv_none);
     /* [temp.over.link]/5: an expression naming a non-type template
        parameter that has no structure above (I + 1) is equivalent to
        another of the same structure (expression_structure): one entity */
