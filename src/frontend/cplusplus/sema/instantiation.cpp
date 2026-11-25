@@ -251,8 +251,11 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
        statement with a non-type-dependent operand"; a use of a
        specialization whose return type is not deduced yet instantiates
        its definition there, in an unevaluated operand too */
-    bool deducing = contains_placeholder(
-        type_table[entity_table[specialization].type.unqualified()].operand);
+    bool deducing =
+        !substituting &&
+        contains_placeholder(
+            type_table[entity_table[specialization].type.unqualified()]
+                .operand);
     if (needed && x.pending && !quiet_member_bodies)
         x.quiet = false;
     if (x.defined || x.defining || (!deducing && (!needed || x.pending)))
