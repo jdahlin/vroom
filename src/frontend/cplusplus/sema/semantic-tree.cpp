@@ -130,8 +130,13 @@ void semantic_analysis::require_destructor_definition(qualified_type type)
     if (object.kind != type_kind::class_type)
         return;
     entity_index destructor = entity_table[object.entity].destructor;
-    if (destructor)
+    if (destructor) {
+        /* (a postponed destructor body ill-formed for these arguments is
+           this declaration's error, instantiate_pending) */
+        if (!instantiation_depth && !entity_table[destructor].member_needed_by)
+            entity_table[destructor].member_needed_by = current_declaration;
         mark_needed(destructor);
+    }
 }
 
 void semantic_analysis::mark_needed(entity_index function)

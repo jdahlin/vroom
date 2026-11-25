@@ -797,6 +797,9 @@ class c_lowering
     uint32_t bind_reference(const semantic_node &n);
     uint32_t initializer_list(const semantic_node &n);
     uint32_t compound_literal(uint32_t n);
+    /* the array the initializer list n builds, as a temporary of the
+       full-expression with its elements' destructors */
+    uint32_t array_temporary(uint32_t n);
     uint32_t spaceship(const semantic_node &n);
     uint32_t compound_literal_of(uint32_t value, ast_qualified_type t);
     /* whether an object of type t has a pointer to data member in it,

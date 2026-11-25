@@ -1046,10 +1046,20 @@ uint32_t c_lowering::conditional(const semantic_node &n)
     ast_qualified_type t = type(n.type, n.at);
     if (!n.b)
         return conditional_omitted(n, t);
-    if (!is_glvalue(n))
+    if (!is_glvalue(n)) {
+        /* [class.copy.elision]/1: a prvalue's result object is the
+           selected operand's: neither is a temporary of its own */
+        bool initializes = at_result_object;
+        uint32_t condition = truth(expression(n.a));
+        if (initializes)
+            result_object = n.b;
+        uint32_t second = expression(n.b);
+        if (initializes)
+            result_object = n.c;
+        uint32_t third = expression(n.c);
         return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
-                    truth(expression(n.a)), expression(n.b), expression(n.c), 0,
-                    0);
+                    condition, second, third, 0, 0);
+    }
     /* the object one of the operands is: its address selected */
     ast_qualified_type pointer = pointer_to(t);
     uint32_t b = object(n.b), c_ = object(n.c);

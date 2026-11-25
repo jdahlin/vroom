@@ -221,11 +221,37 @@ VPRIV void x64_eh_table(codegen_context *e, tbuf *b, uint32_t s)
         action[k] = pad ? x64_eh_site_action(e, m) : 0;
     }
     codegen_eh_table_begin(b, &W->eh_lsda, f);
+    /* every address of the function is in the table: C++'s personality
+       routine terminates at a call in none.  Between the sites listed, one
+       without a pad (a throw outside every try, which the VIR lowering
+       gives no site) */
+    uint32_t after = 0;
+    auto gap = [&](uint32_t until) {
+        if (after)
+            vtext_format_append(b, "\t.uleb128 .Lvcceh%u_%u-", f, after);
+        else
+            vtext_string_append(b, "\t.uleb128 0\n\t.uleb128 ");
+        if (after) {
+            codegen_symbol_name_append(c, b, s);
+            vtext_string_append(b, "\n\t.uleb128 ");
+        }
+        if (until)
+            vtext_format_append(b, ".Lvcceh%u_%u-", f, until);
+        else
+            vtext_format_append(b, ".Lfunc_end%u-", s);
+        if (after)
+            vtext_format_append(b, ".Lvcceh%u_%u", f, after);
+        else
+            codegen_symbol_name_append(c, b, s);
+        vtext_string_append(b, "\n\t.byte\t0\n\t.uleb128 0\n");
+    };
     for (uint32_t k = 0; k < W->eh_nsites; k++) {
         /* (a call a later pass removed: not a call site) */
         if (!W->eh_seen || !W->eh_seen[W->eh_sites[k].begin] ||
             !W->eh_seen[W->eh_sites[k].end])
             continue;
+        gap(W->eh_sites[k].begin);
+        after = W->eh_sites[k].end;
         vtext_format_append(b, "\t.uleb128 .Lvcceh%u_%u-", f,
                             W->eh_sites[k].begin);
         codegen_symbol_name_append(c, b, s);
@@ -239,5 +265,6 @@ VPRIV void x64_eh_table(codegen_context *e, tbuf *b, uint32_t s)
             vtext_string_append(b, "\t.byte\t0\n");
         vtext_format_append(b, "\t.uleb128 %u\n", action[k]);
     }
+    gap(0);
     codegen_eh_table_end(b, c, &W->eh_lsda, f);
 }

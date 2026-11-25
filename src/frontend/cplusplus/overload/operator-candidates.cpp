@@ -118,6 +118,27 @@ bool semantic_analysis::converts_to_callable(entity_index c) const
     return false;
 }
 
+bool semantic_analysis::subscript_has_no_builtin(qualified_type object,
+                                                 qualified_type index) const
+{
+    const struct type &o = type_table[object.unqualified()];
+    type_kind other = type_table[index.unqualified()].kind;
+    if (o.kind != type_kind::class_type || other == type_kind::class_type ||
+        other == type_kind::pointer || other == type_kind::array)
+        return false;
+    owned_array<entity_index> functions, templates;
+    if (!visible_conversion_functions(o.entity, functions, &templates))
+        return false;
+    for (entity_index f : functions) {
+        type_kind k =
+            type_table[conversion_function_result(f).type.unqualified()].kind;
+        if (!entity_table[f].explicit_ &&
+            (k == type_kind::pointer || k == type_kind::array))
+            return false;
+    }
+    return true;
+}
+
 /*
  * [over.call.object]/2: "for each non-explicit conversion function declared
  * in T or in a base class of T ... to pointer to function, ... a surrogate
@@ -610,6 +631,30 @@ analysis_result semantic_analysis::overloaded_operator(
         r = collect(spaceship, true, false);
     if (r == analysis_result::well_formed && three_way)
         VTRY_SET(r, collect(spaceship, true, true));
+    /* [over.match.oper]/3: with no operator function viable for a binary
+       operator that modifies no operand, the built-in candidates are left
+       (doctest's int == Expression_lhs): as with no function at all.  (Not
+       where C++20's rewritten candidates take part) */
+    if (r == analysis_result::well_formed && converts && !rewrites &&
+        !three_way && operands.size() == 2 && !candidates.empty() &&
+        (is_comparison(op) || op == preprocessing_op_or_punc::PLUS ||
+         op == preprocessing_op_or_punc::MINUS)) {
+        owned_array<expression_meaning> trial;
+        for (const expression_meaning &e : operands)
+            trial.append(e);
+        size_t ignored = 0;
+        bool none = false;
+        size_t unsupported_before = unsupported.size();
+        analysis_result t = analysis_result::well_formed;
+        {
+            diagnostics_suppressed_if hush(diagnostics, true);
+            t = best_viable_function(n, candidates, nullptr, trial, ignored,
+                                     &none);
+        }
+        unsupported.resize(unsupported_before);
+        if (t == analysis_result::well_formed && none)
+            candidates.clear();
+    }
     if (candidates.empty()) {
         bool unary_builtin = false;
         if (converts && (unary_prefix || incdec)) {
@@ -799,7 +844,9 @@ analysis_result semantic_analysis::overloaded_operator(
                     return analysis_result::well_formed;
             }
             if (implicit_viable) {
-                if (!declares_move ||
+                /* (/7: one deleted for a const or reference member is a
+                   candidate as the one a declared move deletes) */
+                if ((!declares_move && !copy_assignment_deleted(c)) ||
                     entity_table[c].defaulted_copy_assignment ||
                     operands.size() != 2 ||
                     operands[1].type.unqualified() !=
@@ -884,6 +931,15 @@ analysis_result semantic_analysis::overloaded_operator(
                 seq.rank != 0)
                 beats_builtin = false;
         }
+        /* [impl.clang] the pointer types of the built-in subscript
+           candidates come from conversion functions, not from conversion
+           function templates (json's operator ValueType): with an index
+           that is no class or pointer and no such function yielding a
+           pointer, there is none */
+        if (!beats_builtin && op == preprocessing_op_or_punc::LEFT_BRACKET &&
+            arguments.size() == 2 &&
+            subscript_has_no_builtin(arguments[0].type, arguments[1].type))
+            beats_builtin = true;
         if (!beats_builtin)
             return not_supported_because(n, "over.built",
                                          "a viable operator function that may "
@@ -1049,17 +1105,6 @@ analysis_result semantic_analysis::overloaded_operator(
         /* [over.binary]/1: "If a member function is selected, the expression
            is interpreted as x . operator @ ( y )" */
         expression_meaning &e = ordered[0];
-        if (e.category == value_category::prvalue &&
-            entity_table[object_class].destructor &&
-            entity_table[entity_table[object_class].destructor]
-                .member_body_deferred)
-            /* the temporary's destructor is an instantiated member's
-               definition still to be made ([temp.inst]/4), whose errors
-               this expression's declaration owns: not analysed */
-            return not_supported_because(
-                n, "class.temporary",
-                "an operator on a prvalue whose destructor definition is not "
-                "yet made");
         expression_meaning address;
         address.type =
             qualified_type::make(type_table.pointer_to(e.type), cv_none);

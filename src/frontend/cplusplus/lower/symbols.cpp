@@ -394,7 +394,13 @@ void c_lowering::gnu_attributes(entity_index e, uint32_t s)
 uint32_t c_lowering::special_callee(entity_index e, token_index at)
 {
     int variant = 1;
-    if (analysis.entity_table[e].inline_ && !with_virtual_bases(e))
+    const entity &x = analysis.entity_table[e];
+    /* (an abstract class is constructed and destroyed as a base subobject
+       alone, and clang makes no complete object variant of it) */
+    bool abstract =
+        x.special != special_member::none &&
+        analysis.abstract_class(analysis.entity_table[x.enclosing].type);
+    if ((x.inline_ || abstract) && !with_virtual_bases(e))
         variant = 2;
     uint32_t s = symbol(e, at, variant);
     if (s)

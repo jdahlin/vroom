@@ -871,7 +871,9 @@ analysis_result semantic_analysis::define_class_outside(SyntaxRef at,
     substituting = 0;
     analysis_result r = define_class_instantiation(at, index, c);
     substituting = saved;
-    if (saved && r != analysis_result::well_formed)
+    /* (one only refused has no error of its own to keep: the substitution's
+       failures stay the substitution's) */
+    if (saved && r == analysis_result::ill_formed)
         definition_failures++;
     return r;
 }

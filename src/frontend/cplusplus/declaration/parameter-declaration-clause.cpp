@@ -729,6 +729,17 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
         value.allows = exception_allowance::unknown;
     }
     deferred_noexcept = 0;
+    /* [temp.inst]/15's specification, which is not instantiated yet: one
+       that needs itself without end is not accepted for that */
+    if (exceptions && may_qualify && defining_class &&
+        entity_table[defining_class].instantiation &&
+        noexcept_needs_itself(exceptions.first_token() - 1,
+                              exceptions.end_token(),
+                              entity_table[defining_class].name))
+        return not_supported_because(
+            exceptions, "temp.inst",
+            "an exception specification that needs itself through its own "
+            "template");
     if (exceptions) {
         size_t dependent_before = dependent_exception_specifications.size();
         VTRY(r,

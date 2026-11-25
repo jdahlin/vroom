@@ -597,8 +597,9 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
     bool lvalue = a.category == value_category::lvalue;
     /* a const lvalue reference or an rvalue reference: one that binds to
        an rvalue (or a temporary) */
-    bool binds_rvalues =
-        rvalue_reference || ((t1.cv() & cv_const) && !(t1.cv() & cv_volatile));
+    uint32_t referred_cv = qualifiers_of(t1);
+    bool binds_rvalues = rvalue_reference || ((referred_cv & cv_const) &&
+                                              !(referred_cv & cv_volatile));
     if (a.bit_field_width && lvalue)
         /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
            to a bit-field"; a const one is bound to a temporary (not
@@ -687,6 +688,13 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                             return found;
                     }
                 }
+                /* [over.match.ref]/1: a non-const lvalue reference to no
+                   class takes a conversion function yielding an lvalue
+                   alone */
+                if (functions && !c1 && !rvalue_reference && !binds_rvalues &&
+                    x.kind != type_kind::function &&
+                    !conversion_may_yield_lvalue(c2, t1))
+                    functions = false;
                 if (functions) {
                     sequence cannot_tell = of_form(sequence::form::unknown);
                     /* [over.ics.rank]/2: once the source class is complete

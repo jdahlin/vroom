@@ -4144,6 +4144,11 @@ class semantic_analysis
     };
     owned_array<pending_noexcept> pending_noexcepts;
     bool noexcept_needs_complete_class(SyntaxRef n);
+    /* whether a noexcept-specifier in the tokens [first, end) of class
+       template C (name) asks noexcept of the template specialized with
+       itself, C<C>: a specification that needs another, without end */
+    bool noexcept_needs_itself(token_index first, token_index end,
+                               uint32_t name) const;
     bool names_parameter_of_class(SyntaxRef n, entity_index c);
     analysis_result member_noexcept_specifiers(entity_index c);
     /* the noexcept-specifiers left value-dependent in templates' own
@@ -5100,10 +5105,10 @@ class semantic_analysis
     analysis_result class_conversion(SyntaxRef n, entity_index c,
                                      expression_meaning &m);
     /* ... the prvalue of class c direct-initialized by the arguments */
-    analysis_result
-    class_direct_initialization(SyntaxRef n, entity_index c,
-                                owned_array<expression_meaning> &arguments,
-                                expression_meaning &m);
+    analysis_result class_direct_initialization(
+        SyntaxRef n, entity_index c, owned_array<expression_meaning> &arguments,
+        expression_meaning &m,
+        const owned_array<SyntaxElement> *written_arguments = nullptr);
     /* the expressions of an expression-list, analysed */
     analysis_result
     expression_list_meanings(SyntaxElement list,
@@ -6256,6 +6261,11 @@ class semantic_analysis
        (not known when they are not plain expressions) */
     analysis_result braced_deduction_elements(SyntaxElement list,
                                               expression_meaning &m);
+    analysis_result deduce_initializer_list(SyntaxElement braced,
+                                            entity_index e,
+                                            qualified_type &type,
+                                            initialized_value &value,
+                                            bool &done);
     owned_array<expression_meaning> braced_elements;
     /* ... deduced from the argument m of parameter type p: 1 deduced, 0
        a non-deduced context, -1 deduction failed */
@@ -6935,6 +6945,17 @@ class semantic_analysis
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
     bool has_conversion_functions(entity_index c) const;
+    /* whether a conversion function of class c, or a specialization of one
+       of its templates deduced for to, may yield an lvalue (true when not
+       known) */
+    bool conversion_may_yield_lvalue(entity_index c, qualified_type to);
+    /* [basic.type.qualifier]/3: t's cv-qualifiers, an array's being its
+       elements' */
+    uint32_t qualifiers_of(qualified_type t) const;
+    /* whether object[index], object of class type, has no built-in
+       candidate */
+    bool subscript_has_no_builtin(qualified_type object,
+                                  qualified_type index) const;
     /* whether the class s has a non-explicit conversion function that may
        yield the class t or one derived from it ([over.match.copy]/1.2) */
     bool has_implicit_conversion_functions(entity_index c) const;
@@ -7116,6 +7137,9 @@ class semantic_analysis
     };
     bool function_set_at(token_index at, function_set &out) const;
     bool named_function_set(SyntaxElement e, function_set &out) const;
+    /* ... that N::f names, N the identifier at token qualifier */
+    bool qualified_function_set(token_index qualifier, token_index at,
+                                function_set &out) const;
     /* an operand that is such a name, kept as the overload set it is
        (m.overload_name); false if it is none */
     bool overload_set_operand(SyntaxElement e, expression_meaning &m) const;

@@ -611,11 +611,26 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
         value |= static_cast<uint64_t>(ns_depth) << 8;
     /* (the member class's name, plus one, in the upper half) */
     value |= static_cast<uint64_t>(level) << 32;
+    /* [impl.clang] the unresolved name has the template arguments written,
+       not the specialization's defaulted ones: their number, in
+       member_count */
+    uint32_t written_count = 0;
+    for (uint32_t i = 2; i + 1 < spec_node.size(); i++) {
+        if (spec_node[i].is(syntax_kind::template_argument_list)) {
+            for (SyntaxElement x : spec_node[i].elements())
+                if (!x.is(preprocessing_op_or_punc::COMMA))
+                    written_count++;
+        } else if (!spec_node[i].is(preprocessing_op_or_punc::COMMA)) {
+            written_count++;
+        }
+    }
     for (entity_index d : dependent_values)
         if (entity_table[d].type == type && entity_table[d].name == name &&
             entity_table[d].value == value &&
-            entity_table[d].enclosing == ns_scope)
+            entity_table[d].enclosing == ns_scope &&
+            entity_table[d].member_count == written_count)
             return d;
+    entity_table[e].member_count = written_count;
     entity_table[e].type = type;
     entity_table[e].name = name;
     entity_table[e].value = value;

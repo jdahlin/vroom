@@ -270,6 +270,25 @@ void semantic_analysis::collect_written_casts(
             found.append(b);
         }
     }
+    /* T{}, T a class's name alone: its type, for the mangler (cast the
+       postfix-expression's node).  Only the empty one of a class: other
+       forms, mangled, would let redefinitions through that are not told
+       apart yet */
+    if (x.is(syntax_kind::postfix_expression) && x.size() == 2 &&
+        x[0].is_identifier() && x[1].is(syntax_kind::braced_init_list) &&
+        x[1].size() == 2) {
+        lookup_result named = lookup_unqualified(
+            tokens.identifier(x[0].token()), lookup_filter::any);
+        entity_index e = named.entity;
+        if (e && !named.ambiguous && !named.unknown &&
+            entity_table[e].kind == entity_kind::class_type) {
+            written_binding b;
+            SyntaxRef ar = x;
+            b.cast = ar.index().index();
+            b.type = entity_table[e].type;
+            found.append(b);
+        }
+    }
     /* Q<args>:: in a nested-name-specifier, Q a class template: its
        (dependent) specialization, for the mangler (cast the template-id's
        node) */

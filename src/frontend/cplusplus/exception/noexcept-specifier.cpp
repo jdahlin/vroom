@@ -168,6 +168,49 @@ bool semantic_analysis::noexcept_needs_complete_class(SyntaxRef n)
     return false;
 }
 
+bool semantic_analysis::noexcept_needs_itself(token_index first,
+                                              token_index end,
+                                              uint32_t name) const
+{
+    auto is_name = [&](token_index t) {
+        return tokens[t].kind == token_kind::identifier &&
+               tokens.identifier(t) == name;
+    };
+    auto is_op = [&](token_index t, preprocessing_op_or_punc op) {
+        return tokens[t].kind == token_kind::operator_or_punctuator &&
+               preprocessing_op_or_punc_primary(tokens[t].op_or_punc) == op;
+    };
+    auto is_noexcept = [&](token_index t) {
+        return tokens[t].kind == token_kind::keyword &&
+               syntax_parser.keyword_of(tokens[t]) ==
+                   standard_keyword::noexcept_;
+    };
+    for (token_index t = first; t + 1 < end; t++) {
+        if (!is_noexcept(t) ||
+            !is_op(t + 1, preprocessing_op_or_punc::LEFT_PARENTHESIS))
+            continue;
+        /* within this noexcept's parentheses: another noexcept, then
+           N<N> */
+        int depth = 0;
+        bool asks = false;
+        for (token_index u = t + 1; u < end; u++) {
+            if (is_op(u, preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                depth++;
+            if (is_op(u, preprocessing_op_or_punc::RIGHT_PARENTHESIS) &&
+                !--depth)
+                break;
+            if (is_noexcept(u))
+                asks = true;
+            if (asks && u + 3 < end && is_name(u) &&
+                is_op(u + 1, preprocessing_op_or_punc::LESS) &&
+                is_name(u + 2) &&
+                is_op(u + 3, preprocessing_op_or_punc::GREATER))
+                return true;
+        }
+    }
+    return false;
+}
+
 /*
  * [class.mem]/6: the noexcept-specifier of member functions of the class c
  * that name c, analysed with c complete: each function's type then says

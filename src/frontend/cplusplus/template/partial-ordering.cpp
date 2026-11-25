@@ -181,10 +181,11 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
             return false;
         }
     /* the template parameter pack G's function parameter pack expands
-       (its last template parameter) */
+       (defaulted parameters may follow it: template <class... U, int = 0>) */
     uint32_t pack = gg.parameter_count;
-    if (template_parameter_is_pack(gg.first_parameter + gg.parameter_count - 1))
-        pack = gg.parameter_count - 1;
+    for (uint32_t i = 0; i < gg.parameter_count; i++)
+        if (template_parameter_is_pack(gg.first_parameter + i))
+            pack = i;
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < gg.parameter_count; i++) {
@@ -348,6 +349,19 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
     const uint32_t both[2] = {f, g};
     for (uint32_t x : both) {
         const function_template t = function_templates[x - 1];
+        /* [temp.deduct.partial]/12: a parameter no function parameter's
+           type uses takes no part; where none of the types depends on a
+           parameter (a constructor of a class specialization, templated by
+           its defaulted parameters alone: tuple(const T&...)), a template
+           template parameter or a non-type pack is no obstacle */
+        bool dependent_types = false;
+        qualified_type declared = entity_table[t.entity].type;
+        const struct type d = type_table[declared.unqualified()];
+        const qualified_type *types_of =
+            type_table.parameters(declared.unqualified());
+        for (uint32_t i = 0; i < d.parameter_count; i++)
+            if (depends_on_template_parameter(types_of[i]))
+                dependent_types = true;
         for (uint32_t i = 0; i < t.parameter_count; i++) {
             /* (a type-parameter, or an invented one, [dcl.fct]/22; a
                non-type parameter takes no part: [temp.deduct.partial]/12,
@@ -358,7 +372,8 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
             template_parameter_parts form;
             if (!template_parameter_form(
                     template_parameter_nodes[t.first_parameter + i], form) ||
-                form.template_template || (!form.type && form.pack))
+                (dependent_types &&
+                 (form.template_template || (!form.type && form.pack))))
                 unknown = true;
         }
         qualified_type type = entity_table[t.entity].type;

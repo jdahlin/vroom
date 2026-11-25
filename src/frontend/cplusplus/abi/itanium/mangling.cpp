@@ -202,6 +202,9 @@ class itanium_mangler
     bool refuse(const char *what);
     void refuse_expression(SyntaxElement x);
     bool dependent_expression_of(SyntaxElement c);
+    /* an initializer-list's expressions, a pattern followed by ... as
+       sp <expression> */
+    bool expression_list(SyntaxElement list);
     /* (the dependent values being mangled, dependent_value) */
     uint32_t dependent_value_depth = 0;
     const char *binary_operator_code(SyntaxElement op) const;
@@ -211,7 +214,7 @@ class itanium_mangler
     }
     bool class_template_args(entity_index c);
     bool template_args(entity_index c, entity_index function = 0,
-                       bool pack_brackets = true);
+                       bool pack_brackets = true, uint32_t limit = UINT32_MAX);
     bool dependent_value(entity_index d);
     bool dependent_value_expr(entity_index d);
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
@@ -395,6 +398,16 @@ bool itanium_mangler::encoding(entity_index e)
 bool itanium_mangler::specialization_encoding(entity_index e)
 {
     const entities &table = analysis.entity_table;
+    /* (a specialization named within another's arguments: the enclosing
+       one's template parameters are resolved again after it) */
+    struct restore {
+        entity_index &place;
+        entity_index before;
+        ~restore()
+        {
+            place = before;
+        }
+    } outer_template = {encoding_template, encoding_template};
     entity_index pattern_of = analysis.specialized_template(e);
     entity_index scope = table[e].enclosing;
     bool nested = scope && !is_std(scope);
@@ -1186,10 +1199,15 @@ void itanium_mangler::refuse_expression(SyntaxElement x)
         return;
     refused_text.clear();
     vbuffer_string_append(refused_text.get(), "the expression '");
-    token_index first = x.first_token();
-    token_index end = first + 1;
-    if (x.is_node())
+    /* (a token element's own token: it has no first_token) */
+    token_index first = 0, end = 0;
+    if (x.is_node()) {
+        first = x.first_token();
         end = x.end_token();
+    } else {
+        first = x.token();
+        end = first + 1;
+    }
     for (token_index t = first; t < end; t++) {
         if (refused_text.size() > 70) {
             vbuffer_string_append(refused_text.get(), " ...");
@@ -1209,6 +1227,24 @@ void itanium_mangler::refuse_expression(SyntaxElement x)
     }
     vbuffer_append(refused_text.get(), "", 1);
     refuse(refused_text.data());
+}
+
+/* [abi:expressions] <expression> ::= sp <expression>, a pack expansion */
+bool itanium_mangler::expression_list(SyntaxElement list)
+{
+    owned_array<SyntaxElement> items;
+    for (auto item : list.items(syntax_kind::initializer_list))
+        items.append(item);
+    for (size_t i = 0; i < items.size(); i++) {
+        if (items[i].is(preprocessing_op_or_punc::ELLIPSIS))
+            continue;
+        if (i + 1 < items.size() &&
+            items[i + 1].is(preprocessing_op_or_punc::ELLIPSIS))
+            text("sp");
+        if (!dependent_expression(items[i]))
+            return false;
+    }
+    return true;
 }
 
 bool itanium_mangler::dependent_expression(SyntaxElement expression)
@@ -1424,11 +1460,27 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                 arguments.append(argument);
             if (arguments.size() != 1)
                 text("_");
-            for (SyntaxElement argument : arguments)
-                if (!dependent_expression(argument))
-                    return false;
+            if (!expression_list(expression[2]))
+                return false;
             if (arguments.size() != 1)
                 text("E");
+            return true;
+        }
+        out->n = before;
+    }
+    /* [abi:expressions] T{}, T a class the analysis recorded:
+
+           <expression> ::= tl <type> <braced-expression>* E
+     */
+    if (expression.is(syntax_kind::postfix_expression) &&
+        expression.size() == 2 && expression[0].is_token() &&
+        expression[0].is_identifier() &&
+        expression[1].is(syntax_kind::braced_init_list) &&
+        expression[1].size() == 2) {
+        size_t before = out->n;
+        text("tl");
+        if (type_operand(expression)) {
+            text("E");
             return true;
         }
         out->n = before;
@@ -1718,11 +1770,8 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                     return false;
             } else if (!dependent_expression(base))
                 return false;
-            if (expression.size() == 4)
-                for (auto argument :
-                     expression[2].items(syntax_kind::initializer_list))
-                    if (!dependent_expression(argument))
-                        return false;
+            if (expression.size() == 4 && !expression_list(expression[2]))
+                return false;
             text("E");
             return true;
         }
@@ -2296,10 +2345,12 @@ bool itanium_mangler::class_template_args(entity_index c)
  * magnitude; a bool's 0 or 1.
  */
 bool itanium_mangler::template_args(entity_index c, entity_index function,
-                                    bool pack_brackets)
+                                    bool pack_brackets, uint32_t limit)
 {
     text("I");
     uint32_t count = analysis.specialization_argument_count(c);
+    if (limit < count)
+        count = limit;
     for (uint32_t i = 0; i < count; i++) {
         uint32_t pack = analysis.specialization_pack(c, i);
         /* [impl.clang]: a function template's non-type parameter of a
@@ -2624,7 +2675,10 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     }
     /* (clang flattens a pack expansion written among the arguments: the
        substituted elements, no J ... E) */
-    if (!source_name(spec.name) || !template_args(q, 0, false))
+    uint32_t written = UINT32_MAX;
+    if (x.member_count)
+        written = x.member_count;
+    if (!source_name(spec.name) || !template_args(q, 0, false, written))
         return false;
     /* a member class between the specialization and the name */
     if (x.value >> 32 && !source_name(static_cast<uint32_t>(x.value >> 32) - 1))

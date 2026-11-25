@@ -152,7 +152,13 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         return not_supported_because(
             current_declaration, "class.temporary",
             "a member of an aggregate prvalue at namespace scope");
-    if (!accessible(e, object_class))
+    /* [class.access]/4: of an overloaded function called, "access control
+       is applied to the function selected by overload resolution"
+       (call_function), not to the name's first declaration */
+    bool overloads_called = at == overloaded_callee &&
+                            entity_table[e].kind == entity_kind::function &&
+                            entity_table[e].next_overload;
+    if (!overloads_called && !accessible(e, object_class))
         /* [class.access]/1.1: "private; that is, its name can be used only
            by members and friends of the class in which it is declared" */
         return ill_formed_at_token(at,
