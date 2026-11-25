@@ -218,9 +218,9 @@ bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
     owned_array<entity_index> assignments;
     if (found.unknown && found.unknown_entity &&
         member_function_template_of(found.unknown_entity) && !found.ambiguous) {
-        for (const template_name_function &x : template_name_functions)
-            if (x.name == found.unknown_entity)
-                assignments.append(x.function);
+        for (const template_name_function &named : template_name_functions)
+            if (named.name == found.unknown_entity)
+                assignments.append(named.function);
     } else if (found.unknown || found.ambiguous) {
         known = false;
         return false;
