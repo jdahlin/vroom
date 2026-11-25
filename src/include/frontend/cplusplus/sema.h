@@ -6918,6 +6918,9 @@ class semantic_analysis
        of its templates deduced for to, may yield an lvalue (true when not
        known) */
     bool conversion_may_yield_lvalue(entity_index c, qualified_type to);
+    /* [basic.type.qualifier]/3: t's cv-qualifiers, an array's being its
+       elements' */
+    uint32_t qualifiers_of(qualified_type t) const;
     /* whether object[index], object of class type, has no built-in
        candidate */
     bool subscript_has_no_builtin(qualified_type object,

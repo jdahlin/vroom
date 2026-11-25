@@ -485,6 +485,13 @@ bool semantic_analysis::reference_related(qualified_type t1, qualified_type t2,
    to cv1 T1" via a standard conversion sequence": the same pointer type, a
    qualification conversion or a function pointer conversion (the
    derived-to-base pointer conversion is the class rules') */
+uint32_t semantic_analysis::qualifiers_of(qualified_type t) const
+{
+    while (type_table[t.unqualified()].kind == type_kind::array)
+        t = type_table[t.unqualified()].operand;
+    return t.cv();
+}
+
 bool semantic_analysis::reference_compatible(qualified_type t1,
                                              qualified_type t2)
 {
@@ -628,7 +635,8 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     /* "Otherwise, if the reference is an lvalue reference to a type that is
        not const-qualified or is volatile-qualified, the program is
        ill-formed." */
-    if (!rvalue_reference && (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile)))
+    if (!rvalue_reference &&
+        (!(qualifiers_of(t1) & cv_const) || (qualifiers_of(t1) & cv_volatile)))
         return ill_formed(at,
                           "an lvalue reference to a type that is not "
                           "const-qualified or is volatile-qualified binds "

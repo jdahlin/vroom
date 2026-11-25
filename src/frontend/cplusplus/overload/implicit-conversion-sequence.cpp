@@ -597,8 +597,9 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
     bool lvalue = a.category == value_category::lvalue;
     /* a const lvalue reference or an rvalue reference: one that binds to
        an rvalue (or a temporary) */
-    bool binds_rvalues =
-        rvalue_reference || ((t1.cv() & cv_const) && !(t1.cv() & cv_volatile));
+    uint32_t referred_cv = qualifiers_of(t1);
+    bool binds_rvalues = rvalue_reference || ((referred_cv & cv_const) &&
+                                              !(referred_cv & cv_volatile));
     if (a.bit_field_width && lvalue)
         /* [dcl.init.ref]/5: a non-const lvalue reference "shall not be bound
            to a bit-field"; a const one is bound to a temporary (not
