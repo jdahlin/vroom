@@ -1168,8 +1168,15 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
     for (size_t i = 0; i < packs.size(); i++)
         if (packs[i] != no_expansion)
             expanded = true;
-    if (expanded && (designations.any ||
-                     type_table[type.unqualified()].kind != type_kind::array))
+    /* (std::initializer_list<E> is initialized from its backing array,
+       const E[N], by this list: the array path, [dcl.init.list]/5) */
+    const struct type &target = type_table[type.unqualified()];
+    bool initializer_list_target =
+        target.kind == type_kind::class_type && target.entity &&
+        named(target.entity, "initializer_list") &&
+        std_namespace(entity_table[target.entity].enclosing);
+    if (expanded && (designations.any || (target.kind != type_kind::array &&
+                                          !initializer_list_target)))
         return not_supported_because(
             list, "temp.variadic",
             "a designated or non-array list with a pack expansion");
@@ -1267,10 +1274,14 @@ analysis_result semantic_analysis::gather_clauses(
             }
             continue;
         }
-        /* (a lambda-expression is a primary-expression, [expr.prim.lambda]) */
+        /* (a lambda-expression is a primary-expression, [expr.prim.lambda];
+           a simple-template-id an id-expression, [expr.prim.id]/1: a
+           variable template's specialization, libc++'s
+           {__trait<_Types, ...>...} in <variant>) */
         if (c.is_node() && !syntax_kind_is_expression(c.kind()) &&
             !c.is(syntax_kind::braced_init_list) &&
-            !c.is(syntax_kind::lambda_expression))
+            !c.is(syntax_kind::lambda_expression) &&
+            !c.is(syntax_kind::simple_template_id))
             return not_supported_because(
                 list, "dcl.init.aggr",
                 "an unexpected node in an initializer list");

@@ -2314,7 +2314,8 @@ bool semantic_analysis::subobject_destructor_inaccessible(entity_index c,
 analysis_result semantic_analysis::implicit_special_members(entity_index c,
                                                             SyntaxRef n)
 {
-    const entity &x = entity_table[c];
+    /* (a copy: a probe below may make entities, which moves the table) */
+    const entity x = entity_table[c];
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
         qualified_type t = m.type;
@@ -2396,7 +2397,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
        moved nor copied */
     bool move_declared = false, move_deleted = false;
     for (entity_index k : classes) {
-        const entity &sub = entity_table[k];
+        const entity sub = entity_table[k];
         /* X() = default beside other constructors may be no entity
            (trivial_defaulted_default_constructor) */
         bool default_ok = (!sub.first_constructor ||
@@ -2604,15 +2605,17 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         for (entity_index k : classes)
             if (!copies_bytes(k))
                 trivial_move = false;
-        /* [class.default.ctor]/1: a user-declared constructor (a
-           constructor template is one, [temp.mem]/1) and no default one:
-           no default constructor (not analysed) */
+        /* [class.default.ctor]/1: "If there is no user-declared
+           constructor for class X, a non-explicit constructor having no
+           parameters is implicitly declared as defaulted": X(X&&) =
+           default is a user-declared constructor (with no entity when
+           trivial), so none is.  No default constructor is, for every use
+           analysis makes of it, a deleted one ([class.default.ctor]/2: "M
+           has no default constructor or ... a function that is deleted");
+           only the diagnostic differs (libc++'s <variant> __dtor) */
         if (y.defaulted_move_constructor && !y.defaulted_default_constructor &&
             !user_constructors)
-            return not_supported_because(
-                n, "class.default.ctor",
-                "a class with a defaulted move constructor and no default "
-                "constructor");
+            entity_table[c].implicit_default_deleted = true;
         if (!user_copy && !y.defaulted_copy_constructor)
             copy_deleted = true;
         if (y.defaulted_move_constructor && !trivial_move) {
@@ -2814,6 +2817,12 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             if (entity_table[k].implicit &&
                 !type_table[entity_table[k].type.unqualified()].parameter_count)
                 has_default = true;
+        /* ([class.default.ctor]/2: deleted when the base has no default
+           constructor, or a deleted one) */
+        if (!user_declared && !has_default &&
+            !entity_table[c].implicit_default_deleted &&
+            default_constructor_deleted(base_class))
+            entity_table[c].implicit_default_deleted = true;
         if (!user_declared && !has_default &&
             !entity_table[c].implicit_default_deleted)
             declare_implicit(c, special_member::constructor, false);

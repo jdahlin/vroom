@@ -1072,6 +1072,66 @@ uint32_t semantic_analysis::member_definition_lookup_id(
         preprocessing_op_or_punc_primary(tokens[op + 1].op_or_punc));
 }
 
+/* the number of parameters an out-of-class function definition's
+   declarator declares, or -1 when it is not read here ((void), a pack, a
+   declarator not of the plain form): [dcl.fct]/4, its parameter-
+   declaration-clause */
+static int clause_parameters(SyntaxElement c)
+{
+    int count = 0;
+    for (uint32_t i = 0; i < c.size(); i++) {
+        SyntaxElement k = c[i];
+        if (k.is_token()) {
+            if (k.is(preprocessing_op_or_punc::ELLIPSIS))
+                return -1;
+            continue;
+        }
+        if (k.is(syntax_kind::parameter_declaration)) {
+            count++;
+            continue;
+        }
+        if (k.is(syntax_kind::parameter_declaration_list) ||
+            k.is(syntax_kind::parameter_declaration_clause)) {
+            int inner = clause_parameters(k);
+            if (inner < 0)
+                return -1;
+            count += inner;
+        }
+    }
+    return count;
+}
+
+int semantic_analysis::definition_parameter_count(SyntaxRef definition) const
+{
+    if (!definition.is(syntax_kind::function_definition) ||
+        !out_of_class_nested(definition, nullptr))
+        return -1;
+    SyntaxTail parts(definition, leading_gnu_attributes(definition));
+    if (parts.size() < 2)
+        return -1;
+    DeclaratorParts d(parts[static_cast<uint32_t>(parts.size() - 2)]);
+    if (!d.noptr || !d.direct)
+        return -1;
+    SyntaxRef n = d.noptr;
+    for (uint32_t i = 0; i < n.size(); i++) {
+        SyntaxElement c = n[i];
+        if (!c.is(syntax_kind::parameters_and_qualifiers))
+            continue;
+        int count = clause_parameters(c);
+        /* (void): no parameter, [dcl.fct]/4 */
+        if (count == 1)
+            for (uint32_t k = 0; k < c.size(); k++)
+                if (!c[k].is_token() &&
+                    c[k].first_token() + 1 == c[k].end_token() &&
+                    tokens[c[k].first_token()].kind == token_kind::keyword &&
+                    this->syntax_parser.keyword_of(
+                        tokens[c[k].first_token()]) == standard_keyword::void_)
+                    return -1;
+        return count;
+    }
+    return -1;
+}
+
 /* whether a member the definition may define is needed: one named so in the
    specialization with its definition needed, or explicitly instantiated */
 bool semantic_analysis::member_definition_wanted(const postponed_body &b)
@@ -1112,7 +1172,17 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     if (!first || (entity_table[first].kind != entity_kind::function &&
                    entity_table[first].kind != entity_kind::variable))
         return true;
+    /* (the overloads it may define: those with as many parameters, a
+       definition declaring one function, [dcl.meaning]/1) */
+    int written = definition_parameter_count(o.definition);
     for (entity_index e = first; e; e = entity_table[e].next_overload) {
+        if (written >= 0 && entity_table[e].kind == entity_kind::function &&
+            type_table[entity_table[e].type.unqualified()].kind ==
+                type_kind::function &&
+            !type_table[entity_table[e].type.unqualified()].variadic &&
+            type_table[entity_table[e].type.unqualified()].parameter_count !=
+                static_cast<uint32_t>(written))
+            continue;
         if (entity_table[e].member_definition_needed ||
             (entity_table[e].virtual_ && !vtable_elsewhere) ||
             explicitly_instantiated(e) == instantiation_kind::definition)

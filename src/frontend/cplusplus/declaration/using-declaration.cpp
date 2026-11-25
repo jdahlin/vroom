@@ -446,6 +446,23 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             return inheriting_using(n, t, q.entity);
     }
     lookup_result found = lookup_qualified(q.entity, name, lookup_filter::any);
+    /* [namespace.udecl]/4: "If a constructor or assignment operator brought
+       from a base class into a derived class has the signature of a
+       copy/move constructor or assignment operator for the derived class
+       ..., the using-declaration does not by itself suppress the implicit
+       declaration of the derived class member; the member from the base
+       class is hidden or overridden by the implicitly-declared copy/move
+       ... assignment operator of the derived class".  A defined class
+       whose only operator= are its implicit ones (which have no entity
+       when trivial, class/implicit-assignment.cpp) brings in nothing the
+       derived class does not hide: libc++'s <variant>, using
+       __base_type::operator= */
+    if (defining_class && !found.entity && !found.unknown && !found.ambiguous &&
+        name == operator_name(preprocessing_op_or_punc::EQUAL) &&
+        !is_namespace(q.entity) &&
+        entity_table[q.entity].kind == entity_kind::class_type &&
+        entity_table[q.entity].defined && entity_table[q.entity].size)
+        return analysis_result::well_formed;
     /* [namespace.udecl]/1: "If the using-declarator names ... a set of
        declarations, the using-declarator introduces the declarator's name
        as a synonym for that set" of overloaded functions and function
