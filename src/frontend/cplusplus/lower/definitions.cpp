@@ -283,7 +283,8 @@ bool c_lowering::variable_definition(entity_index e)
             return fail("a _Thread_local variable initialized or destroyed "
                         "at run time",
                         node(x.definition).at);
-        if (x.inline_ && (!constant || destructor))
+        if (x.inline_ && x.linkage_of_name != linkage::internal &&
+            (!constant || destructor))
             /* [basic.start.dynamic]/1: partially-ordered, under a guard in
                a COMDAT group ([abi:guards]) */
             return fail("an inline variable with dynamic initialization or a "
@@ -332,6 +333,9 @@ bool c_lowering::translation_unit()
             continue;
         if (x.automatic || enclosing_function(d.entity))
             continue;
+        if (x.enclosing &&
+            analysis.entity_table[x.enclosing].kind == entity_kind::none)
+            continue;
         /* a function with a placeholder return type never defined: its
            name is in no expression ([dcl.spec.auto]/11), so it needs no
            symbol (clang emits none) */
@@ -347,8 +351,7 @@ bool c_lowering::translation_unit()
            [impl.clang] a specialization for a closure unique to the
            translation unit: its symbol made at its first use, which
            numbers the closure (itanium_mangler) */
-        if ((x.kind == entity_kind::function && !x.defined) ||
-            x.instantiation) {
+        if (!x.defined || x.instantiation) {
             owned_buffer probe;
             analysis.number_closures = false;
             bool mangled = itanium_symbol_name(analysis, tokens.pp, d.entity,
@@ -371,6 +374,9 @@ bool c_lowering::translation_unit()
         /* a deleted function has no code ([dcl.fct.def.delete]) */
         if (!x.defined || x.automatic || enclosing_function(d.entity) ||
             x.deleted)
+            continue;
+        if (x.enclosing &&
+            analysis.entity_table[x.enclosing].kind == entity_kind::none)
             continue;
         /* [temp.explicit]/11: an explicit instantiation declaration's
            specialization is defined in another translation unit (clang
