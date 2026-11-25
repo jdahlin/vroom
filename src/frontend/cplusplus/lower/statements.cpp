@@ -679,6 +679,27 @@ uint32_t c_lowering::asm_statement(const semantic_node &n)
     return block(before);
 }
 
+/* { long i; for (i = 0; i < count; i++) body } (or last first), body's
+   array_index the variable i */
+uint32_t c_lowering::array_loop(const semantic_node &n)
+{
+    ast_qualified_type index_type = ast_builder_type_basic(AST_TYPE_LONG);
+    uint32_t i = c_local(c, index_type);
+    uint32_t enclosing = array_index_symbol;
+    array_index_symbol = i;
+    uint32_t body = statement(n.a);
+    array_index_symbol = enclosing;
+    if (!body)
+        return 0;
+    uint32_t items[2] = {
+        c_declare(c, i),
+        counted_loop(
+            i, index_type,
+            ast_builder_integer(c, index_type, static_cast<int64_t>(n.value)),
+            n.b, body)};
+    return block(items, 2);
+}
+
 uint32_t c_lowering::statement(uint32_t index)
 {
     if (failure.what || !index)
@@ -705,6 +726,8 @@ uint32_t c_lowering::statement(uint32_t index)
     }
     case semantic_kind::null_statement:
         return c_statement(c, 0);
+    case semantic_kind::array_loop:
+        return array_loop(n);
     case semantic_kind::try_statement:
         return try_statement(n);
     case semantic_kind::gnu_asm_statement:

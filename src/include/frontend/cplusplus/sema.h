@@ -1486,6 +1486,9 @@ enum class semantic_kind : uint8_t {
        allocation can give (all ones) when that does not fit in
        std::size_t */
     array_size,
+    /* the index (a long prvalue) of the element the innermost enclosing
+       array_loop is at */
+    array_index,
     /* [expr.delete]: a: the operand (a pointer prvalue), b: the
        destructor's call on *allocated (0: none), c: the deallocation
        function's call; nothing when the operand is a null pointer.
@@ -1559,6 +1562,12 @@ enum class semantic_kind : uint8_t {
     /* a: the init-statement (0: none), b: the condition (0: none), c: the
        expression (0: none), d: the substatement */
     for_statement,
+    /* an array's elements, each in turn: a: the statement run for each
+       index (array_index) from 0 to value - 1, or from value - 1 down to 0
+       when b is 1; no source code's loop: the implicit special members'
+       work on an array member ([class.base.init]/9, [class.copy.ctor]/14,
+       [class.dtor]/13) */
+    array_loop,
     /* a: the condition (promoted), b: the substatement, d: the
        init-statement */
     switch_statement,
@@ -4226,6 +4235,8 @@ class semantic_analysis
            last) */
         uint32_t heap_live = 0;
         owned_array<uint32_t> allocations;
+        /* the indexes of the enclosing array_loops, innermost last */
+        owned_array<uint64_t> array_indexes;
         /* evaluate_object for a store (an assignment's target, an object
            constructed in place) or for a read: a union's member that is
            not active is made so, or is not constant */
@@ -4920,6 +4931,16 @@ class semantic_analysis
     uint32_t complete_object(uint32_t statement);
     uint32_t block_statement(token_index at,
                              const owned_array<uint32_t> &statements);
+    /* the element array[array_index] of the array glvalue array (of
+       elements of type element), an lvalue or (category) an xvalue, in
+       the body of an array_loop */
+    expression_meaning array_element_at_index(token_index at, uint32_t array,
+                                              qualified_type element,
+                                              value_category category);
+    /* an array_loop over count elements running body, last first when
+       reverse */
+    uint32_t array_loop_statement(token_index at, uint64_t count, bool reverse,
+                                  uint32_t body);
     /* the classes of the bases and members (arrays' elements) of c */
     void subobject_classes(entity_index c,
                            owned_array<entity_index> &out) const;
