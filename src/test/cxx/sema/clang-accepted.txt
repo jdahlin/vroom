@@ -4207,7 +4207,6 @@ SemaTemplate/instantiate-complete.cpp:134 -std=gnu++17 -DMSABI
 SemaTemplate/instantiate-complete.cpp:7 -std=gnu++17
 SemaTemplate/instantiate-complete.cpp:7 -std=gnu++17 -DMSABI
 SemaTemplate/instantiate-decl-dtor.cpp:3 -std=gnu++17
-SemaTemplate/instantiate-decl-dtor.cpp:9 -std=gnu++17
 SemaTemplate/instantiate-declref.cpp:42 -std=gnu++17
 SemaTemplate/instantiate-default-assignment-operator.cpp:3 -std=gnu++17
 SemaTemplate/instantiate-default-assignment-operator.cpp:8 -std=gnu++17
