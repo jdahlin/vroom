@@ -3753,8 +3753,27 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
             return c;
         callee = semantics[callee].b;
     }
-    if (semantics[callee].kind != semantic_kind::entity)
+    if (semantics[callee].kind != semantic_kind::entity) {
+        /* [expr.call]/1 through a pointer to function: one that is a null
+           pointer value designates no function, an undefined operation
+           ([expr.const]/5.8; clang's "evaluates to a null function
+           pointer"); any other is not evaluated */
+        uint32_t pointer = 0;
+        if (semantics[callee].kind == semantic_kind::indirection)
+            pointer = semantics[callee].a;
+        else if (type_table[semantics[x.a].type.unqualified()].kind ==
+                 type_kind::pointer)
+            pointer = x.a;
+        if (pointer) {
+            constant_value p;
+            constness pc = evaluate_node(state, pointer, p);
+            if (pc == constness::constant &&
+                p.kind == constant_value_kind::pointer && !p.designator &&
+                !p.offset && !p.count && !p.literal)
+                return CONST_NOT_CONSTANT_RULE;
+        }
         return CONST_UNKNOWN;
+    }
     /* [meta.const.eval]/1: true within a manifestly constant-evaluated
        expression ([expr.const]/14), which this evaluation is unless it is
        potential_constant's or the claims' */

@@ -330,10 +330,29 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
        operator.  A class with a user-declared assignment operator is
        binary_operator_function's. */
     if (right.type.unqualified() != left.type.unqualified()) {
-        if (!assigned_bitwise(c))
+        if (!assigned_bitwise(c)) {
+            /* [over.match.viable]/4: the implicitly-declared X&
+               operator=(const X&) and operator=(X&&), the only candidates
+               ([over.match.oper]/3.3: no built-in one takes a class left
+               operand), are not viable when the right operand has no
+               implicit conversion sequence to X ([over.best.ics]); with
+               none viable the expression is ill-formed ([over.match]/3) */
+            qualified_type parameter = qualified_type::make(
+                type_table.lvalue_reference_to(
+                    qualified_type::make(left.type.unqualified(), cv_const)),
+                cv_none);
+            conversion_sequence s =
+                implicit_conversion_sequence(right, parameter, true);
+            if (s.kind == conversion_sequence::form::bad)
+                return ill_formed(n,
+                                  "overload resolution fails when there is "
+                                  "no viable function, and the invocation is "
+                                  "ill-formed",
+                                  "over.match");
             return not_supported_because(n, "over.match.oper",
                                          "an assignment from another type to a "
                                          "class not assigned bytewise");
+        }
         initialized_value converted;
         VTRY(r, initialize_with(
                     n, right,
