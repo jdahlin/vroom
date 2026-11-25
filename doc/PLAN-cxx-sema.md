@@ -1631,7 +1631,14 @@ lines:
   Pack interning records actual pack starts, so an overlapping sequence
   created later cannot acquire a second identity.  Test
   `partial-ordering-pack`.  A JSON include now reaches a function-template
-  overload refusal in `json.hpp`.
+  overload refusal in `json.hpp`.  Detection idioms using a dependent
+  member with a directly deduced template-template parameter now substitute
+  it when there is one partial specialization ([temp.deduct.type]/5.1,
+  [temp.class.spec.match]/2); array member access is ill-formed in such a
+  substitution ([expr.ref]/2).  Tests `detection-dependent-member` and
+  `temp.class.order-template-template-ambiguous`; competing partial
+  specializations still use the earlier conservative ordering path.  The
+  JSON include now reaches an unsupported member-template overload.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land

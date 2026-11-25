@@ -757,6 +757,10 @@ analysis_result semantic_analysis::matching_specialization(
        arguments' place in all */
     owned_array<uint32_t> found, first_deduced;
     owned_array<template_argument> all;
+    uint32_t partial_count = 0;
+    for (const function_template &candidate : function_templates)
+        if (candidate.primary == class_template)
+            partial_count++;
     for (uint32_t k = 0; k < function_templates.size(); k++) {
         const function_template s = function_templates[k];
         if (s.primary != class_template || s.pattern_count != count)
@@ -771,10 +775,26 @@ analysis_result semantic_analysis::matching_specialization(
         bool match = true;
         matching_partial = true;
         matching_substituted = true;
-        for (uint32_t i = 0; i < s.parameter_count; i++)
-            if (template_template_parameter(
-                    template_parameter_entities[s.first_parameter + i]))
+        /* [temp.class.order]/1: ordering dependent members involving a
+           template template parameter is not yet implemented.  When there
+           is no competing partial specialization, substitution alone can
+           decide the non-deduced context ([temp.class.spec.match]/2). */
+        for (uint32_t i = 0; i < s.parameter_count; i++) {
+            entity_index parameter =
+                template_parameter_entities[s.first_parameter + i];
+            if (!template_template_parameter(parameter))
+                continue;
+            bool direct = false;
+            for (uint32_t j = 0; j < s.pattern_count; j++) {
+                const template_argument &a =
+                    template_arguments[s.first_pattern + j];
+                if (a.kind == template_argument::kind_t::template_name &&
+                    a.template_entity == parameter)
+                    direct = true;
+            }
+            if (partial_count > 1 || !direct)
                 matching_substituted = false;
+        }
         for (uint32_t i = 0; i < count && match; i++) {
             const template_argument x = template_arguments[s.first_pattern + i];
             const template_argument &y = arguments[i];
