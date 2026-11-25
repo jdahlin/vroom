@@ -625,11 +625,6 @@ VPRIV bool virbuild_i128mem(void)
 {
     return true;
 }
-#define VIRBUILD_STUB_UNSUPPORTED(name, ...)                                   \
-    VPRIV val virbuild_##name(ecx *e, __VA_ARGS__)                             \
-    {                                                                          \
-        virbuild_fail(e, VIRBUILD_FAILURE(unsupported_builtin));               \
-    }
 /* A SysV __int128 crosses the same two integer registers as a pair of
  * uint64_t. The walker represents both as the address of a 16-byte object. */
 static void virbuild_wide_target_check(codegen_context *e)
