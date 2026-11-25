@@ -986,7 +986,21 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
     const template_member_definition o =
         template_member_definitions[b.member_definition - 1];
     token_index name = member_definition_name(o);
-    if (!name)
+    uint32_t lookup_id = 0;
+    if (name) {
+        lookup_id = tokens.identifier(name);
+    } else if (o.definition.is(syntax_kind::function_definition)) {
+        SyntaxRef nested = out_of_class_nested(o.definition, nullptr);
+        if (nested && nested.end_token() + 1 < o.definition.end_token() &&
+            tokens[nested.end_token()].kind == token_kind::keyword &&
+            tokens[nested.end_token()].keyword ==
+                static_cast<int16_t>(standard_keyword::operator_) &&
+            tokens[nested.end_token() + 1].kind ==
+                token_kind::operator_or_punctuator)
+            lookup_id = operator_name(preprocessing_op_or_punc_primary(
+                tokens[nested.end_token() + 1].op_or_punc));
+    }
+    if (!lookup_id)
         return true;
     entity_index scope = instantiations[b.instantiation].specialization;
     /* (a virtual function is needed by the vtable, [temp.inst]/11; an
@@ -999,7 +1013,7 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
        needed by one [impl.clang] */
     bool vtable_elsewhere = entity_table[scope].explicitly_instantiated ==
                             instantiation_kind::declaration;
-    if (tokens.identifier(name) == entity_table[scope].name) {
+    if (name && lookup_id == entity_table[scope].name) {
         if (entity_index d = entity_table[scope].destructor)
             if (entity_table[d].member_definition_needed ||
                 (entity_table[d].virtual_ && !vtable_elsewhere) ||
@@ -1012,7 +1026,7 @@ bool semantic_analysis::member_definition_wanted(const postponed_body &b)
                 return true;
         return false;
     }
-    entity_index first = entity_table.find(scope, tokens.identifier(name));
+    entity_index first = entity_table.find(scope, lookup_id);
     /* (a constructor, destructor or operator is found by no such name here:
        defined with the unit) */
     if (!first || (entity_table[first].kind != entity_kind::function &&
