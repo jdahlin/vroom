@@ -211,7 +211,7 @@ class itanium_mangler
     }
     bool class_template_args(entity_index c);
     bool template_args(entity_index c, entity_index function = 0,
-                       bool pack_brackets = true);
+                       bool pack_brackets = true, uint32_t limit = UINT32_MAX);
     bool dependent_value(entity_index d);
     bool dependent_value_expr(entity_index d);
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
@@ -2313,10 +2313,12 @@ bool itanium_mangler::class_template_args(entity_index c)
  * magnitude; a bool's 0 or 1.
  */
 bool itanium_mangler::template_args(entity_index c, entity_index function,
-                                    bool pack_brackets)
+                                    bool pack_brackets, uint32_t limit)
 {
     text("I");
     uint32_t count = analysis.specialization_argument_count(c);
+    if (limit < count)
+        count = limit;
     for (uint32_t i = 0; i < count; i++) {
         uint32_t pack = analysis.specialization_pack(c, i);
         /* [impl.clang]: a function template's non-type parameter of a
@@ -2641,7 +2643,10 @@ bool itanium_mangler::dependent_value_expr(entity_index d)
     }
     /* (clang flattens a pack expansion written among the arguments: the
        substituted elements, no J ... E) */
-    if (!source_name(spec.name) || !template_args(q, 0, false))
+    uint32_t written = UINT32_MAX;
+    if (x.member_count)
+        written = x.member_count;
+    if (!source_name(spec.name) || !template_args(q, 0, false, written))
         return false;
     /* a member class between the specialization and the name */
     if (x.value >> 32 && !source_name(static_cast<uint32_t>(x.value >> 32) - 1))
