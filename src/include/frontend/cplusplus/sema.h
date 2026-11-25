@@ -6181,7 +6181,8 @@ class semantic_analysis
     token_index member_definition_name(const template_member_definition &o);
     void define_waiting_members(entity_index scope, token_index name,
                                 bool define = true);
-    void defer_or_define_member(uint32_t m, uint32_t index);
+    analysis_result defer_or_define_member(uint32_t m, uint32_t index,
+                                           bool recorded = true);
     bool postpone_member_bodies = false;
     analysis_result analyse_function_body(SyntaxRef definition,
                                           SyntaxElement compound,

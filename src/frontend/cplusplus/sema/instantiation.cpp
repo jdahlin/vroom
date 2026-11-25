@@ -911,7 +911,9 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
    template's specialization is defined when a member it may define is needed
    (postponed_bodies, instantiate_pending); a member template's, a nested
    class's and one in a specialization defined within another class now */
-void semantic_analysis::defer_or_define_member(uint32_t m, uint32_t index)
+analysis_result semantic_analysis::defer_or_define_member(uint32_t m,
+                                                          uint32_t index,
+                                                          bool recorded)
 {
     const template_member_definition o = template_member_definitions[m];
     bool now = o.inner || !instantiations[index].specialization;
@@ -932,14 +934,14 @@ void semantic_analysis::defer_or_define_member(uint32_t m, uint32_t index)
             now = true;
     }
     if (now) {
-        define_template_member(m, index, true);
-        return;
+        return define_template_member(m, index, recorded);
     }
     postponed_body b = {};
     b.c = instantiations[index].specialization;
     b.member_definition = m + 1;
     b.instantiation = index;
     postponed_bodies.append(b);
+    return analysis_result::well_formed;
 }
 
 token_index

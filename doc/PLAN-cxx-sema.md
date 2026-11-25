@@ -1611,6 +1611,13 @@ lines:
   and SFINAE, [temp.variadic], [temp.alias], variable templates, generic
   lambdas, fold expressions, class template argument deduction.
 - Instantiation recorded as 3.5 says, bodies only on use.
+- Progress (2026-11-25): ordinary out-of-class member definitions recorded
+  after an implicit class specialization now wait for use, as definitions
+  recorded before the specialization do ([temp.inst]/4).  Constructors,
+  destructors and explicit instantiations still use the earlier eager path;
+  their point-of-instantiation and explicit-specialization handling remain.
+  Regression: `temp.inst-late-member-definition.cpp`.  A minimal JSON include
+  still stops on instantiated libc++ `std::function` member definitions.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land

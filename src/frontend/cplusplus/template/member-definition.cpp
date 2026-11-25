@@ -794,7 +794,21 @@ semantic_analysis::record_template_member(const template_member_definition &m)
             entity_table[y.specialization].kind != entity_kind::class_type ||
             !entity_table[y.specialization].defined)
             continue;
-        analysis_result one = define_template_member(member, k, false);
+        /* [temp.inst]/4: ordinary members of an existing implicit
+           specialization wait for use just as they do when the definition
+           precedes the specialization.  Constructors and destructors still
+           use the existing path: their explicit specializations are not
+           tracked by the postponed-name lookup.  Explicit instantiations
+           likewise retain their point-of-instantiation handling. */
+        token_index name = member_definition_name(m);
+        bool special = name && tokens.identifier(name) ==
+                                   entity_table[y.specialization].name;
+        analysis_result one;
+        if (special || entity_table[y.specialization].explicitly_instantiated !=
+                           instantiation_kind::none)
+            one = define_template_member(member, k, false);
+        else
+            one = defer_or_define_member(member, k, false);
         if (one != analysis_result::well_formed &&
             result == analysis_result::well_formed)
             result = one;
