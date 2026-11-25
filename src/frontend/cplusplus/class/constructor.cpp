@@ -2314,7 +2314,8 @@ bool semantic_analysis::subobject_destructor_inaccessible(entity_index c,
 analysis_result semantic_analysis::implicit_special_members(entity_index c,
                                                             SyntaxRef n)
 {
-    const entity &x = entity_table[c];
+    /* (a copy: a probe below may make entities, which moves the table) */
+    const entity x = entity_table[c];
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
         qualified_type t = m.type;
@@ -2396,7 +2397,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
        moved nor copied */
     bool move_declared = false, move_deleted = false;
     for (entity_index k : classes) {
-        const entity &sub = entity_table[k];
+        const entity sub = entity_table[k];
         /* X() = default beside other constructors may be no entity
            (trivial_defaulted_default_constructor) */
         bool default_ok = (!sub.first_constructor ||
