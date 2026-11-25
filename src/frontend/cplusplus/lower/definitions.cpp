@@ -120,6 +120,18 @@ bool c_lowering::function_definition_or_drop(entity_index e)
         return function_definition(e);
     /* (a use lowered before this definition: its symbol is called) */
     bool used = used_symbols[e];
+    /* [basic.def.odr]/11: an inline function nothing odr-uses (the
+       analysis found no need of it, emitted_functions_needed) has no code,
+       as clang emits none; lowered after all only if a definition lowered
+       since calls it */
+    if (!used && !lowering_waiting && x.inline_ &&
+        !x.member_definition_needed) {
+        for (entity_index w : waiting_functions)
+            if (w == e)
+                return true;
+        waiting_functions.append(e);
+        return true;
+    }
     if (function_definition(e))
         return true;
     if (!failure.what || used)
@@ -407,9 +419,31 @@ bool c_lowering::translation_unit()
         if (!function_definition_or_drop(d.entity))
             return false;
     }
+    if (!lower_waiting_functions())
+        return false;
     if (!complete_variants())
         return false;
     return !failure.what;
+}
+
+/* the waiting functions a lowered definition uses, until none is left
+   that one uses; the others have no code */
+bool c_lowering::lower_waiting_functions()
+{
+    scoped_value<bool> waiting(lowering_waiting, true);
+    for (bool progress = true; progress;) {
+        progress = false;
+        for (size_t i = 0; i < waiting_functions.size(); i++) {
+            entity_index e = waiting_functions[i];
+            if (!e || !used_symbols[e])
+                continue;
+            waiting_functions[i] = 0;
+            progress = true;
+            if (!function_definition_or_drop(e))
+                return false;
+        }
+    }
+    return true;
 }
 
 } // namespace cplusplus::lowering

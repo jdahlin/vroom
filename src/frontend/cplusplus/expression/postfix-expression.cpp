@@ -2289,6 +2289,13 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
         constexpr_calls++;
     }
     uint32_t callee = f.node;
+    /* [over.match]/3, [basic.def.odr]/8: the function overload resolution
+       chose is the one called, and needed; the name's node was made for
+       the first of the set and names the chosen one only since (a static
+       member function's overload declared after the first) */
+    if (!member && called && !unevaluated &&
+        entity_table[called].kind == entity_kind::function)
+        mark_needed(called);
     if (member) {
         /* the member function, as an lvalue of its type; the object's
            address is its implicit object argument ([over.match.funcs]/4) */

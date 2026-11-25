@@ -934,7 +934,9 @@ static bool function_prefix(semantic_analysis &a, entity_index e,
 static bool pretty_function(semantic_analysis &a, entity_index f,
                             owned_buffer &out)
 {
-    const entity &x = a.entity_table[f];
+    /* (a copy: the types analysed below may add entities, and move the
+       table) */
+    const entity x = a.entity_table[f];
     if (!x.nonstatic_member && x.kind == entity_kind::function && x.enclosing &&
         a.entity_table[x.enclosing].kind == entity_kind::class_type)
         append(out, "static ");

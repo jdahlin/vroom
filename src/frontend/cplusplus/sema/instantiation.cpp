@@ -1142,6 +1142,32 @@ bool semantic_analysis::explicit_instantiation_takes_verdict(
            !strncmp(rule, "dcl.fct.def.coroutine", 21);
 }
 
+/* [basic.def.odr]/11, [temp.inst]/4: a function whose definition the
+   translation unit emits (one defined, its body analysed, and not an
+   explicit instantiation declaration's specialization, [temp.explicit]/11;
+   an inline function, an implicitly declared special member among them,
+   is emitted only where it is used, [basic.def.odr]/11)
+   odr-uses what its body uses: it is needed, so that the needs its body
+   deferred (an instantiated body nothing was known to use,
+   defer_needs_of_instantiated_body) are passed on.  Whether any became
+   needed */
+bool semantic_analysis::emitted_functions_needed()
+{
+    bool marked = false;
+    for (entity_index f = 1; f < entity_table.size(); f++) {
+        entity &x = entity_table[f];
+        if (x.kind != entity_kind::function || !x.defined ||
+            x.member_definition_needed || x.member_body_deferred ||
+            x.unsupported_body || x.deleted || x.implicit || x.inline_)
+            continue;
+        if (explicitly_instantiated(f) == instantiation_kind::declaration)
+            continue;
+        x.member_definition_needed = true;
+        marked = true;
+    }
+    return marked;
+}
+
 /* [temp.point]/7: the definitions of the specializations used, after the
    translation unit's declarations (each may use more) */
 void semantic_analysis::instantiate_pending()
@@ -1149,7 +1175,8 @@ void semantic_analysis::instantiate_pending()
     size_t next_definition = 0;
     bool progress;
     do {
-        progress = pass_deferred_needs();
+        progress = emitted_functions_needed();
+        progress = pass_deferred_needs() || progress;
         for (size_t i = 0; i < postponed_bodies.size(); i++) {
             const postponed_body b = postponed_bodies[i];
             if (b.c && b.member_definition) {

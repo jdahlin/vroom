@@ -834,6 +834,12 @@ class c_lowering
         lowering_failure failure;
     };
     owned_array<dropped_function> dropped_functions;
+    /* [basic.def.odr]/11: the inline functions the analysis did not find
+       needed, lowered at the end only if a lowered definition uses them
+       (lower_waiting_functions); 0 for one lowered */
+    owned_array<entity_index> waiting_functions;
+    bool lowering_waiting = false;
+    bool lower_waiting_functions();
     bool variable_definition(entity_index e);
     bool constant_initializer(uint32_t n) const;
     bool wide_constant_arithmetic(uint32_t n) const;

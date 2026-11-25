@@ -3856,6 +3856,7 @@ class semantic_analysis
     owned_array<deferred_need> deferred_needs;
     void mark_needed(entity_index function);
     bool pass_deferred_needs();
+    bool emitted_functions_needed();
     /* set by a default member initializer that is ill-formed: an error of
        the class itself ([class.mem]/6), not a reason a defaulted
        constructor is deleted */
