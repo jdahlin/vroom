@@ -478,10 +478,14 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
            named_declarator.size() &&
            !named_declarator[named_declarator.size() - 1].is_token())
         named_declarator = named_declarator[named_declarator.size() - 1];
-    if (named_declarator.is(syntax_kind::qualified_id) ||
-        (named_declarator.is(syntax_kind::noptr_declarator) &&
-         named_declarator.size() &&
-         named_declarator[0].is(syntax_kind::qualified_id)))
+    SyntaxElement qid;
+    if (named_declarator.is(syntax_kind::qualified_id))
+        qid = named_declarator;
+    else if (named_declarator.is(syntax_kind::noptr_declarator) &&
+             named_declarator.size() &&
+             named_declarator[0].is(syntax_kind::qualified_id))
+        qid = named_declarator[0];
+    if (qid && !(qid.size() == 2 && qid[1].is(syntax_kind::simple_template_id)))
         return member_explicit_instantiation(n, d, lead, extern_);
     if (SyntaxRef id = variable_specialization_id(d))
         return variable_explicit_instantiation(n, d, lead, id, extern_);
