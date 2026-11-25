@@ -98,7 +98,7 @@ bool semantic_analysis::orderable(qualified_type t, bool packs) const
     case type_kind::rvalue_reference:
         return orderable(r.operand, packs);
     case type_kind::array:
-        return r.bound_known && orderable(r.operand, packs);
+        return (r.bound_known || r.entity) && orderable(r.operand, packs);
     case type_kind::function: {
         if (!orderable(r.operand, packs))
             return false;
