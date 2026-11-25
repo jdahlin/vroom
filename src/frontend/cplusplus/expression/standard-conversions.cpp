@@ -993,25 +993,16 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                 entity_table[fp.entity].size &&
                 !base_step(fp.entity, tp.entity, ambiguous))
                 return ill_formed(at, rule, "dcl.init");
-            /* [conv.ptr]: a pointer to a fundamental type converts to
-               none to a class or enumeration, nor the other way (to void*
-               was found above) */
-            auto declared = [&](const struct type &t) {
-                return (t.kind == type_kind::class_type &&
-                        entity_table[t.entity].kind ==
-                            entity_kind::class_type) ||
-                       t.kind == type_kind::enumeration;
-            };
-            if ((fp.kind == type_kind::fundamental && declared(tp)) ||
-                (tp.kind == type_kind::fundamental && declared(fp)))
-                return ill_formed(at, rule, "dcl.init");
-            /* a function pointer conversion: not analysed yet */
-            if (fp.kind == type_kind::class_type ||
-                fp.kind == type_kind::function ||
-                tp.kind == type_kind::class_type ||
+            /* a function pointer conversion, or between classes one of
+               which is not complete (whose bases are not known): not
+               analysed yet.  Between other object types (int* to a class
+               pointer, an enumeration's to an int's) [conv.ptr] has no
+               conversion: libc++'s __has_destroy_v<allocator<node>, T*>
+               asks it in a substitution ([temp.deduct]/8) */
+            if (fp.kind == type_kind::function ||
                 tp.kind == type_kind::function ||
-                fp.kind == type_kind::enumeration ||
-                tp.kind == type_kind::enumeration)
+                (fp.kind == type_kind::class_type &&
+                 tp.kind == type_kind::class_type))
                 return not_supported_because(
                     at, "conv.ptr",
                     "a pointer conversion between class, function or "
