@@ -505,11 +505,17 @@ analysis_result semantic_analysis::member_definition_of_template(
    nested-name-specifier names, in the current scope; else 0 */
 entity_index semantic_analysis::plain_class_nominated(SyntaxRef nested)
 {
-    if (!nested.is(syntax_kind::nested_name_specifier) || nested.size() != 2 ||
-        !nested[0].is_identifier())
+    if (!nested.is(syntax_kind::nested_name_specifier))
         return 0;
+    size_t u = unsupported.size();
     nominated_scope scope;
-    if (nested_name_specifier(nested, scope) != analysis_result::well_formed)
+    analysis_result r = analysis_result::well_formed;
+    {
+        diagnostics_suppressed_if hush(diagnostics, true);
+        r = nested_name_specifier(nested, scope, false);
+    }
+    unsupported.resize(u);
+    if (r != analysis_result::well_formed || scope.dependent || scope.global)
         return 0;
     if (!scope.entity ||
         entity_table[scope.entity].kind != entity_kind::class_type ||
