@@ -350,7 +350,11 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         }
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::function: {
-        if (pr.variadic != ar.variadic || pr.non_throwing != ar.non_throwing ||
+        /* [temp.deduct.decl]/1: the declaration's noexcept-specifier is not
+           deduced from: a template's, dependent, is known after the
+           arguments are substituted (std::swap<J>'s) */
+        if (pr.variadic != ar.variadic ||
+            (pr.non_throwing != ar.non_throwing && !matching_declaration) ||
             pr.function_cv != ar.function_cv ||
             pr.function_ref != ar.function_ref)
             return false;

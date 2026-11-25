@@ -401,6 +401,15 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 entity_kind::class_type)
             class_named = type_table[named].entity;
     }
+    if ((parenthesized || braced) && n[0].is(syntax_kind::typename_specifier)) {
+        /* [temp.res]/3 with [expr.type.conv]/1: typename Q::name(args), the
+           type the typename-specifier denotes */
+        VTRY(r, typename_type(n[0], named, named_cv));
+        if (type_table[named].kind == type_kind::class_type &&
+            entity_table[type_table[named].entity].kind ==
+                entity_kind::class_type)
+            class_named = type_table[named].entity;
+    }
     if ((parenthesized || braced) && n[0].is_token()) {
         const token &t = tokens[n[0].token()];
         if (t.kind == token_kind::identifier) {
