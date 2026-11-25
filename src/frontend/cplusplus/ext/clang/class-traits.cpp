@@ -210,11 +210,26 @@ bool semantic_analysis::class_trivially_copyable(entity_index c, bool &known)
             return false;
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
-    if (found.unknown || found.ambiguous) {
+    /* [class.copy.assign]/1: "A user-declared copy assignment operator
+       X::operator= is a non-static non-template member function of class
+       X": a name held by member function templates only (move_iterator's
+       operator=(const move_iterator<U>&)) declares none, and leaves the
+       implicit ones (as trivial_assignment, operator-function.cpp) */
+    owned_array<entity_index> assignments;
+    if (found.unknown && found.unknown_entity &&
+        member_function_template_of(found.unknown_entity) && !found.ambiguous) {
+        for (const template_name_function &x : template_name_functions)
+            if (x.name == found.unknown_entity)
+                assignments.append(x.function);
+    } else if (found.unknown || found.ambiguous) {
         known = false;
         return false;
+    } else {
+        for (entity_index o = found.entity; o;
+             o = entity_table[o].next_overload)
+            assignments.append(o);
     }
-    for (entity_index o = found.entity; o; o = entity_table[o].next_overload)
+    for (entity_index o : assignments)
         if (entity_table[o].kind == entity_kind::function &&
             (copy_assignment_operator(o, c) ||
              move_assignment_operator(o, c)) &&
