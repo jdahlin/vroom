@@ -680,7 +680,7 @@ analysis_result semantic_analysis::overloaded_operator(
         }
         return analysis_result::well_formed;
     }
-    if (converts && (!unary_prefix || candidates.empty()))
+    if (converts && candidates.empty())
         return not_supported(n, "over.built");
     bool deleted_copy = false;
     if (op == preprocessing_op_or_punc::EQUAL) {
@@ -772,6 +772,39 @@ analysis_result semantic_analysis::overloaded_operator(
     if (r == analysis_result::well_formed && none_viable && converts)
         /* a built-in candidate may be viable through the conversion */
         return not_supported(n, "over.built");
+    if (r == analysis_result::well_formed && !none_viable && converts &&
+        !unary_prefix) {
+        /* [over.ics.rank]/2: a viable operator function that binds every
+           operand with an exact-match standard conversion sequence beats
+           every built-in candidate that must convert a class operand */
+        const overload_candidate &win = candidates[chosen];
+        const struct type &ft = type_table[win.type.unqualified()];
+        const qualified_type *params =
+            type_table.parameters(win.type.unqualified());
+        bool beats_builtin = true;
+        for (size_t i = 0; i < arguments.size() && beats_builtin; i++) {
+            size_t ai = i;
+            if (win.reversed && arguments.size() == 2)
+                ai = 1 - i;
+            if (win.member && i == 0) {
+                /* implicit object parameter: standard binding */
+                continue;
+            }
+            size_t pi = i;
+            if (win.member)
+                pi = i - 1;
+            if (pi >= ft.parameter_count) {
+                beats_builtin = false;
+                break;
+            }
+            conversion_sequence seq =
+                implicit_conversion_sequence(arguments[ai], params[pi], false);
+            if (seq.kind != sequence::form::standard || seq.rank != 0)
+                beats_builtin = false;
+        }
+        if (!beats_builtin)
+            return not_supported(n, "over.built");
+    }
     if (r == analysis_result::well_formed && none_viable && member_only &&
         op != preprocessing_op_or_punc::EQUAL &&
         has_conversion_functions(
