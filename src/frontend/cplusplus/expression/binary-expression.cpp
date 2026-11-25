@@ -1342,7 +1342,9 @@ analysis_result semantic_analysis::comma(SyntaxRef n, expression_meaning &m)
                 continue;
             }
         }
-        if (any && destroyed_temporary(m))
+        /* [dcl.type.decltype]: nothing is destroyed in an unevaluated
+           operand */
+        if (any && !unevaluated && destroyed_temporary(m))
             /* the discarded left operand's temporary */
             return not_supported_because(n, "class.temporary",
                                          "a comma whose discarded left operand "
