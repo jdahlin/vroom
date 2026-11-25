@@ -519,7 +519,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     if (object.kind != type_kind::class_type) {
         if (fundamental_of(m.type) == fundamental_type::none &&
             object.kind != type_kind::pointer &&
-            object.kind != type_kind::array)
+            object.kind != type_kind::array &&
+            object.kind != type_kind::enumeration)
             return not_supported(n, "expr.ref");
         return ill_formed(n,
                           "the object expression of a class member access "
