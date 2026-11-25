@@ -16,6 +16,7 @@
  * constant or extra tables) sets the thread's fail flag and the builder call returns 0; the caller
  * checks vir_is_failed() before using the function.
  */
+#include "common/attributes.h"
 #include "common/literal.h"
 #include "vir-internal.h"
 
@@ -699,7 +700,8 @@ void vir_uses_count(const vir_function *f, uint8_t *cnt)
 
             if (vir_opcode_is_constant(x.op))
                 continue;
-            vir_operand_iterator_init(&it, (vir_function *)f, &x, false);
+            vir_operand_iterator_init(&it, VUNCONST(vir_function *, f), &x,
+                                      false);
             while ((p = vir_operand_iterator_next(&it)))
                 if (*p < f->insn_count && cnt[*p] != 255)
                     cnt[*p]++;

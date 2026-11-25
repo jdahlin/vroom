@@ -7,6 +7,7 @@
  * (under a task-aware mutex: a waiting job gives its core away).  Ownership: the fds and FILEs made
  * here are closed here on every path; the request's own fds are not (the worker closes them).
  */
+#include "common/attributes.h"
 #include "vccd-internal.h"
 
 /* argv[0] plus extra, then argv[1..]: a NULL-terminated copy (free it) */
@@ -20,7 +21,7 @@ static char **vccd_argv_with_extra(const struct vccd_request *r,
         return NULL;
     av[n++] = r->argv[0];
     if (extra)
-        av[n++] = (char *)extra;
+        av[n++] = VUNCONST(char *, extra);
     for (int i = 1; i < r->argc; i++)
         av[n++] = r->argv[i];
     av[n] = NULL;

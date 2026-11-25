@@ -15,6 +15,7 @@
  * (shell.c); anything vccd declines, any other argv, and a missing vccd run
  * the real shell, $VSH_REAL (default /bin/sh), with the same arguments.
  */
+#include "common/attributes.h"
 #include "driver/options-help.h"
 #include "ld/options-help.h"
 #include "common/cmdlib.h"
@@ -59,7 +60,7 @@ static __attribute__((noreturn)) void shim_real_shell_exec(void)
 
     if (!sh)
         sh = "/bin/sh";
-    shim_argv[0] = (char *)sh;
+    shim_argv[0] = VUNCONST(char *, sh);
     execv(sh, shim_argv);
     (void)!write(2, "vsh: cannot run the real shell\n", 31);
     _exit(127);
@@ -133,7 +134,7 @@ static int shim_vccd_start(const char *dir, const struct sockaddr_un *sa)
             close(s);
         s = -1;
         if (t == 0) {
-            av[0] = v, av[1] = "--sock", av[2] = (char *)sa->sun_path,
+            av[0] = v, av[1] = "--sock", av[2] = VUNCONST(char *, sa->sun_path),
             av[3] = NULL;
             nul = open("/dev/null", O_RDWR | O_CLOEXEC);
             log = open(lg, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);

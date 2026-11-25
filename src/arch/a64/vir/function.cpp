@@ -19,6 +19,7 @@
  * go into a small block after the branch's own (a label, the moves, a jump).
  */
 
+#include "common/attributes.h"
 #include "common/literal.h"
 #include "lowering-internal.h"
 
@@ -209,7 +210,8 @@ static void vl_target_order_adjust(void *ctx)
             vir_operand_iterator it;
             uint32_t *x;
 
-            vir_operand_iterator_init(&it, (vir_function *)f, &t, true);
+            vir_operand_iterator_init(&it, VUNCONST(vir_function *, f), &t,
+                                      true);
             while (L->save_point != VIR_BLOCK_NONE &&
                    (x = vir_operand_iterator_next(&it))) {
                 const vir_block *k = &f->blocks[a64_vir_block_chase(L, *x)];

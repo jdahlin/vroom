@@ -1,4 +1,5 @@
 /* vcc preprocessor: the macro table, #define, content-canonical macros */
+#include "common/attributes.h"
 #include "pp-internal.h"
 
 /* ---- content-canonical macros (definitions in the main file and <built-in>) ---- */
@@ -72,7 +73,8 @@ static const pp_macro *pp_macro_canonical_get(const pp_macro *m)
                     (lex_token *)(m->body_count
                                       ? pp_shared_allocate(m->body_count *
                                                            sizeof(lex_token))
-                                      : (lex_token *)pp_macro_empty_body);
+                                      : VUNCONST(lex_token *,
+                                                 pp_macro_empty_body));
 
                 memcpy(t, m->source + lo, hi - lo);
                 memset(t + (hi - lo), 0, 64);
@@ -136,7 +138,8 @@ VPRIV void pp_macro_define(pp *p, pp_context *c, uint32_t b, uint32_t e)
     bool site = c->lex_file != &p->builtin_file &&
                 c->file_index != 0; /* a header: one macro per directive */
     _Atomic(const pp_macro *) *slot =
-        site ? &((pp_skeleton *)c->skeleton)->macros[c->next_directive - 1]
+        site ? &VUNCONST(pp_skeleton *, c->skeleton)
+                    ->macros[c->next_directive - 1]
              : NULL;
 
     if (b >= e || vt[b].kind != LEX_TOKEN_IDENTIFIER) {
@@ -191,8 +194,8 @@ VPRIV void pp_macro_define(pp *p, pp_context *c, uint32_t b, uint32_t e)
 
             if (!atomic_compare_exchange_strong_explicit(
                     slot, &z, n, memory_order_acq_rel, memory_order_acquire))
-                n = (pp_macro *)
-                    z; /* the same definition, built by another TU */
+                n = VUNCONST(pp_macro *,
+                             z); /* the same definition, built by another TU */
             m = n;
         } else {
             m = unlikely(p->keep_macro_text) ? NULL : pp_macro_canonical_get(n);

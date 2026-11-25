@@ -10,6 +10,7 @@
  * is the caller's, with f->insn_count entries.  Only virtest calls it today; the lowerings do not use
  * it yet.
  */
+#include "common/attributes.h"
 #include "vir-internal.h"
 
 void vir_demand_low32_compute(vir_function *f, bool ret32, uint8_t *low32)
@@ -236,7 +237,7 @@ unsigned vir_big_endian_read_match(const vir_function *f, const uint8_t *uses,
         vir_insn i = f->insns[v];
         vir_operand_iterator it;
         uint32_t *p;
-        vir_operand_iterator_init(&it, (vir_function *)f, &i, false);
+        vir_operand_iterator_init(&it, VUNCONST(vir_function *, f), &i, false);
         while ((p = vir_operand_iterator_next(&it)))
             if (*p >= first && *p <= end)
                 internal[*p - first]++;

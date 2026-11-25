@@ -6,6 +6,7 @@
  * Returns X64_NEXT for a mnemonic it does not know (asm.c tries it after the SSE family and before
  * SSE4); a known mnemonic with operands of the wrong shape fails the assembly through
  * as_error_report.  The bytes must equal LLVM MC's: bench/vas-enc.py checks them. */
+#include "common/attributes.h"
 #include "x64as.h"
 
 VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
@@ -251,7 +252,7 @@ VPRIV int x64_i_avx(as_context *a, char *mn, XOp *o, int nops)
             else
                 return as_error_report(a, "invalid operand for instruction");
             if (f.rm->kind == XK_EXPR)
-                ((XOp *)f.rm)->kind = XK_MEM;
+                VUNCONST(XOp *, f.rm)->kind = XK_MEM;
             x64_imm(a, &o[0], &f, &c);
             f.imm = c;
             return x64_emit(a, &f);

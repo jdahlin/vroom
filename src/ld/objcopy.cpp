@@ -21,6 +21,7 @@
  * (name, size, address); symbols that llvm-nm treats as format specific
  * (null, FILE, SECTION, $d/$x mapping symbols) are not printed.
  */
+#include "common/attributes.h"
 #include "common/cmdlib.h"
 #include "common/literal.h"
 #include "ld/ld.h"
@@ -1645,7 +1646,7 @@ static bool nm_coff_symbols(const uint8_t *p, size_t n, bool undef, bool defd,
                 free(v);
                 return false;
             }
-            name = (char *)s;
+            name = VUNCONST(char *, s);
         }
         bool external = klass == IMAGE_SYM_CLASS_EXTERNAL,
              weak_external = klass == IMAGE_SYM_CLASS_WEAK_EXTERNAL;

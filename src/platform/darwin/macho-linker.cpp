@@ -349,11 +349,13 @@ static char *macho_file_read(struct macho_context *ctx, const char *path,
 
 static uint32_t macho_version_parse(const char *s)
 {
-    uint32_t x = (uint32_t)strtoul(s, (char **)&s, 10) << 16;
-    if (*s == '.')
-        x |= ((uint32_t)strtoul(s + 1, (char **)&s, 10) & 0xff) << 8;
-    if (*s == '.')
-        x |= (uint32_t)strtoul(s + 1, (char **)&s, 10) & 0xff;
+    char *end;
+    uint32_t x = (uint32_t)strtoul(s, &end, 10) << 16;
+
+    if (*end == '.')
+        x |= ((uint32_t)strtoul(end + 1, &end, 10) & 0xff) << 8;
+    if (*end == '.')
+        x |= (uint32_t)strtoul(end + 1, &end, 10) & 0xff;
     return x;
 }
 

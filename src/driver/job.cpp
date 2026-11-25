@@ -17,6 +17,7 @@
  *
  *   VPP_TIME=1   report the preprocessing time on the error fd
  */
+#include "common/attributes.h"
 #include "driver-internal.h"
 #include "frontend/cplusplus/compile.h"
 #include "frontend/pp/dircache.h"
@@ -456,7 +457,7 @@ static void driver_job_preprocess(struct driver_job *job, pp *p,
         size_t l;
 
         pp_text_render(p, &s, &l);
-        o.data = (char *)s;
+        o.data = VUNCONST(char *, s);
         o.length = l;
         if (job->dump_macros) {
             char *m;

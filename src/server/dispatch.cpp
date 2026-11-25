@@ -11,6 +11,7 @@
  * --backend-sock nothing is forwarded: a request vcc cannot do fails, with vcc's diagnostics.  A
  * compile that succeeded gets the fixdep step (vccd_compile_fixdep_after) in vccd_request_handle().
  */
+#include "common/attributes.h"
 #include "vccd-internal.h"
 
 static int vccd_request_dispatch(const struct vccd_request *r,
@@ -243,7 +244,7 @@ static int vccd_request_dispatch(const struct vccd_request *r,
         }
         av[n++] = "-c";
         if (deps && !mt)
-            av[n++] = "-MT", av[n++] = (char *)out;
+            av[n++] = "-MT", av[n++] = VUNCONST(char *, out);
         av[n] = NULL;
         if (lv && driver_job_run(n, av, &e) == 0) {
             /* the link: the object for the source, no dependency options */

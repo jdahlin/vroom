@@ -1,5 +1,6 @@
 /* Per-thread bump arenas that every allocation of a link comes from, and the release of big mappings. */
 
+#include "common/attributes.h"
 #include "ld-internal.h"
 
 /* ---------------- arenas ---------------- */
@@ -22,7 +23,7 @@ bool ld_keep_mappings;
 VPRIV void ld_region_unmap(const void *p, size_t n)
 {
     if (!ld_keep_mappings)
-        munmap((void *)p, n);
+        munmap(VUNCONST(void *, p), n);
 }
 
 VPRIV void *ld_region_large_alloc(size_t n)

@@ -19,6 +19,7 @@
  * program (make -C src vccrt puts it there).  The linker itself is the caller's: vpp spawns the vlink
  * beside it, vccd calls ld_main in its own process.
  */
+#include "common/attributes.h"
 #include "driver-internal.h"
 
 #include <limits.h>
@@ -248,7 +249,7 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env,
             !strcmp(a, "-rdynamic") || !strcmp(a, "-v"))
             continue;
         if (a[0] == '-' && a[1]) {
-            cav[nc++] = (char *)a;
+            cav[nc++] = VUNCONST(char *, a);
             if (driver_mingw_option_takes_value(a) && i + 1 < argc)
                 cav[nc++] = argv[++i];
         }
@@ -265,16 +266,16 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env,
         lav[nl++] = "--shared";
     if (subsystem) {
         lav[nl++] = "--subsystem";
-        lav[nl++] = (char *)subsystem;
+        lav[nl++] = VUNCONST(char *, subsystem);
     }
-    lav[nl++] = (char *)(static_ ? "-Bstatic" : "-Bdynamic");
+    lav[nl++] = VUNCONST(char *, (static_ ? "-Bstatic" : "-Bdynamic"));
     if (shared) {
         lav[nl++] = "-e";
         lav[nl++] = "DllMainCRTStartup";
         lav[nl++] = "--enable-auto-image-base";
     }
     lav[nl++] = "-o";
-    lav[nl++] = (char *)out;
+    lav[nl++] = VUNCONST(char *, out);
     if (strip)
         lav[nl++] = "-s";
     if (!nostdlib && !nostartfiles) {
@@ -289,9 +290,9 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env,
         const char *a = argv[i];
 
         if (!strcmp(a, "-L") && i + 1 < argc)
-            lav[nl++] = (char *)a, lav[nl++] = argv[++i];
+            lav[nl++] = VUNCONST(char *, a), lav[nl++] = argv[++i];
         else if (!strncmp(a, "-L", 2))
-            lav[nl++] = (char *)a;
+            lav[nl++] = VUNCONST(char *, a);
         else if (a[0] == '-' && a[1] && driver_mingw_option_takes_value(a))
             i++;
     }
@@ -309,12 +310,12 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env,
         if ((!strcmp(a, "-Xlinker") || !strcmp(a, "-e") || !strcmp(a, "-u")) &&
             i + 1 < argc) {
             if (a[1] != 'X')
-                lav[nl++] = (char *)a;
+                lav[nl++] = VUNCONST(char *, a);
             lav[nl++] = argv[++i];
             continue;
         }
         if (!strncmp(a, "-l", 2)) {
-            lav[nl++] = (char *)a;
+            lav[nl++] = VUNCONST(char *, a);
             continue;
         }
         if (!strncmp(a, "-Wl,",
@@ -338,15 +339,15 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env,
             continue;
         }
         if (!driver_mingw_is_source(a)) {
-            lav[nl++] =
-                (char *)a; /* an object, archive, import library or .def */
+            lav[nl++] = VUNCONST(
+                char *, a); /* an object, archive, import library or .def */
             continue;
         }
         snprintf(tmp[ntmp], sizeof(tmp[ntmp]), "%s.vcc-%d.o", out, ntmp);
         int k = nc;
 
         cav[k++] = "-c";
-        cav[k++] = (char *)a;
+        cav[k++] = VUNCONST(char *, a);
         cav[k++] = "-o";
         cav[k++] = tmp[ntmp];
         cav[k] = NULL;
@@ -378,7 +379,7 @@ int driver_mingw_link_run(int argc, char **argv, const driver_environment *env,
             if (subsystem && !strcmp(subsystem, "windows"))
                 lav[nl++] = "-lgdi32", lav[nl++] = "-lcomdlg32";
             for (size_t t = 0; t < sizeof tail / sizeof *tail; t++)
-                lav[nl++] = (char *)tail[t];
+                lav[nl++] = VUNCONST(char *, tail[t]);
         }
         if (static_)
             lav[nl++] = "--end-group";

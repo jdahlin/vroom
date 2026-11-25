@@ -1,5 +1,6 @@
 /* arm64 lowering of VIR: calls, sibling calls and parameters. */
 
+#include "common/attributes.h"
 #include "lowering-internal.h"
 
 /*
@@ -29,7 +30,8 @@ VPRIV const char *a64_vir_tail_call_reason(a64_vir_context *L, uint8_t *d)
                 if (vir_op_is_call(x.op) &&
                     virbuild_call_returns_twice(L->context, &f->insns[x.a]))
                     return "a call that returns twice";
-                vir_operand_iterator_init(&it, (vir_function *)f, &x, false);
+                vir_operand_iterator_init(&it, VUNCONST(vir_function *, f), &x,
+                                          false);
                 while ((p = vir_operand_iterator_next(&it))) {
                     if (f->insns[*p].op != VIR_OP_SLOTADDR && !d[*p])
                         continue;

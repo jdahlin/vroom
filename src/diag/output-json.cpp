@@ -1,4 +1,5 @@
 /* JSON lines, and the record sink vccd reads. */
+#include "common/attributes.h"
 #include "../frontend/pp/pp-internal.h"
 #include "common/buffer.h"
 #include <ctype.h>
@@ -183,7 +184,7 @@ static void diag_json_record_append(pp *p, vbuffer *b, const diag_record *d,
         p->diagnostic_last_file = 0;
         bool color = p->diagnostic_color;
         p->diagnostic_color = 0;
-        diag_record_render_plain(p, &r, (diag_record *)d);
+        diag_record_render_plain(p, &r, VUNCONST(diag_record *, d));
         p->diagnostic_color = color;
         p->diagnostic_last_file = fe;
         diag_json_string_append(b, r.p ? r.p : "", r.n);

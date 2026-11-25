@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "common/attributes.h"
 #include "common/fail.h"
 #include "common/response-files.h"
 
@@ -67,7 +68,7 @@ bool vresponse_files_expand(int *pargc, char ***pargv, int dirfd,
                 close(fd);
         }
         if (!text) {
-            out[n++] = (char *)a;
+            out[n++] = VUNCONST(char *, a);
             continue;
         }
         /* split in place: a word never grows when its quotes are removed */

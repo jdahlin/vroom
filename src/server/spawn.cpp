@@ -8,6 +8,7 @@
  * is a blocking region.  The result is the child's exit status, 128+signal when it was killed, 127
  * when it could not be started.
  */
+#include "common/attributes.h"
 #include "vccd-internal.h"
 
 /* run a program with the request's cwd, env and fds */
@@ -37,7 +38,7 @@ VPRIV int vccd_program_spawn(const struct vccd_request *r, const char *prog)
         if (r->fds[i] >= 0)
             posix_spawn_file_actions_adddup2(&fa, r->fds[i], i);
     posix_spawn_file_actions_addchdir(&fa, r->cwd);
-    r->argv[0] = (char *)prog;
+    r->argv[0] = VUNCONST(char *, prog);
 #ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
     /* only 0-2 reach the child: other workers' request fds are open meanwhile */
     posix_spawnattr_t sa;

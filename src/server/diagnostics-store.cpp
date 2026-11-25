@@ -13,6 +13,7 @@
  * One mutex: the store is touched only by jobs that have diagnostics (the
  * records) and by dedup lookups, both rare next to a compile.
  */
+#include "common/attributes.h"
 #include "common/literal.h"
 #include "diagnostics-store.h"
 #include "common/scoped-cleanup.h"
@@ -446,7 +447,7 @@ int vccd_diagnostics_query(const char *what, int fd, int errfd)
         vccd_diagnostics_table_print(fd, "by flag", fl, nfl);
         vccd_diagnostics_table_print(fd, "by file", fi, nfi);
         for (unsigned i = 0; i < nfl; i++)
-            free((char *)fl[i].key);
+            free(VUNCONST(char *, fl[i].key));
         free(fl);
         free(fi);
     }
