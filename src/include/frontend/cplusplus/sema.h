@@ -6918,6 +6918,10 @@ class semantic_analysis
        of its templates deduced for to, may yield an lvalue (true when not
        known) */
     bool conversion_may_yield_lvalue(entity_index c, qualified_type to);
+    /* whether object[index], object of class type, has no built-in
+       candidate */
+    bool subscript_has_no_builtin(qualified_type object,
+                                  qualified_type index) const;
     /* whether the class s has a non-explicit conversion function that may
        yield the class t or one derived from it ([over.match.copy]/1.2) */
     bool has_implicit_conversion_functions(entity_index c) const;

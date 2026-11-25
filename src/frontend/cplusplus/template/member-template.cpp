@@ -449,17 +449,22 @@ analysis_result semantic_analysis::member_template_call(
     const owned_array<SyntaxElement> *written, SyntaxRef written_at,
     expression_meaning &m)
 {
+    bool braced = false;
     if (early.empty())
         for (SyntaxElement a : arguments) {
             token_index set_at = 0;
-            if (a.is(syntax_kind::braced_init_list) ||
-                named_overload_set(a, set_at))
+            if (named_overload_set(a, set_at))
                 return not_supported_because(
                     n, "temp.deduct.call",
-                    "a braced list or overload set argument to a member "
-                    "template call");
+                    "an overload set argument to a member template call");
             expression_meaning e;
-            VTRY(r, expression(a, e));
+            if (a.is(syntax_kind::braced_init_list)) {
+                /* [temp.deduct.call]/1, as template_call's */
+                VTRY(r, braced_deduction_elements(a, e));
+                braced = true;
+            } else {
+                VTRY(r, expression(a, e));
+            }
             early.append(e);
         }
     for (const expression_meaning &e : early)
@@ -502,8 +507,19 @@ analysis_result semantic_analysis::member_template_call(
         operands.append(e);
     size_t chosen = 0;
     bool none_viable = false;
+    /* [over.ics.list]: a braced argument's sequences are the list's, by
+       the syntax, the object's operand having none */
+    owned_array<SyntaxElement> operand_syntax;
+    const owned_array<SyntaxElement> *lists = nullptr;
+    if (braced) {
+        if (object)
+            operand_syntax.append(SyntaxElement{});
+        for (SyntaxElement a : arguments)
+            operand_syntax.append(a);
+        lists = &operand_syntax;
+    }
     VTRY_SET(r, best_viable_function(n, candidates, nullptr, operands, chosen,
-                                     &none_viable));
+                                     &none_viable, true, lists));
     if (none_viable)
         return ill_formed(n,
                           "overload resolution fails when there is no viable "

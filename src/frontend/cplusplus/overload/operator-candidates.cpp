@@ -118,6 +118,27 @@ bool semantic_analysis::converts_to_callable(entity_index c) const
     return false;
 }
 
+bool semantic_analysis::subscript_has_no_builtin(qualified_type object,
+                                                 qualified_type index) const
+{
+    const struct type &o = type_table[object.unqualified()];
+    type_kind other = type_table[index.unqualified()].kind;
+    if (o.kind != type_kind::class_type || other == type_kind::class_type ||
+        other == type_kind::pointer || other == type_kind::array)
+        return false;
+    owned_array<entity_index> functions, templates;
+    if (!visible_conversion_functions(o.entity, functions, &templates))
+        return false;
+    for (entity_index f : functions) {
+        type_kind k =
+            type_table[conversion_function_result(f).type.unqualified()].kind;
+        if (!entity_table[f].explicit_ &&
+            (k == type_kind::pointer || k == type_kind::array))
+            return false;
+    }
+    return true;
+}
+
 /*
  * [over.call.object]/2: "for each non-explicit conversion function declared
  * in T or in a base class of T ... to pointer to function, ... a surrogate
@@ -884,6 +905,15 @@ analysis_result semantic_analysis::overloaded_operator(
                 seq.rank != 0)
                 beats_builtin = false;
         }
+        /* [impl.clang] the pointer types of the built-in subscript
+           candidates come from conversion functions, not from conversion
+           function templates (json's operator ValueType): with an index
+           that is no class or pointer and no such function yielding a
+           pointer, there is none */
+        if (!beats_builtin && op == preprocessing_op_or_punc::LEFT_BRACKET &&
+            arguments.size() == 2 &&
+            subscript_has_no_builtin(arguments[0].type, arguments[1].type))
+            beats_builtin = true;
         if (!beats_builtin)
             return not_supported_because(n, "over.built",
                                          "a viable operator function that may "

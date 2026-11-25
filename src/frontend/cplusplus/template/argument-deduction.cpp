@@ -508,14 +508,30 @@ static bool deduction_may_succeed(const types &table, qualified_type p,
     if (ar.kind == type_kind::dependent)
         return true;
     /* [temp.deduct.call]/4.3: only a class (or a pointer to one) has a
-       base to deduce from: P a template-id never matches an array or a
+       base to deduce from: P a template-id never matches an array, a
+       function (std::fixed against const basic_string<C, T, A>&) or a
        scalar A */
     if (pr.kind == type_kind::dependent &&
-        (ar.kind == type_kind::array || ar.kind == type_kind::fundamental ||
+        (ar.kind == type_kind::array || ar.kind == type_kind::function ||
+         ar.kind == type_kind::fundamental ||
          ar.kind == type_kind::enumeration))
         return false;
     if (ar.kind == type_kind::pointer) {
         type_kind k = table[ar.operand.unqualified()].kind;
+        /* (nor a pointer to a template-id, or to a const or volatile T, a
+           function's address: a function type has no cv-qualifiers) */
+        if (k == type_kind::function && pr.kind == type_kind::pointer) {
+            type_kind pointee = table[pr.operand.unqualified()].kind;
+            if (pointee == type_kind::dependent ||
+                (pointee == type_kind::template_parameter && pr.operand.cv()))
+                return false;
+        }
+        /* (a T* that does not deduce from a class pointer: a T deduced
+           otherwise elsewhere, no base to try) */
+        if (k == type_kind::class_type && pr.kind == type_kind::pointer &&
+            table[pr.operand.unqualified()].kind ==
+                type_kind::template_parameter)
+            return false;
         if (k == type_kind::class_type || k == type_kind::function ||
             k == type_kind::dependent)
             return pr.kind == type_kind::pointer ||
