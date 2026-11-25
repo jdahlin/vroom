@@ -3269,7 +3269,13 @@ analysis_result semantic_analysis::implicit_definitions(entity_index c,
         entity_table[entity_table[c].destructor].implicit)
         implicit.append(entity_table[c].destructor);
     for (entity_index f : implicit) {
-        VTRY(r, define_defaulted_special_member(c, f, n));
+        entity_index saved_deferred = needs_deferred_by;
+        if (!entity_table[f].member_definition_needed)
+            needs_deferred_by = f;
+        analysis_result r = define_defaulted_special_member(c, f, n);
+        needs_deferred_by = saved_deferred;
+        if (r != analysis_result::well_formed)
+            return r;
     }
     return implicit_assignment_definitions(c, n);
 }
