@@ -898,6 +898,30 @@ analysis_result semantic_analysis::template_argument_for(
            ([temp.dep.constexpr]/2), checked against the parameter's type
            ([temp.arg.nontype]/2) once an instantiation gives C */
         if (depends_on_template_parameter(to)) {
+            token_index first = written.token();
+            token_index end = first + 1;
+            if (!written.is_token()) {
+                first = written.first_token();
+                end = written.end_token();
+            }
+            if (end == first + 1 &&
+                tokens[first].kind == token_kind::identifier) {
+                lookup_result x = lookup_unqualified(tokens.identifier(first),
+                                                     lookup_filter::any);
+                entity_index named = x.entity;
+                if (!named)
+                    named = x.unknown_entity;
+                if (named && entity_table[named].kind == entity_kind::none &&
+                    entity_table[named].instantiation &&
+                    !entity_table[named].held_by_template &&
+                    entity_table[named].type == to) {
+                    out.kind = template_argument::kind_t::value;
+                    out.type = to;
+                    out.template_entity = named;
+                    out.value = entity_table[named].value;
+                    return analysis_result::well_formed;
+                }
+            }
             out.kind = template_argument::kind_t::value;
             out.type = to;
             out.template_entity = dependent_value_entity(written);
