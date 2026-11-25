@@ -749,8 +749,11 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
         bool ambiguous = false, unknown = false;
         entity_index f =
             conversion_function_for(a, parameter, false, ambiguous, unknown);
-        if (unknown)
-            return of_form(sequence::form::unknown);
+        if (unknown) {
+            sequence s = of_form(sequence::form::unknown);
+            s.user_defined_if_viable = true;
+            return s;
+        }
         if (ambiguous) {
             sequence s = of_form(sequence::form::user_defined);
             s.ambiguous = true;
@@ -763,8 +766,11 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
            for [over.ics.rank]/3.3 */
         expression_meaning value = conversion_function_result(f);
         sequence s = standard_conversion_sequence(value, parameter);
-        if (s.kind != sequence::form::standard)
-            return of_form(sequence::form::unknown);
+        if (s.kind != sequence::form::standard) {
+            sequence u = of_form(sequence::form::unknown);
+            u.user_defined_if_viable = true;
+            return u;
+        }
         s.kind = sequence::form::user_defined;
         s.function = f;
         return s;
