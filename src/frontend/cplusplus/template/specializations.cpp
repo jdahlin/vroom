@@ -157,8 +157,13 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                                          "an explicit specialization with an "
                                          "attribute that has an effect");
     bool defines = inner.is(syntax_kind::function_definition);
+    bool ctor_body =
+        defines && !inner.function_definition().function_body().deleted() &&
+        !inner.function_definition().function_body().defaulted() &&
+        inner.function_definition().function_body().ctor_initializer();
     /* [dcl.fct.def.delete], = default: not yet */
-    if (defines && !inner.function_definition().function_body().plain())
+    if (defines && !inner.function_definition().function_body().plain() &&
+        !ctor_body)
         return not_supported_because(
             n, "temp.expl.spec",
             "a deleted, defaulted or non-plain explicit specialization body");
@@ -173,6 +178,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             tail[has_spec].is(syntax_kind::noptr_declarator,
                               syntax_kind::ptr_declarator) &&
             ((defines && has_spec && inner.function_definition().plain()) ||
+             (defines && !has_spec &&
+              (inner.function_definition().function_body().plain() ||
+               ctor_body)) ||
              (defines && !has_spec &&
               inner.function_definition().function_body().plain()) ||
              (!defines &&
