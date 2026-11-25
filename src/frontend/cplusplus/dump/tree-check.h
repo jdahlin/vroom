@@ -177,8 +177,12 @@ struct tree_checker {
             if (!node.a)
                 problem(n, "no entity");
             break;
-        case semantic_kind::conversion:
-            child(n, node.a, tree_sort::expression, false, "operand");
+        case semantic_kind::conversion: {
+            /* (a discarded int{} is its zero) */
+            tree_sort operand = tree_sort::expression;
+            if (node.op == static_cast<uint8_t>(conversion_kind::to_void))
+                operand = tree_sort::initializer;
+            child(n, node.a, operand, false, "operand");
             if (node.category != value_category::prvalue)
                 problem(n, "a conversion's value is not a prvalue");
             if (node.op ==
@@ -204,6 +208,7 @@ struct tree_checker {
                 node.op != static_cast<uint8_t>(conversion_kind::to_void))
                 prvalue(n, node.a, "operand");
             break;
+        }
         case semantic_kind::unary:
             child(n, node.a, tree_sort::expression, false, "operand");
             prvalue(n, node.a, "operand");

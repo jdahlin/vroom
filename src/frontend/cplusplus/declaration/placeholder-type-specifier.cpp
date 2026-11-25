@@ -454,12 +454,16 @@ semantic_analysis::deduce_initializer_list(SyntaxElement braced, entity_index e,
     for (SyntaxElement c : clauses) {
         if (c.is(syntax_kind::braced_init_list))
             return analysis_result::well_formed;
+        /* (for its type alone: the list is analysed again as it
+           initializes, so nothing of this trial is kept) */
         expression_meaning m;
+        substitution_mark mark = mark_substitution();
         unevaluated++;
         analysis_result r = expression(c, m);
         unevaluated--;
+        undo_substitution(mark);
         if (r != analysis_result::well_formed)
-            return r;
+            return analysis_result::well_formed;
         const struct type of = type_table[m.type.unqualified()];
         if (of.kind != type_kind::fundamental &&
             of.kind != type_kind::enumeration && of.kind != type_kind::pointer)
