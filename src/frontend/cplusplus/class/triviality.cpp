@@ -206,6 +206,14 @@ bool semantic_analysis::trivial_copy_selected(entity_index c, bool rvalue,
     const entity &x = entity_table[c];
     if (x.dynamic)
         return false;
+    /* [over.ics.rank]/3.2.6: from a non-const lvalue a constructor
+       template X(T&) (T deduced as X) binds better than X(const X&), and
+       [over.match.best]/2.4 prefers the non-template only between equal
+       conversions: the template is chosen when viable (its viability, a
+       substitution, is not followed: taken as viable), and a template is
+       no copy constructor ([class.copy.ctor]/1), never trivial */
+    if (!rvalue && !source_const && x.constructor_templates)
+        return false;
     copy_selection selected = select_copy_constructor(c, rvalue, source_const);
     if (!selected.known) {
         known = false;
@@ -227,19 +235,66 @@ bool semantic_analysis::trivial_copy_selected(entity_index c, bool rvalue,
         sub_const = false;
         sub_rvalue = true;
     }
+    /* [class.copy.ctor]/8: with no user-declared copy constructor, copy
+       assignment operator, move assignment operator or destructor, a move
+       constructor is implicitly declared (no entity when trivial), and an
+       rvalue selects it; /14: it moves each subobject from an xvalue */
+    bool user_move_assignment = x.defaulted_move_assignment;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        entity_index f = class_members[x.first_member + i];
+        if (entity_table[f].kind == entity_kind::function &&
+            !entity_table[f].implicit && move_assignment_operator(f, c))
+            user_move_assignment = true;
+    }
+    /* (X(X&&) = default, no entity when trivial: the same, /14) */
+    if (!have_best && rvalue && x.defaulted_move_constructor) {
+        sub_const = false;
+        sub_rvalue = true;
+    }
+    if (!have_best && rvalue && !declares_copy_constructor(c) &&
+        !x.defaulted_copy_constructor && !x.user_copy_assignments &&
+        !x.defaulted_copy_assignment && !user_move_assignment &&
+        !(x.destructor && !entity_table[x.destructor].implicit)) {
+        sub_const = false;
+        sub_rvalue = true;
+    }
     /* [class.copy.ctor]/7: X(X&) copies each subobject from a non-const one */
     if (have_best && !best_rvalue && !(best_cv & cv_const))
         sub_const = false;
-    owned_array<entity_index> classes;
-    subobject_classes(c, classes);
-    for (uint32_t i = 0; i < x.member_count; i++)
-        if (entity_table[class_members[x.first_member + i]].mutable_member) {
-            known = false;
-            return false;
-        }
-    for (entity_index k : classes)
+    /* [class.copy.ctor]/14: each base or member is copied "in the manner
+       appropriate to its type", from the corresponding subobject of the
+       source; [dcl.stc]/9: a mutable member of a const object is not
+       const, so X(const X&) copies it from a non-const lvalue (a
+       TemplateCtor(T&) may be selected, clang's
+       CXX/special/class.copy/p12-0x.cpp) */
+    for (uint32_t i = 0; i < x.virtual_base_count; i++) {
+        entity_index k =
+            type_table
+                [entity_table[class_virtual_bases[x.first_virtual_base + i]]
+                     .type.unqualified()]
+                    .entity;
         if (!trivial_copy_selected(k, sub_rvalue, sub_const, known))
             return false;
+    }
+    for (uint32_t i = 0; i < x.base_count; i++) {
+        const entity &b = entity_table[class_bases[x.first_base + i]];
+        if (b.virtual_base)
+            continue;
+        entity_index k = type_table[b.type.unqualified()].entity;
+        if (!trivial_copy_selected(k, sub_rvalue, sub_const, known))
+            return false;
+    }
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        const entity &m = entity_table[class_members[x.first_member + i]];
+        if (m.base_subobject)
+            continue;
+        entity_index k = element_class(m.type);
+        if (!k)
+            continue;
+        bool from_const = sub_const && !m.mutable_member;
+        if (!trivial_copy_selected(k, sub_rvalue, from_const, known))
+            return false;
+    }
     return true;
 }
 
