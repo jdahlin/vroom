@@ -1652,6 +1652,12 @@ lines:
   `temporary-member-lifetime`.  The JSON include now reaches an implicit
   assignment refusal in libc++ `error_code`; sampled JSON tests also expose
   an unrelated vector instantiation and a BSON member-access error.
+  `assigned_bitwise` now ignores member function template `operator=`
+  declarations ([class.copy.assign]/1, /3).  Test
+  `implicit-assign-member-template` (4/4 at `-O0..3`); semantic comparison
+  gains 18 agreeing declarations and 18 verified types/constants, dropping
+  `[class.copy.assign]` refusals by 27.  The JSON include now reaches
+  `[class.copy.elision]` in libc++ `path_iterator.h`.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land

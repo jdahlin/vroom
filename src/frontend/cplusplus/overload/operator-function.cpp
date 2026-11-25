@@ -509,12 +509,14 @@ bool semantic_analysis::assigned_bitwise(entity_index c)
         return false;
     lookup_result found = lookup_qualified(
         c, operator_name(preprocessing_op_or_punc::EQUAL), lookup_filter::any);
-    if (found.unknown || found.ambiguous)
+    if (found.ambiguous)
         return false;
-    /* another operator= (one of another parameter type) is no copy or
-       move assignment operator: it leaves the implicit one trivial */
-    if (found.entity &&
-        entity_table[found.entity].kind != entity_kind::function)
+    /* [class.copy.assign]/1, /3: a copy or move assignment operator is a
+       non-template non-static member function; a member template operator=
+       or an operator= of another parameter type leaves the implicit one
+       trivial */
+    if (found.unknown && !(found.unknown_entity &&
+                           member_function_template_of(found.unknown_entity)))
         return false;
     for (entity_index o = found.entity; o; o = entity_table[o].next_overload) {
         if (entity_table[o].kind != entity_kind::function)
