@@ -128,6 +128,34 @@ ast_qualified_type c_lowering::type(qualified_type t, token_index at)
     case type_kind::fundamental:
         made = fundamental(r.fundamental, at);
         break;
+    case type_kind::bit_int: {
+        bool is_unsigned = r.fundamental == fundamental_type::unsigned_int;
+        if (r.bound <= 8) {
+            if (is_unsigned)
+                made = ast_builder_type_basic(AST_TYPE_UNSIGNED_CHAR);
+            else
+                made = ast_builder_type_basic(AST_TYPE_SIGNED_CHAR);
+        } else if (r.bound <= 16) {
+            if (is_unsigned)
+                made = ast_builder_type_basic(AST_TYPE_UNSIGNED_SHORT);
+            else
+                made = ast_builder_type_basic(AST_TYPE_SHORT);
+        } else if (r.bound <= 32) {
+            if (is_unsigned)
+                made = ast_builder_type_basic(AST_TYPE_UNSIGNED_INT);
+            else
+                made = ast_builder_type_basic(AST_TYPE_INT);
+        } else if (r.bound <= 64) {
+            if (is_unsigned)
+                made = ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG_LONG);
+            else
+                made = ast_builder_type_basic(AST_TYPE_LONG_LONG);
+        } else {
+            fail("a _BitInt wider than 64 bits", at);
+            return ast_builder_type_basic(AST_TYPE_INT);
+        }
+        break;
+    }
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
