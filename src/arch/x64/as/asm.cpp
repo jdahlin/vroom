@@ -484,7 +484,7 @@ VPRIV int x64_emit(as_context *a, XForm *f)
     int rex = 0x40 | (f->w ? 8 : 0) | (f->reg & 8 ? 4 : 0) |
               (f->oreg && (f->oreg - 1) & 8 ? 1 : 0);
     int seg = rm && rm->kind != XK_REG ? rm->seg : 0;
-    uint8_t modrm, sib;
+    uint8_t modrm = 0, sib = 0;
     int dispsz = 0, ripfix = 0;
     int64_t disp = 0;
     as_value dv;

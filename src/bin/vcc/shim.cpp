@@ -200,7 +200,7 @@ int main(int argc, char **argv)
     struct iovec iov;
     struct msghdr m = {0};
     struct cmsghdr *c;
-    int32_t status;
+    int32_t status = 0;
     size_t off, got;
     ssize_t n;
     char **e;

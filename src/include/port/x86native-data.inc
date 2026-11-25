@@ -537,7 +537,7 @@ static const char *x86_native_hygon(unsigned Family, unsigned Model, x86_feature
 }
 static x86_features x86_native_name_features(const x86_native_io *io, unsigned ECX, unsigned EDX, unsigned MaxLeaf) {
   x86_features features = {{0}};
-  unsigned EAX = 0, EBX;
+  unsigned EAX = 0, EBX = 0;
 
 
 

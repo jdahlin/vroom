@@ -150,7 +150,7 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
             if (fs) {
                 const sym *y = &c->syms[fs];
                 diag_span pr = {y->plb, y->ple};
-                size_t len;
+                size_t len = 0;
                 const char *t = y->ple > y->plb
                                     ? pp_source_text(c->p, y->plb, y->ple, &len)
                                     : NULL;

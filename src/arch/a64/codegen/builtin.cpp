@@ -779,7 +779,7 @@ static codegen_value gen_atomic(codegen_context *e, const node *x,
     }
     case CC_BUILTIN_ATOMIC_STORE_N:
     case CC_BUILTIN_ATOMIC_STORE: {
-        int r;
+        int r = 0;
 
         if (id == CC_BUILTIN_ATOMIC_STORE) {
             int rv = toreg(e, &v1);

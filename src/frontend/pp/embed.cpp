@@ -264,8 +264,8 @@ VPRIV void pp_embed_run(pp *p, pp_context *c, uint32_t b, uint32_t e,
                         uint32_t loc, uint32_t nloc)
 {
     char buf[4096];
-    size_t n;
-    bool angled, ok;
+    size_t n = 0;
+    bool angled = false, ok;
     const char *path;
     const lex_file *f;
     int d = p->context_depth;

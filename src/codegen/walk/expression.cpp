@@ -2322,8 +2322,8 @@ static codegen_value walk_assignment_emit(codegen_context *e, uint32_t n)
 {
     cc *c = e->compile_context;
     const node *x = N(n);
-    uint32_t as;
-    int64_t ak;
+    uint32_t as = 0;
+    int64_t ak = 0;
     bool ael = !x->aux && walk_array_element_of(e, x->a, &as, &ak);
     codegen_value v = walk_assignment_emit_inner(e, n);
     walk_state *W = e->walk_state;

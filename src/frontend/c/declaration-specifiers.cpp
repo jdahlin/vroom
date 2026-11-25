@@ -19,7 +19,7 @@ CC_PRIVATE void cc_declaration_specifiers_unknown_type_report(
     cc *c, cc_declaration_specifiers *ds, bool allow_sc)
 {
     bool ud = c->undecl_ty;
-    uint32_t kw, loc = tok(c)->loc, s;
+    uint32_t kw = 0, loc = tok(c)->loc, s;
 
     c->undecl_ty = 0;
     s = cc_undeclared_report(
