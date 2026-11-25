@@ -915,6 +915,32 @@ analysis_result semantic_analysis::overloaded_operator(
                 if (t == analysis_result::well_formed && none)
                     return analysis_result::well_formed;
             }
+            if (implicit_viable && operands.size() == 2 &&
+                (type_table[operands[1].type.unqualified()].entity == 0 ||
+                 other_class)) {
+                /* [over.ics.rank]/2: the implicit C& operator=(const C&) (and
+                   C&&) requires a user-defined conversion for a right operand
+                   of an unrelated type; a non-const member operator= with a
+                   standard conversion sequence for the right operand is
+                   strictly better and the implicit operator cannot win */
+                for (const overload_candidate &k : candidates) {
+                    if (!k.function)
+                        continue;
+                    const entity &ke = entity_table[k.function];
+                    const struct type &ft = type_table[ke.type.unqualified()];
+                    if (ft.kind != type_kind::function ||
+                        ft.parameter_count != 1 || (ke.member_cv & cv_const))
+                        continue;
+                    const qualified_type *params =
+                        type_table.parameters(ke.type.unqualified());
+                    conversion_sequence cs = implicit_conversion_sequence(
+                        operands[1], params[0], true);
+                    if (cs.kind == conversion_sequence::form::standard) {
+                        implicit_viable = false;
+                        break;
+                    }
+                }
+            }
             if (implicit_viable) {
                 /* (/7: one deleted for a const or reference member is a
                    candidate as the one a declared move deletes) */
