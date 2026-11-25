@@ -90,7 +90,7 @@ VCC_INC    = -I$(abspath include) -I$(abspath $(OUT)/generated/include)
 VCC_WERROR ?= -Werror
 # Warnings beyond -Wall -Wextra, for every module.  Added one at a time with
 # the fixes each asked for; `make VCC_WARN=` for a compiler without them.
-VCC_WARN ?= -Wmissing-prototypes -Wunreachable-code -Wnull-dereference -Wredundant-decls -Wpointer-arith -Wextra-semi -Wcovered-switch-default
+VCC_WARN ?= -Wmissing-prototypes -Wunreachable-code -Wnull-dereference -Wredundant-decls -Wpointer-arith -Wextra-semi -Wcovered-switch-default -Wduplicate-enum
 VCC_CFLAGS = $(if $(VCC_WASM),-DVCC_WASM) -O2 -Wall -Wextra -Wimplicit-fallthrough -Wno-unused-parameter $(VCC_WARN) $(VCC_DIALECT_WARN) $(VCC_WERROR) $(HOST_DEFS) $(VCC_INC) -DVCC_INCDIR='"$(abspath headers)"' $(VCC_SAN)
 # LTO: off; the split modules are one TU each (SPLIT_MODS), which gives the
 # inlining LTO would.  `make VCC_LTO=-flto=thin` turns it on (vbench: pp +0.5 %,
