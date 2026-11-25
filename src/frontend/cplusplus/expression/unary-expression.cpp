@@ -966,6 +966,7 @@ analysis_result semantic_analysis::indirection_of(SyntaxRef n, token_index at,
     if (!is_pointer(m.type)) {
         const struct type &object = type_table[m.type.unqualified()];
         if (fundamental_of(m.type) == fundamental_type::none &&
+            object.kind != type_kind::enumeration &&
             !(object.kind == type_kind::class_type &&
               !converts_to_non_class(object.entity, false)))
             return not_supported(n, "expr.unary.op");
