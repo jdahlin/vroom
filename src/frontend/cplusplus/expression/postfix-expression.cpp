@@ -2007,10 +2007,11 @@ analysis_result semantic_analysis::template_call(
     /* (arguments analysed already: a pack expansion's, call) */
     bool given = !early.empty();
     for (const expression_meaning &e : early) {
-        if (e.entity && entity_table[e.entity].kind == entity_kind::function)
+        if (e.overload_name)
             return not_supported_because(n, "temp.deduct.call",
-                                         "a function as an argument analysed "
-                                         "before the call (pack expansion)");
+                                         "an overloaded function as an "
+                                         "argument analysed before the call "
+                                         "(pack expansion)");
         types.append(e.type);
     }
     for (SyntaxElement a : arguments) {
