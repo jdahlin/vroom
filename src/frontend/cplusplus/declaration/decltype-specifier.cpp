@@ -219,6 +219,23 @@ bool semantic_analysis::names_dependent_entity(token_index first,
     return false;
 }
 
+/* whether no name in x names a template parameter or a type that depends
+   on one: x can be analysed where it is written */
+bool semantic_analysis::names_nothing_dependent(SyntaxRef x)
+{
+    for (token_index t = x.first_token(); t < x.end_token(); t++) {
+        if (tokens[t].kind != token_kind::identifier)
+            continue;
+        uint32_t id = tokens.identifier(t);
+        entity_index e = lookup_unqualified(id, lookup_filter::any).entity;
+        if (find_pack(id))
+            return false;
+        if (e && depends_on_template_parameter(entity_table[e].type))
+            return false;
+    }
+    return true;
+}
+
 /* the types of the casts written in x, analysed with the alias template's
    names bound ([expr.cast]: ( type-id ) cast-expression); a type that does
    not analyse is left out (the mangler then has no encoding) */
@@ -253,6 +270,51 @@ void semantic_analysis::collect_written_casts(
             SyntaxRef ar = operand_type_id;
             b.cast = ar.index().index();
             b.type = t;
+            found.append(b);
+        }
+    }
+    /* f<A>() (std::declval<const T &>()): which specialization it calls,
+       for a mangler that names it ([abi:expressions] L_Z) */
+    if (x.is(syntax_kind::postfix_expression) && x.size() == 3 &&
+        x[0].is(syntax_kind::simple_template_id) &&
+        names_nothing_dependent(SyntaxRef(x[0])) &&
+        x[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+        size_t unsupported_before = unsupported.size();
+        expression_meaning m;
+        unevaluated++;
+        analysis_result r = expression(x, m);
+        unevaluated--;
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed && m.node &&
+            semantics[m.node].kind == semantic_kind::call) {
+            uint32_t callee = semantics[m.node].a;
+            if (callee && semantics[callee].kind == semantic_kind::entity) {
+                written_binding b;
+                SyntaxRef named = x[0];
+                b.cast = named.index().index();
+                b.specialization = semantics[callee].a;
+                b.type = m.type;
+                found.append(b);
+            }
+        }
+    }
+    /* S<A>{...}: the class it makes, for tl <type> */
+    if (x.is(syntax_kind::postfix_expression) && x.size() == 2 &&
+        x[0].is(syntax_kind::simple_template_id,
+                syntax_kind::simple_type_specifier) &&
+        names_nothing_dependent(SyntaxRef(x[0])) &&
+        x[1].is(syntax_kind::braced_init_list)) {
+        size_t unsupported_before = unsupported.size();
+        expression_meaning m;
+        unevaluated++;
+        analysis_result r = expression(x, m);
+        unevaluated--;
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed) {
+            written_binding b;
+            SyntaxRef whole = x;
+            b.cast = whole.index().index();
+            b.type = m.type;
             found.append(b);
         }
     }

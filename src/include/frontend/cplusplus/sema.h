@@ -2935,6 +2935,9 @@ class semantic_analysis
         /* a name bound to a pack: the position plus one of the alias
            template's parameter it is (sizeof...(P) mangles it); 0 else */
         uint32_t pack_position = 0;
+        /* a callee template-id with no arguments of its own call, f<A>():
+           the specialization it names (cast: the template-id's node) */
+        entity_index specialization = 0;
     };
     owned_array<written_binding> written_bindings;
     /* the tags of an expression's structure (expression_structure): a
@@ -2970,6 +2973,7 @@ class semantic_analysis
     void collect_written_bindings(SyntaxRef n,
                                   owned_array<written_binding> &found,
                                   bool every_name = false);
+    bool names_nothing_dependent(SyntaxRef x);
     void collect_written_casts(SyntaxElement x,
                                owned_array<written_binding> &found);
     /* a block scope in the current one, made current */
