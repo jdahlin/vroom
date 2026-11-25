@@ -221,8 +221,8 @@ analysis_result semantic_analysis::base_class_name(SyntaxElement name,
                 n, "class.derived",
                 "a base decltype-specifier that does not denote a class type");
         base = type_table[t.unqualified()].entity;
-        /* a closure type's base (or another unnamed class's): its layout
-           is not reported as clang names it yet */
+        /* [impl.clang] a closure type's base (or another unnamed
+           class's): its layout is not reported as clang names it yet */
         if (!entity_table[base].name)
             return not_supported_because(n, "class.derived",
                                          "a base that is an unnamed class");
