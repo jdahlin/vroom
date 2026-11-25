@@ -94,6 +94,7 @@ node_index parser::using_declarator()
                         "namespace.udecl", position);
     if (name) {
         name_kind kind = name_kind::not_declared;
+        scope_index owned = 0;
         bool dependent = false;
         if (typename_) {
             kind = name_kind::type_name;
@@ -101,7 +102,7 @@ node_index parser::using_declarator()
                nested-name-specifier is dependent */
             dependent = qualifier_dependent;
         } else if (known) {
-            kind = names.lookup_qualified(scope, name);
+            kind = names.lookup_qualified(scope, name, &owned, &dependent);
         } else if (qualifier_dependent) {
             /* [temp.dep.type]/6, [temp.res]/4: what a dependent base's
                member is, the parser cannot tell, but it names no type
@@ -112,7 +113,7 @@ node_index parser::using_declarator()
         }
         if (kind != name_kind::not_declared &&
             kind != name_kind::namespace_name)
-            names.declare(name, kind, 0, dependent);
+            names.declare(name, kind, owned, dependent);
     }
     return finish_node(syntax_kind::using_declarator, mark, first);
 }
