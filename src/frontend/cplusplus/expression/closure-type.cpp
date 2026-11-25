@@ -348,6 +348,7 @@ analysis_result semantic_analysis::generic_closure_conversion(
     entity_index enclosing_scope = current_scope;
     SyntaxRef declaration = current_declaration;
     entity_index conversion = 0;
+    size_t refusals_before = unsupported.size();
     analysis_result r = closure_conversion(c, call, at, &conversion);
     function_state = static_cast<function_context &&>(enclosing_function);
     block_variables =
@@ -355,9 +356,10 @@ analysis_result semantic_analysis::generic_closure_conversion(
     current_scope = enclosing_scope;
     current_declaration = declaration;
     if (r != analysis_result::well_formed || !conversion)
-        return not_supported_because(
+        return not_supported_since(
             at, "expr.prim.lambda.closure",
-            "a generic lambda whose conversion function could not be made");
+            "a generic lambda whose conversion function could not be made",
+            refusals_before);
     token_index tok = at.first_token();
     expression_meaning obj = m;
     qualified_type this_ptr =

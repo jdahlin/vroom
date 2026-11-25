@@ -571,6 +571,7 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
                                                           uint32_t index,
                                                           bool recorded)
 {
+    size_t refusals_before = unsupported.size();
     const template_member_definition o = template_member_definitions[member];
     const instantiation_record x = instantiations[index];
     if (instantiation_depth >= 64)
@@ -634,7 +635,8 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         leave_instantiation(context);
         if (r == analysis_result::well_formed)
             return r;
-        return member_definition_unsupported(o.declaration, recorded);
+        return member_definition_unsupported(o.declaration, recorded,
+                                             refusals_before);
     }
     if (variable)
         r = simple_declaration(o.definition);
@@ -684,7 +686,8 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
                                       tokens.identifier(qualifier[2].token()));
             if (!owner || entity_table[owner].kind != entity_kind::class_type ||
                 !entity_table[owner].defined)
-                return member_definition_unsupported(o.declaration, recorded);
+                return member_definition_unsupported(o.declaration, recorded,
+                                                     refusals_before);
         }
         defined = defined_special_member(owner, o, name);
         if (!defined) {
@@ -723,7 +726,8 @@ analysis_result semantic_analysis::define_template_member(uint32_t member,
         entity_table[defined].inline_ = true;
         return r;
     }
-    return member_definition_unsupported(o.declaration, recorded);
+    return member_definition_unsupported(o.declaration, recorded,
+                                         refusals_before);
 }
 
 /*
@@ -739,27 +743,31 @@ analysis_result
 semantic_analysis::define_member_of_member_class(uint32_t member,
                                                  uint32_t index, bool recorded)
 {
+    size_t refusals_before = unsupported.size();
     const template_member_definition o = template_member_definitions[member];
     entity_index c = instantiations[index].specialization;
     SyntaxRef nested = out_of_class_nested(o.definition);
     if (!c || !nested || nested.size() != 4 ||
         !nested[2].is(syntax_kind::simple_template_id) ||
         head_constraint(o.inner) || trailing_constraint(o.inner))
-        return member_definition_unsupported(o.declaration, recorded);
+        return member_definition_unsupported(o.declaration, recorded,
+                                             refusals_before);
     /* [basic.lookup.qual]/1: Y, looked up in the specialization of X the
        qualifier's X<T> names for these arguments */
     SyntaxRef y_id = nested[2];
     lookup_result found;
     entity_index held = 0;
     if (!template_id_name(y_id, found, held, c))
-        return member_definition_unsupported(o.declaration, recorded);
+        return member_definition_unsupported(o.declaration, recorded,
+                                             refusals_before);
     uint32_t yt = class_template_of(held);
     if (!yt || function_templates[yt - 1].name != held ||
         function_templates[yt - 1].primary ||
         !function_templates[yt - 1].is_class ||
         !function_templates[yt - 1].definition ||
         entity_table[held].enclosing != c)
-        return member_definition_unsupported(o.declaration, recorded);
+        return member_definition_unsupported(o.declaration, recorded,
+                                             refusals_before);
     const function_template d = function_templates[yt - 1];
     owned_array<SyntaxRef> parameters;
     instantiation_context context;
@@ -788,11 +796,13 @@ semantic_analysis::define_member_of_member_class(uint32_t member,
         d.parameter_count != parameters.size() ||
         arguments.size() != parameters.size() ||
         !same_template_parameters(first, d.first_parameter, d.parameter_count))
-        return member_definition_unsupported(o.declaration, recorded);
+        return member_definition_unsupported(o.declaration, recorded,
+                                             refusals_before);
     for (uint32_t i = 0; i < parameters.size(); i++)
         if (!argument_is_parameter(arguments[i],
                                    template_parameter_entities[first + i]))
-            return member_definition_unsupported(o.declaration, recorded);
+            return member_definition_unsupported(o.declaration, recorded,
+                                                 refusals_before);
     token_index declarator_name = 0;
     out_of_class_nested(o.definition, &declarator_name);
     if (parameter_names_after_declarator(o.definition, declarator_name + 1,
@@ -881,14 +891,14 @@ semantic_analysis::record_template_member(const template_member_definition &m)
 /* a member's definition outside its class that is not known to be
    well-formed for a specialization of the class: unsupported, and the
    declaration already analysed (recorded) too */
-analysis_result
-semantic_analysis::member_definition_unsupported(SyntaxRef declaration,
-                                                 bool recorded)
+analysis_result semantic_analysis::member_definition_unsupported(
+    SyntaxRef declaration, bool recorded, size_t refusals_before)
 {
     size_t unsupported_before = unsupported.size();
-    not_supported_because(
+    not_supported_since(
         declaration, "temp.inst",
-        "an out-of-class member definition that fails for a specialization");
+        "an out-of-class member definition that fails for a specialization",
+        refusals_before);
     if (!recorded)
         return analysis_result::unsupported;
     for (analysed_declaration &d : declarations) {
@@ -937,6 +947,7 @@ analysis_result semantic_analysis::define_member_class_template_of(
     entity_index c, SyntaxRef declaration, SyntaxRef inner,
     SyntaxRef definition, bool recorded)
 {
+    size_t refusals_before = unsupported.size();
     owned_array<SyntaxRef> parameters;
     instantiation_context context;
     enter_instantiation(context, entity_table[c].enclosing, declaration);
@@ -948,7 +959,8 @@ analysis_result semantic_analysis::define_member_class_template_of(
             analysis_result::well_formed ||
         head_constraint(inner) || trailing_constraint(inner)) {
         leave_instantiation(context);
-        return member_definition_unsupported(declaration, recorded);
+        return member_definition_unsupported(declaration, recorded,
+                                             refusals_before);
     }
     uint32_t name = tokens.identifier(name_token);
     current_scope = c;
@@ -965,7 +977,8 @@ analysis_result semantic_analysis::define_member_class_template_of(
         defining_class = saved_class;
         leave_instantiation(context);
         if (r != analysis_result::well_formed)
-            return member_definition_unsupported(declaration, recorded);
+            return member_definition_unsupported(declaration, recorded,
+                                                 refusals_before);
         return r;
     }
     uint32_t number = 0, first = 0;
@@ -980,7 +993,8 @@ analysis_result semantic_analysis::define_member_class_template_of(
         function_templates[declared - 1].primary ||
         function_templates[declared - 1].definition ||
         !function_templates[declared - 1].is_class)
-        return member_definition_unsupported(declaration, recorded);
+        return member_definition_unsupported(declaration, recorded,
+                                             refusals_before);
     const function_template d = function_templates[declared - 1];
     /* [temp.over.link]/6: the same template-head */
     if (entity_table[d.entity].enclosing != c ||
@@ -988,7 +1002,8 @@ analysis_result semantic_analysis::define_member_class_template_of(
         !same_template_parameters(first, d.first_parameter,
                                   d.parameter_count) ||
         !same_constraints(d.declaration, inner))
-        return member_definition_unsupported(declaration, recorded);
+        return member_definition_unsupported(declaration, recorded,
+                                             refusals_before);
     for (uint32_t i = 0; i < d.parameter_count; i++)
         if (entity_table[template_parameter_entities[first + i]].kind !=
             entity_kind::template_entity)
@@ -1010,6 +1025,7 @@ analysis_result semantic_analysis::define_member_template_of(
     SyntaxRef definition, bool recorded, bool allow_redefine,
     uint32_t outer_member, uint32_t outer_instantiation)
 {
+    size_t refusals_before = unsupported.size();
     owned_array<SyntaxRef> parameters;
     instantiation_context context;
     enter_instantiation(context, entity_table[c].enclosing, declaration);
@@ -1017,12 +1033,14 @@ analysis_result semantic_analysis::define_member_template_of(
             analysis_result::well_formed ||
         head_constraint(inner) || trailing_constraint(inner)) {
         leave_instantiation(context);
-        return member_definition_unsupported(declaration, recorded);
+        return member_definition_unsupported(declaration, recorded,
+                                             refusals_before);
     }
     for (SyntaxRef x : parameters)
         if (template_parameter_has_default(x)) {
             leave_instantiation(context);
-            return member_definition_unsupported(declaration, recorded);
+            return member_definition_unsupported(declaration, recorded,
+                                                 refusals_before);
         }
     current_scope = c;
     uint32_t number = 0, first = 0;
@@ -1081,7 +1099,8 @@ analysis_result semantic_analysis::define_member_template_of(
             held = member_templates_of(held);
     }
     if (!held)
-        return member_definition_unsupported(declaration, recorded);
+        return member_definition_unsupported(declaration, recorded,
+                                             refusals_before);
     /* the declaration the definition matches: not defined yet, the same
        template-parameters and function type ([temp.over.link]/7) */
     owned_array<uint32_t> group;
@@ -1118,7 +1137,8 @@ analysis_result semantic_analysis::define_member_template_of(
                 (f.definition &&
                  f.definition.is(syntax_kind::function_definition) &&
                  !f.definition.function_definition().function_body().plain()))
-                return member_definition_unsupported(declaration, recorded);
+                return member_definition_unsupported(declaration, recorded,
+                                                     refusals_before);
             return analysis_result::well_formed;
         }
         function_template &record = function_templates[g - 1];
@@ -1155,7 +1175,8 @@ analysis_result semantic_analysis::define_member_template_of(
         entity_table[f.entity].defined = true;
         return analysis_result::well_formed;
     }
-    return member_definition_unsupported(declaration, recorded);
+    return member_definition_unsupported(declaration, recorded,
+                                         refusals_before);
 }
 
 } // namespace cplusplus
