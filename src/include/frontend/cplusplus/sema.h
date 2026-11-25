@@ -5386,6 +5386,7 @@ class semantic_analysis
            children are its decl-specifier-seq and declarator */
         SyntaxRef declarator = 0;
         uint32_t first_parameter = 0, parameter_count = 0;
+        uint32_t declarator_first_parameter = 0;
         /* a member template defined outside a class template whose
            template-head renames the class's parameters: the first of
            them, and the class specialization (instantiations index plus

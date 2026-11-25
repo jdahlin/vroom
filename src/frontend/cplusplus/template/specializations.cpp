@@ -533,6 +533,16 @@ semantic_analysis::record_instantiation(const function_template &ft,
         bind_template_argument(
             record.scope, template_parameter_entities[ft.first_parameter + i],
             arguments[i]);
+    if (ft.declarator_first_parameter) {
+        for (uint32_t i = 0; i < count; i++) {
+            entity_index old_p =
+                template_parameter_entities[ft.declarator_first_parameter + i];
+            entity_index new_p =
+                template_parameter_entities[ft.first_parameter + i];
+            if (entity_table[old_p].name != entity_table[new_p].name)
+                bind_template_argument(record.scope, old_p, arguments[i]);
+        }
+    }
     if (ft.outer_instantiation) {
         const instantiation_record &ox =
             instantiations[ft.outer_instantiation - 1];

@@ -1155,6 +1155,7 @@ analysis_result semantic_analysis::define_member_template_of(
             }
         }
         if (renamed) {
+            record.declarator_first_parameter = f.first_parameter;
             record.first_parameter = first;
             entity_table[f.entity].type = type;
         }
