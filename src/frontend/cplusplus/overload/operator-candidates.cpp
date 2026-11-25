@@ -832,7 +832,7 @@ analysis_result semantic_analysis::overloaded_operator(
         return r;
     const overload_candidate &c = candidates[chosen];
     entity_index f = c.function;
-    if (converts && !c.member) {
+    if (converts && !c.member && unary_prefix) {
         /* [over.match.best]/2: a non-member's parameter reached by a
            user-defined conversion is no better than the built-in's */
         if (c.template_index)
