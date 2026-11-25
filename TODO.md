@@ -218,6 +218,14 @@ generator, T14 KUnit, T15 static sizes, T13, T16, T17 after PIC/PIE.
 
 ## Tier 1: silent wrong code
 
+- [ ] **C++: `noexcept` is not enforced.**  An exception leaving a
+  `noexcept` function propagates instead of calling `std::terminate`
+  ([except.spec]/5): lowering marks nothing.  (A function with a `try` used
+  to terminate only because its table omitted every other call, which also
+  terminated ordinary throws outside the `try`.)
+  *Validate:* a `noexcept` function that calls a throwing one ends in the
+  terminate handler, with and without a `try` of its own.
+
 - [ ] **arm64: unary minus on `__int128` vector lanes keeps 32 bits.**
   `-a` for `a` a `vector_size(32)` of `__int128` gives `4294967293` for a
   lane of 3 (`gen_vlanes` negates through `arith` at the element's width as
