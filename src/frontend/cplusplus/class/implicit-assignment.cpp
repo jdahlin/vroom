@@ -169,7 +169,10 @@ semantic_analysis::subobject_assignment(entity_index k, entity_index c,
        are no entities (defaulted_copy_assignment): usable as a trivial
        one is, when the class's bytes are assigned */
     const entity &kx = entity_table[k];
-    if (kx.defaulted_copy_assignment || kx.defaulted_move_assignment) {
+    if ((!move && !copies && kx.defaulted_copy_assignment) ||
+        (move && !movings &&
+         (kx.defaulted_move_assignment ||
+          (!copies && kx.defaulted_copy_assignment)))) {
         if (!assigned_bitwise(k) && !kx.defaulted_move_assignment)
             return assignment_use::unknown;
         if (kx.defaulted_move_assignment && kx.defaulted_copy_assignment)
