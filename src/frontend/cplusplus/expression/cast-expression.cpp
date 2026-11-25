@@ -125,7 +125,8 @@ analysis_result semantic_analysis::no_cast(SyntaxRef at, uint8_t kinds)
     /* [impl.clang] Microsoft's mode has casts of its own (a static_cast
        between pointers to functions and to objects) */
     if (tokens.files.behavior.microsoft_extensions)
-        return not_supported(at, label);
+        return not_supported_because(
+            at, label, "an invalid cast under Microsoft extensions");
     return ill_formed(at, rule, label);
 }
 
@@ -139,7 +140,8 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
     if (!(target.kind == type_kind::fundamental &&
           target.fundamental == fundamental_type::void_) &&
         binary128_conversion(m.type, to))
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(at, "ext.gnu",
+                                     "a cast involving __float128");
     if (target.kind == type_kind::lvalue_reference ||
         target.kind == type_kind::rvalue_reference)
         return reference_cast(at, to, m, kinds);
@@ -155,10 +157,14 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
         bool scalar_to = is_arithmetic(to);
         if (target.kind == type_kind::vector &&
             from_type.kind != type_kind::vector && !scalar_from)
-            return not_supported(at, "ext.gnu");
+            return not_supported_because(at, "ext.gnu",
+                                         "a cast to a vector from an operand "
+                                         "that is not vector or scalar");
         if (from_type.kind == type_kind::vector &&
             target.kind != type_kind::vector && !scalar_to)
-            return not_supported(at, "ext.gnu");
+            return not_supported_because(
+                at, "ext.gnu",
+                "a cast from a vector to a type that is not vector or scalar");
         if (size_of_type(m.type) != size_of_type(to))
             return ill_formed(at,
                               "invalid conversion between vector type and a "
@@ -214,7 +220,9 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
             return no_cast(at, kinds);
         if (target.kind != type_kind::fundamental &&
             target.kind != type_kind::pointer && !enumeration_of(to))
-            return not_supported(at, "expr.static.cast");
+            return not_supported_because(
+                at, "expr.static.cast",
+                "a static_cast of a class operand to an unhandled type");
         /* [expr.static.cast]/4 with [dcl.init]/17.7: "the source type is a
            (possibly cv-qualified) class type, conversion functions are
            considered", then the second standard conversion sequence */
@@ -233,7 +241,9 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
            operand."  (A bit-field's value of its own type is not
            analysed.) */
         if (m.bit_field_width)
-            return not_supported(at, "expr.reinterpret.cast");
+            return not_supported_because(
+                at, "expr.reinterpret.cast",
+                "a cast of a bit-field to its own type");
         analysis_result r = operand_value(at, m);
         if (r == analysis_result::well_formed)
             m.type = qualified_type::make(to.unqualified(), cv_none);
@@ -252,17 +262,23 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
            subsequently to the enumeration type." */
         entity_index e = enumeration_of(to);
         if (!e)
-            return not_supported(at, "dcl.enum");
+            return not_supported_because(
+                at, "dcl.enum",
+                "a cast to an enumeration type that is not known");
         VTRY(r, operand_value(at, m));
         if (m.type.unqualified() == to.unqualified())
             return analysis_result::well_formed;
         if (type_table[m.type.unqualified()].kind == type_kind::enumeration &&
             !enumeration_as_underlying(m))
-            return not_supported(at, "dcl.enum");
+            return not_supported_because(
+                at, "dcl.enum",
+                "a cast from an enumeration with no known underlying type");
         if (!is_arithmetic(m.type)) {
             if (fundamental_of(m.type) == fundamental_type::none &&
                 !is_pointer(m.type))
-                return not_supported(at, "expr.cast");
+                return not_supported_because(at, "expr.cast",
+                                             "a cast to an enumeration from an "
+                                             "operand of an unhandled type");
             return no_cast(at, kinds);
         }
         if (!by_static)
@@ -305,7 +321,8 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
         return member_pointer_cast(at, to, m, kinds);
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer)
-        return not_supported(at, "expr.cast");
+        return not_supported_because(at, "expr.cast",
+                                     "a cast to a type that has no rules");
     VTRY(r, operand_value(at, m));
     if (is_member_pointer(m.type)) {
         /* [conv.bool]/1: "A prvalue of ... pointer-to-member type can be
@@ -315,7 +332,8 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
         if (target.kind == type_kind::fundamental &&
             target.fundamental == fundamental_type::bool_ && by_static)
             return implicit_conversion(at, m, to, true);
-        return not_supported(at, "expr.cast");
+        return not_supported_because(at, "expr.cast",
+                                     "a cast of a member pointer to this type");
     }
     /* [expr.static.cast]/9: "A value of a scoped enumeration type can be
        explicitly converted to an integral type"; and to a floating-point
@@ -325,7 +343,9 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
         if (!by_static)
             return no_cast(at, kinds);
         if (!enumeration_as_underlying(m))
-            return not_supported(at, "dcl.enum");
+            return not_supported_because(
+                at, "dcl.enum",
+                "a cast from an enumeration with no known underlying type");
     }
     if (is_arithmetic(to) && is_arithmetic(m.type)) {
         if (!by_static)
@@ -358,7 +378,9 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
             return analysis_result::well_formed;
         }
         if (from == fundamental_type::none)
-            return not_supported(at, "expr.cast");
+            return not_supported_because(
+                at, "expr.cast",
+                "a cast to pointer from an operand of an unhandled type");
         return no_cast(at, kinds);
     }
     if (from == fundamental_type::std_nullptr_t &&
@@ -401,10 +423,12 @@ analysis_result semantic_analysis::explicit_conversion(SyntaxRef at,
     /* std::nullptr_t, the operands of other types: the implicit
        conversions, the rest not analysed yet */
     if (from == fundamental_type::none)
-        return not_supported(at, "expr.cast");
+        return not_supported_because(
+            at, "expr.cast", "a cast from an operand of an unhandled type");
     if (target.fundamental == fundamental_type::std_nullptr_t && by_static)
         return implicit_conversion(at, m, to, true);
-    return not_supported(at, "expr.cast");
+    return not_supported_because(
+        at, "expr.cast", "a cast to a fundamental type that has no rules");
 }
 
 /*
@@ -427,7 +451,9 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
 {
     VTRY(r, operand_value(at, m));
     if (!(kinds & cast_static))
-        return not_supported(at, "expr.cast");
+        return not_supported_because(
+            at, "expr.cast",
+            "a member pointer cast without static_cast semantics");
     const struct type source = type_table[m.type.unqualified()];
     const struct type target = type_table[to.unqualified()];
     if (source.kind != type_kind::pointer_to_member ||
@@ -439,7 +465,9 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
         (source.operand.cv() & ~target.operand.cv()) || d == b ||
         entity_table[d].kind != entity_kind::class_type ||
         entity_table[b].kind != entity_kind::class_type)
-        return not_supported(at, "expr.static.cast");
+        return not_supported_because(
+            at, "expr.static.cast",
+            "a member pointer cast that also changes the member type or cv");
     require_complete(b);
     require_complete(d);
     if (entity_table[d].size && base_subobjects(d, b) == 0 &&
@@ -467,7 +495,9 @@ analysis_result semantic_analysis::member_pointer_cast(SyntaxRef at,
         return r;
     }
     if (!entity_table[d].size || !base_subobjects(d, b))
-        return not_supported(at, "expr.static.cast");
+        return not_supported_because(at, "expr.static.cast",
+                                     "a member pointer cast between classes "
+                                     "not related as derived and base");
     if (base_subobjects(d, b) != 1 || !nonvirtual_subobjects(d, b))
         return ill_formed(at,
                           "if no valid standard conversion from \"pointer to "
@@ -652,7 +682,9 @@ analysis_result semantic_analysis::pointer_conversion(SyntaxRef at,
                               "away constness",
                               "expr.reinterpret.cast");
         if (unknown)
-            return not_supported(at, "expr.const.cast");
+            return not_supported_because(
+                at, "expr.const.cast",
+                "a const_cast check of constness that could not be decided");
     }
     m.type = result;
     /* [expr.const]/5: "a reinterpret_cast", "a conversion from type cv
@@ -714,7 +746,9 @@ analysis_result semantic_analysis::class_pointer_cast(SyntaxRef at,
         base = fp.entity;
     }
     if (kinds != cast_static && !single_nonvirtual_path(derived, base))
-        return not_supported(at, "expr.cast");
+        return not_supported_because(at, "expr.cast",
+                                     "a C-style or reinterpret cast along a "
+                                     "virtual or ambiguous base path");
     bool lesser = pointee.cv() & ~target_pointee.cv();
     if (lesser && !(kinds & cast_const))
         return ill_formed(at,
@@ -785,7 +819,9 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
         category = value_category::lvalue;
     if (type_table[referenced.unqualified()].kind == type_kind::function ||
         m.bit_field_width)
-        return not_supported(at, "expr.cast");
+        return not_supported_because(
+            at, "expr.cast",
+            "a cast of a function or bit-field to a reference");
     bool same = referenced.unqualified() == m.type.unqualified();
     bool scalars =
         type_table[referenced.unqualified()].kind != type_kind::class_type &&
@@ -803,19 +839,25 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
         VTRY(r, reference_binding(at, m, to));
     } else {
         if (m.category == value_category::prvalue)
-            return not_supported(at, "expr.cast");
+            return not_supported_because(
+                at, "expr.cast",
+                "a prvalue cast to a reference without a temporary");
         bool xvalue_ok = m.category == value_category::xvalue &&
                          (!lvalue_reference || (referenced.cv() == cv_const &&
                                                 (kinds & cast_static)));
         if (lvalue_reference && m.category != value_category::lvalue &&
             !xvalue_ok)
-            return not_supported(at, "expr.cast");
+            return not_supported_because(at, "expr.cast",
+                                         "a cast to an lvalue reference from a "
+                                         "value that is not an lvalue");
         if (same && m.type.cv() == referenced.cv() && m.category == category &&
             (kinds & (cast_static | cast_const)))
             /* the glvalue itself */
             return analysis_result::well_formed;
         if (m.category != value_category::lvalue && !xvalue_ok)
-            return not_supported(at, "expr.cast");
+            return not_supported_because(
+                at, "expr.cast",
+                "a reference cast of a value of this category");
         const struct type &from = type_table[m.type.unqualified()];
         const struct type &into = type_table[referenced.unqualified()];
         bool related = false;
@@ -829,7 +871,9 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
             (kinds == cast_static || may_bind_temporary))
             /* [expr.static.cast]/4: "T t(E);" may bind the reference to a
                temporary of the converted value */
-            return not_supported(at, "expr.static.cast");
+            return not_supported_because(
+                at, "expr.static.cast",
+                "a static_cast to a reference of an unrelated type");
     }
     token_index t = at.first_token();
     expression_meaning address;
@@ -863,7 +907,9 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
 analysis_result semantic_analysis::cast(SyntaxRef n, expression_meaning &m)
 {
     if (n.size() != 4 || !n[1].is(syntax_kind::type_id))
-        return not_supported(n, "expr.cast");
+        return not_supported_because(
+            n, "expr.cast",
+            "a cast expression not of the form (type-id) expression");
     qualified_type to;
     analysis_result r = type_id(n[1], to);
     /* [over.over]/1: "an explicit type conversion" */

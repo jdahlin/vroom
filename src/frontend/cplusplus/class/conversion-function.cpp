@@ -98,7 +98,9 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
                                                    qualified_type &type)
 {
     if (id.size() != 2 || id[1].is_token())
-        return not_supported(id, "class.conv.fct");
+        return not_supported_because(id, "class.conv.fct",
+                                     "a conversion-function-id without a type "
+                                     "node of the expected form");
     auto t = id[1];
     SyntaxRef seq = t;
     if (t.is(syntax_kind::conversion_type_id))
@@ -107,7 +109,10 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
     VTRY(r, decl_specifier_seq(seq, s, false));
     if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.inline_ ||
         s.constexpr_ || s.virtual_ || s.friend_ || s.gnu_flags || s.aligned)
-        return not_supported(seq, "class.conv.fct");
+        return not_supported_because(
+            seq, "class.conv.fct",
+            "a conversion-type-id with no type or with another specifier than "
+            "a type-specifier");
     type = s.type;
     if (t == seq)
         return analysis_result::well_formed;
@@ -127,7 +132,9 @@ analysis_result semantic_analysis::conversion_type(SyntaxRef id,
             continue;
         }
         if (!k.is(syntax_kind::ptr_operator))
-            return not_supported(k, "class.conv.fct");
+            return not_supported_because(
+                k, "class.conv.fct",
+                "a conversion-declarator part that is no ptr-operator");
         declarator_meaning m;
         VTRY_SET(r, pointer_operator(k, type, m));
     }
@@ -184,11 +191,14 @@ semantic_analysis::conversion_function_member(entity_index c, SyntaxRef n,
                               "member function",
                               "class.conv.fct");
         if (s.typedef_ || s.extern_)
-            return not_supported(n, "class.conv.fct");
+            return not_supported_because(
+                n, "class.conv.fct",
+                "a conversion function declared typedef or extern");
         if (s.virtual_)
             /* [class.virtual]/2: an overrider is the conversion function
                to the same type, which virtual_member does not tell yet */
-            return not_supported(n, "class.conv.fct");
+            return not_supported_because(n, "class.conv.fct",
+                                         "a virtual conversion function");
     }
     qualified_type type;
     VTRY(r, conversion_type(id, type));
@@ -595,13 +605,18 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
     bool ambiguous = false, unknown = false;
     entity_index f = conversion_function_for(m, to, direct, ambiguous, unknown);
     if (unknown)
-        return not_supported(at, "over.match.conv");
+        return not_supported_because(at, "over.match.conv",
+                                     "a conversion for which the choice of "
+                                     "conversion function is not known");
     if (ambiguous)
         /* two conversion functions whose second standard conversion
            sequences [over.ics.rank]/3.2.1 may tell apart (a proper
            subsequence to another type), which compare_conversions does
            not: clang's ambiguity is not claimed */
-        return not_supported(at, "over.ics.rank");
+        return not_supported_because(
+            at, "over.ics.rank",
+            "a conversion with ambiguous conversion functions (their second "
+            "standard conversion sequences are not compared)");
     if (!f)
         return analysis_result::well_formed;
     entity_index c = type_table[m.type.unqualified()].entity;

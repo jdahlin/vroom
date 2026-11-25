@@ -31,7 +31,9 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
            rule for one that differs */
         uint32_t same = alias_template_of(prior);
         if (!same || !same_tokens(function_templates[same - 1].declaration, n))
-            return not_supported(n, "temp.alias");
+            return not_supported_because(
+                n, "temp.alias",
+                "a redeclaration of a name as a different alias template");
         entity_table.add_declaration(function_templates[same - 1].entity, n);
         return analysis_result::well_formed;
     }
@@ -42,7 +44,9 @@ analysis_result semantic_analysis::alias_template_definition(SyntaxRef n,
     /* [temp.param]/14's rule is a class template's: a default after which
        one is missing is left to clang */
     if (default_missing_after_one(parameters))
-        return not_supported(n, "temp.param");
+        return not_supported_because(n, "temp.param",
+                                     "an alias template parameter with no "
+                                     "default after a defaulted one");
     qualified_type pattern;
     entity_index saved_scope = current_scope;
     current_scope = scope;
@@ -156,7 +160,9 @@ analysis_result semantic_analysis::alias_template_specialization(
         if (!satisfied && substituting)
             return analysis_result::ill_formed;
         if (!satisfied)
-            return not_supported(id, "temp.names");
+            return not_supported_because(
+                id, "temp.names",
+                "an alias template-id whose constraints are not satisfied");
     }
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[ft.entity].enclosing);
@@ -203,13 +209,17 @@ analysis_result semantic_analysis::alias_template_specialization(
     if (r == analysis_result::ill_formed && substituting)
         return r;
     if (r == analysis_result::ill_formed)
-        return not_supported(id, "temp.alias");
+        return not_supported_because(id, "temp.alias",
+                                     "an alias template whose type-id is "
+                                     "ill-formed for these arguments");
     if (r != analysis_result::well_formed)
         return r;
     /* a cv-qualified type (alias<const T>) to a caller that takes its cv;
        the others refuse it rather than drop the cv */
     if (t.cv() && !cv)
-        return not_supported(id, "temp.alias");
+        return not_supported_because(
+            id, "temp.alias",
+            "a cv-qualified alias template specialization in this context");
     /* [temp.alias]/4 (CWG 1558): "when a template-id refers to the
        specialization of an alias template ... any substitution failure in
        the template arguments of the template-id is a substitution failure

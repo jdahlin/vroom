@@ -43,10 +43,14 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
     specialization = 0;
     const entity t = entity_table[template_entity];
     if (t.kind != entity_kind::template_entity || !t.instantiation)
-        return not_supported(at, "temp.inst");
+        return not_supported_because(at, "temp.inst",
+                                     "an instantiation of an entity that is no "
+                                     "template with a recorded pattern");
     const function_template ft = function_templates[t.instantiation - 1];
     if (count != ft.parameter_count)
-        return not_supported(at, "temp.inst");
+        return not_supported_because(at, "temp.inst",
+                                     "an instantiation with a different number "
+                                     "of arguments than template parameters");
     bool needed = !unevaluated;
     uint32_t index = 0;
     uint32_t prior = find_instantiation(template_entity, arguments, count);
@@ -228,11 +232,14 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
     if (instantiations[index].substitution_failed) {
         if (substituting)
             return analysis_result::ill_formed;
-        return not_supported(at, "temp.deduct");
+        return not_supported_because(
+            at, "temp.deduct",
+            "a use of a specialization whose substitution failed before");
     }
     specialization = instantiations[index].specialization;
     if (!specialization)
-        return not_supported(at, "temp.inst");
+        return not_supported_because(
+            at, "temp.inst", "an instantiation that left no specialization");
     instantiation_record &x = instantiations[index];
     /* [ext.clang] a call of a C++ library builtin is the builtin's: its
        definition is not instantiated */
@@ -341,7 +348,9 @@ analysis_result semantic_analysis::quiet_definition_failed(SyntaxRef at,
     /* (and code that calls it, analysed before it failed, is refused
        when lowered, as a member's body that failed) */
     size_t before = unsupported.size();
-    not_supported(at, "temp.inst");
+    not_supported_because(
+        at, "temp.inst",
+        "a specialization whose definition failed in a quiet instantiation");
     body_failures.append(unsupported[before]);
     unsupported.resize(before);
     entity_table[x.specialization].unsupported_body =
@@ -370,7 +379,9 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
        instantiations"; [implimits]/2 suggests 1024, this one is lower
        while every level is a C++ stack frame of analysis */
     if (instantiation_depth >= 64)
-        return not_supported(at, "temp.inst");
+        return not_supported_because(
+            at, "temp.inst",
+            "function or variable instantiations nested 64 deep or more");
     entity_index template_entity = instantiations[index].template_entity;
     const function_template ft =
         function_templates[entity_table[template_entity].instantiation - 1];
@@ -661,7 +672,9 @@ analysis_result semantic_analysis::instantiate_class(
                 unsupported.append(x.failure);
                 return analysis_result::unsupported;
             }
-            return not_supported(at, "temp.inst");
+            return not_supported_because(
+                at, "temp.inst",
+                "a class specialization that was recorded without a class");
         }
         /* a specialization named before its template was defined
            ([temp.inst]/2's "declared specialization" is not one): defined
@@ -713,7 +726,9 @@ analysis_result semantic_analysis::instantiate_class(
         return analysis_result::well_formed;
     }
     if (instantiation_depth >= 64)
-        return not_supported(at, "temp.inst");
+        return not_supported_because(at, "temp.inst",
+                                     "class instantiations nested 64 deep or "
+                                     "more (naming a specialization)");
     /* [temp.inst]/2, [basic.def]/5: the specialization named while its own
        pattern is being chosen (a partial specialization's argument that
        needs the same specialization) is incomplete there; looked into, it
@@ -883,7 +898,9 @@ analysis_result semantic_analysis::define_class_instantiation(SyntaxRef at,
     } restore_expanding = {expanding, expanding};
     expanding = false;
     if (instantiation_depth >= 64)
-        return not_supported(at, "temp.inst");
+        return not_supported_because(at, "temp.inst",
+                                     "class instantiations nested 64 deep or "
+                                     "more (defining a specialization)");
     const instantiation_record record = instantiations[index];
     const function_template ft =
         function_templates[entity_table[record.template_entity].instantiation -
@@ -1299,7 +1316,10 @@ analysis_result semantic_analysis::declare_specialization(
        declaration, [dcl.inline]/5) */
     bool inline_ = s.inline_ || !is_namespace(t.enclosing);
     if ((inline_ && !t.inline_) || s.constexpr_ != t.constexpr_)
-        return not_supported(declaration, "temp.inst");
+        return not_supported_because(
+            declaration, "temp.inst",
+            "a member function template definition whose inline or constexpr "
+            "differs from its declaration");
     entity_index e =
         entity_table.make(entity_kind::function, t.name, t.enclosing);
     entity_table[e].type = type;
@@ -1371,7 +1391,10 @@ analysis_result semantic_analysis::declare_variable_specialization(
     const entity t = entity_table[instantiations[index].template_entity];
     bool explicit_ = instantiations[index].explicit_specialization;
     if ((s.constexpr_ != t.constexpr_ && !explicit_) || s.extern_ || s.typedef_)
-        return not_supported(declaration, "temp.inst");
+        return not_supported_because(
+            declaration, "temp.inst",
+            "a variable template definition declared extern or typedef, or "
+            "differing in constexpr");
     entity_index e =
         entity_table.make(entity_kind::variable, t.name, t.enclosing);
     entity_table[e].type = type;

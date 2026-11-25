@@ -181,7 +181,16 @@ analysis_result semantic_analysis::not_supported_because(SyntaxRef n,
                                                          call_site where)
 {
     analysis_result r = not_supported(n, subclause, where);
-    last_unsupported_detail(what, strlen(what));
+    /* (an extension's source text, which not_supported named, stays
+       behind the reason) */
+    const char *source = unsupported[unsupported.size() - 1].detail;
+    if (*source) {
+        char text[512];
+        snprintf(text, sizeof text, "%s: %s", what, source);
+        last_unsupported_detail(text, strlen(text));
+    } else {
+        last_unsupported_detail(what, strlen(what));
+    }
     return r;
 }
 
@@ -498,7 +507,9 @@ analysis_result semantic_analysis::declaration_by_kind(SyntaxRef n)
                 if (ignored)
                     return analysis_result::well_formed;
             }
-            return not_supported(d);
+            return not_supported_because(
+                d, syntax_kind_subclause(d.kind()),
+                "a declaration of a kind that is not analysed");
         }});
 }
 

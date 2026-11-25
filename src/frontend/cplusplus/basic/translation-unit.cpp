@@ -271,7 +271,9 @@ analysis_result semantic_analysis::declare(
            again ([dcl.meaning]/1 has a function or variable in mind):
            clang's error, by a rule C++20 does not word */
         if (kind == entity_kind::typedef_name)
-            return not_supported(declaration, "dcl.meaning");
+            return not_supported_because(
+                declaration, "dcl.meaning",
+                "a typedef declared with a qualified declarator-id");
         scope = qualified_scope;
         /* [namespace.memdef]/2: "Members of a named namespace can also be
            defined outside that namespace by explicit qualification of the
@@ -289,7 +291,9 @@ analysis_result semantic_analysis::declare(
         /* in its own namespace: clang's extra qualification, an error or a
            warning by the kind of member */
         if (current_scope == scope)
-            return not_supported(declaration, "dcl.meaning");
+            return not_supported_because(
+                declaration, "dcl.meaning",
+                "a qualified declarator-id in the namespace it names");
         /* [dcl.meaning]/1: "the declaration shall refer to a previously
            declared member of the class or namespace to which the qualifier
            refers (or, in the case of a namespace, of an element of the
@@ -302,17 +306,23 @@ analysis_result semantic_analysis::declare(
         if (found.ambiguous || found.unknown || !found.entity)
             /* one not found may be a friend's, declared in a class
                ([namespace.memdef]/3) */
-            return not_supported(declaration, "dcl.meaning");
+            return not_supported_because(
+                declaration, "dcl.meaning",
+                "a qualified declaration of a name not found unambiguously");
         prior = found.entity;
         entity_index in = entity_table[prior].enclosing;
         if (entity_table.find(found.found_in, name) != prior ||
             found.found_in != in)
             /* named by a using-declaration there, or found through a
                using-directive */
-            return not_supported(declaration, "dcl.meaning");
+            return not_supported_because(declaration, "dcl.meaning",
+                                         "a qualified redeclaration through a "
+                                         "using declaration or directive");
         for (entity_index y = in; y != scope; y = entity_table[y].enclosing)
             if (!y || !entity_table[y].inline_)
-                return not_supported(declaration, "dcl.meaning");
+                return not_supported_because(declaration, "dcl.meaning",
+                                             "a qualified redeclaration of a "
+                                             "member of a nested namespace");
         scope = in;
     } else {
         prior = entity_table.find(scope, name);
@@ -334,7 +344,10 @@ analysis_result semantic_analysis::declare(
                     if (!(entity_table[e].type == type) &&
                         differ_in_major_bound(type_table, entity_table[e].type,
                                               type))
-                        return not_supported(declaration, "dcl.array");
+                        return not_supported_because(
+                            declaration, "dcl.array",
+                            "a redeclaration of a block's extern array with "
+                            "another bound");
                     prior = e;
                     entity_table.bind(scope, name, e);
                 }
@@ -355,7 +368,9 @@ analysis_result semantic_analysis::declare(
                 bool library = x.gnu_flags & gnu_library_function;
                 if (!(x.type == type) &&
                     !(library && differ_in_exceptions(x.type, type)))
-                    return not_supported(declaration, "dcl.link");
+                    return not_supported_because(
+                        declaration, "dcl.link",
+                        "a C language linkage redeclaration with another type");
                 prior = e;
                 entity_table.bind(scope, name, e);
             }
@@ -426,7 +441,9 @@ analysis_result semantic_analysis::declare(
                                     type.unqualified()))
                     join = false;
         if (!join)
-            return not_supported(declaration, "namespace.udecl");
+            return not_supported_because(
+                declaration, "namespace.udecl",
+                "a declaration conflicting with a name introduced elsewhere");
         if (entity_table[prior].enclosing != scope) {
             entity_index held =
                 entity_table.make(entity_kind::none, name, scope);
@@ -457,7 +474,9 @@ analysis_result semantic_analysis::declare(
         if (kind == entity_kind::typedef_name || qualified ||
             entity_table[prior].enclosing != scope)
             /* a typedef-name for another type: [dcl.typedef]/6 */
-            return not_supported(declaration, "basic.scope.hiding");
+            return not_supported_because(
+                declaration, "basic.scope.hiding",
+                "a declaration hiding a class or enum name in this way");
         hides = prior;
         prior = 0;
     }
@@ -476,12 +495,16 @@ analysis_result semantic_analysis::declare(
         if (kind == entity_kind::function ||
             (s.extern_ && kind == entity_kind::variable)) {
             if (hides)
-                return not_supported(declaration, "basic.scope.hiding");
+                return not_supported_because(declaration, "basic.scope.hiding",
+                                             "a block function or extern that "
+                                             "hides a class or enum name");
             return declare_in_block_with_linkage(declaration, id, kind, type, s,
                                                  initialized, declared_entity);
         }
         if (s.extern_)
-            return not_supported(declaration, "basic.link");
+            return not_supported_because(
+                declaration, "basic.link",
+                "a block-scope extern declaration of this kind of entity");
     }
     /* [dcl.array]/8: "if there is a preceding declaration of the entity in
        the same scope in which the bound was specified, an omitted array
@@ -537,14 +560,17 @@ analysis_result semantic_analysis::declare(
         /* an extern object of type cv void: clang's error, a rule not found
            yet */
         if (is_void)
-            return not_supported(declaration, "basic.types");
+            return not_supported_because(declaration, "basic.types",
+                                         "an extern object of type void");
         /* [basic.def]/5: "In the definition of an object, the type of that
            object shall not be ... an abstract class type, or a (possibly
            multi-dimensional) array thereof" (a declaration that is no
            definition: clang's error too, from no rule found yet) */
         if (abstract_class(type)) {
             if (!definition)
-                return not_supported(declaration, "class.abstract");
+                return not_supported_because(
+                    declaration, "class.abstract",
+                    "a declaration of an object of abstract class type");
             return ill_formed_at_token(id,
                                        "in the definition of an object, the "
                                        "type of that object shall not be an "
@@ -617,7 +643,8 @@ analysis_result semantic_analysis::declare(
                                        "dcl.init");
     }
     if (kind == entity_kind::typedef_name && definition)
-        return not_supported(declaration, "dcl.fct.def.general");
+        return not_supported_because(declaration, "dcl.fct.def.general",
+                                     "a typedef that has a function body");
     /* [dcl.typedef]/9: "If the typedef declaration defines an unnamed
        class (or enumeration), the first typedef-name declared by the
        declaration to be that class type (or enumeration type) is used to
@@ -646,7 +673,9 @@ analysis_result semantic_analysis::declare(
     }
     if (kind != entity_kind::function && s.inline_ &&
         kind != entity_kind::variable)
-        return not_supported(declaration, "dcl.inline");
+        return not_supported_because(
+            declaration, "dcl.inline",
+            "inline on a declaration of neither a function nor a variable");
     /* [basic.link]/3: "A name having namespace scope has internal linkage
        if it is the name of a variable, variable template, function, or
        function template that is explicitly declared static; or a
@@ -702,7 +731,9 @@ analysis_result semantic_analysis::declare(
             if (t.name == prior && !t.unusable)
                 usable = true;
         if (!usable)
-            return not_supported(declaration, "basic.scope.declarative");
+            return not_supported_because(
+                declaration, "basic.scope.declarative",
+                "a function beside an unusable function template of its name");
         held_name = prior;
         prior = 0;
         for (const template_name_function &x : template_name_functions)
@@ -745,7 +776,10 @@ analysis_result semantic_analysis::declare(
             if (u) {
                 if (entity_table[prior].named_by_using ||
                     entity_table[u].next_overload)
-                    return not_supported(declaration, "class.friend");
+                    return not_supported_because(
+                        declaration, "class.friend",
+                        "a friend-declared function that cannot join the "
+                        "overload set");
                 entity_index last = prior;
                 while (entity_table[last].next_overload)
                     last = entity_table[last].next_overload;
@@ -822,12 +856,17 @@ analysis_result semantic_analysis::declare(
                          entity_kind::class_type) ||
                     (now.kind == type_kind::class_type &&
                      entity_table[now.entity].kind != entity_kind::class_type))
-                    return not_supported(declaration, "temp.inst");
+                    return not_supported_because(
+                        declaration, "temp.inst",
+                        "a typedef redeclared with an unanalysed class "
+                        "specialization");
                 /* decltype of a name no rules hold has a dependent type
                    of its own, which compares with nothing */
                 if (was.kind == type_kind::dependent ||
                     now.kind == type_kind::dependent)
-                    return not_supported(declaration, "dcl.typedef");
+                    return not_supported_because(
+                        declaration, "dcl.typedef",
+                        "a typedef redeclared with a dependent type");
                 return ill_formed_at_token(id,
                                            "a typedef specifier shall not be "
                                            "used to redeclare the name of a "
@@ -948,7 +987,9 @@ analysis_result semantic_analysis::declare(
                declarations before it, so this overload is not one of the
                set it introduced; the name is bound to the chain, not to a
                copy of it */
-            return not_supported(declaration, "namespace.udecl");
+            return not_supported_because(
+                declaration, "namespace.udecl",
+                "an overload added to a name a using-declaration introduced");
         entity_index e = entity_table.make(kind, name, scope);
         entity_table[e].hidden_type = hides;
         entity_table[e].unnamed_type_linkage = unnamed_type;
@@ -1116,15 +1157,21 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
                                    "has an initializer is ill-formed",
                                    "dcl.init");
     if ((s.constexpr_ && kind != entity_kind::function) || function_cv)
-        return not_supported(declaration, "basic.link");
+        return not_supported_because(
+            declaration, "basic.link",
+            "a constexpr or cv-qualified block declaration with linkage");
     if (kind == entity_kind::variable) {
         const struct type &record = type_table[type.unqualified()];
         if (record.kind == type_kind::class_type &&
             entity_table[record.entity].kind != entity_kind::class_type)
-            return not_supported(declaration, "class.pre");
+            return not_supported_because(
+                declaration, "class.pre",
+                "a block extern variable of an unanalysed class");
         if (record.kind == type_kind::fundamental &&
             record.fundamental == fundamental_type::void_)
-            return not_supported(declaration, "basic.types");
+            return not_supported_because(
+                declaration, "basic.types",
+                "a block extern variable of type void");
     }
     /* whether the entity e is what this declaration would redeclare */
     auto matches = [&](entity_index e, analysis_result &r) {
@@ -1145,7 +1192,9 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
             if (!same_parameters(type_table, x.type.unqualified(),
                                  type.unqualified())) {
                 /* another function of the name: an overload */
-                r = not_supported(declaration, "over");
+                r = not_supported_because(
+                    declaration, "over",
+                    "a block-scope overload of a function with linkage");
                 return false;
             }
             r = constexpr_redeclaration(id, e, s.constexpr_);
@@ -1183,7 +1232,9 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
            the type the name has in this scope only, which an entity's one
            type does not say */
         if (!(x.type == type)) {
-            r = not_supported(declaration, "dcl.array");
+            r = not_supported_because(
+                declaration, "dcl.array",
+                "a block redeclaration that gives or omits an array bound");
             return false;
         }
         return true;
@@ -1194,7 +1245,9 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
         const entity &x = entity_table[here];
         if (x.kind == entity_kind::none ||
             entity_table.bound_by_using(block, name))
-            return not_supported(declaration, "basic.scope.declarative");
+            return not_supported_because(declaration, "basic.scope.declarative",
+                                         "a block declaration over an "
+                                         "unanalysed or using-declared name");
         /* a local entity of the block: [basic.scope.declarative]/4 */
         if (!is_namespace(x.enclosing))
             return ill_formed_at_token(id,
@@ -1206,7 +1259,9 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
     }
     lookup_result visible = lookup_unqualified(name, lookup_filter::any);
     if (visible.unknown || visible.ambiguous)
-        return not_supported(declaration, "basic.link");
+        return not_supported_because(
+            declaration, "basic.link",
+            "a block extern whose name lookup is unknown or ambiguous");
     if (visible.entity) {
         const entity &x = entity_table[visible.entity];
         bool has_linkage = (x.kind == entity_kind::function ||
@@ -1217,7 +1272,9 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
                through a using-declaration or using-directive */
             if (entity_table.bound_by_using(visible.found_in, name) ||
                 (is_namespace(visible.found_in) && visible.found_in != space))
-                return not_supported(declaration, "basic.link");
+                return not_supported_because(declaration, "basic.link",
+                                             "a block extern found through a "
+                                             "using declaration or directive");
             analysis_result r;
             if (!matches(visible.entity, r))
                 return r;
@@ -1228,7 +1285,9 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
                in a block, or a name of the namespace that is no function
                or variable: what the declaration then declares has no
                rules yet */
-            return not_supported(declaration, "basic.link");
+            return not_supported_because(
+                declaration, "basic.link",
+                "a block extern of a name hidden or of another kind");
         }
         /* else: an entity of an outer namespace, which is ignored */
     }
@@ -1243,7 +1302,9 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
         if (!target && member)
             /* hidden by an outer namespace's name found first? not so:
                lookup would have found it */
-            return not_supported(declaration, "basic.link");
+            return not_supported_because(declaration, "basic.link",
+                                         "a block extern of a namespace member "
+                                         "that lookup did not find");
         if (target) {
             analysis_result r;
             if (!matches(target, r))
@@ -1320,13 +1381,17 @@ analysis_result semantic_analysis::declare_local(
     if (prior) {
         const entity &e = entity_table[prior];
         if (e.kind == entity_kind::none)
-            return not_supported(declaration, "basic.scope.declarative");
+            return not_supported_because(declaration, "basic.scope.declarative",
+                                         "a local redeclaration of a name from "
+                                         "an unanalysed declaration");
         /* C++26's name-independent declarations (P2169, not in C++20): a
            variable named _ may be declared again */
         owned_buffer spelling;
         tokens.spelling(id, spelling.get());
         if (spelling.size() == 1 && spelling.data()[0] == '_')
-            return not_supported(declaration, "basic.scope.declarative");
+            return not_supported_because(
+                declaration, "basic.scope.declarative",
+                "a second declaration of the name _ in a block");
         /* [dcl.typedef]/6: "In a given non-class scope, a typedef
            specifier can be used to redeclare the name of any type declared
            in that scope to refer to the type to which it already refers." */
@@ -1336,7 +1401,9 @@ analysis_result semantic_analysis::declare_local(
                 (type_table[e.type.unqualified()].kind ==
                      type_kind::dependent ||
                  type_table[type.unqualified()].kind == type_kind::dependent))
-                return not_supported(declaration, "dcl.typedef");
+                return not_supported_because(
+                    declaration, "dcl.typedef",
+                    "a local typedef redeclared with a dependent type");
             if (!(e.type == type))
                 return ill_formed_at_token(id,
                                            "a typedef specifier shall not be "
@@ -1364,7 +1431,9 @@ analysis_result semantic_analysis::declare_local(
     if (conflicts) {
         entity_index other = entity_table.find(conflicts, name);
         if (other && entity_table[other].kind == entity_kind::none)
-            return not_supported(declaration, "basic.scope.block");
+            return not_supported_because(
+                declaration, "basic.scope.block",
+                "a local name conflicting with an unanalysed declaration");
         if (other && entity_table[conflicts].parameter_scope)
             /* [basic.scope.param]/1: "A parameter name shall not be
                redeclared in the outermost block of the function

@@ -41,14 +41,17 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
     SyntaxElement decl_part = item;
     if (item.is(syntax_kind::init_declarator, syntax_kind::member_declarator)) {
         if (item.size() != 2 || item[1].is(syntax_kind::requires_clause))
-            return not_supported(n, "temp.pre");
+            return not_supported_because(n, "temp.pre",
+                                         "a variable template declarator with "
+                                         "a requires-clause or extra parts");
         decl_part = item[0];
         has_init = true;
     } else if (declaration.is(syntax_kind::simple_declaration)) {
         /* (no initializer: the declaration is a definition) */
         has_definition = true;
     } else if (!declaration.is(syntax_kind::member_declaration)) {
-        return not_supported(n, "temp.pre");
+        return not_supported_because(
+            n, "temp.pre", "a variable template in this kind of declaration");
     }
     /* (the name is not known before the declarator: the template-parameters
        are checked against it below) */
@@ -57,7 +60,9 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
     VTRY_SET(r, template_parameter_scope(n, parameters, outer, 0, index, scope,
                                          first));
     if (default_missing_after_one(parameters))
-        return not_supported(n, "temp.param");
+        return not_supported_because(n, "temp.param",
+                                     "a variable template parameter with no "
+                                     "default after a defaulted one");
     entity_index saved_scope = current_scope;
     uint32_t saved_cv = function_cv;
     current_scope = scope;
@@ -85,19 +90,25 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
         m.operator_function || m.literal_operator ||
         type_table[type.unqualified()].kind == type_kind::function ||
         type_table[type.unqualified()].kind == type_kind::none)
-        return not_supported(n, "temp.pre");
+        return not_supported_because(n, "temp.pre",
+                                     "a variable template declaration with "
+                                     "specifiers or a type not handled");
     for (SyntaxElement k : declaration[skip].elements()) {
         if (k.is(syntax_kind::class_specifier,
                  syntax_kind::elaborated_type_specifier,
                  syntax_kind::enum_specifier))
-            return not_supported(n, "temp.pre");
+            return not_supported_because(n, "temp.pre",
+                                         "a variable template whose specifiers "
+                                         "declare a class or enumeration");
     }
     uint32_t name = tokens.identifier(m.id);
     /* [temp.mem]/1: out-of-class definition of a static data member template */
     if (m.qualifier) {
         if (!has_init ||
             entity_table[m.qualifier].kind != entity_kind::class_type)
-            return not_supported(n, "temp.pre");
+            return not_supported_because(n, "temp.pre",
+                                         "a qualified variable template other "
+                                         "than a static member definition");
         entity_index prior = entity_table.find(m.qualifier, name);
         uint32_t vt = variable_template_of(prior);
         if (!vt || function_templates[vt - 1].definition ||
@@ -105,7 +116,9 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
             !same_template_parameters(
                 first, function_templates[vt - 1].first_parameter,
                 function_templates[vt - 1].parameter_count))
-            return not_supported(n, "temp.pre");
+            return not_supported_because(n, "temp.pre",
+                                         "a static member template definition "
+                                         "that matches no declaration");
         function_template &record = function_templates[vt - 1];
         VTRY(merged, merge_template_defaults(n, record.first_parameter, first,
                                              record.parameter_count, false));
@@ -117,12 +130,16 @@ semantic_analysis::variable_template_definition(SyntaxRef n,
         return analysis_result::well_formed;
     }
     if (entity_table.find(outer, name))
-        return not_supported(n, "temp.pre");
+        return not_supported_because(
+            n, "temp.pre",
+            "a variable template whose name is already declared in the scope");
     /* [temp.local]/6: "A template-parameter shall not have the same name
        as the template name." (clang's error) */
     for (uint32_t i = 0; i < parameters.size(); i++)
         if (entity_table[template_parameter_entities[first + i]].name == name)
-            return not_supported(n, "temp.local");
+            return not_supported_because(
+                n, "temp.local",
+                "a template parameter with the variable template's name");
     function_template record = new_template(
         name, outer, n, index, first, static_cast<uint32_t>(parameters.size()));
     has_definition = has_definition || has_init;
@@ -153,7 +170,9 @@ analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(n, x, named))
-        return not_supported(n, "temp.names");
+        return not_supported_because(
+            n, "temp.names",
+            "a variable template-id whose template name is not resolved");
     if (uint32_t ct = concept_of(named))
         if (!x.ambiguous)
             return concept_id(n, ct, m);
@@ -162,7 +181,9 @@ analysis_result semantic_analysis::variable_template_id(SyntaxRef n,
         if (uint32_t ft = function_template_of(x.unknown_entity))
             return function_template_id_value(n, ft, m);
     if (!vt || x.ambiguous)
-        return not_supported(n, "temp.names");
+        return not_supported_because(
+            n, "temp.names",
+            "an ambiguous template-id or one naming no variable template");
     return variable_template_id_of(n, vt, m);
 }
 
@@ -173,7 +194,8 @@ semantic_analysis::variable_template_id_of(SyntaxRef n, uint32_t vt,
     owned_array<template_argument> arguments;
     VTRY(r, template_id_arguments(n, vt, arguments));
     if (dependent_arguments(arguments))
-        return not_supported(n, "temp.dep");
+        return not_supported_because(
+            n, "temp.dep", "a variable template-id with dependent arguments");
     entity_index e = 0;
     VTRY_SET(r,
              instantiate_variable(n, vt, arguments.data(),
@@ -193,17 +215,23 @@ semantic_analysis::instantiate_variable(SyntaxRef at, uint32_t vt,
     e = 0;
     const function_template ft = function_templates[vt - 1];
     if (count != ft.parameter_count)
-        return not_supported(at, "temp.inst");
+        return not_supported_because(
+            at, "temp.inst",
+            "a variable template-id with a different number of arguments");
     if (uint32_t prior = find_instantiation(ft.entity, arguments, count)) {
         const instantiation_record &x = instantiations[prior - 1];
         /* (one whose initializer uses itself, or that failed) */
         if (!x.specialization || !x.defined)
-            return not_supported(at, "temp.inst");
+            return not_supported_because(at, "temp.inst",
+                                         "a variable template specialization "
+                                         "used by itself or failed before");
         e = x.specialization;
         return analysis_result::well_formed;
     }
     if (instantiation_depth >= 64)
-        return not_supported(at, "temp.inst");
+        return not_supported_because(
+            at, "temp.inst",
+            "variable template instantiations nested too deeply");
     /* [temp.class.spec.match] for variable templates: a partial
        specialization's declaration, its parameters the deduced arguments */
     uint32_t pattern = 0;
@@ -242,7 +270,8 @@ semantic_analysis::instantiate_variable(SyntaxRef at, uint32_t vt,
        reports it at the template, with a note at the use */
     if (r != analysis_result::well_formed ||
         !instantiations[index].specialization)
-        return not_supported(at, "temp.inst");
+        return not_supported_because(
+            at, "temp.inst", "a variable template instantiation that failed");
     instantiations[index].defined = true;
     e = instantiations[index].specialization;
     return analysis_result::well_formed;

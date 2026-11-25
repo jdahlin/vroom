@@ -815,14 +815,18 @@ analysis_result semantic_analysis::deduce_from_call(
     /* [dcl.fct]/3's ellipsis: the arguments after the parameters match
        it, and deduce nothing ([temp.deduct.call]/1 for each parameter) */
     if (f.variadic && fixed != f.parameter_count)
-        return not_supported(at, "temp.deduct.call");
+        return not_supported_because(at, "temp.deduct.call",
+                                     "a function pack before the end of a "
+                                     "variadic function's parameters");
     if (count + ft.default_arguments < fixed ||
         (fixed == f.parameter_count && count > fixed && !f.variadic)) {
         /* [over.match.viable]/2: a template of another number of
            parameters, less those with a default argument, cannot be
            called with these arguments */
         if (!failed)
-            return not_supported(at, "temp.deduct.call");
+            return not_supported_because(at, "temp.deduct.call",
+                                         "a call with an unsuitable number of "
+                                         "arguments for the template");
         *failed = true;
         return analysis_result::well_formed;
     }
@@ -846,7 +850,9 @@ analysis_result semantic_analysis::deduce_from_call(
     if (specified > pack && fixed == f.parameter_count)
         given = pack;
     if (given > ft.parameter_count || given > pack)
-        return not_supported(at, "temp.arg.explicit");
+        return not_supported_because(
+            at, "temp.arg.explicit",
+            "explicit template arguments reaching past the pack or parameters");
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
@@ -881,7 +887,9 @@ analysis_result semantic_analysis::deduce_from_call(
             /* [temp.deduct.call]/6: an overload set as the argument of a
                parameter of function or function pointer type */
             if (i >= fixed)
-                return not_supported(at, "temp.deduct.call");
+                return not_supported_because(
+                    at, "temp.deduct.call",
+                    "an overload set argument for a function parameter pack");
             VTRY(r, deduce_from_overload_set(at, p, arguments[i], values, set,
                                              failed));
             if (failed && *failed)
@@ -893,10 +901,14 @@ analysis_result semantic_analysis::deduce_from_call(
             int found =
                 deduce_from_braced_list(p, arguments[i], values, set, unknown);
             if (unknown || (found && i >= fixed))
-                return not_supported(at, "temp.deduct.call");
+                return not_supported_because(
+                    at, "temp.deduct.call",
+                    "an unhandled braced-list argument in deduction");
             if (found < 0) {
                 if (!failed)
-                    return not_supported(at, "temp.deduct.call");
+                    return not_supported_because(
+                        at, "temp.deduct.call",
+                        "a braced-list argument that fails deduction");
                 *failed = true;
                 return analysis_result::well_formed;
             }
@@ -911,7 +923,9 @@ analysis_result semantic_analysis::deduce_from_call(
             continue;
         if (ar.kind == type_kind::none || ar.kind == type_kind::placeholder ||
             ar.kind == type_kind::dependent)
-            return not_supported(at, "temp.deduct.call");
+            return not_supported_because(at, "temp.deduct.call",
+                                         "an argument of no, placeholder or "
+                                         "dependent type in deduction");
         adjust_call_deduction(p, a, arguments[i].category);
         /* a parameter that does not match: deduction fails, which
            overload resolution of the function templates of the name and
@@ -924,7 +938,10 @@ analysis_result semantic_analysis::deduce_from_call(
             if (deduce_type(p, a, values, set))
                 continue;
             if (deduction_unknowns != unknowns)
-                return not_supported(at, "temp.deduct.type");
+                return not_supported_because(
+                    at, "temp.deduct.type",
+                    "a call argument whose deduction against the parameter is "
+                    "unknown");
             copy_deduction(before, before_set, values, set);
             int base = deduce_from_base(p, a, values, set);
             if (base > 0)
@@ -935,7 +952,9 @@ analysis_result semantic_analysis::deduce_from_call(
                added to the set of candidate functions for that template" */
             if (!failed ||
                 (base < 0 && deduction_may_succeed(type_table, p, a)))
-                return not_supported(at, "temp.deduct.call");
+                return not_supported_because(at, "temp.deduct.call",
+                                             "a call argument that does not "
+                                             "deduce against its parameter");
             *failed = true;
             return analysis_result::well_formed;
         }
@@ -948,17 +967,25 @@ analysis_result semantic_analysis::deduce_from_call(
             one_set.append(set[k] && k != pack);
         }
         if (pack >= one.size())
-            return not_supported(at, "temp.deduct.call");
+            return not_supported_because(at, "temp.deduct.call",
+                                         "a function parameter pack with no "
+                                         "template parameter pack to deduce");
         if (!deduce_type(p, a, one, one_set)) {
             if (deduction_unknowns != unknowns)
-                return not_supported(at, "temp.deduct.type");
+                return not_supported_because(
+                    at, "temp.deduct.type",
+                    "a pack element argument whose deduction is unknown");
             if (!failed || deduction_may_succeed(type_table, p, a))
-                return not_supported(at, "temp.deduct.call");
+                return not_supported_because(
+                    at, "temp.deduct.call",
+                    "a pack element argument that does not deduce");
             *failed = true;
             return analysis_result::well_formed;
         }
         if (!one_set[pack])
-            return not_supported(at, "temp.deduct.call");
+            return not_supported_because(at, "temp.deduct.call",
+                                         "a function parameter pack element "
+                                         "that deduces no pack element");
         for (uint32_t k = 0; k < values.size(); k++)
             if (k != pack && one_set[k] && !set[k]) {
                 values[k] = one[k];
@@ -972,7 +999,9 @@ analysis_result semantic_analysis::deduce_from_call(
        keeps its arguments, which a function parameter pack's would have
        to agree with (not analysed) */
     if (pack < ft.parameter_count && set[pack] && !elements.empty())
-        return not_supported(at, "temp.deduct.call");
+        return not_supported_because(
+            at, "temp.deduct.call",
+            "a pack deduced both by another parameter and a function pack");
     if (pack < ft.parameter_count && !set[pack]) {
         values[pack] =
             make_pack(elements.data(), static_cast<uint32_t>(elements.size()));
@@ -1007,7 +1036,9 @@ analysis_result semantic_analysis::deduce_from_call(
                                                satisfied));
     if (!satisfied) {
         if (!failed)
-            return not_supported(at, "temp.deduct");
+            return not_supported_because(at, "temp.deduct",
+                                         "deduced template arguments that do "
+                                         "not satisfy the constraints");
         *failed = true;
         return analysis_result::well_formed;
     }
@@ -1041,11 +1072,15 @@ analysis_result semantic_analysis::deduce_from_function_type(
     /* [temp.deduct]/2: the explicit template arguments first */
     if (explicit_arguments) {
         if (explicit_arguments->size() > ft.parameter_count)
-            return not_supported(at, "temp.arg.explicit");
+            return not_supported_because(
+                at, "temp.arg.explicit",
+                "more explicit template arguments than template parameters");
         for (size_t i = 0; i < explicit_arguments->size(); i++) {
             if ((*explicit_arguments)[i].kind ==
                 template_argument::kind_t::pack)
-                return not_supported(at, "temp.deduct.funcaddr");
+                return not_supported_because(at, "temp.deduct.funcaddr",
+                                             "an explicit pack argument when "
+                                             "deducing from a function type");
             values[i] = (*explicit_arguments)[i];
             set[i] = true;
         }
@@ -1059,17 +1094,23 @@ analysis_result semantic_analysis::deduce_from_function_type(
     } else if (!deduce_type(entity_table[ft.entity].type, target, values,
                             set)) {
         if (deduction_unknowns != unknowns)
-            return not_supported(at, "temp.deduct.type");
+            return not_supported_because(
+                at, "temp.deduct.type",
+                "a target function type whose deduction is unknown");
         /* (P with the explicit arguments substituted, which reference
            collapsing ([dcl.ref]/6) may change, is not formed here) */
         if (explicit_arguments && !explicit_arguments->empty())
-            return not_supported(at, "temp.deduct.funcaddr");
+            return not_supported_because(
+                at, "temp.deduct.funcaddr",
+                "a target type not matching with explicit template arguments");
         failed = true;
         return analysis_result::well_formed;
     }
     for (uint32_t i = 0; i < ft.parameter_count; i++)
         if (template_parameter_is_pack(ft.first_parameter + i) && !set[i])
-            return not_supported(at, "temp.deduct.funcaddr");
+            return not_supported_because(
+                at, "temp.deduct.funcaddr",
+                "a pack not deduced from a function type");
     VTRY(r, default_template_arguments(at, function_template, values, set));
     bool satisfied = true;
     VTRY_SET(r, template_constraints_satisfied(function_template, values,
@@ -1109,13 +1150,17 @@ analysis_result semantic_analysis::deduce_from_overload_set(
         referred = pr.operand;
     if (!function_target(referred, ft)) {
         if (!failed)
-            return not_supported(at, "temp.deduct.call");
+            return not_supported_because(
+                at, "temp.deduct.call",
+                "an overload set argument for a parameter of no function type");
         *failed = true;
         return analysis_result::well_formed;
     }
     function_set members;
     if (!function_set_at(argument.overload_name, members))
-        return not_supported(at, "temp.deduct.call");
+        return not_supported_because(
+            at, "temp.deduct.call",
+            "an overload set argument whose functions cannot be listed");
     if (!members.templates.empty())
         return analysis_result::well_formed;
     owned_array<template_argument> success;
@@ -1123,14 +1168,18 @@ analysis_result semantic_analysis::deduce_from_overload_set(
     uint32_t count = 0;
     for (entity_index f : members.functions) {
         if (entity_table[f].nonstatic_member)
-            return not_supported(at, "temp.deduct.call");
+            return not_supported_because(
+                at, "temp.deduct.call",
+                "an overload set argument with a non-static member function");
         owned_array<template_argument> trial;
         owned_array<bool> trial_set;
         copy_deduction(values, set, trial, trial_set);
         uint32_t unknowns = deduction_unknowns;
         if (!deduce_type(ft, entity_table[f].type, trial, trial_set)) {
             if (deduction_unknowns != unknowns)
-                return not_supported(at, "temp.deduct.type");
+                return not_supported_because(
+                    at, "temp.deduct.type",
+                    "an overload set member whose deduction is unknown");
             continue;
         }
         count++;
@@ -1138,7 +1187,9 @@ analysis_result semantic_analysis::deduce_from_overload_set(
     }
     if (count == 0) {
         if (!failed)
-            return not_supported(at, "temp.deduct.call");
+            return not_supported_because(
+                at, "temp.deduct.call",
+                "an overload set argument with no member that deduces");
         *failed = true;
         return analysis_result::well_formed;
     }

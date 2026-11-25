@@ -139,7 +139,9 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
     bool lanewise = compare || integer_only || op == op_t::PLUS ||
                     op == op_t::MINUS || op == op_t::STAR || op == op_t::SLASH;
     if (!lanewise)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "a vector operand of an operator that does not work lane by lane");
     bool left_vector =
              type_table[left.type.unqualified()].kind == type_kind::vector,
          right_vector =
@@ -151,7 +153,8 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
     if (left_vector && right_vector &&
         left.type.unqualified() != right.type.unqualified())
         /* clang's lax vector conversions */
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu", "a binary operator on vectors of different types");
     const struct type record = type_table[vector.unqualified()];
     qualified_type element = record.operand;
     if (integer_only && !is_integral(element))
@@ -164,10 +167,15 @@ analysis_result semantic_analysis::vector_binary(SyntaxRef n, token_index at,
         scalar = &left;
     if (!(left_vector && right_vector)) {
         if (!is_arithmetic(scalar->type))
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(
+                n, "ext.gnu",
+                "a vector operator with a non-arithmetic scalar operand");
         bool fits = true;
         if (!shift && !vector_scalar_fits(*scalar, element, fits))
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(
+                n, "ext.gnu",
+                "a vector operator with a scalar whose fit in the element type "
+                "is unknown");
         if (!fits)
             return ill_formed(n,
                               "a scalar cannot be converted to a vector "

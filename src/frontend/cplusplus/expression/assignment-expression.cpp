@@ -110,7 +110,9 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
                                               expression_meaning &m)
 {
     if (n.size() != 3 || !n[1].is_token())
-        return not_supported(n, "expr.ass");
+        return not_supported_because(
+            n, "expr.ass",
+            "an assignment not made of two operands and an operator");
     preprocessing_op_or_punc op =
         preprocessing_op_or_punc_primary(tokens[n[1].token()].op_or_punc);
     expression_meaning left, right;
@@ -124,7 +126,8 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
         /* [expr.ass]/8: a braced-init-list on the right of '=' initializes a
            temporary of the left operand's type, which is then assigned */
         if (op != preprocessing_op_or_punc::EQUAL)
-            return not_supported(n, "expr.ass");
+            return not_supported_because(
+                n, "expr.ass", "a compound assignment with a braced-init-list");
         if (type_table[left.type.unqualified()].kind == type_kind::class_type) {
             /* [expr.ass]/8: x = {...} means x.operator=({...}) of a class:
                its operator= functions take the list, the left operand's
@@ -141,7 +144,10 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
                 for (entity_index f : candidates)
                     if (!copy_assignment_operator(f, c) &&
                         !move_assignment_operator(f, c))
-                        return not_supported(n, "over.match.oper");
+                        return not_supported_because(
+                            n, "over.match.oper",
+                            "a braced assignment to a class with other "
+                            "assignment operators");
             }
         }
         right.type = qualified_type::make(left.type.unqualified(), cv_none);
@@ -191,7 +197,9 @@ analysis_result semantic_analysis::assignment_of(
         record.kind != type_kind::vector &&
         !(record.kind == type_kind::enumeration &&
           enumeration_of(assigned_type)))
-        return not_supported(n, "expr.ass");
+        return not_supported_because(
+            n, "expr.ass",
+            "an assignment to a left operand of an unhandled type");
     /* [basic.lval]/10: "An lvalue is modifiable unless its type is
        const-qualified or is a function type." */
     if (left.category != value_category::lvalue || (left.type.cv() & cv_const))
@@ -218,7 +226,8 @@ analysis_result semantic_analysis::assignment_of(
         preprocessing_op_or_punc arithmetic_op =
             compound_assignment_operator(op);
         if (arithmetic_op == preprocessing_op_or_punc::count)
-            return not_supported(n, "expr.ass");
+            return not_supported_because(
+                n, "expr.ass", "an unrecognised compound assignment operator");
         bool additive = arithmetic_op == preprocessing_op_or_punc::PLUS ||
                         arithmetic_op == preprocessing_op_or_punc::MINUS;
         /* [expr.ass]/6: "E1 shall have arithmetic type": an enumeration
@@ -237,11 +246,17 @@ analysis_result semantic_analysis::assignment_of(
                                   "expr.ass");
             if (!is_object_pointer(assigned_type) ||
                 !size_of_type(type_table[assigned_type.unqualified()].operand))
-                return not_supported(n, "expr.ass");
+                return not_supported_because(
+                    n, "expr.ass",
+                    "a compound assignment to a pointer without a sized object "
+                    "type");
             if (!is_integral(right.type)) {
                 if (fundamental_of(right.type) == fundamental_type::none &&
                     !is_pointer(right.type))
-                    return not_supported(n, "expr.ass");
+                    return not_supported_because(
+                        n, "expr.ass",
+                        "a pointer += or -= with a right operand of an "
+                        "unhandled type");
                 return ill_formed(n,
                                   "for += and -= of a pointer, E2 shall have "
                                   "integral or unscoped enumeration type",
@@ -290,10 +305,14 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
                                                     expression_meaning &m)
 {
     if (op != preprocessing_op_or_punc::EQUAL)
-        return not_supported(n, "over.match.oper");
+        return not_supported_because(
+            n, "over.match.oper",
+            "a compound assignment to a class with no operator function");
     entity_index c = type_table[left.type.unqualified()].entity;
     if (entity_table[c].kind != entity_kind::class_type)
-        return not_supported(n, "class.pre");
+        return not_supported_because(
+            n, "class.pre",
+            "an assignment to a class type whose entity is not a class");
     require_complete(c);
     if (!entity_table[c].size)
         return ill_formed(n,
@@ -330,7 +349,9 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
                                   "no viable function, and the invocation is "
                                   "ill-formed",
                                   "over.match");
-            return not_supported(n, "over.match.oper");
+            return not_supported_because(n, "over.match.oper",
+                                         "an assignment from another type to a "
+                                         "class not assigned bytewise");
         }
         initialized_value converted;
         VTRY(r, initialize_with(
@@ -345,14 +366,18 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
        operator "performs memberwise copy assignment of its subobjects":
        one that calls an operator function is not analysed */
     if (!assigned_bitwise(c))
-        return not_supported(n, "class.copy.assign");
+        return not_supported_because(
+            n, "class.copy.assign",
+            "an implicit class assignment that calls an operator function");
     /* [class.copy.assign]/7.2: a const non-static data member of a class
        (or of a subobject's class) defines the implicit operator deleted */
     if (copy_assignment_deleted(c) || bytewise_const_member(c)) {
         /* [impl.clang] -fms-compatibility keeps the copy assignment
            operator beside a user-declared move constructor */
         if (tokens.files.behavior.microsoft_compatibility)
-            return not_supported(n, "class.copy.assign");
+            return not_supported_because(
+                n, "class.copy.assign",
+                "a deleted copy assignment under Microsoft compatibility");
         return ill_formed(n,
                           "the implicitly-declared copy assignment operator "
                           "is defined as deleted",
@@ -368,7 +393,9 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
                           "over.match.viable");
     if (left.category != value_category::lvalue ||
         (left.type.cv() & cv_volatile))
-        return not_supported(n, "class.copy.assign");
+        return not_supported_because(
+            n, "class.copy.assign",
+            "a class assignment to a volatile or non-lvalue left operand");
     VTRY(r, operand_value(n, right));
     uint32_t assigned = left.node;
     m = left;

@@ -44,11 +44,17 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
         id = d[k++].token();
     if (k + 2 != d.size() || !d[k].is(preprocessing_op_or_punc::COLON))
         /* attributes, a brace-or-equal-initializer */
-        return not_supported(d.index(), "class.bit");
+        return not_supported_because(
+            d.index(), "class.bit",
+            "a bit-field declarator with attributes, an initializer or another "
+            "form than name : width");
     SyntaxElement width_expression = d[k + 1];
     if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.mutable_ ||
         s.inline_ || s.constexpr_ || s.aligned || s.gnu_flags)
-        return not_supported(declaration, "class.bit");
+        return not_supported_because(
+            declaration, "class.bit",
+            "a bit-field with no type or with a specifier such as static, "
+            "constexpr, alignment or a GNU attribute");
     qualified_type type = s.type;
     const struct type record = type_table[type.unqualified()];
     /* [class.bit]/1: "A bit-field shall have integral or enumeration
@@ -56,10 +62,13 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
        incomplete one) has no size */
     bool enumeration = record.kind == type_kind::enumeration;
     if (enumeration && !size_of_type(type))
-        return not_supported(declaration, "class.bit");
+        return not_supported_because(
+            declaration, "class.bit",
+            "a bit-field of an enumeration type with no known size");
     /* [ext:clang_bit_int] a _BitInt bit-field: its layout is not written */
     if (record.kind == type_kind::bit_int)
-        return not_supported(declaration, "ext.clang");
+        return not_supported_because(declaration, "ext.clang",
+                                     "a bit-field of _BitInt type");
     if (!enumeration && (record.kind != type_kind::fundamental ||
                          !fundamental_type_is_integral(record.fundamental)))
         return ill_formed(declaration,
@@ -71,14 +80,18 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     VTRY_SET(r, operand_value(declaration, w));
     promote_enumeration(w);
     if (!is_integral(w.type))
-        return not_supported(declaration, "class.bit");
+        return not_supported_because(
+            declaration, "class.bit",
+            "a bit-field width that is not of integral type");
     /* [class.bit]/1: "The constant-expression shall be an integral
        constant expression with a value greater than or equal to zero and
        is called the width of the bit-field." */
     bool constant_width = false;
     VTRY_SET(r, integral_constant_expression(declaration, w, constant_width));
     if (!constant_width)
-        return not_supported(declaration, "class.bit");
+        return not_supported_because(
+            declaration, "class.bit",
+            "a bit-field width not established to be a constant expression");
     __int128 width_value =
         integer_value(tokens.files.behavior, fundamental_of(w.type), w.value);
     if (width_value < 0)
@@ -95,13 +108,17 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     uint64_t alignment = alignment_of_type(type);
     if (static_cast<unsigned __int128>(width_value) > unit || !alignment)
         /* padding bits (clang's warning) */
-        return not_supported(declaration, "class.bit");
+        return not_supported_because(declaration, "class.bit",
+                                     "a bit-field wider than its type (padding "
+                                     "bits) or of unknown alignment");
     uint64_t width = static_cast<uint64_t>(width_value);
     uint32_t name = 0;
     if (id) {
         name = tokens.identifier(id);
         if (entity_table.find(c, name))
-            return not_supported(declaration, "class.mem");
+            return not_supported_because(
+                declaration, "class.mem",
+                "a bit-field with the name of an earlier member");
     }
     entity_index e = entity_table.make(entity_kind::variable, name, c);
     entity_table[e].type = type;

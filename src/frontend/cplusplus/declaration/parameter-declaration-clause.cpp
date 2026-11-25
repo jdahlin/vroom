@@ -263,7 +263,8 @@ analysis_result semantic_analysis::parameter_declaration(
     auto at = [&](uint32_t i) { return n[lead + i]; };
     uint32_t child_count = n.size() - lead;
     if (!at(0).decl_specifier_seq())
-        return not_supported(n, "dcl.attr");
+        return not_supported_because(
+            n, "dcl.attr", "a parameter without a decl-specifier-seq");
     specified s;
     VTRY(r, decl_specifier_seq(at(0), s, true));
     /* [dcl.type]/3: "at least one defining-type-specifier that is not a
@@ -279,7 +280,8 @@ analysis_result semantic_analysis::parameter_declaration(
        changes the type of the function it points to, the others have no
        rules for a parameter */
     if (s.gnu_flags || s.aligned || s.section)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu", "a GNU attribute in a parameter's specifiers");
     type = s.type;
     unnamed = true;
     declared_pack = 0;
@@ -290,14 +292,17 @@ analysis_result semantic_analysis::parameter_declaration(
     for (uint32_t i = 1; i + 1 < child_count; i++)
         if (at(i).is(punct::EQUAL)) {
             if (i + 2 != child_count)
-                return not_supported(n, "dcl.fct.default");
+                return not_supported_because(
+                    n, "dcl.fct.default",
+                    "a default argument not at the end of the parameter");
             default_argument = at(i + 1);
             declarator_count = i;
         }
     if (declarator_count == 1)
         return misplaced_function_qualifiers(n, type, false);
     if (declarator_count > 2)
-        return not_supported(n, "dcl.fct");
+        return not_supported_because(
+            n, "dcl.fct", "a parameter-declaration with extra parts");
     declarator_meaning m;
     pack_declarator = true;
     r = declarator(n, at(1), type, m);
@@ -314,7 +319,8 @@ analysis_result semantic_analysis::parameter_declaration(
        a parameter */
     if (r == analysis_result::well_formed &&
         (m.gnu_flags || m.aligned || m.section || m.asm_label))
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu", "a GNU attribute or asm label on a parameter");
     return r;
 }
 
@@ -338,7 +344,8 @@ analysis_result semantic_analysis::misplaced_function_qualifiers(
     if (f.kind != type_kind::function || (!f.function_cv && !f.function_ref))
         return analysis_result::well_formed;
     if (member)
-        return not_supported(n, "dcl.fct");
+        return not_supported_because(
+            n, "dcl.fct", "a member's parameter of a qualified function type");
     return ill_formed(n,
                       "a function type with a cv-qualifier-seq or a "
                       "ref-qualifier shall appear only as the function type "
@@ -425,7 +432,9 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                     *qualified |= added;
                     continue;
                 }
-                return not_supported(parameters, "dcl.fct");
+                return not_supported_because(
+                    parameters, "dcl.fct",
+                    "a misplaced cv-qualifier-seq in a function declarator");
             }
             standard_keyword kw = standard_keyword::none;
             if (c.is_token())
@@ -445,7 +454,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                 bool lvalue = c.is(punct::AMPERSAND);
                 if (may_qualify) {
                     if (cv & (cv_ref_lvalue | cv_ref_rvalue))
-                        return not_supported(parameters, "dcl.fct");
+                        return not_supported_because(parameters, "dcl.fct",
+                                                     "a second ref-qualifier");
                     if (lvalue)
                         cv |= cv_ref_lvalue;
                     else
@@ -514,7 +524,9 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
             continue;
         }
         if (!c.parameter_declaration())
-            return not_supported(parameters, "dcl.fct");
+            return not_supported_because(
+                parameters, "dcl.fct",
+                "an unexpected item in a parameter list");
         declarations2.append(c);
     }
     owned_array<qualified_type> list;
@@ -559,11 +571,15 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
                     return r;
                 if ((!clause_expansion && declared_pack != ellipsis) ||
                     default_argument || depends_on_template_parameter(t))
-                    return not_supported(declarations2[k], "temp.variadic");
+                    return not_supported_because(
+                        declarations2[k], "temp.variadic",
+                        "a parameter pack form that is not expanded");
                 const struct type &element = type_table[t.unqualified()];
                 if ((element.kind == type_kind::fundamental &&
                      element.fundamental == fundamental_type::void_))
-                    return not_supported(declarations2[k], "temp.variadic");
+                    return not_supported_because(
+                        declarations2[k], "temp.variadic",
+                        "a parameter pack expanding to void");
                 if (element.kind == type_kind::array)
                     t = qualified_type::make(
                         type_table.pointer_to(element.operand), cv_none);
@@ -649,7 +665,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
            parameter of abstract class type is checked where the function
            is defined or called: not analysed */
         if (abstract_class(t))
-            return not_supported(declarations2[k], "class.abstract");
+            return not_supported_because(declarations2[k], "class.abstract",
+                                         "a parameter of abstract class type");
         if (record.kind == type_kind::array)
             t = qualified_type::make(type_table.pointer_to(record.operand),
                                      cv_none);
@@ -727,7 +744,8 @@ analysis_result semantic_analysis::function(SyntaxRef parameters,
     function_exceptions = value;
     if (abstract_class(type))
         /* a return type of abstract class type: as a parameter's */
-        return not_supported(parameters, "class.abstract");
+        return not_supported_because(parameters, "class.abstract",
+                                     "a return type that is an abstract class");
     /* [except.spec]/2: part of the type since C++17 (P0012R1); before it
        a function's own, which nothing analysed asks about */
     if (!tokens.files.behavior.has(
@@ -787,7 +805,9 @@ semantic_analysis::dynamic_exception_types(SyntaxRef n, bool member,
             entity_table[t->entity].kind == entity_kind::class_type &&
             (member || size_of_type(base)))
             continue;
-        return not_supported(c, "except.spec");
+        return not_supported_because(
+            c, "except.spec",
+            "a dynamic exception specification type of this kind");
     }
     return analysis_result::well_formed;
 }

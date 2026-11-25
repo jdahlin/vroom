@@ -68,7 +68,8 @@ analysis_result semantic_analysis::gnu_va_arg(SyntaxRef n,
     VTRY_SET(r, type_id(n[4], t));
     if (depends_on_template_parameter(t) ||
         depends_on_template_parameter(list.type))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(n, "temp.dep.constexpr",
+                                     "va_arg with a dependent type or va_list");
     uint32_t list_cv = 0;
     if (!is_va_list(list.type, list_cv))
         return ill_formed(n,
@@ -76,7 +77,8 @@ analysis_result semantic_analysis::gnu_va_arg(SyntaxRef n,
                           "'va_list'",
                           "ext.gnu");
     if (list.category != value_category::lvalue)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu", "va_arg on a va_list that is not an lvalue");
     /* the va_list is read and advanced: clang's "binding reference of type
        '__builtin_va_list' to value of type 'const __builtin_va_list' drops
        'const' qualifier" */
@@ -92,7 +94,9 @@ analysis_result semantic_analysis::gnu_va_arg(SyntaxRef n,
         (fundamental_type_is_integral(f) && f != fundamental_type::bool_ &&
          fundamental_type_width(b, f) >= b.int_width);
     if (!kept)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(n, "ext.gnu",
+                                     "va_arg of a type other than a pointer, "
+                                     "wide integer, double or long double");
     m = expression_meaning();
     m.type = t;
     m.category = value_category::prvalue;

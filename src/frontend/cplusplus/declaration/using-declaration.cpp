@@ -159,7 +159,10 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
                     return worse(result, r);
             }
             if ((g.flags & ~gnu_using_if_exists) || g.aligned || g.section)
-                return worse(result, not_supported(n, "namespace.udecl"));
+                return worse(result, not_supported_because(
+                                         n, "namespace.udecl",
+                                         "a using-declaration attribute other "
+                                         "than using_if_exists"));
             size_t after = i + 1;
             while (after < items.size() &&
                    items[after].is(syntax_kind::gnu_attribute_specifier))
@@ -177,11 +180,16 @@ analysis_result semantic_analysis::using_declaration(UsingDeclaration n)
             continue; /* the using-declarator's before it */
         } else if (!d.is(preprocessing_op_or_punc::COMMA)) {
             /* a pack expansion */
-            result = worse(result, not_supported(n, "temp.variadic"));
+            result = worse(
+                result, not_supported_because(
+                            n, "temp.variadic",
+                            "an unexpected part in a using-declarator-list"));
         }
     }
     if (!any)
-        result = worse(result, not_supported(n, "namespace.udecl"));
+        result = worse(result, not_supported_because(
+                                   n, "namespace.udecl",
+                                   "a using-declaration with no declarator"));
     return result;
 }
 
@@ -197,7 +205,9 @@ analysis_result semantic_analysis::using_declarator_pack(UsingDeclarator n,
 {
     uint32_t count = 0;
     if (!expansion_count(n.first_token(), n.end_token(), count))
-        return not_supported(n, "temp.variadic");
+        return not_supported_because(
+            n, "temp.variadic",
+            "a using pack whose expansion count is unknown");
     analysis_result result = analysis_result::well_formed;
     for (uint32_t e = 0; e < count; e++) {
         expansion_scope scope(*this, true, e);
@@ -256,17 +266,23 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
         if (entity_table[f].enclosing == c)
             continue;
         if (!plain(f))
-            return not_supported(n, "namespace.udecl");
+            return not_supported_because(
+                n, "namespace.udecl",
+                "a base function the using-declaration cannot merge");
         present.append(f);
     }
     if (!plain(e))
-        return not_supported(n, "namespace.udecl");
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a named function the using-declaration cannot merge");
     owned_array<entity_index> introduced;
     owned_array<entity_index> found;
     overload_set(e, found);
     for (entity_index f : found) {
         if (!plain(f))
-            return not_supported(n, "namespace.udecl");
+            return not_supported_because(
+                n, "namespace.udecl",
+                "an introduced function the using-declaration cannot merge");
         bool skip = false;
         for (entity_index o : visible) {
             if (o == f) {
@@ -275,12 +291,17 @@ semantic_analysis::using_join_chains(UsingDeclarator n, token_index t,
                 if (entity_table[o].enclosing == c)
                     skip = true; /* /15: hidden by the class's own */
                 else if (!skip)
-                    return not_supported(n, "namespace.udecl");
+                    return not_supported_because(
+                        n, "namespace.udecl",
+                        "a base function with the signature of an earlier "
+                        "using");
             }
         }
         for (entity_index o : introduced)
             if (same_signature(o, f))
-                return not_supported(n, "namespace.udecl");
+                return not_supported_because(
+                    n, "namespace.udecl",
+                    "two introduced functions with the same signature");
         if (!skip)
             introduced.append(f);
     }
@@ -341,10 +362,13 @@ analysis_result semantic_analysis::using_typename(UsingDeclarator n)
     type_index type = 0;
     uint32_t cv = 0;
     if (!defining_class)
-        return not_supported(n, "namespace.udecl");
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a using typename outside a class definition");
     VTRY(r, typename_type(n, type, cv));
     if (!type)
-        return not_supported(n, "namespace.udecl");
+        return not_supported_because(n, "namespace.udecl",
+                                     "a using typename that names no type");
     qualified_type q;
     q = qualified_type::make(type, cv);
     specified s;
@@ -362,7 +386,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         n[1].is(syntax_kind::nested_name_specifier) && n[2].is_identifier())
         return using_typename(n);
     if (n.size() != 2 || !n.nested_name_specifier())
-        return not_supported(n, "namespace.udecl");
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a using-declarator with no nested-name-specifier");
     token_index t = 0;
     if (n.identifier()) {
         t = n.identifier().token();
@@ -383,7 +409,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             case preprocessing_op_or_punc::LESS_EQUAL:
             case preprocessing_op_or_punc::GREATER_EQUAL:
             case preprocessing_op_or_punc::SPACESHIP:
-                return not_supported(n, "over.match.oper");
+                return not_supported_because(
+                    n, "over.match.oper",
+                    "a using-declaration of a comparison operator");
             default:
                 break;
             }
@@ -398,7 +426,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         t = function_name.id;
     } else {
         /* a destructor's name, a conversion function's */
-        return not_supported(n, "namespace.udecl");
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a using-declaration of a destructor or conversion function");
     }
     nominated_scope q;
     VTRY(r, nested_name_specifier(n.nested_name_specifier(), q));
@@ -434,7 +464,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
          variable_template_of(held))) {
         entity_index prior = entity_table.find(current_scope, name);
         if (prior && prior != held)
-            return not_supported(n, "namespace.udecl");
+            return not_supported_because(
+                n, "namespace.udecl",
+                "a using of a template name already bound otherwise");
         if (!prior)
             entity_table.bind(current_scope, name, held, true);
         used(t, held);
@@ -459,7 +491,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 for (entity_index f : functions)
                     template_name_functions.append({prior, f});
             } else if (!entity_table[prior].held_by_template) {
-                return not_supported(n, "over");
+                return not_supported_because(
+                    n, "over",
+                    "a template name using over a non-function declaration");
             } else if (!function_template_of(prior)) {
                 /* a name whose function templates are all unusable (it
                    also names something calls of them cannot resolve)
@@ -470,7 +504,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                         !t3.is_variable)
                         poisoned = true;
                 if (!poisoned)
-                    return not_supported(n, "over");
+                    return not_supported_because(n, "over",
+                                                 "a template name using over "
+                                                 "unusable function templates");
             }
             /* [namespace.udecl]/1, /9: two paths can introduce the same
                declaration. Merge by entity identity, keeping distinct
@@ -511,7 +547,8 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         return analysis_result::well_formed;
     }
     if (found.unknown)
-        return not_supported(n, "over");
+        return not_supported_because(
+            n, "over", "a using-declaration of a name with unknown lookup");
     /* clang's using_if_exists: "the using-declaration is ignored if the
        name is not found" (a name an unsupported declaration declares
        is not found either, so this trusts the library's headers) */
@@ -520,7 +557,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
     /* the declarations found in more than one namespace, or none (which
        may be ones analysis has no rules for) */
     if (found.ambiguous || !found.entity)
-        return not_supported(n, "namespace.udecl");
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a using-declaration of an ambiguous or unfound name");
     entity_index e = found.entity;
     entity_kind kind = entity_table[e].kind;
     bool names_class_member =
@@ -528,7 +567,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         entity_table[q.entity].kind == entity_kind::class_type;
     if (!is_namespace(q.entity) && !names_class_member)
         /* an enumerator named through its enumeration (C++20) */
-        return not_supported(n, "namespace.udecl");
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a using-declaration qualified by neither a namespace nor a class");
     if (defining_class) {
         entity_index c = defining_class;
         /* [namespace.udecl]/3: "In a using-declaration used as a
@@ -538,7 +579,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         /* (an enumerator of a namespace's enumeration: C++20) */
         if (is_namespace(q.entity) &&
             (kind == entity_kind::enumerator || kind == entity_kind::none))
-            return not_supported(n, "namespace.udecl");
+            return not_supported_because(
+                n, "namespace.udecl",
+                "a namespace enumerator or held name in a class using");
         if (is_namespace(q.entity))
             return ill_formed_at_token(t,
                                        "in a using-declaration used as a "
@@ -549,7 +592,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                                        "namespace.udecl");
         bool ambiguous = false;
         if (!base_step(c, q.entity, ambiguous))
-            return not_supported(n, "namespace.udecl");
+            return not_supported_because(
+                n, "namespace.udecl",
+                "a using of a member of a class not found as a base");
         /* [namespace.udecl]/19: "A synonym created by a using-declaration
            has the usual accessibility for a member-declaration."  Access
            is the entity's here, so only a declaration that leaves it as
@@ -557,11 +602,15 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
            an overload or hide the base's */
         if (kind == entity_kind::none ||
             entity_table[e].access != declaration_access)
-            return not_supported(n, "namespace.udecl");
+            return not_supported_because(
+                n, "namespace.udecl",
+                "a using of a held name or with a different access");
         /* (the access of every function of the set the head begins) */
         for (entity_index o = e; o; o = entity_table[o].next_overload)
             if (entity_table[o].access != declaration_access)
-                return not_supported(n, "namespace.udecl");
+                return not_supported_because(
+                    n, "namespace.udecl",
+                    "a using of overloads with differing access");
         entity_index own = entity_table.find(c, name);
         if (own) {
             /* [namespace.udecl]/15 (C++20 /14): the base's member
@@ -573,7 +622,10 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
                 entity_table[e].special != special_member::none ||
                 entity_table[own].kind != entity_kind::function ||
                 entity_table[own].special != special_member::none)
-                return not_supported(n, "namespace.udecl");
+                return not_supported_because(
+                    n, "namespace.udecl",
+                    "a using of a name the class declares that is no plain "
+                    "function");
             if (entity_table[own].enclosing != c)
                 /* the name is a base's already (another using-declaration) */
                 return using_join_chains(n, t, c, name, own, e);
@@ -604,7 +656,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
         /* [namespace.udecl]/7: "A using-declaration that names a class
            member other than an enumerator shall be a member-declaration." */
         if (kind == entity_kind::enumerator || kind == entity_kind::none)
-            return not_supported(n, "namespace.udecl");
+            return not_supported_because(
+                n, "namespace.udecl",
+                "a using of an enumerator or held member outside a class");
         return ill_formed_at_token(t,
                                    "a using-declaration that names a class "
                                    "member other than an enumerator shall "
@@ -647,7 +701,9 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             used(t, e);
             return analysis_result::well_formed;
         }
-        return not_supported(n, "basic.scope.declarative");
+        return not_supported_because(
+            n, "basic.scope.declarative",
+            "a using over a name held by an unanalysed declaration");
     }
     if (prior == e) {
         /* [namespace.udecl]/9: "A using-declaration is a declaration and can
@@ -658,7 +714,8 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
             used(t, e);
             return analysis_result::well_formed;
         }
-        return not_supported(n, "namespace.udecl");
+        return not_supported_because(n, "namespace.udecl",
+                                     "a repeated using-declaration in a class");
     }
     /* [namespace.udecl]/12: "Since a using-declaration is a declaration, the
        restrictions on declarations of the same name in the same declarative
@@ -666,14 +723,18 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
        class or enumeration and a variable or function hide one another; a
        typedef-name may name the same type */
     if (kind == entity_kind::function && prior_kind == entity_kind::function)
-        return not_supported(n, "over");
+        return not_supported_because(
+            n, "over",
+            "a using of a function beside a function of the same name");
     bool plain =
         (kind == entity_kind::variable || kind == entity_kind::function) &&
         (prior_kind == entity_kind::variable ||
          prior_kind == entity_kind::function);
     if (!plain || entity_table[e].hidden_type ||
         entity_table[prior].hidden_type)
-        return not_supported(n, "namespace.udecl");
+        return not_supported_because(
+            n, "namespace.udecl",
+            "a using that conflicts with a declaration of the name");
     /* [basic.scope.declarative]/4: "Given a set of declarations in a
        single declarative region, each of which specifies the same
        unqualified name, they shall all refer to the same entity, or all

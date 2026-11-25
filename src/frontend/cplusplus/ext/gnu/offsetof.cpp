@@ -69,7 +69,8 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
     qualified_type t;
     VTRY(r, type_id(n[2], t));
     if (depends_on_template_parameter(t))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(n, "temp.dep.constexpr",
+                                     "offsetof in a dependent type");
     const implementation_defined_behavior &b = tokens.files.behavior;
     uint64_t offset = 0;
     /* node[4 .. child_count - 1): the member-designator */
@@ -92,7 +93,10 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
             if (r == analysis_result::well_formed && is_integral(e.type))
                 VTRY_SET(r, integral_constant_expression(n, e, constant));
             if (!constant)
-                return not_supported(n, "ext.gnu");
+                return not_supported_because(
+                    n, "ext.gnu",
+                    "offsetof with an array index that is not an integral "
+                    "constant");
             i++; /* ] */
             t = record.operand;
             offset += static_cast<uint64_t>(
@@ -108,11 +112,15 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
         entity_index member = declared_in(
             record.entity, tokens.identifier(c.token()), lookup_filter::any);
         if (!member)
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(
+                n, "ext.gnu",
+                "offsetof of a member name not found in the class");
         const entity &e = entity_table[member];
         if (e.kind != entity_kind::variable || !e.nonstatic_member ||
             e.anonymous_object)
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(n, "ext.gnu",
+                                         "offsetof of a name that is not a "
+                                         "plain non-static data member");
         offset += e.offset;
         /* [class.union.anon]/1: a member of an anonymous union is one of the
            class whose member its unnamed object is, at that object's offset
@@ -125,7 +133,8 @@ analysis_result semantic_analysis::gnu_offsetof(SyntaxRef n,
             member_of = object.enclosing;
         }
         if (member_of != record.entity)
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(
+                n, "ext.gnu", "offsetof of a member of a base class");
         t = e.type;
     }
     m = integer_constant(fundamental_type::unsigned_long_int, offset,

@@ -201,7 +201,9 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
     value = false;
     const entity x = entity_table[c];
     if (x.base_count || x.virtual_base_count)
-        return not_supported(n, "dcl.init.aggr");
+        return not_supported_because(n, "dcl.init.aggr",
+                                     "a constructibility trait: parenthesized "
+                                     "aggregate init of a class with bases");
     owned_array<entity_index> elements;
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index e = class_members[x.first_member + i];
@@ -209,7 +211,9 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
         if (m.kind != entity_kind::variable || !m.nonstatic_member)
             continue;
         if (m.bit_field || !m.name)
-            return not_supported(n, "dcl.init.aggr");
+            return not_supported_because(n, "dcl.init.aggr",
+                                         "a constructibility trait: aggregate "
+                                         "with a bit-field or unnamed member");
         elements.append(e);
         /* a union initializes its first member */
         if (x.union_)
@@ -229,11 +233,17 @@ analysis_result semantic_analysis::aggregate_paren_initialization(
                 return analysis_result::well_formed;
             if (kind == type_kind::class_type || kind == type_kind::array ||
                 (m.default_initializer && nothrow))
-                return not_supported(n, "dcl.init.aggr");
+                return not_supported_because(
+                    n, "dcl.init.aggr",
+                    "a constructibility trait: aggregate member left to "
+                    "value-initialization");
             continue;
         }
         if (type_table[m.type.unqualified()].kind == type_kind::array)
-            return not_supported(n, "dcl.init.aggr");
+            return not_supported_because(
+                n, "dcl.init.aggr",
+                "a constructibility trait: parenthesized init of an array "
+                "member");
         initialized_value made;
         bool ok = false;
         VTRY(r, try_initialization(n, arguments[i], m.type, false, made, ok));
@@ -271,7 +281,10 @@ semantic_analysis::aggregate_value_initialization(SyntaxRef n, entity_index c,
         if (implicit_constructor_throws(k, known))
             value = false;
         if (!known)
-            return not_supported(n, "except.spec");
+            return not_supported_because(
+                n, "except.spec",
+                "a constructibility trait: unknown whether an implicit "
+                "constructor throws");
     }
     return analysis_result::well_formed;
 }
@@ -293,7 +306,9 @@ analysis_result semantic_analysis::constructible_types(
         if (!k.bound_known)
             return analysis_result::well_formed;
         if (count)
-            return not_supported(n, "dcl.init.aggr");
+            return not_supported_because(n, "dcl.init.aggr",
+                                         "a constructibility trait: an array "
+                                         "initialized from arguments");
         return constructible_types(n, k.operand, types, 0, nothrow, value);
     }
     bool reference = k.kind == type_kind::lvalue_reference ||
@@ -311,7 +326,9 @@ analysis_result semantic_analysis::constructible_types(
         c = k.entity;
         require_complete(c);
         if (!entity_table[c].size)
-            return not_supported(n, "dcl.init");
+            return not_supported_because(
+                n, "dcl.init",
+                "a constructibility trait of a class that has no size");
         bool throws = false;
         if (!class_destructible(c, throws))
             return analysis_result::well_formed;
@@ -330,7 +347,10 @@ analysis_result semantic_analysis::constructible_types(
         }
         /* a volatile object is not copied by an implicit constructor */
         if (count == 1 && (arguments[0].type.cv() & cv_volatile))
-            return not_supported(n, "dcl.init");
+            return not_supported_because(
+                n, "dcl.init",
+                "a constructibility trait: initialization from a volatile "
+                "object");
         bool one_of_its_own =
             count == 1 && same_or_derived_class(arguments[0], c);
         if (is_aggregate(c) && !one_of_its_own) {
@@ -347,7 +367,10 @@ analysis_result semantic_analysis::constructible_types(
                     type_kind::class_type &&
                 has_conversion_functions(
                     type_table[arguments[0].type.unqualified()].entity))
-                return not_supported(n, "over.match.copy");
+                return not_supported_because(
+                    n, "over.match.copy",
+                    "a constructibility trait: argument class with conversion "
+                    "functions");
             return analysis_result::well_formed;
         }
     } else if (!count && !reference) {
@@ -454,22 +477,30 @@ analysis_result semantic_analysis::clang_constructible_trait(
             continue;
         if (n[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
-                return not_supported(n, "temp.variadic");
+                return not_supported_because(
+                    n, "temp.variadic",
+                    "a constructibility trait with a misplaced ellipsis");
             expansion.back() = true;
             continue;
         }
         if (!n[i].is(syntax_kind::type_id))
-            return not_supported(n, "ext.clang");
+            return not_supported_because(
+                n, "ext.clang",
+                "a constructibility trait argument that is not a type");
         written.append(n[i]);
         expansion.append(false);
     }
     if (written.empty() || expansion[0])
-        return not_supported(n, "ext.clang");
+        return not_supported_because(n, "ext.clang",
+                                     "a constructibility trait with no type or "
+                                     "with a pack as the first argument");
     owned_array<qualified_type> types;
     bool dependent = false;
     VTRY(r, builtin_template_types(n, written, expansion, 0, types, dependent));
     if (dependent)
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "a constructibility trait of dependent types");
     bool value = false;
     VTRY_SET(r, constructible_types(n, types[0], types.data() + 1,
                                     static_cast<uint32_t>(types.size() - 1),
@@ -480,7 +511,9 @@ analysis_result semantic_analysis::clang_constructible_trait(
                                       static_cast<uint32_t>(types.size() - 1),
                                       known);
         if (!known)
-            return not_supported(n, "class.default.ctor");
+            return not_supported_because(
+                n, "class.default.ctor",
+                "a trivial-constructibility trait whose triviality is unknown");
     }
     m = integer_constant(fundamental_type::bool_, value, n.first_token());
     return analysis_result::well_formed;

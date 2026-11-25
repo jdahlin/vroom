@@ -94,7 +94,9 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
                                                  qualified_type &type)
 {
     if (n.size() != 4)
-        return not_supported(n, "dcl.type.decltype");
+        return not_supported_because(
+            n, "dcl.type.decltype",
+            "a decltype-specifier of an unexpected shape");
     SyntaxElement operand = n[2];
     if (operand.is_token() && operand.is_identifier()) {
         lookup_result found = lookup_unqualified(
@@ -141,7 +143,9 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
            own declaration (an instantiation's names are bound to
            arguments) */
         if (instantiating || class_instantiating || substituting)
-            return not_supported(n, "temp.dep.expr");
+            return not_supported_because(n, "temp.dep.expr",
+                                         "a type-dependent decltype operand "
+                                         "while instantiating or substituting");
         type = qualified_type::make(dependent_written_type(n), cv_none);
         return analysis_result::well_formed;
     }
@@ -152,14 +156,19 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
     if (r != analysis_result::well_formed)
         return r;
     if (m.bit_field_width && !names_entity(operand))
-        return not_supported(n, "class.bit");
+        return not_supported_because(
+            n, "class.bit",
+            "decltype of a bit-field expression that is no name");
     bool named = names_entity(operand);
     if (!decltype_of(m, named, type))
-        return not_supported(n, "dcl.type.decltype");
+        return not_supported_because(
+            n, "dcl.type.decltype",
+            "an operand whose decltype cannot be determined");
     /* [ext:clang_vla] a variable length array type is the declaration's
        own: clang refuses it as a template argument and in the type traits */
     if (has_variable_bound(type))
-        return not_supported(n, "dcl.array");
+        return not_supported_because(n, "dcl.array",
+                                     "decltype of a variable length array");
     return analysis_result::well_formed;
 }
 

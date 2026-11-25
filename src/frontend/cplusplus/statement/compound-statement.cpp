@@ -93,7 +93,10 @@ analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
            precede switch label") */
         if (fallthrough_statement(s) &&
             (i + 1 == items.size() || !case_or_default_label(items[i + 1]))) {
-            result = worse(result, not_supported(s, "dcl.attr.fallthrough"));
+            result = worse(
+                result, not_supported_because(
+                            s, "dcl.attr.fallthrough",
+                            "a fallthrough not directly before a case label"));
             statements.append(one);
             continue;
         }

@@ -659,7 +659,10 @@ analysis_result semantic_analysis::analyse_function_body_of(
             continue;
         }
         if (!target->analysed) {
-            result = worse(result, not_supported(g.node, "stmt.dcl"));
+            result =
+                worse(result, not_supported_because(
+                                  g.node, "stmt.dcl",
+                                  "a goto to a label that was not analysed"));
             continue;
         }
         if (jump_bypasses(g.point, target->point))

@@ -48,7 +48,10 @@ analysis_result semantic_analysis::clang_bit_int_type(SyntaxRef n,
     SyntaxElement width = n[2];
     if (entity_index named = value_parameter_named(width)) {
         if (!is_integral(entity_table[named].type))
-            return not_supported(n, "temp.dep.constexpr");
+            return not_supported_because(
+                n, "temp.dep.constexpr",
+                "a _BitInt width naming a non-type template parameter of "
+                "non-integral type");
         type = qualified_type::make(type_table.bit_int(0, named, is_unsigned),
                                     cv_none);
         return analysis_result::well_formed;
@@ -61,7 +64,8 @@ analysis_result semantic_analysis::clang_bit_int_type(SyntaxRef n,
     if (r == analysis_result::well_formed && is_integral(m.type))
         VTRY_SET(r, integral_constant_expression(n, m, constant));
     if (!constant)
-        return not_supported(n, "ext.clang");
+        return not_supported_because(
+            n, "ext.clang", "a _BitInt width that is not an integral constant");
     __int128 bits =
         integer_value(tokens.files.behavior, fundamental_of(m.type), m.value);
     /* (an unsigned _BitInt may be one bit wide) */

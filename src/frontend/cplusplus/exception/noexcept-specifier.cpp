@@ -129,13 +129,16 @@ analysis_result semantic_analysis::noexcept_specifier(NoexceptSpecifier n,
         /* noexcept, throw ( ) */
         return analysis_result::well_formed;
     if (n.size() != 4)
-        return not_supported(n, "except.spec");
+        return not_supported_because(
+            n, "except.spec", "a noexcept-specifier of unexpected shape");
     if (member && noexcept_names_later_member(n))
         /* [class.mem]/6: a member function's noexcept-specifier is a
            complete-class context, analysed with the class complete: not
            deferred yet, so a name that a later member could declare is
            not decided */
-        return not_supported(n, "except.spec");
+        return not_supported_because(
+            n, "except.spec",
+            "a noexcept-specifier naming a later class member");
     bool constant = false, value = false;
     VTRY(r, bool_constant_expression(n, n[2], constant, value));
     if (!constant)

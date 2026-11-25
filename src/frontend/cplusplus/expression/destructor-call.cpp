@@ -73,7 +73,9 @@ semantic_analysis::destructor_type_name(SyntaxRef n, SyntaxElement name,
     }
     if (!written.is_identifier())
         /* ~ decltype-specifier */
-        return not_supported(n, "expr.prim.id.dtor");
+        return not_supported_because(
+            n, "expr.prim.id.dtor",
+            "a destructor name after ~ that is not an identifier");
     token_index t = written.token();
     uint32_t id = tokens.identifier(t);
     if (in_scope && scope &&
@@ -91,7 +93,9 @@ semantic_analysis::destructor_type_name(SyntaxRef n, SyntaxElement name,
     else
         x = lookup_unqualified(id, lookup_filter::types);
     if (x.ambiguous || x.unknown)
-        return not_supported(n, "basic.lookup.classref");
+        return not_supported_because(
+            n, "basic.lookup.classref",
+            "an ambiguous or unknown type name after ~");
     if (!x.entity)
         return analysis_result::well_formed;
     entity_kind k = entity_table[x.entity].kind;
@@ -153,7 +157,9 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
         if ((fundamental_of(m.type) == fundamental_type::none &&
              object.kind != type_kind::pointer) ||
             fundamental_of(m.type) == fundamental_type::void_)
-            return not_supported(n, "expr.ref");
+            return not_supported_because(
+                n, "expr.ref",
+                "a destructor call on a type that is not a scalar or a class");
         return ill_formed(n,
                           "the object expression of a class member access "
                           "shall be of class type",
@@ -165,7 +171,9 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
         require_complete(c);
         if (entity_table[c].kind != entity_kind::class_type)
             /* a class whose definition was not analysed */
-            return not_supported(n, "class.pre");
+            return not_supported_because(n, "class.pre",
+                                         "a destructor call on a class type "
+                                         "whose entity is not a class");
         if (!entity_table[c].size)
             return ill_formed(n,
                               "the class type shall be complete unless the "
@@ -230,7 +238,9 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
                                           "basic.lookup.qual");
                 }
                 if (x.ambiguous || x.unknown || !x.entity)
-                    return not_supported(n, "basic.lookup.qual");
+                    return not_supported_because(
+                        n, "basic.lookup.qual",
+                        "an ambiguous, unknown or missing name before :: ~");
                 if (last) {
                     uint32_t cv = 0;
                     VTRY(r7,
@@ -243,12 +253,17 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
                     const struct type &synonym =
                         type_table[entity_table[next].type.unqualified()];
                     if (synonym.kind != type_kind::class_type)
-                        return not_supported(n, "basic.lookup.qual");
+                        return not_supported_because(
+                            n, "basic.lookup.qual",
+                            "a typedef before :: ~ that does not name a class");
                     next = synonym.entity;
                 }
                 if (!is_namespace(next) &&
                     entity_table[next].kind != entity_kind::class_type)
-                    return not_supported(n, "basic.lookup.qual");
+                    return not_supported_because(
+                        n, "basic.lookup.qual",
+                        "a name before :: ~ that is neither a namespace nor a "
+                        "class");
                 scope = next;
                 in_scope = true;
             }
@@ -257,7 +272,9 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
             VTRY(r6, nested_name_specifier(specifier, nominated));
             if (!nominated.entity ||
                 entity_table[nominated.entity].kind != entity_kind::class_type)
-                return not_supported(n, "basic.lookup.qual");
+                return not_supported_because(n, "basic.lookup.qual",
+                                             "a nested-name-specifier before ~ "
+                                             "that does not name a class");
             scope = nominated.entity;
             in_scope = true;
             qualifier = entity_table[scope].type.unqualified();
@@ -275,7 +292,9 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
                                   "object expression's type",
                                   "expr.ref");
             /* a base class's destructor */
-            return not_supported(n, "expr.ref");
+            return not_supported_because(
+                n, "expr.ref",
+                "a destructor name that does not match the object's type");
         }
     } else {
         bool matches = false;
@@ -309,7 +328,9 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
     if (c && destroys(c)) {
         destructor = entity_table[c].destructor;
         if (!destructor)
-            return not_supported(n, "class.dtor");
+            return not_supported_because(
+                n, "class.dtor",
+                "a destructor call on a class with no destructor entity");
         VTRY(r2, deleted_use(at, destructor));
         if (!accessible(destructor, c))
             return ill_formed_at_token(at,
@@ -324,7 +345,9 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
            is evaluated (the pointer of p->~T(): *p is no access) and
            discarded */
         if (aggregate_prvalue(m))
-            return not_supported(n, "class.temporary");
+            return not_supported_because(
+                n, "class.temporary",
+                "a pseudo-destructor call on a class or array prvalue");
         uint32_t operand = m.node;
         if (arrow)
             operand = semantics[operand].a;
@@ -334,7 +357,9 @@ analysis_result semantic_analysis::destructor_call(SyntaxRef n,
         return analysis_result::well_formed;
     }
     if (aggregate_prvalue(m))
-        return not_supported(n, "class.temporary");
+        return not_supported_because(
+            n, "class.temporary",
+            "a destructor call on a class or array prvalue");
     if (entity_table[destructor].virtual_ && !qualified) {
         /* [class.virtual]/16: the final overrider */
         expression_meaning address;

@@ -71,7 +71,9 @@ analysis_result semantic_analysis::literal_operator_id(LiteralOperatorId id,
         suffix_after_quote(spelling, suffix);
     }
     if (!id.size() || !id.operator_keyword().is_token() || !suffix.size())
-        return not_supported(id, "over.literal");
+        return not_supported_because(
+            id, "over.literal",
+            "a literal operator id without an operator keyword or a suffix");
     /* [usrlit.suffix]/1: suffixes that do not start with an underscore are
        "reserved for future standardization": a program's declaration is
        ill-formed, no diagnostic required, and clang only warns
@@ -179,7 +181,9 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
     const token &k = tokens[t];
     if (operators_held)
         /* a literal operator (template) analysis did not follow */
-        return not_supported(current_declaration, "lex.ext");
+        return not_supported_because(current_declaration, "lex.ext",
+                                     "a user-defined literal while an operator "
+                                     "declaration was not analysed");
     owned_buffer spelling, suffix, number;
     tokens.spelling(t, spelling.get());
     bool numeric = k.preprocessing.kind == preprocessing_token_kind::pp_number;
@@ -187,7 +191,9 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
         uint32_t at = k.preprocessing.ud_suffix_offset;
         if (!at || at >= spelling.size() ||
             spelling.size() != k.preprocessing.extent)
-            return not_supported(current_declaration, "lex.ext");
+            return not_supported_because(current_declaration, "lex.ext",
+                                         "a user-defined numeric literal whose "
+                                         "suffix cannot be separated");
         vbuffer_append(number.get(), spelling.data(), at);
         vbuffer_append(suffix.get(), spelling.data() + at,
                        spelling.size() - at);
@@ -195,15 +201,22 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
         suffix_after_quote(spelling, suffix);
     }
     if (!suffix.size())
-        return not_supported(current_declaration, "lex.ext");
+        return not_supported_because(
+            current_declaration, "lex.ext",
+            "a user-defined literal with an empty suffix");
     uint32_t name = literal_operator_name(suffix.data(), suffix.size());
     lookup_result found = lookup_unqualified(name, lookup_filter::any);
     if (found.ambiguous)
-        return not_supported(current_declaration, "lex.ext");
+        return not_supported_because(
+            current_declaration, "lex.ext",
+            "a user-defined literal whose operator lookup is ambiguous");
     entity_index held_templates = 0;
     if (found.unknown) {
         if (!function_template_of(found.unknown_entity))
-            return not_supported(current_declaration, "lex.ext");
+            return not_supported_because(
+                current_declaration, "lex.ext",
+                "a user-defined literal whose operator name has an unanalysed "
+                "declaration");
         held_templates = found.unknown_entity;
     }
     if (!found.entity && !held_templates)
@@ -216,7 +229,9 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
     if (found.entity) {
         if (entity_table[found.entity].kind != entity_kind::function ||
             !is_namespace(entity_table[found.entity].enclosing))
-            return not_supported(current_declaration, "lex.ext");
+            return not_supported_because(
+                current_declaration, "lex.ext",
+                "a literal operator that is not a namespace-scope function");
         overload_set(found.entity, set);
     }
     owned_array<expression_meaning> arguments;
@@ -265,10 +280,14 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
                 digit = static_cast<unsigned>(c - 'A' + 10);
             if (digit >= base)
                 /* a user-defined-floating-point-literal ([lex.ext]/4) */
-                return not_supported(current_declaration, "lex.ext");
+                return not_supported_because(current_declaration, "lex.ext",
+                                             "a user-defined floating literal "
+                                             "for a literal operator template");
             value = value * base + digit;
             if (value > UINT64_MAX)
-                return not_supported(current_declaration, "lex.ext");
+                return not_supported_because(current_declaration, "lex.ext",
+                                             "a user-defined integer literal "
+                                             "whose value exceeds 64 bits");
         }
         chosen = with_parameter(fundamental_type::unsigned_long_long_int);
         if (chosen) {
@@ -281,7 +300,10 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
             owned_array<uint32_t> group;
             function_template_overloads(held_templates, group);
             if (group.size() != 1)
-                return not_supported(current_declaration, "lex.ext");
+                return not_supported_because(
+                    current_declaration, "lex.ext",
+                    "a numeric literal operator template with more than one "
+                    "overload");
             uint32_t ft = group[0];
             owned_array<template_argument> chars;
             qualified_type char_type = qualified_type::make(
@@ -302,7 +324,9 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
                                  function_templates[ft - 1].entity, &pack, 1,
                                  chosen));
         } else {
-            return not_supported(current_declaration, "lex.ext");
+            return not_supported_because(
+                current_declaration, "lex.ext",
+                "a numeric literal with no usable literal operator form");
         }
     } else if (k.preprocessing.kind ==
                preprocessing_token_kind::user_defined_character_literal) {
@@ -310,7 +334,9 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
            only parameter has the type of ch and the literal L is treated as
            a call of the form operator "" X(ch)" */
         if (!k.value_known || !fundamental_type_is_integral(k.type))
-            return not_supported(current_declaration, "lex.ext");
+            return not_supported_because(current_declaration, "lex.ext",
+                                         "a user-defined character literal of "
+                                         "unknown value or non-integral type");
         chosen = with_parameter(k.type);
         if (!chosen)
             return ill_formed_at_token(t,
@@ -330,7 +356,9 @@ analysis_result semantic_analysis::user_defined_literal(token_index t,
            treated as a call of the form operator "" X(str, len)" */
         expression_meaning str;
         if (!k.value_known || !string_literal_meaning(t, str))
-            return not_supported(current_declaration, "lex.ext");
+            return not_supported_because(
+                current_declaration, "lex.ext",
+                "a user-defined string literal whose value is not available");
         str.node = expression_node(semantic_kind::string_literal, str, t);
         arguments.append(str);
         arguments.append(

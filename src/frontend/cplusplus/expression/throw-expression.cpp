@@ -129,7 +129,10 @@ analysis_result semantic_analysis::throw_expression(ThrowExpression n,
                                    conversion_kind::lvalue_to_rvalue)))
                 /* a prvalue of the class, stored in the object it
                    initializes: not lowered */
-                return not_supported(n, "expr.throw");
+                return not_supported_because(
+                    n, "expr.throw",
+                    "a throw operand not initialized by a constructor or a "
+                    "plain copy");
         }
         initialization = value.node;
     }

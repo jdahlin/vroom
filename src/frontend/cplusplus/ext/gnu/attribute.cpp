@@ -557,16 +557,22 @@ analysis_result semantic_analysis::add_gnu_abi_tag(SyntaxRef at,
                                                    gnu_attributes &g)
 {
     if (tokens[literal].literal != literal_kind::string_literal)
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu",
+            "an abi_tag argument that is not an ordinary string literal");
     owned_buffer tag;
     tokens.spelling(literal, tag.get());
     if (tag.size() < 3 || tag.data()[0] != '"')
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu",
+            "an abi_tag argument that is empty or has a literal prefix");
     for (size_t i = 1; i + 1 < tag.size(); i++) {
         unsigned char ch = static_cast<unsigned char>(tag.data()[i]);
         if (!(ch == '_' || (ch >= '0' && ch <= '9') ||
               ((ch | 32) >= 'a' && (ch | 32) <= 'z')))
-            return not_supported(at, "ext.gnu");
+            return not_supported_because(at, "ext.gnu",
+                                         "an abi_tag argument with a character "
+                                         "not allowed in an identifier");
     }
     if (g.abi_tag) {
         /* two tags: their order in the name is sorted */
@@ -574,7 +580,8 @@ analysis_result semantic_analysis::add_gnu_abi_tag(SyntaxRef at,
         tokens.spelling(g.abi_tag, before.get());
         if (before.size() != tag.size() ||
             memcmp(before.data(), tag.data(), tag.size()))
-            return not_supported(at, "ext.gnu");
+            return not_supported_because(
+                at, "ext.gnu", "a second abi_tag that differs from the first");
     }
     g.abi_tag = literal;
     g.flags |= gnu_abi_tag;
@@ -624,7 +631,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                      attributes_as_gnu(c, standard))
                 g.flags |= standard;
             else if (!c.is_token())
-                return not_supported(n, "ext.gnu");
+                return not_supported_because(
+                    n, "ext.gnu",
+                    "an unrecognized element in a GNU attribute specifier");
             else if (tokens[c.token()].kind !=
                      token_kind::operator_or_punctuator)
                 /* an attribute without arguments: its token (or
@@ -640,7 +649,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
         uint32_t count = a.size();
         if (!a.is_token()) {
             if (!count || !a[0].is_token())
-                return not_supported(a.index(), "ext.gnu");
+                return not_supported_because(
+                    a.index(), "ext.gnu",
+                    "a GNU attribute that does not start with a name");
             name_token = a[0].token();
         }
         owned_buffer spelling;
@@ -666,7 +677,8 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                     !memcmp(r.name, spelling.data(), spelling.size()))
                     rule = &r;
         if (!rule)
-            return not_supported(at, "ext.gnu");
+            return not_supported_because(
+                at, "ext.gnu", "an unrecognized GNU or __declspec attribute");
         /* clang's enable_if: the function a candidate only where the
            condition holds; on a constructor template's declarator
            (enable_if_allowed: libc++'s _CmpUnspecifiedParam, which allows
@@ -679,11 +691,16 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             if (enable_if_allowed)
                 continue;
             if (count != 6)
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "an enable_if attribute without exactly one argument where "
+                    "not allowed");
             bool constant = false, value = false;
             VTRY(r, bool_constant_expression(at, a[2], constant, value));
             if (!constant || !value)
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "an enable_if condition that is not constant true");
             g.flags |= gnu_enable_if;
             continue;
         }
@@ -694,9 +711,14 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                 if (!alignment || (alignment & (alignment - 1)) ||
                     alignment > (1u << 28))
                     /* clang: "requested alignment is not a power of 2" */
-                    return not_supported(at, "ext.gnu");
+                    return not_supported_because(
+                        at, "ext.gnu",
+                        "an aligned attribute whose alignment is not a power "
+                        "of two up to 2^28");
             } else if (count > 1 && count != 3) {
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "an aligned attribute with an unrecognized argument form");
             }
             if (alignment > g.aligned)
                 g.aligned = alignment;
@@ -710,9 +732,15 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             if (count == 4) {
                 VTRY(r, gnu_integer_argument(at, a[2], priority));
                 if (priority > 65535)
-                    return not_supported(at, "ext.gnu");
+                    return not_supported_because(
+                        at, "ext.gnu",
+                        "a constructor or destructor attribute priority above "
+                        "65535");
             } else if (count > 1 && count != 3) {
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "a constructor or destructor attribute with an "
+                    "unrecognized argument form");
             }
             g.flags |= rule->flag;
             g.priority = static_cast<uint32_t>(priority);
@@ -726,7 +754,10 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             /* one identifier: the mode */
             if (count != 4 || !a[2].is_token() ||
                 tokens[a[2].token()].kind != token_kind::identifier || g.mode)
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "a mode attribute without one mode name, or a second mode "
+                    "attribute");
             g.mode = a[2].token();
             g.flags |= gnu_mode;
             continue;
@@ -734,7 +765,10 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
         if (rule->flag == gnu_vector_size) {
             uint64_t bytes = 0;
             if (count != 4 || g.vector_bytes)
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "a vector_size attribute without one argument, or a second "
+                    "vector_size");
             VTRY(r, gnu_integer_argument(at, a[2], bytes));
             if (!bytes)
                 return ill_formed(at, "zero vector size", "ext.gnu");
@@ -746,12 +780,17 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             /* one ordinary string-literal: "section-name" */
             if (count != 4 || !a[2].is_token() ||
                 tokens[a[2].token()].literal != literal_kind::string_literal)
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "a section attribute whose argument is not an ordinary "
+                    "string literal");
             owned_buffer name;
             tokens.spelling(a[2].token(), name.get());
             if (name.size() < 2 || name.data()[0] != '"' ||
                 memchr(name.data(), '\\', name.size()))
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(at, "ext.gnu",
+                                             "a section attribute name with a "
+                                             "literal prefix or an escape");
             g.section = a[2].token();
             g.flags |= gnu_section;
             continue;
@@ -768,13 +807,17 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             bool type_visibility = !strcmp(rule->name, "type_visibility");
             if (type_visibility || value.size() != 8 ||
                 memcmp(value.data(), "\"hidden\"", 8))
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "a visibility attribute other than default or hidden");
             g.flags |= gnu_hidden_visibility;
             continue;
         }
         if (rule->flag == gnu_abi_tag) {
             if (count != 4 || !a[2].is_token())
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "an abi_tag attribute without exactly one argument");
             VTRY(r, add_gnu_abi_tag(at, a[2].token(), g));
             continue;
         }
@@ -788,14 +831,19 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
             if (count > 1 && count != 3 &&
                 (count != 4 || !a[2].is_token() ||
                  tokens[a[2].token()].literal != literal_kind::string_literal))
-                return not_supported(at, "ext.gnu");
+                return not_supported_because(
+                    at, "ext.gnu",
+                    "an unavailable attribute whose argument is not one string "
+                    "literal");
             g.flags |= gnu_unavailable;
             continue;
         }
         /* the others take no arguments analysis has rules for (format's
            and nonnull's say nothing to code generation) */
         if (count > 1 && rule->flag && rule->flag != gnu_nonnull)
-            return not_supported(at, "ext.gnu");
+            return not_supported_because(at, "ext.gnu",
+                                         "an argument on a GNU attribute that "
+                                         "has no rules for arguments");
         g.flags |= rule->flag;
     }
     return analysis_result::well_formed;
@@ -809,11 +857,15 @@ analysis_result semantic_analysis::gnu_integer_argument(SyntaxRef at,
     expression_meaning e;
     VTRY(r, expression(argument, e));
     if (!is_integral(e.type) || e.category != value_category::prvalue)
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu",
+            "a GNU attribute integer argument that is not an integral prvalue");
     bool constant = false;
     VTRY_SET(r, constant_expression(at, e, constant));
     if (!constant)
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu",
+            "a GNU attribute integer argument that is not a constant");
     value = e.value;
     return analysis_result::well_formed;
 }
@@ -837,7 +889,9 @@ analysis_result semantic_analysis::gnu_cleanup_function(SyntaxRef at,
 {
     if (count != 4 || !a[2].is_token() ||
         tokens[a[2].token()].kind != token_kind::identifier || g.cleanup)
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(at, "ext.gnu",
+                                     "a cleanup attribute without one function "
+                                     "name, or a second cleanup");
     lookup_result found =
         lookup_unqualified(tokens.identifier(a[2].token()), lookup_filter::any);
     if (!found.entity || found.unknown || found.ambiguous ||
@@ -846,11 +900,15 @@ analysis_result semantic_analysis::gnu_cleanup_function(SyntaxRef at,
          entity_table[entity_table[found.entity].enclosing].kind ==
              entity_kind::class_type))
         /* (a member function needs an object: not GCC's cleanup) */
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu",
+            "a cleanup attribute naming something that is not a usable "
+            "non-member function");
     owned_array<entity_index> set;
     overload_set(found.entity, set);
     if (set.size() != 1)
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu", "a cleanup attribute naming an overloaded function");
     g.cleanup = found.entity;
     g.flags |= gnu_cleanup;
     return analysis_result::well_formed;
@@ -903,7 +961,8 @@ analysis_result semantic_analysis::gnu_mode_type(SyntaxRef at, token_index mode,
         if (pointer_size() == 8)
             spelled = "DI";
     } else if (length != 2) {
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu", "a mode attribute with an unrecognized mode name");
     }
     name = spelled;
     fundamental_type integer = fundamental_of(type);
@@ -947,7 +1006,9 @@ analysis_result semantic_analysis::gnu_mode_type(SyntaxRef at, token_index mode,
                 t = fundamental_type::int128;
             break;
         default:
-            return not_supported(at, "ext.gnu");
+            return not_supported_because(
+                at, "ext.gnu",
+                "a mode attribute with an unrecognized integer mode");
         }
         type = qualified_type::make(type_table.fundamental(t), type.cv());
         return analysis_result::well_formed;
@@ -958,13 +1019,19 @@ analysis_result semantic_analysis::gnu_mode_type(SyntaxRef at, token_index mode,
         base = type_table[type.unqualified()].operand;
     if (!fundamental_type_is_floating(fundamental_of(base)) &&
         fundamental_of(base) != fundamental_type::float128)
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(at, "ext.gnu",
+                                     "a floating mode attribute on a type that "
+                                     "is not floating or complex");
     /* the second letter C says complex, F real */
     bool complex = name[1] == 'C';
     if (!complex && name[1] != 'F')
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu",
+            "a mode attribute whose mode is neither float nor complex float");
     if (complex != (kind == type_kind::complex))
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu",
+            "a mode attribute that changes between real and complex");
     fundamental_type t = fundamental_type::none;
     switch (name[0]) {
     case 'S':
@@ -975,7 +1042,9 @@ analysis_result semantic_analysis::gnu_mode_type(SyntaxRef at, token_index mode,
         break;
     case 'X':
         if (tokens.files.behavior.long_double_fraction_bits != 63)
-            return not_supported(at, "ext.gnu");
+            return not_supported_because(
+                at, "ext.gnu",
+                "an XF or XC mode where long double is not the x87 format");
         t = fundamental_type::long_double;
         break;
     case 'T':
@@ -984,7 +1053,9 @@ analysis_result semantic_analysis::gnu_mode_type(SyntaxRef at, token_index mode,
             t = fundamental_type::long_double;
         break;
     default:
-        return not_supported(at, "ext.gnu");
+        return not_supported_because(
+            at, "ext.gnu",
+            "a mode attribute with an unrecognized floating mode size");
     }
     type_index made = type_table.fundamental(t);
     if (complex)
@@ -1043,7 +1114,9 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
     s.gnu_cleanup = g.cleanup;
     if (g.mode || g.vector_bytes)
         /* the mode of a decl-specifier's attribute: not analysed */
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "a mode or vector_size attribute among the decl-specifiers");
     s.aligned = g.aligned;
     s.gnu_flags = g.flags;
     s.section = g.section;

@@ -56,7 +56,9 @@ analysis_result semantic_analysis::member_function_template(
        where the template-head has none */
     uint32_t trailing = static_cast<bool>(trailing_constraint(n));
     if (trailing && head_constraint(n))
-        return not_supported(n, "temp.constr");
+        return not_supported_because(
+            n, "temp.constr",
+            "a member template with requires-clauses both in head and after");
     /* [temp.mem]/1: a member template declared in the class, defined
        outside it (member_template_definition_of_template): a
        member-declaration of a decl-specifier-seq and a declarator */
@@ -65,13 +67,16 @@ analysis_result semantic_analysis::member_function_template(
         ((!specifiers && !constructor && !conversion) || trailing ||
          tail.size() != 2 + specifiers || tail[specifiers].is_token() ||
          !tail[specifiers + 1].is(preprocessing_op_or_punc::SEMICOLON)))
-        return not_supported(n, "temp.mem");
+        return not_supported_because(
+            n, "temp.mem",
+            "a member template declaration of an unhandled form");
     if (defines &&
         (tail.size() != 2 + specifiers + trailing ||
          (!specifiers && !constructor && !conversion) ||
          tail[specifiers].is_token() ||
          !tail[specifiers + 1 + trailing].is(syntax_kind::function_body)))
-        return not_supported(n, "temp.mem");
+        return not_supported_because(
+            n, "temp.mem", "a member template definition of an unhandled form");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY(declared,
@@ -231,14 +236,18 @@ analysis_result semantic_analysis::member_function_template(
             entity_table.bind(c, name, held);
             prior = held;
         } else {
-            return not_supported(n, "class.mem");
+            return not_supported_because(n, "class.mem",
+                                         "a member template whose name was "
+                                         "brought in from another class");
         }
     } else if (prior && !member_function_template_of(prior)) {
         /* [temp.mem]/8: a conversion function template beside a
            non-template conversion function (or a member of another kind):
            the best conversion function among them ([over.match.conv]) is
            not weighed */
-        return not_supported(n, "temp.mem");
+        return not_supported_because(n, "temp.mem",
+                                     "a member function template beside a "
+                                     "non-template member of its name");
     }
     if (prior) {
         /* [over.load]/2: "member function template declarations with the
@@ -445,7 +454,10 @@ analysis_result semantic_analysis::member_template_call(
             token_index set_at = 0;
             if (a.is(syntax_kind::braced_init_list) ||
                 named_overload_set(a, set_at))
-                return not_supported(n, "temp.deduct.call");
+                return not_supported_because(
+                    n, "temp.deduct.call",
+                    "a braced list or overload set argument to a member "
+                    "template call");
             expression_meaning e;
             VTRY(r, expression(a, e));
             early.append(e);
@@ -453,7 +465,9 @@ analysis_result semantic_analysis::member_template_call(
     for (const expression_meaning &e : early)
         if (e.entity && entity_table[e.entity].kind == entity_kind::function &&
             entity_table[e.entity].next_overload)
-            return not_supported(n, "temp.deduct.call");
+            return not_supported_because(n, "temp.deduct.call",
+                                         "an overloaded function as an "
+                                         "argument to a member template call");
     owned_array<overload_candidate> candidates;
     owned_array<uint32_t> first_arguments;
     owned_array<template_argument> all;
@@ -477,7 +491,9 @@ analysis_result semantic_analysis::member_template_call(
            context this is a substitution failure. */
         if (substituting)
             return analysis_result::ill_formed;
-        return not_supported(n, "temp.deduct");
+        return not_supported_because(
+            n, "temp.deduct",
+            "a member template call with no candidate after deduction");
     }
     owned_array<expression_meaning> operands;
     if (object)
@@ -519,7 +535,9 @@ analysis_result semantic_analysis::member_template_call(
         /* [class.mfct.non-static]/3: a non-static member function named
            where no object is (a static member's context, a default
            argument): ill-formed, not analysed */
-        return not_supported(n, "class.mfct.non-static");
+        return not_supported_because(
+            n, "class.mfct.non-static",
+            "a non-static member function template called with no object");
     return bound_member_call(n, f, *object, arguments, early, m);
 }
 
@@ -548,7 +566,9 @@ analysis_result semantic_analysis::static_member_call(
     if (object && object->category == value_category::prvalue &&
         entity_table[object_class].destructor)
         /* the temporary's destruction ([class.temporary]/4) */
-        return not_supported(n, "class.temporary");
+        return not_supported_because(
+            n, "class.temporary",
+            "a static member call on a temporary that has a destructor");
     VTRY(r, deleted_use(at, f));
     const entity x = entity_table[f];
     expression_meaning callee;
@@ -607,7 +627,9 @@ analysis_result semantic_analysis::bound_member_call(
     if (aggregate_prvalue(e) &&
         (!at_block_scope() || entity_table[x.enclosing].destructor ||
          x.enclosing != object_class))
-        return not_supported(n, "class.temporary");
+        return not_supported_because(
+            n, "class.temporary",
+            "a member call on an aggregate temporary in this context");
     VTRY(r, deleted_use(at, f));
     expression_meaning callee;
     callee.type = x.type;

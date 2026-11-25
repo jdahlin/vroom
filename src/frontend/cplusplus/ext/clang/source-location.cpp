@@ -73,7 +73,9 @@ semantic_analysis::clang_source_location_object(SyntaxRef n,
                           "before '__builtin_source_location' is called",
                           "ext.clang");
     if (!unevaluated)
-        return not_supported(n, "ext.clang");
+        return not_supported_because(
+            n, "ext.clang",
+            "__builtin_source_location in an evaluated context");
     qualified_type object = qualified_type::make(
         type_table.of_entity(type_kind::class_type, impl), cv_const);
     m.type = qualified_type::make(type_table.pointer_to(object), cv_none);
@@ -125,7 +127,10 @@ analysis_result semantic_analysis::clang_source_location(SyntaxRef n,
         source_position of_macro = tokens.files.position(written.expansion);
         if (!strcmp(in_argument.file_name, of_macro.file_name) &&
             in_argument.line != of_macro.line)
-            return not_supported(n, "cpp.replace");
+            return not_supported_because(
+                n, "cpp.replace",
+                "__builtin_source_location with a macro argument on another "
+                "line than the macro name");
     }
     bool numeric = which == source_location_builtin::line ||
                    which == source_location_builtin::column;

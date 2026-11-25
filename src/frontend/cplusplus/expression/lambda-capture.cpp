@@ -89,17 +89,22 @@ analysis_result semantic_analysis::capture_type(SyntaxRef at, qualified_type t,
         object = r.operand;
     const struct type o = type_table[object.unqualified()];
     if (o.kind == type_kind::function)
-        return not_supported(at, "expr.prim.lambda.capture");
+        return not_supported_because(at, "expr.prim.lambda.capture",
+                                     "a capture of a function");
     /* an array captured by copy is copied element by element (/15) */
     if (o.kind == type_kind::array && !by_reference &&
         (!o.bound_known || !size_of_type(object)))
-        return not_supported(at, "expr.prim.lambda.capture");
+        return not_supported_because(
+            at, "expr.prim.lambda.capture",
+            "an array of unknown bound or size captured by copy");
     if (by_reference) {
         type = reference_to(object, false);
         return analysis_result::well_formed;
     }
     if (!size_of_type(object))
-        return not_supported(at, "expr.prim.lambda.capture");
+        return not_supported_because(
+            at, "expr.prim.lambda.capture",
+            "a capture by copy of a type with no known size");
     type = object;
     return analysis_result::well_formed;
 }
@@ -216,7 +221,9 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                                                "or * this",
                                                "expr.prim.lambda.capture");
             } else {
-                return not_supported(n, "expr.prim.lambda.capture");
+                return not_supported_because(
+                    n, "expr.prim.lambda.capture",
+                    "a simple-capture of an unhandled form");
             }
         } else if (c.is(syntax_kind::init_capture)) {
             VTRY_SET(r, init_capture(c, l, record));
@@ -248,14 +255,17 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                     !c[static_cast<uint32_t>(at)].is_identifier() ||
                     !c[static_cast<uint32_t>(at + 1)].is(
                         preprocessing_op_or_punc::ELLIPSIS))
-                    return not_supported(c.index(), "temp.variadic");
+                    return not_supported_because(
+                        c.index(), "temp.variadic",
+                        "a capture pack expansion that is not identifier...");
                 VTRY(packed,
                      pack_capture(n, l, c[static_cast<uint32_t>(at)].token(),
                                   reference));
                 continue;
             }
         } else {
-            return not_supported(n, "expr.prim.lambda.capture");
+            return not_supported_because(n, "expr.prim.lambda.capture",
+                                         "a capture of an unhandled form");
         }
         if (!name) {
             /* this or * this */
@@ -279,7 +289,9 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
             if (record.star_this) {
                 type = type_table[type.unqualified()].operand;
                 if (!size_of_type(type))
-                    return not_supported(n, "expr.prim.lambda.capture");
+                    return not_supported_because(
+                        n, "expr.prim.lambda.capture",
+                        "a *this capture of a class with no known size");
             } else {
                 record.by_reference = true;
             }
@@ -292,7 +304,9 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
         entity_index e = found.entity;
         if (found.ambiguous || found.unknown || !e ||
             entity_table[e].kind == entity_kind::none)
-            return not_supported(n, "basic.lookup.unqual");
+            return not_supported_because(
+                n, "basic.lookup.unqual",
+                "a capture of a name that lookup cannot resolve");
         VTRY_SET(r, variable_capture(n, l, e, name, record.by_reference));
     }
     return analysis_result::well_formed;
@@ -334,7 +348,9 @@ analysis_result semantic_analysis::variable_capture(SyntaxRef n,
     entity_index owner = enclosing_function(entity_table, e);
     bool reachable = local_reachable(owner);
     if (!reachable || (owner != function_state.function && !current_lambda()))
-        return not_supported(n, "basic.def.odr");
+        return not_supported_because(
+            n, "basic.def.odr",
+            "a capture of a local that is not reachable from this lambda");
     record.variable = e;
     record.at = name;
     qualified_type type;
@@ -360,7 +376,9 @@ analysis_result semantic_analysis::pack_capture(SyntaxRef n, lambda_context &l,
 {
     entity_index pack = find_pack(tokens.identifier(name));
     if (!pack)
-        return not_supported(n, "temp.variadic");
+        return not_supported_because(
+            n, "temp.variadic",
+            "a capture pack expansion of a name that is not a pack");
     uint32_t first = static_cast<uint32_t>(entity_table[pack].value);
     uint32_t count = entity_table[pack].member_count;
     for (uint32_t i = 0; i < count; i++) {
@@ -393,7 +411,8 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
     if (pack)
         i++;
     if (n.size() != i + 2 || !n[i].is_identifier())
-        return not_supported(n, "temp.variadic");
+        return not_supported_because(
+            n, "temp.variadic", "an init-capture pack of an unhandled form");
     token_index name = n[i].token();
     for (size_t k = l.first_capture; k < lambda_captures.size(); k++)
         if (lambda_captures[k].variable &&
@@ -444,7 +463,9 @@ analysis_result semantic_analysis::init_capture(InitCapture n,
         if (t.kind == type_kind::function ||
             (t.kind == type_kind::array && !by_reference) ||
             (!by_reference && !size_of_type(type)))
-            return not_supported(n, "expr.prim.lambda.capture");
+            return not_supported_because(n, "expr.prim.lambda.capture",
+                                         "an init-capture of a function, array "
+                                         "or type with no known size");
         capture_record each;
         each.variable = v;
         each.init_capture = true;
@@ -571,7 +592,9 @@ analysis_result semantic_analysis::captured_entity(token_index t,
     if (!reachable)
         /* of a function enclosing a local class whose member function
            the lambda is in */
-        return not_supported(current_declaration, "basic.def.odr");
+        return not_supported_because(
+            current_declaration, "basic.def.odr",
+            "a use of a local that is not reachable from this lambda");
     /* a variable usable in constant expressions is odr-used unless its
        value is read (/4): decided when the body is analysed
        (resolve_pending_uses) */
@@ -584,7 +607,9 @@ analysis_result semantic_analysis::captured_entity(token_index t,
             /* (a pointer's or class object's reads, and a variable whose
                value is not known, are not tracked: whether it is odr-used
                is not analysed) */
-            return not_supported(current_declaration, "basic.def.odr");
+            return not_supported_because(current_declaration, "basic.def.odr",
+                                         "a possible odr-use of a constant "
+                                         "variable that is not tracked");
         plain = true;
         deferred = true;
         return analysis_result::well_formed;
@@ -635,7 +660,9 @@ analysis_result semantic_analysis::capture_variable(lambda_context &l,
        when the lambda-expression was analysed are captured
        (implicit_captures) */
     if (l.sealed && l.default_capture != capture_default::none)
-        return not_supported(current_declaration, "expr.prim.lambda.capture");
+        return not_supported_because(
+            current_declaration, "expr.prim.lambda.capture",
+            "a new implicit capture after the lambda's captures were fixed");
     if (l.default_capture == capture_default::none)
         return ill_formed_at_token(t,
                                    "a local entity odr-used in a declarative "
@@ -917,8 +944,9 @@ analysis_result semantic_analysis::captured_this(token_index t,
                                        "member initializer",
                                        "expr.prim.this");
         if (unevaluated || l.sealed)
-            return not_supported(current_declaration,
-                                 "expr.prim.lambda.capture");
+            return not_supported_because(
+                current_declaration, "expr.prim.lambda.capture",
+                "a use of this in an unevaluated or already analysed lambda");
         if (l.default_capture == capture_default::none)
             return ill_formed_at_token(t,
                                        "*this odr-used in a declarative region "

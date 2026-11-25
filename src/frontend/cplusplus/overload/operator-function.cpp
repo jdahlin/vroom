@@ -285,17 +285,23 @@ analysis_result semantic_analysis::operator_function_id(OperatorFunctionId id,
         !id.symbol().is_token() ||
         tokens[id.symbol().token()].kind != token_kind::operator_or_punctuator)
         /* co_await */
-        return not_supported(id, "over.oper");
+        return not_supported_because(
+            id, "over.oper",
+            "an operator function id for co_await or of unrecognized form");
     preprocessing_op_or_punc op = preprocessing_op_or_punc_primary(
         tokens[id.symbol().token()].op_or_punc);
     if (id.size() == 3 && op != preprocessing_op_or_punc::LEFT_PARENTHESIS &&
         op != preprocessing_op_or_punc::LEFT_BRACKET)
-        return not_supported(id, "over.oper");
+        return not_supported_because(
+            id, "over.oper",
+            "an operator function id with extra tokens after the operator");
     switch (op) {
     case preprocessing_op_or_punc::SPACESHIP:
         if (!tokens.files.behavior.has(
                 language_feature::three_way_comparison_operator))
-            return not_supported(id, "over.oper");
+            return not_supported_because(
+                id, "over.oper",
+                "operator<=> without three-way comparison support");
         break;
     default:
         break;
@@ -357,7 +363,8 @@ analysis_result semantic_analysis::operator_function_declaration(SyntaxRef n,
         return analysis_result::well_formed;
     if (subscript && member && !x.nonstatic_member)
         /* C++23's static operator[] (P2589) */
-        return not_supported(n, "over.sub");
+        return not_supported_because(n, "over.sub",
+                                     "a static operator[] member");
     /* [over.oper]/7: "An operator function shall either be a non-static
        member function or be a non-member function that has at least one
        parameter whose type is a class, a reference to a class, an
@@ -421,7 +428,8 @@ analysis_result semantic_analysis::operator_function_declaration(SyntaxRef n,
         if (tokens.files.behavior.has(
                 language_feature::multidimensional_subscript))
             /* C++23's operator[] of any number of parameters */
-            return not_supported(n, "over.sub");
+            return not_supported_because(
+                n, "over.sub", "an operator[] with other than one parameter");
         return ill_formed(n,
                           "a subscripting operator function shall have "
                           "exactly one parameter",

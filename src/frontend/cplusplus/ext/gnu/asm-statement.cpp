@@ -221,9 +221,12 @@ analysis_result semantic_analysis::gnu_asm_operand(GnuAsmOperand n, bool output,
     expression_meaning m;
     VTRY(r, expression(n[i + 2], m));
     if (!m.node || m.overload_name)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "an asm operand that has no value or names an overload set");
     if (depends_on_template_parameter(m.type))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(n, "temp.dep.constexpr",
+                                     "an asm operand of dependent type");
     if (output) {
         /* [basic.lval]/10: an lvalue is modifiable unless its type is
            const-qualified or is a function type; clang: "invalid lvalue in
@@ -234,7 +237,8 @@ analysis_result semantic_analysis::gnu_asm_operand(GnuAsmOperand n, bool output,
                               "ext.gnu");
         /* the write back into a bit-field is not generated */
         if (m.bit_field_width)
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(
+                n, "ext.gnu", "a bit-field as an asm output operand");
     } else {
         type_kind k = type_table[m.type.unqualified()].kind;
         if (k == type_kind::array || k == type_kind::function)
@@ -272,7 +276,9 @@ analysis_result semantic_analysis::gnu_asm_statement(GnuAsmStatement n,
         }
     }
     if (i + 1 >= n.size())
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "an asm statement that ends before its template string");
     token_index tmpl = n[i + 1].token();
     owned_array<uint32_t> operands, clobbers, labels;
     uint32_t outputs = 0;
