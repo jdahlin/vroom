@@ -968,6 +968,25 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
         text("E");
         return true;
     }
+    /* [abi:expressions] sizeof ... ( P ), P a template parameter pack of
+       the template or of the class template it is a member of:
+
+           <expression> ::= sZ <template-param>
+
+       [impl.clang] the parameter's position alone, T_ or T <n> _, at any
+       depth */
+    if (expression.is(syntax_kind::unary_expression) &&
+        expression.size() == 5 && expression[0].is(standard_keyword::sizeof_) &&
+        expression[1].is(preprocessing_op_or_punc::ELLIPSIS) &&
+        expression[3].is_identifier()) {
+        entity_index pe = analysis.constraint_parameter(encoding_template,
+                                                        expression[3].token());
+        if (!pe)
+            return false;
+        text("sZ");
+        template_param(analysis.entity_table[pe].value);
+        return true;
+    }
     /* [abi:expressions] <unary operator-name> <expression> */
     if (expression.is(syntax_kind::unary_expression) &&
         expression.size() == 2) {
