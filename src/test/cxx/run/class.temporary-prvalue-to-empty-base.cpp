@@ -25,8 +25,23 @@ int take(const Empty &e)
 {
     return e.seven() + destroyed;
 }
+/* an empty derived class passed by value as its empty base (a priority
+   tag) */
+template <int N> struct tag : tag<N - 1> {};
+template <> struct tag<0> {};
+struct W {};
+int tagged(tag<0>, W, const char *a)
+{
+    return a[0];
+}
+template <class T> int call(W w, T &&a)
+{
+    return tagged(tag<1>(), w, a);
+}
 int main()
 {
+    if (call(W(), "x") != 'x')
+        return 2;
     int a = take(Agg{{}, 1});
     int b = take(make());
     int before = destroyed;

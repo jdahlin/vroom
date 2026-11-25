@@ -763,28 +763,30 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
             /* an empty base, at the object's address: *(B *)&object (an
                xvalue's object, or a prvalue's temporary materialized by
                [conv.rval]) */
-            expression_meaning address;
             if (m.category == value_category::prvalue &&
                 (aggregate_prvalue(m) || entity_table[c].destructor)) {
                 /* [basic.lval]/7, [class.temporary]/4: an aggregate's
                    prvalue or one with a destructor is held in a temporary
-                   as a reference bound to it holds it */
-                address = m;
+                   as a reference bound to it holds it: the glvalue the
+                   reference refers to */
+                expression_meaning bound = m;
                 VTRY(r,
                      reference_binding(
-                         current_declaration, address,
+                         current_declaration, bound,
                          qualified_type::make(
                              type_table.rvalue_reference_to(m.type), cv_none)));
-                address.category = value_category::prvalue;
-                address.evaluation = constness::not_constant;
-            } else {
-                address.type = qualified_type::make(
-                    type_table.pointer_to(m.type), cv_none);
-                address.category = value_category::prvalue;
-                address.evaluation = constness::not_constant;
-                address.node = expression_node(semantic_kind::address, address,
-                                               at, m.node);
+                m.category = value_category::xvalue;
+                m.evaluation = constness::not_constant;
+                m.node = expression_node(semantic_kind::indirection, m, at,
+                                         bound.node);
             }
+            expression_meaning address;
+            address.type =
+                qualified_type::make(type_table.pointer_to(m.type), cv_none);
+            address.category = value_category::prvalue;
+            address.evaluation = constness::not_constant;
+            address.node =
+                expression_node(semantic_kind::address, address, at, m.node);
             address.type = qualified_type::make(
                 type_table.pointer_to(result.type), cv_none);
             converted(address, conversion_kind::derived_to_base);
