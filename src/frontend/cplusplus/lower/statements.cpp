@@ -384,9 +384,38 @@ bool c_lowering::needs_run_time(uint32_t n) const
 }
 
 /* whether an initializer is a constant C emits as data */
+/* [expr.const]/11: arithmetic of a 128-bit integer type on constants
+   whose value the analysis evaluated but does not keep in its 64 bits
+   (libc++'s __pow10_128: __uint128_t(10000000000000000000) * 10): the
+   initializer as written, which C folds as a constant expression too */
+bool c_lowering::wide_constant_arithmetic(uint32_t n) const
+{
+    const semantic_node &x = node(n);
+    if (x.kind == semantic_kind::constant)
+        return true;
+    const struct type &t = record(x.type);
+    if (t.kind != type_kind::fundamental ||
+        (t.fundamental != fundamental_type::int128 &&
+         t.fundamental != fundamental_type::unsigned_int128) ||
+        x.evaluation == constness::not_constant)
+        return false;
+    if (x.kind == semantic_kind::conversion)
+        return static_cast<conversion_kind>(x.op) ==
+                   conversion_kind::integral &&
+               (node(x.a).kind == semantic_kind::constant ||
+                wide_constant_arithmetic(x.a));
+    if (x.kind == semantic_kind::unary)
+        return wide_constant_arithmetic(x.a);
+    if (x.kind == semantic_kind::binary)
+        return wide_constant_arithmetic(x.a) && wide_constant_arithmetic(x.b);
+    return false;
+}
+
 bool c_lowering::constant_initializer(uint32_t n) const
 {
     const semantic_node &x = node(n);
+    if (wide_constant_arithmetic(n))
+        return true;
     switch (x.kind) {
     case semantic_kind::constant:
     case semantic_kind::zero:
