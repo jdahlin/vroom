@@ -2051,7 +2051,7 @@ class semantic_analysis
     bool destructor_deleted(entity_index c) const;
     bool copy_constructor_deleted_by_move(entity_index c) const;
     bool declares_move_assignment(entity_index c);
-    bool copy_assignment_deleted(entity_index c) const;
+    bool copy_assignment_deleted(entity_index c);
     bool bytewise_const_member(entity_index c) const;
     bool trivial_special_members(entity_index c) const;
     bool copy_or_move_constructor(entity_index c, entity_index k) const;
