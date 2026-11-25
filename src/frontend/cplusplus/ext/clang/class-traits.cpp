@@ -27,6 +27,14 @@ bool semantic_analysis::empty_class(entity_index c) const
         if (m.base_subobject || m.kind != entity_kind::variable ||
             !m.nonstatic_member)
             continue;
+        /* [impl.clang] a [[no_unique_address]] member of an empty class
+           type leaves the class empty (clang's CXXRecordDecl::isEmpty,
+           whatever the class's size; libc++'s _LIBCPP_COMPRESSED_ELEMENT
+           and __is_empty of __map_value_compare<K, V, less<K>>) */
+        if (m.no_unique_address && !m.bit_field &&
+            type_table[m.type.unqualified()].kind == type_kind::class_type &&
+            empty_class(type_table[m.type.unqualified()].entity))
+            continue;
         if (!m.bit_field || m.bit_width)
             return false;
     }
