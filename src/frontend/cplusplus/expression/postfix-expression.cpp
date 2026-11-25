@@ -1330,7 +1330,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             function_type = pointer.operand;
         } else {
             if (fundamental_of(f.type) == fundamental_type::none &&
-                !is_pointer(f.type))
+                !is_pointer(f.type) &&
+                type_table[f.type.unqualified()].kind != type_kind::enumeration)
                 return not_supported(n, "expr.call");
             return ill_formed(n,
                               "the postfix expression shall be either an "
