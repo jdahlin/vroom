@@ -687,6 +687,13 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                             return found;
                     }
                 }
+                /* [over.match.ref]/1: a non-const lvalue reference to no
+                   class takes a conversion function yielding an lvalue
+                   alone */
+                if (functions && !c1 && !rvalue_reference && !binds_rvalues &&
+                    x.kind != type_kind::function &&
+                    !conversion_may_yield_lvalue(c2, t1))
+                    functions = false;
                 if (functions) {
                     sequence cannot_tell = of_form(sequence::form::unknown);
                     /* [over.ics.rank]/2: once the source class is complete

@@ -277,6 +277,27 @@ bool semantic_analysis::has_conversion_functions(entity_index c) const
            own_conversion_functions(c) || base_has_conversion_functions(c);
 }
 
+bool semantic_analysis::conversion_may_yield_lvalue(entity_index c,
+                                                    qualified_type to)
+{
+    owned_array<entity_index> functions, templates, specializations;
+    if (entity_table[c].kind != entity_kind::class_type ||
+        !entity_table[c].size ||
+        !visible_conversion_functions(c, functions, &templates) ||
+        !deduce_conversion_templates(
+            templates,
+            qualified_type::make(type_table.lvalue_reference_to(to), cv_none),
+            specializations))
+        return true;
+    for (entity_index f : functions)
+        if (conversion_function_result(f).category == value_category::lvalue)
+            return true;
+    for (entity_index f : specializations)
+        if (conversion_function_result(f).category == value_category::lvalue)
+            return true;
+    return false;
+}
+
 /*
  * [over.match.conv]/1: "A call to a conversion function returning
  * "reference to X" is a glvalue of type X"; [expr.call]/14: "A function

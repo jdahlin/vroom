@@ -65,6 +65,13 @@ entity_index semantic_analysis::named_overload_set(SyntaxElement e,
 
 bool semantic_analysis::function_set_at(token_index at, function_set &out) const
 {
+    /* (the name of N::f, the one qualified form named_function_set takes:
+       an argument's overload set is kept as its name's token) */
+    if (at >= 2 && tokens[at - 1].kind == token_kind::operator_or_punctuator &&
+        preprocessing_op_or_punc_primary(tokens[at - 1].op_or_punc) ==
+            preprocessing_op_or_punc::COLON_COLON &&
+        tokens[at - 2].kind == token_kind::identifier)
+        return qualified_function_set(at - 2, at, out);
     out.at = at;
     lookup_result found =
         lookup_unqualified(tokens.identifier(at), lookup_filter::any);
@@ -114,42 +121,48 @@ bool semantic_analysis::named_function_set(SyntaxElement e,
         SyntaxElement qual = name[0];
         if (qual.size() != 2 || !qual[0].is_identifier())
             return false;
-        lookup_result scope = lookup_unqualified(
-            tokens.identifier(qual[0].token()), lookup_filter::any);
-        if (!scope.entity || scope.ambiguous || scope.unknown)
-            return false;
-        entity_index c = scope.entity;
-        if (!is_class_entity(c) && !is_namespace(c))
-            return false;
-        token_index at = name[1].token();
-        lookup_result found =
-            lookup_qualified(c, tokens.identifier(at), lookup_filter::any);
-        if (found.ambiguous)
-            return false;
-        out.at = at;
-        if (found.unknown) {
-            if (!function_template_of(found.unknown_entity) &&
-                !member_function_template_of(found.unknown_entity))
-                return false;
-            function_template_overloads(found.unknown_entity, out.templates);
-            inline_set_functions(found.unknown_entity, out.functions);
-            if (found.entity)
-                overload_set(found.entity, out.functions);
-            return !out.templates.empty() || !out.functions.empty();
-        }
-        if (!found.entity)
-            return false;
-        const entity &first = entity_table[found.entity];
-        if (first.kind != entity_kind::function)
-            return false;
-        if (!first.next_overload && !first.member_templates)
-            return false;
-        overload_set(found.entity, out.functions);
-        if (first.member_templates)
-            function_template_overloads(first.member_templates, out.templates);
-        return true;
+        return qualified_function_set(qual[0].token(), name[1].token(), out);
     }
     return false;
+}
+
+bool semantic_analysis::qualified_function_set(token_index qualifier,
+                                               token_index at,
+                                               function_set &out) const
+{
+    lookup_result scope =
+        lookup_unqualified(tokens.identifier(qualifier), lookup_filter::any);
+    if (!scope.entity || scope.ambiguous || scope.unknown)
+        return false;
+    entity_index c = scope.entity;
+    if (!is_class_entity(c) && !is_namespace(c))
+        return false;
+    lookup_result found =
+        lookup_qualified(c, tokens.identifier(at), lookup_filter::any);
+    if (found.ambiguous)
+        return false;
+    out.at = at;
+    if (found.unknown) {
+        if (!function_template_of(found.unknown_entity) &&
+            !member_function_template_of(found.unknown_entity))
+            return false;
+        function_template_overloads(found.unknown_entity, out.templates);
+        inline_set_functions(found.unknown_entity, out.functions);
+        if (found.entity)
+            overload_set(found.entity, out.functions);
+        return !out.templates.empty() || !out.functions.empty();
+    }
+    if (!found.entity)
+        return false;
+    const entity &first = entity_table[found.entity];
+    if (first.kind != entity_kind::function)
+        return false;
+    if (!first.next_overload && !first.member_templates)
+        return false;
+    overload_set(found.entity, out.functions);
+    if (first.member_templates)
+        function_template_overloads(first.member_templates, out.templates);
+    return true;
 }
 
 bool semantic_analysis::overload_set_operand(SyntaxElement e,

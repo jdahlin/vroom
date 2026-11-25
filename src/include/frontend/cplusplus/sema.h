@@ -6914,6 +6914,10 @@ class semantic_analysis
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
     bool has_conversion_functions(entity_index c) const;
+    /* whether a conversion function of class c, or a specialization of one
+       of its templates deduced for to, may yield an lvalue (true when not
+       known) */
+    bool conversion_may_yield_lvalue(entity_index c, qualified_type to);
     /* whether the class s has a non-explicit conversion function that may
        yield the class t or one derived from it ([over.match.copy]/1.2) */
     bool has_implicit_conversion_functions(entity_index c) const;
@@ -7095,6 +7099,9 @@ class semantic_analysis
     };
     bool function_set_at(token_index at, function_set &out) const;
     bool named_function_set(SyntaxElement e, function_set &out) const;
+    /* ... that N::f names, N the identifier at token qualifier */
+    bool qualified_function_set(token_index qualifier, token_index at,
+                                function_set &out) const;
     /* an operand that is such a name, kept as the overload set it is
        (m.overload_name); false if it is none */
     bool overload_set_operand(SyntaxElement e, expression_meaning &m) const;
