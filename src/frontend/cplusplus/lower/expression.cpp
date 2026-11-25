@@ -292,6 +292,11 @@ uint32_t c_lowering::expression(uint32_t index)
         if (!count_symbol)
             return fail("an array count outside new or delete", n.at);
         return c_variable(c, count_symbol, type(n.type, n.at));
+    case semantic_kind::array_index:
+        if (!array_index_symbol)
+            return fail("an array index outside an array loop", n.at);
+        return c_variable(c, array_index_symbol,
+                          ast_builder_type_basic(AST_TYPE_LONG));
     case semantic_kind::allocated:
         if (!allocated_symbol)
             return fail("an allocated pointer outside new or delete", n.at);

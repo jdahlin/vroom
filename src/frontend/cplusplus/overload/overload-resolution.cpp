@@ -309,7 +309,7 @@ analysis_result semantic_analysis::best_viable_function(
                         initialized_value value;
                         substituting++;
                         analysis_result r = list_initialization(
-                            (*written_arguments)[k], list_target, true, value);
+                            (*written_arguments)[k], list_target, false, value);
                         substituting--;
                         bool rolled_back = undo_substitution(mark);
                         if (r == analysis_result::well_formed &&

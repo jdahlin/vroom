@@ -591,6 +591,10 @@ class c_lowering
     ast_qualified_type allocated_type = {};
     /* [abi:array-cookies]: the element count array_count reads */
     uint32_t count_symbol = 0;
+    /* the index (a long variable) of the innermost enclosing array_loop,
+       which array_index reads */
+    uint32_t array_index_symbol = 0;
+    uint32_t array_loop(const semantic_node &n);
     /* an array's elements, first to last or last to first: for (size_t i
        ...) { element = &first[i]; each } with allocated the element, as
        the node each of new_object or delete_object lowers */
