@@ -6484,6 +6484,23 @@ class semantic_analysis
         return entity_table[template_parameter_entities[f.first_parameter + i]]
             .name;
     }
+    /* [namespace.qual]/2: what name names in namespace ns, a member of ns
+       or of an unnamed or inline namespace of it (their using-directives,
+       [namespace.unnamed]/1, [namespace.def]/5), the first found; 0 none */
+    entity_index namespace_member(entity_index ns, uint32_t name) const
+    {
+        if (entity_index e = entity_table.find(ns, name))
+            return e;
+        for (const using_directive_record &u : using_directives)
+            if (u.scope == ns && u.nominated != ns &&
+                entity_table[u.nominated].kind ==
+                    entity_kind::namespace_entity &&
+                (!entity_table[u.nominated].name ||
+                 entity_table[u.nominated].inline_))
+                if (entity_index e = namespace_member(u.nominated, name))
+                    return e;
+        return 0;
+    }
     /* whether the name held by entity held denotes a function template
        (a non-member's, as a callee's unresolved name is mangled) */
     bool names_function_template(entity_index held) const

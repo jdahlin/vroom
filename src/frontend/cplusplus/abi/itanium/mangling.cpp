@@ -1340,6 +1340,13 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
             }
             entity_index target = analysis.entity_table.find(
                 scope, analysis.token_identifier(member.token()));
+            /* ([namespace.unnamed]/1: a member of the namespace's unnamed
+               namespace is found as the namespace's, json's
+               ::nlohmann::to_json) */
+            if (!target && analysis.entity_table[scope].kind ==
+                               entity_kind::namespace_entity)
+                target = analysis.namespace_member(
+                    scope, analysis.token_identifier(member.token()));
             if (target &&
                 analysis.entity_table[target].kind == entity_kind::variable) {
                 text("L_Z");

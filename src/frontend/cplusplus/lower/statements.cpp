@@ -853,7 +853,10 @@ uint32_t c_lowering::statement(uint32_t index)
                 c, s, type(analysis.entity_table[named_return].type, n.at));
         } else if (n.a && node(n.a).kind == semantic_kind::initializer_list) {
             /* a class's result initialized by a braced-init-list
-               ([stmt.return]/2, [dcl.init.list]/3.4): its value */
+               ([stmt.return]/2, [dcl.init.list]/3.4): its value; the
+               temporaries of its full-expression ([class.temporary]/4)
+               made before it and destroyed after */
+            collection k = collect();
             if (piecewise_initializer(n.a)) {
                 ast_qualified_type t = type(node(n.a).type, n.at);
                 uint32_t temp = c_local(c, t);
@@ -868,6 +871,7 @@ uint32_t c_lowering::statement(uint32_t index)
             } else {
                 value = compound_literal(n.a);
             }
+            collected(k, items, after);
             if (!value)
                 return 0;
         } else if (n.a) {
