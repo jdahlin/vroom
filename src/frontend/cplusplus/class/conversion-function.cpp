@@ -693,6 +693,9 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
     callee.category = value_category::lvalue;
     callee.evaluation = constness::constant;
     callee.entity = f;
+    used(t, f);
+    if (!unevaluated)
+        mark_needed(f);
     owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> arguments;
     expression_meaning result;

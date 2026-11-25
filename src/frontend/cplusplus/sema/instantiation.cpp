@@ -1273,7 +1273,9 @@ bool semantic_analysis::emitted_functions_needed()
         entity &x = entity_table[f];
         if (x.kind != entity_kind::function || !x.defined ||
             x.member_definition_needed || x.member_body_deferred ||
-            x.unsupported_body || x.deleted || x.implicit || x.inline_)
+            x.unsupported_body || x.deleted || x.implicit ||
+            (x.inline_ &&
+             explicitly_instantiated(f) != instantiation_kind::definition))
             continue;
         if (explicitly_instantiated(f) == instantiation_kind::declaration)
             continue;
