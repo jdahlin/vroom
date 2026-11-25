@@ -369,6 +369,9 @@ analysis_result semantic_analysis::member_definition_of_template(
             if (member.is_token() ||
                 !member.is(syntax_kind::template_declaration))
                 continue;
+            if (member.size() >= 2 &&
+                member[1].is(syntax_kind::function_definition))
+                continue;
             bool writes = false;
             for (token_index t = member.first_token(); t < member.end_token();
                  t++)

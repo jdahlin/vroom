@@ -1669,6 +1669,11 @@ lines:
   ([temp.class.spec]/9).  Test `partial-spec-constrained-primary` (4/4 at
   `-O0..3`); the JSON include now reaches `[temp.mem]` in libc++
   `__ranges/join_view.h`.
+  `member_definition_of_template` now skips member `function_definition`
+  templates when matching a member class template ([temp.mem]/1).  Test
+  `member-class-template-constrained-method` (4/4 at `-O0..3`); `#include
+  <nlohmann/json.hpp>` with `-std=c++20 -stdlib=libc++ -fsyntax-only` now
+  succeeds with zero errors.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land
