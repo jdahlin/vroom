@@ -631,6 +631,30 @@ analysis_result semantic_analysis::overloaded_operator(
         r = collect(spaceship, true, false);
     if (r == analysis_result::well_formed && three_way)
         VTRY_SET(r, collect(spaceship, true, true));
+    /* [over.match.oper]/3: with no operator function viable for a binary
+       operator that modifies no operand, the built-in candidates are left
+       (doctest's int == Expression_lhs): as with no function at all.  (Not
+       where C++20's rewritten candidates take part) */
+    if (r == analysis_result::well_formed && converts && !rewrites &&
+        !three_way && operands.size() == 2 && !candidates.empty() &&
+        (is_comparison(op) || op == preprocessing_op_or_punc::PLUS ||
+         op == preprocessing_op_or_punc::MINUS)) {
+        owned_array<expression_meaning> trial;
+        for (const expression_meaning &e : operands)
+            trial.append(e);
+        size_t ignored = 0;
+        bool none = false;
+        size_t unsupported_before = unsupported.size();
+        analysis_result t = analysis_result::well_formed;
+        {
+            diagnostics_suppressed_if hush(diagnostics, true);
+            t = best_viable_function(n, candidates, nullptr, trial, ignored,
+                                     &none);
+        }
+        unsupported.resize(unsupported_before);
+        if (t == analysis_result::well_formed && none)
+            candidates.clear();
+    }
     if (candidates.empty()) {
         bool unary_builtin = false;
         if (converts && (unary_prefix || incdec)) {
