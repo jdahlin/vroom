@@ -137,7 +137,8 @@ static int vccd_request_dispatch(const struct vccd_request *r,
                          t, d1);
         else
             n = snprintf(line, sizeof line, "%s\n", t);
-        return n < (int)sizeof line && vccd_fd_write_full(r->fds[1], line, n)
+        return n >= 0 && n < (int)sizeof line &&
+                       vccd_fd_write_full(r->fds[1], line, (size_t)n)
                    ? 0
                    : 1;
     }
@@ -152,7 +153,8 @@ static int vccd_request_dispatch(const struct vccd_request *r,
                      strcmp(name, "include")
                          ? name
                          : vccd_capabilities_resource_include);
-        return n < (int)sizeof(line) && vccd_fd_write_full(r->fds[1], line, n)
+        return n >= 0 && n < (int)sizeof(line) &&
+                       vccd_fd_write_full(r->fds[1], line, (size_t)n)
                    ? 0
                    : 1;
     }
