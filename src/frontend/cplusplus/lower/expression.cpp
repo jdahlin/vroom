@@ -227,8 +227,19 @@ uint32_t c_lowering::expression(uint32_t index)
         return make(AST_NODE_ZERO, type(n.type, n.at), 0, 0, 0, 0, 0);
     case semantic_kind::initializer_list:
         return initializer_list(n);
-    case semantic_kind::compound_literal:
+    case semantic_kind::compound_literal: {
+        /* [dcl.init.list]/5, [class.temporary]: an initializer_list's
+           backing array whose elements have destructors: constructed in
+           place and destroyed as one object, not built of temporaries
+           copied in as bytes */
+        qualified_type element;
+        if (collecting && !static_glvalue &&
+            node(n.a).kind == semantic_kind::initializer_list &&
+            record(node(n.a).type).kind == type_kind::array &&
+            element_destructor(node(n.a).type, element))
+            return array_temporary(n.a);
         return compound_literal(n.a);
+    }
     case semantic_kind::vector_shuffle: {
         uint32_t a = expression(n.a);
         if (!a)

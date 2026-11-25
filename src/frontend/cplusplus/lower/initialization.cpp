@@ -236,6 +236,21 @@ uint32_t c_lowering::temporary_object(uint32_t n)
     return dereference(comma(pointer, made, address_of(variable, pointer)), t);
 }
 
+uint32_t c_lowering::array_temporary(uint32_t n)
+{
+    const semantic_node &x = node(n);
+    ast_qualified_type t = type(x.type, x.at);
+    uint32_t held = full_expression_temporary(t);
+    uint32_t flag = constructed_flag();
+    uint32_t made = mark_constructed(initialize_into(held, x.type, t, n), flag);
+    if (!made)
+        return 0;
+    destroyed_temporary(x, held, x.at, flag);
+    ast_qualified_type pointer = pointer_to(t);
+    uint32_t variable = c_variable(c, held, t);
+    return dereference(comma(pointer, made, address_of(variable, pointer)), t);
+}
+
 entity_index c_lowering::element_destructor(qualified_type type,
                                             qualified_type &object) const
 {
