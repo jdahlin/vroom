@@ -221,6 +221,20 @@ analysis_result
 semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
 {
     entity_index outer = current_scope;
+    /* [impl.clang] preferred_name in the attributes after the class-key of
+       a redeclaration (libc++'s basic_string): its tokens */
+    bool preferred_names_valid = false;
+    if (elaborated.size() >= 2 && elaborated[0].is_token() &&
+        elaborated[elaborated.size() - 1].is_identifier()) {
+        token_index name_at = elaborated[elaborated.size() - 1].token();
+        if (name_at > elaborated[0].token() + 1)
+            if (entity_index held =
+                    entity_table.find(outer, tokens.identifier(name_at)))
+                if (uint32_t ct = class_template_of(held))
+                    preferred_names_valid = note_preferred_names(
+                        function_templates[ct - 1].entity,
+                        elaborated[0].token() + 1, name_at);
+    }
     if (elaborated.size() == 2 && elaborated[0].is_token() &&
         elaborated[1].is(syntax_kind::simple_template_id)) {
         /* [temp.class.spec]/1: template<class A> class S<bool, A>; a
@@ -253,7 +267,10 @@ semantic_analysis::class_template_declaration(SyntaxRef n, SyntaxRef elaborated)
             alignment_declared = true;
             at = 2;
         } else if (seq && class_head_attributes_without_effect(seq) &&
-                   !attribute_argument_present(seq)) {
+                   (!attribute_argument_present(seq) ||
+                    preferred_names_valid)) {
+            /* (preferred_name's argument is a typedef-name, recorded by
+               note_preferred_names above) */
             at = 2;
         } else if (seq && !seq.is_token()) {
             /* [ext:gnu_attributes] visibility("hidden") (libc++'s

@@ -6426,6 +6426,29 @@ class semantic_analysis
        when it cannot be (a typedef-name clang prints is lost) */
     bool predefined_name_text(entity_index f, predefined_name_form form,
                               owned_buffer &out) const;
+    /* __PRETTY_FUNCTION__'s characters per function, made where the
+       analysis meets it (keep_pretty_function) */
+    struct pretty_text {
+        entity_index function = 0;
+        uint32_t first = 0, length = 0;
+    };
+    owned_array<pretty_text> pretty_texts;
+    owned_buffer pretty_characters;
+    bool keep_pretty_function(entity_index f);
+    /* [impl.clang] preferred_name(N) on a class template's
+       declaration: the typedef-name N clang prints for the specialization
+       N denotes (libc++'s std::string for basic_string<char>) */
+    struct preferred_name {
+        entity_index template_entity = 0, name = 0;
+    };
+    owned_array<preferred_name> preferred_names;
+    /* (true when there is one and each names a typedef of a specialization
+       of t; none is kept otherwise) */
+    bool note_preferred_names(entity_index t, token_index first,
+                              token_index end);
+    /* the number of class specialization c's template arguments clang
+       prints: the trailing ones equal to their defaults left out */
+    uint32_t shown_template_arguments(entity_index c);
     /* the name of template-parameter i of template entity t (0: none) */
     uint32_t template_parameter_name(entity_index t, uint32_t i) const
     {
