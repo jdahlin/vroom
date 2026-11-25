@@ -408,7 +408,25 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
     /* [dcl.type.simple]/1: nested-name-specifier(opt) type-name */
     entity_index class_named = 0;
     uint32_t named_cv = 0;
+    uint32_t deduced_ct = 0;
     if ((parenthesized || braced) &&
+        n[0].is(syntax_kind::simple_type_specifier) && n[0].size() == 2 &&
+        n[0][0].is(syntax_kind::nested_name_specifier) && n[0][1].is_token() &&
+        tokens[n[0][1].token()].kind == token_kind::identifier) {
+        nominated_scope qscope;
+        if (nested_name_specifier(n[0][0], qscope, false) ==
+                analysis_result::well_formed &&
+            !qscope.dependent) {
+            entity_index scope = qscope.entity;
+            if (qscope.global)
+                scope = 0;
+            lookup_result qf = lookup_qualified(
+                scope, tokens.identifier(n[0][1].token()), lookup_filter::any);
+            if (!qf.entity && !qf.ambiguous)
+                deduced_ct = class_template_of(qf.unknown_entity);
+        }
+    }
+    if ((parenthesized || braced) && !deduced_ct &&
         n[0].is(syntax_kind::simple_type_specifier)) {
         VTRY(r, qualified_type_name(n[0], named, named_cv));
         if (type_table[named].kind == type_kind::class_type &&
@@ -496,15 +514,19 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             VTRY(r, simple_type(n, k, named));
         }
     }
-    if ((parenthesized || braced) && n[0].is_token() &&
-        tokens[n[0].token()].kind == token_kind::identifier && !class_named &&
-        !named) {
+    if ((parenthesized || braced) &&
+        (deduced_ct || (n[0].is_token() &&
+                        tokens[n[0].token()].kind == token_kind::identifier &&
+                        !class_named && !named))) {
         /* [dcl.type.class.deduct]/1: a template-name of a class template
            alone is a placeholder for a deduced class type, which
            [expr.type.conv]/1 allows as the simple-type-specifier */
-        lookup_result x = lookup_unqualified(tokens.identifier(n[0].token()),
-                                             lookup_filter::any);
-        uint32_t ct = class_template_of(x.unknown_entity);
+        uint32_t ct = deduced_ct;
+        if (!ct) {
+            lookup_result x = lookup_unqualified(
+                tokens.identifier(n[0].token()), lookup_filter::any);
+            ct = class_template_of(x.unknown_entity);
+        }
         if (ct && n.size() <= 4) {
             entity_index deduced = 0;
             /* a lambda-expression among the arguments is one closure for
