@@ -1007,6 +1007,25 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
         uint32_t qi = 0;
         if (global)
             qi = 1;
+        /* [abi:expressions] T::name, T a template type parameter, its
+           type a <template-param>:
+
+               <unresolved-name> ::= sr <unresolved-type> <base-unresolved-name>
+         */
+        if (member.is_token() && member.is_identifier() && !global &&
+            qual.size() == 2 && qual[0].is_identifier()) {
+            entity_index pe = analysis.constraint_parameter(encoding_template,
+                                                            qual[0].token());
+            if (pe &&
+                analysis.entity_table[pe].kind == entity_kind::typedef_name &&
+                analysis.type_table[analysis.entity_table[pe]
+                                        .type.unqualified()]
+                        .kind == type_kind::template_parameter) {
+                text("sr");
+                return type(analysis.entity_table[pe].type) &&
+                       source_name(analysis.token_identifier(member.token()));
+            }
+        }
         if (member.is_token() && member.is_identifier()) {
             entity_index scope = 0;
             bool first_lookup = !global;
