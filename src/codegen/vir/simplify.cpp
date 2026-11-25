@@ -219,8 +219,8 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
         hc *= 2;
     if (kc > UINT32_MAX || hc > UINT32_MAX)
         virbuild_fail(e, VIRBUILD_FAILURE(out_of_memory));
-    S.constant_table_mask = kc - 1;
-    S.value_table_mask = hc - 1;
+    S.constant_table_mask = (uint32_t)(kc - 1);
+    S.value_table_mask = (uint32_t)(hc - 1);
     size_t need = virbuild_simplify_layout(e, &S, NULL, kc, hc);
     void *buf = virbuild_pass_scratch_get(e, need);
     virbuild_simplify_layout(e, &S, (char *)buf, kc, hc);

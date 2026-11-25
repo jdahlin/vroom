@@ -36,7 +36,7 @@ VPRIV void ld_comdat_groups_deduplicate(struct ld_context *ctx)
             if (!(w[0] & 1)) /* GRP_COMDAT */
                 continue;
             const char *name = o->string_table + o->symbols[h->sh_info].st_name;
-            uint32_t len = strlen(name), hh = ld_name_hash(name, len);
+            uint32_t len = (uint32_t)strlen(name), hh = ld_name_hash(name, len);
 
             if (!tab || (n + 1) * 2 > mask) {
                 uint32_t m = tab ? (mask + 1) * 2 : 1024;

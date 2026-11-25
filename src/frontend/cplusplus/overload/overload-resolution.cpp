@@ -37,7 +37,7 @@ static bool uses_decltype(SyntaxRef n)
     if (n.is(syntax_kind::decltype_specifier))
         return true;
     for (size_t i = 0; i < n.size(); i++) {
-        SyntaxElement e = n[i];
+        SyntaxElement e = n[static_cast<uint32_t>(i)];
         if (!e.is_token() && uses_decltype(e))
             return true;
     }

@@ -40,7 +40,7 @@ VPRIV void ld_input_sections_fill(void *arg, size_t i)
                     &ctx->inputs.sections
                          .v[o->first_input_section + h->sh_info];
                 t->rela = (const elf_rela *)(o->file_bytes + h->sh_offset);
-                t->rela_count = h->sh_size / sizeof(elf_rela);
+                t->rela_count = (uint32_t)(h->sh_size / sizeof(elf_rela));
             }
             continue;
         }
@@ -60,8 +60,8 @@ VPRIV void ld_input_sections_fill(void *arg, size_t i)
         is->size = h->sh_size;
         is->flags = h->sh_flags & ~(uint64_t)SHF_GROUP;
         is->type = h->sh_type;
-        is->alignment = h->sh_addralign ? h->sh_addralign : 1;
-        is->entry_size = h->sh_entsize;
+        is->alignment = h->sh_addralign ? (uint32_t)h->sh_addralign : 1;
+        is->entry_size = (uint32_t)h->sh_entsize;
         if (!ctx->options.relocatable && (h->sh_flags & SHF_MERGE) &&
             h->sh_size && h->sh_entsize) {
             if (h->sh_size % h->sh_entsize)

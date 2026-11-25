@@ -75,7 +75,7 @@ VPRIV bool ld_object_is_valid(struct ld_context *ctx, ld_object *o,
     if (nsh == 0 || nsh > (n - eh->e_shoff) / sizeof(elf_section_header))
         LD_OBJECT_INVALID(
             "%s: section header table goes past the end of the file", o->path);
-    o->section_header_count = nsh;
+    o->section_header_count = (uint32_t)nsh;
     for (uint32_t s = 0; s < o->section_header_count;
          s++) { /* (0 too: shstrndx and sh_link may name it) */
         const elf_section_header *h = &o->section_headers[s];
@@ -243,7 +243,7 @@ VPRIV void ld_object_parse(void *arg, size_t i)
             o->symbols = (const elf_symbol *)(o->file_bytes +
                                               o->section_headers[s].sh_offset);
             o->symbol_count =
-                o->section_headers[s].sh_size / sizeof(elf_symbol);
+                (uint32_t)(o->section_headers[s].sh_size / sizeof(elf_symbol));
             o->first_global_index = o->section_headers[s].sh_info;
             o->string_table =
                 (const char *)o->file_bytes +

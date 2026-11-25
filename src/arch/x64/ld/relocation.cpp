@@ -85,7 +85,7 @@ VPRIV void x64_ld_relocation_scan(void *arg, size_t i)
     if (!is->rela_count || is->kind == LD_SECTION_KIND_NONE ||
         is->object == LD_NONE)
         return;
-    uint32_t os = ld_input_section_output_section(ctx, i);
+    uint32_t os = ld_input_section_output_section(ctx, (uint32_t)i);
     if (os == LD_OUTPUT_SECTION_DISCARD || os == LD_NONE)
         return;
     ld_object *o = ctx->inputs.objects.v[is->object];

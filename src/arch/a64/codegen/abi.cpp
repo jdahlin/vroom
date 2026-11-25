@@ -301,7 +301,7 @@ VPRIV void a64_abi_argument_classify(codegen_context *e, ast_qualified_type t,
             a->register_count = 1, a->float_member_size = (uint8_t)size;
             return;
         }
-        n = size / 8;
+        n = (int)(size / 8);
         goto stack;
     }
     if (codegen_type_is_record_like(c, t)) {

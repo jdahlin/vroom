@@ -219,8 +219,8 @@ VPRIV codegen_value x64_wbin(codegen_context *e, int op, bool sgn,
         int r;
 
         ra = x64_waddr(e, &a);
-        w0 = x64_wword(e, ra, 0);
-        w1 = x64_wword(e, ra, 8);
+        w0 = (int32_t)x64_wword(e, ra, 0);
+        w1 = (int32_t)x64_wword(e, ra, 8);
         x64_tfree(e, ra);
         v = x64_bin(e, LEX_TOKEN_AMPERSAND, 8, false, b,
                     codegen_value_constant(127));

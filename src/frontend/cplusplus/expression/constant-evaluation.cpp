@@ -2663,7 +2663,7 @@ constness semantic_analysis::evaluate_array_pointer(constant_evaluation &state,
                 v.kind = constant_value_kind::pointer;
                 v.count = 1;
                 v.base = opaque_array_base + array;
-                v.extent = t.bound;
+                v.extent = static_cast<uint32_t>(t.bound);
                 v.offset = 0;
                 v.first = element_place | v.base;
                 return constness::constant;

@@ -76,7 +76,7 @@ static void ld_relocatable_locals_write(void *arg, size_t i)
     elf_symbol *d = (elf_symbol *)(ctx->relocatable.image +
                                    ctx->relocatable.symtab_offset) +
                     ctx->relocatable.local_first_index[i];
-    uint32_t idx = ctx->relocatable.local_first_index[i];
+    uint32_t idx = (uint32_t)ctx->relocatable.local_first_index[i];
     uint64_t so = ctx->relocatable.local_string_offsets[i];
     uint8_t *strbuf = ctx->relocatable.image + ctx->relocatable.strtab_offset;
     for (uint32_t s = 1; s < o->first_global_index && s < o->symbol_count;
@@ -117,9 +117,9 @@ static void ld_relocatable_locals_write(void *arg, size_t i)
 static void ld_relocatable_globals_write(void *arg, size_t c)
 {
     struct ld_context *ctx = (struct ld_context *)arg;
-    uint32_t b = c * 4096, e = b + 4096 < ctx->symbols.order.n
-                                   ? b + 4096
-                                   : ctx->symbols.order.n;
+    uint32_t b = (uint32_t)(c * 4096), e = b + 4096 < ctx->symbols.order.n
+                                               ? b + 4096
+                                               : ctx->symbols.order.n;
     uint8_t *strbuf = ctx->relocatable.image + ctx->relocatable.strtab_offset;
     for (uint32_t i = b; i < e; i++) {
         uint32_t g = ctx->symbols.order.v[i];
@@ -277,7 +277,7 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
         r->size = ld_value_align_up(r->size, is->alignment);
         is->offset = r->size;
         r->size += is->size;
-        is->first_dynamic_relocation = r->rela_count;
+        is->first_dynamic_relocation = (uint32_t)r->rela_count;
         r->rela_count += is->rela_count;
         VVEC_PUSH(r->sections, i, ld_region_alloc);
     }
@@ -289,11 +289,11 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
     for (uint32_t i = 0; i < ctx->relocatable.sections.n; i++) {
         ld_relocatable_section *r = &ctx->relocatable.sections.v[i];
         r->section_header_index = sh++;
-        r->name_offset = shs;
+        r->name_offset = (uint32_t)shs;
         shs += strlen(r->name) + 1;
         if (r->rela_count) {
             r->rela_section_header_index = sh++;
-            r->rela_name_offset = shs;
+            r->rela_name_offset = (uint32_t)shs;
             shs += strlen(r->name) + 6;
         }
     }
@@ -333,7 +333,7 @@ VPRIV int ld_relocatable_link(struct ld_context *ctx)
     ctx->relocatable.local_count = idx;
     for (uint32_t i = 0; i < ctx->symbols.order.n; i++) {
         ld_global_symbol *s = &ctx->symbols.globals[ctx->symbols.order.v[i]];
-        s->output_index = idx++;
+        s->output_index = (uint32_t)(idx++);
         /* s->value is unused for -r output: park the string offset there */
         s->value = str;
         str += strlen(ld_global_name(ctx, ctx->symbols.order.v[i])) + 1;

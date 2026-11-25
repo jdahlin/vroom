@@ -291,8 +291,8 @@ static bool ar_thin_archive_read(ar_request *q, const char *abs,
             m.name = m.absolute_name
                          ? ar_path_relative(q->directory, m.absolute_name)
                          : NULL;
-            m.mode = ar_field_number_parse(
-                (const unsigned char *)member.header + 40, 8, 8);
+            m.mode = (uint32_t)(ar_field_number_parse(
+                (const unsigned char *)member.header + 40, 8, 8));
             m.mtime = (int64_t)ar_field_number_parse(
                 (const unsigned char *)member.header + 16, 12, 10);
             m.uid = ar_field_number_parse(

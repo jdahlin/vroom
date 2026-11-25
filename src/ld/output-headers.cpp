@@ -33,7 +33,7 @@ VPRIV void ld_section_name_table_build(struct ld_context *ctx)
             continue;
         }
         memcpy(ctx->output.shstrtab + n, os->name, l + 1);
-        os->name_offset = n;
+        os->name_offset = (uint32_t)n;
         n += l + 1;
     }
     ctx->inputs.sections.v[ctx->output.shstrtab_section].size = n;

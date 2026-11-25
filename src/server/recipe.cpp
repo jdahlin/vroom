@@ -103,7 +103,7 @@ static int vccd_recipe_tool_run(void *ctx, char **argv, char **assign,
     h->magic = VCCD_PROTOCOL_MAGIC;
     h->argc = argc;
     h->envc = envc;
-    h->payload_len = p - (vccd_recipe_request_buffer + sizeof(*h));
+    h->payload_len = (uint32_t)(p - (vccd_recipe_request_buffer + sizeof(*h)));
     if (!vccd_request_split(vccd_recipe_request_buffer,
                             vccd_recipe_request_strings, &q)) {
         vccd_request_message_write(r, "%s: error: %s\n",

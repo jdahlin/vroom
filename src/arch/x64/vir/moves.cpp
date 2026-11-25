@@ -25,8 +25,8 @@ VPRIV int64_t x64_vir_constant_bits(const vir_insn *i)
 VPRIV void x64_vir_text_append(x64_vir_context *L, const char *s)
 {
     record *r = x64_record_emit(L->context, X64_OP_RAW);
-    r->offset = L->context->raw.n;
-    r->reference = strlen(s);
+    r->offset = (int32_t)L->context->raw.n;
+    r->reference = (uint32_t)strlen(s);
     vtext_string_append(&L->context->raw, s);
 }
 

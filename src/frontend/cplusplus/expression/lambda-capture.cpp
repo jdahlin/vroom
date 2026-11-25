@@ -243,11 +243,15 @@ analysis_result semantic_analysis::lambda_introducer(LambdaIntroducer n,
                 bool reference = c.size() == 3 &&
                                  c[0].is(preprocessing_op_or_punc::AMPERSAND);
                 size_t at = reference;
-                if (c.size() != at + 2 || !c[at].is_token() ||
-                    !c[at].is_identifier() ||
-                    !c[at + 1].is(preprocessing_op_or_punc::ELLIPSIS))
+                if (c.size() != at + 2 ||
+                    !c[static_cast<uint32_t>(at)].is_token() ||
+                    !c[static_cast<uint32_t>(at)].is_identifier() ||
+                    !c[static_cast<uint32_t>(at + 1)].is(
+                        preprocessing_op_or_punc::ELLIPSIS))
                     return not_supported(c.index(), "temp.variadic");
-                VTRY(packed, pack_capture(n, l, c[at].token(), reference));
+                VTRY(packed,
+                     pack_capture(n, l, c[static_cast<uint32_t>(at)].token(),
+                                  reference));
                 continue;
             }
         } else {

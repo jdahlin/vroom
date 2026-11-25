@@ -626,8 +626,10 @@ uint32_t c_lowering::initializer_list(const semantic_node &n)
         runs.append(i);
         runs.append(e);
     }
-    return make(AST_NODE_INITIALIZER, type(n.type, n.at), 0,
-                ast_builder_list(c, runs.data(), runs.size()), n.count, 1, 0);
+    return make(
+        AST_NODE_INITIALIZER, type(n.type, n.at), 0,
+        ast_builder_list(c, runs.data(), static_cast<uint32_t>(runs.size())),
+        n.count, 1, 0);
 }
 
 } // namespace cplusplus::lowering

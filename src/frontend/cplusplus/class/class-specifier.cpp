@@ -652,7 +652,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         return result;
     }
     owned_array<SyntaxRef> bodies;
-    entity_index first_member_entity = entity_table.size();
+    entity_index first_member_entity =
+        static_cast<entity_index>(entity_table.size());
     size_t nested_start = nested_bodies.size();
     auto spec = n.class_specifier().member_specification();
     token_index outer_members_first = defining_members_first;
@@ -690,7 +691,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             result = worse(result, not_supported(member));
             continue;
         }
-        entity_index before_member = entity_table.size();
+        entity_index before_member =
+            static_cast<entity_index>(entity_table.size());
         analysis_result declared =
             member_declaration(c, declaration, access, bodies);
         /* [temp.inst]/3: a specialization's member class is declared, not

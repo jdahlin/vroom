@@ -86,7 +86,7 @@ static void ld_input_section_final_address_set(void *arg, size_t i)
 {
     struct ld_context *ctx = (struct ld_context *)arg;
     ld_input_section *is = &ctx->inputs.sections.v[i];
-    uint32_t os = ld_input_section_output_section(ctx, i);
+    uint32_t os = ld_input_section_output_section(ctx, (uint32_t)i);
     ctx->relocations.final_section_addresses[i] =
         is->kind == LD_SECTION_KIND_NONE ||
                 is->kind == LD_SECTION_KIND_MERGE_INPUT || os == LD_NONE ||

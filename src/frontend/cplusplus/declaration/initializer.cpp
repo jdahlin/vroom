@@ -1161,7 +1161,7 @@ analysis_result semantic_analysis::gather_clauses(
        that follows it */
     owned_array<SyntaxElement> pending;
     for (size_t k = 0; k < n; k++) {
-        SyntaxElement c = node[k];
+        SyntaxElement c = node[static_cast<uint32_t>(k)];
         if (c.is(preprocessing_op_or_punc::LEFT_BRACE,
                  preprocessing_op_or_punc::RIGHT_BRACE,
                  preprocessing_op_or_punc::COMMA,
@@ -1204,8 +1204,8 @@ analysis_result semantic_analysis::gather_clauses(
             !c.is(syntax_kind::lambda_expression))
             return not_supported(list, "dcl.init.aggr");
         uint32_t count = 1;
-        bool expansion =
-            k + 1 < n && node[k + 1].is(preprocessing_op_or_punc::ELLIPSIS);
+        bool expansion = k + 1 < n && node[static_cast<uint32_t>(k + 1)].is(
+                                          preprocessing_op_or_punc::ELLIPSIS);
         if (expansion) {
             if (!packs || !pending.empty() || c.is_token() ||
                 !expansion_count(c.first_token(), c.end_token(), count))

@@ -177,7 +177,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                 (uint8_t)(L->memory_is_indexed ? L->memory_index
                                                : X64_REGISTER_NONE);
             r->shift = L->memory_shift;
-            r->offset = L->memory_offset;
+            r->offset = (int32_t)L->memory_offset;
             r->reference = (uint32_t)L->test_immediate;
             if (i->op != VIR_OP_BRIF) {
                 L->test_value = 0;
@@ -214,7 +214,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                     X64_REGISTER_NONE);
                 r->registers[3] = (uint8_t)L->big_endian_index;
                 r->shift = L->big_endian_shift;
-                r->offset = at.offset;
+                r->offset = (int32_t)at.offset;
             } else
                 x64_record_emit_memory(e, X64_OP_LD, L->big_endian_width, d,
                                        &at, false);
@@ -673,7 +673,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             r->registers[3] = (uint8_t)L->memory_index;
             r->shift = L->memory_shift;
             r->condition = !!(i->flags & VIR_INSN_FLAG_MS);
-            r->offset = at.offset;
+            r->offset = (int32_t)at.offset;
         } else
             x64_record_emit_memory(e, load ? X64_OP_LD : X64_OP_ST, width,
                                    load ? d : c, &at,
@@ -785,7 +785,7 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
                 (uint8_t)(L->memory_is_indexed ? L->memory_index
                                                : X64_REGISTER_NONE);
             r->shift = L->memory_shift;
-            r->offset = L->memory_offset;
+            r->offset = (int32_t)L->memory_offset;
             r->condition = L->compare_memory_side;
             if (!L->compare_memory_side && p[1] == VIR_REGISTER_NONE) {
                 int64_t k;

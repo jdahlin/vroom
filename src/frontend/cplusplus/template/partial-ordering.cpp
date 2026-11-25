@@ -90,7 +90,9 @@ bool semantic_analysis::orderable(qualified_type t, bool packs) const
         return packs && orderable(r.operand, packs);
     case type_kind::pointer_to_member:
         if (!r.entity &&
-            !orderable(qualified_type::make(r.bound, cv_none), packs))
+            !orderable(
+                qualified_type::make(static_cast<type_index>(r.bound), cv_none),
+                packs))
             return false;
         return orderable(r.operand, packs);
     case type_kind::pointer:

@@ -1065,7 +1065,7 @@ static void w_str(cc *c, uint32_t s)
         wm_get(&r->wm, (uint64_t)W_STR << 32 | s, r->wst.n) != UINT32_MAX)
         return;
     VPUSH(r->wst, (VCC_LITERAL(wstr, s, r->wb.n, *x)));
-    VGROW(r->wb, n);
+    VGROW(r->wb, (uint32_t)n);
     memcpy(r->wb.v + r->wb.n, x->s, n);
     r->wb.n += (uint32_t)n;
 }
@@ -1731,7 +1731,7 @@ static uint32_t heap_piece(cvec *h, const cc *c, size_t heap0, const void *p,
         return 0;
     }
     at = (h->n + 15) & ~15u;
-    VGROW(*h, at - h->n + n);
+    VGROW(*h, (uint32_t)(at - h->n + n));
     memset(h->v + h->n, 0, at - h->n);
     memcpy(h->v + at, p, n);
     h->n = at + (uint32_t)n;

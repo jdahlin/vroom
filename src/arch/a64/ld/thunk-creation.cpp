@@ -226,7 +226,7 @@ VPRIV bool a64_ld_thunks_create(struct ld_context *ctx, int pass)
                 for (uint32_t x = 0; x < tsx->list.n; x++) {
                     a64_ld_thunk *tx =
                         &ctx->relocations.thunks.v[tsx->list.v[x]];
-                    tx->offset = off;
+                    tx->offset = (uint32_t)off;
                     /* getMayUseShortThunk(): b if the destination is within
 					   +-128 MiB, decided against the current layout */
                     if (!tx->is_long) {

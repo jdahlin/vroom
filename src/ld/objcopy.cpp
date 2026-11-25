@@ -262,7 +262,7 @@ static void objcopy_string_table_reserve(objcopy_string_table *t, uint32_t n)
 }
 static uint32_t objcopy_string_table_add(objcopy_string_table *t, const char *s)
 {
-    uint32_t len = strlen(s), h = vhash_string(s, len);
+    uint32_t len = (uint32_t)strlen(s), h = vhash_string(s, len);
     if (!t->hash_table || (t->count + 1) * 2 > t->hash_mask)
         objcopy_string_table_grow(t);
     uint32_t j = h & t->hash_mask;
@@ -285,7 +285,7 @@ static uint32_t objcopy_string_table_add(objcopy_string_table *t, const char *s)
 static uint64_t objcopy_string_table_find(const objcopy_string_table *t,
                                           const char *s)
 {
-    uint32_t len = strlen(s), h = vhash_string(s, len);
+    uint32_t len = (uint32_t)strlen(s), h = vhash_string(s, len);
     if (!len)
         return 0;
     uint32_t j = h & t->hash_mask;
@@ -987,7 +987,7 @@ static int objcopy_run(int dirfd)
         const elf_symbol *ys = (const elf_symbol *)st->data;
         const char *str =
             (const char *)e.file_bytes + e.section_headers[st->link].sh_offset;
-        nsym = st->size / sizeof(elf_symbol);
+        nsym = (uint32_t)(st->size / sizeof(elf_symbol));
         sym = own.symbols =
             (objcopy_symbol *)objcopy_zeroed_alloc(nsym, sizeof *sym);
         own.symbol_count = nsym;
@@ -1987,7 +1987,7 @@ int nm_main(int argc, char **argv, int dirfd, FILE *out, FILE *err)
             (const elf_symbol *)(e.file_bytes + st->sh_offset);
         const char *str = (const char *)e.file_bytes +
                           e.section_headers[st->sh_link].sh_offset;
-        uint32_t n = st->sh_size / sizeof(elf_symbol);
+        uint32_t n = (uint32_t)(st->sh_size / sizeof(elf_symbol));
         nm_symbol *v = (nm_symbol *)objcopy_zeroed_alloc(n, sizeof *v);
         uint32_t m = 0;
         /* -D: symbol versions as llvm-nm (name@@VER defined, name@VER hidden or undefined) */

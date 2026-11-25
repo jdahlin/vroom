@@ -272,8 +272,8 @@ int main(int argc, char **argv)
     h->process_group = (uint32_t)getpgrp();
     h->magic = VCCD_PROTOCOL_MAGIC;
     h->argc = argc;
-    h->envc = e - environ + 1;
-    h->payload_len = p - (shim_request_buffer + sizeof(*h));
+    h->envc = (uint32_t)(e - environ + 1);
+    h->payload_len = (uint32_t)(p - (shim_request_buffer + sizeof(*h)));
 
     /* VCCD_STATUS_RETRY: the server restarts itself (memory) and has not run
 	   the request; it listens again on the same socket in a moment */

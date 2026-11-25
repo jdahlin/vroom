@@ -85,10 +85,11 @@ SyntaxRef semantic_analysis::out_of_class_nested(SyntaxRef definition,
     SyntaxTail parts(definition, leading_gnu_attributes(definition));
     /* (a constructor or destructor has no decl-specifier-seq) */
     size_t at = parts.size() - 2;
-    if ((parts.size() != 3 && parts.size() != 2) || parts[at].is_token() ||
+    if ((parts.size() != 3 && parts.size() != 2) ||
+        parts[static_cast<uint32_t>(at)].is_token() ||
         (parts.size() == 3 && !parts[0].is(syntax_kind::decl_specifier_seq)))
         return 0;
-    DeclaratorParts d(parts[at]);
+    DeclaratorParts d(parts[static_cast<uint32_t>(at)]);
     SyntaxElement nested = d.qualifier();
     if (!d.noptr || !nested)
         return 0;
@@ -138,8 +139,8 @@ bool semantic_analysis::member_class_function_unjudged(
         if (qualified && !typename_seen)
             return true;
     }
-    for (token_index t = parts[last - 1].first_token();
-         t < parts[last].first_token(); t++) {
+    for (token_index t = parts[static_cast<uint32_t>(last - 1)].first_token();
+         t < parts[static_cast<uint32_t>(last)].first_token(); t++) {
         const token &x = tokens[t];
         if (x.kind == token_kind::operator_or_punctuator &&
             preprocessing_op_or_punc_primary(x.op_or_punc) ==
