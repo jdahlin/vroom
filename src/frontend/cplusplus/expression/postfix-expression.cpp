@@ -111,7 +111,15 @@ node_index parser::postfix_expression()
         type = true;
         break;
     case standard_keyword::auto_:
-        return beyond_this_step();
+        /* P0849R8 (C++23), [expr.type.conv]: auto ( expression-list_opt )
+           and auto braced-init-list, a simple-type-specifier that is the
+           placeholder; any other use of auto here is not an expression */
+        if (!at(preprocessing_op_or_punc::LEFT_PARENTHESIS, 1) &&
+            !at(preprocessing_op_or_punc::LEFT_BRACE, 1))
+            return beyond_this_step();
+        add_token();
+        type = true;
+        break;
     case standard_keyword::decltype_:
         /* decltype-specifier :: begins a qualified-id */
         if (!at(preprocessing_op_or_punc::COLON_COLON, group_end(1))) {

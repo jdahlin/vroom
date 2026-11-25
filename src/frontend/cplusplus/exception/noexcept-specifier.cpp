@@ -75,7 +75,29 @@ node_index parser::dynamic_exception_specification()
         return expected("'(' after throw", "except.spec");
     if (any)
         add_token(); /* ... */
-    else if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+    else if (collecting_members &&
+             !at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        /* [class.mem]/6 (C++14's /2 names the exception-specification): a
+           complete-class context, so a type-id may name a member a later
+           declaration makes; the first pass over the member-specification
+           only skips it, the second reads it with the class complete */
+        static const preprocessing_op_or_punc none[] = {
+            preprocessing_op_or_punc::RIGHT_PARENTHESIS};
+        unparsed_until(none, 1);
+    } else if (!at(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        /* ... in the second pass the class is complete */
+        struct complete_when_member {
+            declared_names &names;
+            unsigned count;
+            ~complete_when_member()
+            {
+                names.complete_contexts -= count;
+            }
+        } complete{names, 0};
+        if (member_declarator_context) {
+            complete.count = 1;
+            names.complete_contexts++;
+        }
         size_t list_mark = begin_node();
         token_index list_first = position;
         unsigned count = 0;

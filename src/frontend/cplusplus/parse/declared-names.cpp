@@ -186,6 +186,16 @@ scope_index declared_names::declaring_scope() const
     return s;
 }
 
+bool declared_names::within_template() const
+{
+    for (scope_index s = current_scope; s != global_namespace;
+         s = scopes[s].enclosing) {
+        if (scopes[s].kind == scope_kind::template_parameter)
+            return true;
+    }
+    return false;
+}
+
 bool declared_names::encloses_current(scope_index region) const
 {
     for (scope_index s = current_scope;; s = scopes[s].enclosing) {

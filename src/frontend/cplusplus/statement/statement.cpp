@@ -236,6 +236,7 @@ node_index parser::statement()
         failure = failed_with;
         return 0;
     }
+    report_fallback(first, failed_with);
     bool ended = false;
     node_index n = unparsed_statement(&ended);
     /* every statement ends with its ';' or the '}' of a compound-statement

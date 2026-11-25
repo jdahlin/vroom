@@ -360,8 +360,10 @@ node_index parser::noptr_declarator(declarator_form form,
                        an initializer */
                     bool this_argument =
                         block_scope && at(standard_keyword::this_, 1);
-                    if (failed_with.beyond_step && !this_argument)
-                        return beyond_this_step();
+                    if (failed_with.beyond_step && !this_argument) {
+                        failure = failed_with;
+                        return 0;
+                    }
                     /* ... but only when the parenthesis could hold an
                        expression-list: one that starts with a
                        decl-specifier other than a type a functional cast

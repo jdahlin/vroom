@@ -89,6 +89,29 @@ bool parser::starts_module_declaration()
            (n == 6 && !memcmp(s, "export", 6));
 }
 
+/* -fcxx-debug-fallbacks: why the tokens from first stay as they are (a
+   declaration or a statement), by the failure that stopped their parse */
+void parser::report_fallback(token_index first,
+                             const failure_state &failed_with)
+{
+    if (!debug_fallbacks)
+        return;
+    const char *why = "expected ";
+    const char *in = "", *in_word = "";
+    if (failed_with.beyond_step) {
+        why = "later step: ";
+        in = failed_with.beyond_where;
+        in_word = " in ";
+    }
+    owned_buffer spelling;
+    tokens.spelling(failed_with.at, spelling.get());
+    source_position at = tokens.position(failed_with.at);
+    fprintf(stderr, "vcc: declaration at %s:%u:%u: %s%s%s%s at %u:%u `%.*s`\n",
+            at.file_name, tokens.position(first).line,
+            tokens.position(first).column, why, failed_with.expected, in_word,
+            in, at.line, at.column, (int)spelling.size(), spelling.data());
+}
+
 /*
  * [dcl.pre]/1:
  *
@@ -201,23 +224,7 @@ node_index parser::recover_declaration(node_index (parser::*alternative)())
         nesting_limit_exceeded = false;
     }
     /* the tokens were not a declaration of the grammar written so far */
-    if (debug_fallbacks) {
-        const char *why = "expected ";
-        const char *in = "", *in_word = "";
-        if (failed_with.beyond_step) {
-            why = "later step: ";
-            in = failed_with.beyond_where;
-            in_word = " in ";
-        }
-        owned_buffer spelling;
-        tokens.spelling(failed_with.at, spelling.get());
-        source_position at = tokens.position(failed_with.at);
-        fprintf(
-            stderr, "vcc: declaration at %s:%u:%u: %s%s%s%s at %u:%u `%.*s`\n",
-            at.file_name, tokens.position(first).line,
-            tokens.position(first).column, why, failed_with.expected, in_word,
-            in, at.line, at.column, (int)spelling.size(), spelling.data());
-    }
+    report_fallback(first, failed_with);
     size_t messages = diagnostics.messages.size();
     node_index n = unparsed_declaration();
     /* a declaration that named something the parser does not know may have

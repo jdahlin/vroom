@@ -523,9 +523,17 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
        (horizon_hidden) is the use's as much as the template's
        ([impl.clang] reports the error with a note at the declaration
        that required it) */
+    /* a body with an if consteval is not analysed (its immediate function
+       context has no rules yet), so what instantiating it reports (a member
+       that a dependent object lacks, in either branch) is not known: the
+       use is not judged either */
+    bool undecided_body =
+        r == analysis_result::unsupported &&
+        unsupported.size() > unsupported_before &&
+        !strcmp(unsupported[unsupported_before].detail, "if consteval");
     if (r == analysis_result::unsupported &&
         unsupported.size() > unsupported_before &&
-        horizon_hidden != hidden_before &&
+        (horizon_hidden != hidden_before || undecided_body) &&
         instantiations[index].requested_by != ft.declaration)
         charge_requester(instantiations[index].requested_by,
                          unsupported_before);
