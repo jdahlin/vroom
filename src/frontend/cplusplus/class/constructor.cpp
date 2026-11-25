@@ -1733,6 +1733,21 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                             "dcl.init");
                     return not_supported(item, "dcl.init");
                 }
+                if (entity_table[e].base_subobject &&
+                    entity_table[e].field == UINT32_MAX) {
+                    /* an empty base ([class.derived]/4: no field) copied
+                       from an expression (json's basic_json(const
+                       basic_json &other) : json_base_class_t(other)): its
+                       implicit copy constructor copies no byte
+                       ([class.copy.ctor]/14), the expression is evaluated
+                       for its effects */
+                    VTRY(rb,
+                         initialize_from(item, init, type, true, false, value));
+                    set_slot(slot, id,
+                             statement_node(semantic_kind::expression_statement,
+                                            id, value.node));
+                    continue;
+                }
                 if (entity_table[e].base_subobject)
                     /* a base copied from an expression: [conv.ptr]/3's
                    conversion of the source */
@@ -1889,7 +1904,17 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                Before C++20 a constexpr constructor must initialize one
                member of each such union ([dcl.constexpr]/4): another
                anonymous union left alone is not analysed */
-            if (!tokens.files.behavior.has(
+            /* (a constructor that is not constexpr, as libc++'s
+               _LIBCPP_CONSTEXPR_SINCE_CXX26 ones before C++26, is not
+               bound by it) */
+            /* (a defaulted one, analysed with no function: as before) */
+            bool constexpr_constructor =
+                !function_state.function ||
+                entity_table[function_state.function].constexpr_ ||
+                (current_class() &&
+                 entity_table[current_class()].defaulted_default_constructor);
+            if (constexpr_constructor &&
+                !tokens.files.behavior.has(
                     language_feature::three_way_comparison_operator))
                 for (size_t j = 0; j < subobjects.size(); j++) {
                     const struct type &other =
