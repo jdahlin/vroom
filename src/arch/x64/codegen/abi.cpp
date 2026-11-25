@@ -406,8 +406,6 @@ static int x64_abi_registers_need(const walk_argument *a, int cl)
 }
 
 /* fldt / fstpt of l (fp.c's x87 records) */
-VPRIV void x64_x87ld(codegen_context *e, const codegen_lvalue *l);
-VPRIV void x64_x87st(codegen_context *e, const codegen_lvalue *l);
 
 /* ---------------- calls ---------------- */
 

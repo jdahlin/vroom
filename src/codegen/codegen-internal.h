@@ -1500,6 +1500,10 @@ VPRIV void emit_function(codegen_context *e, uint32_t s);
 /* data.c */
 VPRIV void codegen_data_object_emit(codegen_context *e, uint32_t s);
 VPRIV void codegen_string_literal_emit(codegen_context *e, uint32_t i);
+/* the walker's ecx_free per lowering (codegen/walk/statement.cpp) */
+VPRIV void x64_ecx_free(codegen_context *e); /* arch/x64/codegen/lower.cpp */
+VPRIV void
+virbuild_ecx_free(codegen_context *e); /* codegen/vir/lower-call.cpp */
 /* arch/wasm/codegen/ */
 #ifdef VCC_WASM
 VPRIV void wasm_emit_function(codegen_context *e, uint32_t s);

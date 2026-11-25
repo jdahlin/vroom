@@ -275,6 +275,9 @@ VPRIV __attribute__((unused)) record_effects
 x64_record_effects(const codegen_context *e, const record *i);
 VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s);
 VPRIV void x64_x87(codegen_context *e, int xf, const codegen_lvalue *l, int sz);
+/* fp.c: long double loaded to st(0), st(0) stored and popped */
+VPRIV void x64_x87ld(codegen_context *e, const codegen_lvalue *l);
+VPRIV void x64_x87st(codegen_context *e, const codegen_lvalue *l);
 
 VPRIV void x64_label_name_append(tbuf *b, uint32_t s, uint32_t l);
 VPRIV void x64_register_name_append(tbuf *b, int r, int sz);
