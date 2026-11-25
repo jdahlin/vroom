@@ -203,7 +203,40 @@ bool semantic_analysis::primary_arguments(
         if (!argument_is_parameter(arguments[i],
                                    template_parameter_entities[first + i]))
             return false;
-    return !template_head_constrained(n) || template_head_constrained(primary);
+    if (!template_head_constrained(n))
+        return true;
+    if (!template_head_constrained(primary))
+        return false;
+    /* [temp.class.spec]/9: a partial specialization with the same
+       type-constraints as the primary template plus a requires-clause is
+       strictly more constrained than the primary */
+    if (head_constraint(n) && !head_constraint(primary)) {
+        owned_array<SyntaxRef> spec_params, prim_params;
+        if (n.size() && n[0].is(syntax_kind::template_head) && primary.size() &&
+            primary[0].is(syntax_kind::template_head) &&
+            template_head_list(n[0], spec_params) &&
+            template_head_list(primary[0], prim_params) &&
+            spec_params.size() == prim_params.size()) {
+            bool all_match = true;
+            for (size_t i = 0; i < prim_params.size(); i++) {
+                template_parameter_parts sp, pp;
+                if (!template_parameter_form(spec_params[i], sp) ||
+                    !template_parameter_form(prim_params[i], pp)) {
+                    all_match = false;
+                    break;
+                }
+                if (pp.constraint &&
+                    (!sp.constraint ||
+                     !same_tokens(sp.constraint, pp.constraint))) {
+                    all_match = false;
+                    break;
+                }
+            }
+            if (all_match)
+                return false;
+        }
+    }
+    return true;
 }
 
 /* whether the class is an explicit specialization of a class template (its

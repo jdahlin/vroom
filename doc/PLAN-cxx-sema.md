@@ -1664,6 +1664,11 @@ lines:
   Test `return-defaulted-copy-no-move` (4/4 at `-O0..3`); the JSON include
   now clears `<filesystem>` and reaches `[temp.class.spec]` in libc++
   `__ranges/movable_box.h`.
+  `primary_arguments` now recognizes a partial specialization that keeps the
+  primary template's type-constraints and adds a `requires`-clause
+  ([temp.class.spec]/9).  Test `partial-spec-constrained-primary` (4/4 at
+  `-O0..3`); the JSON include now reaches `[temp.mem]` in libc++
+  `__ranges/join_view.h`.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land
