@@ -844,7 +844,9 @@ analysis_result semantic_analysis::overloaded_operator(
                     return analysis_result::well_formed;
             }
             if (implicit_viable) {
-                if (!declares_move ||
+                /* (/7: one deleted for a const or reference member is a
+                   candidate as the one a declared move deletes) */
+                if ((!declares_move && !copy_assignment_deleted(c)) ||
                     entity_table[c].defaulted_copy_assignment ||
                     operands.size() != 2 ||
                     operands[1].type.unqualified() !=
