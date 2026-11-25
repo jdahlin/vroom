@@ -1102,11 +1102,6 @@ semantic_analysis::scalar_initialization(SyntaxRef at, expression_meaning &m,
         target.kind != type_kind::pointer_to_member && !enumeration_of(type))
         return not_supported_because(
             at, "dcl.init", "a scalar initialization of this target type");
-    if (target.kind == type_kind::pointer_to_member &&
-        type_table[m.type.unqualified()].kind == type_kind::class_type)
-        /* a conversion function to a pointer to member: not analysed */
-        return not_supported_because(
-            at, "dcl.init", "a conversion function to a pointer to member");
     if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
         /* [dcl.init]/17.7: by a conversion function */
         bool converted = false;

@@ -52,8 +52,10 @@ analysis_result semantic_analysis::member_pointer_conversion(
     }
     const struct type source = type_table[m.type.unqualified()];
     if (source.kind != type_kind::pointer_to_member) {
-        if (source.kind == type_kind::fundamental &&
-            !(is_integral(m.type) && m.evaluation != constness::not_constant))
+        if (source.kind == type_kind::class_type ||
+            source.kind == type_kind::pointer ||
+            (source.kind == type_kind::fundamental &&
+             !(is_integral(m.type) && m.evaluation != constness::not_constant)))
             return ill_formed(at, rule, "dcl.init");
         return not_supported_because(
             at, "conv.mem",
