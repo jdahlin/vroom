@@ -410,27 +410,23 @@ bool semantic_analysis::deduce_conversion_templates(
             }
             if (!deduce_type(ret, dest, values, set, true))
                 continue;
+            bool all_set = true;
+            for (bool s : set)
+                if (!s)
+                    all_set = false;
+            if (!all_set)
+                continue;
             entity_index spec = 0;
             substitution_mark mark = mark_substitution();
             substituting++;
             unevaluated++;
             analysis_result r =
-                default_template_arguments(current_declaration, g, values, set);
-            bool all_set = r == analysis_result::well_formed;
-            for (bool s : set)
-                if (!s)
-                    all_set = false;
-            if (all_set)
-                r = instantiate(current_declaration, ft.entity, values.data(),
-                                ft.parameter_count, spec);
+                instantiate(current_declaration, ft.entity, values.data(),
+                            ft.parameter_count, spec);
             unevaluated--;
             substituting--;
             if (r == analysis_result::ill_formed && undo_substitution(mark))
                 continue;
-            if (r == analysis_result::well_formed && !all_set) {
-                undo_substitution(mark);
-                continue;
-            }
             if (r != analysis_result::well_formed || !spec)
                 return false;
             candidates.append(spec);
