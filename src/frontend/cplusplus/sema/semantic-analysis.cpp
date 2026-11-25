@@ -194,6 +194,34 @@ analysis_result semantic_analysis::not_supported_because(SyntaxRef n,
     return r;
 }
 
+analysis_result semantic_analysis::not_supported_caused_by(
+    SyntaxRef n, const char *subclause, const char *what,
+    const unsupported_construct &cause, call_site where)
+{
+    /* before recording, which may move what cause refers to */
+    char text[1024];
+    snprintf(text, sizeof text, "%s: caused by [%s] %s:%u %s", what,
+             cause.subclause, cause.file, static_cast<unsigned>(cause.line),
+             cause.detail);
+    SyntaxRef holder = cause.holder;
+    analysis_result r = not_supported(n, subclause, where);
+    last_unsupported_detail(text, strlen(text));
+    unsupported[unsupported.size() - 1].holder = holder;
+    return r;
+}
+
+analysis_result semantic_analysis::not_supported_since(SyntaxRef n,
+                                                       const char *subclause,
+                                                       const char *what,
+                                                       size_t refusals_before,
+                                                       call_site where)
+{
+    if (unsupported.size() > refusals_before)
+        return not_supported_caused_by(n, subclause, what,
+                                       unsupported[refusals_before], where);
+    return not_supported_because(n, subclause, what, where);
+}
+
 void semantic_analysis::last_unsupported_detail(const char *text, size_t size)
 {
     owned_string &detail = detail_texts.make(text, size);

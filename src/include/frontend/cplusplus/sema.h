@@ -2151,6 +2151,19 @@ class semantic_analysis
     analysis_result not_supported_because(SyntaxRef n, const char *subclause,
                                           const char *what,
                                           call_site where = call_site());
+    /* not_supported_because for a refusal that stands for an earlier one:
+       the detail names the cause too, "what: caused by [..] file:line
+       detail", so the wrapper does not hide it */
+    analysis_result not_supported_caused_by(SyntaxRef n, const char *subclause,
+                                            const char *what,
+                                            const unsupported_construct &cause,
+                                            call_site where = call_site());
+    /* ... the cause being the first refusal recorded since there were
+       refusals_before of them, if any was */
+    analysis_result not_supported_since(SyntaxRef n, const char *subclause,
+                                        const char *what,
+                                        size_t refusals_before,
+                                        call_site where = call_site());
     /* the last refusal recorded gets this text as its detail (a copy) */
     __attribute__((noinline, cold)) void
     last_unsupported_detail(const char *text, size_t size);
@@ -6000,7 +6013,8 @@ class semantic_analysis
                                         const template_member_definition &o,
                                         token_index name);
     analysis_result member_definition_unsupported(SyntaxRef declaration,
-                                                  bool recorded);
+                                                  bool recorded,
+                                                  size_t refusals_before);
     /* template_member_definitions[member] for the class of
        instantiations[index]; after the template-declaration was analysed
        (declarations has it), a failure makes that unsupported */

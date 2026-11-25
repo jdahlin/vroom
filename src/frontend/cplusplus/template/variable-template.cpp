@@ -262,6 +262,7 @@ semantic_analysis::instantiate_variable(SyntaxRef at, uint32_t vt,
     instantiations[index].defining = true;
     /* (a partial specialization's declarator-id: its template-id) */
     declarator_template_id = pattern != 0;
+    size_t refusals_before = unsupported.size();
     analysis_result r = simple_declaration(definition.declarator);
     declarator_template_id = false;
     instantiations[index].defining = false;
@@ -270,8 +271,9 @@ semantic_analysis::instantiate_variable(SyntaxRef at, uint32_t vt,
        reports it at the template, with a note at the use */
     if (r != analysis_result::well_formed ||
         !instantiations[index].specialization)
-        return not_supported_because(
-            at, "temp.inst", "a variable template instantiation that failed");
+        return not_supported_since(
+            at, "temp.inst", "a variable template instantiation that failed",
+            refusals_before);
     instantiations[index].defined = true;
     e = instantiations[index].specialization;
     return analysis_result::well_formed;

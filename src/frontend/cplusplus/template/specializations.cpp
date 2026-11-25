@@ -1078,10 +1078,12 @@ analysis_result semantic_analysis::named_specialization(
     if (!deduced_from_declaration)
         return not_supported_because(n, "temp.deduct.decl",
                                      "the declared type deduces no arguments");
+    size_t refusals_before = unsupported.size();
     r = default_template_arguments(n, ft, values, set);
     if (r != analysis_result::well_formed)
-        return not_supported_because(n, "temp.deduct.decl",
-                                     "default template arguments fail");
+        return not_supported_since(n, "temp.deduct.decl",
+                                   "default template arguments fail",
+                                   refusals_before);
     uint32_t prior = find_instantiation(f.entity, values.data(),
                                         static_cast<uint32_t>(values.size()));
     if (prior) {
@@ -1217,20 +1219,23 @@ analysis_result semantic_analysis::class_explicit_instantiation(
        after an implicit instantiation is left to clang) */
     size_t uses_before = name_uses.size();
     owned_array<template_argument> arguments;
+    size_t refusals_before = unsupported.size();
     analysis_result r = template_id_arguments(id, ct, arguments);
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
-        return not_supported_because(
+        return not_supported_since(
             n, "temp.explicit",
-            "a class instantiation whose template arguments fail");
+            "a class instantiation whose template arguments fail",
+            refusals_before);
     uint32_t prior = find_instantiation(
         t, arguments.data(), static_cast<uint32_t>(arguments.size()));
     type_index type = 0;
     r = template_type(id, qualifier, qualifier != 0, type);
     if (r != analysis_result::well_formed)
-        return not_supported_because(
+        return not_supported_since(
             n, "temp.explicit",
-            "a class instantiation whose template-id forms no type");
+            "a class instantiation whose template-id forms no type",
+            refusals_before);
     const struct type &ty = type_table[type];
     if (ty.kind != type_kind::class_type)
         return not_supported_because(
@@ -1334,11 +1339,16 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
                 continue;
             for (const analysed_declaration &a : declarations)
                 if (a.node == m.declaration &&
-                    a.result != analysis_result::well_formed)
-                    return not_supported_because(
-                        n, "temp.explicit",
+                    a.result != analysis_result::well_formed) {
+                    const char *what =
                         "a class instantiation with a member definition that "
-                        "failed");
+                        "failed";
+                    if (a.has_unsupported)
+                        return not_supported_caused_by(
+                            n, "temp.explicit", what,
+                            unsupported[a.first_unsupported]);
+                    return not_supported_because(n, "temp.explicit", what);
+                }
         }
     }
     instantiation_kind was = entity_table[c].explicitly_instantiated;
@@ -1363,6 +1373,7 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     SyntaxRef n, SyntaxRef declaration, uint32_t lead, bool extern_)
 {
     SyntaxTail tail(declaration, lead);
+    size_t refusals_before = unsupported.size();
     size_t expressions_before = expressions.size();
     size_t uses_before = name_uses.size();
     entity_index outer = current_scope;
@@ -1403,9 +1414,9 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     expressions.resize(expressions_before);
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
-        return not_supported_because(
-            n, "temp.explicit",
-            "a member instantiation whose declarator fails");
+        return not_supported_since(
+            n, "temp.explicit", "a member instantiation whose declarator fails",
+            refusals_before);
     if (!m.has_id || !m.qualifier || m.literal_operator || defaults ||
         s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
         s.gnu_flags || m.gnu_flags || s.aligned || m.aligned || s.section ||

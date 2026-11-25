@@ -560,18 +560,26 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     /* [temp.inst]/2: a specialization named only is defined here; one
        that cannot be is no class */
     require_complete(c);
-    if (entity_table[c].kind != entity_kind::class_type)
+    uint32_t made_by = entity_table[c].instantiation;
+    if (entity_table[c].kind != entity_kind::class_type) {
         /* a class whose definition was not analysed */
+        if (made_by && instantiations[made_by - 1].has_failure)
+            return not_supported_caused_by(
+                n, "class.pre",
+                "member access on a class whose instantiation failed",
+                instantiations[made_by - 1].failure);
         return not_supported_because(
             n, "class.pre",
             "member access on a class type whose entity is not a class");
+    }
     /* a specialization whose definition could not be analysed is no
        incomplete class */
     if (!entity_table[c].size && entity_table[c].instantiation &&
         instantiations[entity_table[c].instantiation - 1].has_failure)
-        return not_supported_because(
+        return not_supported_caused_by(
             n, "temp.inst",
-            "member access on a class whose instantiation failed");
+            "member access on a class whose instantiation failed",
+            instantiations[entity_table[c].instantiation - 1].failure);
     if (!entity_table[c].size && entity_table[c].defined)
         /* [expr.ref]/4: in the definition of the class, a complete-class
            context ([class.mem]/6) whose layout is not known yet */
