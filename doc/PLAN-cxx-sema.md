@@ -1638,7 +1638,13 @@ lines:
   substitution ([expr.ref]/2).  Tests `detection-dependent-member` and
   `temp.class.order-template-template-ambiguous`; competing partial
   specializations still use the earlier conservative ordering path.  The
-  JSON include now reaches an unsupported member-template overload.
+  member-template calls now fail substitution when no overload is viable,
+  and dereferencing a class with neither an operator nor a non-class
+  conversion is ill-formed ([over.match.viable]/2, [expr.unary.op]/1).
+  Test `detection-dependent-member`.  The JSON include reaches an overload
+  ranking refusal in libc++ filesystem.  Semantic comparison gains four
+  agreeing declarations and loses eight type claims as invalid calls now
+  terminate their analysis; no newly accepted invalid declarations.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land

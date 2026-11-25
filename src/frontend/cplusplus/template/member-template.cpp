@@ -472,8 +472,13 @@ analysis_result semantic_analysis::member_template_call(
                 n, templates, object != nullptr, early.data(),
                 static_cast<uint32_t>(early.size()), candidates,
                 &first_arguments, &all, written, written_at));
-    if (candidates.empty())
+    if (candidates.empty()) {
+        /* [temp.deduct]/8: no specialization was formed; in an immediate
+           context this is a substitution failure. */
+        if (substituting)
+            return analysis_result::ill_formed;
         return not_supported(n, "temp.deduct");
+    }
     owned_array<expression_meaning> operands;
     if (object)
         operands.append(*object);
@@ -484,7 +489,10 @@ analysis_result semantic_analysis::member_template_call(
     VTRY_SET(r, best_viable_function(n, candidates, nullptr, operands, chosen,
                                      &none_viable));
     if (none_viable)
-        return not_supported(n, "over.match.viable");
+        return ill_formed(n,
+                          "overload resolution fails when there is no viable "
+                          "function, and the invocation is ill-formed",
+                          "over.match.viable");
     const overload_candidate &k = candidates[chosen];
     entity_index f = k.function;
     if (k.template_index) {

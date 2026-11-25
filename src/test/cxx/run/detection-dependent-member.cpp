@@ -16,9 +16,23 @@ struct S { void append(const char*); };
 template<class T, class A>
 using append = decltype(declval<T&>().append(declval<A&&>()));
 template<class T> using begin = decltype(declval<T&>().begin());
+template<class T> using dereference = decltype(*declval<T&>());
+struct Other {};
+struct NoDeref { operator Other() const; };
+struct PointerDeref { operator int*() const; };
 struct Range { int* begin(); };
+struct Overloaded {
+    void append(int);
+    template<class T> void append(T, int);
+};
+struct TemplateOnly { template<class T> void append(T, int); };
+static_assert(detected<append, Overloaded, int>::value);
+static_assert(!detected<append, Overloaded, const char*>::value);
+static_assert(!detected<append, TemplateOnly, int>::value);
 static_assert(detected<append, S, const char*>::value);
 static_assert(!detected<append, S, int>::value);
 static_assert(detected<begin, Range>::value);
 static_assert(!detected<begin, char[3]>::value);
+static_assert(!detected<dereference, NoDeref>::value);
+static_assert(detected<dereference, PointerDeref>::value);
 int main() { return 0; }
