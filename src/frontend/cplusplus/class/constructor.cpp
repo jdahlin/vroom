@@ -1817,8 +1817,17 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                               "non-class type is not initialized by the "
                               "constructor",
                               "class.base.init");
+        /* [class.base.init]/9.2: an anonymous union's variant members a
+           user-provided constructor does not name are not initialized: the
+           union's deleted default constructor is not called (libc++'s
+           __tree_node, union { __node_value_type __value_; }) */
+        entity_index own = function_state.function;
+        bool user_provided =
+            own && !entity_table[own].implicit && !declared_defaulted(own);
         if (record.kind == type_kind::class_type &&
             entity_table[record.entity].kind == entity_kind::class_type &&
+            !(user_provided &&
+              entity_table[record.entity].anonymous_object == subobjects[i]) &&
             default_constructor_deleted(record.entity))
             /* its implicit default constructor is deleted
                ([class.default.ctor]/2) */
@@ -3212,6 +3221,12 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
         }
         if (r.kind != type_kind::class_type ||
             !entity_table[r.entity].destructor)
+            continue;
+        /* (an anonymous union's members are variant members of c, which
+           are not destroyed: no destructor of the unnamed union is
+           called) */
+        if (entity_table[r.entity].anonymous_object == order[i] &&
+            entity_table[r.entity].union_)
             continue;
         /* read before subobject adds types, which may move r */
         entity_index destructor = entity_table[r.entity].destructor;
