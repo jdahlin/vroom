@@ -1182,10 +1182,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             if (!argument_dependent_lookup(name, types, set, 0, &held))
                 return not_supported(n, "basic.lookup.argdep");
             if (!held.empty()) {
-                /* (the other templates ADL found join the first's, the
-                   candidates of template_call) */
-                if (!set.empty())
-                    return not_supported(n, "basic.lookup.argdep");
+                /* (the other templates and non-template functions ADL found
+                   join the first's, the candidates of template_call) */
                 uint32_t found_template = function_template_of(held[0]);
                 if (!found_template)
                     return not_supported(n, "basic.lookup.argdep");
