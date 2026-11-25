@@ -113,9 +113,21 @@ node_index parser::lambda_expression()
         if (failed())
             return 0;
         names.reenter(parameters);
+    } else if (at(standard_keyword::mutable_) ||
+               at(standard_keyword::constexpr_) ||
+               at(standard_keyword::consteval_) ||
+               at(standard_keyword::static_) ||
+               at(standard_keyword::noexcept_) ||
+               at(preprocessing_op_or_punc::ARROW)) {
+        /* P1102R2 (C++23): decl-specifiers, a noexcept-specifier or a
+           trailing-return-type with no parameters */
+        scope_index parameters = 0;
+        lambda_declarator(&parameters);
+        if (failed())
+            return 0;
+        names.reenter(parameters);
     } else if (!at(preprocessing_op_or_punc::LEFT_BRACE)) {
-        /* P1102R2 (C++23): decl-specifiers, a noexcept-specifier,
-           attributes or a trailing-return-type with no parameters */
+        /* P1102R2 (C++23): attributes with no parameters */
         return beyond_this_step();
     }
     if (!at(preprocessing_op_or_punc::LEFT_BRACE)) {
@@ -255,19 +267,23 @@ node_index parser::lambda_declarator(scope_index *parameters)
     const implementation_defined_behavior &b = tokens.files.behavior;
     size_t mark = begin_node();
     token_index first = position;
-    add_token(); /* ( */
     scope_index enclosing = names.current();
     *parameters = names.enter(scope_kind::function_prototype);
-    {
-        /* [temp.res]/5: a parameter-declaration in a lambda-declarator */
-        flag_set implicit(parameters_implicit_typename, true);
-        parameter_declaration_clause();
+    /* P1102R2 (C++23): the parentheses may be left out when no
+       parameter-declaration-clause follows */
+    if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
+        add_token(); /* ( */
+        {
+            /* [temp.res]/5: a parameter-declaration in a lambda-declarator */
+            flag_set implicit(parameters_implicit_typename, true);
+            parameter_declaration_clause();
+        }
+        if (failed())
+            return 0;
+        if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
+            return expected("')' to close the lambda's parameters",
+                            "expr.prim.lambda");
     }
-    if (failed())
-        return 0;
-    if (!accept(preprocessing_op_or_punc::RIGHT_PARENTHESIS))
-        return expected("')' to close the lambda's parameters",
-                        "expr.prim.lambda");
     /* [ext:gnu_attributes] right after the parameters, as clang */
     gnu_attributes_opt();
     if (failed())
@@ -277,7 +293,8 @@ node_index parser::lambda_declarator(scope_index *parameters)
     unsigned specifiers = 0;
     /* [dcl.spec]/2: "each decl-specifier shall appear at most once in a
        complete decl-specifier-seq" */
-    bool seen_mutable = false, seen_constexpr = false, seen_consteval = false;
+    bool seen_mutable = false, seen_constexpr = false, seen_consteval = false,
+         seen_static = false;
     for (;;) {
         bool *seen = nullptr;
         if (at(standard_keyword::mutable_)) {
@@ -289,7 +306,8 @@ node_index parser::lambda_declarator(scope_index *parameters)
                 return beyond_this_step();
             seen = &seen_constexpr;
         } else if (at(standard_keyword::static_)) {
-            return beyond_this_step(); /* P1169R4 (C++23): static */
+            /* P1169R4 (C++23): static; the analysis has no rules for it */
+            seen = &seen_static;
         } else {
             break;
         }
@@ -404,6 +422,12 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
                 n, "expr.prim.lambda",
                 "an unhandled part in a lambda-expression");
     }
+    if (declarator &&
+        !declarator[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
+        /* P1102R2: its specifiers and trailing-return-type are read after
+           the ')' of the parameters */
+        return not_supported_because(n, "expr.prim.lambda",
+                                     "a lambda-declarator without parentheses");
     SyntaxElement body = n.compound_statement();
     if (!n.lambda_introducer() || !body)
         return not_supported_because(
