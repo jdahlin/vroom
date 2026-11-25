@@ -1626,7 +1626,12 @@ lines:
   reject a const class object with no viable assignment even when its class
   has conversion functions: those cannot bind the left operand of a built-in
   assignment ([over.match.oper]/4, [over.built]/21-23).  Test `over.match.oper-assignment-conversion`;
-  the remaining `__tree` refusal reaches a JSON class's base clause.
+  ordering a fixed template argument pack against one trailing expansion
+  ([temp.class.order]/1, [temp.deduct.type]/9) now selects the fixed pattern.
+  Pack interning records actual pack starts, so an overlapping sequence
+  created later cannot acquire a second identity.  Test
+  `partial-ordering-pack`.  A JSON include now reaches a function-template
+  overload refusal in `json.hpp`.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land

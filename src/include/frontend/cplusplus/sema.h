@@ -6016,6 +6016,9 @@ class semantic_analysis
     /* [temp.variadic]: the elements of the packs among template arguments
        (template_argument::kind_t::pack) */
     owned_array<template_argument> pack_arguments;
+    /* Packs returned by make_pack, indexed separately from their elements:
+       an overlapping element sequence may appear only after a pack exists. */
+    owned_array<template_argument> canonical_packs;
     template_argument make_pack(const template_argument *elements,
                                 uint32_t count);
     bool deduce_argument(const template_argument &x, const template_argument &y,
