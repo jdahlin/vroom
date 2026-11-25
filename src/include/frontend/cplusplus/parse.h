@@ -966,6 +966,7 @@ class parser
     /* one declaration's tokens as an unparsed node: up to the ';' or the
        '}' that ends it, brackets balanced */
     node_index unparsed_declaration();
+    void report_fallback(token_index first, const failure_state &failed_with);
     /* tokens up to (not including) one of stops outside all brackets, as an
        unparsed node: a part of the grammar not written yet (an expression,
        an initializer-clause); 0 if there are none */
