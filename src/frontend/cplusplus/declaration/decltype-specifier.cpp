@@ -270,6 +270,41 @@ void semantic_analysis::collect_written_casts(
         if (!ok)
             found.resize(before);
     }
+    /* a template argument written as a type-id that is not a name
+       (std::declval<_Iter&>()): its type, for the mangler (cast the
+       type-id's node) */
+    if (x.is(syntax_kind::simple_template_id) && x.size() >= 3) {
+        owned_array<SyntaxElement> written;
+        for (uint32_t i = 2; i + 1 < x.size(); i++) {
+            if (x[i].is(syntax_kind::template_argument_list))
+                for (SyntaxElement y : x[i].elements())
+                    written.append(y);
+            else
+                written.append(x[i]);
+        }
+        for (SyntaxElement a : written) {
+            if (!a.is(syntax_kind::type_id))
+                continue;
+            SyntaxElement inner = a;
+            while (
+                inner.is_node() && inner.size() == 1 &&
+                inner.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
+                inner = inner[0];
+            if (inner.is_token())
+                continue;
+            size_t unsupported_before = unsupported.size();
+            qualified_type t;
+            analysis_result r = type_id(a, t);
+            unsupported.resize(unsupported_before);
+            if (r != analysis_result::well_formed)
+                continue;
+            written_binding b;
+            SyntaxRef ar = a;
+            b.cast = ar.index().index();
+            b.type = t;
+            found.append(b);
+        }
+    }
     for (SyntaxElement c : x.elements())
         collect_written_casts(c, found);
 }

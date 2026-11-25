@@ -394,7 +394,14 @@ bool itanium_mangler::specialization_encoding(entity_index e)
     entity_index typed_parameters = pattern_of;
     if (table[e].kind != entity_kind::function)
         typed_parameters = 0;
-    if (!template_args(e, typed_parameters))
+    /* (the parameters' types name the template's parameters, which
+       their expressions resolve through it) */
+    entity_index outer_encoding_template = encoding_template;
+    if (typed_parameters)
+        encoding_template = pattern_of;
+    bool arguments = template_args(e, typed_parameters);
+    encoding_template = outer_encoding_template;
+    if (!arguments)
         return false;
     /* [abi:mangle.template-arg]'s template-args, with [impl.clang]'s
        requires-clause: I, the template-args, Q and the requires-clause's
@@ -1131,12 +1138,40 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
             for (SyntaxElement a : written) {
                 if (a.is(preprocessing_op_or_punc::COMMA))
                     continue;
+                /* (a type-id that is not a name: the type the analysis
+                   gave it, collect_written_casts) */
+                SyntaxElement inner = a;
+                while (inner.is_node() && inner.size() == 1 &&
+                       inner.is(syntax_kind::type_id,
+                                syntax_kind::type_specifier_seq))
+                    inner = inner[0];
+                if (a.is(syntax_kind::type_id) && !inner.is_token()) {
+                    SyntaxRef ar = a;
+                    bool found = false;
+                    for (uint32_t i = 0; i < written_count && !found; i++) {
+                        const auto &w =
+                            analysis.written_bindings[written_first + i];
+                        if (w.identifier || w.cast != ar.index().index())
+                            continue;
+                        if (!type(w.type))
+                            return false;
+                        found = true;
+                    }
+                    if (!found)
+                        return false;
+                    continue;
+                }
                 while (
                     a.is_node() && a.size() == 1 &&
                     a.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
                     a = a[0];
                 if (!a.is_token())
                     return false;
+                if (const auto *b = bound(a)) {
+                    if (!type(b->type))
+                        return false;
+                    continue;
+                }
                 entity_index pe =
                     analysis.constraint_parameter(encoding_template, a.token());
                 if (!pe || !type(analysis.entity_table[pe].type))
