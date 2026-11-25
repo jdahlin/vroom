@@ -26,18 +26,13 @@ void elf_error(ElfObj *o, const char *fmt, ...)
 ElfObj *elf_new(void)
 {
     ElfObj *o = (ElfObj *)reserve(sizeof *o);
-    o->arena.base = (uint8_t *)reserve(ARENA_CAP);
-    o->arena.cap = ARENA_CAP;
-    o->secs.base = (uint8_t *)reserve(SEC_CAP);
-    o->secs.cap = SEC_CAP;
+    vregion_init(&o->arena, reserve(ARENA_CAP), ARENA_CAP);
+    vregion_init(&o->secs, reserve(SEC_CAP), SEC_CAP);
     o->frags.base = (uint8_t *)(reserve(FRAG_CAP * sizeof(ElfFrag)));
     o->frags.cap = FRAG_CAP * sizeof(ElfFrag);
-    o->syms.base = (uint8_t *)reserve(SYMS_CAP);
-    o->syms.cap = SYMS_CAP;
-    o->fixes.base = (uint8_t *)reserve(FIX_CAP);
-    o->fixes.cap = FIX_CAP;
-    o->regs.base = (uint8_t *)reserve(SYMS_CAP);
-    o->regs.cap = SYMS_CAP;
+    vregion_init(&o->syms, reserve(SYMS_CAP), SYMS_CAP);
+    vregion_init(&o->fixes, reserve(FIX_CAP), FIX_CAP);
+    vregion_init(&o->regs, reserve(SYMS_CAP), SYMS_CAP);
     o->machine = EM_AARCH64;
     elf_reset(o);
     return o;
@@ -45,6 +40,11 @@ ElfObj *elf_new(void)
 
 void elf_free(ElfObj *o)
 {
+    vregion_unpoison(&o->arena);
+    vregion_unpoison(&o->secs);
+    vregion_unpoison(&o->syms);
+    vregion_unpoison(&o->fixes);
+    vregion_unpoison(&o->regs);
     munmap(o->arena.base, o->arena.cap);
     munmap(o->secs.base, o->secs.cap);
     munmap(o->frags.base, o->frags.cap);
@@ -56,16 +56,19 @@ void elf_free(ElfObj *o)
 
 void elf_reset(ElfObj *o)
 {
-    o->arena.used = 0;
-    o->syms.used = sizeof(ElfSym);
-    o->secs.used = sizeof(ElfSec);
-    o->fixes.used = sizeof(ElfFix);
+    vregion_truncate(&o->arena, 0);
+    vregion_truncate(&o->syms, 0);
+    vregion_truncate(&o->secs, 0);
+    vregion_truncate(&o->fixes, 0);
+    (void)rpush(&o->syms, sizeof(ElfSym), 1); /* entry 0 of each: null */
+    (void)rpush(&o->secs, sizeof(ElfSec), 1);
+    (void)rpush(&o->fixes, sizeof(ElfFix), 1);
     o->nsec = 1;
     o->nfrag = FRAG_CAP - 1;
     o->nsym = 1;
     o->nfix = 1;
     o->nreg = 0;
-    o->regs.used = 0;
+    vregion_truncate(&o->regs, 0);
     o->expr = 0;
     o->expr_tail = &o->expr;
     memset(o->secs.base, 0, sizeof(ElfSec));

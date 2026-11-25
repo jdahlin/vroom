@@ -96,8 +96,9 @@ void pp_token_next(pp *p, ptok *t)
 
             if (p->context_depth == p->file_context_count &&
                 !p->scratch_token_count && !p->temporary_held)
-                p->temporary_region.used =
-                    0; /* nothing above file level refers to tmp */
+                vregion_truncate(
+                    &p->temporary_region,
+                    0); /* nothing above file level refers to tmp */
             pp_token_fill_from_lexer(t, v, c->source, c->location + v->off);
         } else {
             pp_token_next_slow(p, t);

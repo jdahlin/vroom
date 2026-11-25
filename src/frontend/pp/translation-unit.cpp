@@ -134,14 +134,14 @@ pp *pp_open(const pp_opts *o)
     p->contexts = (pp_context *)(vjob_region_acquire(
         &pp_translation_unit_regions[1], PP_CONTEXT_MAX * sizeof(pp_context),
         "pp.cx"));
-    p->permanent_region.base = (uint8_t *)vjob_region_acquire(
-        &pp_translation_unit_regions[2], 1ull << 30, "pp.perm");
-    p->permanent_region.used = 0;
-    p->permanent_region.cap = 1ull << 30;
-    p->temporary_region.base = (uint8_t *)vjob_region_acquire(
-        &pp_translation_unit_regions[3], 1ull << 32, "pp.tmp");
-    p->temporary_region.used = 0;
-    p->temporary_region.cap = 1ull << 32;
+    vregion_init(&p->permanent_region,
+                 vjob_region_acquire(&pp_translation_unit_regions[2],
+                                     1ull << 30, "pp.perm"),
+                 1ull << 30);
+    vregion_init(&p->temporary_region,
+                 vjob_region_acquire(&pp_translation_unit_regions[3],
+                                     1ull << 32, "pp.tmp"),
+                 1ull << 32);
     p->search_path_signatures = (uint32_t *)(varena_alloc(
         &p->permanent_region, ((size_t)o->ndirs + 1) * sizeof(uint32_t)));
     if (!pp_header_cache_signatures_get(o, &p->options_signature,

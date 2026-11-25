@@ -269,8 +269,8 @@ static int as_macro_argument_parse(as_context *a, const char **pp,
     }
     if (depth)
         return as_error_report(a, "unbalanced parentheses in argument");
-    a->expansion_text.used =
-        (size_t)((uint8_t *)buf - a->expansion_text.base) + n;
+    vregion_truncate(&a->expansion_text,
+                     (size_t)((uint8_t *)buf - a->expansion_text.base) + n);
     *pp = p;
     *out = VCC_LITERAL(as_text, buf, (uint32_t)n);
     return 0;
@@ -525,7 +525,7 @@ VPRIV int as_directive_macro(as_context *a, const char *p, const char *e)
             if (as_macro_argument_parse(a, &p, e, 0, &d))
                 return -1;
             q->default_value = as_text_duplicate(a, d.text, d.length);
-            a->expansion_text.used = mark;
+            vregion_truncate(&a->expansion_text, mark);
             p = as_whitespace_skip(p, e);
         }
         if (p < e && *p == ',')
@@ -688,8 +688,8 @@ VPRIV int as_macro_invoke(as_context *a, as_macro *m, const char *p,
         &a->expansion_text, as_template_expand_bound(m->body, args, np));
     size_t n =
         as_template_expand(a, o, m->body.text, tt, args, m->invocation_count);
-    a->expansion_text.used =
-        (size_t)((uint8_t *)o - a->expansion_text.base) + n;
+    vregion_truncate(&a->expansion_text,
+                     (size_t)((uint8_t *)o - a->expansion_text.base) + n);
     a->macro_instance_count++;
     m->invocation_count++;
     return as_frame_push(a, o, n, AS_FRAME_MACRO, mark);
@@ -715,8 +715,8 @@ VPRIV int as_directive_rept(as_context *a, const char *p, const char *e)
     size_t n = 0;
     for (int64_t i = 0; i < cnt; i++)
         n += as_template_expand(a, o + n, body.text, t, 0, 0);
-    a->expansion_text.used =
-        (size_t)((uint8_t *)o - a->expansion_text.base) + n;
+    vregion_truncate(&a->expansion_text,
+                     (size_t)((uint8_t *)o - a->expansion_text.base) + n);
     if (as_frame_push(a, o, n, AS_FRAME_LOOP, mark))
         return -1;
     a->frames[a->frame_count - 1].caller_line = at;
@@ -777,8 +777,8 @@ VPRIV int as_directive_irp(as_context *a, const char *p, const char *e,
     size_t n = 0;
     for (uint32_t i = 0; i < nv; i++)
         n += as_template_expand(a, o + n, body.text, t, &vals[i], 0);
-    a->expansion_text.used =
-        (size_t)((uint8_t *)o - a->expansion_text.base) + n;
+    vregion_truncate(&a->expansion_text,
+                     (size_t)((uint8_t *)o - a->expansion_text.base) + n);
     if (as_frame_push(a, o, n, AS_FRAME_LOOP, mark))
         return -1;
     a->frames[a->frame_count - 1].caller_line = at;

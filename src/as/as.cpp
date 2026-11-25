@@ -69,7 +69,7 @@ VPRIV void as_frame_pop(as_context *a)
 {
     as_frame *f = &a->frames[--a->frame_count];
     if (f->kind != AS_FRAME_FILE)
-        a->expansion_text.used = f->region_mark;
+        vregion_truncate(&a->expansion_text, f->region_mark);
     else
         a->end_line = f->line;
 }
@@ -972,10 +972,10 @@ static int as_statement_assemble(as_context *a, const char *p, const char *e)
 as_context *as_new(void)
 {
     as_context *a = (as_context *)as_region_reserve(sizeof *a);
-    a->expansion_text.base = (uint8_t *)(as_region_reserve((size_t)1 << 32));
-    a->expansion_text.cap = (size_t)1 << 32;
-    a->definitions.base = (uint8_t *)(as_region_reserve((size_t)1 << 30));
-    a->definitions.cap = (size_t)1 << 30;
+    vregion_init(&a->expansion_text, as_region_reserve((size_t)1 << 32),
+                 (size_t)1 << 32);
+    vregion_init(&a->definitions, as_region_reserve((size_t)1 << 30),
+                 (size_t)1 << 30);
     a->statement_buffer.base = (uint8_t *)(as_region_reserve((size_t)1 << 24));
     a->statement_buffer.cap = (size_t)1 << 24;
     return a;
@@ -989,6 +989,8 @@ void as_statistics_get(const as_context *a, uint64_t *stmts, uint64_t *bytes)
 
 void as_free(as_context *a)
 {
+    vregion_unpoison(&a->expansion_text);
+    vregion_unpoison(&a->definitions);
     munmap(a->expansion_text.base, a->expansion_text.cap);
     munmap(a->definitions.base, a->definitions.cap);
     munmap(a->statement_buffer.base, a->statement_buffer.cap);
@@ -1029,8 +1031,8 @@ void as_begin(as_context *a, ElfObj *o, const char *name)
     a->failed = 0;
     a->messages[0] = 0;
     a->message_length = a->error_count = 0;
-    a->expansion_text.used = 0;
-    a->definitions.used = 0;
+    vregion_truncate(&a->expansion_text, 0);
+    vregion_truncate(&a->definitions, 0);
     a->macro_instance_count = 0;
     a->alias_count = 0;
     a->alias_capacity = 0;
