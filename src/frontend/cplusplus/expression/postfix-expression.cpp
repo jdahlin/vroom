@@ -863,14 +863,40 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
         owned_array<overload_candidate> candidates;
         owned_array<uint32_t> first_arguments;
         owned_array<template_argument> all;
-        VTRY(added, template_candidates(n, group, arguments.data(),
-                                        static_cast<uint32_t>(arguments.size()),
-                                        candidates, &first_arguments, &all,
-                                        nullptr, 0));
+        owned_array<expression_meaning> call_args;
+        bool used_braced = false;
+        if (SyntaxElement list = parts.braced_list()) {
+            expression_meaning braced_arg;
+            if (braced_deduction_elements(list, braced_arg) ==
+                    analysis_result::well_formed &&
+                braced_arg.braced_known) {
+                VTRY(b_added,
+                     template_candidates(n, group, &braced_arg, 1, candidates,
+                                         &first_arguments, &all, nullptr, 0));
+                if (!candidates.empty()) {
+                    call_args.append(braced_arg);
+                    used_braced = true;
+                }
+            }
+        }
+        if (!used_braced) {
+            VTRY(added, template_candidates(
+                            n, group, arguments.data(),
+                            static_cast<uint32_t>(arguments.size()), candidates,
+                            &first_arguments, &all, nullptr, 0));
+        }
         if (!candidates.empty()) {
             size_t chosen = 0;
-            VTRY(best, best_viable_function(n, candidates, nullptr, arguments,
-                                            chosen));
+            if (used_braced) {
+                owned_array<SyntaxElement> lists;
+                lists.append(parts.braced_list());
+                VTRY(best,
+                     best_viable_function(n, candidates, nullptr, call_args,
+                                          chosen, nullptr, false, &lists));
+            } else {
+                VTRY(best, best_viable_function(n, candidates, nullptr,
+                                                arguments, chosen));
+            }
             /* (the arguments are analysed again by the initialization) */
             expressions.resize(expressions_before);
             name_uses.resize(uses_before);
@@ -948,7 +974,13 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             function_parameters.clear();
             qualified_type ctor_type = qualified_type::make(
                 type_table.fundamental(fundamental_type::void_), cv_none);
-            analysis_result fr = function(ctor.parameters().index(), ctor_type);
+            size_t unsup_before = unsupported.size();
+            analysis_result fr = analysis_result::well_formed;
+            {
+                diagnostics_suppressed_if hush(diagnostics, true);
+                fr = function(ctor.parameters().index(), ctor_type);
+            }
+            unsupported.resize(unsup_before);
             current_scope = saved_scope;
             defining_class = saved_class;
             function_cv = saved_cv;
