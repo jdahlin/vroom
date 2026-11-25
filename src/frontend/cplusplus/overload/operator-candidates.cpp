@@ -380,6 +380,10 @@ analysis_result semantic_analysis::overloaded_operator(
     default:
         break;
     }
+    if (op == preprocessing_op_or_punc::EQUAL &&
+        type_table[operands[0].type.unqualified()].kind !=
+            type_kind::class_type)
+        return analysis_result::well_formed;
     if (converts && !logical && !unary_prefix && !incdec &&
         (operands.size() != 2 || (member_only && !subscript) ||
          op == preprocessing_op_or_punc::SPACESHIP))
@@ -858,11 +862,36 @@ analysis_result semantic_analysis::overloaded_operator(
                ostreambuf_iterator, whose operator=(_CharT) takes no
                iterator): the built-in copy (class_assignment) */
             if (implicit_viable && !declares_move &&
+                !copy_assignment_deleted(c) &&
                 !entity_table[c].defaulted_copy_assignment &&
                 operands.size() == 2 &&
                 operands[1].type.unqualified() ==
                     operands[0].type.unqualified() &&
-                assigned_bitwise(c)) {
+                !(operands[0].type.cv() & cv_const) && assigned_bitwise(c)) {
+                /* [class.copy.assign]/2, [over.ics.rank]/3.2: the implicit
+                   copy assignment operator C& operator=(const C&) has an
+                   identity conversion for a right operand of type C; any
+                   declared operator= whose parameter's unqualified
+                   non-reference type is not C requires a derived-to-base or
+                   user-defined conversion and is strictly worse */
+                bool same_type_candidate = false;
+                for (const overload_candidate &k : candidates) {
+                    const entity &ke = entity_table[k.function];
+                    const struct type &ft = type_table[ke.type.unqualified()];
+                    if (ft.kind != type_kind::function ||
+                        ft.parameter_count != 1) {
+                        same_type_candidate = true;
+                        break;
+                    }
+                    const qualified_type *params =
+                        type_table.parameters(ke.type.unqualified());
+                    if (stripped(params[0]) == operands[0].type.unqualified()) {
+                        same_type_candidate = true;
+                        break;
+                    }
+                }
+                if (!same_type_candidate)
+                    return analysis_result::well_formed;
                 owned_array<expression_meaning> trial;
                 for (const expression_meaning &e : operands)
                     trial.append(e);
