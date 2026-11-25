@@ -320,6 +320,13 @@ analysis_result semantic_analysis::best_viable_function(
                             a.from_list = true;
                             a.to_initializer_list =
                                 list_initializer_list(list_target);
+                            if (tr.kind == type_kind::lvalue_reference ||
+                                tr.kind == type_kind::rvalue_reference) {
+                                a.reference = true;
+                                a.binds_rvalue = true;
+                                a.rvalue_reference =
+                                    tr.kind == type_kind::rvalue_reference;
+                            }
                             if (semantics[value.node].kind ==
                                 semantic_kind::construct)
                                 a.function = semantics[value.node].b;
