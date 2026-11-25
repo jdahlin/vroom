@@ -7273,6 +7273,9 @@ class semantic_analysis
     /* [class.copy.assign]/12: the implicit copy assignment of class c
        assigns its members as the built-in operator does (no member's
        assignment is a user-provided operator=) */
+    /* X& operator=(X&&) = default of a class whose subobjects are
+       assigned bitwise: an rvalue is assigned by the bytes too */
+    bool moved_bitwise(entity_index c);
     bool assigned_bitwise(entity_index c);
     /* ---- [over.literal] literal operators (literal-operator.cpp) ---- */
     /* the name of the literal operator of the literal suffix identifier

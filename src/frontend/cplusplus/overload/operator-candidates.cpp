@@ -795,6 +795,16 @@ analysis_result semantic_analysis::overloaded_operator(
         for (const overload_candidate &k : candidates)
             if (copy_assignment_operator(k.function, c))
                 copy = true;
+        /* [class.copy.assign]/3, /9: X& operator=(X&&) = default beside a
+           user-declared copy assignment operator, of a class assigned
+           bitwise: trivial, no entity (implicit_assignments), and the
+           better candidate for an rvalue of the class ([over.ics.rank]
+           /3.2.3): the built-in copy */
+        if (copy && operands.size() == 2 &&
+            operands[1].category != value_category::lvalue &&
+            operands[1].type.unqualified() == operands[0].type.unqualified() &&
+            moved_bitwise(c))
+            return analysis_result::well_formed;
         if (!copy) {
             /* [class.copy.assign]/2: a class that declares a move assignment
                operator and no copy assignment operator has its implicit copy

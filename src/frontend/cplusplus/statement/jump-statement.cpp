@@ -229,7 +229,9 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
             m.category = value_category::xvalue;
     } else if (movable && m.category == value_category::lvalue &&
                object.kind == type_kind::class_type &&
-               declares_move_constructor(object.entity)) {
+               (declares_move_constructor(object.entity) ||
+                /* (X(X&&) = default: no entity when trivial) */
+                entity_table[object.entity].defaulted_move_constructor)) {
         /* the first overload resolution, as an rvalue, finds the move
            constructor viable: it is chosen ([over.ics.rank]/3.2.3), deleted
            or not.  For another class (a converting constructor), C++11 to
