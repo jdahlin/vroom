@@ -568,8 +568,17 @@ analysis_result semantic_analysis::static_member_call(
    lambda's enclosing function's */
 bool semantic_analysis::has_this_object()
 {
-    if (lambda_context *l = current_lambda())
-        return l->enclosing_this.unqualified() != 0;
+    if (lambda_context *l = current_lambda()) {
+        if (!l->enclosing_this.unqualified())
+            return false;
+        if (l->default_capture != capture_default::none)
+            return true;
+        for (size_t i = l->first_capture; i < lambda_captures.size(); i++)
+            if (!lambda_captures[i].variable &&
+                !lambda_captures[i].init_capture)
+                return true;
+        return false;
+    }
     return function_state.this_entity != 0;
 }
 
