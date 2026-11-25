@@ -463,8 +463,11 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         return of_form(sequence::form::bad);
     /* [temp.mem]/1: a constructor template of c1 only declared is a
        candidate too: not analysed */
-    if (entity_table[c1].constructor_template)
-        return of_form(sequence::form::unknown);
+    if (entity_table[c1].constructor_template) {
+        sequence cannot_tell = of_form(sequence::form::unknown);
+        cannot_tell.user_defined_if_viable = true;
+        return cannot_tell;
+    }
     /* the converting constructors of c1, and the specializations of its
        converting constructor templates, with one parameter to take the
        argument */
@@ -476,8 +479,11 @@ semantic_analysis::class_sequence(const expression_meaning &a,
         owned_array<overload_candidate> specializations;
         if (constructor_template_candidates(SyntaxRef(), c1, &a, 1, true,
                                             specializations) !=
-            analysis_result::well_formed)
-            return of_form(sequence::form::unknown);
+            analysis_result::well_formed) {
+            sequence cannot_tell = of_form(sequence::form::unknown);
+            cannot_tell.user_defined_if_viable = true;
+            return cannot_tell;
+        }
         for (const overload_candidate &k : specializations)
             constructors.append(k.function);
     }
@@ -512,8 +518,11 @@ semantic_analysis::class_sequence(const expression_meaning &a,
             unique = false;
         }
     }
-    if (unknown)
-        return of_form(sequence::form::unknown);
+    if (unknown) {
+        sequence cannot_tell = of_form(sequence::form::unknown);
+        cannot_tell.user_defined_if_viable = true;
+        return cannot_tell;
+    }
     if (by_function.kind == sequence::form::user_defined) {
         /* [over.match.copy]/1: a conversion function and a converting
            constructor both viable are candidates of one overload
