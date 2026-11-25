@@ -108,10 +108,14 @@ bool c_lowering::function_definition_or_drop(entity_index e)
        one that nothing uses has no code, as clang makes none; an
        implicitly declared special member is inline, [class.default.ctor]/1,
        [class.copy.ctor]/10, [class.dtor]/8) */
-    bool droppable = x.kind == entity_kind::function && x.definition &&
-                     (x.inline_ || x.implicit || instantiated_member ||
-                      (x.linkage_of_name == linkage::internal &&
-                       analysis.token_in_system_header(node(x.definition).at)));
+    /* ([temp.explicit]/10: an explicit instantiation definition is
+       emitted whether used or not: never dropped) */
+    bool droppable =
+        x.kind == entity_kind::function && x.definition &&
+        analysis.explicitly_instantiated(e) != instantiation_kind::definition &&
+        (x.inline_ || x.implicit || instantiated_member ||
+         (x.linkage_of_name == linkage::internal &&
+          analysis.token_in_system_header(node(x.definition).at)));
     if (!droppable)
         return function_definition(e);
     /* (a use lowered before this definition: its symbol is called) */
