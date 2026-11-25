@@ -398,6 +398,16 @@ bool itanium_mangler::encoding(entity_index e)
 bool itanium_mangler::specialization_encoding(entity_index e)
 {
     const entities &table = analysis.entity_table;
+    /* (a specialization named within another's arguments: the enclosing
+       one's template parameters are resolved again after it) */
+    struct restore {
+        entity_index &place;
+        entity_index before;
+        ~restore()
+        {
+            place = before;
+        }
+    } outer_template = {encoding_template, encoding_template};
     entity_index pattern_of = analysis.specialized_template(e);
     entity_index scope = table[e].enclosing;
     bool nested = scope && !is_std(scope);
@@ -1189,10 +1199,15 @@ void itanium_mangler::refuse_expression(SyntaxElement x)
         return;
     refused_text.clear();
     vbuffer_string_append(refused_text.get(), "the expression '");
-    token_index first = x.first_token();
-    token_index end = first + 1;
-    if (x.is_node())
+    /* (a token element's own token: it has no first_token) */
+    token_index first = 0, end = 0;
+    if (x.is_node()) {
+        first = x.first_token();
         end = x.end_token();
+    } else {
+        first = x.token();
+        end = first + 1;
+    }
     for (token_index t = first; t < end; t++) {
         if (refused_text.size() > 70) {
             vbuffer_string_append(refused_text.get(), " ...");
