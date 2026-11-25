@@ -1918,15 +1918,16 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                              statement_node(semantic_kind::expression_statement,
                                             id, value.node));
                     continue;
-                }
-                if (entity_table[e].base_subobject)
+                } else if (entity_table[e].base_subobject) {
                     /* a base copied from an expression: [conv.ptr]/3's
                    conversion of the source */
                     return not_supported_because(
                         item, "class.base.init",
                         "a base class initialized from a single expression "
                         "that is not a constructor call");
-                r = initialize_from(item, init, type, true, false, value);
+                } else {
+                    r = initialize_from(item, init, type, true, false, value);
+                }
             } else {
                 return not_supported_because(
                     item, "class.base.init",
