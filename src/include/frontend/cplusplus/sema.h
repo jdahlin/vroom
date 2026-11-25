@@ -4699,7 +4699,8 @@ class semantic_analysis
                                        owned_array<SyntaxRef> &bodies);
     analysis_result member_declarator(entity_index c, SyntaxRef declaration,
                                       SyntaxElement d, const specified &s,
-                                      uint8_t access, bool definition);
+                                      uint8_t access, bool definition,
+                                      bool initialized = false);
     /* the body of a member function defined in its class, analysed at the
        end of the class ([class.mem]/6: a complete-class context) */
     analysis_result member_function_body(entity_index c, SyntaxRef definition);
