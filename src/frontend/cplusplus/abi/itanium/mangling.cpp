@@ -202,6 +202,9 @@ class itanium_mangler
     bool refuse(const char *what);
     void refuse_expression(SyntaxElement x);
     bool dependent_expression_of(SyntaxElement c);
+    /* an initializer-list's expressions, a pattern followed by ... as
+       sp <expression> */
+    bool expression_list(SyntaxElement list);
     /* (the dependent values being mangled, dependent_value) */
     uint32_t dependent_value_depth = 0;
     const char *binary_operator_code(SyntaxElement op) const;
@@ -1211,6 +1214,24 @@ void itanium_mangler::refuse_expression(SyntaxElement x)
     refuse(refused_text.data());
 }
 
+/* [abi:expressions] <expression> ::= sp <expression>, a pack expansion */
+bool itanium_mangler::expression_list(SyntaxElement list)
+{
+    owned_array<SyntaxElement> items;
+    for (auto item : list.items(syntax_kind::initializer_list))
+        items.append(item);
+    for (size_t i = 0; i < items.size(); i++) {
+        if (items[i].is(preprocessing_op_or_punc::ELLIPSIS))
+            continue;
+        if (i + 1 < items.size() &&
+            items[i + 1].is(preprocessing_op_or_punc::ELLIPSIS))
+            text("sp");
+        if (!dependent_expression(items[i]))
+            return false;
+    }
+    return true;
+}
+
 bool itanium_mangler::dependent_expression(SyntaxElement expression)
 {
     if (dependent_expression_of(expression))
@@ -1424,9 +1445,8 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                 arguments.append(argument);
             if (arguments.size() != 1)
                 text("_");
-            for (SyntaxElement argument : arguments)
-                if (!dependent_expression(argument))
-                    return false;
+            if (!expression_list(expression[2]))
+                return false;
             if (arguments.size() != 1)
                 text("E");
             return true;
@@ -1735,11 +1755,8 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                     return false;
             } else if (!dependent_expression(base))
                 return false;
-            if (expression.size() == 4)
-                for (auto argument :
-                     expression[2].items(syntax_kind::initializer_list))
-                    if (!dependent_expression(argument))
-                        return false;
+            if (expression.size() == 4 && !expression_list(expression[2]))
+                return false;
             text("E");
             return true;
         }
