@@ -5079,10 +5079,10 @@ class semantic_analysis
     analysis_result class_conversion(SyntaxRef n, entity_index c,
                                      expression_meaning &m);
     /* ... the prvalue of class c direct-initialized by the arguments */
-    analysis_result
-    class_direct_initialization(SyntaxRef n, entity_index c,
-                                owned_array<expression_meaning> &arguments,
-                                expression_meaning &m);
+    analysis_result class_direct_initialization(
+        SyntaxRef n, entity_index c, owned_array<expression_meaning> &arguments,
+        expression_meaning &m,
+        const owned_array<SyntaxElement> *written_arguments = nullptr);
     /* the expressions of an expression-list, analysed */
     analysis_result
     expression_list_meanings(SyntaxElement list,

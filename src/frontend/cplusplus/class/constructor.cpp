@@ -3718,14 +3718,23 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
     if (SyntaxElement braced = written.braced_list()) {
         r = list_initialization(braced, type, true, value);
     } else {
+        owned_array<SyntaxElement> as_written;
         if (written.list) {
-            VTRY_SET(r, expression_list_meanings(written.list, arguments));
+            owned_array<SyntaxElement> *keep = nullptr;
+            require_complete(c);
+            if (entity_table[c].first_constructor)
+                keep = &as_written;
+            VTRY_SET(r,
+                     expression_list_meanings(written.list, arguments, keep));
         } else if (!written) {
             return not_supported_because(
                 n, "expr.type.conv",
                 "a type conversion with neither an expression-list nor braces");
         }
-        return class_direct_initialization(n, c, arguments, m);
+        const owned_array<SyntaxElement> *lists = nullptr;
+        if (!as_written.empty())
+            lists = &as_written;
+        return class_direct_initialization(n, c, arguments, m, lists);
     }
     if (r == analysis_result::well_formed)
         class_prvalue(type, value.evaluation, value.node, m);
@@ -3740,7 +3749,7 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
  */
 analysis_result semantic_analysis::class_direct_initialization(
     SyntaxRef n, entity_index c, owned_array<expression_meaning> &arguments,
-    expression_meaning &m)
+    expression_meaning &m, const owned_array<SyntaxElement> *written_arguments)
 {
     qualified_type type = entity_table[c].type;
     require_complete(c);
@@ -3748,7 +3757,7 @@ analysis_result semantic_analysis::class_direct_initialization(
         return not_supported_because(
             n, "expr.type.conv",
             "a direct initialization of a class with no size");
-    if (arguments.size() == 1 &&
+    if (arguments.size() == 1 && arguments[0].node &&
         tokens.files.behavior.edition >= standard_edition::cplusplus_17 &&
         type_table[arguments[0].type.unqualified()].kind ==
             type_kind::class_type &&
@@ -3831,7 +3840,7 @@ analysis_result semantic_analysis::class_direct_initialization(
             if (!entity_table[class_members[x.first_member + i]]
                      .default_initializer)
                 overwritten = false;
-        r = construct(n, type, arguments, 0, value);
+        r = construct(n, type, arguments, 0, value, false, written_arguments);
         if (r == analysis_result::well_formed && !overwritten) {
             if (semantics[value.node].kind != semantic_kind::construct)
                 return not_supported_because(
@@ -3849,7 +3858,7 @@ analysis_result semantic_analysis::class_direct_initialization(
         return not_supported_because(
             n, "expr.type.conv", "a parenthesized aggregate initialization");
     } else {
-        r = construct(n, type, arguments, 0, value);
+        r = construct(n, type, arguments, 0, value, false, written_arguments);
     }
     if (r == analysis_result::well_formed)
         class_prvalue(type, value.evaluation, value.node, m);

@@ -1529,6 +1529,26 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
             return not_supported_because(
                 init, "dcl.init",
                 "a parenthesized initializer with no expressions");
+        /* a braced-init-list argument of a constructor ([over.best.ics]/1:
+           its sequence is [over.ics.list]'s), kept as written.  (Not an
+           empty one: the ambiguity of B b({}) with the copy constructor,
+           CWG1902, is not told) */
+        if (!parts.list_of_several() &&
+            parts.list.is(syntax_kind::braced_init_list) &&
+            parts.list.end_token() > parts.list.first_token() + 2 &&
+            type_table[type.unqualified()].kind == type_kind::class_type) {
+            entity_index c = type_table[type.unqualified()].entity;
+            require_complete(c);
+            if (entity_table[c].kind == entity_kind::class_type &&
+                entity_table[c].first_constructor) {
+                owned_array<expression_meaning> arguments;
+                owned_array<SyntaxElement> written;
+                VTRY(r,
+                     expression_list_meanings(parts.list, arguments, &written));
+                return construct(init, type, arguments, 0, result, false,
+                                 &written);
+            }
+        }
         if (parts.list_of_several()) {
             if (has_pack_expansion(parts.list))
                 return not_supported_because(
@@ -1549,8 +1569,11 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                         init, "dcl.init",
                         "several arguments for a class without constructors");
                 owned_array<expression_meaning> arguments;
-                VTRY(r, expression_list_meanings(parts.list, arguments));
-                return construct(init, type, arguments, 0, result);
+                owned_array<SyntaxElement> written;
+                VTRY(r,
+                     expression_list_meanings(parts.list, arguments, &written));
+                return construct(init, type, arguments, 0, result, false,
+                                 &written);
             }
             return ill_formed(init,
                               "if the entity being initialized does not have "
