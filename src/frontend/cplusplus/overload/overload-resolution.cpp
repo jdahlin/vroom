@@ -229,7 +229,7 @@ analysis_result semantic_analysis::best_viable_function(
     owned_array<sequence> ics;
     owned_array<viability> state;
     for (const overload_candidate &c : candidates) {
-        const struct type &f = type_table[c.type.unqualified()];
+        const struct type f = type_table[c.type.unqualified()];
         size_t count = f.parameter_count;
         /* a member candidate's first argument is for its implicit object
            parameter ([over.match.oper]/3): its parameters are for the
@@ -286,7 +286,7 @@ analysis_result semantic_analysis::best_viable_function(
                 if (written_arguments &&
                     (*written_arguments)[k].is(syntax_kind::braced_init_list)) {
                     qualified_type list_target = target;
-                    const struct type &tr = type_table[target.unqualified()];
+                    const struct type tr = type_table[target.unqualified()];
                     /* (an array's cv-qualifiers are its elements',
                        [basic.type.qualifier]/3) */
                     qualified_type referred = tr.operand;
