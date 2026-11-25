@@ -1409,9 +1409,20 @@ analysis_result semantic_analysis::declare_with_initializer(
     for (const parameter_meaning &p : function_parameters)
         if (p.default_argument)
             has_default_arguments = true;
-    if (m.qualifier && has_default_arguments) {
-        /* [dcl.fct.default]/6: a member function's, added to its class's
-           declaration's: what calls of the member have is not known */
+    /* [dcl.fct.default]/6: "Except for member functions of class
+       templates, the default arguments in a member function definition
+       that appears outside of the class definition are added to the set of
+       default arguments provided by the member function declaration in the
+       class definition": a member of a class that is no template's
+       (default_arguments, analysed as the class's own) */
+    const entity &qualifier_class = entity_table[m.qualifier];
+    bool added_member_defaults =
+        m.qualifier && has_default_arguments &&
+        qualifier_class.kind == entity_kind::class_type &&
+        qualifier_class.defined && !qualifier_class.instantiation &&
+        !qualifier_class.held_by_template;
+    if (m.qualifier && has_default_arguments && !added_member_defaults) {
+        /* what calls of the member have is not known */
         lookup_result found = lookup_qualified(
             m.qualifier, tokens.identifier(m.id), lookup_filter::any);
         if (found.entity &&
@@ -1571,8 +1582,22 @@ analysis_result semantic_analysis::declare_with_initializer(
             return not_supported_because(
                 declaration, "dcl.init",
                 "an initializer on a member function's redeclaration");
-        return member_redeclaration(declaration, m.id, m.qualifier, type, s,
-                                    m.exceptions, definition);
+        analysis_result redeclared = member_redeclaration(
+            declaration, m.id, m.qualifier, type, s, m.exceptions, definition);
+        if (redeclared != analysis_result::well_formed ||
+            !added_member_defaults || !last_declared)
+            return redeclared;
+        /* (/6: added to the class's set, analysed as its own in the class's
+           scope) */
+        entity_index defined = last_declared;
+        scoped_value<entity_index> in_class(current_scope, m.qualifier);
+        scoped_value<bool> as_member(analysing_member_defaults, true);
+        analysis_result added =
+            default_arguments(declaration, defined, entity_kind::function);
+        if (added != analysis_result::well_formed)
+            entity_table[defined].unknown_defaults = true;
+        last_declared = defined;
+        return added;
     }
     /* [dcl.fct]/6: "A function type with a cv-qualifier-seq or a
        ref-qualifier ... shall appear only as the function type for a

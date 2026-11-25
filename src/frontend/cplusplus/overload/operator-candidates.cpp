@@ -217,6 +217,24 @@ analysis_result semantic_analysis::overloaded_operator(
     }
     if (!any_class && !any_enumeration)
         return analysis_result::well_formed;
+    /* ([impl.clang] clang reports "exceeded maximum depth" for a default
+       template argument whose operator needs the template's own candidates:
+       SemaTemplate/stack-exhaustion.cpp) */
+    if (overloaded_operator_depth >= 64)
+        return not_supported_because(
+            n, "over.match.oper",
+            "overloaded operators nested 64 deep or more in their candidates");
+    struct depth_guard {
+        unsigned &depth;
+        explicit depth_guard(unsigned &d) : depth(d)
+        {
+            depth++;
+        }
+        ~depth_guard()
+        {
+            depth--;
+        }
+    } guard(overloaded_operator_depth);
     /* [temp.inst]/2: the members the candidates come from: a specialization
        named only is defined here */
     for (const expression_meaning &e : operands)
@@ -412,9 +430,17 @@ analysis_result semantic_analysis::overloaded_operator(
            the set of member candidates is empty." */
         owned_array<entity_index> members, others;
         const struct type &t1 = type_table[operand(0).type.unqualified()];
-        if (t1.kind == type_kind::class_type) {
+        bool members_looked_up = t1.kind == type_kind::class_type;
+        if (members_looked_up) {
             entity_index c = t1.entity;
             require_complete(c);
+            /* (incomplete and not being defined: no member candidates) */
+            if (entity_table[c].kind == entity_kind::class_type &&
+                !entity_table[c].defined && !entity_table[c].size)
+                members_looked_up = false;
+        }
+        if (members_looked_up) {
+            entity_index c = t1.entity;
             if (entity_table[c].kind != entity_kind::class_type ||
                 !entity_table[c].size)
                 return not_supported_because(
@@ -769,6 +795,16 @@ analysis_result semantic_analysis::overloaded_operator(
         for (const overload_candidate &k : candidates)
             if (copy_assignment_operator(k.function, c))
                 copy = true;
+        /* [class.copy.assign]/3, /9: X& operator=(X&&) = default beside a
+           user-declared copy assignment operator, of a class assigned
+           bitwise: trivial, no entity (implicit_assignments), and the
+           better candidate for an rvalue of the class ([over.ics.rank]
+           /3.2.3): the built-in copy */
+        if (copy && operands.size() == 2 &&
+            operands[1].category != value_category::lvalue &&
+            operands[1].type.unqualified() == operands[0].type.unqualified() &&
+            moved_bitwise(c))
+            return analysis_result::well_formed;
         if (!copy) {
             /* [class.copy.assign]/2: a class that declares a move assignment
                operator and no copy assignment operator has its implicit copy

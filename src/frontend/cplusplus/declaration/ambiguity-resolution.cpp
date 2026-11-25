@@ -99,6 +99,11 @@ bool parser::cast_expression_follows()
  */
 bool parser::parenthesized_type_id(bool cast)
 {
+    /* [ext:gnu_extension_keyword] __extension__ begins a unary-expression,
+       never a type-id: ( __extension__ ... ) is a parenthesized expression
+       (glibc's CPU_ISSET_S) */
+    if (at(extension_keyword::extension, 1))
+        return false;
     /* [temp.names]/3: a > in brackets nested in a template-argument-list
        is an operator */
     flag_set greater(greater_is_operator, true);
