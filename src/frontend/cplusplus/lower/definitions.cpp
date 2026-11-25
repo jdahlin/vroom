@@ -283,13 +283,6 @@ bool c_lowering::variable_definition(entity_index e)
             return fail("a _Thread_local variable initialized or destroyed "
                         "at run time",
                         node(x.definition).at);
-        if (x.inline_ && x.linkage_of_name != linkage::internal &&
-            (!constant || destructor))
-            /* [basic.start.dynamic]/1: partially-ordered, under a guard in
-               a COMDAT group ([abi:guards]) */
-            return fail("an inline variable with dynamic initialization or a "
-                        "destructor",
-                        node(x.definition).at);
         if (!constant) {
             /* [basic.start.static]/2: zero-initialized, then initialized
                by dynamic_initialization */

@@ -330,6 +330,40 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
     in_function = false;
     if (failure.what || statements.empty())
         return false;
+    if (x.inline_ && x.linkage_of_name != linkage::internal) {
+        /* [basic.start.dynamic]/1, [abi:guards]: guard an inline variable's
+           dynamic initialization with weak _ZGV<mangled without _Z> */
+        owned_buffer name;
+        if (!itanium_symbol_name(analysis, tokens.pp, e, name.get(), 0) ||
+            name.size() < 2)
+            return fail("an entity whose symbol is not mangled", init.at);
+        owned_buffer guard_name;
+        vbuffer_string_append(guard_name.get(), "_ZGV");
+        vbuffer_append(guard_name.get(), name.data() + 2, name.size() - 2);
+        ast_qualified_type guard_type =
+            ast_builder_type_basic(AST_TYPE_LONG_LONG);
+        uint32_t guard = ast_builder_symbol(
+            c, AST_SYMBOL_VARIABLE, guard_name.data(), guard_name.size(),
+            guard_type, AST_STORAGE_NONE,
+            AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
+                AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED,
+            0);
+        ast_builder_symbol_keep(c, guard);
+        ast_builder_toplevel(c, guard);
+        owned_array<uint32_t> guarded;
+        guarded.append(
+            c_statement(c, assign(guard_type, c_variable(c, guard, guard_type),
+                                  ast_builder_integer(c, guard_type, 1))));
+        for (uint32_t st : statements)
+            guarded.append(st);
+        uint32_t test = make(
+            AST_NODE_BINARY, ast_builder_type_basic(AST_TYPE_INT),
+            c_variable(c, guard, guard_type),
+            ast_builder_integer(c, guard_type, 0), 0, LEX_TOKEN_EQUAL_EQUAL, 0);
+        uint32_t body = if_statement(test, block(guarded), 0);
+        statements.clear();
+        statements.append(body);
+    }
     ast_builder_symbol_body(c, f, block(statements));
     ast_builder_symbol_flags_add(
         c, f, AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED);
