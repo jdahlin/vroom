@@ -133,6 +133,7 @@ static void *zalloc(ElfObj *o, size_t n)
         return NULL;
     }
     r->used = at + n;
+    VASAN_UNPOISON(r->base + at, n);
     memset(r->base + at, 0, n);
     return r->base + at;
 }

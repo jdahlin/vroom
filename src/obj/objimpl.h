@@ -41,8 +41,7 @@ static inline void *rpush(vregion *r, size_t n, size_t al)
     size_t u = (r->used + al - 1) & ~(al - 1);
     if (u + n > r->cap || u + n < u)
         vjob_fail("object too large (an output section or table is full)");
-    r->used = u + n;
-    return r->base + u;
+    return vregion_take(r, u, n);
 }
 
 static inline uint64_t symoff(ElfObj *o, ElfSym *y)

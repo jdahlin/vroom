@@ -43,6 +43,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include "common/asan.h"
 #include "common/attributes.h"
 #include "common/fail.h"
 
@@ -97,8 +98,10 @@ static inline VUSE VNONNULL(1) void *vjob_region_acquire(vjob_region *r,
                                                          const char *name)
 {
     if (__builtin_expect(r->cap < n || r->busy, 0)) {
-        if (r->p)
+        if (r->p) {
+            VASAN_UNPOISON(r->p, r->cap);
             munmap(r->p, r->cap);
+        }
         n = (n + VJOB_REGION_PAGE - 1) & ~(VJOB_REGION_PAGE - 1);
         if (r->cap <
             n) /* sizes that grow with the TU: double, from 64 MB of address space */

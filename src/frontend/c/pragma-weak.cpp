@@ -26,10 +26,11 @@ static uint32_t cc_pragma_weak_identifier_string(cc *c, uint32_t id)
 {
     int l;
     const char *s = cc_identifier_name(id, &l);
-    char *k = (char *)(cc_heap_allocate(c, (size_t)l + 1));
+    /* vintern_hash reads 16 bytes past the name (cc_symbol_global_find) */
+    char *k = (char *)(cc_heap_allocate(c, (size_t)l + 16));
 
     memcpy(k, s, (size_t)l);
-    k[l] = 0;
+    memset(k + l, 0, 16);
     c->strs[c->nstr++] =
         VCC_LITERAL(cstr, k, (uint32_t)l + 1, 1, LEX_TOKEN_STRING);
     return c->nstr; /* (attrs hold index + 1) */

@@ -277,6 +277,9 @@ static inline void *as_region_alloc(vregion *r, size_t n)
     if (u + n > r->cap || u + n < u)
         vjob_fail("assembly too large (expansion or statement buffer full)");
     r->used = u + n;
+#if VCC_ASAN
+    (void)vregion_take(r, u, n);
+#endif
     return r->base + u;
 }
 
