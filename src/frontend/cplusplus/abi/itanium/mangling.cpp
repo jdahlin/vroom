@@ -1505,7 +1505,11 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
             if (!class_enum_type(t))
                 return false;
         } else if (analysis.entity_table[prefix.enclosing].kind !=
-                   entity_kind::namespace_entity) {
+                       entity_kind::namespace_entity &&
+                   analysis.entity_table[prefix.enclosing].kind !=
+                       entity_kind::class_type) {
+            /* (a member class template of a class: the class's <prefix>
+               the same way, typename sp<int>::get<Y>::type) */
             return false;
         } else if (prefix.instantiation &&
                    substitution(analysis.specialized_template(c))) {
