@@ -49,6 +49,16 @@
                                                           sizeof(*(x).v));     \
         }                                                                      \
     } while (0)
+/* VGROW for a size_t count: the test in size_t, so a count near 4 GiB
+   cannot wrap past the capacity */
+#define VGROW_SIZE(x, k)                                                       \
+    do {                                                                       \
+        if ((x).n + (size_t)(k) > (x).cap) {                                   \
+            (x).cap = (uint32_t)(((x).n + (size_t)(k)) * 2 + 32);              \
+            (x).v = (__typeof__((x).v))realloc((x).v, (size_t)(x).cap *        \
+                                                          sizeof(*(x).v));     \
+        }                                                                      \
+    } while (0)
 #define VPUSH(x, val)                                                          \
     do {                                                                       \
         VGROW(x, 1);                                                           \
@@ -1065,7 +1075,7 @@ static void w_str(cc *c, uint32_t s)
         wm_get(&r->wm, (uint64_t)W_STR << 32 | s, r->wst.n) != UINT32_MAX)
         return;
     VPUSH(r->wst, (VCC_LITERAL(wstr, s, r->wb.n, *x)));
-    VGROW(r->wb, (uint32_t)n);
+    VGROW_SIZE(r->wb, n);
     memcpy(r->wb.v + r->wb.n, x->s, n);
     r->wb.n += (uint32_t)n;
 }
@@ -1731,7 +1741,7 @@ static uint32_t heap_piece(cvec *h, const cc *c, size_t heap0, const void *p,
         return 0;
     }
     at = (h->n + 15) & ~15u;
-    VGROW(*h, (uint32_t)(at - h->n + n));
+    VGROW_SIZE(*h, at - h->n + n);
     memset(h->v + h->n, 0, at - h->n);
     memcpy(h->v + at, p, n);
     h->n = at + (uint32_t)n;
