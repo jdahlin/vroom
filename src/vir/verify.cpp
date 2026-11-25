@@ -455,7 +455,7 @@ static void vir_verify_insn_check(vir_verify_state *v, uint32_t b, uint32_t i,
         if (kd == VIR_OPERAND_KIND_NONE) {
             if (val) {
                 vir_verify_fail(v, "T2", b, i, "%s: operand %c must be 0",
-                                oi->name, 'a' + k);
+                                oi->name, (int)('a' + k));
                 return;
             }
             continue;
@@ -466,13 +466,14 @@ static void vir_verify_insn_check(vir_verify_state *v, uint32_t b, uint32_t i,
             (!vir_verify_type_is_value(f->insns[val].type) &&
              f->insns[val].type != VIR_TYPE_MULTI)) {
             vir_verify_fail(v, "T2", b, i, "%s: operand %c is not a value",
-                            oi->name, 'a' + k);
+                            oi->name, (int)('a' + k));
             return;
         }
         opty[k] = f->insns[val].type;
         if (!vir_verify_operand_type_is_ok(kd, opty[k], in->type)) {
             vir_verify_fail(v, "T2", b, i, "%s: operand %c has type %s",
-                            oi->name, 'a' + k, vir_verify_type_name(opty[k]));
+                            oi->name, (int)('a' + k),
+                            vir_verify_type_name(opty[k]));
             return;
         }
     }
@@ -513,33 +514,34 @@ static void vir_verify_insn_check(vir_verify_state *v, uint32_t b, uint32_t i,
     /* T3: flags */
     if (in->flags & ~oi->flags_mask) {
         vir_verify_fail(v, "T3", b, i, "%s: flag bits 0x%x are not allowed",
-                        oi->name, in->flags & ~oi->flags_mask);
+                        oi->name, (unsigned)(in->flags & ~oi->flags_mask));
         return;
     }
     if (op == VIR_OP_VICMP && (in->flags & 15) > 9) {
         vir_verify_fail(v, "T3", b, i,
                         "vicmp: condition code %u is not allowed",
-                        in->flags & 15);
+                        (unsigned)(in->flags & 15));
         return;
     }
     if (op == VIR_OP_VFCMP && (in->flags & 15) > 7) {
         vir_verify_fail(v, "T3", b, i,
                         "vfcmp: condition code %u is not allowed",
-                        in->flags & 15);
+                        (unsigned)(in->flags & 15));
         return;
     }
     if (op == VIR_OP_ICMP &&
         ((in->flags & 15) > 9 ||
          (opty[0] == VIR_TYPE_PTR && (in->flags & 15) >= 2 &&
           (in->flags & 15) <= 5))) {
-        vir_verify_fail(
-            v, "T3", b, i, "icmp: condition code %u is not allowed%s",
-            in->flags & 15, opty[0] == VIR_TYPE_PTR ? " on ptr" : "");
+        vir_verify_fail(v, "T3", b, i,
+                        "icmp: condition code %u is not allowed%s",
+                        (unsigned)(in->flags & 15),
+                        opty[0] == VIR_TYPE_PTR ? " on ptr" : "");
         return;
     }
     if (op == VIR_OP_FCMP && (in->flags & 15) > 7) {
         vir_verify_fail(v, "T3", b, i, "fcmp: condition code %u is not allowed",
-                        in->flags & 15);
+                        (unsigned)(in->flags & 15));
         return;
     }
     /* T4: widths */
