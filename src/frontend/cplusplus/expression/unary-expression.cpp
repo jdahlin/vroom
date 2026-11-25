@@ -710,6 +710,15 @@ analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
        function may be the meaning */
     {
         type_kind operand_kind = type_table[m.type.unqualified()].kind;
+        if (substituting && (operand_kind == type_kind::enumeration ||
+                             (operand_kind == type_kind::class_type &&
+                              !has_implicit_conversion_functions(
+                                  type_table[m.type.unqualified()].entity))))
+            return ill_formed(n,
+                              "the type of the operand shall be an arithmetic "
+                              "type other than cv bool, or a pointer to a "
+                              "completely-defined object type",
+                              subclause);
         if (operand_kind == type_kind::class_type ||
             operand_kind == type_kind::enumeration)
             return not_supported(n, "over.match.oper");

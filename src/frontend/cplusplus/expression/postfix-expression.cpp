@@ -1293,8 +1293,15 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                                 false, operand_syntax, operands, handled, m);
         if (r != analysis_result::well_formed || handled)
             return r;
-        /* [over.call.object]/2: no surrogate call functions (no conversion
-           functions are analysed) */
+        /* [over.call.object]/2: if the class has no viable operator() and no
+           conversion functions (no surrogate call functions), calling it is
+           ill-formed in a substitution context */
+        if (substituting && !has_implicit_conversion_functions(
+                                type_table[f.type.unqualified()].entity))
+            return ill_formed(n,
+                              "called object type is not a function or "
+                              "function pointer",
+                              "over.call.object");
         return not_supported(n, "over.call.object");
     }
     qualified_type function_type = f.type;
