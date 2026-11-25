@@ -1,0 +1,2 @@
+mangle-worklist-alias-sizeof-pack-and.cpp:17:28: error: C++ code generation does not handle an entity whose symbol is not mangled yet: function template specialization 'f<...>': the mangler does not handle the expression 'sizeof ... ( R )' (unary-expression) in a non-type template parameter's type
+mangle-worklist-alias-sizeof-pack-and.cpp:16:1: note: declared here

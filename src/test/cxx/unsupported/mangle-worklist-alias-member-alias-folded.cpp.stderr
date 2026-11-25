@@ -1,0 +1,2 @@
+mangle-worklist-alias-member-alias-folded.cpp:17:28: error: C++ code generation does not handle an entity whose symbol is not mangled yet: function template specialization 'f<...>': the mangler does not handle an alias template's specialization of dependent arguments and a non-dependent type in a value-dependent template argument (clang evaluates it) in a non-type template parameter's type
+mangle-worklist-alias-member-alias-folded.cpp:16:1: note: declared here

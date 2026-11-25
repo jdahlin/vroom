@@ -1,0 +1,2 @@
+mangle-worklist-decltype-void-cast-comma-braced.cpp:14:39: error: C++ code generation does not handle an entity whose symbol is not mangled yet: function template specialization 'dd::detail::E<...>::op<...>': the mangler does not handle the expression 'Result { }' (postfix-expression) in the return type
+mangle-worklist-decltype-void-cast-comma-braced.cpp:11:3: note: declared here

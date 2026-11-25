@@ -1,0 +1,2 @@
+mangle-worklist-alias-sizeof-pack-folded.cpp:3:1: error: the rules of [ifdef] are not implemented yet
+mangle-worklist-alias-sizeof-pack-folded.cpp:3:1: note: refused by vcc's frontend/cplusplus/declaration/declarator-meaning.cpp:N (declarator)
