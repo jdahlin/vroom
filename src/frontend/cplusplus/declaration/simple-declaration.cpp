@@ -2162,6 +2162,10 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r != analysis_result::well_formed)
         return r;
     entity_table[declared_entity].bound_unknown = false;
+    /* [stmt.ranged]/1: "= *begin" reads the variable begin, which is not
+       usable in constant expressions ([expr.const]) */
+    if (supplied && !s.constexpr_)
+        value.evaluation = constness::not_constant;
     /* [expr.const]/5.16 allows the modification of an object "whose
        lifetime began within the evaluation of E" (a temporary bound to a
        member of the object being initialized), which the analysis takes

@@ -993,6 +993,18 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                 entity_table[fp.entity].size &&
                 !base_step(fp.entity, tp.entity, ambiguous))
                 return ill_formed(at, rule, "dcl.init");
+            /* [conv.ptr]: a pointer to a fundamental type converts to
+               none to a class or enumeration, nor the other way (to void*
+               was found above) */
+            auto declared = [&](const struct type &t) {
+                return (t.kind == type_kind::class_type &&
+                        entity_table[t.entity].kind ==
+                            entity_kind::class_type) ||
+                       t.kind == type_kind::enumeration;
+            };
+            if ((fp.kind == type_kind::fundamental && declared(tp)) ||
+                (tp.kind == type_kind::fundamental && declared(fp)))
+                return ill_formed(at, rule, "dcl.init");
             /* a function pointer conversion: not analysed yet */
             if (fp.kind == type_kind::class_type ||
                 fp.kind == type_kind::function ||

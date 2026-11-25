@@ -1391,6 +1391,17 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
        each argument a type or X <expression> E */
     if (expression.is(syntax_kind::simple_template_id) &&
         expression.size() >= 3 && expression[0].is_identifier()) {
+        SyntaxRef id = expression;
+        for (uint32_t i = 0; i < written_count; i++) {
+            const auto &b = analysis.written_bindings[written_first + i];
+            if (!b.specialization || b.cast != id.index().index())
+                continue;
+            text("L_Z");
+            if (!encoding(b.specialization))
+                return false;
+            text("E");
+            return true;
+        }
         /* (a function template's name; an alias or class template's
            names a type, a functional cast: not mangled yet) */
         entity_index named = analysis.constraint_name(
@@ -1752,6 +1763,24 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         return false;
     }
 
+    /* S<A>{x, y}: tl <type> <braced-expression>* E */
+    if (expression.is(syntax_kind::postfix_expression) &&
+        expression.size() == 2 &&
+        expression[1].is(syntax_kind::braced_init_list)) {
+        SyntaxRef whole = expression;
+        for (uint32_t i = 0; i < written_count; i++) {
+            const auto &b = analysis.written_bindings[written_first + i];
+            if (b.identifier || b.cast != whole.index().index())
+                continue;
+            text("tl");
+            if (!type(b.type))
+                return false;
+            if (expression[1].size() > 2 && !expression_list(expression[1][1]))
+                return false;
+            text("E");
+            return true;
+        }
+    }
     if (expression.is(syntax_kind::postfix_expression) &&
         expression.size() >= 3) {
         auto base = expression[0];
@@ -1777,6 +1806,23 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         }
 
         bool dot = op.is(preprocessing_op_or_punc::DOT);
+        /* e.template f<A>: dt <expression> <source-name> <template-args> */
+        if (expression.size() == 4 &&
+            expression[2].is(standard_keyword::template_) &&
+            expression[3].is(syntax_kind::simple_template_id) &&
+            (dot || op.is(preprocessing_op_or_punc::ARROW))) {
+            auto member = expression[3];
+            if (!member[0].is_identifier())
+                return false;
+            if (dot)
+                text("dt");
+            else
+                text("pt");
+            bool dependent = false;
+            return dependent_expression(base) &&
+                   source_name(analysis.token_identifier(member[0].token())) &&
+                   written_template_args(member, dependent);
+        }
         if (expression.size() == 3 && expression[2].is_token() &&
             (dot || op.is(preprocessing_op_or_punc::ARROW))) {
             if (dot)
@@ -2079,6 +2125,10 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
         return false;
 
     const entity &prefix = analysis.entity_table[r.entity];
+    /* typename __remove_cvref(T)::name: the transformation's own <type>,
+       as clang writes it */
+    if (prefix.kind == entity_kind::type_transformation)
+        return type(t);
     if (prefix.kind != entity_kind::template_specialization &&
         prefix.kind != entity_kind::dependent_member)
         return false;
