@@ -6308,6 +6308,7 @@ class semantic_analysis
                                         uint32_t failure,
                                         bool argument_dependent);
     bool member_definition_wanted(const postponed_body &b);
+    int definition_parameter_count(SyntaxRef definition) const;
     token_index member_definition_name(const template_member_definition &o);
     uint32_t member_definition_lookup_id(const template_member_definition &o,
                                          token_index name);
