@@ -123,10 +123,14 @@ analysis_result semantic_analysis::decltype_type(SyntaxRef n,
         SyntaxElement inner = operand;
         while (inner.is_node() && inner.size() == 1)
             inner = inner[0];
+        /* ([temp.over.link]/5: in the template's own declaration it is
+           the expression's decltype all the same, a distinct type the
+           mangling spells as written, [abi:mangle.decltype]) */
         if (inner.is_node() && inner.is(syntax_kind::unary_expression) &&
             inner.size() > 1 &&
             (inner[0].is(standard_keyword::sizeof_) ||
-             inner[0].is(standard_keyword::alignof_))) {
+             inner[0].is(standard_keyword::alignof_)) &&
+            (instantiating || class_instantiating || substituting)) {
             type = qualified_type::make(
                 type_table.fundamental(fundamental_type::unsigned_long_int),
                 cv_none);
@@ -214,6 +218,24 @@ void semantic_analysis::collect_written_casts(
 {
     if (!x.is_node())
         return;
+    /* sizeof ( type-id ) and alignof ( type-id ): the type-id's type,
+       for the mangler (cast the type-id's node) */
+    if (x.is(syntax_kind::unary_expression) && x.size() == 4 &&
+        (x[0].is(standard_keyword::sizeof_) ||
+         x[0].is(standard_keyword::alignof_)) &&
+        x[2].is(syntax_kind::type_id)) {
+        size_t unsupported_before = unsupported.size();
+        qualified_type t;
+        analysis_result r = type_id(x[2], t);
+        unsupported.resize(unsupported_before);
+        if (r == analysis_result::well_formed) {
+            written_binding b;
+            SyntaxRef ar = x[2];
+            b.cast = ar.index().index();
+            b.type = t;
+            found.append(b);
+        }
+    }
     if (x.is(syntax_kind::cast_expression) && x.size() == 4 &&
         x[1].is(syntax_kind::type_id)) {
         size_t unsupported_before = unsupported.size();

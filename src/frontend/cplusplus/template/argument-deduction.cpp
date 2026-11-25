@@ -103,8 +103,13 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
            comparing two declarations, the same entity for the same
            tokens ([temp.over.link]/5).  Matching a partial
            specialization, the deduced arguments substituted into it are
-           compared with the use's ([temp.class.spec.match]/2) */
-        return !exact || matching_partial || p == a;
+           compared with the use's ([temp.class.spec.match]/2); matching a
+           declaration to a function template ([temp.deduct.decl]), a type
+           with no template parameter in it is checked against the
+           specialization's by the caller, as for a dependent member */
+        return !exact || matching_partial ||
+               (matching_declaration && !depends_on_template_parameter(a)) ||
+               p == a;
     }
     if (pr.kind == type_kind::dependent) {
         /* [temp.deduct.type]/8's TT<T>: a class template's specialization,

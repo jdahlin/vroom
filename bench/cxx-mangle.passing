@@ -2,6 +2,7 @@
 # (rewritten by --bless; one that stops passing is an error)
 2004-03-09-UnmangledBuiltinMethods.cpp
 mangle-98.cpp
+mangle-alignof.cpp
 mangle-extern-local.cpp
 mangle-extreme.cpp
 mangle-lambdas-in-dmi-local-class.cpp

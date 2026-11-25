@@ -382,17 +382,6 @@ uint32_t semantic_analysis::expression_node_make(uint32_t tag, uint64_t word,
    node by its kind and children.  Equal structures are one index [impl.clang] */
 uint32_t semantic_analysis::expression_structure(SyntaxElement e)
 {
-    enum : uint32_t {
-        tag_none = 1,
-        tag_token,
-        tag_parameter,
-        tag_entity,
-        tag_identifier,
-        tag_floating,
-        tag_node,
-        tag_children,
-        tag_literal = 16,
-    };
     while (e.is_node() && SyntaxRef(e).size() == 1)
         e = SyntaxRef(e)[0];
     if (!e)

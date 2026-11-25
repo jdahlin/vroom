@@ -177,6 +177,7 @@ class itanium_mangler
                                      SyntaxElement id);
     bool dependent_expression(SyntaxElement c);
     bool dependent_fold(SyntaxElement fold);
+    bool structure_expression(uint32_t s);
     bool named_variable(entity_index t, SyntaxElement name);
     /* the dependent_written type being mangled: its bindings
        (sema.h: written_bindings), and the element of the packs among them
@@ -184,6 +185,7 @@ class itanium_mangler
     uint32_t written_first = 0, written_count = 0;
     uint32_t pack_element = UINT32_MAX;
     const semantic_analysis::written_binding *bound(SyntaxElement name) const;
+    bool type_operand(SyntaxElement a);
     const char *binary_operator_code(SyntaxElement op) const;
     bool punctuator(SyntaxElement c, preprocessing_op_or_punc op) const
     {
@@ -884,6 +886,40 @@ itanium_mangler::bound(SyntaxElement name) const
     return nullptr;
 }
 
+/* the <type> of a type-id written in a dependent expression: a name an
+   alias template bound, one of the template's type parameters, or another
+   type-id the analysis recorded with its node (collect_written_casts) */
+bool itanium_mangler::type_operand(SyntaxElement a)
+{
+    SyntaxElement inner = a;
+    while (inner.is_node() && inner.size() == 1 &&
+           inner.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
+        inner = inner[0];
+    if (inner.is_token()) {
+        if (const auto *b = bound(inner))
+            return type(b->type);
+        if (!inner.is_identifier())
+            return false;
+        entity_index pe =
+            analysis.constraint_parameter(encoding_template, inner.token());
+        if (!pe ||
+            analysis.entity_table[pe].kind != entity_kind::typedef_name ||
+            record(analysis.entity_table[pe].type).kind !=
+                type_kind::template_parameter)
+            return false;
+        return type(analysis.entity_table[pe].type);
+    }
+    if (!a.is_node())
+        return false;
+    SyntaxRef ar = a;
+    for (uint32_t i = 0; i < written_count; i++) {
+        const auto &w = analysis.written_bindings[written_first + i];
+        if (!w.identifier && w.cast == ar.index().index())
+            return type(w.type);
+    }
+    return false;
+}
+
 /* [abi:expressions] of a unary fold over a pack bound by an alias
    template: expanded, as clang does, for the elements: ( pattern op ... )
    is op e0 (op e1 (... en)), ( ... op pattern ) is ((e0 op e1) op ...) */
@@ -999,6 +1035,90 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
         template_param(analysis.entity_table[pe].value);
         return true;
     }
+    /* [abi:expressions] sizeof and alignof of a type or an expression:
+
+           <expression> ::= st <type>
+                        ::= sz <expression>
+                        ::= at <type>
+                        ::= az <expression>
+
+       [impl.clang] __alignof__ a vendor extended expression, u11__alignof__
+       and its operand (a type, or X <expression> E), E */
+    if (expression.is(syntax_kind::unary_expression) &&
+        (expression.size() == 2 || expression.size() == 4) &&
+        expression[0].is_token() &&
+        (expression[0].is(standard_keyword::sizeof_) ||
+         expression[0].is(standard_keyword::alignof_)) &&
+        !expression[1].is(preprocessing_op_or_punc::ELLIPSIS)) {
+        bool size = expression[0].is(standard_keyword::sizeof_);
+        owned_buffer spelling;
+        analysis.token_spelling(expression[0].token(), spelling.get());
+        bool vendor = !size && spelling.size() == 11 &&
+                      !memcmp(spelling.data(), "__alignof__", 11);
+        SyntaxElement operand = expression[1];
+        bool of_type = false;
+        if (expression.size() == 4) {
+            if (!punctuator(expression[1],
+                            preprocessing_op_or_punc::LEFT_PARENTHESIS))
+                return false;
+            operand = expression[2];
+            of_type = operand.is(syntax_kind::type_id);
+        }
+        if (vendor) {
+            text("u11__alignof__");
+            if (of_type) {
+                if (!type_operand(operand))
+                    return false;
+            } else {
+                text("X");
+                if (!dependent_expression(operand))
+                    return false;
+                text("E");
+            }
+            text("E");
+            return true;
+        }
+        if (of_type) {
+            if (size)
+                text("st");
+            else
+                text("at");
+            return type_operand(operand);
+        }
+        if (size)
+            text("sz");
+        else
+            text("az");
+        return dependent_expression(operand);
+    }
+    /* [abi:expressions] T(e), T(e, ...), T a type: a functional cast,
+
+           <expression> ::= cv <type> <expression>
+                        ::= cv <type> _ <expression>* E
+     */
+    if (expression.is(syntax_kind::postfix_expression) &&
+        expression.size() == 4 && expression[0].is_token() &&
+        expression[0].is_identifier() &&
+        expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        expression[3].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
+        size_t before = out->n;
+        text("cv");
+        if (type_operand(expression[0])) {
+            owned_array<SyntaxElement> arguments;
+            for (auto argument :
+                 expression[2].items(syntax_kind::initializer_list))
+                arguments.append(argument);
+            if (arguments.size() != 1)
+                text("_");
+            for (SyntaxElement argument : arguments)
+                if (!dependent_expression(argument))
+                    return false;
+            if (arguments.size() != 1)
+                text("E");
+            return true;
+        }
+        out->n = before;
+    }
     /* [abi:expressions] <unary operator-name> <expression> */
     if (expression.is(syntax_kind::unary_expression) &&
         expression.size() == 2) {
@@ -1019,18 +1139,20 @@ bool itanium_mangler::dependent_expression(SyntaxElement expression)
                 return dependent_expression(expression[1]);
             }
     }
-    /* T(), T an alias template's parameter: cv <type> _ E */
+    /* T(), T an alias template's parameter or the template's own type
+       parameter: cv <type> _ E */
     if (expression.is(syntax_kind::postfix_expression) &&
-        expression.size() == 3 &&
+        expression.size() == 3 && expression[0].is_token() &&
+        expression[0].is_identifier() &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
-        if (const auto *b = bound(expression[0])) {
-            text("cv");
-            if (!type(b->type))
-                return false;
+        size_t before = out->n;
+        text("cv");
+        if (type_operand(expression[0])) {
             text("_E");
             return true;
         }
+        out->n = before;
     }
     if (expression.is(syntax_kind::expression) && expression.size() == 3 &&
         punctuator(expression[1], preprocessing_op_or_punc::COMMA)) {
@@ -3353,11 +3475,150 @@ bool itanium_mangler::function_type(qualified_type t)
  * Omit an unknown bound. A dependent bound here is a template parameter.
  * Array CV-qualifiers go on the element type ([basic.type.qualifier]/3).
  */
+/*
+ * [abi:expressions] of a value-dependent expression in a template's own
+ * declaration, from its structure (expression_structure: an array bound
+ * N + 1), as clang mangles it: parentheses dropped,
+
+ *     <expression> ::= <unary operator-name> <expression>
+ *                  ::= <binary operator-name> <expression> <expression>
+ *                  ::= <ternary operator-name> <expression> <expression> <expression>
+ *                  ::= <template-param>
+ *                  ::= <expr-primary>
+ *     <expr-primary> ::= L <type> <value number> E
+ *
+ * a non-type template parameter its <template-param>, an integer,
+ * character or boolean literal its type and value.  Anything else: not
+ * mangled yet.
+ */
+bool itanium_mangler::structure_expression(uint32_t s)
+{
+    using sa = semantic_analysis;
+    uint32_t tag = 0, a = 0, b = 0;
+    uint64_t word = 0;
+    analysis.expression_structure_parts(s, tag, word, a, b);
+    if (tag == sa::tag_parameter) {
+        template_param(word);
+        return true;
+    }
+    if (tag == sa::tag_literal + (uint32_t)literal_kind::integer_literal ||
+        tag == sa::tag_literal + (uint32_t)literal_kind::character_literal ||
+        tag == sa::tag_literal + (uint32_t)literal_kind::boolean_literal) {
+        text("L");
+        if (!builtin_type(static_cast<fundamental_type>(a)))
+            return false;
+        number(word);
+        text("E");
+        return true;
+    }
+    if (tag != sa::tag_node)
+        return false;
+    /* the children, and each one that is a token its op_or_punc */
+    uint32_t children[5] = {};
+    preprocessing_op_or_punc ops[5] = {};
+    uint32_t count = 0;
+    for (uint32_t c = a; c; count++) {
+        uint32_t ct = 0, ca = 0, cb = 0;
+        uint64_t cw = 0;
+        analysis.expression_structure_parts(c, ct, cw, ca, cb);
+        if (count == 5)
+            return false;
+        children[count] = ca;
+        ops[count] = preprocessing_op_or_punc::count;
+        uint32_t t = 0, ta = 0, tb = 0;
+        uint64_t tw = 0;
+        analysis.expression_structure_parts(ca, t, tw, ta, tb);
+        if (t == sa::tag_token && static_cast<token_kind>(tw >> 48) ==
+                                      token_kind::operator_or_punctuator)
+            ops[count] = preprocessing_op_or_punc_primary(
+                static_cast<preprocessing_op_or_punc>(tw & 0xffffff));
+        c = cb;
+    }
+    syntax_kind kind = static_cast<syntax_kind>(word);
+    static const struct {
+        preprocessing_op_or_punc op;
+        const char *code;
+    } binary[] = {
+        {preprocessing_op_or_punc::PLUS, "pl"},
+        {preprocessing_op_or_punc::MINUS, "mi"},
+        {preprocessing_op_or_punc::STAR, "ml"},
+        {preprocessing_op_or_punc::SLASH, "dv"},
+        {preprocessing_op_or_punc::PERCENT, "rm"},
+        {preprocessing_op_or_punc::LESS_LESS, "ls"},
+        {preprocessing_op_or_punc::GREATER_GREATER, "rs"},
+        {preprocessing_op_or_punc::AMPERSAND, "an"},
+        {preprocessing_op_or_punc::BAR, "or"},
+        {preprocessing_op_or_punc::CARET, "eo"},
+        {preprocessing_op_or_punc::AMPERSAND_AMPERSAND, "aa"},
+        {preprocessing_op_or_punc::BAR_BAR, "oo"},
+        {preprocessing_op_or_punc::EQUAL_EQUAL, "eq"},
+        {preprocessing_op_or_punc::EXCLAMATION_EQUAL, "ne"},
+        {preprocessing_op_or_punc::LESS, "lt"},
+        {preprocessing_op_or_punc::GREATER, "gt"},
+        {preprocessing_op_or_punc::LESS_EQUAL, "le"},
+        {preprocessing_op_or_punc::GREATER_EQUAL, "ge"},
+    };
+    static const struct {
+        preprocessing_op_or_punc op;
+        const char *code;
+    } unary[] = {
+        {preprocessing_op_or_punc::MINUS, "ng"},
+        {preprocessing_op_or_punc::PLUS, "ps"},
+        {preprocessing_op_or_punc::EXCLAMATION, "nt"},
+        {preprocessing_op_or_punc::TILDE, "co"},
+    };
+    if (kind == syntax_kind::primary_expression && count == 3 &&
+        ops[0] == preprocessing_op_or_punc::LEFT_PARENTHESIS &&
+        ops[2] == preprocessing_op_or_punc::RIGHT_PARENTHESIS)
+        return structure_expression(children[1]);
+    if (kind == syntax_kind::conditional_expression && count == 5 &&
+        ops[1] == preprocessing_op_or_punc::QUESTION &&
+        ops[3] == preprocessing_op_or_punc::COLON) {
+        text("qu");
+        return structure_expression(children[0]) &&
+               structure_expression(children[2]) &&
+               structure_expression(children[4]);
+    }
+    if (kind == syntax_kind::unary_expression && count == 2)
+        for (const auto &u : unary)
+            if (ops[0] == u.op) {
+                text(u.code);
+                return structure_expression(children[1]);
+            }
+    bool binary_kind = kind == syntax_kind::additive_expression ||
+                       kind == syntax_kind::multiplicative_expression ||
+                       kind == syntax_kind::shift_expression ||
+                       kind == syntax_kind::relational_expression ||
+                       kind == syntax_kind::equality_expression ||
+                       kind == syntax_kind::and_expression ||
+                       kind == syntax_kind::exclusive_or_expression ||
+                       kind == syntax_kind::inclusive_or_expression ||
+                       kind == syntax_kind::logical_and_expression ||
+                       kind == syntax_kind::logical_or_expression;
+    if (binary_kind && count == 3)
+        for (const auto &o : binary)
+            if (ops[1] == o.op) {
+                text(o.code);
+                return structure_expression(children[0]) &&
+                       structure_expression(children[2]);
+            }
+    return false;
+}
+
 bool itanium_mangler::array_type(qualified_type t)
 {
     const struct type &array = record(t);
     text("A");
-    if (array.entity)
+    /* [abi:mangle.array-type]: an instantiation-dependent bound,
+
+           <array-type> ::= A <instantiation-dependent array bound expression> _ <element type>
+
+       a non-type template parameter's name, or an expression of one (its
+       structure) */
+    if (array.entity && array.bound) {
+        if (!structure_expression(static_cast<uint32_t>(array.bound)))
+            return false;
+    } else if (array.entity)
         template_param(analysis.entity_table[array.entity].value);
     else if (array.bound_known)
         number(array.bound);

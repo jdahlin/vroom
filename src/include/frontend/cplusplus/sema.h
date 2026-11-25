@@ -2908,6 +2908,32 @@ class semantic_analysis
         uint32_t cast = 0;
     };
     owned_array<written_binding> written_bindings;
+    /* the tags of an expression's structure (expression_structure): a
+       node (word its syntax_kind, a its first tag_children: a the child,
+       b the next), a token (word its kind << 48, keyword << 24 and
+       op_or_punc), a non-type template parameter (word its position), an
+       entity or identifier (a), a literal (tag_literal plus its
+       literal_kind: word its value, a its fundamental_type) */
+    enum structure_tag : uint32_t {
+        tag_none = 1,
+        tag_token,
+        tag_parameter,
+        tag_entity,
+        tag_identifier,
+        tag_floating,
+        tag_node,
+        tag_children,
+        tag_literal = 16,
+    };
+    /* the parts of structure s: its tag, word, a and b */
+    void expression_structure_parts(uint32_t s, uint32_t &tag, uint64_t &word,
+                                    uint32_t &a, uint32_t &b) const
+    {
+        tag = expression_nodes[s].tag;
+        word = expression_nodes[s].word;
+        a = expression_nodes[s].a;
+        b = expression_nodes[s].b;
+    }
 
   private:
     /* (every_name: each name of a type, not only those of a dependent
