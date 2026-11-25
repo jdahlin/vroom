@@ -548,6 +548,11 @@ struct entity {
        template-declaration or explicit-specialization declared it: what
        it denotes needs [temp]'s rules */
     bool held_by_template = false;
+    /* [expr.const]/4: a variable usable in constant expressions whose
+       128-bit integer value `value` cannot hold: usable stays unknown for
+       every reader of value, and the evaluator reads the value from
+       semantic_analysis::wide_variables */
+    bool wide_value = false;
     /* [temp.dep]: in an instantiation, a name whose meaning came from the
        template arguments: a template-parameter's name bound to its
        argument, a local variable, parameter or this declared with one; a
@@ -1821,6 +1826,13 @@ class semantic_analysis
 
     types type_table;
     entities entity_table;
+    /* [expr.const]/4: the values of the variables marked wide_value */
+    struct wide_variable {
+        entity_index entity = 0;
+        unsigned __int128 value = 0;
+    };
+    owned_array<wide_variable> wide_variables;
+    unsigned __int128 wide_variable_value(entity_index e) const;
     owned_array<analysed_declaration> declarations;
     owned_array<unsupported_construct> unsupported;
     /* the names held (note_held) by the declarations being analysed */
@@ -5343,6 +5355,9 @@ class semantic_analysis
         entity_index name = 0, function = 0;
     };
     owned_array<template_name_function> template_name_functions;
+    /* an initializer of a 128-bit integer type the evaluator finds
+       constant with a value 64 bits do not hold: e keeps it (wide_value) */
+    bool keep_wide_value(entity_index e, uint32_t node);
     /* per template-parameter: a type parameter's typedef-name of its
        template_parameter type, or a non-type parameter's entity (kind
        none, so that the template's own declarator cannot use its value;

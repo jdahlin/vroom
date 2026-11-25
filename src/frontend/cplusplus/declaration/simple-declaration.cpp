@@ -2147,6 +2147,10 @@ analysis_result semantic_analysis::declare_with_initializer(
             } else if (!entity_table[declared_entity].automatic) {
                 return not_supported(declaration, "basic.start.static");
             }
+        } else if (s.constexpr_ &&
+                   keep_wide_value(declared_entity, value.node)) {
+            /* (a 128-bit value: the evaluator's, the initializer as
+               written) */
         } else {
             constant_value v;
             bool constant = false;

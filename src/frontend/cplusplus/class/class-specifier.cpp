@@ -2759,6 +2759,7 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         (!integral_or_enumeration && !constexpr_floating && !constexpr_class))
         return not_supported(declarator, "class.static.data");
     analysis_result r = analysis_result::well_formed;
+    bool wide = false;
     if (!deduced)
         VTRY_SET(r, initializer(init, type, value));
     /* [expr.const]/5: an initializer that calls a function (a constexpr
@@ -2772,6 +2773,10 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         value.evaluation = c;
         if (data)
             value.node = data;
+    } else if (value.evaluation == constness::unknown && value.node &&
+               keep_wide_value(e, value.node)) {
+        /* (a 128-bit value: the evaluator's, the initializer as written) */
+        wide = true;
     } else if (value.evaluation == constness::unknown && value.node) {
         constant_value v;
         bool constant = false;
@@ -2793,11 +2798,13 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
                           "member's in-class initializer shall be a "
                           "constant expression",
                           "class.static.data");
-    if (value.evaluation != constness::constant)
+    if (value.evaluation != constness::constant && !wide)
         return not_supported(declarator, "expr.const");
     entity &x = entity_table[e];
-    x.usable = constness::constant;
-    x.value = value.value;
+    if (!wide) {
+        x.usable = constness::constant;
+        x.value = value.value;
+    }
     x.definition = value.node;
     if (s.constexpr_ || s.inline_) {
         /* [dcl.inline]/1 (C++17): "A function or static data member

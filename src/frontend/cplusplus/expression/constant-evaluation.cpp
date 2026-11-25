@@ -681,6 +681,34 @@ constness semantic_analysis::evaluate_value(uint32_t node, constant_value &v)
     return c;
 }
 
+unsigned __int128 semantic_analysis::wide_variable_value(entity_index e) const
+{
+    for (const wide_variable &w : wide_variables)
+        if (w.entity == e)
+            return w.value;
+    return 0;
+}
+
+bool semantic_analysis::keep_wide_value(entity_index e, uint32_t node)
+{
+    if (!node || !wide_integer(evaluated_type(entity_table[e].type)))
+        return false;
+    constant_evaluation state;
+    reset_evaluation_trace();
+    constant_value v;
+    if (evaluate_node(state, node, v) != constness::constant ||
+        state.heap_live || v.kind != constant_value_kind::integer ||
+        value_kept_exactly(entity_table[e].type, v))
+        return false;
+    wide_variable w;
+    w.entity = e;
+    w.value = v.integer;
+    wide_variables.append(w);
+    entity_table[e].wide_value = true;
+    entity_table[e].usable = constness::unknown;
+    return true;
+}
+
 constness semantic_analysis::evaluate_reference_binding(uint32_t node)
 {
     if (semantics[node].kind != semantic_kind::bind_reference)
@@ -2166,6 +2194,12 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
            rules are not these) */
         if (e.kind != entity_kind::variable || !e.name)
             return CONST_UNKNOWN;
+        if (e.wide_value) {
+            v = constant_value();
+            v.kind = constant_value_kind::integer;
+            v.integer = wide_variable_value(x.a);
+            return constness::constant;
+        }
         if (e.usable == constness::unknown)
             return CONST_UNKNOWN_HELD(e);
         if (e.usable == constness::not_constant) {

@@ -837,6 +837,7 @@ class c_lowering
     bool variable_definition(entity_index e);
     bool constant_initializer(uint32_t n) const;
     bool wide_constant_arithmetic(uint32_t n) const;
+    uint32_t wide_integer(qualified_type t, unsigned __int128 v);
     bool address_constant(uint32_t n) const;
     bool nonnull_address(uint32_t n) const;
     bool null_pointer(uint32_t n) const;
