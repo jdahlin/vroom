@@ -1459,6 +1459,13 @@ analysis_result semantic_analysis::member_callee(
         name = id.token();
     } else if (SyntaxElement t = id.simple_template_id().template_name()) {
         name = t.token();
+    } else if (auto function = id.operator_function_id()) {
+        /* [over.call]: operator@(args), an operator function's name
+           called as a function (json's operator[](T* key) calling
+           operator[](key_type(key))) */
+        declarator_meaning function_name;
+        VTRY(r, operator_function_id(function, function_name));
+        name = function_name.id;
     } else {
         return analysis_result::well_formed;
     }
