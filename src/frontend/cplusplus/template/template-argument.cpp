@@ -783,7 +783,9 @@ analysis_result semantic_analysis::substituted_parameter_type(
     SyntaxRef node = template_parameter_nodes[ft.first_parameter + position];
     template_parameter_parts form;
     if (!template_parameter_form(node, form))
-        return not_supported(node, "temp.param");
+        return not_supported_because(
+            node, "temp.param",
+            "a non-type template parameter of an unhandled form");
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[ft.entity].enclosing);
     for (uint32_t k = 0; k < position; k++)
@@ -835,11 +837,15 @@ analysis_result semantic_analysis::template_argument_for(
             return analysis_result::well_formed;
         }
         if (!written.is(syntax_kind::type_id))
-            return not_supported(at, "temp.arg");
+            return not_supported_because(
+                at, "temp.arg",
+                "a type template argument that is not a type-id");
         return type_id(written, out.type);
     }
     if (written.is(syntax_kind::type_id))
-        return not_supported(at, "temp.arg");
+        return not_supported_because(
+            at, "temp.arg",
+            "a type-id as the argument of a non-type template parameter");
     qualified_type to = entity_table[p].type;
     bool placeholder_to =
         type_table[to.unqualified()].kind == type_kind::placeholder && !to.cv();
@@ -851,19 +857,25 @@ analysis_result semantic_analysis::template_argument_for(
     if (typed_by != UINT32_MAX) {
         if (!before || typed_by >= position ||
             before[typed_by].kind != template_argument::kind_t::type)
-            return not_supported(at, "temp.arg.nontype");
+            return not_supported_because(
+                at, "temp.arg.nontype",
+                "a parameter typed by a type parameter with no argument yet");
         to = qualified_type::make(before[typed_by].type.unqualified(), cv_none);
         /* (a type that is itself a template parameter, in a partial
            specialization's arguments: a name of the same type or a
            value-dependent expression below, else refused there) */
         if (!depends_on_template_parameter(to) &&
             !structural_parameter_type(to))
-            return not_supported(at, "temp.arg.nontype");
+            return not_supported_because(
+                at, "temp.arg.nontype",
+                "a template parameter of a non-structural type argument");
     } else if (!placeholder_to && depends_on_template_parameter(to)) {
         /* another dependent type: the parameter's type with the arguments
            before it, which may fail to be one ([temp.deduct]/8) */
         if (!before)
-            return not_supported(at, "temp.arg.nontype");
+            return not_supported_because(at, "temp.arg.nontype",
+                                         "a dependent parameter type with no "
+                                         "earlier arguments to substitute");
         VTRY(r,
              substituted_parameter_type(template_index, position, before, to));
         /* still dependent (template <class C, typename C::type = 0> with C
@@ -878,7 +890,9 @@ analysis_result semantic_analysis::template_argument_for(
             return analysis_result::well_formed;
         }
         if (!structural_parameter_type(to))
-            return not_supported(at, "temp.arg.nontype");
+            return not_supported_because(
+                at, "temp.arg.nontype",
+                "a substituted parameter type that is not structural");
     }
     /* in a template's own declaration, a non-type template-parameter's
        name: a value dependent argument ([temp.dep.constexpr]/2), of a
@@ -915,7 +929,9 @@ analysis_result semantic_analysis::template_argument_for(
                 (is_integral(to) ||
                  type_table[to.unqualified()].kind == type_kind::enumeration);
             if (!deferred && !(entity_table[named].type == to))
-                return not_supported(at, "temp.arg.nontype");
+                return not_supported_because(
+                    at, "temp.arg.nontype",
+                    "a non-type parameter used as an argument of another type");
             out.kind = template_argument::kind_t::value;
             out.type = to;
             out.template_entity = named;
@@ -958,7 +974,9 @@ analysis_result semantic_analysis::template_argument_for(
         else
             deduced = qualified_type::make(deduced.unqualified(), cv_none);
         if (!structural_parameter_type(deduced))
-            return not_supported(at, "temp.arg.nontype");
+            return not_supported_because(
+                at, "temp.arg.nontype",
+                "a placeholder parameter deduced to a non-structural type");
         to = deduced;
     }
     /* [temp.dep.constexpr]/2: another expression naming a template
@@ -1005,7 +1023,10 @@ analysis_result semantic_analysis::template_argument_for(
             continue;
         if (!is_integral(to) &&
             type_table[to.unqualified()].kind != type_kind::enumeration)
-            return not_supported(at, "temp.dep.constexpr");
+            return not_supported_because(
+                at, "temp.dep.constexpr",
+                "a dependent argument for a non-integral, non-enumeration "
+                "parameter");
         out.kind = template_argument::kind_t::value;
         out.type = to;
         out.template_entity = dependent_value_entity(written);
@@ -1023,7 +1044,9 @@ analysis_result semantic_analysis::template_argument_for(
         if (!written.is_token() ||
             this->syntax_parser.keyword_of(tokens[written.token()]) !=
                 standard_keyword::nullptr_)
-            return not_supported(at, "temp.arg.nontype");
+            return not_supported_because(
+                at, "temp.arg.nontype",
+                "a std::nullptr_t argument other than nullptr");
         out.kind = template_argument::kind_t::value;
         out.type = to;
         return analysis_result::well_formed;
@@ -1039,11 +1062,15 @@ analysis_result semantic_analysis::template_argument_for(
         /* [expr.const]/10's converted constant expression of an
            enumeration type: one of that type (no conversion) */
         if (m.type.unqualified() != to.unqualified())
-            return not_supported(at, "temp.arg.nontype");
+            return not_supported_because(
+                at, "temp.arg.nontype",
+                "an enumeration parameter's argument of another type");
         bool constant = false;
         VTRY_SET(r, constant_expression(at, m, constant));
         if (!constant)
-            return not_supported(at, "temp.arg.nontype");
+            return not_supported_because(
+                at, "temp.arg.nontype",
+                "an enumeration argument that is not a constant expression");
         out.kind = template_argument::kind_t::value;
         out.type = to;
         out.value = m.value;
@@ -1157,12 +1184,16 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         address_of = true;
     }
     if (reference && address_of)
-        return not_supported(at, "temp.arg.nontype");
+        return not_supported_because(
+            at, "temp.arg.nontype",
+            "the address-of operator for a reference parameter's argument");
     expression_meaning m;
     VTRY(result, expression(operand, m));
     entity_index e = m.entity;
     if (!e)
-        return not_supported(at, "temp.arg.nontype");
+        return not_supported_because(
+            at, "temp.arg.nontype",
+            "an address argument that does not name an entity");
     const entity x = entity_table[e];
     if ((x.kind != entity_kind::variable && x.kind != entity_kind::function) ||
         x.instantiation || x.next_overload || !is_namespace(x.enclosing) ||
@@ -1170,7 +1201,9 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
         /* (an object of thread storage duration has no address that is
            the same in each thread: [temp.arg.nontype]/2's constant
            expression is clang's error) */
-        return not_supported(at, "temp.arg.nontype");
+        return not_supported_because(at, "temp.arg.nontype",
+                                     "an address argument not a plain "
+                                     "namespace-scope object or function");
     const struct type &xr = type_table[x.type.unqualified()];
     bool same = false;
     if (reference || address_of)
@@ -1181,7 +1214,9 @@ analysis_result semantic_analysis::address_argument(SyntaxRef at,
     else if (xr.kind == type_kind::function)
         same = r.operand == x.type;
     if (!same)
-        return not_supported(at, "temp.arg.nontype");
+        return not_supported_because(
+            at, "temp.arg.nontype",
+            "an address argument whose type does not match the parameter");
     out.value = e;
     return analysis_result::well_formed;
 }
@@ -1313,34 +1348,46 @@ analysis_result semantic_analysis::template_template_argument(
     SyntaxRef qualifier = 0;
     if (name.is(syntax_kind::type_id)) {
         if (name.size() != 1 || !name[0].is(syntax_kind::type_specifier_seq))
-            return not_supported(at, "temp.arg.template");
+            return not_supported_because(
+                at, "temp.arg.template",
+                "a template template argument that is not a plain type name");
         name = name[0];
         if (name.size() != 1)
-            return not_supported(at, "temp.arg.template");
+            return not_supported_because(
+                at, "temp.arg.template",
+                "a template template argument with several type specifiers");
         name = name[0];
         if (name.is(syntax_kind::simple_type_specifier)) {
             auto c = name;
             if (name.size() != 2 ||
                 !c[0].is(syntax_kind::nested_name_specifier))
-                return not_supported(at, "temp.arg.template");
+                return not_supported_because(
+                    at, "temp.arg.template",
+                    "a template template argument with this type specifier");
             qualifier = c[0].index();
             name = c[1];
         }
     } else if (name.is(syntax_kind::qualified_id)) {
         auto c = name;
         if (name.size() != 2 || !c[0].is(syntax_kind::nested_name_specifier))
-            return not_supported(at, "temp.arg.template");
+            return not_supported_because(
+                at, "temp.arg.template",
+                "a template template argument with an unhandled qualified-id");
         qualifier = c[0].index();
         name = c[1];
     }
     if (!name.is_token() || tokens[name.token()].kind != token_kind::identifier)
-        return not_supported(at, "temp.arg.template");
+        return not_supported_because(
+            at, "temp.arg.template",
+            "a template template argument that does not end in an identifier");
     lookup_result x;
     if (qualifier) {
         nominated_scope scope;
         VTRY(r, nested_name_specifier(qualifier, scope));
         if (scope.entity && !is_namespace(scope.entity))
-            return not_supported(at, "temp.arg.template");
+            return not_supported_because(
+                at, "temp.arg.template",
+                "a template template argument qualified by a non-namespace");
         x = lookup_qualified(scope.entity, tokens.identifier(name.token()),
                              lookup_filter::any);
     } else {
@@ -1356,12 +1403,16 @@ analysis_result semantic_analysis::template_template_argument(
     if (!a)
         a = alias_template_of(named);
     if (!a || function_templates[a - 1].primary)
-        return not_supported(at, "temp.arg.template");
+        return not_supported_because(
+            at, "temp.arg.template",
+            "a template argument naming no primary class or alias template");
     const function_template given = function_templates[a - 1];
     const function_template wanted =
         function_templates[entity_table[parameter].instantiation - 1];
     if (!template_parameters_match(wanted, given))
-        return not_supported(at, "temp.arg.template");
+        return not_supported_because(
+            at, "temp.arg.template",
+            "a template template argument whose parameters do not match");
     out.kind = template_argument::kind_t::template_name;
     if (given.is_parameter) {
         out.template_entity = given.entity;

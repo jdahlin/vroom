@@ -67,7 +67,8 @@ analysis_result semantic_analysis::jump_statement(JumpStatement n,
                                                   uint32_t &built)
 {
     if (!n.size() || !n[0].is_token())
-        return not_supported(n, "stmt.jump");
+        return not_supported_because(n, "stmt.jump",
+                                     "a jump statement with no keyword");
     token_index at = n[0].token();
     switch (syntax_parser.keyword_of(tokens[at])) {
     case standard_keyword::break_:
@@ -93,7 +94,8 @@ analysis_result semantic_analysis::jump_statement(JumpStatement n,
     case standard_keyword::goto_: {
         if (n.size() != 3 || !n[1].is_identifier())
             /* GNU's computed goto */
-            return not_supported(n, "stmt.goto");
+            return not_supported_because(n, "stmt.goto",
+                                         "a goto that is not to an identifier");
         goto_record g;
         g.name = tokens.identifier(n[1].token());
         g.point.scope = current_scope;
@@ -111,7 +113,8 @@ analysis_result semantic_analysis::jump_statement(JumpStatement n,
         return r;
     }
     default:
-        return not_supported(n, "stmt.jump");
+        return not_supported_because(n, "stmt.jump",
+                                     "a jump keyword with no rules");
     }
 }
 
@@ -153,7 +156,8 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
                               n[0].token(), nullptr);
     }
     if (n.size() != 3)
-        return not_supported(n, "stmt.return");
+        return not_supported_because(n, "stmt.return",
+                                     "a return statement of unexpected shape");
     SyntaxElement operand = n[1];
     initialized_value result;
     if (operand.is(syntax_kind::braced_init_list)) {
@@ -183,7 +187,9 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
            xvalue in C++23 (P2266R3), so decltype((x)) is T&&; an
            unparenthesized name yields its declared type ([dcl.type.decltype]
            /1.3) whatever its category */
-        return not_supported(n, "class.copy.elision");
+        return not_supported_because(
+            n, "class.copy.elision",
+            "decltype(auto) returning a parenthesized movable entity");
     if (function_state.deducing) {
         analysis_result r = expression(operand, m);
         if (r == analysis_result::well_formed)
@@ -202,7 +208,9 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
         (instantiating || entity_table[function_state.function].instantiation ||
          depends_on_template_parameter(returns) ||
          depends_on_template_parameter(entity_table[movable].type)))
-        return not_supported(n, "class.copy.elision");
+        return not_supported_because(
+            n, "class.copy.elision",
+            "an implicit move into a dependent or instantiated reference");
     /* [over.over]/1: "the return value of a function" */
     analysis_result r = analysis_result::well_formed;
     if (!function_state.deducing)
@@ -229,7 +237,9 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
            an rvalue reference to the object's type, C++20 does not: not
            analysed */
         if (m.type.unqualified() != returns.unqualified())
-            return not_supported(n, "class.copy.elision");
+            return not_supported_because(
+                n, "class.copy.elision",
+                "an implicit move that converts to another class");
         m.category = value_category::xvalue;
     } else if (movable && m.category == value_category::lvalue &&
                object.kind == type_kind::class_type &&
@@ -244,7 +254,9 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
            type, the copy or move constructor binds the rvalue directly,
            an identity conversion that beats any constructor needing the
            user-defined conversion ([over.ics.rank]/2): analysed */
-        return not_supported(n, "class.copy.elision");
+        return not_supported_because(
+            n, "class.copy.elision",
+            "an implicit move through a conversion function");
     } else if (movable && m.category == value_category::lvalue &&
                object.kind == type_kind::class_type &&
                tokens.files.behavior.has(language_feature::rvalue_references) &&
@@ -260,7 +272,9 @@ analysis_result semantic_analysis::return_statement(SyntaxRef n,
         /* the move constructor the class may declare implicitly
            ([class.copy.ctor]/8), a function other than its copy
            constructor: not analysed */
-        return not_supported(n, "class.copy.elision");
+        return not_supported_because(
+            n, "class.copy.elision",
+            "an implicit move with an implicit move constructor");
     }
     /* a void operand, or (an extension) one in a function returning void,
        is evaluated and discarded */

@@ -42,11 +42,14 @@ analysis_result semantic_analysis::gnu_compound_literal(SyntaxRef n,
 {
     if (n.size() != 4 || !n[1].is(syntax_kind::type_id) ||
         !n[3].is(syntax_kind::braced_init_list))
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "a compound literal that is not ( type-id ) braced-init-list");
     qualified_type to;
     VTRY(r, type_id(n[1], to));
     if (type_table[to.unqualified()].kind != type_kind::vector)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu", "a compound literal of a type that is not a vector");
     initialized_value result;
     VTRY_SET(r, list_initialization(n[3], to, true, result));
     m = expression_meaning();

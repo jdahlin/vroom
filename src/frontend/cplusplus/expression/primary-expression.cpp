@@ -149,12 +149,17 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
     case literal_kind::integer_literal:
     case literal_kind::character_literal:
         if (!fundamental_type_is_integral(k.type))
-            return not_supported(current_declaration, "lex.icon");
+            return not_supported_because(
+                current_declaration, "lex.icon",
+                "an integer or character literal whose type is not integral");
         if (k.literal == literal_kind::integer_literal && imaginary_literal(t))
-            return not_supported(current_declaration, "ext.gnu");
+            return not_supported_because(current_declaration, "ext.gnu",
+                                         "an imaginary integer literal");
         m.type = qualified_type::make(type_table.fundamental(k.type), cv_none);
         if (!k.value_known)
-            return not_supported(current_declaration, "lex.icon");
+            return not_supported_because(
+                current_declaration, "lex.icon",
+                "an integer or character literal with no known value");
         m.evaluation = constness::constant;
         m.value = integer_wrap(b, k.type, v.value);
         m.zero_literal =
@@ -162,9 +167,12 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
         return analysis_result::well_formed;
     case literal_kind::floating_point_literal:
         if (!fundamental_type_is_floating(k.type))
-            return not_supported(current_declaration, "lex.fcon");
+            return not_supported_because(
+                current_declaration, "lex.fcon",
+                "a floating literal whose type is not a floating-point type");
         if (imaginary_literal(t))
-            return not_supported(current_declaration, "ext.gnu");
+            return not_supported_because(current_declaration, "ext.gnu",
+                                         "an imaginary floating literal");
         m.type = qualified_type::make(type_table.fundamental(k.type), cv_none);
         m.beyond_integral_constant = true;
         if (!k.value_known || k.type == fundamental_type::long_double)
@@ -201,11 +209,14 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
            u8, u, U and L ([lex.string]/6-10); /12: the size counts the
            terminating '\0' */
         if (!string_literal_meaning(t, m))
-            return not_supported(current_declaration, "lex.string");
+            return not_supported_because(
+                current_declaration, "lex.string",
+                "a string literal whose meaning could not be formed");
         return analysis_result::well_formed;
     }
     default:
-        return not_supported(current_declaration, "lex.ext");
+        return not_supported_because(current_declaration, "lex.ext",
+                                     "a literal of a kind without rules");
     }
 }
 
@@ -218,11 +229,13 @@ analysis_result semantic_analysis::parenthesized(SyntaxRef n,
                                                  expression_meaning &m)
 {
     if (n.size() != 3 || !n[0].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
-        return not_supported(n, "expr.prim");
+        return not_supported_because(
+            n, "expr.prim", "a primary expression of an unhandled form");
     if (n[1].is(syntax_kind::compound_statement)) {
         /* [ext.gnu] statement expression ({ stmt; ... expr; }) */
         if (!function_state.active)
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(
+                n, "ext.gnu", "a statement expression outside a function");
         entity_index outer = current_scope;
         open_scope(0, false);
         owned_array<SyntaxElement> items;

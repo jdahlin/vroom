@@ -382,7 +382,8 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
     if ((!function_state.active && !is_namespace(current_scope) &&
          !in_default && !in_member_default) ||
         (substituting && !function_state.active) || n.size() < 2)
-        return not_supported(n, "expr.prim.lambda");
+        return not_supported_because(
+            n, "expr.prim.lambda", "a lambda in a context that is not handled");
     /* [expr.prim.lambda]/5: a template-parameter-list makes a generic
        lambda, whose call operator is a template
        ([expr.prim.lambda.closure]/3); its requires-clause is the
@@ -399,24 +400,32 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
             /* (a list of one template-parameter is that parameter) */
             template_list = x;
         else if (!x.is_token() && !x.is(syntax_kind::requires_clause))
-            return not_supported(n, "expr.prim.lambda");
+            return not_supported_because(
+                n, "expr.prim.lambda",
+                "an unhandled part in a lambda-expression");
     }
     SyntaxElement body = n.compound_statement();
     if (!n.lambda_introducer() || !body)
-        return not_supported(n, "expr.prim.lambda");
+        return not_supported_because(
+            n, "expr.prim.lambda", "a lambda without an introducer or a body");
     if (declarator) {
         /* [expr.prim.lambda]/5: "A lambda is a generic lambda if the
            lambda-expression has any generic parameter type placeholders"
            (auto in a parameter's decl-specifier-seq) */
         owned_array<SyntaxRef> placeholders;
         if (!abbreviated_clause(declarator, placeholders))
-            return not_supported(n, "expr.prim.lambda.closure");
+            return not_supported_because(
+                n, "expr.prim.lambda.closure",
+                "a lambda whose placeholder parameters have no invented "
+                "template head");
         has_placeholder = !placeholders.empty();
         /* a requires-clause after the parameters: a generic lambda's,
            (lambda_constraint) */
         if (!template_list && !has_placeholder &&
             declarator[declarator.size() - 1].is(syntax_kind::requires_clause))
-            return not_supported(n, "temp.constr");
+            return not_supported_because(
+                n, "temp.constr",
+                "a trailing requires-clause on a non-generic lambda");
     }
 
     lambda_context l;
@@ -642,12 +651,16 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                     l.constexpr_ = true;
                     l.immediate = true;
                 } else {
-                    r = not_supported(n, "dcl.constexpr");
+                    r = not_supported_because(
+                        n, "dcl.constexpr",
+                        "a lambda specifier that has no rules");
                 }
             }
             if (part.is(syntax_kind::trailing_return_type)) {
                 if (part.size() != 2 || !part[1].is(syntax_kind::type_id)) {
-                    r = not_supported(n, "dcl.fct");
+                    r = not_supported_because(
+                        n, "dcl.fct",
+                        "a lambda trailing return type that is not -> type-id");
                     continue;
                 }
                 /* an init-capture's name in the trailing-return-type:
@@ -657,7 +670,9 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                 for (size_t i2 = l.first_capture; i2 < lambda_captures.size();
                      i2++)
                     if (lambda_captures[i2].init_capture)
-                        r = not_supported(n, "expr.prim.lambda.capture");
+                        r = not_supported_because(n, "expr.prim.lambda.capture",
+                                                  "an init-capture in a lambda "
+                                                  "of this declarator form");
                 if (r != analysis_result::well_formed)
                     continue;
                 /* (names in it have the types of the members that would
@@ -684,7 +699,9 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
                 declaring_lambda = outer_declaring;
                 if (r == analysis_result::well_formed &&
                     abstract_class(returns))
-                    r = not_supported(n, "class.abstract");
+                    r = not_supported_because(
+                        n, "class.abstract",
+                        "a lambda returning an abstract class");
             }
         }
         type = returns;
@@ -706,7 +723,9 @@ semantic_analysis::lambda_call_type(SyntaxRef n, SyntaxRef d, lambda_context &l,
             break;
         /* a default argument ([dcl.fct.default]) */
         if (parameter.default_argument)
-            r = not_supported(n, "dcl.fct.default");
+            r = not_supported_because(
+                n, "dcl.fct.default",
+                "a default argument in a lambda parameter");
         /* [expr.prim.lambda.capture]/5: "If an identifier in a
            simple-capture appears as the declarator-id of a parameter of the
            lambda-declarator's parameter-declaration-clause, the program is
@@ -839,14 +858,18 @@ analysis_result semantic_analysis::generic_lambda(SyntaxRef n, SyntaxRef list,
        type placeholder in the lambda's parameter-declaration-clause, in
        order of appearance" */
     if (declarator && !abbreviated_clause(declarator, parameters))
-        return not_supported(n, "temp.variadic");
+        return not_supported_because(
+            n, "temp.variadic",
+            "a generic lambda whose template parameters could not be invented");
     VTRY(valid, validate_template_parameters(n, parameters, true, true, true));
     uint32_t clauses = 0;
     for (uint32_t i = 1; i + 1 < n.size(); i++)
         clauses += n[i].is(syntax_kind::requires_clause);
     if (clauses && declarator &&
         declarator[declarator.size() - 1].is(syntax_kind::requires_clause))
-        return not_supported(n, "temp.constr");
+        return not_supported_because(
+            n, "temp.constr",
+            "requires-clauses both after the template head and the declarator");
     uint32_t index = 0, first = 0;
     entity_index scope = 0;
     VTRY(r, template_parameter_scope(n, parameters, c, 0, index, scope, first));
@@ -995,7 +1018,9 @@ analysis_result semantic_analysis::lambda_specialization(
     r = lambda_body(n, n[n.size() - 1], l, parameters, captures);
     /* (lambda_body took the captures off lambda_captures) */
     if (r == analysis_result::well_formed && captures.size() != made)
-        return not_supported(n, "expr.prim.lambda.capture");
+        return not_supported_because(
+            n, "expr.prim.lambda.capture",
+            "a lambda that gained captures when its body was analysed again");
     return r;
 }
 

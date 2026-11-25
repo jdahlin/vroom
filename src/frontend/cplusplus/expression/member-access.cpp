@@ -241,7 +241,9 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
            cv-qualifiers are the implicit object parameter's, of
            overload resolution ([over.match.funcs]/4) */
         if (x.next_overload && at != overloaded_callee)
-            return not_supported(current_declaration, "over.over");
+            return not_supported_because(
+                current_declaration, "over.over",
+                "an overloaded member function named without a call");
         if (!x.next_overload) {
             /* [dcl.fct.def.delete]/2 */
             VTRY(r, deleted_use(at, e));
@@ -292,7 +294,9 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         if (x.kind == entity_kind::enumerator &&
             object_evaluation != constness::constant &&
             tokens.files.behavior.microsoft_compatibility)
-            return not_supported(current_declaration, "expr.ref");
+            return not_supported_because(current_declaration, "expr.ref",
+                                         "an enumerator through a non-constant "
+                                         "object in Microsoft mode");
         VTRY(r, named_entity(at, e, result));
         if (object_evaluation != constness::constant &&
             result.evaluation != constness::not_constant)
@@ -304,7 +308,9 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         return analysis_result::well_formed;
     }
     /* a type, an enumerator, an overloaded static member function */
-    return not_supported(current_declaration, "expr.ref");
+    return not_supported_because(
+        current_declaration, "expr.ref",
+        "a member access naming a member of an unhandled kind");
 }
 
 /*
@@ -356,7 +362,9 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
     }
     if (!function_state.this_entity || !of_current)
         /* in a static member function, or a member function unevaluated */
-        return not_supported(current_declaration, "expr.prim.id");
+        return not_supported_because(
+            current_declaration, "expr.prim.id",
+            "a non-static member used without a usable this pointer");
     VTRY(r, this_object(at, object));
     VTRY_SET(r, member_access(at, e, object));
     m = object;
@@ -406,7 +414,8 @@ analysis_result semantic_analysis::member_object(SyntaxRef n, bool arrow,
             break;
         if (depth == 16)
             /* a chain of operator-> this long, or a cycle */
-            return not_supported(n, "over.ref");
+            return not_supported_because(n, "over.ref",
+                                         "an operator-> chain deeper than 16");
         bool handled = false;
         VTRY_SET(r, unary_operator_function(n, n[1].token(),
                                             preprocessing_op_or_punc::ARROW,
@@ -423,7 +432,8 @@ analysis_result semantic_analysis::member_object(SyntaxRef n, bool arrow,
                  type_kind::class_type)) {
             if (fundamental_of(m.type) == fundamental_type::none &&
                 pointer.kind != type_kind::pointer)
-                return not_supported(n, "expr.ref");
+                return not_supported_because(
+                    n, "expr.ref", "-> on an operand of an unhandled type");
             /* [ext:clang_ext_vector_type]: v->xy, an element access of a
                vector, is not analysed */
             if (pointer.kind == type_kind::pointer &&
@@ -431,7 +441,9 @@ analysis_result semantic_analysis::member_object(SyntaxRef n, bool arrow,
                      type_kind::ext_vector ||
                  type_table[pointer.operand.unqualified()].kind ==
                      type_kind::vector))
-                return not_supported(n, "ext.clang");
+                return not_supported_because(
+                    n, "ext.clang",
+                    "member access through a pointer to a vector type");
             return ill_formed(n,
                               "the first expression of -> shall be a "
                               "pointer to a class",
@@ -476,7 +488,9 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         if (qscope.global || qscope.dependent || !qscope.entity ||
             entity_table[qscope.entity].kind != entity_kind::class_type ||
             !entity_table[qscope.entity].size)
-            return not_supported(n, "expr.ref");
+            return not_supported_because(n, "expr.ref",
+                                         "a qualified pseudo-member name whose "
+                                         "scope is not a complete class");
         qual_class = qscope.entity;
         SyntaxElement rhs = n[2].back();
         if (rhs.is_identifier()) {
@@ -488,7 +502,9 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
             VTRY(r, operator_function_id(function, function_name));
             name = function_name.id;
         } else {
-            return not_supported(n, "expr.ref");
+            return not_supported_because(
+                n, "expr.ref",
+                "a template keyword member name of an unhandled form");
         }
     } else if (SyntaxElement id = member_template_id(n); id.is(
                    syntax_kind::simple_template_id, syntax_kind::template_id)) {
@@ -509,7 +525,9 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     } else if (destructor_id(n[2])) {
         /* [expr.prim.id.dtor]/2: a destructor's name can be the callee of
            a call only (a parenthesized one is not analysed) */
-        return not_supported(n, "expr.prim.id.dtor");
+        return not_supported_because(
+            n, "expr.prim.id.dtor",
+            "a destructor name in a member access that is not called");
     } else if (n[2].is(syntax_kind::conversion_function_id)) {
         /* [class.conv.fct]/1, [temp.mem]/5: explicit call to a conversion
            function or conversion function template (a.operator T()) */
@@ -518,7 +536,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     } else {
         /* template, a qualified-id, a conversion function's or a literal
            operator's */
-        return not_supported(n, "expr.ref");
+        return not_supported_because(n, "expr.ref",
+                                     "a member name of an unhandled form");
     }
     /* (the call's callee name: member_object leaves it as it was) */
     token_index callee = overloaded_callee;
@@ -529,7 +548,9 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
             object.kind != type_kind::pointer &&
             object.kind != type_kind::array &&
             object.kind != type_kind::enumeration)
-            return not_supported(n, "expr.ref");
+            return not_supported_because(
+                n, "expr.ref",
+                "member access on an operand of an unhandled type");
         return ill_formed(n,
                           "the object expression of a class member access "
                           "shall be of class type",
@@ -541,12 +562,16 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     require_complete(c);
     if (entity_table[c].kind != entity_kind::class_type)
         /* a class whose definition was not analysed */
-        return not_supported(n, "class.pre");
+        return not_supported_because(
+            n, "class.pre",
+            "member access on a class type whose entity is not a class");
     /* a specialization whose definition could not be analysed is no
        incomplete class */
     if (!entity_table[c].size && entity_table[c].instantiation &&
         instantiations[entity_table[c].instantiation - 1].has_failure)
-        return not_supported(n, "temp.inst");
+        return not_supported_because(
+            n, "temp.inst",
+            "member access on a class whose instantiation failed");
     if (!entity_table[c].size && entity_table[c].defined)
         /* [expr.ref]/4: in the definition of the class, a complete-class
            context ([class.mem]/6) whose layout is not known yet */
@@ -566,7 +591,9 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
         if (unknown || ambiguous || !f ||
             type_table[entity_table[f].type.unqualified()].operand !=
                 conversion_target)
-            return not_supported(n, "expr.ref");
+            return not_supported_because(n, "expr.ref",
+                                         "a conversion function name with no "
+                                         "single exactly matching function");
         VTRY_SET(r, need_specialization_definition(n, f));
         return member_access(n[2].first_token(), f, m);
     }
@@ -581,7 +608,8 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
     entity_index e =
         class_member_lookup(lookup_class, tokens.identifier(name), ambiguous);
     if (ambiguous)
-        return not_supported(n, "class.member.lookup");
+        return not_supported_because(n, "class.member.lookup",
+                                     "an ambiguous member name");
     if (e && (entity_table[e].kind == entity_kind::none ||
               entity_table[e].member_templates)) {
         if (uint32_t vt = variable_template_of(e)) {
@@ -606,17 +634,23 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
                                              expansion));
                 for (bool x : expansion)
                     if (x)
-                        return not_supported(id.index(), "temp.variadic");
+                        return not_supported_because(
+                            id.index(), "temp.variadic",
+                            "a pack expansion in a member template's explicit "
+                            "arguments");
                 member_template_written_at = id.index();
             }
             return analysis_result::well_formed;
         }
-        return not_supported(n, "over");
+        return not_supported_because(n, "over",
+                                     "a member name that lookup does not find");
     }
     if (member_template_id(n).is(syntax_kind::simple_template_id,
                                  syntax_kind::template_id))
         /* a template-id of no member function template analysis knows */
-        return not_supported(n, "temp.names");
+        return not_supported_because(
+            n, "temp.names",
+            "a template-id naming a member that is not a member template");
     if (!e)
         return ill_formed_at_token(name,
                                    "the id-expression shall name a member "

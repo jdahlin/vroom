@@ -65,7 +65,8 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     }
     i++; /* delete */
     if (count < i + 1)
-        return not_supported(n, "expr.delete");
+        return not_supported_because(n, "expr.delete",
+                                     "a delete-expression with no operand");
     /* delete [ ] cast-expression */
     bool array = count - i == 3;
     expression_meaning operand;
@@ -73,7 +74,8 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     if (type_table[operand.type.unqualified()].kind == type_kind::class_type)
         /* /2: "the operand is converted to a pointer type by calling the
            above-mentioned conversion function" */
-        return not_supported(n, "expr.delete");
+        return not_supported_because(n, "expr.delete",
+                                     "a delete whose operand has class type");
     VTRY_SET(r, operand_value(n, operand));
     const struct type &pointer = type_table[operand.type.unqualified()];
     if (pointer.kind != type_kind::pointer)
@@ -92,7 +94,8 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
         object.fundamental == fundamental_type::void_)
         /* clang: a warning, "cannot delete expression with pointer-to-'void'
            type" */
-        return not_supported(n, "expr.delete");
+        return not_supported_because(n, "expr.delete",
+                                     "a delete of a pointer to void");
     entity_index c = 0;
     if (object.kind == type_kind::class_type) {
         c = object.entity;
@@ -103,11 +106,14 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
                the point of deletion and the complete class has a
                non-trivial destructor or a deallocation function, the
                behavior is undefined." */
-            return not_supported(n, "expr.delete");
+            return not_supported_because(
+                n, "expr.delete",
+                "a delete of a pointer to an incomplete class");
     }
     uint64_t size = size_of_type(object_type);
     if (!size)
-        return not_supported(n, "expr.delete");
+        return not_supported_because(n, "expr.delete",
+                                     "a delete of a type with no known size");
     /* [basic.align]/3: new-extended alignment: the deallocation function
        with std::align_val_t is preferred ([expr.delete]/10) */
     bool over_aligned =
@@ -118,7 +124,9 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
         (!over_aligned || !align_val_type(align_type) ||
          (c && entity_table[c].destructor &&
           entity_table[entity_table[c].destructor].virtual_)))
-        return not_supported(n, "expr.delete");
+        return not_supported_because(n, "expr.delete",
+                                     "an over-aligned delete without aligned "
+                                     "deallocation or with virtual dtor");
     /* the operand's value, which the destructor and the deallocation
        function are given; /11 (a note): "Any cv-qualifiers in the type of
        the deleted object are ignored when forming this argument." */
@@ -158,11 +166,15 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
         if (destroying && entity_table[destroying].enclosing != c)
             /* a base class's: the first argument's conversion to the
                base and its access are not followed */
-            return not_supported(n, "expr.delete");
+            return not_supported_because(
+                n, "expr.delete",
+                "a destroying operator delete inherited from a base class");
         if (destroying && entity_table[c].destructor &&
             entity_table[entity_table[c].destructor].virtual_)
             /* the deleting destructor would call it */
-            return not_supported(n, "expr.delete");
+            return not_supported_because(
+                n, "expr.delete",
+                "a destroying operator delete with a virtual destructor");
     }
     if (destroying) {
         expression_meaning tag;
@@ -190,7 +202,10 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     if (c && destroys(c)) {
         entity_index destructor = entity_table[c].destructor;
         if (!destructor)
-            return not_supported(n, "expr.delete");
+            return not_supported_because(
+                n, "expr.delete",
+                "a delete of a class that needs destruction but has no "
+                "destructor entity");
         VTRY_SET(r, deleted_use(at, destructor));
         expression_meaning target;
         target.type = unqualified;
@@ -429,7 +444,9 @@ analysis_result semantic_analysis::usual_deallocation(
         /* a class's deallocation functions that are not all usual ones:
            clang's ambiguities ("multiple suitable 'operator delete'") are
            not followed */
-        return not_supported(n, "class.dtor");
+        return not_supported_because(
+            n, "class.dtor",
+            "an ambiguous or unfollowed choice of member operator delete");
     /* [expr.delete]/10: "If deallocation function lookup finds more than
        one usual deallocation function, the function to be called is
        selected as follows: ... If exactly one function remains, that
@@ -454,7 +471,9 @@ analysis_result semantic_analysis::usual_deallocation(
         return ill_formed(n, "no suitable member 'operator delete'",
                           "expr.delete");
     if (!function)
-        return not_supported(n, "expr.delete");
+        return not_supported_because(
+            n, "expr.delete",
+            "a delete with no deallocation function selected");
     return analysis_result::well_formed;
 }
 

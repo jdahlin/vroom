@@ -228,7 +228,9 @@ analysis_result semantic_analysis::std_class_template(SyntaxRef n,
        (unknown_entity); a name of a declaration analysis did not follow
        is none (tuple_size_of looks for those) */
     if (found.ambiguous)
-        return not_supported(n, "namespace.qual");
+        return not_supported_because(
+            n, "namespace.qual",
+            "an ambiguous std name for the tuple-like protocol");
     entity_index held = found.entity;
     if (found.unknown)
         held = found.unknown_entity;
@@ -247,14 +249,17 @@ analysis_result semantic_analysis::index_argument(SyntaxRef n,
 {
     const function_template ft = function_templates[template_index - 1];
     if (!ft.parameter_count)
-        return not_supported(n, "dcl.struct.bind");
+        return not_supported_because(n, "dcl.struct.bind",
+                                     "a std trait template with no parameters");
     entity_index p = template_parameter_entities[ft.first_parameter];
     const entity &x = entity_table[p];
     if (x.kind == entity_kind::typedef_name ||
         x.kind == entity_kind::template_entity ||
         template_parameter_is_pack(ft.first_parameter) ||
         depends_on_template_parameter(x.type) || !is_integral(x.type))
-        return not_supported(n, "dcl.struct.bind");
+        return not_supported_because(
+            n, "dcl.struct.bind",
+            "a std trait whose index parameter is not a plain integer");
     out = template_argument();
     out.kind = template_argument::kind_t::value;
     out.type = qualified_type::make(x.type.unqualified(), cv_none);
@@ -285,7 +290,9 @@ analysis_result semantic_analysis::tuple_trait_member(
         entity_table[template_parameter_entities[ft.first_parameter + count -
                                                  1]]
                 .kind != entity_kind::typedef_name)
-        return not_supported(n, "dcl.struct.bind");
+        return not_supported_because(
+            n, "dcl.struct.bind",
+            "a std tuple trait with unexpected parameters");
     template_argument a[2];
     if (indexed) {
         VTRY_SET(r, index_argument(n, ct, i, a[0]));
@@ -301,9 +308,13 @@ analysis_result semantic_analysis::tuple_trait_member(
     found = class_member_lookup(
         c, tokens.pp.identifier(member, strlen(member)) + 1, ambiguous);
     if (ambiguous)
-        return not_supported(n, "class.member.lookup");
+        return not_supported_because(
+            n, "class.member.lookup",
+            "an ambiguous member of a std trait specialization");
     if (found && !accessible(found))
-        return not_supported(n, "dcl.struct.bind");
+        return not_supported_because(
+            n, "dcl.struct.bind",
+            "an inaccessible member of a std trait specialization");
     return analysis_result::well_formed;
 }
 
@@ -330,7 +341,9 @@ analysis_result semantic_analysis::tuple_size_of(SyntaxRef n,
                  t++)
                 if (tokens[t].kind == token_kind::identifier &&
                     tokens.identifier(t) == name)
-                    return not_supported(n, "temp.expl.spec");
+                    return not_supported_because(
+                        n, "temp.expl.spec",
+                        "a std trait specialization that was not analysed");
         }
         return analysis_result::well_formed;
     }
@@ -338,7 +351,9 @@ analysis_result semantic_analysis::tuple_size_of(SyntaxRef n,
     const entity &x = entity_table[v];
     if (x.kind != entity_kind::variable || x.nonstatic_member ||
         !is_integral(x.type) || x.usable != constness::constant)
-        return not_supported(n, "dcl.struct.bind");
+        return not_supported_because(
+            n, "dcl.struct.bind",
+            "a trait value that is no constant integral static member");
     value = x.value;
     return analysis_result::well_formed;
 }
@@ -352,7 +367,8 @@ analysis_result semantic_analysis::tuple_element_of(SyntaxRef n, uint32_t i,
     VTRY(r, tuple_trait_member(n, "tuple_element", true, i, type, "type", t));
     if (!t || entity_table[t].kind != entity_kind::typedef_name ||
         depends_on_template_parameter(entity_table[t].type))
-        return not_supported(n, "dcl.struct.bind");
+        return not_supported_because(
+            n, "dcl.struct.bind", "a tuple_element with no usable type member");
     element = entity_table[t].type;
     return analysis_result::well_formed;
 }
@@ -381,12 +397,15 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
     /* a member template ([temp.mem]): not analysed */
     if (ambiguous ||
         (member && entity_table[member].kind != entity_kind::function))
-        return not_supported(n, "dcl.struct.bind");
+        return not_supported_because(
+            n, "dcl.struct.bind",
+            "a get member that is ambiguous or no function");
     owned_array<qualified_type> types;
     types.append(type);
     owned_array<entity_index> classes, namespaces;
     if (!associated_namespaces(types, classes, namespaces))
-        return not_supported(n, "basic.lookup.argdep");
+        return not_supported_because(n, "basic.lookup.argdep",
+                                     "get with unknown associated namespaces");
     entity_index held = 0;
     for (entity_index s : namespaces) {
         entity_index x = entity_table.find(s, name);
@@ -394,12 +413,15 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
             continue;
         /* a function that is no template, a second namespace's get */
         if (!function_template_of(x) || held)
-            return not_supported(n, "dcl.struct.bind");
+            return not_supported_because(
+                n, "dcl.struct.bind",
+                "a get that is no single function template");
         held = x;
     }
     /* none: a hidden friend may declare it ([basic.lookup.argdep]/4.3) */
     if (!held)
-        return not_supported(n, "dcl.struct.bind");
+        return not_supported_because(
+            n, "dcl.struct.bind", "no get found by argument-dependent lookup");
     expression_meaning object;
     VTRY(r, named_entity(at, e, object, false));
     if (type_table[entity_table[e].type.unqualified()].kind !=
@@ -426,7 +448,7 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
                                         SyntaxRef(), &given));
     }
     if (candidates.empty())
-        return not_supported(n, "temp.over");
+        return not_supported_because(n, "temp.over", "no candidate for get");
     owned_array<expression_meaning> arguments;
     arguments.append(object);
     size_t chosen = 0;
@@ -470,7 +492,9 @@ analysis_result semantic_analysis::binding_members_class(SyntaxRef n,
     require_complete(c);
     const entity &x = entity_table[c];
     if (x.kind != entity_kind::class_type || !x.size || x.virtual_base_count)
-        return not_supported(n, "dcl.struct.bind");
+        return not_supported_because(
+            n, "dcl.struct.bind",
+            "an incomplete class or one with virtual bases");
     uint32_t own = 0;
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = entity_table[class_members[x.first_member + i]];
@@ -478,7 +502,8 @@ analysis_result semantic_analysis::binding_members_class(SyntaxRef n,
             continue;
         /* an anonymous union (or struct) member */
         if (!m.name)
-            return not_supported(n, "dcl.struct.bind");
+            return not_supported_because(n, "dcl.struct.bind",
+                                         "an anonymous union or struct member");
         own++;
     }
     entity_index with_members = 0;
@@ -517,7 +542,8 @@ analysis_result semantic_analysis::structured_binding_declaration(
         i++;
     }
     if (i + 3 > declaration.size())
-        return not_supported(declaration, "dcl.struct.bind");
+        return not_supported_because(declaration, "dcl.struct.bind",
+                                     "a structured binding with too few parts");
     token_index at = declaration[i].token();
     owned_array<token_index> names;
     SyntaxElement list = declaration[i + 1];
@@ -532,7 +558,9 @@ analysis_result semantic_analysis::structured_binding_declaration(
     SyntaxElement init;
     if (!supplied) {
         if (i + 4 > declaration.size())
-            return not_supported(declaration, "dcl.struct.bind");
+            return not_supported_because(
+                declaration, "dcl.struct.bind",
+                "a structured binding with no initializer");
         init = declaration[i + 3];
     }
     /* [dcl.pre]/8: "If the decl-specifier-seq contains any decl-specifier
@@ -540,7 +568,8 @@ analysis_result semantic_analysis::structured_binding_declaration(
        cv-qualifiers, the program is ill-formed." */
     /* (C++26's constexpr structured bindings, P2686R5: not analysed) */
     if (s.constexpr_)
-        return not_supported(declaration, "dcl.struct.bind");
+        return not_supported_because(declaration, "dcl.struct.bind",
+                                     "a constexpr structured binding");
     if (s.typedef_ || s.extern_ || s.inline_ || s.virtual_ || s.friend_ ||
         s.explicit_ || s.declares_class ||
         type_table[s.type.unqualified()].kind != type_kind::placeholder ||
@@ -552,7 +581,8 @@ analysis_result semantic_analysis::structured_binding_declaration(
                           "cv-qualifiers",
                           "dcl.pre");
     if (s.gnu_flags || s.aligned || s.section || s.abi_tag)
-        return not_supported(declaration, "ext.gnu");
+        return not_supported_because(declaration, "ext.gnu",
+                                     "attributes on a structured binding");
     /* /1: "Let ... S consist of the storage-class-specifiers of the
        decl-specifier-seq (if any)": e's storage duration
        ([basic.stc.static]/1) and, at namespace scope, linkage
@@ -561,7 +591,9 @@ analysis_result semantic_analysis::structured_binding_declaration(
        which a structured binding declaration cannot have) */
     bool automatic = function_state.active && !s.static_;
     if (c_language && !automatic)
-        return not_supported(declaration, "dcl.link");
+        return not_supported_because(
+            declaration, "dcl.link",
+            "a static or namespace-scope structured binding in C");
     scoped_value<linkage> storage(binding_storage, linkage::none);
     if (!automatic)
         binding_storage = linkage::external;
@@ -591,7 +623,9 @@ analysis_result semantic_analysis::structured_binding_declaration(
                                        "functions",
                                        "basic.scope.declarative");
         if (prior || (conflicts && entity_table.find(conflicts, name)))
-            return not_supported(declaration, "basic.scope.declarative");
+            return not_supported_because(
+                declaration, "basic.scope.declarative",
+                "a binding name already declared in the scope");
         entity_index b = entity_table.make(entity_kind::structured_binding,
                                            name, current_scope);
         entity_table.bind(current_scope, name, b);
@@ -638,10 +672,14 @@ analysis_result semantic_analysis::structured_binding_declaration(
             source.kind != type_kind::fundamental &&
             source.kind != type_kind::pointer &&
             source.kind != type_kind::enumeration)
-            return give_up(not_supported(declaration, "dcl.struct.bind"));
+            return give_up(not_supported_because(
+                declaration, "dcl.struct.bind",
+                "a structured binding of this kind of type"));
         if (source.kind == type_kind::class_type &&
             entity_table[source.entity].kind != entity_kind::class_type)
-            return give_up(not_supported(declaration, "class.pre"));
+            return give_up(not_supported_because(
+                declaration, "class.pre",
+                "a structured binding of a class that was not analysed"));
         if (source.kind != type_kind::class_type ||
             entity_table[source.entity].union_)
             return give_up(ill_formed(declaration,
@@ -656,7 +694,9 @@ analysis_result semantic_analysis::structured_binding_declaration(
         /* (of static storage duration: the reference the elements are
            copied from would need a symbol) */
         if (!source.bound_known || !automatic)
-            return give_up(not_supported(declaration, "dcl.struct.bind"));
+            return give_up(not_supported_because(
+                declaration, "dcl.struct.bind",
+                "an array copy of unknown bound or static storage"));
         /* /3 (below), checked before the elements are copied */
         if (source.bound != count)
             return give_up(ill_formed(declaration,
@@ -711,7 +751,9 @@ analysis_result semantic_analysis::structured_binding_declaration(
         if (tuple) {
             /* (of static storage duration: r_i's symbols) */
             if (!automatic)
-                return give_up(not_supported(declaration, "dcl.struct.bind"));
+                return give_up(not_supported_because(
+                    declaration, "dcl.struct.bind",
+                    "a tuple-like binding of static storage"));
             if (size != count)
                 return give_up(ill_formed(declaration,
                                           "the number of elements in the "
@@ -763,7 +805,9 @@ analysis_result semantic_analysis::structured_binding_declaration(
            as e.name in the context of the structured binding declaration
            (/5), not where it is used: only public members of E itself */
         if (!automatic && holder != object.entity)
-            return give_up(not_supported(declaration, "dcl.struct.bind"));
+            return give_up(not_supported_because(
+                declaration, "dcl.struct.bind",
+                "static bindings of members of a base class"));
         const entity &h = entity_table[holder];
         uint32_t k = 0;
         for (uint32_t j = 0; j < h.member_count; j++) {
@@ -771,7 +815,9 @@ analysis_result semantic_analysis::structured_binding_declaration(
             if (!binding_data_member(entity_table[x]))
                 continue;
             if (!automatic && entity_table[x].access)
-                return give_up(not_supported(declaration, "dcl.struct.bind"));
+                return give_up(not_supported_because(
+                    declaration, "dcl.struct.bind",
+                    "static bindings of non-public members"));
             if (k < count)
                 entity_table[first_binding + k].binding_target = x;
             k++;
@@ -835,7 +881,9 @@ analysis_result semantic_analysis::structured_binding_use(token_index t,
            class's member function it is not odr-usable
            ([basic.def.odr]/10) */
         if (!function_state.active || !current_lambda())
-            return not_supported(current_declaration, "basic.def.odr");
+            return not_supported_because(
+                current_declaration, "basic.def.odr",
+                "a use of a binding from another function");
         bool deferred = false, plain = false;
         VTRY(captured, captured_entity(t, b, m, deferred, plain));
         if (!plain) {

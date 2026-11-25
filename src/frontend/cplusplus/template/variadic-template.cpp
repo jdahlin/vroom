@@ -328,7 +328,9 @@ analysis_result semantic_analysis::parameter_pack_expansion(
     if (!in_before && !in_after)
         return analysis_result::well_formed;
     if (!last || (in_before && in_after && before != after))
-        return not_supported(d, "temp.variadic");
+        return not_supported_because(
+            d, "temp.variadic",
+            "a pack expansion in a parameter not last or of unequal lengths");
     ellipsis = found;
     elements = before;
     if (in_after)
@@ -407,7 +409,9 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
         child_tokens(tree, n[5], first, end);
         bool in_right = expansion_count(first, end, right_count);
         if (in_left == in_right)
-            return not_supported(n, "expr.prim.fold");
+            return not_supported_because(
+                n, "expr.prim.fold",
+                "a binary fold with packs in both operands or in neither");
         has_init = true;
         at = n[2].token();
         if (in_left) {
@@ -419,12 +423,15 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
             init = n[1];
         }
     } else {
-        return not_supported(n, "expr.prim.fold");
+        return not_supported_because(n, "expr.prim.fold",
+                                     "a fold-expression of an unhandled form");
     }
     token_index first = 0, end = 0;
     child_tokens(tree, pattern, first, end);
     if (!n[2].is_token() || !expansion_count(first, end, count))
-        return not_supported(n, "expr.prim.fold");
+        return not_supported_because(
+            n, "expr.prim.fold",
+            "a fold-expression with no operator or no pack to expand");
     preprocessing_op_or_punc op =
         preprocessing_op_or_punc_primary(tokens[at].op_or_punc);
     bool comma = op == preprocessing_op_or_punc::COMMA;
@@ -450,7 +457,8 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
     case preprocessing_op_or_punc::COMMA:
         break;
     default:
-        return not_supported(n, "expr.prim.fold");
+        return not_supported_because(n, "expr.prim.fold",
+                                     "a fold-expression over this operator");
     }
     /* the operands: the pattern's instantiations, then E */
     owned_array<expression_meaning> operands;
@@ -467,13 +475,17 @@ analysis_result semantic_analysis::fold(SyntaxRef n, expression_meaning &m)
         type_kind k = type_table[x.type.unqualified()].kind;
         if (k == type_kind::class_type || k == type_kind::enumeration ||
             k == type_kind::none)
-            return not_supported(n, "expr.prim.fold");
+            return not_supported_because(
+                n, "expr.prim.fold",
+                "a fold over operands of class, enumeration or unknown type");
     }
     if (has_init) {
         type_kind k = type_table[e.type.unqualified()].kind;
         if (k == type_kind::class_type || k == type_kind::enumeration ||
             k == type_kind::none)
-            return not_supported(n, "expr.prim.fold");
+            return not_supported_because(n, "expr.prim.fold",
+                                         "a binary fold with an initial value "
+                                         "of class, enum or unknown type");
     }
     if (!count && has_init) {
         m = e;

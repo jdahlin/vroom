@@ -36,7 +36,8 @@ analysis_result semantic_analysis::closure_class(entity_index c, SyntaxRef n,
     }
     /* [class.mem]/7: complete, its members laid out ([abi:class-types]) */
     if (const char *rule = itanium_class_layout(*this, c))
-        return not_supported(n, rule);
+        return not_supported_because(
+            n, rule, "a closure type the class layout cannot place");
     VTRY(r, implicit_special_members(c, n));
     /* the definitions are analysed as functions of their own: the
        enclosing function's state aside meanwhile (class_definition) */
@@ -85,7 +86,9 @@ semantic_analysis::closure_conversion(entity_index c, entity_index call,
     qualified_type function_type = entity_table[call].type;
     const struct type f = type_table[function_type.unqualified()];
     if (f.variadic || contains_placeholder(f.operand))
-        return not_supported(n, "expr.prim.lambda.closure");
+        return not_supported_because(n, "expr.prim.lambda.closure",
+                                     "a conversion to function pointer of a "
+                                     "variadic or placeholder lambda");
     token_index at = n.first_token();
     static const char invoke_spelling[] = "__invoke";
     uint32_t invoke_name =
@@ -271,23 +274,33 @@ analysis_result semantic_analysis::generic_closure_conversion(
     entity_index c, qualified_type to, SyntaxRef at, expression_meaning &m)
 {
     if (entity_table[c].member_count != 0)
-        return not_supported(at, "expr.prim.lambda.closure");
+        return not_supported_because(
+            at, "expr.prim.lambda.closure",
+            "a function pointer conversion of a generic lambda with captures");
     const struct type to_ptr = type_table[to.unqualified()];
     if (to_ptr.kind != type_kind::pointer)
-        return not_supported(at, "expr.prim.lambda.closure");
+        return not_supported_because(
+            at, "expr.prim.lambda.closure",
+            "a generic lambda converted to a type that is not a pointer");
     const struct type to_fn = type_table[to_ptr.operand.unqualified()];
     if (to_fn.kind != type_kind::function || to_fn.variadic)
-        return not_supported(at, "expr.prim.lambda.closure");
+        return not_supported_because(
+            at, "expr.prim.lambda.closure",
+            "a generic lambda converted to no non-variadic function pointer");
     entity_index call_tpl = entity_table[c].call_operator;
     uint32_t ft = entity_table[call_tpl].instantiation;
     if (!ft)
-        return not_supported(at, "expr.prim.lambda.closure");
+        return not_supported_because(
+            at, "expr.prim.lambda.closure",
+            "a generic lambda whose call operator is not a template");
     const function_template f = function_templates[ft - 1];
     const struct type pat_fn =
         type_table[entity_table[f.entity].type.unqualified()];
     if (pat_fn.kind != type_kind::function || pat_fn.variadic ||
         pat_fn.parameter_count != to_fn.parameter_count)
-        return not_supported(at, "expr.prim.lambda.closure");
+        return not_supported_because(at, "expr.prim.lambda.closure",
+                                     "a generic lambda's call operator not "
+                                     "matching the pointer's parameters");
     const qualified_type *pat_params =
         type_table.parameters(entity_table[f.entity].type.unqualified());
     const qualified_type *to_params =
@@ -300,24 +313,32 @@ analysis_result semantic_analysis::generic_closure_conversion(
     }
     for (uint32_t i = 0; i < pat_fn.parameter_count; i++)
         if (!deduce_type(pat_params[i], to_params[i], values, set, false))
-            return not_supported(at, "expr.prim.lambda.closure");
+            return not_supported_because(at, "expr.prim.lambda.closure",
+                                         "a generic lambda conversion whose "
+                                         "template arguments are not deduced");
     VTRY(dr, default_template_arguments(at, ft, values, set));
     entity_index call = 0;
     VTRY(ir, instantiate(at, call_tpl, values.data(),
                          static_cast<uint32_t>(values.size()), call));
     if (!call)
-        return not_supported(at, "expr.prim.lambda.closure");
+        return not_supported_because(
+            at, "expr.prim.lambda.closure",
+            "a generic lambda conversion that instantiated no call operator");
     const struct type inst_fn =
         type_table[entity_table[call].type.unqualified()];
     if (inst_fn.kind != type_kind::function ||
         !(inst_fn.operand == to_fn.operand) ||
         inst_fn.parameter_count != to_fn.parameter_count)
-        return not_supported(at, "expr.prim.lambda.closure");
+        return not_supported_because(at, "expr.prim.lambda.closure",
+                                     "an instantiated lambda call operator "
+                                     "with another type than the target");
     const qualified_type *inst_params =
         type_table.parameters(entity_table[call].type.unqualified());
     for (uint32_t i = 0; i < inst_fn.parameter_count; i++)
         if (!(inst_params[i] == to_params[i]))
-            return not_supported(at, "expr.prim.lambda.closure");
+            return not_supported_because(at, "expr.prim.lambda.closure",
+                                         "an instantiated lambda call operator "
+                                         "with other parameter types");
     function_context enclosing_function =
         static_cast<function_context &&>(function_state);
     function_state = function_context();
@@ -334,7 +355,9 @@ analysis_result semantic_analysis::generic_closure_conversion(
     current_scope = enclosing_scope;
     current_declaration = declaration;
     if (r != analysis_result::well_formed || !conversion)
-        return not_supported(at, "expr.prim.lambda.closure");
+        return not_supported_because(
+            at, "expr.prim.lambda.closure",
+            "a generic lambda whose conversion function could not be made");
     token_index tok = at.first_token();
     expression_meaning obj = m;
     qualified_type this_ptr =

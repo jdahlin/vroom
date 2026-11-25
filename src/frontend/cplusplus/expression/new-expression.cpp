@@ -192,11 +192,14 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
                                                SyntaxElement &bound)
 {
     if (!n.type_specifier_seq() || n.size() > 2)
-        return not_supported(n, "expr.new");
+        return not_supported_because(
+            n, "expr.new",
+            "a new type-id with no type-specifier-seq or with extra parts");
     specified s;
     VTRY(r, decl_specifier_seq(n.type_specifier_seq(), s, false));
     if (!s.has_type)
-        return not_supported(n, "expr.new");
+        return not_supported_because(
+            n, "expr.new", "a new type-id whose specifiers name no type");
     type = s.type;
     if (n.size() == 1)
         return analysis_result::well_formed;
@@ -205,16 +208,22 @@ analysis_result semantic_analysis::new_type_id(NewTypeId n,
         if (d.is(syntax_kind::noptr_new_declarator)) {
             auto bounds = d;
             if (bounds.size() != 3)
-                return not_supported(d.index(), "expr.new");
+                return not_supported_because(d.index(), "expr.new",
+                                             "an array new-declarator without "
+                                             "exactly one bracketed bound");
             bound = d[1];
             return analysis_result::well_formed;
         }
         if (!d.is(syntax_kind::new_declarator))
-            return not_supported(n, "expr.new");
+            return not_supported_because(
+                n, "expr.new",
+                "a new type-id followed by something not a new-declarator");
         auto declarator = d;
         if (!declarator.size() || declarator.size() > 2 ||
             !declarator[0].is(syntax_kind::ptr_operator))
-            return not_supported(d.index(), "expr.new");
+            return not_supported_because(
+                d.index(), "expr.new",
+                "a new-declarator that does not start with a ptr-operator");
         declarator_meaning ignored;
         r = pointer_operator(declarator[0], type, ignored);
         if (r != analysis_result::well_formed || declarator.size() == 1)
@@ -237,7 +246,9 @@ analysis_result semantic_analysis::allocation_functions(
         /* Before its layout, the class may declare one analysis has not
            followed. A class with a size has had its members and bases
            analysed, including in a complete-class context. */
-        return not_supported(n, "class.free");
+        return not_supported_because(
+            n, "class.free",
+            "an allocation function lookup in a class not yet fully analysed");
     if (c) {
         lookup_result found = lookup_qualified(c, name, lookup_filter::any);
         if (templates && found.unknown && !found.ambiguous && !found.entity &&
@@ -249,16 +260,23 @@ analysis_result semantic_analysis::allocation_functions(
             return analysis_result::well_formed;
         }
         if (found.ambiguous || found.unknown)
-            return not_supported(n, "class.free");
+            return not_supported_because(
+                n, "class.free",
+                "an ambiguous or unknown member allocation function name");
         if (found.entity) {
             if (entity_table[found.entity].kind != entity_kind::function)
-                return not_supported(n, "class.free");
+                return not_supported_because(
+                    n, "class.free",
+                    "a member allocation function name that is not a function");
             if (entity_table[found.entity].member_templates) {
                 /* [class.free]/1: its member function templates are
                    candidates too ([expr.new]/21), by deduction from the
                    arguments of the new-expression; not for a delete */
                 if (!templates)
-                    return not_supported(n, "class.free");
+                    return not_supported_because(
+                        n, "class.free",
+                        "a member allocation function template where templates "
+                        "are not handled");
                 *templates = member_templates_of(found.entity);
             }
             overload_set(found.entity, set);
@@ -269,7 +287,9 @@ analysis_result semantic_analysis::allocation_functions(
     lookup_result found = lookup_in_namespace(0, name, lookup_filter::any);
     if (found.ambiguous || found.unknown || !found.entity ||
         entity_table[found.entity].kind != entity_kind::function)
-        return not_supported(n, "basic.stc.dynamic");
+        return not_supported_because(
+            n, "basic.stc.dynamic",
+            "no usable global allocation or deallocation function found");
     overload_set(found.entity, set);
     return analysis_result::well_formed;
 }
@@ -319,7 +339,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         r = type_id(n[i + 1], type);
         i += 3;
     } else {
-        return not_supported(n, "expr.new");
+        return not_supported_because(
+            n, "expr.new", "a new-expression with no recognised form of type");
     }
     if (r != analysis_result::well_formed)
         return r;
@@ -327,7 +348,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     if (i < count)
         init = n[i++];
     if (i < count)
-        return not_supported(n, "expr.new");
+        return not_supported_because(
+            n, "expr.new", "a new-expression with parts after its initializer");
     if (contains_placeholder(type)) {
         /* [dcl.type.auto.deduct]/2: "for a new-expression with a type that
            contains a placeholder type, T is the declared type of the
@@ -338,7 +360,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         bool direct = false, list = false;
         if (bound || !init || init.is_token() ||
             !initializer_form(init, clause, direct, list) || !direct)
-            return not_supported(n, "dcl.type.auto.deduct");
+            return not_supported_because(n, "dcl.type.auto.deduct",
+                                         "a new with a placeholder type not "
+                                         "direct-initialized, or of an array");
         expression_meaning deduced_from;
         VTRY(dr, expression(clause, deduced_from));
         qualified_type deduced, replacement;
@@ -356,7 +380,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         const struct type &a = type_table[type.unqualified()];
         if (!a.bound_known)
             /* /8: the bound from the new-initializer */
-            return not_supported(n, "expr.new");
+            return not_supported_because(
+                n, "expr.new", "a new of an array type of unknown bound");
         array = true;
         known_count = a.bound;
         type = a.operand;
@@ -375,12 +400,15 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                           "the allocated type shall be a complete object type",
                           "expr.new");
     if (allocated.kind == type_kind::array)
-        return not_supported(n, "expr.new");
+        return not_supported_because(
+            n, "expr.new", "a new whose allocated type is still an array");
     entity_index c = 0;
     if (allocated.kind == type_kind::class_type) {
         c = allocated.entity;
         if (entity_table[c].kind != entity_kind::class_type)
-            return not_supported(n, "class.pre");
+            return not_supported_because(
+                n, "class.pre",
+                "a new of a class type whose entity is not a class");
     }
     uint64_t size = size_of_type(type);
     if (!size)
@@ -399,7 +427,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         /* /19: "If the allocated type has new-extended alignment, the
            alignment is passed as std::align_val_t" */
         if (!align_val_type(align_type))
-            return not_supported(n, "expr.new");
+            return not_supported_because(
+                n, "expr.new",
+                "an over-aligned new without std::align_val_t declared");
         with_alignment = true;
     }
     qualified_type size_type = qualified_type::make(
@@ -414,7 +444,8 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     expression_meaning element_count;
     if (array) {
         if (init)
-            return not_supported(n, "expr.new");
+            return not_supported_because(n, "expr.new",
+                                         "an array new with an initializer");
         /* the class's operator delete[], [impl.clang] as clang looks it up,
            ::new or not */
         VTRY_SET(r, array_cookie(n, c, type, false, cookie));
@@ -447,7 +478,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         if (!integral)
             /* a class's conversion function; a floating value, which clang
                refuses */
-            return not_supported(n, "expr.new");
+            return not_supported_because(n, "expr.new",
+                                         "an array new bound that is not of "
+                                         "integral or enumeration type");
         bool negative = false;
         if (b.evaluation == constness::constant &&
             bt.kind == type_kind::fundamental &&
@@ -514,7 +547,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
     owned_array<expression_meaning> placement_arguments;
     if (placement) {
         if (placement.size() != 3)
-            return not_supported(placement.index(), "expr.new");
+            return not_supported_because(
+                placement.index(), "expr.new",
+                "a new-placement without a parenthesized expression list");
         VTRY_SET(r,
                  expression_list_meanings(placement[1], placement_arguments));
     }
@@ -581,7 +616,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             tokens.files.behavior.microsoft_extensions)
             /* a declaration not analysed may be the one chosen; Microsoft's
                mode falls back from operator new[] to operator new (clang) */
-            return not_supported(n, "expr.new");
+            return not_supported_because(n, "expr.new",
+                                         "a new with no viable allocation "
+                                         "function, in a case not diagnosed");
         return ill_formed(n,
                           "overload resolution fails when there is no "
                           "viable function, and the invocation is "
@@ -632,7 +669,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
            T, T shall be a const-default-constructible class type" */
         if (c && entity_table[c].kind == entity_kind::class_type &&
             default_constructor_deleted(c))
-            return not_supported(n, "class.default.ctor");
+            return not_supported_because(n, "class.default.ctor",
+                                         "a default-initialized new of a class "
+                                         "with a deleted default constructor");
         if (c && entity_table[c].first_constructor) {
             r = construct(n, type, none, object.node, value);
         } else if (type.cv() & cv_const) {
@@ -660,14 +699,19 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                 VTRY_SET(r, construct(n, type, none, object.node, value));
                 semantic_node &initialization = semantics[value.node];
                 if (initialization.kind != semantic_kind::construct)
-                    return not_supported(n, "dcl.init");
+                    return not_supported_because(
+                        n, "dcl.init",
+                        "a value-initialized new whose initialization is not a "
+                        "constructor call");
                 /* [dcl.init]/8.2: value-initialization zeroes the object
                    before calling a non-user-provided default constructor. */
                 if (entity_table[initialization.b].implicit ||
                     entity_table[c].defaulted_default_constructor)
                     initialization.op = 1;
             } else if (c) {
-                return not_supported(n, "dcl.init");
+                return not_supported_because(
+                    n, "dcl.init",
+                    "a value-initialized new of a class without a constructor");
             } else {
                 expression_meaning zero;
                 zero.type = qualified_type::make(type.unqualified(), cv_none);
@@ -687,7 +731,10 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             else if (list.size() == 1)
                 r = initialize_with(n, list[0], type, true, false, value);
             else if (c)
-                return not_supported(n, "dcl.init");
+                return not_supported_because(
+                    n, "dcl.init",
+                    "a braced new initializer of several clauses for a class "
+                    "with no ctor");
             else
                 return ill_formed(n,
                                   "if the entity being initialized does not "
@@ -698,10 +745,13 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
         } else if (init.size() == 3) {
             r = initialize_from(n, init[1], type, true, false, value);
         } else {
-            return not_supported(n, "expr.new");
+            return not_supported_because(
+                n, "expr.new",
+                "a parenthesized new initializer of an unhandled form");
         }
     } else {
-        return not_supported(n, "expr.new");
+        return not_supported_because(n, "expr.new",
+                                     "a new initializer of an unhandled form");
     }
     if (r != analysis_result::well_formed)
         return r;
@@ -717,7 +767,9 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
                initializes ([dcl.init]/17.6.1); an lvalue-to-rvalue copy of
                a trivially copyable object ([dcl.init]/17.6.2, [conv.lval])
                is lowered as an assignment into the allocated object */
-            return not_supported(n, "expr.new");
+            return not_supported_because(n, "expr.new",
+                                         "a new initializer that is neither a "
+                                         "constructor call nor a plain copy");
     }
     m.node = expression_node(semantic_kind::new_object, m, at, call.node,
                              value.node);

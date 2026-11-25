@@ -98,7 +98,8 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
                                                        uint32_t &built)
 {
     if (n.size() < 5 || !n[0].is_token())
-        return not_supported(n, "stmt.if");
+        return not_supported_because(
+            n, "stmt.if", "a selection statement with too few parts");
     /* [stmt.if]/1: if constexpr */
     bool constexpr_if =
         n[1].is_token() && n[1].keyword() == standard_keyword::constexpr_;
@@ -108,7 +109,8 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
     if (n.size() < open + 4 ||
         !n[open].is(preprocessing_op_or_punc::LEFT_PARENTHESIS))
         /* if consteval */
-        return not_supported(n, "stmt.if");
+        return not_supported_because(n, "stmt.if",
+                                     "if consteval or a missing parenthesis");
     bool is_switch = n[0].keyword() == standard_keyword::switch_;
     statement_parts parts;
     uint32_t i = open + 1;
@@ -119,7 +121,8 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
         inside.append(n[i]);
     }
     if (i + 1 >= n.size() || inside.empty() || inside.size() > 2)
-        return not_supported(n, "stmt.select");
+        return not_supported_because(
+            n, "stmt.select", "a parenthesized condition of unexpected shape");
     if (inside.size() == 2) {
         parts.has_init = true;
         parts.init = inside[0];
@@ -156,7 +159,9 @@ analysis_result semantic_analysis::selection_statement(SelectionStatement n,
         if (c == analysis_result::well_formed &&
             parts.condition.is(syntax_kind::condition)) {
             current_scope = outer;
-            return not_supported(n, "stmt.if");
+            return not_supported_because(
+                n, "stmt.if",
+                "a constexpr if whose condition is a declaration");
         }
         if (c == analysis_result::well_formed)
             result = worse(result, constant_expression(node_of(parts.condition),

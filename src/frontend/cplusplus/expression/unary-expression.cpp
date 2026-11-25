@@ -560,7 +560,8 @@ analysis_result semantic_analysis::pack_size(SyntaxRef n, expression_meaning &m)
                                   "shall name a pack",
                                   "expr.sizeof");
         }
-        return not_supported(n, "temp.variadic");
+        return not_supported_because(
+            n, "temp.variadic", "a sizeof... of a pack that has no rules here");
     }
     m.type = qualified_type::make(
         type_table.fundamental(fundamental_type::unsigned_long_int), cv_none);
@@ -621,7 +622,9 @@ analysis_result semantic_analysis::sized_operand(SyntaxRef n, bool alignment,
         const entity &c = entity_table[record.entity];
         if (c.kind != entity_kind::class_type)
             /* a class whose definition was not analysed */
-            return not_supported(n, "class.pre");
+            return not_supported_because(n, "class.pre",
+                                         "sizeof or alignof of a class type "
+                                         "whose entity is not a class");
         /* [class.mem]/6: a class is incomplete until its closing brace
            (the size is 0 until then; an empty class's is 1) */
         if (!c.size)
@@ -641,10 +644,14 @@ analysis_result semantic_analysis::sized_operand(SyntaxRef n, bool alignment,
     case type_kind::none:
         /* [temp.dep.constexpr]/2: value-dependent (or, a placeholder, not
            yet a type): the operand of a template's own declaration */
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "sizeof or alignof of a type not yet known in a template");
     default:
         if (!size_of_type(t))
-            return not_supported(n, "basic.compound");
+            return not_supported_because(
+                n, "basic.compound",
+                "sizeof or alignof of a type with no known size");
         return analysis_result::well_formed;
     }
 }
@@ -721,7 +728,9 @@ analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
                               subclause);
         if (operand_kind == type_kind::class_type ||
             operand_kind == type_kind::enumeration)
-            return not_supported(n, "over.match.oper");
+            return not_supported_because(
+                n, "over.match.oper",
+                "an increment or decrement of a class or enumeration operand");
     }
     fundamental_type t = fundamental_of(m.type);
     /* [diff.cpp14.expr]/1: ++ of a bool operand, deprecated, removed in
@@ -738,7 +747,9 @@ analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
     if (is_pointer(m.type) &&
         (!is_object_pointer(m.type) ||
          !size_of_type(type_table[m.type.unqualified()].operand)))
-        return not_supported(n, subclause);
+        return not_supported_because(n, subclause,
+                                     "an increment or decrement of a pointer "
+                                     "without a sized object type");
     /* [expr.const]/5.16: the modification of a variable whose lifetime
        did not begin within the evaluation (the evaluator's, inside a
        constexpr function's); another glvalue (a call's, *p) may designate
@@ -773,7 +784,9 @@ analysis_result semantic_analysis::increment_of(SyntaxRef n, token_index at,
 analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
 {
     if (n.size() < 2 || !n[0].is_token())
-        return not_supported(n, "expr.unary");
+        return not_supported_because(
+            n, "expr.unary",
+            "a unary expression without a leading operator or keyword");
     const token &op = tokens[n[0].token()];
     if (op.kind == token_kind::keyword) {
         standard_keyword kw = syntax_parser.keyword_of(op);
@@ -790,7 +803,9 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
             VTRY(r, expression(n[1], operand));
             const struct type ot = type_table[operand.type.unqualified()];
             if (ot.kind != type_kind::complex)
-                return not_supported(n, "ext.gnu");
+                return not_supported_because(
+                    n, "ext.gnu",
+                    "__real__ or __imag__ of an operand that is not complex");
             uint8_t part = 0;
             if (ek == extension_keyword::imag_)
                 part = 1;
@@ -804,10 +819,13 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
                                      n.first_token(), operand.node, 0, part);
             return analysis_result::well_formed;
         }
-        return not_supported(n, "expr.unary");
+        return not_supported_because(
+            n, "expr.unary", "a unary expression with an unhandled keyword");
     }
     if (op.kind != token_kind::operator_or_punctuator || n.size() != 2)
-        return not_supported(n, "expr.unary");
+        return not_supported_because(
+            n, "expr.unary",
+            "a unary expression with an unhandled operator form");
     preprocessing_op_or_punc o =
         preprocessing_op_or_punc_primary(op.op_or_punc);
     if (o == preprocessing_op_or_punc::PLUS_PLUS ||
@@ -849,7 +867,9 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
             type_table[m.type.unqualified()].kind == type_kind::class_type)
             /* [impl.clang] the address of a class temporary: an error
                clang makes a warning (-Waddress-of-temporary) */
-            return not_supported(n, "expr.unary.op");
+            return not_supported_because(
+                n, "expr.unary.op",
+                "taking the address of a prvalue that is not of class type");
         /* (/3.1, a pointer to member, is member_pointer_constant's) */
         if (m.category != value_category::lvalue)
             return ill_formed(n,
@@ -898,7 +918,9 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
         if (!allowed) {
             if (fundamental_of(m.type) == fundamental_type::none &&
                 !is_pointer(m.type))
-                return not_supported(n, "expr.unary.op");
+                return not_supported_because(
+                    n, "expr.unary.op",
+                    "a unary operator on an operand of an unhandled type");
             if (o == preprocessing_op_or_punc::PLUS)
                 return ill_formed(n,
                                   "the operand of the unary + operator shall "
@@ -936,7 +958,8 @@ analysis_result semantic_analysis::unary(SyntaxRef n, expression_meaning &m)
         break;
     }
     default:
-        return not_supported(n, "expr.unary");
+        return not_supported_because(
+            n, "expr.unary", "a unary expression with an unhandled operator");
     }
     m.node = expression_node(semantic_kind::unary, m, at, m.node, 0,
                              static_cast<uint8_t>(o));
@@ -970,7 +993,9 @@ analysis_result semantic_analysis::indirection_of(SyntaxRef n, token_index at,
             object.kind != type_kind::enumeration &&
             !(object.kind == type_kind::class_type &&
               !converts_to_non_class(object.entity, false)))
-            return not_supported(n, "expr.unary.op");
+            return not_supported_because(
+                n, "expr.unary.op",
+                "indirection through an operand of an unhandled type");
         return ill_formed(n,
                           "the operand of unary * shall be a pointer to an "
                           "object type, or a pointer to a function type",
@@ -979,7 +1004,8 @@ analysis_result semantic_analysis::indirection_of(SyntaxRef n, token_index at,
     qualified_type pointee = type_table[m.type.unqualified()].operand;
     if (fundamental_of(pointee) == fundamental_type::void_)
         /* clang's extension, a warning */
-        return not_supported(n, "expr.unary.op");
+        return not_supported_because(n, "expr.unary.op",
+                                     "indirection through a pointer to void");
     m.type = pointee;
     m.category = value_category::lvalue;
     if (m.evaluation != constness::not_constant)
@@ -1027,12 +1053,16 @@ semantic_analysis::member_pointer_constant(token_index t, entity_index e,
     const entity &x = entity_table[e];
     entity_index c = x.enclosing;
     if (x.kind != entity_kind::variable && x.kind != entity_kind::function)
-        return not_supported(current_declaration, "expr.unary.op");
+        return not_supported_because(
+            current_declaration, "expr.unary.op",
+            "a pointer to a member that is neither a variable nor a function");
     if (!c || entity_table[c].kind != entity_kind::class_type ||
         !entity_table[c].name)
         /* a variant member of an anonymous union: its offset is the
            union's plus its own */
-        return not_supported(current_declaration, "expr.unary.op");
+        return not_supported_because(
+            current_declaration, "expr.unary.op",
+            "a pointer to a member of an unnamed or unsuitable class");
     if (!accessible(e))
         return ill_formed_at_token(t,
                                    "a private or protected member's name can "
@@ -1096,7 +1126,9 @@ analysis_result semantic_analysis::noexcept_operator(SyntaxRef n,
        its type, and not kept (parameter-declaration-clause.cpp) */
     if (n.size() != 4 || !tokens.files.behavior.has(
                              language_feature::exception_specification_in_type))
-        return not_supported(n, "expr.unary.noexcept");
+        return not_supported_because(n, "expr.unary.noexcept",
+                                     "a noexcept operator, unhandled form or "
+                                     "no noexcept in function types");
     expression_meaning e;
     unevaluated++;
     analysis_result r = expression(n[2], e);
@@ -1167,7 +1199,9 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
                 t = type_table[t.unqualified()].operand;
             const struct type &f = type_table[t.unqualified()];
             if (f.kind != type_kind::function)
-                return not_supported(n, "expr.unary.noexcept");
+                return not_supported_because(
+                    n, "expr.unary.noexcept",
+                    "noexcept of a call whose callee has no function type");
             /* clang: a function with the nothrow attribute has a
                non-throwing type */
             const semantic_node &callee = semantics[callee_node];
@@ -1176,7 +1210,10 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
             /* [impl.clang] the attribute is ignored with a
                noexcept(false): whether there is one is not kept */
             if (nothrow && !f.non_throwing)
-                return not_supported(n, "expr.unary.noexcept");
+                return not_supported_because(
+                    n, "expr.unary.noexcept",
+                    "noexcept of a call to a nothrow function declared without "
+                    "noexcept");
             if (!f.non_throwing) {
                 throwing = true;
                 break;
@@ -1200,7 +1237,10 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
                         break;
                     }
                     if (!known)
-                        return not_supported(n, "except.spec");
+                        return not_supported_because(
+                            n, "except.spec",
+                            "noexcept of an implicit constructor with unknown "
+                            "exception specification");
                 } else if (!type_table[c.type.unqualified()].non_throwing) {
                     throwing = true;
                     break;
@@ -1215,7 +1255,9 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
         default:
             /* a temporary's destruction, a new- or delete-expression, a
                member pointer: no rule here */
-            return not_supported(n, "expr.unary.noexcept");
+            return not_supported_because(
+                n, "expr.unary.noexcept",
+                "noexcept of an operand with a construct that has no rules");
         }
     }
     return analysis_result::well_formed;

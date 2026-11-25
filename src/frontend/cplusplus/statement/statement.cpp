@@ -497,7 +497,8 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
     scoped_value<bool> named(argument_named, false);
     built = 0;
     if (s.is_token())
-        return not_supported(current_declaration, "stmt.pre");
+        return not_supported_because(current_declaration, "stmt.pre",
+                                     "a statement that is a single token");
     /* [stmt.dcl]/1: a block-declaration that declares no object: no code */
     auto declares_nothing = [&](SyntaxRef d) {
         analysis_result r = declaration_by_kind(d);
@@ -509,7 +510,9 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
     auto view = s.statement();
     if (!view)
         /* a node the grammar does not place in a statement */
-        return not_supported(s.index());
+        return not_supported_because(
+            s.index(), syntax_kind_subclause(SyntaxRef(s.index()).kind()),
+            "a node that is no statement");
     return view.visit(Overloaded{
         [&](GnuExtensionDeclaration x) {
             /* [ext:gnu_extension_keyword]: __extension__ changes no meaning */
@@ -522,7 +525,10 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
         [&](TryBlock c) { return try_block(c, built); },
         /* (jump-statement's sum also has these two kinds: the sum's case
            would take them, and report their own subclauses elsewhere) */
-        [&](CoroutineReturnStatement c) { return not_supported(c); },
+        [&](CoroutineReturnStatement c) {
+            return not_supported_because(c, syntax_kind_subclause(c.kind()),
+                                         "a coroutine return statement");
+        },
         [&](GnuComputedGoto c) { return gnu_computed_goto(c, built); },
         [&](GnuAsmStatement c) { return gnu_asm_statement(c, built); },
         [&](JumpStatement c) { return jump_statement(c, built); },
@@ -553,7 +559,9 @@ analysis_result semantic_analysis::statement(SyntaxElement s, uint32_t &built)
         [&](Statement other) {
             if (other.is(syntax_kind::statement))
                 return attributed_statement(other, built);
-            return not_supported(other);
+            return not_supported_because(other,
+                                         syntax_kind_subclause(other.kind()),
+                                         "a statement of this kind");
         }});
 }
 
@@ -619,7 +627,8 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
 {
     /* the attribute-specifiers, then the statement */
     if (n.size() < 2)
-        return not_supported(n, "stmt.pre");
+        return not_supported_because(
+            n, "stmt.pre", "an attributed statement with too few parts");
     SyntaxElement inner = n[n.size() - 1];
     bool declaration = inner.is(syntax_kind::simple_declaration);
     for (uint32_t i = 0; i + 1 < n.size(); i++) {
@@ -627,7 +636,9 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
         if (!c.is(syntax_kind::attribute_specifier,
                   syntax_kind::attribute_specifier_seq,
                   syntax_kind::gnu_attribute_specifier))
-            return not_supported(n, "dcl.attr");
+            return not_supported_because(
+                n, "dcl.attr",
+                "an unexpected part before an attributed statement");
         /* [dcl.attr.grammar]/6: the attributes that change nothing vcc
            generates, and those clang does not know (it ignores them), may
            stand before any statement [impl.clang] */
@@ -674,13 +685,18 @@ analysis_result semantic_analysis::attributed_statement(Statement n,
             if (a == statement_attribute::code_align) {
                 if (!inner.is(syntax_kind::iteration_statement) ||
                     !code_align_argument(t + 1))
-                    return not_supported(n, "dcl.attr");
+                    return not_supported_because(n, "dcl.attr",
+                                                 "a code_align attribute not "
+                                                 "on a loop with an argument");
                 /* (past the argument's three tokens) */
                 t += 3;
             } else if (a == statement_attribute::fallthrough) {
                 if (!inner.is(syntax_kind::expression_statement) ||
                     inner.size() != 1 || function_state.switches.empty())
-                    return not_supported(n, "dcl.attr.fallthrough");
+                    return not_supported_because(
+                        n, "dcl.attr.fallthrough",
+                        "a fallthrough attribute not on an empty statement in "
+                        "a switch");
             } else if (a != statement_attribute::likely &&
                        a != statement_attribute::unlikely && !wrapper) {
                 /* assume (C++23, not in n4861): its argument is a
@@ -789,7 +805,9 @@ analysis_result semantic_analysis::condition(SyntaxElement c, bool for_switch,
     uint32_t declaration = 0;
     if (c.is(syntax_kind::condition)) {
         if (at.size() != 3 || !at[0].is(syntax_kind::decl_specifier_seq))
-            return not_supported(at, "dcl.attr");
+            return not_supported_because(
+                at, "dcl.attr",
+                "a condition declaration with attributes or no specifiers");
         specified s;
         placeholder_allowed = true;
         scoped_value<qualified_type> deduced(declaration_deduced,
@@ -862,7 +880,9 @@ analysis_result semantic_analysis::switch_condition(SyntaxRef at,
     if (!is_integral(m.type)) {
         if (fundamental_of(m.type) == fundamental_type::none &&
             !is_pointer(m.type))
-            return not_supported(at, "stmt.switch");
+            return not_supported_because(
+                at, "stmt.switch",
+                "a switch condition of class or other non-integral type");
         return ill_formed(at,
                           "the condition shall be of integral type, "
                           "enumeration type, or class type",

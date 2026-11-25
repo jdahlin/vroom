@@ -62,7 +62,9 @@ analysis_result semantic_analysis::complex_type(SyntaxRef seq,
     else if (k.float128 == 1 && keywords == 1)
         t = fundamental_type::float128;
     else if (keywords != 0)
-        return not_supported(seq, "ext.gnu");
+        return not_supported_because(
+            seq, "ext.gnu",
+            "_Complex with this combination of type specifiers");
     type = type_table.complex_of(
         qualified_type::make(type_table.fundamental(t), cv_none));
     return analysis_result::well_formed;

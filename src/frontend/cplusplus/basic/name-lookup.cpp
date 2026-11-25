@@ -871,7 +871,9 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
         /* [temp.names]/4: template before a simple-template-id after a
            nested-name-specifier */
         if (part.has_template && !qualified)
-            return not_supported(n, "basic.lookup.qual");
+            return not_supported_because(
+                n, "basic.lookup.qual",
+                "the keyword template in an unqualified nested-name-specifier");
         if (scope.dependent) {
             /* [temp.dep.type]/6: "A qualified-id in which the
                nested-name-specifier names a dependent type that is not the
@@ -885,7 +887,10 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                 break;
             }
             if (!part.name.is_identifier() || !part.scoped)
-                return not_supported(n, "temp.res");
+                return not_supported_because(
+                    n, "temp.res",
+                    "a dependent nested-name-specifier part that is no plain "
+                    "name");
             scope.dependent = dependent_member_type(
                 scope.dependent, tokens.identifier(part.name.token()));
             continue;
@@ -936,7 +941,9 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                       "a nested-name-specifier shall name a "
                                       "class, enumeration, or namespace",
                                       "basic.lookup.qual");
-                return not_supported(n, "temp.res");
+                return not_supported_because(n, "temp.res",
+                                             "a nested-name-specifier naming a "
+                                             "dependent type or enumeration");
             }
             require_complete(st.entity);
             const entity &x = entity_table[st.entity];
@@ -956,7 +963,9 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                                       "has no definition for this "
                                       "specialization",
                                       "basic.lookup.qual");
-                return not_supported(n, "basic.lookup.qual");
+                return not_supported_because(
+                    n, "basic.lookup.qual",
+                    "a nested-name-specifier naming an incomplete class");
             }
             scope.entity = st.entity;
             scope.global = false;
@@ -966,8 +975,12 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
         if (!part.name.is_identifier() || !part.scoped) {
             /* [temp.names]: template before a simple-template-id */
             if (part.name.is(syntax_kind::simple_template_id))
-                return not_supported(n, "temp.names");
-            return not_supported(n, "basic.lookup.qual");
+                return not_supported_because(n, "temp.names",
+                                             "a template-id in this position "
+                                             "of a nested-name-specifier");
+            return not_supported_because(
+                n, "basic.lookup.qual",
+                "a nested-name-specifier part that is not a plain name");
         }
         token_index t = part.name.token();
         uint32_t name = tokens.identifier(t);
@@ -1000,7 +1013,10 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
             if (named.kind == type_kind::template_parameter ||
                 named.kind == type_kind::dependent) {
                 if (!dependent_allowed)
-                    return not_supported(n, "temp.res");
+                    return not_supported_because(
+                        n, "temp.res",
+                        "a dependent typedef-name in a nested-name-specifier "
+                        "here");
                 scope.entity = 0;
                 scope.global = false;
                 scope.dependent = entity_table[e].type.unqualified();
@@ -1059,10 +1075,14 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
                are looked up, so it is complete or being defined */
             if (!incomplete_allowed && !x.size && e != defining_class &&
                 !x.defined)
-                return not_supported(n, "basic.lookup.qual");
+                return not_supported_because(
+                    n, "basic.lookup.qual",
+                    "a member lookup in a class that is not yet defined");
         } else if (x.kind != entity_kind::namespace_entity &&
                    x.kind != entity_kind::enumeration) {
-            return not_supported(n, "basic.lookup.qual");
+            return not_supported_because(n, "basic.lookup.qual",
+                                         "a nested-name-specifier naming no "
+                                         "class, namespace or enumeration");
         }
         if (x.kind != entity_kind::namespace_entity && x.enclosing &&
             entity_table[x.enclosing].kind == entity_kind::class_type &&
@@ -1078,7 +1098,9 @@ analysis_result semantic_analysis::nested_name_specifier(NestedNameSpecifier n,
         qualified = true;
     }
     if (!qualified)
-        return not_supported(n, "basic.lookup.qual");
+        return not_supported_because(
+            n, "basic.lookup.qual",
+            "a nested-name-specifier with no named part");
     return analysis_result::well_formed;
 }
 

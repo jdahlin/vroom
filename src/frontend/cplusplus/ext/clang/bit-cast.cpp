@@ -95,12 +95,16 @@ analysis_result semantic_analysis::clang_bit_cast(SyntaxRef n,
     VTRY_SET(r, expression(n[4], m));
     if (depends_on_template_parameter(to) ||
         depends_on_template_parameter(m.type))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "__builtin_bit_cast with a dependent type or operand");
     to = qualified_type::make(to.unqualified(), cv_none);
     bool pointer = is_pointer(to) || is_pointer(m.type);
     if ((!is_arithmetic(to) && !is_pointer(to)) ||
         (!is_arithmetic(m.type) && !is_pointer(m.type)))
-        return not_supported(n, "bit.cast");
+        return not_supported_because(n, "bit.cast",
+                                     "__builtin_bit_cast of a type that is "
+                                     "neither arithmetic nor a pointer");
     if (size_of_type(to) != size_of_type(m.type))
         return ill_formed(n,
                           "__builtin_bit_cast requires sizeof(To) == "

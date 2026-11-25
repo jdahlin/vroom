@@ -47,7 +47,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     }
     /* ... or a function template's specialization, declared or defined */
     if (n.size() != 4 || n[3].is_token())
-        return not_supported(n, "temp.expl.spec");
+        return not_supported_because(
+            n, "temp.expl.spec",
+            "an explicit specialization with no declaration of a handled form");
     auto inner = n[3];
     /* [temp.expl.spec]/16: template <> template <> ... (explicit
        specialization of a member function template of an explicitly or
@@ -81,7 +83,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                                                            def, false);
             }
             if (only && only.is(syntax_kind::class_specifier))
-                return not_supported(n, "temp.expl.spec");
+                return not_supported_because(
+                    n, "temp.expl.spec",
+                    "a member class specialization of this class or form");
             /* [temp.expl.spec]/16: a member variable template of an
                implicit instantiation (template<> template<int> constexpr
                int A<int>::u = 3;) */
@@ -89,7 +93,10 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                 analysis_result vr = variable_template_definition(inner, def);
                 if (vr == analysis_result::well_formed)
                     return vr;
-                return not_supported(n, "temp.expl.spec");
+                return not_supported_because(
+                    n, "temp.expl.spec",
+                    "a member variable template specialization that fails to "
+                    "analyse");
             }
         }
         uint32_t lead_attr = leading_gnu_attributes(def);
@@ -104,7 +111,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                                                      false, true);
             }
         }
-        return not_supported(n, "temp.expl.spec");
+        return not_supported_because(
+            n, "temp.expl.spec",
+            "a nested template specialization of an unhandled member");
     }
     entity_index qualifier = 0;
     if (SyntaxRef id = variable_specialization_id(inner)) {
@@ -124,7 +133,10 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                     if (sp.is(standard_keyword::static_))
                         internal = true;
             if (nested_explicit_specialization || internal)
-                return not_supported(n, "temp.expl.spec");
+                return not_supported_because(
+                    n, "temp.expl.spec",
+                    "a nested or internal-linkage variable specialization "
+                    "declared only");
         }
         return variable_specialization(n, inner, id, qualifier);
     }
@@ -141,11 +153,15 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     for (uint32_t i = 0; i < lead; i++)
         if (!inner[i].is(syntax_kind::gnu_attribute_specifier) ||
             !gnu_attributes_without_effect(inner[i]))
-            return not_supported(n, "temp.expl.spec");
+            return not_supported_because(n, "temp.expl.spec",
+                                         "an explicit specialization with an "
+                                         "attribute that has an effect");
     bool defines = inner.is(syntax_kind::function_definition);
     /* [dcl.fct.def.delete], = default: not yet */
     if (defines && !inner.function_definition().function_body().plain())
-        return not_supported(n, "temp.expl.spec");
+        return not_supported_because(
+            n, "temp.expl.spec",
+            "a deleted, defaulted or non-plain explicit specialization body");
     /* [temp.expl.spec]/1.3: explicit specialization of a non-template member
        function of a class template specialization (template<> R C<T>::f(...)) */
     {
@@ -320,7 +336,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         return analysis_result::well_formed;
     if (entity_table[e].defined)
         /* [basic.def.odr]/1: a second definition */
-        return not_supported(n, "basic.def.odr");
+        return not_supported_because(
+            n, "basic.def.odr",
+            "a second definition of an explicit specialization");
     /* the definition: the function-definition's declarator declares the
        specialization again (declare_specialization), its body analysed
        as any function's */
@@ -335,7 +353,9 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
     current_scope = saved_scope;
     if (r == analysis_result::well_formed &&
         last_declared != instantiations[index].specialization)
-        return not_supported(n, "temp.expl.spec");
+        return not_supported_because(
+            n, "temp.expl.spec",
+            "a specialization definition that declares a different entity");
     entity_table[e].defined = true;
     return r;
 }
@@ -350,14 +370,20 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
     /* [extern] template declaration */
     bool extern_ = n.size() == 3;
     if ((n.size() != 2 && n.size() != 3) || n[n.size() - 1].is_token())
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "an explicit instantiation of an unhandled form");
     /* [temp.explicit]/3: "An explicit instantiation shall appear in an
        enclosing namespace of its template": here, its own */
     if (!is_namespace(current_scope) || defining_class || function_state.active)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "an explicit instantiation outside plain namespace scope");
     auto d = n[n.size() - 1];
     if (!d.is(syntax_kind::simple_declaration))
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "an explicit instantiation that is not a simple-declaration");
     /* [ext:gnu_attributes] before the declaration, as libc++'s
        extern template _LIBCPP_EXPORTED_FROM_ABI void f<T>(T): only those
        that change nothing vcc generates (visibility("default")) */
@@ -365,7 +391,9 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
     for (uint32_t i = 0; i < lead; i++)
         if (!d[i].is(syntax_kind::gnu_attribute_specifier) ||
             !gnu_attributes_without_effect(d[i]))
-            return not_supported(n, "temp.explicit");
+            return not_supported_because(n, "temp.explicit",
+                                         "an explicit instantiation with an "
+                                         "attribute that has an effect");
     SyntaxTail tail(d, lead);
     if (tail.size() == 2 && tail[0].is(syntax_kind::decl_specifier_seq) &&
         tail[0].size() == 1 &&
@@ -408,7 +436,9 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
             if (!scope.entity ||
                 (!is_namespace(scope.entity) &&
                  entity_table[scope.entity].kind != entity_kind::class_type))
-                return not_supported(n, "temp.explicit");
+                return not_supported_because(n, "temp.explicit",
+                                             "an instantiation qualified by no "
+                                             "known namespace or class");
             qualifier = scope.entity;
             id++;
         }
@@ -436,7 +466,9 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
         return member_explicit_instantiation(n, d, lead, extern_);
     if (tail.size() != 3 || !tail[0].is(syntax_kind::decl_specifier_seq) ||
         tail[1].is_token() || !tail[2].is(preprocessing_op_or_punc::SEMICOLON))
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "an explicit instantiation declaration of an unhandled form");
     /* a member function of a class template's specialization:
        S<A>::f(...) */
     /* (a pointer or reference return type puts the name under ptr-declarator:
@@ -629,12 +661,16 @@ semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
     for (const template_argument &a : arguments)
         if (a.kind == template_argument::kind_t::pack ||
             depends_on_template_parameter(a.type) || a.template_entity)
-            return not_supported(n, "temp.expl.spec");
+            return not_supported_because(
+                n, "temp.expl.spec",
+                "a variable specialization with pack or dependent arguments");
     const function_template ft = function_templates[vt - 1];
     uint32_t count = static_cast<uint32_t>(arguments.size());
     if (count != ft.parameter_count ||
         find_instantiation(ft.entity, arguments.data(), count))
-        return not_supported(n, "temp.expl.spec");
+        return not_supported_because(n, "temp.expl.spec",
+                                     "a variable specialization already used "
+                                     "or with a wrong argument count");
     uint32_t index = record_instantiation(ft, arguments.data(), count);
     instantiations[index].explicit_specialization = true;
     variable_instantiating = index + 1;
@@ -645,7 +681,9 @@ semantic_analysis::variable_specialization(SyntaxRef n, SyntaxRef inner,
     if (r != analysis_result::well_formed)
         return r;
     if (!instantiations[index].specialization)
-        return not_supported(n, "temp.expl.spec");
+        return not_supported_because(
+            n, "temp.expl.spec",
+            "a variable specialization that declared no variable");
     instantiations[index].defined = true;
     return analysis_result::well_formed;
 }
@@ -659,7 +697,9 @@ analysis_result semantic_analysis::variable_explicit_instantiation(
     SyntaxRef n, SyntaxRef d, uint32_t lead, SyntaxRef id, bool extern_)
 {
     if (lead || !d[0].is(syntax_kind::decl_specifier_seq))
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "an attributed variable instantiation or one without specifiers");
     lookup_result x;
     entity_index named = 0;
     template_id_name(id, x, named);
@@ -667,14 +707,20 @@ analysis_result semantic_analysis::variable_explicit_instantiation(
     owned_array<template_argument> arguments;
     VTRY(r, template_id_arguments(id, vt, arguments));
     if (dependent_arguments(arguments))
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a variable template instantiation with dependent arguments");
     for (const template_argument &a : arguments)
         if (a.kind == template_argument::kind_t::pack || a.template_entity)
-            return not_supported(n, "temp.explicit");
+            return not_supported_because(n, "temp.explicit",
+                                         "a variable template instantiation "
+                                         "with a pack or template argument");
     specified s;
     VTRY_SET(r, decl_specifier_seq(d[0], s, false));
     if (s.static_ || s.extern_ || s.typedef_ || s.constexpr_ || s.inline_)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a variable template instantiation with an extra specifier");
     entity_index e = 0;
     VTRY_SET(r,
              instantiate_variable(n, vt, arguments.data(),
@@ -693,7 +739,9 @@ analysis_result semantic_analysis::variable_explicit_instantiation(
         entity_table[e].explicitly_instantiated != instantiation_kind::none ||
         !namespace_encloses(current_scope,
                             entity_table[primary.entity].enclosing))
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(n, "temp.explicit",
+                                     "a variable instantiation of mismatched "
+                                     "type, linkage or namespace");
     mark_explicit_instantiation(e, extern_);
     return analysis_result::well_formed;
 }
@@ -1147,7 +1195,9 @@ analysis_result semantic_analysis::class_explicit_instantiation(
     lookup_result x;
     entity_index named = 0;
     if (!template_id_name(id, x, named, qualifier))
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a class instantiation whose template-id is not resolved");
     uint32_t ct = class_template_of(named);
     if (!ct) {
         analysis_result refused = not_supported(n, "temp.explicit");
@@ -1159,7 +1209,9 @@ analysis_result semantic_analysis::class_explicit_instantiation(
     /* (a qualified name found the template in the nominated scope) */
     if (!qualifier &&
         !declared_in_scope_of(function_templates[ct - 1].entity, current_scope))
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a class template instantiation from another scope");
     entity_index t = function_templates[ct - 1].entity;
     /* whether the specialization was named before (/11: a declaration
        after an implicit instantiation is left to clang) */
@@ -1168,16 +1220,22 @@ analysis_result semantic_analysis::class_explicit_instantiation(
     analysis_result r = template_id_arguments(id, ct, arguments);
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a class instantiation whose template arguments fail");
     uint32_t prior = find_instantiation(
         t, arguments.data(), static_cast<uint32_t>(arguments.size()));
     type_index type = 0;
     r = template_type(id, qualifier, qualifier != 0, type);
     if (r != analysis_result::well_formed)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a class instantiation whose template-id forms no type");
     const struct type &ty = type_table[type];
     if (ty.kind != type_kind::class_type)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a class instantiation whose template-id names no class type");
     entity_index c = ty.entity;
     /* [temp.explicit]: an explicit instantiation of a class that was
        explicitly specialized, declared only or defined, has no effect
@@ -1196,7 +1254,9 @@ analysis_result semantic_analysis::class_explicit_instantiation(
            ([temp.spec]/5): not judged */
         for (uint32_t done : specializations_instantiated)
             if (done == k + 1)
-                return not_supported(n, "temp.explicit");
+                return not_supported_because(
+                    n, "temp.explicit",
+                    "a repeated instantiation of an explicit specialization");
         specializations_instantiated.append(static_cast<uint32_t>(k + 1));
         return analysis_result::well_formed;
     }
@@ -1217,32 +1277,42 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
                                                                 uint32_t prior)
 {
     if (!c || entity_table[c].kind != entity_kind::class_type)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "an explicit instantiation of something that is not a class");
     entity_index outer = entity_table[c].enclosing;
     bool member_class = !entity_table[c].instantiation;
     if (member_class) {
         /* (a member class of a class template's specialization) */
         if (!outer || entity_table[outer].kind != entity_kind::class_type ||
             !entity_table[outer].instantiation)
-            return not_supported(n, "temp.explicit");
+            return not_supported_because(n, "temp.explicit",
+                                         "a member class instantiation not "
+                                         "within a class specialization");
         /* [temp.explicit]/2: in a namespace enclosing the template's */
         entity_index home = outer;
         while (home && !is_namespace(home))
             home = entity_table[home].enclosing;
         if (!is_namespace(current_scope) ||
             !namespace_encloses(current_scope, home))
-            return not_supported(n, "temp.explicit");
+            return not_supported_because(n, "temp.explicit",
+                                         "a member class instantiation outside "
+                                         "the enclosing namespaces");
         require_complete(outer);
         if (!entity_table[outer].defined || entity_table[outer].union_ ||
             entity_table[outer].explicitly_instantiated !=
                 instantiation_kind::none)
-            return not_supported(n, "temp.explicit");
+            return not_supported_because(n, "temp.explicit",
+                                         "an instantiation of a member class "
+                                         "of an unsuitable specialization");
     }
     /* [temp.explicit]/10: an explicit instantiation defines the class */
     require_complete(c);
     const entity &k = entity_table[c];
     if (!k.defined)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "an explicit instantiation of an undefined class");
     if (k.union_)
         return not_supported_because(n, "temp.explicit",
                                      "an explicit instantiation of a union");
@@ -1253,7 +1323,9 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
            instantiation */
         if (record.pattern &&
             !function_templates[record.pattern - 1].parameter_count)
-            return not_supported(n, "temp.explicit");
+            return not_supported_because(
+                n, "temp.explicit",
+                "an explicit instantiation of an explicitly specialized class");
         /* /10's members defined outside the class: one that failed is not
            known to be well-formed for this class */
         for (const template_member_definition &m :
@@ -1263,12 +1335,17 @@ analysis_result semantic_analysis::explicitly_instantiate_class(SyntaxRef n,
             for (const analysed_declaration &a : declarations)
                 if (a.node == m.declaration &&
                     a.result != analysis_result::well_formed)
-                    return not_supported(n, "temp.explicit");
+                    return not_supported_because(
+                        n, "temp.explicit",
+                        "a class instantiation with a member definition that "
+                        "failed");
         }
     }
     instantiation_kind was = entity_table[c].explicitly_instantiated;
     if (was == instantiation_kind::definition)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a repeated explicit instantiation definition of a class");
     mark_explicit_instantiation(c, extern_);
     if (!extern_)
         explicit_instantiation_record(c, n);
@@ -1326,39 +1403,53 @@ analysis_result semantic_analysis::member_explicit_instantiation(
     expressions.resize(expressions_before);
     name_uses.resize(uses_before);
     if (r != analysis_result::well_formed)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a member instantiation whose declarator fails");
     if (!m.has_id || !m.qualifier || m.literal_operator || defaults ||
         s.typedef_ || s.static_ || s.extern_ || s.inline_ || s.constexpr_ ||
         s.gnu_flags || m.gnu_flags || s.aligned || m.aligned || s.section ||
         m.section || m.asm_label)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a member instantiation with unhandled specifiers or declarator");
     /* a static data member (const B<char>::size_type B<char>::npos) */
     bool variable = type_table[type.unqualified()].kind != type_kind::function;
     if (variable && !has_specifiers)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a non-function member instantiation without specifiers");
     const entity c = entity_table[m.qualifier];
     if (c.kind != entity_kind::class_type || !c.instantiation ||
         entity_table[c.enclosing].kind == entity_kind::class_type ||
         c.enclosing != current_scope)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a member instantiation not of a specialization in this namespace");
     const instantiation_record record = instantiations[c.instantiation - 1];
     if (record.pattern &&
         !function_templates[record.pattern - 1].parameter_count)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a member instantiation of an explicitly specialized class");
     /* the member: one function of the name, of the declared type (the
        definition outside its class, if waiting, made now: [temp.explicit]/10) */
     define_waiting_members(m.qualifier, m.id);
     entity_index f =
         explicit_instantiation_target(c, m, type, cv, has_specifiers, variable);
     if (!f || entity_table[f].enclosing != m.qualifier)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a member instantiation that matches no member");
     if (variable) {
         /* an explicit instantiation declaration: the member is defined
            where the definition is instantiated, which a use asks for */
         if (extern_) {
             if (entity_table[f].explicitly_instantiated ==
                 instantiation_kind::definition)
-                return not_supported(n, "temp.explicit");
+                return not_supported_because(
+                    n, "temp.explicit",
+                    "a member instantiation declaration after the definition");
             mark_explicit_instantiation(f, true);
             return analysis_result::well_formed;
         }
@@ -1386,12 +1477,16 @@ analysis_result semantic_analysis::member_explicit_instantiation(
        declaration of one is allowed: its definition is another
        translation unit's) */
     if (!extern_ && !entity_table[f].defined)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "an explicit instantiation of an undefined member");
     /* (a declaration: whether a use before it was emitted is left to
        clang) */
     instantiation_kind was = explicitly_instantiated(f);
     if (was == instantiation_kind::definition)
-        return not_supported(n, "temp.explicit");
+        return not_supported_because(
+            n, "temp.explicit",
+            "a repeated explicit instantiation definition of a member");
     mark_explicit_instantiation(f, extern_);
     return analysis_result::well_formed;
 }

@@ -134,17 +134,25 @@ analysis_result semantic_analysis::anonymous_union_member(entity_index c,
        namespace */
     bool in_namespace = is_namespace(c);
     if (in_namespace && !s.static_)
-        return not_supported(n, "class.union.anon");
+        return not_supported_because(
+            n, "class.union.anon",
+            "a namespace-scope anonymous union that is not static");
     if (s.typedef_ || (s.static_ && !in_namespace) || s.extern_ || s.mutable_ ||
         s.inline_ || s.constexpr_ || s.type.cv() || s.aligned || s.gnu_flags ||
         record.kind != type_kind::class_type)
-        return not_supported(n, "class.union.anon");
+        return not_supported_because(
+            n, "class.union.anon",
+            "an anonymous union with a storage class, specifier, cv-qualifier "
+            "or attribute, or not of class type");
     entity_index u = record.entity;
     const entity &x = entity_table[u];
     if (x.base_count || !size_of_type(s.type))
-        return not_supported(n, "class.union.anon");
+        return not_supported_because(
+            n, "class.union.anon",
+            "an anonymous union with a base class or no size");
     if (in_namespace && !x.union_)
-        return not_supported(n, "class.union.anon");
+        return not_supported_because(n, "class.union.anon",
+                                     "a namespace-scope anonymous struct");
     for (entity_index f = u + 1; f < entity_table.size(); f++) {
         const entity &member = entity_table[f];
         if (member.enclosing == u && member.kind == entity_kind::variable &&
@@ -234,7 +242,9 @@ analysis_result semantic_analysis::bind_anonymous_members(entity_index c,
         if (entity_table.find(c, member.name))
             /* [class.mem]/5: "A member shall not be declared twice in the
                member-specification" */
-            return not_supported(n, "class.union.anon");
+            return not_supported_because(
+                n, "class.union.anon",
+                "an anonymous union member whose name is already declared");
         entity_table.bind(c, member.name, m);
     }
     return analysis_result::well_formed;
@@ -252,7 +262,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     SyntaxRef postponed_declaration = current_declaration;
     auto head = n.class_specifier().class_head();
     if (!head)
-        return not_supported(n, "class.pre");
+        return not_supported_because(n, "class.pre",
+                                     "a class-specifier without a class-head");
     /* class-key attribute-specifier-seq_opt class-head-name ...: the
        alignment-specifiers left out of head_children, kept in alignas */
     owned_array<SyntaxElement> head_list;
@@ -305,11 +316,16 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         (gnu.flags & ~(gnu_hidden_visibility | gnu_abi_tag |
                        gnu_exclude_from_explicit_instantiation | gnu_packed |
                        gnu_dllimport)))
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "a class-head attribute other than the handled ones, such as "
+            "aligned or section");
     const SyntaxElement *head_children = head_list.data();
     uint32_t head_count = static_cast<uint32_t>(head_list.size());
     if (!head_count || !head_children[0].is_token())
-        return not_supported(n, "class.pre");
+        return not_supported_because(
+            n, "class.pre",
+            "a class-head that does not start with a class-key");
     /* [class.pre]/1: "A class-specifier whose class-head omits the
        class-head-name defines an unnamed class." */
     bool unnamed = head_count == 1;
@@ -327,7 +343,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         head_name = name_syntax[0].token();
     } else if (auto qualified = name_syntax.qualified_class_head_name()) {
         if (!qualified.nested_name_specifier())
-            return not_supported(n, "temp.spec");
+            return not_supported_because(
+                n, "temp.spec",
+                "a qualified class-head-name without a nested-name-specifier");
         if (qualified.identifier()) {
             head_qualifier = qualified.nested_name_specifier().index();
             head_name = qualified.identifier().token();
@@ -336,7 +354,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             head_qualifier = qualified.nested_name_specifier().index();
             head_name = name_syntax[1][0].token();
         } else {
-            return not_supported(n, "temp.spec");
+            return not_supported_because(
+                n, "temp.spec",
+                "a qualified class-head-name that ends in neither an "
+                "identifier nor an instantiated template-id");
         }
     } else if (!unnamed) {
         return not_supported_because(
@@ -359,18 +380,24 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         head_count == next + 1 && !unnamed && head_children[next].base_clause();
     if (head_count > next && !has_bases)
         /* a class-virt-specifier, a base-clause of an unnamed class */
-        return not_supported(n, "class.derived");
+        return not_supported_because(
+            n, "class.derived",
+            "extra class-head parts, such as bases on an unnamed class or an "
+            "unhandled virt-specifier");
     standard_keyword key = head_children[0].keyword();
     if (!is_class_key(key))
-        return not_supported(n, "class.pre");
+        return not_supported_because(
+            n, "class.pre", "a class-head whose first keyword is no class-key");
     /* #pragma pack and the like change the layout: no rules yet, for the
        classes in a region of one */
     if (tokens.layout_pragma_at(n.first_token()))
-        return not_supported(n, "cpp.pragma");
+        return not_supported_because(n, "cpp.pragma",
+                                     "a class in a region of a layout pragma");
     /* [class.union]/1: "A union shall not have base classes." (clang's
        error) */
     if (key == standard_keyword::union_ && has_bases)
-        return not_supported(n, "class.union");
+        return not_supported_because(n, "class.union",
+                                     "a union with a base-clause");
     /* [class.nest]/1: "A class can be declared within another class.  A
        class so declared is called a nested class."  [class.local]/1: "A
        class can be declared within a function definition; such a class is
@@ -392,7 +419,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            previous declaration."  A member of a namespace; a nested class
            defined outside its class has no rules yet */
         if (outer || at_block_scope() || function_state.active)
-            return not_supported(n, "class.pre");
+            return not_supported_because(
+                n, "class.pre",
+                "a qualified class definition inside a class or function");
         nominated_scope q;
         VTRY(qr, nested_name_specifier(head_qualifier, q));
         if (!is_namespace(q.entity)) {
@@ -417,7 +446,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                     note_held(y);
                     entity_table[y].size = 0;
                 }
-                return not_supported(n, "class.nest");
+                return not_supported_because(
+                    n, "class.nest",
+                    "a nested class definition qualified by a class that "
+                    "cannot take it");
             }
             scope = q.entity;
         } else {
@@ -426,7 +458,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             if (!found.entity ||
                 entity_table[found.entity].kind != entity_kind::class_type ||
                 entity_table[found.entity].enclosing != found.found_in)
-                return not_supported(n, "class.pre");
+                return not_supported_because(n, "class.pre",
+                                             "a qualified class definition "
+                                             "with no matching class found");
             bool directly = true;
             for (entity_index y = found.found_in; y != q.entity;
                  y = entity_table[y].enclosing)
@@ -440,7 +474,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 entity_table[found.entity].kind = entity_kind::none;
                 note_held(found.entity);
                 entity_table[found.entity].size = 0;
-                return not_supported(n, "class.pre");
+                return not_supported_because(
+                    n, "class.pre",
+                    "a qualified class definition in a namespace that may not "
+                    "define it");
             }
             scope = found.found_in;
         }
@@ -454,7 +491,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     entity_index c = 0;
     if (specialization) {
         if (unnamed || outer)
-            return not_supported(n, "temp.class");
+            return not_supported_because(
+                n, "temp.class",
+                "an unnamed or nested class as a template specialization");
         id = head_name;
         name = tokens.identifier(id);
         /* (one named before its template was defined is the incomplete
@@ -506,7 +545,9 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 note_held(c);
                 entity_table[c].size = 0;
             }
-            return not_supported(n, "namespace.udecl");
+            return not_supported_because(
+                n, "namespace.udecl",
+                "a class definition of a name bound by a using-declaration");
         }
     }
     /* [basic.scope.hiding]/2: "If a class name or enumeration name and a
@@ -541,11 +582,15 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         redeclared = true;
         entity &prior = entity_table[c];
         if (prior.kind == entity_kind::none)
-            return not_supported(n, "basic.scope.declarative");
+            return not_supported_because(n, "basic.scope.declarative",
+                                         "a class definition of a name whose "
+                                         "declaration was not analysed");
         if (prior.kind != entity_kind::class_type)
             /* a class and a variable or function of one name
                ([basic.scope.hiding]/2) */
-            return not_supported(n, "basic.scope.hiding");
+            return not_supported_because(
+                n, "basic.scope.hiding",
+                "a class with the name of an entity that is no class");
         /* [basic.def.odr]/1: "No translation unit shall contain more than
            one definition of any variable, function, class type,
            enumeration type, template, default argument for a parameter
@@ -563,7 +608,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
            refers ... the union class-key shall be used to refer to a
            union" (an earlier declaration with another class-key) */
         if (prior.union_ != (key == standard_keyword::union_))
-            return not_supported(n, "dcl.type.elab");
+            return not_supported_because(
+                n, "dcl.type.elab",
+                "a class definition whose class-key disagrees about union with "
+                "its declaration");
     } else {
         c = entity_table.make(entity_kind::class_type, name, scope);
         /* [basic.link]/2.3: a local class's name has no linkage; a nested
@@ -688,14 +736,21 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             }
             if (member.is(preprocessing_op_or_punc::COLON))
                 continue;
-            result = worse(result, not_supported(n, "class.mem"));
+            result = worse(result, not_supported_because(
+                                       n, "class.mem",
+                                       "a token in a member-specification that "
+                                       "is no access specifier or colon"));
             continue;
         }
         auto declaration = member.member_declaration();
         if (!declaration) {
             /* a node the grammar does not place here (unparsed, an
                explicit instantiation kept as an error) */
-            result = worse(result, not_supported(member));
+            result =
+                worse(result, not_supported_because(
+                                  member, syntax_kind_subclause(member.kind()),
+                                  "an element of a member-specification that "
+                                  "is no member-declaration"));
             continue;
         }
         entity_index before_member =
@@ -710,7 +765,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             for (entity_index e = before_member; e < entity_table.size(); e++)
                 if (entity_table[e].enclosing == c &&
                     entity_table[e].kind == entity_kind::none)
-                    declared = not_supported(declaration, "temp.inst");
+                    declared =
+                        not_supported_because(declaration, "temp.inst",
+                                              "an invalid nested class of a "
+                                              "class template specialization");
         result = worse(result, declared);
     }
     defining_members_first = outer_members_first;
@@ -730,7 +788,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         dynamic_class_offsets(c);
     resume_outer();
     if (layout_rule && result == analysis_result::well_formed)
-        result = not_supported(n, layout_rule);
+        result = not_supported_because(n, layout_rule,
+                                       "a class whose layout is not computed");
     if (result == analysis_result::well_formed)
         result = implicit_special_members(c, n);
     if (result != analysis_result::well_formed) {
@@ -955,7 +1014,9 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
     size_t count = e.size() - (at - 1);
     standard_keyword key = leading_keyword(n);
     if (!is_class_key(key))
-        return not_supported(n, "dcl.type.elab");
+        return not_supported_because(
+            n, "dcl.type.elab",
+            "an elaborated-type-specifier without a class-key");
     bool is_union = key == standard_keyword::union_;
     if (count == 3 && e[at].nested_name_specifier() &&
         e[at + 1].is_identifier()) {
@@ -981,7 +1042,9 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
         /* one not found may be declared by a declaration analysis has no
            rules for */
         if (!c)
-            return not_supported(n, "basic.lookup.elab");
+            return not_supported_because(
+                n, "basic.lookup.elab",
+                "a qualified elaborated class name that was not found");
         if (entity_table[c].kind == entity_kind::typedef_name)
             /* [dcl.type.elab]/2: "If the identifier or simple-template-id
                resolves to a typedef-name ..., the elaborated-type-specifier
@@ -993,15 +1056,21 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
                                        "ill-formed",
                                        "dcl.type.elab");
         if (entity_table[c].kind != entity_kind::class_type)
-            return not_supported(n, "basic.lookup.elab");
+            return not_supported_because(
+                n, "basic.lookup.elab",
+                "a qualified elaborated class name that is not a class");
         if (entity_table[c].union_ != is_union)
-            return not_supported(n, "dcl.type.elab");
+            return not_supported_because(n, "dcl.type.elab",
+                                         "a qualified elaborated type whose "
+                                         "class-key disagrees about union");
         used(t, c);
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
     if (count != 2 || !e[at].is_identifier())
-        return not_supported(n, "dcl.type.elab");
+        return not_supported_because(
+            n, "dcl.type.elab",
+            "an elaborated-type-specifier of an unhandled form");
     token_index id = e[at].token();
     uint32_t name = tokens.identifier(id);
     bool sole = sole_elaborated == n;
@@ -1028,7 +1097,9 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
                        !entity_table[target].parameter_scope);
     if (!declarable &&
         (sole || entity_table[target].kind != entity_kind::class_type))
-        return not_supported(n, "basic.scope.pdecl");
+        return not_supported_because(n, "basic.scope.pdecl",
+                                     "an elaborated class declaration in a "
+                                     "scope that cannot declare it");
     entity_index c = 0;
     if (sole && defining_class) {
         /* [class.nest]: a nested class declared; one declared before in
@@ -1051,7 +1122,9 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
         }
         if (entity_table[e4].kind != entity_kind::class_type ||
             entity_table[e4].enclosing != defining_class)
-            return not_supported(n, "class.nest");
+            return not_supported_because(
+                n, "class.nest",
+                "a nested class declaration of a name bound to something else");
         c = e4;
     } else if (sole) {
         /* [basic.scope.pdecl]/7.1: only the scope that contains the
@@ -1060,19 +1133,27 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
         entity_index e3 = entity_table.find(target, name);
         if (e3 && (entity_table[e3].kind == entity_kind::none ||
                    entity_table.bound_by_using(target, name)))
-            return not_supported(n, "basic.lookup.elab");
+            return not_supported_because(
+                n, "basic.lookup.elab",
+                "a class declaration of a name bound by using or by a "
+                "declaration that was not analysed");
         if (e3 && entity_table[e3].kind == entity_kind::class_type &&
             entity_table[e3].enclosing == target) {
             c = e3;
         } else if (e3 && entity_table[e3].hidden_type) {
             c = entity_table[e3].hidden_type;
             if (entity_table[c].kind != entity_kind::class_type)
-                return not_supported(n, "basic.lookup.elab");
+                return not_supported_because(
+                    n, "basic.lookup.elab",
+                    "a hidden class name that does not refer to a class");
         } else if (e3 && entity_table[e3].kind != entity_kind::variable &&
                    entity_table[e3].kind != entity_kind::function) {
             /* a typedef-name, an enumeration, a namespace of the name:
                clang's error, by more than one rule */
-            return not_supported(n, "basic.lookup.elab");
+            return not_supported_because(
+                n, "basic.lookup.elab",
+                "a class declaration of a name bound to a non-class, "
+                "non-variable, non-function entity");
         } else {
             c = declare_class(target, name, is_union);
             declared(c);
@@ -1099,18 +1180,26 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
                                        "declare the same entity is ill-formed",
                                        "namespace.udir");
         if (found.unknown)
-            return not_supported(n, "basic.lookup.elab");
+            return not_supported_because(
+                n, "basic.lookup.elab",
+                "an elaborated class name whose lookup is unknown");
         c = found.entity;
         if (!c) {
             if (!declarable)
-                return not_supported(n, "basic.scope.pdecl");
+                return not_supported_because(
+                    n, "basic.scope.pdecl",
+                    "an undeclared elaborated class name in a scope that "
+                    "cannot declare it");
             /* declared in target; a name bound there by a declaration
                analysis did not follow, or by a using-declaration, may be
                the class's */
             entity_index e2 = entity_table.find(target, name);
             if (e2 && (entity_table[e2].kind == entity_kind::none ||
                        entity_table.bound_by_using(target, name)))
-                return not_supported(n, "basic.lookup.elab");
+                return not_supported_because(
+                    n, "basic.lookup.elab",
+                    "an undeclared elaborated class name bound by using or by "
+                    "a declaration that was not analysed");
             c = declare_class(target, name, is_union);
             declared(c);
             type = entity_table[c].type.unqualified();
@@ -1127,14 +1216,18 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
                                        "ill-formed",
                                        "dcl.type.elab");
         if (entity_table[c].kind != entity_kind::class_type)
-            return not_supported(n, "basic.lookup.elab");
+            return not_supported_because(
+                n, "basic.lookup.elab",
+                "an elaborated class name that refers to a non-class");
     }
     /* [dcl.type.elab]/3: "The class-key or enum keyword present in the
        elaborated-type-specifier shall agree in kind with the declaration to
        which the name in the elaborated-type-specifier refers ... the union
        class-key shall be used to refer to a union" */
     if (entity_table[c].union_ != is_union)
-        return not_supported(n, "dcl.type.elab");
+        return not_supported_because(
+            n, "dcl.type.elab",
+            "an elaborated type whose class-key disagrees about union");
     used(id, c);
     declared(c);
     type = entity_table[c].type.unqualified();
@@ -1573,14 +1666,22 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
             /* a conversion function ([class.conv.fct]) has no rules yet:
                reported at its conversion-function-id */
             if (SyntaxRef id = conversion_function_id_of(node))
-                return not_supported(id, "class.conv.fct");
-            return not_supported(node, "class.ctor");
+                return not_supported_because(id, "class.conv.fct",
+                                             "a conversion function without a "
+                                             "decl-specifier-seq in this form");
+            return not_supported_because(
+                node, "class.ctor",
+                "a declaration without decl-specifiers that is no recognised "
+                "special member");
         }
         if (node.is(syntax_kind::member_declaration)) {
             if (node.size() != at + 2 ||
                 !node[at + 1].is(preprocessing_op_or_punc::SEMICOLON))
                 /* = default, = delete, a pure-specifier */
-                return not_supported(node, "dcl.fct.def");
+                return not_supported_because(
+                    node, "dcl.fct.def",
+                    "a special member declaration with more than a semicolon "
+                    "after the declarator");
             virt_override = override_;
             virt_final = final_;
             analysis_result r = special_member_declarator(
@@ -1599,12 +1700,18 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
                            node[body_at].size() == 2;
         if ((!constrained && node.size() != body_at + 1) || !body ||
             body.function_try_block())
-            return not_supported(node, "dcl.fct.def.general");
+            return not_supported_because(
+                node, "dcl.fct.def.general",
+                "a special member definition with a function-try-block or "
+                "unhandled parts");
         bool satisfied = true;
         if (constrained) {
             if (!entity_table[c].instantiation || body.defaulted() ||
                 body.deleted())
-                return not_supported(node, "temp.constr");
+                return not_supported_because(
+                    node, "temp.constr",
+                    "a requires-clause on a defaulted or deleted special "
+                    "member or outside a template specialization");
             VTRY(r, constraint_satisfied(node[body_at][1], current_scope,
                                          lookup_horizon, satisfied));
         }
@@ -1697,12 +1804,18 @@ analysis_result semantic_analysis::member_declarators(
                            n[body_at].size() == 2;
         if ((!constrained && n.size() != body_at + 1) || !body ||
             body.function_try_block())
-            return not_supported(n, "dcl.fct.def.general");
+            return not_supported_because(
+                n, "dcl.fct.def.general",
+                "a member function definition with a function-try-block or "
+                "unhandled parts");
         bool satisfied = true;
         if (constrained) {
             if (!entity_table[c].instantiation || body.defaulted() ||
                 body.deleted())
-                return not_supported(n, "temp.constr");
+                return not_supported_because(
+                    n, "temp.constr",
+                    "a requires-clause on a defaulted or deleted member "
+                    "function or outside a template specialization");
             VTRY(cr, constraint_satisfied(n[body_at][1], current_scope,
                                           lookup_horizon, satisfied));
         }
@@ -1716,7 +1829,10 @@ analysis_result semantic_analysis::member_declarators(
         /* = delete: member_function_definition's deleted_definition */
         if (!body.deleted() && !body.plain() && !compared)
             /* a ctor-initializer, a function-try-block, = default */
-            return not_supported(n, "dcl.fct.def.general");
+            return not_supported_because(
+                n, "dcl.fct.def.general",
+                "a member function body that is neither plain, deleted nor an "
+                "accepted default");
         virt_override = override_;
         virt_final = final_;
         virt_pure = false;
@@ -1752,7 +1868,10 @@ analysis_result semantic_analysis::member_declarators(
                       syntax_kind::elaborated_type_specifier))
             return analysis_result::well_formed;
         /* a nested class, an anonymous union */
-        return not_supported(n, "class.mem");
+        return not_supported_because(
+            n, "class.mem",
+            "a member declaration without declarators that is no nested class "
+            "or anonymous union");
     }
     analysis_result result = analysis_result::well_formed;
     for (SyntaxElement d : declarators)
@@ -1799,7 +1918,9 @@ analysis_result semantic_analysis::member_declarator(
                 return r;
             }
             if (i > 1)
-                return not_supported(d.index(), "class.mem");
+                return not_supported_because(
+                    d.index(), "class.mem",
+                    "a member-declarator with too many parts");
         }
         /* declarator brace-or-equal-initializer: [class.mem]/10 "A
            brace-or-equal-initializer shall appear only in the declaration
@@ -1808,7 +1929,9 @@ analysis_result semantic_analysis::member_declarator(
            ([class.base.init]/9), a complete-class context ([class.mem]/6) */
         if (d.size() != 2 || !d[1].is(syntax_kind::brace_or_equal_initializer,
                                       syntax_kind::braced_init_list))
-            return not_supported(d.index(), "class.mem");
+            return not_supported_because(
+                d.index(), "class.mem",
+                "a member-declarator with an unhandled initializer or suffix");
         last_declared = 0;
         VTRY(r, member_declarator(c, declaration, d[0], s, access, definition,
                                   true));
@@ -1818,7 +1941,10 @@ analysis_result semantic_analysis::member_declarator(
             return static_member_initializer(d, e, d[1], s);
         if (!e || entity_table[e].kind != entity_kind::variable)
             /* a pure-specifier ([class.abstract]) */
-            return not_supported(d.index(), "class.abstract");
+            return not_supported_because(
+                d.index(), "class.abstract",
+                "an initializer on a member declaration that declares no "
+                "variable");
         if (entity_table[c].union_) {
             /* [class.union]/2: "At most one variant member of a union may
                have a default member initializer" */
@@ -1837,7 +1963,9 @@ analysis_result semantic_analysis::member_declarator(
     }
     if (!s.has_type && declares_special_member(c, d))
         /* a cv-qualifier or another specifier with a constructor */
-        return not_supported(declaration, "class.ctor");
+        return not_supported_because(declaration, "class.ctor",
+                                     "a constructor declared with a specifier "
+                                     "or cv-qualifier but no type");
     if (s.cxx_thread_local && !s.static_)
         /* [dcl.stc]/3: "It shall be applied only to the declaration of a
            variable of namespace or block scope, to a structured binding
@@ -1849,11 +1977,13 @@ analysis_result semantic_analysis::member_declarator(
     if (s.cxx_thread_local)
         /* a static data member of thread storage duration: its definition
            outside the class is not analysed */
-        return not_supported(declaration, "dcl.stc");
+        return not_supported_because(declaration, "dcl.stc",
+                                     "a thread_local static data member");
     if (s.constinit_)
         /* [dcl.constinit]/1: on the initializing declaration of a static
            data member, an inline one in the class */
-        return not_supported(declaration, "dcl.constinit");
+        return not_supported_because(declaration, "dcl.constinit",
+                                     "a constinit static data member");
     qualified_type type = s.type;
     declarator_meaning m;
     m.alignas_allowed = true;
@@ -1884,23 +2014,29 @@ analysis_result semantic_analysis::member_declarator(
     for (const parameter_meaning &p : function_parameters)
         parameters.append(p);
     if (!m.has_id || m.qualifier)
-        return not_supported(declaration, "class.mem");
+        return not_supported_because(
+            declaration, "class.mem",
+            "a member declarator with no name or a qualified name");
     /* [ext:gnu_attributes] the declaration's and the declarator's */
     if (s.aligned > m.aligned)
         m.aligned = s.aligned;
     /* clang's layout of a data member keeps alignments up to 2^28 only */
     if (m.aligned > (uint64_t(1) << 28))
-        return not_supported(declaration, "dcl.align");
+        return not_supported_because(declaration, "dcl.align",
+                                     "a member alignment above 2^28");
     m.gnu_flags |= s.gnu_flags;
     if (!m.section)
         m.section = s.section;
     /* [ext:gnu_asm_labels] a member's: not yet */
     if (m.asm_label)
-        return not_supported(declaration, "ext.gnu");
+        return not_supported_because(declaration, "ext.gnu",
+                                     "an asm label on a member");
     if (!m.abi_tag)
         m.abi_tag = s.abi_tag;
     if (!s.has_type)
-        return not_supported(declaration, "dcl.type");
+        return not_supported_because(
+            declaration, "dcl.type",
+            "a member declaration without a type specifier");
     if (s.typedef_)
         return member_typedef(c, declaration, m.id, type, s, m, access);
     /* [dcl.stc]/8: "The mutable specifier shall appear only in the
@@ -1923,7 +2059,8 @@ analysis_result semantic_analysis::member_declarator(
        analysed yet */
     if (s.constexpr_ && !s.static_ &&
         type_table[type.unqualified()].kind != type_kind::function)
-        return not_supported(declaration, "dcl.constexpr");
+        return not_supported_because(declaration, "dcl.constexpr",
+                                     "a constexpr non-static data member");
     /* [class.mem]/11: "A member shall not be declared with the extern
        storage-class-specifier." */
     if (s.extern_)
@@ -1960,7 +2097,10 @@ analysis_result semantic_analysis::member_declarator(
                 language_feature::return_type_deduction) ||
             m.conversion_function || m.destructor || m.literal_operator ||
             (m.operator_function && m.allocation != allocation_function::none))
-            return not_supported(declaration, "dcl.spec.auto");
+            return not_supported_because(
+                declaration, "dcl.spec.auto",
+                "a placeholder return type of a member declared without a "
+                "definition, or of a kind not handled");
     }
     if (!is_function && contains_placeholder(type)) {
         /* [dcl.spec.auto]/6: the subclause lists where a placeholder type may
@@ -1985,7 +2125,9 @@ analysis_result semantic_analysis::member_declarator(
                                    "dcl.fct.spec");
     if ((is_function && (m.aligned || (m.gnu_flags & gnu_packed))) ||
         (m.gnu_flags & gnu_used))
-        return not_supported(declaration, "ext.gnu");
+        return not_supported_because(
+            declaration, "ext.gnu",
+            "a member function with aligned or packed, or a member with used");
     /* a member's symbol attributes (a member function's weak and section,
        a static data member's, a data member's function attributes) are not
        analysed yet; on a non-static data member they are GCC's error */
@@ -1994,7 +2136,9 @@ analysis_result semantic_analysis::member_declarator(
                         gnu_require_constant_initialization)) ||
         (!is_function &&
          (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))))
-        return not_supported(declaration, "ext.gnu");
+        return not_supported_because(declaration, "ext.gnu",
+                                     "a member with a GNU symbol or function "
+                                     "attribute that is not handled");
     /* [class.mem]/20: "If T is the name of a class, then each of the
        following shall have a name different from T: every static data
        member of class T; every member function of class T ...; every
@@ -2034,7 +2178,10 @@ analysis_result semantic_analysis::member_declarator(
         } else {
             /* a name a using-declaration or a member enumeration's
                enumerator brought into the class */
-            return not_supported(declaration, "class.mem");
+            return not_supported_because(
+                declaration, "class.mem",
+                "a member with the name of one introduced by using or an "
+                "enumerator");
         }
     }
     entity_index overloads = 0;
@@ -2082,7 +2229,10 @@ analysis_result semantic_analysis::member_declarator(
                 continue;
             if ((placeholder_return || x.placeholder_return) &&
                 x.member_cv == function_cv && x.nonstatic_member == !s.static_)
-                return not_supported(declaration, "dcl.spec.auto");
+                return not_supported_because(
+                    declaration, "dcl.spec.auto",
+                    "a redeclaration beside a member function with a "
+                    "placeholder return type");
             if (x.member_cv == function_cv &&
                 x.nonstatic_member == !s.static_ && x.type == type)
                 /* [class.mem]/5 */
@@ -2111,13 +2261,16 @@ analysis_result semantic_analysis::member_declarator(
     }
     if (prior) {
         if (entity_table[prior].kind == entity_kind::none)
-            return not_supported(declaration, "over");
+            return not_supported_because(declaration, "over",
+                                         "a member overloading a name whose "
+                                         "declaration was not analysed");
         owned_buffer spelling;
         tokens.spelling(m.id, spelling.get());
         if (spelling.size() == 1 && spelling.data()[0] == '_')
             /* C++26's name-independent declarations (P2169): _ may be
                declared again */
-            return not_supported(declaration, "basic.scope.scope");
+            return not_supported_because(declaration, "basic.scope.scope",
+                                         "a repeated member named _");
         /* [class.mem]/5: "A member shall not be declared twice in the
            member-specification" */
         return ill_formed_at_token(m.id,
@@ -2161,7 +2314,9 @@ analysis_result semantic_analysis::member_declarator(
         /* [dcl.constexpr]/3 (and clang before C++20 for any non-static
            member function): not in a class with virtual bases */
         if (s.constexpr_ && !s.static_ && entity_table[c].virtual_base_count)
-            return not_supported(declaration, "dcl.constexpr");
+            return not_supported_because(
+                declaration, "dcl.constexpr",
+                "a constexpr member function of a class with virtual bases");
         entity_table[e].inline_ = definition || s.inline_ || s.constexpr_;
         /* [dcl.constexpr]/1: constexpr makes it inline; its body's rules
            and its invocations in constant expressions are the evaluator's
@@ -2209,8 +2364,9 @@ analysis_result semantic_analysis::member_declarator(
                    shall not have an associated default argument"; which
                    parameter has one is known once the defaults are
                    analysed, after the class */
-                return not_supported(declaration,
-                                     "basic.stc.dynamic.allocation");
+                return not_supported_because(
+                    declaration, "basic.stc.dynamic.allocation",
+                    "a default argument on an allocation function");
             if (entity_table[e].operator_function &&
                 entity_table[e].allocation == allocation_function::none &&
                 entity_table[e].implemented !=
@@ -2225,7 +2381,9 @@ analysis_result semantic_analysis::member_declarator(
         VTRY(v, virtual_member(c, e, declaration, m.id, s.virtual_));
     } else if (has_defaults) {
         /* /3: a default argument of a member that is not a function */
-        return not_supported(declaration, "dcl.fct.default");
+        return not_supported_because(
+            declaration, "dcl.fct.default",
+            "a default argument on a member that is not a function");
     } else if (s.static_) {
         /* [class.static.data]/3: "The declaration of a non-inline static
            data member in its class definition is not a definition and may
@@ -2233,7 +2391,9 @@ analysis_result semantic_analysis::member_declarator(
         /* an inline static data member ([dcl.inline]/6: defined in the
            class) has rules when it is const too: the constexpr path */
         if (s.inline_ && !s.constexpr_ && !(type.cv() & cv_const))
-            return not_supported(declaration, "class.static.data");
+            return not_supported_because(declaration, "class.static.data",
+                                         "an inline static data member that is "
+                                         "neither const nor constexpr");
         /* [dcl.constexpr]/10: "A constexpr specifier used in an object
            declaration declares the object as const"; [dcl.constexpr]/1 a
            constexpr static data member is an inline variable, defined by
@@ -2245,11 +2405,15 @@ analysis_result semantic_analysis::member_declarator(
         if (local_class_rule(c))
             /* [class.local]/4: "A local class cannot have static data
                members" (a class nested in one neither) */
-            return not_supported(declaration, "class.static.data");
+            return not_supported_because(
+                declaration, "class.static.data",
+                "a static data member of a local class");
         const struct type &record = type_table[type.unqualified()];
         if (record.kind == type_kind::lvalue_reference ||
             record.kind == type_kind::rvalue_reference || abstract_class(type))
-            return not_supported(declaration, "class.static.data");
+            return not_supported_because(
+                declaration, "class.static.data",
+                "a static data member of reference or abstract class type");
         e = entity_table.make(entity_kind::variable, name, c);
         entity_table[e].type = type;
         /* [class.static.data]/1: "A static data member is not part of the
@@ -2330,7 +2494,9 @@ analysis_result semantic_analysis::member_declarator(
                 unsupported.append(instantiations[inst - 1].failure);
                 return analysis_result::unsupported;
             }
-            return not_supported(declaration, "class.mem");
+            return not_supported_because(
+                declaration, "class.mem",
+                "a data member whose class type is not known as a class");
         }
         if (record.kind == type_kind::class_type && !size) {
             /* [class.mem]/15: "The type of a non-static data member shall
@@ -2360,12 +2526,16 @@ analysis_result semantic_analysis::member_declarator(
            (declarator_meaning warns of it), take no bytes: glibc's struct
            file_handle) */
         if (!size && record.kind != type_kind::array)
-            return not_supported(declaration, "class.mem");
+            return not_supported_because(
+                declaration, "class.mem",
+                "a data member of a type with no size");
         uint32_t alignment = static_cast<uint32_t>(alignment_of_type(type));
         if (is_reference)
             alignment = static_cast<uint32_t>(pointer_size());
         if (!alignment)
-            return not_supported(declaration, "class.mem");
+            return not_supported_because(
+                declaration, "class.mem",
+                "a data member of a type with unknown alignment");
         /* its offset is the layout's, at the closing }
            ([abi:class-types]), with [ext:gnu_attributes]' aligned and
            packed */
@@ -2436,7 +2606,9 @@ analysis_result semantic_analysis::member_typedef(
     if (s.static_ || s.inline_ || s.constexpr_ || s.virtual_ || s.gnu_flags ||
         s.aligned || s.typedef_aligned || m.aligned || m.gnu_flags ||
         m.section || m.asm_label)
-        return not_supported(declaration, "dcl.typedef");
+        return not_supported_because(declaration, "dcl.typedef",
+                                     "a member typedef with a specifier, "
+                                     "attribute, alignment or asm label");
     uint32_t name = tokens.identifier(id);
     if (name == entity_table[c].name)
         return ill_formed_at_token(id,
@@ -2445,7 +2617,9 @@ analysis_result semantic_analysis::member_typedef(
                                    "the class",
                                    "class.mem");
     if (entity_table.find(c, name))
-        return not_supported(declaration, "dcl.typedef");
+        return not_supported_because(
+            declaration, "dcl.typedef",
+            "a member typedef of an already declared name");
     entity_index e = entity_table.make(entity_kind::typedef_name, name, c);
     entity_table[e].type = type;
     entity_table[e].defined = true;
@@ -2524,7 +2698,9 @@ analysis_result semantic_analysis::instantiated_member_body(entity_index c,
        refused, never a call of a function without code */
     bool failed = used && r == analysis_result::ill_formed;
     if (r == analysis_result::ill_formed && last_declared && !used)
-        r = not_supported(n, "temp.inst");
+        r = not_supported_because(
+            n, "temp.inst",
+            "a member body that is ill-formed for these template arguments");
     if (r == analysis_result::ill_formed)
         entity_table[last_declared].defined = false;
     if (r == analysis_result::unsupported && last_declared) {
@@ -2562,7 +2738,9 @@ semantic_analysis::member_function_definition(entity_index c,
         if (body.deleted())
             return deleted_definition(definition, f);
         if (!body.plain())
-            return not_supported(definition, "dcl.fct.def.general");
+            return not_supported_because(
+                definition, "dcl.fct.def.general",
+                "a conversion function body that is neither plain nor deleted");
         function_parameters.clear();
         function_empty_pack = 0;
         entity_index saved_class = defining_class;
@@ -2605,7 +2783,10 @@ semantic_analysis::member_function_definition(entity_index c,
                     last_declared = k;
         }
         if (!last_declared)
-            return not_supported(definition, "class.ctor");
+            return not_supported_because(
+                definition, "class.ctor",
+                "a special member definition that matches no declared "
+                "constructor or destructor");
         return special_member_body(definition, definition.function_body());
     }
     /* [basic.scope.class]: the declarator's names are looked up in the
@@ -2640,7 +2821,9 @@ semantic_analysis::member_function_definition(entity_index c,
         if (declared_by(o, definition))
             last_declared = o;
     if (!last_declared)
-        return not_supported(definition, "class.mfct");
+        return not_supported_because(
+            definition, "class.mfct",
+            "a member function definition that matches no declaration");
     /* the function-body after any virt-specifier-seq */
     auto body = definition.function_body();
     if (body.deleted())
@@ -2652,7 +2835,9 @@ semantic_analysis::member_function_definition(entity_index c,
         return analyse_function_body(definition, body);
     }
     if (!body.plain())
-        return not_supported(definition, "dcl.fct.def.general");
+        return not_supported_because(definition, "dcl.fct.def.general",
+                                     "a member function body that is neither "
+                                     "plain, deleted nor defaulted");
     return analyse_function_body(definition, body.compound_statement());
 }
 
@@ -2674,15 +2859,24 @@ analysis_result semantic_analysis::member_redeclaration(
 {
     last_declared = 0;
     if (at_block_scope() || function_state.active)
-        return not_supported(declaration, "class.mfct");
+        return not_supported_because(
+            declaration, "class.mfct",
+            "an out-of-class member definition at block scope");
     if (type_table[type.unqualified()].kind != type_kind::function)
         /* (init_declarator analyses a static data member's definition) */
-        return not_supported(declaration, "class.static.data");
+        return not_supported_because(
+            declaration, "class.static.data",
+            "an out-of-class redeclaration that is not of function type");
     if (!definition || s.static_ || s.typedef_ || s.extern_)
-        return not_supported(declaration, "class.mfct");
+        return not_supported_because(
+            declaration, "class.mfct",
+            "an out-of-class member function that is no definition or is "
+            "static, typedef or extern");
     entity_index e = entity_table.find(qualifier, tokens.identifier(id));
     if (e && entity_table[e].kind == entity_kind::none)
-        return not_supported(declaration, "over");
+        return not_supported_because(declaration, "over",
+                                     "an out-of-class definition of a name "
+                                     "whose declaration was not analysed");
     /* [dcl.meaning]/1: the member function of the set it declares again */
     entity_index o = 0;
     if (s.constexpr_ &&
@@ -2780,7 +2974,10 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         entity_table[e].usable = constness::unknown;
     if (!(cv & cv_const) || (cv & cv_volatile) ||
         (!integral_or_enumeration && !constexpr_floating && !constexpr_class))
-        return not_supported(declarator, "class.static.data");
+        return not_supported_because(
+            declarator, "class.static.data",
+            "an in-class initializer of a static data member of a non-const, "
+            "volatile or unhandled type");
     analysis_result r = analysis_result::well_formed;
     bool wide = false;
     if (!deduced)
@@ -2792,7 +2989,9 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
         constness c =
             evaluate_variable(type, value.node, semantics[value.node].at, data);
         if (c == constness::unknown)
-            return not_supported(declarator, "expr.const");
+            return not_supported_because(
+                declarator, "expr.const",
+                "a static data member initializer that could not be evaluated");
         value.evaluation = c;
         if (data)
             value.node = data;
@@ -2822,7 +3021,9 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
                           "constant expression",
                           "class.static.data");
     if (value.evaluation != constness::constant && !wide)
-        return not_supported(declarator, "expr.const");
+        return not_supported_because(
+            declarator, "expr.const",
+            "a static data member initializer not established to be constant");
     entity &x = entity_table[e];
     if (!wide) {
         x.usable = constness::constant;
@@ -2864,20 +3065,30 @@ analysis_result semantic_analysis::static_member_definition(
 {
     declared_entity = 0;
     if (at_block_scope() || function_state.active)
-        return not_supported(declaration, "class.static.data");
+        return not_supported_because(
+            declaration, "class.static.data",
+            "a static data member definition at block scope");
     if (s.typedef_)
-        return not_supported(declaration, "class.static.data");
+        return not_supported_because(
+            declaration, "class.static.data",
+            "a typedef definition of a static data member");
     /* [dcl.inline]/6 and [class.static.data]/3: an inline or constexpr
        definition makes it an inline variable (C++17) */
     if ((s.inline_ || s.constexpr_) &&
         tokens.files.behavior.edition < standard_edition::cplusplus_17)
-        return not_supported(declaration, "class.static.data");
+        return not_supported_because(
+            declaration, "class.static.data",
+            "an inline static data member definition before C++17");
     /* static or extern on the definition: clang's error */
     if (s.static_ || s.extern_)
-        return not_supported(declaration, "class.static.data");
+        return not_supported_because(
+            declaration, "class.static.data",
+            "a static data member definition declared static or extern");
     entity_index e = entity_table.find(qualifier, tokens.identifier(id));
     if (e && entity_table[e].kind == entity_kind::none)
-        return not_supported(declaration, "class.static.data");
+        return not_supported_because(declaration, "class.static.data",
+                                     "a static data member definition of a "
+                                     "name whose declaration was not analysed");
     /* [basic.link]/11: "declarations for an array object can specify
        array types that differ by the presence or absence of a major array
        bound" */
@@ -3052,18 +3263,23 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
 {
     alignment = 0;
     if (n.size() != 4)
-        return not_supported(n, "dcl.align");
+        return not_supported_because(n, "dcl.align",
+                                     "an alignas specifier of an unhandled "
+                                     "form, such as a pack expansion");
     if (n[2].is(syntax_kind::type_id)) {
         qualified_type t;
         VTRY(r, type_id(n[2], t));
         const struct type &record = type_table[t.unqualified()];
         if (record.kind == type_kind::function ||
             (record.kind == type_kind::array && !record.bound_known))
-            return not_supported(n, "dcl.align");
+            return not_supported_because(
+                n, "dcl.align",
+                "alignas of a function type or an array of unknown bound");
         alignment = alignment_of_type(t);
         /* an incomplete type, void: not known */
         if (!alignment)
-            return not_supported(n, "dcl.align");
+            return not_supported_because(
+                n, "dcl.align", "alignas of a type with unknown alignment");
         return analysis_result::well_formed;
     }
     expression_meaning e;
@@ -3072,11 +3288,15 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
        ([expr.const]/8): a constexpr variable's value */
     VTRY_SET(r, operand_value(n, e));
     if (!is_integral(e.type) || e.category != value_category::prvalue)
-        return not_supported(n, "dcl.align");
+        return not_supported_because(
+            n, "dcl.align",
+            "an alignas operand that is not an integral prvalue");
     bool constant = false;
     VTRY_SET(r, constant_expression(n, e, constant));
     if (!constant)
-        return not_supported(n, "dcl.align");
+        return not_supported_because(
+            n, "dcl.align",
+            "an alignas operand not established to be constant");
     alignment = e.value;
     /* [basic.align]/4: "Every alignment value shall be a non-negative
        integral power of two"; clang's limit 2^29 */
@@ -3089,7 +3309,7 @@ analysis_result semantic_analysis::alignment_specifier(AlignmentSpecifier n,
         return ill_formed(n, "the requested alignment is too large",
                           "dcl.align");
     if (alignment > (uint64_t(1) << 31))
-        return not_supported(n, "dcl.align");
+        return not_supported_because(n, "dcl.align", "an alignment above 2^31");
     return analysis_result::well_formed;
 }
 

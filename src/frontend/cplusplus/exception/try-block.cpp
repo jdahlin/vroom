@@ -148,10 +148,11 @@ static bool has_label(SyntaxElement n)
 analysis_result semantic_analysis::try_block(TryBlock n, uint32_t &built)
 {
     if (has_label(n))
-        return not_supported(n, "except.handle");
+        return not_supported_because(n, "except.handle", "a labeled try block");
     /* try compound-statement handler-seq (one handler alone is a child) */
     if (n.size() < 3 || !n[1].is(syntax_kind::compound_statement))
-        return not_supported(n, "except.pre");
+        return not_supported_because(n, "except.pre",
+                                     "a try block of unexpected shape");
     uint32_t body = 0;
     analysis_result result;
     {
@@ -170,7 +171,10 @@ analysis_result semantic_analysis::try_block(TryBlock n, uint32_t &built)
     }
     for (size_t i = 0; i < items.size(); i++) {
         if (!items[i].is(syntax_kind::handler))
-            return worse(result, not_supported(n, "except.pre"));
+            return worse(result,
+                         not_supported_because(
+                             n, "except.pre",
+                             "something other than a handler after try"));
         uint32_t one = 0;
         /* [except.handle]/5: "A handler for a ... catch (...) ... shall be the last handler" */
         result = worse(result, handler(Handler(items[i]), one));
@@ -194,7 +198,8 @@ analysis_result semantic_analysis::handler(Handler n, uint32_t &built)
 {
     if (n.size() != 5 || !n[2].is(syntax_kind::exception_declaration) ||
         !n[4].is(syntax_kind::compound_statement))
-        return not_supported(n, "except.pre");
+        return not_supported_because(n, "except.pre",
+                                     "a handler of unexpected shape");
     SyntaxElement declaration = n[2];
     entity_index outer = current_scope;
     open_scope(0, false);
@@ -214,7 +219,9 @@ analysis_result semantic_analysis::handler(Handler n, uint32_t &built)
         }
         if (!spec) {
             current_scope = outer;
-            return not_supported(n, "except.pre");
+            return not_supported_because(
+                n, "except.pre",
+                "an exception-declaration with no type specifiers");
         }
         specified s;
         result = decl_specifier_seq(declaration[spec - 1], s, false);
@@ -255,7 +262,9 @@ analysis_result semantic_analysis::handler(Handler n, uint32_t &built)
         if (result == analysis_result::well_formed && !variable &&
             type_table[caught.unqualified()].kind == type_kind::class_type) {
             current_scope = outer;
-            return not_supported(n, "except.handle");
+            return not_supported_because(
+                n, "except.handle",
+                "an unnamed handler catching a class by value");
         }
         if (result == analysis_result::well_formed &&
             abstract_class(decayed(caught)))

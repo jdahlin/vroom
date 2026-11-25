@@ -269,7 +269,8 @@ analysis_result semantic_analysis::named_cast(PostfixOperationNamedCast cast,
     else if (keyword == standard_keyword::reinterpret_cast_)
         kinds = cast_reinterpret;
     else if (keyword != standard_keyword::static_cast_)
-        return not_supported(n, "expr.dynamic.cast");
+        return not_supported_because(n, "expr.dynamic.cast",
+                                     "a named cast keyword that has no rules");
     qualified_type to;
     analysis_result r = type_id(cast.type_id(), to);
     /* [over.over]/1: "an explicit type conversion" */
@@ -309,10 +310,13 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
         if (e.category != value_category::prvalue &&
             type_table[operand.unqualified()].kind == type_kind::class_type &&
             entity_table[type_table[operand.unqualified()].entity].dynamic)
-            return not_supported(n, "expr.typeid");
+            return not_supported_because(
+                n, "expr.typeid",
+                "typeid of a glvalue of polymorphic class type");
     }
     if (depends_on_template_parameter(operand))
-        return not_supported(n, "expr.typeid");
+        return not_supported_because(n, "expr.typeid",
+                                     "typeid of a dependent type");
     const struct type record = type_table[operand.unqualified()];
     if (record.kind == type_kind::lvalue_reference ||
         record.kind == type_kind::rvalue_reference)
@@ -320,7 +324,8 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
     const struct type shape = type_table[operand.unqualified()];
     require_complete(shape.entity);
     if (shape.kind == type_kind::class_type && !entity_table[shape.entity].size)
-        return not_supported(n, "expr.typeid");
+        return not_supported_because(n, "expr.typeid",
+                                     "typeid of an incomplete class");
     entity_index std_ =
         entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
     entity_index info = 0;
@@ -328,7 +333,8 @@ semantic_analysis::type_identification(PostfixOperationTypeidOperation syntax,
         lookup_result found = lookup_in_namespace(
             std_, tokens.pp.identifier("type_info", 9) + 1, lookup_filter::any);
         if (found.ambiguous)
-            return not_supported(n, "namespace.qual");
+            return not_supported_because(
+                n, "namespace.qual", "an ambiguous lookup of std::type_info");
         info = found.entity;
     }
     /* [expr.typeid]/1: an lvalue of type const std::type_info, which may be
@@ -376,7 +382,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                          inc.op().is(preprocessing_op_or_punc::MINUS_MINUS),
                          true, m);
     if (n.size() < 2)
-        return not_supported(n, "expr.post");
+        return not_supported_because(n, "expr.post",
+                                     "a postfix expression with too few parts");
     if (PostfixOperationNamedCast cast = post.named_cast())
         return named_cast(cast, m);
     if (post.member_access())
@@ -474,7 +481,9 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 k.alone_type = fundamental_type::char32_t_;
                 break;
             default:
-                return not_supported(n, "expr.type.conv");
+                return not_supported_because(
+                    n, "expr.type.conv",
+                    "a type conversion with an unhandled type keyword");
             }
             VTRY(r, simple_type(n, k, named));
         }
@@ -507,7 +516,9 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         }
     }
     if (named_cv)
-        return not_supported(n, "expr.type.conv");
+        return not_supported_because(
+            n, "expr.type.conv",
+            "a cv-qualified type specifier in an explicit type conversion");
     if (class_named)
         return class_conversion(n, class_named, m);
     if ((parenthesized || braced) && n[0].is(syntax_kind::simple_template_id)) {
@@ -525,7 +536,10 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 type_index t = 0;
                 VTRY(r, template_type(n[0], 0, false, t));
                 if (type_table[t].kind != type_kind::class_type)
-                    return not_supported(n, "temp.res");
+                    return not_supported_because(
+                        n, "temp.res",
+                        "an explicit conversion to a template-id that names no "
+                        "class");
                 return class_conversion(n, type_table[t].entity, m);
             }
             if (alias_template_of(found)) {
@@ -536,7 +550,9 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 uint32_t cv = 0;
                 VTRY(r, template_type(n[0], 0, false, t, &cv));
                 if (cv)
-                    return not_supported(n, "expr.type.conv");
+                    return not_supported_because(n, "expr.type.conv",
+                                                 "an explicit conversion to a "
+                                                 "cv-qualified specialization");
                 if (type_table[t].kind == type_kind::class_type &&
                     entity_table[type_table[t].entity].kind ==
                         entity_kind::class_type)
@@ -555,7 +571,9 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         if (record.kind != type_kind::fundamental &&
             record.kind != type_kind::pointer &&
             record.kind != type_kind::enumeration)
-            return not_supported(n, "expr.type.conv");
+            return not_supported_because(
+                n, "expr.type.conv",
+                "an explicit type conversion to a type that has no rules");
         bool is_void = record.kind == type_kind::fundamental &&
                        record.fundamental == fundamental_type::void_;
         if (parenthesized && !written.list) {
@@ -611,7 +629,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         }
         if (braced) {
             if (is_void)
-                return not_supported(n, "expr.type.conv");
+                return not_supported_because(n, "expr.type.conv",
+                                             "a braced conversion to void");
             initialized_value result;
             VTRY(r, list_initialization(written.clause, to, true, result));
             m = expression_meaning();
@@ -621,7 +640,9 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             m.node = result.node;
             return analysis_result::well_formed;
         }
-        return not_supported(n, "expr.type.conv");
+        return not_supported_because(
+            n, "expr.type.conv",
+            "an explicit type conversion with an unhandled form of arguments");
     }
     if (parenthesized)
         return call(n, m);
@@ -635,7 +656,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
            an xvalue otherwise." */
         if (!sub.index() || sub.index().is(syntax_kind::braced_init_list,
                                            syntax_kind::initializer_list))
-            return not_supported(n, "expr.sub");
+            return not_supported_because(
+                n, "expr.sub", "a subscript without a single expression");
         expression_meaning a, i;
         analysis_result r = expression(sub.operand(), a);
         if (r == analysis_result::well_formed)
@@ -665,7 +687,9 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             VTRY_SET(r, operand_value(n, *index));
             promote_enumeration(*index);
             if (!is_integral(index->type))
-                return not_supported(n, "ext.gnu");
+                return not_supported_because(
+                    n, "ext.gnu",
+                    "a vector or array subscript that is not of integral type");
             qualified_type lane = type_table[base->type.unqualified()].operand;
             lane = qualified_type::make(lane.unqualified(), base->type.cv());
             constness evaluation = constness::not_constant;
@@ -689,7 +713,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             index = &a;
         }
         if (is_array(*base) && base->category == value_category::prvalue)
-            return not_supported(n, "expr.sub");
+            return not_supported_because(n, "expr.sub",
+                                         "a subscript of an array prvalue");
         r = operand_value(n, *base);
         if (r == analysis_result::well_formed)
             VTRY_SET(r, operand_value(n, *index));
@@ -701,7 +726,9 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                  !is_pointer(base->type)) ||
                 (fundamental_of(index->type) == fundamental_type::none &&
                  !is_pointer(index->type)))
-                return not_supported(n, "expr.sub");
+                return not_supported_because(
+                    n, "expr.sub",
+                    "a subscript with operands of unhandled types");
             return ill_formed(n,
                               "one of the expressions shall be a glvalue of "
                               "type array of T or a prvalue of type pointer "
@@ -711,7 +738,9 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
         }
         qualified_type element = type_table[base->type.unqualified()].operand;
         if (!is_object_pointer(base->type) || !size_of_type(element))
-            return not_supported(n, "expr.sub");
+            return not_supported_because(
+                n, "expr.sub",
+                "a subscript of a pointer without a sized object type");
         constness evaluation =
             combined_constness(base->evaluation, index->evaluation);
         m = expression_meaning();
@@ -724,7 +753,8 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                                  base->node, index->node);
         return analysis_result::well_formed;
     }
-    return not_supported(n, "expr.post");
+    return not_supported_because(n, "expr.post",
+                                 "a postfix expression of an unhandled form");
 }
 
 /*
@@ -771,11 +801,15 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
     for (SyntaxElement a : clauses) {
         if (a.is(syntax_kind::braced_init_list) ||
             a.is(preprocessing_op_or_punc::ELLIPSIS))
-            return not_supported(n, "over.match.class.deduct");
+            return not_supported_because(n, "over.match.class.deduct",
+                                         "class template argument deduction "
+                                         "from a braced list or a pack");
         expression_meaning e;
         VTRY(r, passed_expression(a, e));
         if (e.entity && entity_table[e.entity].kind == entity_kind::function)
-            return not_supported(n, "over.match.class.deduct");
+            return not_supported_because(
+                n, "over.match.class.deduct",
+                "class template argument deduction from a function argument");
         arguments.append(e);
     }
     /* [over.match.class.deduct]/1.2: a lone argument of the template's own
@@ -786,7 +820,9 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
             type_table[arguments[0].type.unqualified()];
         if (argument.kind == type_kind::class_type &&
             class_template_of(argument.entity) == ct)
-            return not_supported(n, "over.match.class.deduct");
+            return not_supported_because(n, "over.match.class.deduct",
+                                         "class template argument deduction "
+                                         "from a specialization of itself");
     }
     implicit_deduction_guides(ct);
     owned_array<uint32_t> group;
@@ -817,11 +853,17 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                 const function_template &guide =
                     function_templates[candidates[chosen].template_index - 1];
                 if (guide.explicit_guide)
-                    return not_supported(n, "over.match.class.deduct");
+                    return not_supported_because(
+                        n, "over.match.class.deduct",
+                        "copy-initialization deducing through an explicit "
+                        "deduction guide");
                 SyntaxElement first = guide.declarator[0];
                 if (first.is_token() &&
                     first.keyword() == standard_keyword::explicit_)
-                    return not_supported(n, "over.match.class.deduct");
+                    return not_supported_because(
+                        n, "over.match.class.deduct",
+                        "copy-initialization deducing through an explicit "
+                        "deduction guide");
             }
             qualified_type function =
                 entity_table[candidates[chosen].function].type;
@@ -829,7 +871,9 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
                 type_table[type_table[function.unqualified()]
                                .operand.unqualified()];
             if (returned.kind != type_kind::class_type)
-                return not_supported(n, "over.match.class.deduct");
+                return not_supported_because(
+                    n, "over.match.class.deduct",
+                    "a deduction guide whose return type is not a class");
             c = returned.entity;
             return analysis_result::well_formed;
         }
@@ -920,7 +964,9 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
         function_parameters =
             static_cast<owned_array<parameter_meaning> &&>(saved_params);
     }
-    return not_supported(n, "over.match.class.deduct");
+    return not_supported_because(
+        n, "over.match.class.deduct",
+        "class template argument deduction in a form that has no rules");
 }
 
 /*
@@ -951,7 +997,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         arguments_written = conversion.arguments();
         parenthesis = conversion.parenthesis();
         if (!parenthesis)
-            return not_supported(n, "expr.call");
+            return not_supported_because(
+                n, "expr.call", "a call without a parenthesized argument list");
     }
     if (builtin_addressof_call(n))
         return builtin_addressof(n, m);
@@ -1008,7 +1055,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             owned_array<SyntaxElement> written;
             owned_array<bool> expansion;
             if (!expansion_list(c, written, expansion))
-                return not_supported(n, "temp.variadic");
+                return not_supported_because(
+                    n, "temp.variadic",
+                    "a call argument list with an unhandled pack expansion");
             bool any = false;
             for (bool x : expansion)
                 any = any || x;
@@ -1019,7 +1068,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                     continue;
                 }
                 if (a.is(syntax_kind::braced_init_list))
-                    return not_supported(n, "temp.variadic");
+                    return not_supported_because(
+                        n, "temp.variadic",
+                        "a pack expansion of a braced-init-list argument");
                 if (!expansion[i]) {
                     expression_meaning e;
                     VTRY(r, expression(a, e));
@@ -1032,7 +1083,10 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 if (!a.is_token())
                     end = a.end_token();
                 if (!expansion_count(first_token(a), end, count))
-                    return not_supported(n, "temp.variadic");
+                    return not_supported_because(
+                        n, "temp.variadic",
+                        "an argument pack expansion whose length cannot be "
+                        "determined");
                 for (uint32_t k = 0; k < count; k++) {
                     expression_meaning e;
                     VTRY(r, expansion_element_expression(a, k, e));
@@ -1077,7 +1131,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             bool related = from && (named_in == from ||
                                     base_step(from, named_in, ambiguous));
             if (ambiguous)
-                return not_supported(n, "temp.mem");
+                return not_supported_because(
+                    n, "temp.mem",
+                    "a call naming a member through an ambiguous base class");
             expression_meaning object;
             bool has_object = related && has_this_object();
             if (has_object)
@@ -1160,7 +1216,10 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             if (x.entity)
                 set.append(x.entity);
             if (!argument_dependent_lookup(name, types, set) || !x.entity)
-                return not_supported(n, "basic.lookup.argdep");
+                return not_supported_because(
+                    n, "basic.lookup.argdep",
+                    "argument-dependent lookup that failed or found nothing "
+                    "for a name");
             for (entity_index e : set)
                 overload_set(e, found_by_adl);
         } else if (dependent) {
@@ -1189,13 +1248,18 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 set.append(x.entity);
             owned_array<entity_index> held;
             if (!argument_dependent_lookup(name, types, set, 0, &held))
-                return not_supported(n, "basic.lookup.argdep");
+                return not_supported_because(
+                    n, "basic.lookup.argdep",
+                    "argument-dependent lookup that could not be completed");
             if (!held.empty()) {
                 /* (the other templates and non-template functions ADL found
                    join the first's, the candidates of template_call) */
                 uint32_t found_template = function_template_of(held[0]);
                 if (!found_template)
-                    return not_supported(n, "basic.lookup.argdep");
+                    return not_supported_because(
+                        n, "basic.lookup.argdep",
+                        "a held argument-dependent lookup result that is not a "
+                        "function template");
                 owned_array<template_argument> specified;
                 {
                     resolving_call scope(resolving_calls);
@@ -1262,7 +1326,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         } else {
             for (SyntaxElement a : arguments) {
                 if (a.is(syntax_kind::braced_init_list))
-                    return not_supported(n, "expr.call");
+                    return not_supported_because(
+                        n, "expr.call",
+                        "a braced argument in a call of a class object");
                 expression_meaning e;
                 VTRY_SET(r, expression(a, e));
                 ops.append(e);
@@ -1282,7 +1348,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         for (size_t i = 0; i < arguments.size(); i++) {
             SyntaxElement a = arguments[i];
             if (a.is(syntax_kind::braced_init_list))
-                return not_supported(n, "over.ics.list");
+                return not_supported_because(
+                    n, "over.ics.list",
+                    "a braced argument to an overloaded call operator");
             expression_meaning e;
             if (i < expanded.size() && expanded.size() == arguments.size()) {
                 /* [temp.variadic]/5: an element of a pack expansion,
@@ -1309,7 +1377,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                               "called object type is not a function or "
                               "function pointer",
                               "over.call.object");
-        return not_supported(n, "over.call.object");
+        return not_supported_because(
+            n, "over.call.object",
+            "a call of a class object with no handled operator() or surrogate");
     }
     qualified_type function_type = f.type;
     /* [expr.call]/2: "For a call to a non-static member function, the
@@ -1341,7 +1411,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             if (fundamental_of(f.type) == fundamental_type::none &&
                 !is_pointer(f.type) &&
                 type_table[f.type.unqualified()].kind != type_kind::enumeration)
-                return not_supported(n, "expr.call");
+                return not_supported_because(
+                    n, "expr.call",
+                    "a call of an operand of an unhandled type");
             return ill_formed(n,
                               "the postfix expression shall be either an "
                               "lvalue that refers to a function or a prvalue "
@@ -1502,7 +1574,9 @@ analysis_result semantic_analysis::member_callee(
         VTRY(r, written_arguments_of(id, written, expansion));
         for (bool e : expansion)
             if (e)
-                return not_supported(id.index(), "temp.variadic");
+                return not_supported_because(id.index(), "temp.variadic",
+                                             "a pack expansion in explicit "
+                                             "arguments of a member template");
         written_at = id.index();
     }
     return analysis_result::well_formed;
@@ -1524,11 +1598,15 @@ semantic_analysis::written_arguments_of(SyntaxElement id,
            (a lone argument is the template-id's own child) */
         if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
-                return not_supported(id.index(), "temp.variadic");
+                return not_supported_because(
+                    id.index(), "temp.variadic",
+                    "a misplaced ellipsis in explicit template arguments");
             expansion.back() = true;
         } else if (id[i].is(syntax_kind::template_argument_list)) {
             if (!expansion_list(id[i], written, expansion))
-                return not_supported(id.index(), "temp.variadic");
+                return not_supported_because(id.index(), "temp.variadic",
+                                             "an unhandled pack expansion in "
+                                             "explicit template arguments");
         } else {
             written.append(id[i]);
             expansion.append(false);
@@ -1540,7 +1618,9 @@ semantic_analysis::written_arguments_of(SyntaxElement id,
         if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
             written[w][1].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (expansion[w])
-                return not_supported(id.index(), "temp.variadic");
+                return not_supported_because(
+                    id.index(), "temp.variadic",
+                    "a doubly expanded explicit template argument");
             expansion[w] = true;
         }
     return analysis_result::well_formed;
@@ -1598,7 +1678,9 @@ analysis_result semantic_analysis::template_callee_parts(
             .nonstatic_member)
         /* [class.mfct.non-static]/3: C::f(args) names a non-static member
            function, called on (*this) (or an error outside one) */
-        return not_supported(id.index(), "class.mfct.non-static");
+        return not_supported_because(
+            id.index(), "class.mfct.non-static",
+            "a qualified call of a non-static member function template");
     if (!function_template) {
         /* a template-id of no function template analysis knows: what it
            was before */
@@ -1646,13 +1728,18 @@ analysis_result semantic_analysis::template_callee_parts(
                                        preprocessing_op_or_punc::ELLIPSIS))
                 end--;
             if (!expansion_count(first, end, times))
-                return not_supported(id.index(), "temp.variadic");
+                return not_supported_because(
+                    id.index(), "temp.variadic",
+                    "an explicit argument pack expansion of undetermined "
+                    "length");
         }
         for (uint32_t k = 0; k < times; k++) {
             uint32_t position = explicit_argument_position(
                 function_template, static_cast<uint32_t>(specified.size()));
             if (position == UINT32_MAX)
-                return not_supported(id.index(), "temp.arg.explicit");
+                return not_supported_because(
+                    id.index(), "temp.arg.explicit",
+                    "an explicit template argument with no matching parameter");
             template_argument x2;
             analysis_result r = analysis_result::well_formed;
             {
@@ -1770,7 +1857,10 @@ analysis_result semantic_analysis::template_candidates(
                             preprocessing_op_or_punc::ELLIPSIS))
                         end--;
                     if (!expansion_count(first, end, times)) {
-                        r = not_supported(written_at, "temp.variadic");
+                        r = not_supported_because(
+                            written_at, "temp.variadic",
+                            "an explicit argument pack expansion of "
+                            "undetermined length");
                         break;
                     }
                 }
@@ -1961,7 +2051,9 @@ analysis_result semantic_analysis::template_call(
         (!argument_dependent_lookup(
             tokens.identifier(name), types, others,
             function_templates[function_template - 1].name, &adl_templates)))
-        return not_supported(n, "basic.lookup.argdep");
+        return not_supported_because(
+            n, "basic.lookup.argdep",
+            "argument-dependent lookup for a template call that failed");
     owned_array<template_argument> &deduced = specified;
     const expression_meaning *meanings = nullptr;
     if (!early.empty())
@@ -1985,7 +2077,9 @@ analysis_result semantic_analysis::template_call(
     owned_array<entity_index> associated_classes, associated_spaces;
     if (!qualified &&
         !associated_namespaces(types, associated_classes, associated_spaces))
-        return not_supported(n, "basic.lookup.argdep");
+        return not_supported_because(n, "basic.lookup.argdep",
+                                     "associated namespaces of the arguments "
+                                     "that could not be determined");
     owned_array<uint32_t> visible;
     for (uint32_t candidate : group) {
         const struct function_template &entry =
@@ -2024,7 +2118,9 @@ analysis_result semantic_analysis::template_call(
                                 type_table[t].kind == type_kind::enumeration;
             }
             if (!user_defined)
-                return not_supported(n, "over.oper");
+                return not_supported_because(n, "over.oper",
+                                             "an operator template with no "
+                                             "class or enumeration argument");
         }
     }
     if (!template_id)
@@ -2070,7 +2166,9 @@ analysis_result semantic_analysis::template_call(
                 return analysis_result::ill_formed;
             /* (deduction failed for each: no viable function, which
                [impl.clang] clang reports with each template's reason) */
-            return not_supported(n, "temp.over");
+            return not_supported_because(
+                n, "temp.over",
+                "a call where deduction left no candidate template");
         }
         size_t chosen = 0;
         VTRY(r, best_viable_function(n, candidates, nullptr, early, chosen));
@@ -2155,7 +2253,9 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
         defaults = entity_table[called].default_arguments;
     if (called && entity_table[called].unknown_defaults &&
         arguments.size() < count)
-        return not_supported(n, "dcl.fct.default");
+        return not_supported_because(
+            n, "dcl.fct.default",
+            "a call needing default arguments that were not analysed");
     if (arguments.size() + defaults < count ||
         (arguments.size() > count && !function.variadic))
         return ill_formed(n,
@@ -2199,7 +2299,8 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
            does not have arithmetic, enumeration, pointer, pointer-to-member,
            or class type, the program is ill-formed." */
         if (a.is(syntax_kind::braced_init_list))
-            return not_supported(n, "expr.call");
+            return not_supported_because(
+                n, "expr.call", "a braced list passed for an ellipsis");
         expression_meaning e;
         if (i < early.size() && early[i].node)
             e = early[i];
@@ -2223,7 +2324,8 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
                               "pointer-to-member, or class type",
                               "expr.call");
         if (passed == fundamental_type::none && !is_pointer(e.type))
-            return not_supported(n, "expr.call");
+            return not_supported_because(
+                n, "expr.call", "an ellipsis argument of an unhandled type");
         if (passed == fundamental_type::std_nullptr_t) {
             /* "An argument that has type cv std::nullptr_t is converted to
                type void*" */
@@ -2312,7 +2414,9 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
     bool dispatched = false;
     if (member && entity_table[member].virtual_) {
         if (!n.size())
-            return not_supported(n, "class.virtual");
+            return not_supported_because(
+                n, "class.virtual",
+                "a virtual function call with no call syntax");
         SyntaxElement name = n[0];
         if (!name.is_token() && name.is(syntax_kind::postfix_expression) &&
             name.size() == 3 &&
@@ -2329,7 +2433,9 @@ semantic_analysis::call_with(SyntaxRef n, expression_meaning &f,
         else if (name.is_token() && name.is_identifier())
             dispatched = true;
         else if (!name.is(syntax_kind::qualified_id))
-            return not_supported(n, "class.virtual");
+            return not_supported_because(n, "class.virtual",
+                                         "a virtual function call whose callee "
+                                         "name has an unhandled form");
     }
     if (called) {
         VTRY(dq,
@@ -2372,7 +2478,9 @@ analysis_result semantic_analysis::immediate_invocation(SyntaxRef n,
         entity_index owner = function_state.function;
         if (owner && entity_table[owner].enclosing &&
             entity_table[entity_table[owner].enclosing].lambda)
-            return not_supported(n, "expr.const");
+            return not_supported_because(
+                n, "expr.const",
+                "an immediate function call in a lambda's member function");
         return ill_formed(n,
                           "an immediate invocation shall be a constant "
                           "expression",
@@ -2381,7 +2489,9 @@ analysis_result semantic_analysis::immediate_invocation(SyntaxRef n,
     /* a value of class type is not one an expression_meaning keeps */
     if (m.category != value_category::prvalue ||
         evaluated_type(m.type) == fundamental_type::none)
-        return not_supported(n, "expr.const");
+        return not_supported_because(
+            n, "expr.const",
+            "an immediate call that is not a prvalue of fundamental type");
     evaluated_meaning(m, v);
     semantics[m.node].evaluation = m.evaluation;
     semantics[m.node].value = m.value;

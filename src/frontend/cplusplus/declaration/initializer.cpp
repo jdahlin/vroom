@@ -305,7 +305,9 @@ analysis_result semantic_analysis::string_initialization(
         /* an array of ordinary characters and a UTF-8 string literal of
            char8_t: P2513R4 allows it, clang as a defect report */
         if (ordinary && of_literal == fundamental_type::char8_t_)
-            return not_supported(at, "dcl.init.string");
+            return not_supported_because(
+                at, "dcl.init.string",
+                "a char8_t string literal for a char array");
         return ill_formed(at,
                           "an array of ordinary character type, char8_t, "
                           "char16_t, char32_t, or wchar_t can be initialized "
@@ -419,7 +421,9 @@ analysis_result semantic_analysis::narrowing(SyntaxRef at,
     if (m.evaluation == constness::unknown ||
         f == fundamental_type::long_double ||
         t == fundamental_type::long_double)
-        return not_supported(at, "dcl.init.list");
+        return not_supported_because(
+            at, "dcl.init.list",
+            "a narrowing check of an unknown or long double value");
     expression_meaning converted = m;
     convert_arithmetic(converted, t);
     if (fundamental_type_is_floating(f) && fundamental_type_is_floating(t)) {
@@ -578,7 +582,9 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
         if (!const_lvalue) {
             entity_index f = own_conversion_functions(y.entity);
             if (f && entity_table[f].next_overload)
-                return not_supported(at, "over.match.ref");
+                return not_supported_because(
+                    at, "over.match.ref",
+                    "a non-const reference with several conversion functions");
         }
         bool converted = false;
         VTRY(c, conversion_function_call(
@@ -596,7 +602,9 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
                               "reference to it",
                               "dcl.init.ref");
         if (!converted)
-            return not_supported(at, "dcl.init.ref");
+            return not_supported_because(
+                at, "dcl.init.ref",
+                "no conversion function found for the reference");
         return reference_binding(at, m, reference);
     }
     /* an enumeration has no conversion functions: its rules are a
@@ -604,7 +612,9 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
        the assignment's lvalue) */
     if (x.kind == type_kind::class_type || y.kind == type_kind::class_type ||
         x.kind == type_kind::none || y.kind == type_kind::none)
-        return not_supported(at, "dcl.init.ref");
+        return not_supported_because(
+            at, "dcl.init.ref",
+            "a reference binding with a class or unknown type");
     bool compatible = reference_compatible(t1, t2);
     bool ambiguous = false;
     bool related = reference_related(t1, t2, ambiguous);
@@ -656,7 +666,9 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     }
     /* (a temporary of or from an enumeration: not yet) */
     if (x.kind == type_kind::enumeration || y.kind == type_kind::enumeration)
-        return not_supported(at, "dcl.init.ref");
+        return not_supported_because(
+            at, "dcl.init.ref",
+            "a reference temporary of or from an enumeration");
     VTRY(result, operand_value(at, m));
     return implicit_conversion(at, m, t1, false);
 }
@@ -683,7 +695,9 @@ analysis_result semantic_analysis::converted_temporary_binding(
     bool lvalue_only =
         !rvalue_reference && (!(t1.cv() & cv_const) || (t1.cv() & cv_volatile));
     if (converting_binds >= 16)
-        return not_supported(at, "dcl.init.ref");
+        return not_supported_because(
+            at, "dcl.init.ref",
+            "too deeply nested converting reference binding");
     qualified_type made_type = qualified_type::make(t1.unqualified(), cv_none);
     const struct type &source = type_table[m.type.unqualified()];
     if (source.kind == type_kind::class_type &&
@@ -695,7 +709,9 @@ analysis_result semantic_analysis::converted_temporary_binding(
         if (converted && (!lvalue_only || m.category == value_category::lvalue))
             return analysis_result::well_formed;
         if (converted)
-            return not_supported(at, "dcl.init.ref");
+            return not_supported_because(
+                at, "dcl.init.ref",
+                "a conversion function result that is no lvalue");
     }
     if (lvalue_only)
         return ill_formed(at,
@@ -743,17 +759,23 @@ semantic_analysis::class_reference_binding(SyntaxRef at, expression_meaning &m,
     entity_index c2 = type_table[t2.unqualified()].entity;
     if (entity_table[c1].kind != entity_kind::class_type ||
         entity_table[c2].kind != entity_kind::class_type)
-        return not_supported(at, "dcl.init.ref");
+        return not_supported_because(
+            at, "dcl.init.ref",
+            "a base reference binding of non-analysed classes");
     /* the same class binds even when incomplete (an lvalue of it); a base
        needs the complete derived class */
     if (c1 != c2)
         require_complete(c2);
     if (c1 != c2 && !entity_table[c2].size)
-        return not_supported(at, "dcl.init.ref");
+        return not_supported_because(
+            at, "dcl.init.ref",
+            "a reference binding of an incomplete derived class");
     bool ambiguous = false;
     bool related = reference_related(t1, t2, ambiguous);
     if (!related)
-        return not_supported(at, "dcl.init.ref");
+        return not_supported_because(
+            at, "dcl.init.ref",
+            "a reference binding between unrelated classes");
     if (t2.cv() & ~t1.cv()) {
         if (!rvalue_reference && !(t1.cv() & cv_const))
             return ill_formed(at,
@@ -815,11 +837,14 @@ analysis_result semantic_analysis::initialize_from(SyntaxRef at,
         if (direct)
             /* C++20's aggregate initialization from a parenthesized
                expression-list ([dcl.init]/17.5) */
-            return not_supported(at, "dcl.init");
+            return not_supported_because(
+                at, "dcl.init", "a parenthesized aggregate initialization");
         VTRY(r, expression(clause, m));
         /* a string-literal in parentheses: GCC's and clang's extension */
         if (m.string_literal)
-            return not_supported(at, "dcl.init.string");
+            return not_supported_because(
+                at, "dcl.init.string",
+                "a parenthesized string literal for an array");
         return ill_formed(at,
                           "an array is initialized by a braced-init-list, or "
                           "by a string-literal if it is an array of "
@@ -890,7 +915,8 @@ analysis_result semantic_analysis::same_type_copy(SyntaxRef at,
                                                   initialized_value &result)
 {
     if (m.type.unqualified() != type.unqualified())
-        return not_supported(at, "dcl.init");
+        return not_supported_because(
+            at, "dcl.init", "an extension type initialized from another type");
     VTRY(r, operand_value(at, m));
     result.evaluation = evaluation;
     result.value = 0;
@@ -946,7 +972,8 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
     const struct type target = type_table[type.unqualified()];
     analysis_result r = analysis_result::well_formed;
     if (entity_table[target.entity].kind != entity_kind::class_type)
-        return not_supported(at, "dcl.init");
+        return not_supported_because(
+            at, "dcl.init", "initialization of a class that was not analysed");
     bool same = m.type.unqualified() == type.unqualified();
     bool related = false;
     if (type_table[m.type.unqualified()].kind == type_kind::class_type &&
@@ -979,15 +1006,21 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
                     standard_edition::cplusplus_17 ||
                 s.kind != conversion_sequence::form::user_defined ||
                 s.ambiguous || s.function != found.function)
-                return not_supported(at, "over.match.copy");
+                return not_supported_because(
+                    at, "over.match.copy",
+                    "a conversion function in this copy-initialization");
             bool converted = false;
             VTRY_SET(r, conversion_function_call(at, m, unqualified, direct,
                                                  converted));
             if (!converted || m.type.unqualified() != type.unqualified())
-                return not_supported(at, "over.match.copy");
+                return not_supported_because(
+                    at, "over.match.copy",
+                    "a conversion function that does not yield the class");
             same = true;
         } else if (cannot_tell) {
-            return not_supported(at, "over.match.copy");
+            return not_supported_because(
+                at, "over.match.copy",
+                "conversion functions that cannot be decided");
         }
     }
     if (!(same && m.category == value_category::prvalue) &&
@@ -1009,7 +1042,9 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
         /* the implicit copy constructor's const T& bound to the base
            class subobject of the derived object */
         if (!copies_bytes(target.entity))
-            return not_supported(at, "class.copy.ctor");
+            return not_supported_because(
+                at, "class.copy.ctor",
+                "a derived-to-base copy that is not a byte copy");
         VTRY_SET(r, to_base(at.first_token(), target.entity, m));
         same = true;
     }
@@ -1029,7 +1064,8 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
                           "conversion cannot be done",
                           "dcl.init");
     if (!same)
-        return not_supported(at, "dcl.init");
+        return not_supported_because(
+            at, "dcl.init", "a class initialized from this other type");
     VTRY_SET(r, operand_value(at, m));
     result.evaluation = constness::unknown;
     result.value = 0;
@@ -1057,11 +1093,13 @@ semantic_analysis::scalar_initialization(SyntaxRef at, expression_meaning &m,
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer &&
         target.kind != type_kind::pointer_to_member && !enumeration_of(type))
-        return not_supported(at, "dcl.init");
+        return not_supported_because(
+            at, "dcl.init", "a scalar initialization of this target type");
     if (target.kind == type_kind::pointer_to_member &&
         type_table[m.type.unqualified()].kind == type_kind::class_type)
         /* a conversion function to a pointer to member: not analysed */
-        return not_supported(at, "dcl.init");
+        return not_supported_because(
+            at, "dcl.init", "a conversion function to a pointer to member");
     if (type_table[m.type.unqualified()].kind == type_kind::class_type) {
         /* [dcl.init]/17.7: by a conversion function */
         bool converted = false;
@@ -1069,7 +1107,7 @@ semantic_analysis::scalar_initialization(SyntaxRef at, expression_meaning &m,
     }
     if (target.kind == type_kind::fundamental &&
         target.fundamental == fundamental_type::void_)
-        return not_supported(at, "dcl.init");
+        return not_supported_because(at, "dcl.init", "initialization of void");
     if (target.kind == type_kind::fundamental &&
         target.fundamental == fundamental_type::builtin_va_list) {
         /* [impl.clang] a va_list is initialized from a va_list only (a
@@ -1084,7 +1122,9 @@ semantic_analysis::scalar_initialization(SyntaxRef at, expression_meaning &m,
         /* Microsoft's extensions: [ext.microsoft] clang accepts a narrowing
            conversion by the -fms-compatibility-version it emulates */
         if (narrows && tokens.files.behavior.microsoft_extensions)
-            return not_supported(at, "dcl.init.list");
+            return not_supported_because(
+                at, "dcl.init.list",
+                "a narrowing conversion under Microsoft extensions");
         if (narrows) {
             VTRY_SET(r, extension_used(diagnostic_id::sema_narrowing,
                                        at.first_token(), nullptr));
@@ -1122,7 +1162,9 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
             expanded = true;
     if (expanded && (designations.any ||
                      type_table[type.unqualified()].kind != type_kind::array))
-        return not_supported(list, "temp.variadic");
+        return not_supported_because(
+            list, "temp.variadic",
+            "a designated or non-array list with a pack expansion");
     const owned_array<uint32_t> *saved = clause_packs;
     clause_packs = nullptr;
     if (expanded)
@@ -1193,7 +1235,9 @@ analysis_result semantic_analysis::gather_clauses(
             /* designator brace-or-equal-initializer: ". identifier" and
                "= initializer-clause", or a braced-init-list */
             if (!designated)
-                return not_supported(list, "dcl.init.aggr");
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "a designator where none is allowed");
             SyntaxElement initializer = c[1];
             if (initializer.is(syntax_kind::brace_or_equal_initializer))
                 initializer = initializer[1];
@@ -1204,7 +1248,9 @@ analysis_result semantic_analysis::gather_clauses(
         }
         if (c.is(syntax_kind::gnu_designation)) {
             if (!designated)
-                return not_supported(list, "dcl.init.aggr");
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "a GNU designator where none is allowed");
             pending.clear();
             for (uint32_t i = 0; i < c.size(); i++) {
                 SyntaxElement d = c[i];
@@ -1217,14 +1263,18 @@ analysis_result semantic_analysis::gather_clauses(
         if (c.is_node() && !syntax_kind_is_expression(c.kind()) &&
             !c.is(syntax_kind::braced_init_list) &&
             !c.is(syntax_kind::lambda_expression))
-            return not_supported(list, "dcl.init.aggr");
+            return not_supported_because(
+                list, "dcl.init.aggr",
+                "an unexpected node in an initializer list");
         uint32_t count = 1;
         bool expansion = k + 1 < n && node[static_cast<uint32_t>(k + 1)].is(
                                           preprocessing_op_or_punc::ELLIPSIS);
         if (expansion) {
             if (!packs || !pending.empty() || c.is_token() ||
                 !expansion_count(c.first_token(), c.end_token(), count))
-                return not_supported(list, "temp.variadic");
+                return not_supported_because(
+                    list, "temp.variadic",
+                    "a pack expansion in this initializer list");
         }
         for (uint32_t i = 0; i < count; i++) {
             uint32_t pack = no_expansion;
@@ -1311,7 +1361,9 @@ analysis_result semantic_analysis::array_list_initialization(
         while (inner.is(syntax_kind::primary_expression) && inner.size() == 3)
             inner = inner[1];
         if (is_unparenthesized_string_literal(tokens, inner))
-            return not_supported(list, "dcl.init.string");
+            return not_supported_because(
+                list, "dcl.init.string",
+                "a parenthesized string literal in braces");
     }
     /* [dcl.init.aggr]/9: "An array of unknown bound initialized with a
        brace-enclosed initializer-list containing n initializer-clauses
@@ -1355,7 +1407,8 @@ analysis_result semantic_analysis::scalar_list_initialization(
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer &&
         target.kind != type_kind::pointer_to_member && !empty_enumeration)
-        return not_supported(list, "dcl.init.list");
+        return not_supported_because(list, "dcl.init.list",
+                                     "list-initialization of this type");
     if (clauses.empty()) {
         /* (3.11) value-initialization; [dcl.init]/8: to value-initialize a scalar is to zero-initialize
            it: the value 0, a null pointer, a null member pointer (whose
@@ -1380,7 +1433,8 @@ analysis_result semantic_analysis::scalar_list_initialization(
                           "dcl.init.list");
     if (clauses[0].is(syntax_kind::braced_init_list))
         /* braces around a scalar's initializer: clang's warning */
-        return not_supported(list, "dcl.init.list");
+        return not_supported_because(
+            list, "dcl.init.list", "extra braces around a scalar initializer");
     /* (3.9) */
     return initialize_from(list, clauses[0], type, direct, true, result);
 }
@@ -1404,7 +1458,9 @@ analysis_result semantic_analysis::reference_list_initialization(
     qualified_type referenced = type_table[type.unqualified()].operand;
     const struct type x = type_table[referenced.unqualified()];
     if (x.kind == type_kind::array && !x.bound_known)
-        return not_supported(list, "dcl.init.list");
+        return not_supported_because(
+            list, "dcl.init.list",
+            "a reference to an array of unknown bound from a list");
     qualified_type prvalue_type =
         qualified_type::make(referenced.unqualified(), cv_none);
     expression_meaning m;
@@ -1455,7 +1511,8 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                                                initialized_value &result)
 {
     if (init.is_token())
-        return not_supported(current_declaration, "dcl.init");
+        return not_supported_because(current_declaration, "dcl.init",
+                                     "an initializer that is a single token");
     /* [temp.spec]/6: a static data member or variable template
        initializer is checked */
     flag_set checked(explicit_declaration_names, false);
@@ -1469,20 +1526,28 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
         return initialize_from(init, parts.clause, type, false, false, result);
     case InitializerParts::syntax_form::parenthesized:
         if (!parts.list)
-            return not_supported(init, "dcl.init");
+            return not_supported_because(
+                init, "dcl.init",
+                "a parenthesized initializer with no expressions");
         if (parts.list_of_several()) {
             if (has_pack_expansion(parts.list))
-                return not_supported(init, "temp.variadic");
+                return not_supported_because(
+                    init, "temp.variadic",
+                    "a pack expansion in a parenthesized initializer");
             const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
-                return not_supported(init, "dcl.init");
+                return not_supported_because(
+                    init, "dcl.init",
+                    "an array initialized from several parenthesized values");
             if (target.kind == type_kind::class_type) {
                 /* [dcl.init]/17.6.2: the constructor called with the
                    expression-list as its arguments */
                 if (entity_table[target.entity].kind !=
                         entity_kind::class_type ||
                     !entity_table[target.entity].first_constructor)
-                    return not_supported(init, "dcl.init");
+                    return not_supported_because(
+                        init, "dcl.init",
+                        "several arguments for a class without constructors");
                 owned_array<expression_meaning> arguments;
                 VTRY(r, expression_list_meanings(parts.list, arguments));
                 return construct(init, type, arguments, 0, result);
@@ -1498,7 +1563,8 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
     case InitializerParts::syntax_form::none:
         break;
     }
-    return not_supported(init, "dcl.init");
+    return not_supported_because(init, "dcl.init",
+                                 "an initializer of no known form");
 }
 
 bool semantic_analysis::has_user_constructor_template(entity_index c) const
@@ -1576,20 +1642,26 @@ analysis_result semantic_analysis::class_list_initialization(
        needed is defined by the initialization of an object of it */
     require_complete(c);
     if (entity_table[c].kind != entity_kind::class_type)
-        return not_supported(list, "class.pre");
+        return not_supported_because(
+            list, "class.pre",
+            "list-initialization of a class that was not analysed");
     /* [dcl.init.list]/3.6: "Otherwise, if T is a specialization of
        std::initializer_list<E>, the object is constructed as described
        below" */
     if (named(c, "initializer_list") &&
         std_namespace(entity_table[c].enclosing)) {
         if (!entity_table[c].instantiation)
-            return not_supported(list, "dcl.init.list");
+            return not_supported_because(
+                list, "dcl.init.list",
+                "an initializer_list that is no specialization");
         const instantiation_record &inst =
             instantiations[entity_table[c].instantiation - 1];
         if (inst.argument_count < 1 ||
             template_arguments[inst.first_argument].kind !=
                 template_argument::kind_t::type)
-            return not_supported(list, "dcl.init.list");
+            return not_supported_because(
+                list, "dcl.init.list",
+                "an initializer_list with no element type argument");
         qualified_type elem = template_arguments[inst.first_argument].type;
         owned_array<entity_index> fields;
         for (uint32_t i = 0; i < entity_table[c].member_count; i++) {
@@ -1599,15 +1671,21 @@ analysis_result semantic_analysis::class_list_initialization(
                 fields.append(m);
         }
         if (fields.size() != 2)
-            return not_supported(list, "dcl.init.list");
+            return not_supported_because(
+                list, "dcl.init.list",
+                "an initializer_list without two data members");
         qualified_type f0 = entity_table[fields[0]].type;
         qualified_type f1 = entity_table[fields[1]].type;
         if (type_table[f0.unqualified()].kind != type_kind::pointer)
-            return not_supported(list, "dcl.init.list");
+            return not_supported_because(
+                list, "dcl.init.list",
+                "an initializer_list whose first member is no pointer");
         bool second_is_int = is_integral(f1);
         if (!second_is_int &&
             type_table[f1.unqualified()].kind != type_kind::pointer)
-            return not_supported(list, "dcl.init.list");
+            return not_supported_because(
+                list, "dcl.init.list",
+                "an initializer_list with an unknown second member");
         token_index at = list.first_token();
         uint32_t first_node = 0;
         uint32_t second_node = 0;
@@ -1652,7 +1730,9 @@ analysis_result semantic_analysis::class_list_initialization(
                     static_cast<uint64_t>(static_cast<int64_t>(clauses.size()));
                 second_node = expression_node(semantic_kind::constant, sz, at);
             } else {
-                return not_supported(list, "dcl.init.list");
+                return not_supported_because(
+                    list, "dcl.init.list",
+                    "an initializer_list with a pointer end member");
             }
         }
         owned_array<uint32_t> items;
@@ -1671,7 +1751,9 @@ analysis_result semantic_analysis::class_list_initialization(
     if (!entity_table[c].size)
         /* [dcl.init.list]/3: list-initialization of an incomplete class:
            clang's "incomplete type" error */
-        return not_supported(list, "dcl.init.list");
+        return not_supported_because(
+            list, "dcl.init.list",
+            "list-initialization of an incomplete class");
     if (!is_aggregate(c)) {
         /* (3.5): "Otherwise, if the initializer list has no elements and T
            is a class type with a default constructor, the object is
@@ -1728,7 +1810,10 @@ analysis_result semantic_analysis::class_list_initialization(
             return aggregate_elements(list, clauses, next, type, result);
         }
         if (clauses.empty() || !entity_table[c].first_constructor)
-            return not_supported(list, "over.match.list");
+            return not_supported_because(
+                list, "over.match.list",
+                "list-initialization of a non-aggregate with no constructor "
+                "match");
         return constructor_list_initialization(list, clauses, type, direct,
                                                result);
     }
@@ -1812,7 +1897,8 @@ analysis_result semantic_analysis::constructor_list_initialization(
         if (ir != analysis_result::ill_formed || !undo_substitution(mark))
             return ir;
     } else if (ilist_ctors.size() > 1) {
-        return not_supported(list, "over.match.list");
+        return not_supported_because(list, "over.match.list",
+                                     "several initializer_list constructors");
     }
     owned_array<expression_meaning> arguments;
     for (SyntaxElement clause : clauses) {
@@ -1829,7 +1915,8 @@ analysis_result semantic_analysis::constructor_list_initialization(
         /* one prvalue of the class itself: clang initializes the object
            from it with no constructor (CWG2311), the copy or move one
            deleted or not */
-        return not_supported(list, "dcl.init.list");
+        return not_supported_because(list, "dcl.init.list",
+                                     "a list of one prvalue of the same class");
     /* the arguments before the conversions overload resolution adds */
     owned_array<expression_meaning> before;
     for (const expression_meaning &e : arguments)
@@ -1837,7 +1924,8 @@ analysis_result semantic_analysis::constructor_list_initialization(
     VTRY(r, construct(list, type, arguments, 0, result, false, &clauses));
     entity_index chosen = semantics[result.node].b;
     if (!chosen || semantics[result.node].kind != semantic_kind::construct)
-        return not_supported(list, "over.match.list");
+        return not_supported_because(list, "over.match.list",
+                                     "no constructor chosen for the list");
     if (!direct && entity_table[chosen].explicit_)
         /* [over.match.list]/1 */
         return ill_formed(
@@ -1873,7 +1961,9 @@ analysis_result semantic_analysis::constructor_list_initialization(
            group (-Wc++11-narrowing-const-reference) */
         if (narrows &&
             (reference || tokens.files.behavior.microsoft_extensions))
-            return not_supported(at, "dcl.init.list");
+            return not_supported_because(
+                at, "dcl.init.list",
+                "narrowing into a reference or under Microsoft extensions");
         if (narrows) {
             VTRY_SET(r, extension_used(diagnostic_id::sema_narrowing,
                                        at.first_token(), nullptr));
@@ -2085,7 +2175,9 @@ semantic_analysis::empty_base_element(SyntaxRef list,
 {
     entity_index base = type_table[element.unqualified()].entity;
     if (!trivial_special_members(base))
-        return not_supported(list, "dcl.init.aggr");
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "an empty base with non-trivial special members");
     if (next >= clauses.size()) {
         /* /5.2: from an empty initializer list */
         return omitted_element_checks(list, element, false);
@@ -2093,7 +2185,9 @@ semantic_analysis::empty_base_element(SyntaxRef list,
     initialized_value one;
     VTRY(r, aggregate_element(list, clauses, next, element, one));
     if (!makes_no_effect(one.node))
-        return not_supported(list, "dcl.init.aggr");
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "an empty base initializer that has an effect");
     return analysis_result::well_formed;
 }
 
@@ -2155,13 +2249,17 @@ analysis_result semantic_analysis::member_default_in_aggregate(
 {
     if (!owner || entity_table[owner].kind != entity_kind::class_type ||
         function_state.active || at_block_scope() || defining_class)
-        return not_supported(list, "dcl.init.aggr");
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "a default member initializer in this aggregate context");
     /* (in a function body: the lowering has no rule for the
        default_member_initializer node, whose `this` is the aggregate) */
     /* (in a default argument ([dcl.fct.default]/1): the lowering of the
        call that uses it has no object for its `this`) */
     if (call_site_depth)
-        return not_supported(list, "dcl.init.aggr");
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "a default member initializer in a default argument");
     /* the class's scope with a `this` of its own: no function's */
     function_context outer = static_cast<function_context &&>(function_state);
     entity_index outer_scope = current_scope;
@@ -2185,9 +2283,13 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     /* [ext:clang_source_location] a builtin in it is the place of the
        aggregate's initialization, which is not the initializer's */
     if (source_location_uses != locations_before)
-        return not_supported(list, "dcl.init.aggr");
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "a source location builtin in a default member initializer");
     if (!one.node)
-        return not_supported(list, "dcl.init.aggr");
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "a default member initializer with no value");
     /* the evaluator binds `this` to the aggregate under construction, whose
        earlier elements it has stored; its value is not known here */
     expression_meaning wrapped;
@@ -2228,7 +2330,9 @@ analysis_result semantic_analysis::omitted_element_value(
             !aggregate_value_stored(member.entity, one.node))
             /* a class with constructors initialized in place by a
                constructor call: not analysed */
-            return not_supported(list, "dcl.init.aggr");
+            return not_supported_because(
+                list, "dcl.init.aggr",
+                "a class member default that needs construction in place");
         return analysis_result::well_formed;
     }
     /* (5.2): from an empty initializer list: value-initialization
@@ -2340,7 +2444,9 @@ analysis_result semantic_analysis::aggregate_element_clause(
         /* a conversion from another class (a constructor or conversion
            function) into a subaggregate */
         if (type_table[e.type.unqualified()].kind == type_kind::class_type)
-            return not_supported(list, "dcl.init.aggr");
+            return not_supported_because(
+                list, "dcl.init.aggr",
+                "a subaggregate converted from another class");
     }
     if (!subaggregate) {
         next++;
@@ -2348,14 +2454,16 @@ analysis_result semantic_analysis::aggregate_element_clause(
     }
     if (record.kind == type_kind::array && !record.bound_known)
         /* a flexible array member */
-        return not_supported(list, "dcl.init.aggr");
+        return not_supported_because(list, "dcl.init.aggr",
+                                     "a flexible array member initializer");
     if ((record.kind == type_kind::array && !record.bound) ||
         (record.kind == type_kind::class_type &&
          !entity_table[record.entity].member_count))
         /* [impl.clang] a subaggregate with no elements takes no clause:
            clang's "initializer for aggregate with no elements requires
            explicit braces" error */
-        return not_supported(list, "dcl.init.aggr");
+        return not_supported_because(list, "dcl.init.aggr",
+                                     "a subaggregate with no elements");
     /* the braces elided: the subaggregate's elements from the clauses */
     return aggregate_elements(list, clauses, next, element, one);
 }
@@ -2429,7 +2537,9 @@ analysis_result semantic_analysis::designated_elements(
                entity_table[target.entity].kind == entity_kind::class_type) {
         require_complete(target.entity);
         if (!entity_table[target.entity].size)
-            return not_supported(list, "dcl.init.list");
+            return not_supported_because(
+                list, "dcl.init.list",
+                "designated initialization of an incomplete class");
         if (!is_aggregate(target.entity))
             return ill_formed(list,
                               "a designator selects an element of an "
@@ -2447,7 +2557,10 @@ analysis_result semantic_analysis::designated_elements(
                 empty_base = true;
                 if (!trivial_special_members(
                         type_table[e.type.unqualified()].entity))
-                    return not_supported(list, "dcl.init.aggr");
+                    return not_supported_because(
+                        list, "dcl.init.aggr",
+                        "an empty base with non-trivial members before "
+                        "designators");
                 continue;
             }
             types.append(e.type);
@@ -2457,7 +2570,8 @@ analysis_result semantic_analysis::designated_elements(
         bound = members.size();
     } else if (target.kind == type_kind::lvalue_reference ||
                target.kind == type_kind::rvalue_reference) {
-        return not_supported(list, "dcl.init.list");
+        return not_supported_because(list, "dcl.init.list",
+                                     "a designated list for a reference");
     } else {
         return ill_formed(list,
                           "a designator selects an element of an aggregate",
@@ -2497,16 +2611,22 @@ analysis_result semantic_analysis::designated_elements(
                 /* another member than the one given: clang's "initializer
                    partially overrides prior initialization of this
                    subobject" error, not modelled */
-                return not_supported(list, "dcl.init.aggr");
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "a designator overriding another union member");
         } else {
             if (after_nested)
-                return not_supported(list, "dcl.init.aggr");
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "an undesignated clause after a nested designator");
             if (empty_base)
                 /* a clause without a designator mixed with designated
                    ones (clang's -Wc99-designator) counts the empty
                    bases' positions, which this element list leaves out:
                    not modelled */
-                return not_supported(list, "dcl.init.aggr");
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "mixed designators with an empty base");
             if (pos >= room)
                 return ill_formed(list,
                                   "an initializer-list is ill-formed if the "
@@ -2515,7 +2635,8 @@ analysis_result semantic_analysis::designated_elements(
                                   "dcl.init.aggr");
         }
         if (last >= limit)
-            return not_supported(list, "dcl.init.aggr");
+            return not_supported_because(list, "dcl.init.aggr",
+                                         "an array designator index too large");
         qualified_type element = target.operand;
         if (!is_array)
             element = types[first];
@@ -2524,7 +2645,9 @@ analysis_result semantic_analysis::designated_elements(
             /* a subobject of the element: the clauses designating the
                element so, as a list of its own */
             if (first != last || (first < slots.size() && slots[first]))
-                return not_supported(list, "dcl.init.aggr");
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "a nested designator over a range or initialized element");
             owned_array<designated_item> inner;
             for (size_t j = i; j < items.size(); j++) {
                 if (consumed[j] || !items[j].chain_count)
@@ -2543,7 +2666,9 @@ analysis_result semantic_analysis::designated_elements(
                         continue;
                     if (items[j].chain_count == 1 && !through_j)
                         /* the element designated in part and as a whole */
-                        return not_supported(list, "dcl.init.aggr");
+                        return not_supported_because(
+                            list, "dcl.init.aggr",
+                            "an element designated both in part and whole");
                 }
                 designated_item d = items[j];
                 if (!through_j) {
@@ -2568,7 +2693,9 @@ analysis_result semantic_analysis::designated_elements(
             size_t next = 0;
             VTRY(r, aggregate_element(list, run, next, element, one));
             if (!next)
-                return not_supported(list, "dcl.init.aggr");
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "a designated element that takes no clause");
             i += next - 1;
             after_nested = false;
         }
@@ -2576,7 +2703,9 @@ analysis_result semantic_analysis::designated_elements(
             /* [ext:gnu_designated_initializers]: a range's initializer is
                evaluated once; the list holds its node once per element, so
                only a constant (no side effect) is the same for each */
-            return not_supported(list, "dcl.init.aggr");
+            return not_supported_because(
+                list, "dcl.init.aggr",
+                "a range designator with a non-constant value");
         if (slots.size() <= last) {
             size_t was = slots.size();
             uint32_t *grown = slots.extend(last + 1 - was);
@@ -2742,7 +2871,9 @@ analysis_result semantic_analysis::designator_elements(
         bool constant = false;
         VTRY_SET(r, integral_constant_expression(at, e, constant));
         if (!constant)
-            return not_supported(at, "expr.const");
+            return not_supported_because(
+                at, "expr.const",
+                "an array designator index not evaluated as a constant");
         __int128 value =
             integer_value(behavior, fundamental_of(e.type), e.value);
         if (value < 0)
@@ -2751,7 +2882,8 @@ analysis_result semantic_analysis::designator_elements(
                               "negative",
                               "dcl.init.aggr");
         if (value > static_cast<__int128>(UINT32_MAX))
-            return not_supported(at, "dcl.init.aggr");
+            return not_supported_because(at, "dcl.init.aggr",
+                                         "an array designator index too large");
         bounds[k] = static_cast<uint64_t>(value);
         index = 3;
     }

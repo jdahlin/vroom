@@ -160,7 +160,9 @@ semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
     transformation which = transformation_named(
         reinterpret_cast<const char *>(written.data()), written.size());
     if (which == transformation::none)
-        return not_supported(n, "ext.clang");
+        return not_supported_because(
+            n, "ext.clang",
+            "a type transformation builtin with an unknown name");
     qualified_type t;
     VTRY(r, type_id(n[2], t));
     if (depends_on_template_parameter(t)) {
@@ -257,7 +259,9 @@ semantic_analysis::clang_type_transformation(ClangTypeTransformation n,
                               "meta.trans.other");
         fundamental_type u = entity_table[k->entity].underlying;
         if (u == fundamental_type::none)
-            return not_supported(n, "dcl.enum");
+            return not_supported_because(n, "dcl.enum",
+                                         "__underlying_type of an enumeration "
+                                         "whose underlying type is not set");
         type = qualified_type::make(type_table.fundamental(u), cv_none);
         break;
     }
@@ -661,7 +665,9 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         VTRY(r, type_id(n[2], t));
         if (depends_on_template_parameter(t) ||
             names_dependent_entity(n[4].first_token(), n[4].end_token()))
-            return not_supported(n, "temp.dep.constexpr");
+            return not_supported_because(
+                n, "temp.dep.constexpr",
+                "__array_extent with a dependent type or dimension");
         expression_meaning index;
         VTRY_SET(r, expression(n[4], index));
         VTRY_SET(r, operand_value(n, index));
@@ -669,11 +675,14 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         if (is_integral(index.type))
             VTRY_SET(r, integral_constant_expression(n, index, constant));
         if (!constant)
-            return not_supported(n, "ext.clang");
+            return not_supported_because(n, "ext.clang",
+                                         "__array_extent with a dimension that "
+                                         "is not an integral constant");
         __int128 dimension = integer_value(
             tokens.files.behavior, fundamental_of(index.type), index.value);
         if (dimension < 0)
-            return not_supported(n, "ext.clang");
+            return not_supported_because(
+                n, "ext.clang", "__array_extent with a negative dimension");
         uint64_t extent = 0;
         qualified_type k = t;
         for (__int128 i = 0;; i++) {
@@ -699,7 +708,9 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
     if ((lvalue_trait || spelled(name, written.size(), "__is_rvalue_expr")) &&
         n.size() == 4 && !n[2].is(syntax_kind::type_id)) {
         if (names_dependent_entity(n[2].first_token(), n[2].end_token()))
-            return not_supported(n, "temp.dep.constexpr");
+            return not_supported_because(n, "temp.dep.constexpr",
+                                         "__is_lvalue_expr or __is_rvalue_expr "
+                                         "of a dependent expression");
         expression_meaning operand;
         unevaluated++;
         analysis_result r = expression(n[2], operand);
@@ -717,14 +728,20 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
         n[2].is(syntax_kind::type_id)) {
         int which = unary_trait_named(name, written.size());
         if (which < 0)
-            return not_supported(n, "ext.clang");
+            return not_supported_because(
+                n, "ext.clang",
+                "a type trait of one type with an unknown name");
         qualified_type t;
         VTRY(r, type_id(n[2], t));
         if (depends_on_template_parameter(t))
-            return not_supported(n, "temp.dep.constexpr");
+            return not_supported_because(
+                n, "temp.dep.constexpr",
+                "a unary type trait of a dependent type");
         int64_t value = 0;
         if (!unary_trait(which, t, value))
-            return not_supported(n, "ext.clang");
+            return not_supported_because(
+                n, "ext.clang",
+                "a unary type trait with no answer for this type");
         fundamental_type result = fundamental_type::bool_;
         if (which == int(unary_trait_kind::array_rank))
             result = fundamental_type::unsigned_long_int;
@@ -735,23 +752,30 @@ analysis_result semantic_analysis::clang_type_trait(SyntaxRef n,
     /* ( type-id , type-id ) */
     if ((!same && !convertible) || n.size() != 6 ||
         !n[2].is(syntax_kind::type_id) || !n[4].is(syntax_kind::type_id))
-        return not_supported(n, "ext.clang");
+        return not_supported_because(
+            n, "ext.clang",
+            "a type trait builtin with an unrecognized name or argument form");
     qualified_type t, u;
     VTRY(r, type_id(n[2], t));
     VTRY_SET(r, type_id(n[4], u));
     if (depends_on_template_parameter(t) || depends_on_template_parameter(u))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(n, "temp.dep.constexpr",
+                                     "a binary type trait of dependent types");
     bool answer = t == u;
     if (convertible) {
         bool known = true;
         answer = convertible_types(n, t, u, known);
         if (!known)
-            return not_supported(n, "over.best.ics");
+            return not_supported_because(
+                n, "over.best.ics",
+                "a convertibility trait whose conversion could not be decided");
         /* a class's conversion functions and constructors may throw: not
            followed */
         if (nothrow_convertible && answer &&
             (class_or_referenced_class(t) || class_or_referenced_class(u)))
-            return not_supported(n, "over.best.ics");
+            return not_supported_because(
+                n, "over.best.ics",
+                "a nothrow-convertibility trait involving a class type");
     }
     m = integer_constant(fundamental_type::bool_, answer, n.first_token());
     return analysis_result::well_formed;
@@ -810,13 +834,18 @@ analysis_result semantic_analysis::builtin_template_arguments(
     for (uint32_t i = 2; i + 1 < id.size(); i++) {
         if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
-                return not_supported(id, "temp.variadic");
+                return not_supported_because(id, "temp.variadic",
+                                             "a builtin template argument list "
+                                             "with a misplaced ellipsis");
             expansion.back() = true;
             continue;
         }
         if (id[i].is(syntax_kind::template_argument_list)) {
             if (!expansion_list(id[i], written, expansion))
-                return not_supported(id, "temp.variadic");
+                return not_supported_because(
+                    id, "temp.variadic",
+                    "a builtin template argument list whose pack expansion "
+                    "could not be listed");
         } else {
             written.append(id[i]);
             expansion.append(false);
@@ -840,7 +869,9 @@ analysis_result semantic_analysis::builtin_template_types(
     for (size_t w = from; w < written.size(); w++) {
         SyntaxElement a = written[w];
         if (!a.is(syntax_kind::type_id))
-            return not_supported(id, "ext.clang");
+            return not_supported_because(id, "ext.clang",
+                                         "a builtin template argument that is "
+                                         "not a type where types are expected");
         uint32_t times = 1;
         if (expansion[w]) {
             token_index first = first_token(a);
@@ -879,7 +910,10 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
     owned_array<bool> expansion;
     VTRY(r, builtin_template_arguments(id, written, expansion));
     if (written.size() < 3 || expansion[0] || expansion[1] || expansion[2])
-        return not_supported(id, "ext.clang");
+        return not_supported_because(
+            id, "ext.clang",
+            "__builtin_common_type with too few arguments or a pack among the "
+            "first three");
     /* the two templates, by name */
     entity_index templates[2] = {0, 0};
     for (uint32_t i = 0; i < 2; i++) {
@@ -889,7 +923,10 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
         if (!a.is_token())
             end = a.end_token();
         if (end != first + 1 || tokens[first].kind != token_kind::identifier)
-            return not_supported(id, "ext.clang");
+            return not_supported_because(
+                id, "ext.clang",
+                "__builtin_common_type with a template argument not written as "
+                "a single name");
         lookup_result x =
             lookup_unqualified(tokens.identifier(first), lookup_filter::any);
         entity_index e = x.entity;
@@ -900,12 +937,17 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
             t = alias_template_of(e);
         if (!t || function_templates[t - 1].is_parameter ||
             function_templates[t - 1].primary)
-            return not_supported(id, "ext.clang");
+            return not_supported_because(
+                id, "ext.clang",
+                "__builtin_common_type with a name that is no usable class or "
+                "alias template");
         templates[i] = e;
     }
     qualified_type empty;
     if (!written[2].is(syntax_kind::type_id))
-        return not_supported(id, "ext.clang");
+        return not_supported_because(
+            id, "ext.clang",
+            "__builtin_common_type whose third argument is not a type");
     VTRY_SET(r, type_id(written[2], empty));
     owned_array<qualified_type> types;
     bool dependent = depends_on_template_parameter(empty);
@@ -922,7 +964,10 @@ analysis_result semantic_analysis::builtin_common_type(SyntaxRef id,
                                static_cast<uint32_t>(types.size()), found, c));
     if (found == common_found::none) {
         if (empty.cv())
-            return not_supported(id, "ext.clang");
+            return not_supported_because(
+                id, "ext.clang",
+                "__builtin_common_type with no common type and a cv-qualified "
+                "fallback type");
         type = empty.unqualified();
         return analysis_result::well_formed;
     }
@@ -948,7 +993,9 @@ analysis_result semantic_analysis::builtin_type_pack_element(SyntaxRef id,
     owned_array<bool> expansion;
     VTRY(r, builtin_template_arguments(id, written, expansion));
     if (written.empty() || expansion[0] || written[0].is(syntax_kind::type_id))
-        return not_supported(id, "ext.clang");
+        return not_supported_because(id, "ext.clang",
+                                     "__type_pack_element with no index or an "
+                                     "index that is a pack or a type");
     owned_array<qualified_type> types;
     bool dependent = false;
     VTRY_SET(
@@ -985,7 +1032,9 @@ analysis_result semantic_analysis::builtin_type_pack_element(SyntaxRef id,
                           "number of types",
                           "ext.clang");
     if (types[m.value].cv())
-        return not_supported(id, "ext.clang");
+        return not_supported_because(
+            id, "ext.clang",
+            "__type_pack_element selecting a cv-qualified type");
     type = types[m.value].unqualified();
     return analysis_result::well_formed;
 }
@@ -1009,12 +1058,16 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     VTRY(r, builtin_template_arguments(id, written, expansion));
     if (written.size() != 3 || expansion[0] || expansion[1] || expansion[2] ||
         written[2].is(syntax_kind::type_id))
-        return not_supported(id, "ext.clang");
+        return not_supported_because(id, "ext.clang",
+                                     "__make_integer_seq without a template, "
+                                     "an element type and a length");
     /* B, by name */
     token_index first = first_token(written[0]);
     if ((!written[0].is_token() && written[0].end_token() != first + 1) ||
         tokens[first].kind != token_kind::identifier)
-        return not_supported(id, "ext.clang");
+        return not_supported_because(id, "ext.clang",
+                                     "__make_integer_seq with a template "
+                                     "argument not written as a single name");
     lookup_result x =
         lookup_unqualified(tokens.identifier(first), lookup_filter::any);
     entity_index b = x.entity;
@@ -1024,9 +1077,13 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     if (!t)
         t = alias_template_of(b);
     if (!t)
-        return not_supported(id, "ext.clang");
+        return not_supported_because(id, "ext.clang",
+                                     "__make_integer_seq with a name that is "
+                                     "no class or alias template");
     if (!written[1].is(syntax_kind::type_id))
-        return not_supported(id, "ext.clang");
+        return not_supported_because(
+            id, "ext.clang",
+            "__make_integer_seq whose element type argument is not a type");
     qualified_type element;
     VTRY_SET(r, type_id(written[1], element));
     /* N: value-dependent when it names a template's own parameter
@@ -1064,7 +1121,9 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     const function_template ft = function_templates[t - 1];
     if (ft.parameter_count != 2 ||
         !template_parameter_is_pack(ft.first_parameter + 1))
-        return not_supported(id, "ext.clang");
+        return not_supported_because(id, "ext.clang",
+                                     "__make_integer_seq with a template not "
+                                     "taking a type and a value pack");
     owned_array<template_argument> arguments, values;
     template_argument a;
     a.type = element;
@@ -1283,12 +1342,16 @@ semantic_analysis::template_with_types(SyntaxRef id, entity_index named,
     if (pack)
         fixed--;
     if (count < fixed || (!pack && count != fixed))
-        return not_supported(id, "ext.clang");
+        return not_supported_because(id, "ext.clang",
+                                     "a builtin template result whose argument "
+                                     "count the template does not take");
     owned_array<template_argument> arguments;
     for (uint32_t i = 0; i < fixed; i++) {
         if (entity_table[template_parameter_entities[ft.first_parameter + i]]
                 .kind != entity_kind::typedef_name)
-            return not_supported(id, "ext.clang");
+            return not_supported_because(id, "ext.clang",
+                                         "a builtin template result for a "
+                                         "template with a non-type parameter");
         template_argument a;
         a.type = types[i];
         arguments.append(a);
@@ -1297,7 +1360,10 @@ semantic_analysis::template_with_types(SyntaxRef id, entity_index named,
         if (entity_table[template_parameter_entities[ft.first_parameter +
                                                      fixed]]
                 .kind != entity_kind::typedef_name)
-            return not_supported(id, "ext.clang");
+            return not_supported_because(
+                id, "ext.clang",
+                "a builtin template result for a template with a non-type "
+                "parameter pack");
         owned_array<template_argument> elements;
         for (uint32_t i = fixed; i < count; i++) {
             template_argument a;
@@ -1369,7 +1435,9 @@ analysis_result semantic_analysis::changed_signedness(SyntaxRef n,
         /* (_BitInt(N): no rule here) */
         if (f == fundamental_type::bit_precise_int ||
             f == fundamental_type::unsigned_bit_precise_int)
-            return not_supported(n, "ext.clang");
+            return not_supported_because(
+                n, "ext.clang",
+                "__make_signed or __make_unsigned of a _BitInt");
         return ill_formed(n,
                           "the operand of __make_signed and __make_unsigned "
                           "is an integral or enumeration type other than "
@@ -1379,7 +1447,9 @@ analysis_result semantic_analysis::changed_signedness(SyntaxRef n,
     uint64_t size =
         size_of_type(qualified_type::make(t.unqualified(), cv_none));
     if (!size)
-        return not_supported(n, "ext.clang");
+        return not_supported_because(
+            n, "ext.clang",
+            "__make_signed or __make_unsigned of a type with no size");
     for (const auto &p : pairs)
         if (size_of_type(qualified_type::make(type_table.fundamental(p[side]),
                                               cv_none)) == size) {
@@ -1387,7 +1457,9 @@ analysis_result semantic_analysis::changed_signedness(SyntaxRef n,
                 qualified_type::make(type_table.fundamental(p[side]), t.cv());
             return analysis_result::well_formed;
         }
-    return not_supported(n, "ext.clang");
+    return not_supported_because(n, "ext.clang",
+                                 "__make_signed or __make_unsigned with no "
+                                 "integer type of the same size");
 }
 
 } // namespace cplusplus

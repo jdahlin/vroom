@@ -76,13 +76,16 @@ analysis_result semantic_analysis::atomic_value_check(SyntaxRef n,
     /* (clang's rules for an atomic _BitInt, by its width, are not
        analysed) */
     if (record.kind == type_kind::bit_int)
-        return not_supported(n, "ext.clang");
+        return not_supported_because(n, "ext.clang",
+                                     "_Atomic of a _BitInt type");
     if (record.kind != type_kind::class_type)
         return analysis_result::well_formed;
     bool known = true;
     bool copyable = class_trivially_copyable(record.entity, known);
     if (!known)
-        return not_supported(n, "ext.clang");
+        return not_supported_because(
+            n, "ext.clang",
+            "_Atomic of a class not known to be trivially copyable");
     if (!copyable)
         return ill_formed(n,
                           "_Atomic cannot be applied to a type which is not "

@@ -50,7 +50,9 @@ analysis_result semantic_analysis::clang_convertvector(SyntaxRef n,
     VTRY_SET(r, type_id(n[4], to));
     if (depends_on_template_parameter(to) ||
         depends_on_template_parameter(m.type))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "__builtin_convertvector with a dependent type or operand");
     to = qualified_type::make(to.unqualified(), cv_none);
     VTRY_SET(r, operand_value(n, m));
     const struct type &from_type = type_table[m.type.unqualified()];

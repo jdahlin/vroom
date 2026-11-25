@@ -27,7 +27,10 @@ analysis_result semantic_analysis::clang_ext_vector_count(SyntaxRef at,
 {
     if (entity_index named = value_parameter_named(count)) {
         if (!is_integral(entity_table[named].type))
-            return not_supported(at, "temp.dep.constexpr");
+            return not_supported_because(
+                at, "temp.dep.constexpr",
+                "an ext_vector_type length naming a non-type parameter of "
+                "non-integral type");
         g.ext_vector.parameter = named;
         return analysis_result::well_formed;
     }
@@ -39,7 +42,9 @@ analysis_result semantic_analysis::clang_ext_vector_count(SyntaxRef at,
     if (r == analysis_result::well_formed && is_integral(m.type))
         VTRY_SET(r, integral_constant_expression(at, m, constant));
     if (!constant)
-        return not_supported(at, "ext.clang");
+        return not_supported_because(
+            at, "ext.clang",
+            "an ext_vector_type length that is not an integral constant");
     __int128 n =
         integer_value(tokens.files.behavior, fundamental_of(m.type), m.value);
     if (n < 1 || n > 4096)
@@ -61,7 +66,9 @@ semantic_analysis::clang_ext_vector_type(SyntaxRef at, const gnu_attributes &g,
         (element.kind != type_kind::fundamental ||
          element.fundamental == fundamental_type::bool_ ||
          !is_arithmetic(type)))
-        return not_supported(at, "ext.clang");
+        return not_supported_because(
+            at, "ext.clang",
+            "an ext_vector_type of a bool or non-arithmetic element type");
     type = qualified_type::make(
         type_table.ext_vector_of(
             qualified_type::make(type.unqualified(), cv_none),

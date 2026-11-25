@@ -610,7 +610,9 @@ semantic_analysis::va_list_builtin_result(SyntaxRef n, entity_index called,
         /* (a template's own va_list is dependent: analysed when it is
            instantiated) */
         if (depends_on_template_parameter(t))
-            return not_supported(n, "temp.dep.constexpr");
+            return not_supported_because(
+                n, "temp.dep.constexpr",
+                "a va_list builtin on a va_list of dependent type");
         /* (the lvalue-to-rvalue conversion argument passing applied is
            the lowering's no-op: the node under it is the object) */
         uint32_t list_cv = 0;
@@ -815,7 +817,9 @@ semantic_analysis::atomic_builtin_result(SyntaxRef n, entity_index called,
         if (atomic_object) {
             type_index value = atomic_value_type(pointee);
             if (!value)
-                return not_supported(n, "ext.clang");
+                return not_supported_because(n, "ext.clang",
+                                             "an atomic builtin on an _Atomic "
+                                             "object with no value type");
             pointee = qualified_type::make(value, cv_none);
         }
         fundamental_type f = fundamental_of(pointee);
@@ -952,7 +956,9 @@ semantic_analysis::complex_result(SyntaxRef n, entity_index called,
     qualified_type a = semantics[nodes[0]].type;
     qualified_type b = semantics[nodes[1]].type;
     if (depends_on_template_parameter(a) || depends_on_template_parameter(b))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "__builtin_complex with a dependent argument");
     fundamental_type f = fundamental_of(a);
     if (a.unqualified() != b.unqualified())
         return ill_formed(n,
@@ -988,7 +994,9 @@ semantic_analysis::launder_result(SyntaxRef n, entity_index called,
                           "ext.clang");
     qualified_type t = semantics[nodes[0]].type;
     if (depends_on_template_parameter(t))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "__builtin_launder of a dependent argument");
     if (!is_pointer(t))
         return ill_formed(n,
                           "the argument of __builtin_launder shall be a "
@@ -1017,7 +1025,9 @@ semantic_analysis::clear_padding_result(SyntaxRef n, entity_index called,
                           "ext.clang");
     qualified_type t = semantics[nodes[0]].type;
     if (depends_on_template_parameter(t))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "__builtin_clear_padding of a dependent argument");
     if (!is_pointer(t))
         return ill_formed(n,
                           "the argument of __builtin_clear_padding shall be a "
@@ -1051,7 +1061,9 @@ semantic_analysis::bswapg_result(SyntaxRef n, entity_index called,
     qualified_type t = semantics[nodes[0]].type;
     fundamental_type f = fundamental_of(t);
     if (depends_on_template_parameter(t))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "__builtin_bswapg of a dependent argument");
     if (f == fundamental_type::none || !fundamental_type_is_integral(f))
         return ill_formed(n,
                           "the argument of __builtin_bswapg shall be an "
@@ -1089,7 +1101,9 @@ semantic_analysis::align_result(SyntaxRef n, entity_index called,
     qualified_type t = semantics[nodes[0]].type;
     qualified_type a = semantics[nodes[1]].type;
     if (depends_on_template_parameter(t) || depends_on_template_parameter(a))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "an alignment builtin with a dependent argument");
     fundamental_type f = fundamental_of(t);
     bool integer = f != fundamental_type::none &&
                    fundamental_type_is_integral(f) &&
@@ -1143,7 +1157,9 @@ semantic_analysis::vtable_pointer_result(SyntaxRef n, entity_index called,
                           "ext.clang");
     qualified_type t = semantics[nodes[0]].type;
     if (depends_on_template_parameter(t))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "__builtin_get_vtable_pointer of a dependent argument");
     const struct type &tk = type_table[t.unqualified()];
     qualified_type pointee;
     if (tk.kind == type_kind::pointer || tk.kind == type_kind::array)
@@ -1204,7 +1220,9 @@ semantic_analysis::stdc_bits_result(SyntaxRef n, entity_index called,
     qualified_type first = semantics[nodes[0]].type;
     fundamental_type f = fundamental_of(first);
     if (depends_on_template_parameter(first))
-        return not_supported(n, "temp.dep.constexpr");
+        return not_supported_because(
+            n, "temp.dep.constexpr",
+            "a bit function builtin with a dependent argument");
     if (f == fundamental_type::none)
         return not_supported_builtin(n, "ext.gnu", called,
                                      "of an operand that is not an integer");
@@ -1800,7 +1818,9 @@ semantic_analysis::nontemporal_access(SyntaxRef n,
     VTRY(r, expression(clauses[pointer_at], pointer));
     VTRY_SET(r, operand_value(n, pointer));
     if (!is_object_pointer(pointer.type))
-        return not_supported(n, "ext.clang");
+        return not_supported_because(
+            n, "ext.clang",
+            "a nontemporal builtin whose address is not an object pointer");
     VTRY_SET(r, indirection_of(n, at, clauses[pointer_at], pointer));
     if (!store) {
         m = pointer;
@@ -1921,7 +1941,9 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
         /* __builtin_elementwise_min, _max, _add_sat and _sub_sat of
            integer vectors */
         if (!is_integral(vector.operand))
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(
+                n, "ext.gnu",
+                "an elementwise builtin on a vector of non-integer elements");
         m = expression_meaning();
         m.type = qualified_type::make(a.type.unqualified(), cv_none);
         m.category = value_category::prvalue;
@@ -1937,10 +1959,14 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
         VTRY_SET(r, expression(clauses[i], e));
         bool constant = false;
         if (!is_integral(e.type))
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(
+                n, "ext.gnu",
+                "__builtin_shufflevector with a non-integral index");
         VTRY_SET(r, integral_constant_expression(n, e, constant));
         if (!constant)
-            return not_supported(n, "ext.gnu");
+            return not_supported_because(
+                n, "ext.gnu",
+                "__builtin_shufflevector with an index that is not a constant");
         __int128 v = integer_value(tokens.files.behavior,
                                    fundamental_of(e.type), e.value);
         if (v < -1 || v >= static_cast<__int128>(2 * vector.bound))
@@ -1952,7 +1978,9 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
     }
     uint64_t lanes = indices.size();
     if ((lanes & (lanes - 1)) || lanes * size_of_type(vector.operand) > 64)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(n, "ext.gnu",
+                                     "__builtin_shufflevector result of "
+                                     "non-power-of-two lanes or over 64 bytes");
     m = expression_meaning();
     m.type = qualified_type::make(type_table.vector_of(vector.operand, lanes),
                                   cv_none);
@@ -2048,7 +2076,9 @@ analysis_result semantic_analysis::builtin_complex(SyntaxRef n,
     VTRY(r2, operand_value(n, arg));
     const struct type at = type_table[arg.type.unqualified()];
     if (at.kind != type_kind::complex)
-        return not_supported(n, "ext.gnu");
+        return not_supported_because(
+            n, "ext.gnu",
+            "a complex part builtin on an operand that is not complex");
     m = expression_meaning();
     if (kind == 4)
         m.type = qualified_type::make(arg.type.unqualified(), cv_none);

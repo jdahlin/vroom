@@ -147,7 +147,9 @@ semantic_analysis::resolve_call(SyntaxRef n,
     for (size_t i = 0; i < early.size(); i++)
         if (!early[i].node && !early[i].overload_name &&
             !arguments[i].is(syntax_kind::braced_init_list))
-            return not_supported(n, "over.over");
+            return not_supported_because(
+                n, "over.over",
+                "a call argument with no value that is not a braced-init-list");
     for (size_t i = early.size(); i < arguments.size(); i++) {
         expression_meaning e;
         /* [over.over]/1: an overload set's name as an argument stays the
@@ -216,7 +218,9 @@ semantic_analysis::resolve_call(SyntaxRef n,
         /* a static member function chosen for a call with an object
            (called without it), or a non-static one without an object
            ([class.mfct.non-static]/3, ill-formed): not analysed */
-        return not_supported(n, "over.match.funcs");
+        return not_supported_because(n, "over.match.funcs",
+                                     "a call whose chosen member's staticness "
+                                     "does not match the object argument");
     /* a copy: deleted_use may define an implicit member, adding entities
        that may move entity_table's */
     const entity x = entity_table[c];

@@ -136,7 +136,10 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
                 continue;
             if (overridden && overridden != g &&
                 entity_table[g].type != entity_table[overridden].type)
-                return not_supported(declaration, "class.virtual");
+                return not_supported_because(
+                    declaration, "class.virtual",
+                    "an override of functions of different types in several "
+                    "bases");
             if (entity_table[g].final_function)
                 overridden = g;
             if (!overridden)
@@ -157,7 +160,11 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
            ([class.compare.default]/4), [class.union]/2's "A union shall not have virtual functions",
            a local class's virtual table: not analysed (a constexpr
            virtual function is an inline one, [dcl.constexpr]/1) */
-        return not_supported(declaration, "class.virtual");
+        return not_supported_because(
+            declaration, "class.virtual",
+            "a virtual assignment operator, operator== or three-way "
+            "comparison, or a virtual function of a union or of some local "
+            "classes");
     if (!entity_table[e].nonstatic_member) {
         /* [class.static.mfct]/2: "A static member function shall not be
            virtual" */
@@ -166,7 +173,10 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
                                        "a static member function shall not "
                                        "be virtual",
                                        "class.static.mfct");
-        return not_supported(declaration, "class.virtual");
+        return not_supported_because(
+            declaration, "class.virtual",
+            "a function without an object parameter that would be virtual "
+            "without the virtual specifier");
     }
     if (overridden) {
         const entity &g = entity_table[overridden];
@@ -176,7 +186,10 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
         if (g.type != entity_table[e].type &&
             !covariant_override(g.type.unqualified(),
                                 entity_table[e].type.unqualified()))
-            return not_supported(declaration, "class.virtual");
+            return not_supported_because(
+                declaration, "class.virtual",
+                "an override with another return type that is not an accepted "
+                "covariant return");
         /* [class.virtual]/4: "If a virtual function f in some class B is
            marked with the virt-specifier final and in a class D derived
            from B a function D::f overrides B::f, the program is
@@ -188,7 +201,9 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
                                        "class.virtual");
         if (g.deleted || entity_table[e].deleted)
             /* [class.virtual]/17 */
-            return not_supported(declaration, "class.virtual");
+            return not_supported_because(
+                declaration, "class.virtual",
+                "an override where either function is deleted");
     } else if (virt_override) {
         /* [class.virtual]/5: "If a virtual function is marked with the
            virt-specifier override and does not override a member function
@@ -210,7 +225,9 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
                                    "class.mem");
     }
     if (entity_table[e].deleted)
-        return not_supported(declaration, "class.virtual");
+        return not_supported_because(
+            declaration, "class.virtual",
+            "a deleted virtual function that overrides nothing");
     entity_table[e].virtual_ = true;
     entity_table[e].pure = virt_pure;
     entity_table[e].final_function = virt_final;
@@ -319,7 +336,9 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     if (!primary_base_choice(c, primary))
         /* a primary base that is not the first base: allocated first
            ([abi:class-types] II), out of declaration order */
-        return not_supported(n, "class.virtual");
+        return not_supported_because(
+            n, "class.virtual",
+            "a dynamic class whose primary base is not its first base");
     /* [abi:class-types] I: without a non-virtual dynamic base, "a nearly
        empty virtual base class" (one with nothing but its virtual table
        pointer) is the primary base, the first in inheritance graph order,
@@ -333,7 +352,10 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                 entity_table[v].nv_size == pointer_size()) {
                 /* its secondary tables are not followed */
                 if (dynamic_of(v)->group_count != 1)
-                    return not_supported(n, "class.mi");
+                    return not_supported_because(
+                        n, "class.mi",
+                        "a primary virtual base with more than one virtual "
+                        "table group");
                 primary = virtual_base_of(c, v);
                 primary_virtual = true;
             }
@@ -434,7 +456,8 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
         entity_table[destructor].pure)
         /* a pure virtual destructor, still defined ([class.dtor]/12): its
            slots and its deleting destructor are not analysed */
-        return not_supported(n, "class.dtor");
+        return not_supported_because(n, "class.dtor",
+                                     "a pure virtual destructor");
     dynamic_class d;
     d.primary_base = primary;
     d.primary_is_virtual = primary_virtual;
@@ -597,7 +620,10 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
     }
     d.group_count = static_cast<uint32_t>(vtable_groups.size()) - d.first_group;
     if (across_virtual)
-        return not_supported(n, "class.mi");
+        return not_supported_because(
+            n, "class.mi",
+            "a virtual override in a secondary virtual table that is ambiguous "
+            "or adjusted across a virtual base");
     if (destructor && entity_table[destructor].virtual_) {
         /* [class.dtor]/12: "At the point of definition of a virtual
            destructor (including an implicit definition), the non-array
@@ -614,7 +640,9 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                "results in an ambiguity or in a function that is deleted
                or inaccessible from the destructor" (access from the
                class is not followed) */
-            return not_supported(n, "class.dtor");
+            return not_supported_because(n, "class.dtor",
+                                         "a virtual destructor whose operator "
+                                         "delete is deleted or not public");
     }
     /* the key function is among all the class's virtual functions,
        overriders too, in declaration order */
@@ -641,19 +669,28 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                 while (type_table[u.unqualified()].kind == type_kind::array)
                     u = type_table[u.unqualified()].operand;
                 if (u.unqualified() == self)
-                    return not_supported(n, "class.abstract");
+                    return not_supported_because(
+                        n, "class.abstract",
+                        "a static data member of the class's own type in an "
+                        "abstract class");
                 continue;
             }
             if (m.kind != entity_kind::function ||
                 t.kind != type_kind::function)
                 continue;
             if (t.operand.unqualified() == self)
-                return not_supported(n, "class.abstract");
+                return not_supported_because(
+                    n, "class.abstract",
+                    "a member function returning the class itself in an "
+                    "abstract class");
             const qualified_type *ps =
                 type_table.parameters(m.type.unqualified());
             for (uint32_t i = 0; i < t.parameter_count; i++)
                 if (ps[i].unqualified() == self)
-                    return not_supported(n, "class.abstract");
+                    return not_supported_because(
+                        n, "class.abstract",
+                        "a member function with a parameter of the class "
+                        "itself in an abstract class");
         }
     }
     dynamic_classes.append(d);

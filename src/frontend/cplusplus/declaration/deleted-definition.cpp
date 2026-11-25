@@ -63,7 +63,9 @@ analysis_result semantic_analysis::unavailable_use(token_index at,
        of an unavailable class; a default argument is analysed before the
        function's attributes are all known */
     if (default_argument_function)
-        return not_supported(current_declaration, "ext.gnu");
+        return not_supported_because(
+            current_declaration, "ext.gnu",
+            "a use of an unavailable function in a default argument");
     if (function_state.active && function_state.function)
         for (entity_index c = function_state.function; c;
              c = entity_table[c].enclosing)

@@ -159,7 +159,11 @@ analysis_result semantic_analysis::template_declaration(TemplateDeclaration t)
         [&](SimpleDeclaration s) { return template_simple_declaration(t, s); },
         [&](DeductionGuide g) { return deduction_guide(t, g); },
         /* (or no declaration: a token) */
-        [&](Declaration) { return not_supported(t, "temp.pre"); }});
+        [&](Declaration) {
+            return not_supported_because(
+                t, "temp.pre",
+                "a template-declaration with no declaration of a handled kind");
+        }});
 }
 
 /* [temp.mem.class]/1: a member class of a class template defined outside
@@ -199,7 +203,9 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
     /* a function template's declaration or a variable template of several
        declarators: which needs the declarator's type */
     if (s.init_declarator_list().is(syntax_kind::init_declarator_list))
-        return not_supported(t, "temp.pre");
+        return not_supported_because(
+            t, "temp.pre",
+            "a templated simple-declaration with several declarators");
     /* [temp.class]/1: "A class template defines the layout and operations
        for an unbounded set of related types." (a declaration with no
        declarator: a class's) */
@@ -225,7 +231,9 @@ semantic_analysis::template_simple_declaration(TemplateDeclaration t,
            yet) */
         auto item = s[lead + 1];
         if (lead && item.is(item[0], syntax_kind::simple_template_id))
-            return not_supported(t, "temp.pre");
+            return not_supported_because(
+                t, "temp.pre",
+                "an attributed declaration of a variable specialization");
         if (SyntaxRef id = variable_specialization_id(s))
             return variable_partial_specialization(t, s, id, 0);
         /* [dcl.meaning]/1: the same named by a qualified template-id,
@@ -321,11 +329,16 @@ analysis_result semantic_analysis::template_head_parameters(
        template-head, its parameters all invented */
     if (n.is(syntax_kind::function_definition)) {
         if (!abbreviated_parameters(n, parameters) || parameters.empty())
-            return not_supported(n, "temp.variadic");
+            return not_supported_because(
+                n, "temp.variadic",
+                "a function definition with no template-head or invented "
+                "parameters");
         return analysis_result::well_formed;
     }
     if (n.size() != 2 || !n[0].is(syntax_kind::template_head))
-        return not_supported(n, "temp.pre");
+        return not_supported_because(n, "temp.pre",
+                                     "a template-declaration that is not a "
+                                     "template-head and a declaration");
     /* a member alias template of a class of namespace scope
        (member_template_declaration) is the one member template here */
     bool member_alias =
@@ -348,17 +361,22 @@ analysis_result semantic_analysis::template_head_parameters(
         template_member_scope && current_scope == template_member_scope;
     if (!member_alias && !member_class && !member_guide && !member_definition &&
         (!is_namespace(current_scope) || (defining_class && !friend_allowed)))
-        return not_supported(n, "temp.mem");
+        return not_supported_because(
+            n, "temp.mem", "a member template of this kind or in this scope");
     /* template-head: template < template-parameter-list >; a
        requires-clause is [temp.constr] */
     auto head = n[0];
     if (!template_head_list(head, parameters))
-        return not_supported(n, "temp.pre");
+        return not_supported_because(
+            n, "temp.pre", "a template-head with an unhandled parameter list");
     /* [dcl.fct]/22: the invented template-parameters after the declared */
     if (!abbreviated_parameters(n, parameters))
-        return not_supported(n, "temp.variadic");
+        return not_supported_because(n, "temp.variadic",
+                                     "unhandled invented parameters of an "
+                                     "abbreviated function template");
     if (head_constraint(n) && !constrained)
-        return not_supported(n, "temp.constr");
+        return not_supported_because(
+            n, "temp.constr", "a requires-clause on this kind of template");
     return validate_template_parameters(n, parameters, packs, pack_anywhere,
                                         type_constraints);
 }
@@ -376,14 +394,17 @@ analysis_result semantic_analysis::validate_template_parameters(
         SyntaxRef p = parameters[i];
         template_parameter_parts x;
         if (!template_parameter_form(p, x))
-            return not_supported(p, "temp.param");
+            return not_supported_because(
+                p, "temp.param", "a template parameter of an unhandled form");
         /* [temp.param]/4: a type-constraint's immediately-declared
            constraint is one of the template's associated constraints
            ([temp.constr.decl]/3), checked with its requires-clause
            (template_constraints_satisfied): a function template's and a
            partial specialization's ([temp.class.spec.match]/2) */
         if (x.constraint && (!type_constraints || x.pack))
-            return not_supported(p, "temp.param");
+            return not_supported_because(
+                p, "temp.param",
+                "a type-constraint on this template parameter");
         /* [temp.param]/18: "If a template-parameter is a type-parameter
            with an ellipsis prior to its optional identifier ... then the
            template-parameter is a template parameter pack"; /17 a
@@ -399,7 +420,10 @@ analysis_result semantic_analysis::validate_template_parameters(
                ([temp.class.spec]/8.3 aside) */
             if (!packs || (i + 1 != parameters.size() && !pack_anywhere) ||
                 x.template_template || x.has_default)
-                return not_supported(p, "temp.variadic");
+                return not_supported_because(
+                    p, "temp.variadic",
+                    "a template parameter pack not allowed in this position or "
+                    "form");
             continue;
         }
         if (!x.template_template)
@@ -409,16 +433,22 @@ analysis_result semantic_analysis::validate_template_parameters(
            without defaults; a pack its last */
         owned_array<SyntaxRef> inner;
         if (!template_head_list(x.head, inner) || inner.empty())
-            return not_supported(p, "temp.arg.template");
+            return not_supported_because(p, "temp.arg.template",
+                                         "a template template parameter with "
+                                         "an unhandled or empty head");
         for (size_t k = 0; k < inner.size(); k++) {
             template_parameter_parts y;
             if (!template_parameter_form(inner[k], y) || y.has_declarator ||
                 y.template_template || (y.pack && k + 1 != inner.size()))
-                return not_supported(p, "temp.arg.template");
+                return not_supported_because(
+                    p, "temp.arg.template",
+                    "a template template parameter with an unhandled inner "
+                    "parameter");
         }
     }
     if (parameters.empty())
-        return not_supported(n, "temp.param");
+        return not_supported_because(n, "temp.param",
+                                     "an empty template parameter list");
     return analysis_result::well_formed;
 }
 
@@ -510,7 +540,9 @@ analysis_result semantic_analysis::declare_template_parameters(
         SyntaxRef node = parameters[i];
         template_parameter_parts form;
         if (!template_parameter_form(node, form))
-            return not_supported(node, "temp.param");
+            return not_supported_because(
+                node, "temp.param",
+                "a template parameter of an unhandled form");
         token_index id = form.id;
         uint32_t name = 0;
         if (form.named)
@@ -552,7 +584,9 @@ analysis_result semantic_analysis::declare_template_parameters(
                     (dm.qualifier || dm.qualified_namespace ||
                      !dm.pack != !form.pack || dm.gnu_flags || dm.aligned ||
                      dm.template_id || dm.has_id != form.named))
-                    r = not_supported(node, "temp.param");
+                    r = not_supported_because(node, "temp.param",
+                                              "a non-type template parameter "
+                                              "with an unhandled declarator");
             }
             current_scope = saved;
             if (r != analysis_result::well_formed)
@@ -581,7 +615,10 @@ analysis_result semantic_analysis::declare_template_parameters(
             for (qualified_type walk = type;;) {
                 const struct type &w = type_table[walk.unqualified()];
                 if (w.kind == type_kind::array && w.entity && w.bound)
-                    return not_supported(node, "temp.param");
+                    return not_supported_because(
+                        node, "temp.param",
+                        "a parameter type with an array bound depending on "
+                        "another parameter");
                 if (w.kind != type_kind::pointer &&
                     w.kind != type_kind::array &&
                     w.kind != type_kind::lvalue_reference &&
@@ -1081,7 +1118,8 @@ analysis_result semantic_analysis::template_type(SyntaxRef id,
 {
     SyntaxElement template_name = id.simple_template_id().template_name();
     if (!template_name)
-        return not_supported(id, "temp.names");
+        return not_supported_because(id, "temp.names",
+                                     "a template-id with no template-name");
     uint32_t name = tokens.identifier(template_name.token());
     lookup_result x;
     if (qualified)
@@ -1244,13 +1282,17 @@ analysis_result semantic_analysis::template_id_arguments(
     for (uint32_t i = 2; i + 1 < id.size(); i++) {
         if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
-                return not_supported(id, "temp.variadic");
+                return not_supported_because(
+                    id, "temp.variadic",
+                    "a misplaced ellipsis in a template argument list");
             expansion.back() = true;
             continue;
         }
         if (id[i].is(syntax_kind::template_argument_list)) {
             if (!expansion_list(id[i], written, expansion))
-                return not_supported(id, "temp.variadic");
+                return not_supported_because(id, "temp.variadic",
+                                             "a template argument list whose "
+                                             "expansions cannot be listed");
         } else {
             written.append(id[i]);
             expansion.append(false);
@@ -1262,7 +1304,9 @@ analysis_result semantic_analysis::template_id_arguments(
         if (written[w].is(syntax_kind::type_id) && written[w].size() == 2 &&
             written[w][1].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (expansion[w])
-                return not_supported(id, "temp.variadic");
+                return not_supported_because(
+                    id, "temp.variadic",
+                    "a template argument with two ellipses");
             expansion[w] = true;
         }
     {
@@ -1290,7 +1334,10 @@ analysis_result semantic_analysis::template_id_arguments(
                     own = own_pack_parameter(tokens.identifier(first));
                 if (own) {
                     if (arguments.size() < pack || pack >= count)
-                        return not_supported(id, "temp.variadic");
+                        return not_supported_because(
+                            id, "temp.variadic",
+                            "an own pack expansion with arguments missing "
+                            "before the pack");
                     template_argument v;
                     v.kind = template_argument::kind_t::pack;
                     v.template_entity = template_parameter_entities[own - 1];
@@ -1308,7 +1355,10 @@ analysis_result semantic_analysis::template_id_arguments(
                 if (!expansion_count(first, end, times, &own_pattern)) {
                     if (!own_pattern || a.is_token() || pack >= count ||
                         arguments.size() < pack)
-                        return not_supported(id, "temp.variadic");
+                        return not_supported_because(
+                            id, "temp.variadic",
+                            "a template argument pack expansion that cannot be "
+                            "expanded");
                     template_argument v;
                     v.kind = template_argument::kind_t::pack;
                     v.type = qualified_type::make(dependent_written_type(a),
@@ -1326,7 +1376,9 @@ analysis_result semantic_analysis::template_id_arguments(
                     position = pack;
                 /* too many: clang's "too many template arguments" */
                 if (position >= count)
-                    return not_supported(id, "temp.arg");
+                    return not_supported_because(id, "temp.arg",
+                                                 "more template arguments than "
+                                                 "the template has parameters");
                 template_argument v;
                 analysis_result r = analysis_result::well_formed;
                 {
@@ -1359,7 +1411,9 @@ analysis_result semantic_analysis::template_id_arguments(
        declaration is judged */
     analysis_result r = default_template_arguments(id, ct, arguments, set);
     if (r == analysis_result::ill_formed)
-        return not_supported(id, "temp.arg");
+        return not_supported_because(
+            id, "temp.arg",
+            "a default template argument that is ill-formed here");
     return r;
 }
 
@@ -1493,7 +1547,8 @@ semantic_analysis::merge_template_defaults(SyntaxRef n, uint32_t old_first,
             continue;
         if (template_parameter_has_default(
                 template_parameter_nodes[new_first + i]))
-            return not_supported(n, "temp.param");
+            return not_supported_because(
+                n, "temp.param", "a default template argument given twice");
         template_parameter_nodes[new_first + i] = before;
         template_parameter_default_names[new_first + i] =
             template_parameter_default_names[old_first + i];
@@ -1506,7 +1561,10 @@ semantic_analysis::merge_template_defaults(SyntaxRef n, uint32_t old_first,
                     template_parameter_nodes[new_first + i - 1]) &&
                 !template_parameter_has_default(
                     template_parameter_nodes[new_first + i]))
-                return not_supported(n, "temp.param");
+                return not_supported_because(
+                    n, "temp.param",
+                    "merged defaults with a parameter lacking one after a "
+                    "defaulted one");
     }
     return analysis_result::well_formed;
 }

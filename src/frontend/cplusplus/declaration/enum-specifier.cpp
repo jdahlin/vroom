@@ -503,11 +503,13 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             continue;
         }
         /* an attribute-specifier-seq, a nested-name-specifier */
-        return not_supported(n, "dcl.enum");
+        return not_supported_because(n, "dcl.enum",
+                                     "an unexpected part in an enum-head");
     }
     if (!opaque &&
         (i >= n.size() || !n[i].is(preprocessing_op_or_punc::LEFT_BRACE)))
-        return not_supported(n, "dcl.enum");
+        return not_supported_because(
+            n, "dcl.enum", "an enum-specifier with no enumerator braces");
     owned_array<SyntaxElement> enumerators;
     for (i++; i < n.size(); i++) {
         SyntaxElement c = n[i];
@@ -533,17 +535,21 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
         fixed = fundamental_type::int_;
     if (base) {
         if (base.size() != 2 || !base[1].is(syntax_kind::type_specifier_seq))
-            return not_supported(n, "dcl.enum");
+            return not_supported_because(n, "dcl.enum",
+                                         "an enum-base of an unexpected shape");
         specified s;
         VTRY(r, decl_specifier_seq(base[1], s, true));
         /* [dcl.enum]/2: "The type-specifier-seq of an enum-base shall name
            an integral type; any cv-qualification is ignored." */
         if (!s.has_type)
-            return not_supported(n, "dcl.enum");
+            return not_supported_because(n, "dcl.enum",
+                                         "an enum-base that names no type");
         if (!is_integral(s.type)) {
             if (fundamental_of(s.type) == fundamental_type::none &&
                 type_table[s.type.unqualified()].kind != type_kind::pointer)
-                return not_supported(n, "dcl.enum");
+                return not_supported_because(
+                    n, "dcl.enum",
+                    "an enum-base of a non-integral class or other type");
             return ill_formed(base,
                               "the type-specifier-seq of an enum-base shall "
                               "name an integral type",
@@ -594,12 +600,16 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                                            "contain more than one definition "
                                            "of any enumeration type",
                                            "basic.def.odr");
-            return not_supported(n, "basic.scope.declarative");
+            return not_supported_because(
+                n, "basic.scope.declarative",
+                "an enum definition whose name is already declared otherwise");
         }
     }
     if (opaque && !is_fixed)
         /* (the parser requires an unscoped one's enum-base) */
-        return not_supported(n, "dcl.enum");
+        return not_supported_because(
+            n, "dcl.enum",
+            "an opaque enum declaration with no fixed underlying type");
     bool redeclared = e != 0;
     if (!redeclared)
         e = entity_table.make(entity_kind::enumeration, name, scope);
@@ -682,7 +692,9 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
         bool has_init = false;
         if (c.is(syntax_kind::enumerator_definition)) {
             if (c.size() != 3)
-                return not_supported(n, "dcl.enum");
+                return not_supported_because(
+                    n, "dcl.enum",
+                    "an enumerator-definition of an unexpected shape");
             id = c[0];
             init = c[2];
             has_init = true;
@@ -694,11 +706,14 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             auto attrs = id;
             for (uint32_t i2 = 1; i2 < id.size(); i2++)
                 if (!class_head_attributes_without_effect(attrs[i2]))
-                    return not_supported(n, "dcl.enum");
+                    return not_supported_because(
+                        n, "dcl.enum",
+                        "an enumerator attribute that has an effect");
             id = attrs[0];
         }
         if (!id.is_token() || tokens[id.token()].kind != token_kind::identifier)
-            return not_supported(n, "dcl.enum");
+            return not_supported_because(n, "dcl.enum",
+                                         "an enumerator that is no identifier");
         token_index at = id.token();
         __int128 value;
         fundamental_type value_type = previous_type;
@@ -720,7 +735,10 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                 if (!is_integral(m.type)) {
                     if (fundamental_of(m.type) == fundamental_type::none &&
                         !is_pointer(m.type))
-                        return not_supported(n, "dcl.enum");
+                        return not_supported_because(
+                            n, "dcl.enum",
+                            "an enumerator value of class or other "
+                            "non-integral type");
                     /* [dcl.enum]/5: "the constant-expression shall be an
                        integral constant expression" (or a converted constant
                        expression of the fixed underlying type) */
@@ -733,7 +751,9 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                 bool constant = false;
                 VTRY_SET(r, integral_constant_expression(n, m, constant));
                 if (!constant)
-                    return not_supported(n, "expr.const");
+                    return not_supported_because(
+                        n, "expr.const",
+                        "an enumerator value not evaluated as a constant");
                 fundamental_type f = fundamental_of(m.type);
                 value = integer_value(b, f, m.value);
                 if (is_fixed) {
@@ -800,7 +820,9 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                         break;
                     }
                 if (value_type == fundamental_type::none)
-                    return not_supported(n, "dcl.enum");
+                    return not_supported_because(
+                        n, "dcl.enum",
+                        "an enumerator value no integer type holds");
             }
         }
         if (!value_unknown && value < 0) {
@@ -819,7 +841,9 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             conflict = entity_table.find(e, enumerator_name);
         if (conflict) {
             if (entity_table[conflict].kind == entity_kind::none)
-                return not_supported(n, "basic.scope.declarative");
+                return not_supported_because(
+                    n, "basic.scope.declarative",
+                    "an enumerator name held by an unanalysed declaration");
             /* [basic.scope.declarative]/4: "Given a set of declarations
                in a single declarative region, each of which specifies the
                same unqualified name, they shall all refer to the same
@@ -831,7 +855,9 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                                            "the enumerator's name is "
                                            "declared in the scope already",
                                            "basic.scope.declarative");
-            return not_supported(n, "basic.scope.declarative");
+            return not_supported_because(
+                n, "basic.scope.declarative",
+                "an enumerator name that conflicts with a declaration");
         }
         entity_index enumerator_scope = scope;
         if (scoped)
@@ -910,7 +936,8 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
             /* [dcl.enum]/7: "If no integral type can represent all the
                enumerator values, the enumeration is ill-formed." (clang's
                extension: __int128) */
-            return not_supported(n, "dcl.enum");
+            return not_supported_because(
+                n, "dcl.enum", "enumerator values no underlying type holds");
     }
     /* [dcl.enum]/5: "Following the closing brace of an enum-specifier,
        each enumerator has the type of its enumeration." */
@@ -949,7 +976,9 @@ semantic_analysis::elaborated_enum_specifier(ElaboratedEnumSpecifier n,
                                              type_index &type)
 {
     if (n.size() != 2 || !n[1].is_identifier())
-        return not_supported(n, "dcl.type.elab");
+        return not_supported_because(
+            n, "dcl.type.elab",
+            "an elaborated enum specifier that is no plain name");
     entity_index e = lookup(tokens.identifier(n[1].token()));
     /* [enum.udecl]/1: "The using-enum-declarator ... shall name a
        non-dependent previously declared enumeration type": a typedef-name
@@ -964,7 +993,9 @@ semantic_analysis::elaborated_enum_specifier(ElaboratedEnumSpecifier n,
         }
     }
     if (!e || entity_table[e].kind != entity_kind::enumeration)
-        return not_supported(n, "basic.lookup.elab");
+        return not_supported_because(
+            n, "basic.lookup.elab",
+            "an elaborated enum name that finds no enumeration");
     type = entity_table[e].type.unqualified();
     return analysis_result::well_formed;
 }
@@ -981,12 +1012,16 @@ analysis_result
 semantic_analysis::using_enum_declaration(UsingEnumDeclaration n)
 {
     if (n.size() != 3 || !n[1].is(syntax_kind::elaborated_enum_specifier))
-        return not_supported(n, "enum.udecl");
+        return not_supported_because(
+            n, "enum.udecl",
+            "a using enum without an elaborated-enum-specifier");
     type_index type = 0;
     VTRY(r, elaborated_enum_specifier(ElaboratedEnumSpecifier(n[1]), type));
     const struct type &t = type_table[type];
     if (t.kind != type_kind::enumeration || !t.entity)
-        return not_supported(n, "enum.udecl");
+        return not_supported_because(
+            n, "enum.udecl",
+            "a using enum of a type that is no named enumeration");
     entity_index enumeration = t.entity;
     bool any = false;
     /* (the enumerators are made after their enumeration's entity, an
@@ -996,12 +1031,15 @@ semantic_analysis::using_enum_declaration(UsingEnumDeclaration n)
         if (x.kind != entity_kind::enumerator || x.enclosing != enumeration)
             continue;
         if (entity_table.find(current_scope, x.name))
-            return not_supported(n, "enum.udecl");
+            return not_supported_because(
+                n, "enum.udecl",
+                "a using enum whose enumerator name is already in the scope");
         entity_table.bind(current_scope, x.name, en, true);
         any = true;
     }
     if (!any)
-        return not_supported(n, "enum.udecl");
+        return not_supported_because(
+            n, "enum.udecl", "a using enum that brings in no enumerators");
     return analysis_result::well_formed;
 }
 
