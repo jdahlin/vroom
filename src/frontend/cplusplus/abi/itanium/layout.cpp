@@ -201,6 +201,36 @@ class class_layout
     /* set when a component has more empty subobjects than are recorded */
     bool too_many = false;
 
+    /* whether class `of` or any of its subobjects is an empty class */
+    bool has_empty_subobject(entity_index of, bool complete) const
+    {
+        if (empty_class(analysis, of))
+            return true;
+        const entity &x = table[of];
+        for (uint32_t i = 0; i < x.base_count; i++) {
+            const entity &b = table[analysis.class_bases[x.first_base + i]];
+            if (b.virtual_base)
+                continue;
+            if (has_empty_subobject(class_of_component(analysis, b), false))
+                return true;
+        }
+        for (uint32_t i = 0; complete && i < x.virtual_base_count; i++) {
+            const entity &b =
+                table[analysis.class_virtual_bases[x.first_virtual_base + i]];
+            if (has_empty_subobject(class_of_component(analysis, b), false))
+                return true;
+        }
+        for (uint32_t i = 0; i < x.member_count; i++) {
+            const entity &m = table[analysis.class_members[x.first_member + i]];
+            entity_index inner = class_of_component(analysis, m);
+            if (!inner || m.base_subobject)
+                continue;
+            if (has_empty_subobject(inner, true))
+                return true;
+        }
+        return false;
+    }
+
     /* f(class, offset) for every subobject of class `of` at `at`, itself
        included, while it returns true */
     template <typename F>
@@ -270,7 +300,7 @@ bool class_layout::each_subobject(entity_index of, uint64_t at, bool complete,
     for (uint32_t i = 0; i < x.member_count; i++) {
         const entity &m = table[analysis.class_members[x.first_member + i]];
         entity_index inner = class_of_component(analysis, m);
-        if (!inner || m.base_subobject)
+        if (!inner || m.base_subobject || !has_empty_subobject(inner, true))
             continue;
         uint64_t element = table[inner].size;
         uint64_t count = elements(m, inner);
@@ -535,7 +565,7 @@ const char *class_layout::data_member(entity &m)
             return nullptr;
         }
         uint64_t element = 0, count = 0;
-        if (of) {
+        if (of && has_empty_subobject(of, true)) {
             element = table[of].size;
             count = elements(m, of);
         }
