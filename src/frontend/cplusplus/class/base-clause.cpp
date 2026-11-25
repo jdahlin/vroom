@@ -730,10 +730,18 @@ analysis_result semantic_analysis::to_base(token_index at, entity_index base,
         if (entity_table[step].field != UINT32_MAX) {
             result.node = expression_node(semantic_kind::member, result, at,
                                           m.node, step);
-        } else if (m.category != value_category::lvalue) {
+        } else if (m.category == value_category::prvalue &&
+                   (aggregate_prvalue(m) || entity_table[c].destructor)) {
+            /* [basic.lval]/7: a prvalue's temporary ([conv.rval]), whose
+               address the lowering takes as a reference binding's; one
+               destroyed at the end of the full-expression
+               ([class.temporary]/4) or an aggregate's temporary is not
+               analysed yet (as .*'s first operand) */
             return not_supported(current_declaration, "class.temporary");
         } else {
-            /* an empty base, at the object's address: *(B *)&object */
+            /* an empty base, at the object's address: *(B *)&object (an
+               xvalue's object, or a prvalue's temporary materialized by
+               [conv.rval]) */
             expression_meaning address;
             address.type =
                 qualified_type::make(type_table.pointer_to(m.type), cv_none);

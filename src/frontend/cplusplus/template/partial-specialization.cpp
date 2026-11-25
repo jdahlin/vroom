@@ -844,7 +844,7 @@ analysis_result semantic_analysis::matching_specialization(
         /* [temp.deduct.type]/8: noexcept(B) of a function type in the
            pattern, value-dependent: the type keeps no B to deduce, so a
            mismatch is not known to be one */
-        if (!match && value_dependent_noexcept_in(s.declaration))
+        if (!match && value_dependent_noexcept_in(s.declaration, s.definition))
             return not_supported(at, "temp.deduct.type");
         if (!match)
             continue;
@@ -915,12 +915,19 @@ analysis_result semantic_analysis::matching_specialization(
 }
 
 /* a value-dependent noexcept-specifier (dependent_exception_specifications)
-   inside the declaration n */
-bool semantic_analysis::value_dependent_noexcept_in(SyntaxRef n) const
+   inside the declaration n, in its template-arguments: one in the
+   member-specification of its class-specifier definition (a member
+   function's, as less<void>'s operator()) is no part of the pattern
+   ([temp.class.spec.match]/2 matches the template argument list) */
+bool semantic_analysis::value_dependent_noexcept_in(SyntaxRef n,
+                                                    SyntaxRef definition) const
 {
     if (!n)
         return false;
     token_index first = n.first_token(), end = n.end_token();
+    if (definition && definition.is(syntax_kind::class_specifier) &&
+        definition.size() && definition[0].end_token() < end)
+        end = definition[0].end_token();
     for (SyntaxRef d : dependent_exception_specifications)
         if (d.first_token() >= first && d.first_token() < end)
             return true;

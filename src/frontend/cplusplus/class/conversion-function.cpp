@@ -631,10 +631,10 @@ semantic_analysis::conversion_function_call(SyntaxRef at, expression_meaning &m,
         if (why)
             return not_supported_because(at, "class.temporary", why);
     }
-    if (m.category == value_category::prvalue && entity_table[c].destructor)
-        return not_supported_because(
-            at, "class.temporary",
-            "a prvalue with a destructor (the temporary's destruction)");
+    /* [basic.lval]/7, [class.temporary]/4: a prvalue the function is called
+       on is materialized, and one with a destructor is destroyed at the end
+       of the full-expression: lowering holds it in a temporary of the
+       full-expression, as for a member function's call (member_access) */
     const entity &x = entity_table[f];
     expression_meaning address;
     address.type = qualified_type::make(type_table.pointer_to(m.type), cv_none);

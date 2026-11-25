@@ -4128,7 +4128,7 @@ class semantic_analysis
        declarations */
     owned_array<SyntaxRef> dependent_exception_specifications;
     bool dependent_exception_specification(entity_index t) const;
-    bool value_dependent_noexcept_in(SyntaxRef n) const;
+    bool value_dependent_noexcept_in(SyntaxRef n, SyntaxRef definition) const;
     /* [expr.const]/5: the evaluation of the semantic tree node as a core
        constant expression (expression/constant-evaluation.cpp): well_formed
        with its value in v and constant true; constant false if it is not one;
@@ -4595,6 +4595,10 @@ class semantic_analysis
                                                 SyntaxRef default_initializer,
                                                 qualified_type member_type,
                                                 initialized_value &one);
+    /* the default member initializers member_default_in_aggregate is
+       analysing (one that needs itself, as FibTree's new FibTree{n-1}, is
+       not analysed again) */
+    owned_array<SyntaxRef> member_defaults_analysed;
     analysis_result omitted_element_value(SyntaxRef list,
                                           qualified_type element,
                                           SyntaxRef default_initializer,
