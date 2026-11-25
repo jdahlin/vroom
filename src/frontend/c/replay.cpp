@@ -2385,27 +2385,29 @@ static void rec_close(cc *c, uint64_t endpos)
         cb.n += 8;                                                             \
     } while (0)
 #define CC_EXPRESSION_OPERAND_NAME_APPEND(rec, fds, nf)                        \
-    for (int q_ = 0; q_ < (nf); q_++) {                                        \
-        uint64_t v_ = rd((rec), (fds)[q_]);                                    \
-        int k_ = (fds)[q_].kind;                                               \
-        if (k_ == K_LOC || k_ == K_SHADOW)                                     \
-            continue;                                                          \
-        if (k_ == K_TYPE || k_ == K_TIDX) {                                    \
-            uint32_t ix_ = k_ == K_TYPE                                        \
-                               ? AST_QUALIFIED_TYPE_INDEX((uint32_t)v_)        \
-                               : (uint32_t)v_;                                 \
-            if (ix_ >= r->nty_bi)                                              \
-                v_ = k_ == K_TYPE                                              \
-                         ? AST_QUALIFIED_TYPE_QUALIFIERS((uint32_t)v_) |       \
-                               1ull << 40                                      \
-                         : 1ull << 40;                                         \
-        } else if (k_ != K_IMM) {                                              \
-            v_ = v_ ? 1ull << 41 : 0;                                          \
+    do {                                                                       \
+        for (int q_ = 0; q_ < (nf); q_++) {                                    \
+            uint64_t v_ = rd((rec), (fds)[q_]);                                \
+            int k_ = (fds)[q_].kind;                                           \
+            if (k_ == K_LOC || k_ == K_SHADOW)                                 \
+                continue;                                                      \
+            if (k_ == K_TYPE || k_ == K_TIDX) {                                \
+                uint32_t ix_ = k_ == K_TYPE                                    \
+                                   ? AST_QUALIFIED_TYPE_INDEX((uint32_t)v_)    \
+                                   : (uint32_t)v_;                             \
+                if (ix_ >= r->nty_bi)                                          \
+                    v_ = k_ == K_TYPE                                          \
+                             ? AST_QUALIFIED_TYPE_QUALIFIERS((uint32_t)v_) |   \
+                                   1ull << 40                                  \
+                             : 1ull << 40;                                     \
+            } else if (k_ != K_IMM) {                                          \
+                v_ = v_ ? 1ull << 41 : 0;                                      \
+            }                                                                  \
+            VGROW(cb, 8);                                                      \
+            memcpy(cb.v + cb.n, &v_, 8);                                       \
+            cb.n += 8;                                                         \
         }                                                                      \
-        VGROW(cb, 8);                                                          \
-        memcpy(cb.v + cb.n, &v_, 8);                                           \
-        cb.n += 8;                                                             \
-    }
+    } while (0)
             n = tag_fd(&w->t, f);
             CC_EXPRESSION_OPERAND_NAME_APPEND(&w->t, f, n);
             for (uint32_t j = 0; j < w->t.nfield && w->t.f; j++) {
@@ -3562,10 +3564,12 @@ static void drcheck(cc *c)
 
     ADD(st_chk, 1);
 #define CNT(what, a, b)                                                        \
-    if ((uint64_t)(a) != (uint64_t)(b)) {                                      \
-        chk_report(c, "count " what, 0, 0, (a), (b));                          \
-        return;                                                                \
-    }
+    do {                                                                       \
+        if ((uint64_t)(a) != (uint64_t)(b)) {                                  \
+            chk_report(c, "count " what, 0, 0, (a), (b));                      \
+            return;                                                            \
+        }                                                                      \
+    } while (0)
     CNT("syms", e->s1 - e->s0, c->nsym - r->s0);
     CNT("tags", e->t1 - e->t0, c->ntag - r->t0);
     CNT("nodes", e->n1 - e->n0, c->nnode - r->n0);
