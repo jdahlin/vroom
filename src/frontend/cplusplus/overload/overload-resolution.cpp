@@ -599,6 +599,11 @@ analysis_result semantic_analysis::best_viable_function(
     for (size_t i = 0; i < candidates.size(); i++) {
         if (i == w || state[i] != viability::viable)
             continue;
+        if (candidates[i].function &&
+            candidates[i].function == candidates[w].function &&
+            candidates[i].rewritten == candidates[w].rewritten &&
+            candidates[i].reversed == candidates[w].reversed)
+            continue;
         if (!better(w, i) &&
             (candidates[w].rewritten || candidates[i].rewritten))
             /* [impl.clang] an ambiguity a reversed candidate makes is
