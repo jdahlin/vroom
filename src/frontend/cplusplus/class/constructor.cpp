@@ -2348,13 +2348,15 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         const struct type &ar = type_table[t.unqualified()];
         if (ar.kind != type_kind::array)
             continue;
-        bool one_dim_known =
-            ar.bound_known && ar.bound > 0 &&
-            type_table[ar.operand.unqualified()].kind == type_kind::class_type;
-        if (one_dim_known)
+        bool all_dims_known = true;
+        while (type_table[t.unqualified()].kind == type_kind::array) {
+            const struct type &dim = type_table[t.unqualified()];
+            if (!dim.bound_known || dim.bound == 0)
+                all_dims_known = false;
+            t = dim.operand;
+        }
+        if (all_dims_known)
             continue;
-        while (type_table[t.unqualified()].kind == type_kind::array)
-            t = type_table[t.unqualified()].operand;
         const struct type &r = type_table[t.unqualified()];
         if (r.kind == type_kind::class_type &&
             (entity_table[r.entity].first_constructor || destroys(r.entity)))
