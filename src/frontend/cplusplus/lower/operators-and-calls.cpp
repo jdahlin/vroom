@@ -861,8 +861,12 @@ uint32_t c_lowering::call(const semantic_node &n)
             }
         }
         /* [impl.clang] constant-fold __builtin_sqrt / __builtin_ceill on
-           floating-point literals (no libm call emitted) */
-        if (node(named).kind == semantic_kind::entity && n.count == 1) {
+           floating-point literals (no libm call emitted).  Only the
+           builtins themselves: a program's own sqrt (in any namespace, or
+           the library's ::sqrt) is another entity and is called. */
+        if (node(named).kind == semantic_kind::entity && n.count == 1 &&
+            (analysis.entity_table[node(named).a].gnu_flags &
+             gnu_library_function)) {
             owned_buffer fn_name;
             spelling(node(named).a, fn_name);
             const uint32_t *items = analysis.semantics.items(n.first);
@@ -872,6 +876,8 @@ uint32_t c_lowering::call(const semantic_node &n)
                 (record(a0.type).fundamental == fundamental_type::double_ ||
                  record(a0.type).fundamental ==
                      fundamental_type::long_double)) {
+                /* (the builtin's entity may be spelled by its library
+                   name) */
                 bool is_sqrt =
                     (fn_name.size() == 14 &&
                      !memcmp(fn_name.data(), "__builtin_sqrt", 14)) ||

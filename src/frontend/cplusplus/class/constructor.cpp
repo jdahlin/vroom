@@ -1385,25 +1385,11 @@ analysis_result semantic_analysis::construct(
         initialized_value one;
         if (written_arguments &&
             (*written_arguments)[i].is(syntax_kind::braced_init_list)) {
-            const struct type &pr = type_table[p[i].unqualified()];
-            if (pr.kind == type_kind::lvalue_reference ||
-                pr.kind == type_kind::rvalue_reference) {
-                qualified_type inner =
-                    qualified_type::make(pr.operand.unqualified(), cv_none);
-                initialized_value temp;
-                VTRY(r, list_initialization((*written_arguments)[i], inner,
-                                            true, temp));
-                expression_meaning arg;
-                arg.type = inner;
-                arg.category = value_category::prvalue;
-                arg.evaluation = temp.evaluation;
-                arg.node = temp.node;
-                VTRY(r2, initialize_with(at, arg, p[i], false, false, one));
-            } else {
-                qualified_type pt = p[i];
-                VTRY(r, list_initialization((*written_arguments)[i], pt, true,
-                                            one));
-            }
+            /* copy-list-initialization, as a call's argument
+               ([dcl.init.list]/3.10 for a reference parameter) */
+            qualified_type pt = p[i];
+            VTRY(r,
+                 list_initialization((*written_arguments)[i], pt, false, one));
         } else {
             VTRY(r, initialize_with(at, arguments[i], p[i], false, false, one));
         }
@@ -2014,43 +2000,23 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             if (er.kind == type_kind::class_type &&
                 entity_table[er.entity].first_constructor &&
                 !trivial_defaulted_default_constructor(er.entity)) {
+                /* (read before subobject and the pointer type add types,
+                   which may move record) */
                 uint64_t bound = record.bound;
                 expression_meaning arr;
                 VTRY(r, subobject(at, subobjects[i], arr));
-                owned_array<uint32_t> elem_stmts;
-                for (uint64_t k = 0; k < bound; k++) {
-                    expression_meaning ptr;
-                    ptr.type = qualified_type::make(type_table.pointer_to(et),
-                                                    cv_none);
-                    ptr.category = value_category::prvalue;
-                    ptr.evaluation = constness::not_constant;
-                    ptr.node = expression_node(
-                        semantic_kind::conversion, ptr, at, arr.node, 0,
-                        static_cast<uint8_t>(
-                            conversion_kind::array_to_pointer));
-                    expression_meaning idx;
-                    idx.type = qualified_type::make(
-                        type_table.fundamental(fundamental_type::long_int),
-                        cv_none);
-                    idx.category = value_category::prvalue;
-                    idx.evaluation = constness::constant;
-                    idx.value = k;
-                    idx.node =
-                        expression_node(semantic_kind::constant, idx, at);
-                    expression_meaning elem;
-                    elem.type = et;
-                    elem.category = value_category::lvalue;
-                    elem.evaluation = constness::not_constant;
-                    elem.node = expression_node(semantic_kind::subscript, elem,
-                                                at, ptr.node, idx.node);
-                    owned_array<expression_meaning> none;
-                    initialized_value value;
-                    VTRY(r2, construct(current_declaration, et, none, elem.node,
-                                       value));
-                    elem_stmts.append(statement_node(
-                        semantic_kind::expression_statement, at, value.node));
-                }
-                initialized[i] = block_statement(at, elem_stmts);
+                /* [class.base.init]/9: each element default-initialized,
+                   first to last ([dcl.init]/7.2) */
+                expression_meaning elem = array_element_at_index(
+                    at, arr.node, et, value_category::lvalue);
+                owned_array<expression_meaning> none;
+                initialized_value value;
+                VTRY(r2, construct(current_declaration, et, none, elem.node,
+                                   value));
+                initialized[i] = array_loop_statement(
+                    at, bound, false,
+                    statement_node(semantic_kind::expression_statement, at,
+                                   value.node));
                 continue;
             }
         }
@@ -2214,6 +2180,45 @@ semantic_analysis::block_statement(token_index at,
         semantics.set_list(built, &statements[0], statements.size());
     }
     return built;
+}
+
+expression_meaning
+semantic_analysis::array_element_at_index(token_index at, uint32_t array,
+                                          qualified_type element,
+                                          value_category category)
+{
+    /* [expr.sub]/2: E1[E2] is *((E1)+(E2)), E1 the array converted to a
+       pointer ([conv.array]) */
+    expression_meaning pointer;
+    pointer.type =
+        qualified_type::make(type_table.pointer_to(element), cv_none);
+    pointer.category = value_category::prvalue;
+    pointer.evaluation = constness::not_constant;
+    pointer.node = expression_node(
+        semantic_kind::conversion, pointer, at, array, 0,
+        static_cast<uint8_t>(conversion_kind::array_to_pointer));
+    expression_meaning index;
+    index.type = qualified_type::make(
+        type_table.fundamental(fundamental_type::long_int), cv_none);
+    index.category = value_category::prvalue;
+    index.evaluation = constness::unknown;
+    index.node = expression_node(semantic_kind::array_index, index, at);
+    expression_meaning result;
+    result.type = element;
+    result.category = category;
+    result.evaluation = constness::not_constant;
+    result.node = expression_node(semantic_kind::subscript, result, at,
+                                  pointer.node, index.node);
+    return result;
+}
+
+uint32_t semantic_analysis::array_loop_statement(token_index at, uint64_t count,
+                                                 bool reverse, uint32_t body)
+{
+    uint32_t loop =
+        statement_node(semantic_kind::array_loop, at, body, reverse, 0, 0);
+    semantics[loop].value = count;
+    return loop;
 }
 
 /* the classes of the subobjects of class c (its bases' and its members',
@@ -3256,64 +3261,35 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
             type_table[record.operand.unqualified()].kind ==
                 type_kind::class_type &&
             !copies_bytes(type_table[record.operand.unqualified()].entity)) {
+            /* (read before the pointer types add types, which may move
+               record) */
             uint64_t bound = record.bound;
             qualified_type et = record.operand;
             qualified_type from_et = qualified_type::make(
                 et.unqualified(), et.cv() | from.type.cv());
-            for (uint64_t k = 0; k < bound; k++) {
-                expression_meaning dst_ptr;
-                dst_ptr.type =
-                    qualified_type::make(type_table.pointer_to(et), cv_none);
-                dst_ptr.category = value_category::prvalue;
-                dst_ptr.evaluation = constness::not_constant;
-                dst_ptr.node = expression_node(
-                    semantic_kind::conversion, dst_ptr, at, object.node, 0,
-                    static_cast<uint8_t>(conversion_kind::array_to_pointer));
-                expression_meaning src_ptr;
-                src_ptr.type = qualified_type::make(
-                    type_table.pointer_to(from_et), cv_none);
-                src_ptr.category = value_category::prvalue;
-                src_ptr.evaluation = constness::not_constant;
-                src_ptr.node = expression_node(
-                    semantic_kind::conversion, src_ptr, at, from.node, 0,
-                    static_cast<uint8_t>(conversion_kind::array_to_pointer));
-                expression_meaning idx;
-                idx.type = qualified_type::make(
-                    type_table.fundamental(fundamental_type::long_int),
-                    cv_none);
-                idx.category = value_category::prvalue;
-                idx.evaluation = constness::constant;
-                idx.value = k;
-                idx.node = expression_node(semantic_kind::constant, idx, at);
-                expression_meaning dst_elem;
-                dst_elem.type = et;
-                dst_elem.category = value_category::lvalue;
-                dst_elem.evaluation = constness::not_constant;
-                dst_elem.node =
-                    expression_node(semantic_kind::subscript, dst_elem, at,
-                                    dst_ptr.node, idx.node);
-                expression_meaning src_elem;
-                src_elem.type = from_et;
-                src_elem.category = value_category::lvalue;
-                if (move)
-                    src_elem.category = value_category::xvalue;
-                src_elem.evaluation = constness::not_constant;
-                src_elem.node =
-                    expression_node(semantic_kind::subscript, src_elem, at,
-                                    src_ptr.node, idx.node);
-                owned_array<expression_meaning> arguments;
-                arguments.append(src_elem);
-                initialized_value value;
-                r = construct(n, et, arguments, dst_elem.node, value);
-                if (r == analysis_result::ill_formed)
-                    return not_supported_because(
-                        n, "class.copy.ctor",
-                        "an array element's copy is ill-formed");
-                if (r != analysis_result::well_formed)
-                    return r;
-                statements.append(statement_node(
-                    semantic_kind::expression_statement, at, value.node));
-            }
+            /* [class.copy.ctor]/14: "if the member is an array, each
+               element is direct-initialized with the corresponding
+               subobject of x" */
+            value_category source_category = value_category::lvalue;
+            if (move)
+                source_category = value_category::xvalue;
+            expression_meaning dst_elem = array_element_at_index(
+                at, object.node, et, value_category::lvalue);
+            owned_array<expression_meaning> arguments;
+            arguments.append(array_element_at_index(at, from.node, from_et,
+                                                    source_category));
+            initialized_value value;
+            r = construct(n, et, arguments, dst_elem.node, value);
+            if (r == analysis_result::ill_formed)
+                return not_supported_because(
+                    n, "class.copy.ctor",
+                    "an array element's copy is ill-formed");
+            if (r != analysis_result::well_formed)
+                return r;
+            statements.append(array_loop_statement(
+                at, bound, false,
+                statement_node(semantic_kind::expression_statement, at,
+                               value.node)));
             continue;
         }
         if (record.kind == type_kind::class_type &&
@@ -3407,43 +3383,24 @@ uint32_t semantic_analysis::subobject_destructions(entity_index c,
             qualified_type et = r.operand;
             entity_index destructor =
                 entity_table[type_table[et.unqualified()].entity].destructor;
-            uint64_t bound = r.bound;
             expression_meaning arr;
             if (subobject(at, order[i], arr) != analysis_result::well_formed)
                 return 0;
-            for (uint64_t k = bound; k-- > 0;) {
-                expression_meaning ptr;
-                ptr.type =
-                    qualified_type::make(type_table.pointer_to(et), cv_none);
-                ptr.category = value_category::prvalue;
-                ptr.evaluation = constness::not_constant;
-                ptr.node = expression_node(
-                    semantic_kind::conversion, ptr, at, arr.node, 0,
-                    static_cast<uint8_t>(conversion_kind::array_to_pointer));
-                expression_meaning idx;
-                idx.type = qualified_type::make(
-                    type_table.fundamental(fundamental_type::long_int),
-                    cv_none);
-                idx.category = value_category::prvalue;
-                idx.evaluation = constness::constant;
-                idx.value = k;
-                idx.node = expression_node(semantic_kind::constant, idx, at);
-                expression_meaning elem;
-                elem.type = et;
-                elem.category = value_category::lvalue;
-                elem.evaluation = constness::not_constant;
-                elem.node = expression_node(semantic_kind::subscript, elem, at,
-                                            ptr.node, idx.node);
-                expression_meaning call;
-                call.type = qualified_type::make(
-                    type_table.fundamental(fundamental_type::void_), cv_none);
-                call.category = value_category::prvalue;
-                call.evaluation = constness::not_constant;
-                uint32_t destroyed = expression_node(
-                    semantic_kind::destroy, call, at, elem.node, destructor);
-                statements.append(statement_node(
-                    semantic_kind::expression_statement, at, destroyed));
-            }
+            /* [class.dtor]/13: "the elements of an array are destroyed in
+               reverse order of their construction" */
+            expression_meaning elem = array_element_at_index(
+                at, arr.node, et, value_category::lvalue);
+            expression_meaning call;
+            call.type = qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), cv_none);
+            call.category = value_category::prvalue;
+            call.evaluation = constness::not_constant;
+            uint32_t destroyed = expression_node(semantic_kind::destroy, call,
+                                                 at, elem.node, destructor);
+            statements.append(array_loop_statement(
+                at, r.bound, true,
+                statement_node(semantic_kind::expression_statement, at,
+                               destroyed)));
             continue;
         }
         if (r.kind != type_kind::class_type ||

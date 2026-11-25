@@ -3586,6 +3586,12 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
         v.stamp = state.objects[place].serial;
         return constness::constant;
     }
+    case semantic_kind::array_index:
+        if (state.array_indexes.empty())
+            return CONST_UNKNOWN;
+        v = value_of(fundamental_type::long_int,
+                     state.array_indexes[state.array_indexes.size() - 1]);
+        return constness::constant;
     case semantic_kind::allocated: {
         if (state.allocations.empty())
             return CONST_UNKNOWN;
@@ -4855,6 +4861,22 @@ constness semantic_analysis::evaluate_statement(constant_evaluation &state,
         }
         return leave_scope(state, saved, saved_elements, returned, result, c);
     }
+    case semantic_kind::array_loop:
+        for (uint64_t i = 0; i < x.value; i++) {
+            uint64_t index = i;
+            if (x.b)
+                index = x.value - 1 - i;
+            state.array_indexes.append(index);
+            c = evaluate_statement(state, x.a, returned, result);
+            state.array_indexes.resize(state.array_indexes.size() - 1);
+            if (c != constness::constant || returned || state.jump != jump_none)
+                break;
+            if (++state.full_expressions > constant_full_expression_limit) {
+                c = constness::unknown;
+                break;
+            }
+        }
+        return c;
     case semantic_kind::break_statement:
         state.jump = jump_break;
         return c;

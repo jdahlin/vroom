@@ -353,6 +353,7 @@ struct tree_checker {
             break;
         case semantic_kind::allocated:
         case semantic_kind::array_count:
+        case semantic_kind::array_index:
             break;
         case semantic_kind::array_size:
             child(n, node.a, tree_sort::expression, false, "count");
@@ -411,6 +412,9 @@ struct tree_checker {
             child(n, node.a, tree_sort::statement, false, "substatement");
             child(n, node.b, tree_sort::expression, false, "condition");
             condition(n, node.b);
+            break;
+        case semantic_kind::array_loop:
+            child(n, node.a, tree_sort::statement, false, "substatement");
             break;
         case semantic_kind::for_statement:
             /* none in the loop [stmt.ranged]/1 expands to: its declarations
