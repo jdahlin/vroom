@@ -1645,6 +1645,13 @@ lines:
   ranking refusal in libc++ filesystem.  Semantic comparison gains four
   agreeing declarations and loses eight type claims as invalid calls now
   terminate their analysis; no newly accepted invalid declarations.
+  A known-unrelated complete class's unknown reference conversion is now
+  ranked no better than a user-defined conversion ([over.ics.rank]/2), and
+  a member-template call on a temporary uses the existing full-expression
+  destruction ([class.temporary]/4).  Tests `copy-versus-conversion` and
+  `temporary-member-lifetime`.  The JSON include now reaches an implicit
+  assignment refusal in libc++ `error_code`; sampled JSON tests also expose
+  an unrelated vector instantiation and a BSON member-access error.
 - Gate: each libstdc++ header alone with no `unsupported`; instantiation and
   type claims 0 wrong; the first `libcxx/test/std` numbers.
 - Plan (2026-11-18): stubs first.  The final interfaces and files land

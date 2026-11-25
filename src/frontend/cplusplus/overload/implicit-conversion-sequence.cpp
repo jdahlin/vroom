@@ -655,8 +655,14 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                             return found;
                     }
                 }
-                if (functions)
-                    return of_form(sequence::form::unknown);
+                if (functions) {
+                    sequence cannot_tell = of_form(sequence::form::unknown);
+                    /* [over.ics.rank]/2: once the source class is complete
+                       and known not to be reference-related, any viable
+                       conversion here is user-defined. */
+                    cannot_tell.user_defined_if_viable = entity_table[c2].size;
+                    return cannot_tell;
+                }
             }
             if (!c1 || !binds_rvalues || !user_defined)
                 return of_form(sequence::form::bad);

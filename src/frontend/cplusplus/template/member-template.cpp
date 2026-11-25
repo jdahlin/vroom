@@ -595,10 +595,6 @@ analysis_result semantic_analysis::bound_member_call(
     if (x.enclosing != object_class) {
         VTRY(r, to_base(at, x.enclosing, e));
     }
-    if (e.category == value_category::prvalue &&
-        entity_table[x.enclosing].destructor)
-        /* the temporary's destruction ([class.temporary]/4) */
-        return not_supported(n, "class.temporary");
     if (aggregate_prvalue(e) &&
         (!at_block_scope() || entity_table[x.enclosing].destructor ||
          x.enclosing != object_class))
