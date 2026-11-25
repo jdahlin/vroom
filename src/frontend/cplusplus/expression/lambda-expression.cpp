@@ -450,6 +450,7 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
                     cv_none);
             }
     } else if (function_state.this_entity) {
+        function_state.this_named = true;
         l.enclosing_this = entity_table[function_state.this_entity].type;
     }
 

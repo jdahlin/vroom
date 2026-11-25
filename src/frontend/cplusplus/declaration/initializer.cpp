@@ -2237,29 +2237,45 @@ analysis_result semantic_analysis::omitted_element_checks(
 }
 
 /* [dcl.init.aggr]/5.1, [class.mem]/6: a default member initializer that
-   names members is a complete-class context whose `this` is the aggregate
+   names something is a complete-class context whose `this` is the aggregate
    being initialized: analysed in the class's scope with a `this` of its
-   type (a variable of the class, which the lowering binds to the
+   type (a variable of the class, which the evaluator binds to the
    aggregate), as a constructor analyses it ([class.base.init]/9.1,
-   default_member_initializer), and the value is not a constant, which the
-   evaluator has no object for */
+   default_member_initializer).  One that names no `this` is its value
+   alone; one that does is not a constant, which the evaluator has no object
+   for, and has no lowering in a function body or a default argument */
 analysis_result semantic_analysis::member_default_in_aggregate(
     SyntaxRef list, entity_index owner, SyntaxRef default_initializer,
     qualified_type member_type, initialized_value &one)
 {
-    if (!owner || entity_table[owner].kind != entity_kind::class_type ||
-        function_state.active || at_block_scope() || defining_class)
+    if (!owner || entity_table[owner].kind != entity_kind::class_type)
         return not_supported_because(
             list, "dcl.init.aggr",
-            "a default member initializer in this aggregate context");
-    /* (in a function body: the lowering has no rule for the
-       default_member_initializer node, whose `this` is the aggregate) */
-    /* (in a default argument ([dcl.fct.default]/1): the lowering of the
-       call that uses it has no object for its `this`) */
-    if (call_site_depth)
+            "a default member initializer of no known class");
+    /* a class inside one still being defined: the enclosing class's later
+       members are not declared yet */
+    for (entity_index y = owner; y && defining_class;
+         y = entity_table[y].enclosing)
+        if (y == defining_class)
+            return not_supported_because(
+                list, "dcl.init.aggr",
+                "a default member initializer of a class inside one being "
+                "defined");
+    for (SyntaxRef active : aggregate_defaults_active)
+        if (active == default_initializer)
+            return not_supported_because(
+                list, "class.mem",
+                "a default member initializer needed within itself");
+    /* (before the analysis changes them) */
+    bool in_body = function_state.active || at_block_scope() || defining_class;
+    bool in_default_argument = call_site_depth != 0;
+    /* [dcl.constexpr]: a constexpr function that can never be constant
+       because of such a value is not diagnosed */
+    if (function_state.function &&
+        entity_table[function_state.function].constexpr_)
         return not_supported_because(
             list, "dcl.init.aggr",
-            "a default member initializer in a default argument");
+            "a default member initializer in a constexpr function");
     /* the class's scope with a `this` of its own: no function's */
     function_context outer = static_cast<function_context &&>(function_state);
     entity_index outer_scope = current_scope;
@@ -2275,7 +2291,10 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     function_state.this_class = owner;
     current_scope = owner;
     uint32_t locations_before = source_location_uses;
+    aggregate_defaults_active.append(default_initializer);
     analysis_result r = initializer(default_initializer, member_type, one);
+    aggregate_defaults_active.resize(aggregate_defaults_active.size() - 1);
+    bool this_named = function_state.this_named;
     function_state = static_cast<function_context &&>(outer);
     current_scope = outer_scope;
     if (r != analysis_result::well_formed)
@@ -2290,6 +2309,22 @@ analysis_result semantic_analysis::member_default_in_aggregate(
         return not_supported_because(
             list, "dcl.init.aggr",
             "a default member initializer with no value");
+    if (!this_named)
+        return analysis_result::well_formed;
+    /* (in a function body: the lowering has no rule for the
+       default_member_initializer node, whose `this` is the aggregate) */
+    if (in_body)
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "a default member initializer naming a member, in a function "
+            "body or class definition");
+    /* (in a default argument ([dcl.fct.default]/1): the lowering of the
+       call that uses it has no object for its `this`) */
+    if (in_default_argument)
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "a default member initializer naming a member, in a default "
+            "argument");
     /* the evaluator binds `this` to the aggregate under construction, whose
        earlier elements it has stored; its value is not known here */
     expression_meaning wrapped;

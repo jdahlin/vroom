@@ -4603,6 +4603,9 @@ class semantic_analysis
     analysis_result omitted_element_checks(SyntaxRef list,
                                            qualified_type element,
                                            bool has_default);
+    /* the default member initializers member_default_in_aggregate is
+       analysing ([class.mem]/6: one needed within itself) */
+    owned_array<SyntaxRef> aggregate_defaults_active;
     analysis_result member_default_in_aggregate(SyntaxRef list,
                                                 entity_index owner,
                                                 SyntaxRef default_initializer,
@@ -5207,6 +5210,8 @@ class semantic_analysis
            complete-class context this is ([class.mem]/6: an aggregate's
            default member initializer, member_default_in_aggregate) */
         entity_index this_class = 0;
+        /* whether this_entity was named, or a lambda could capture it */
+        bool this_named = false;
         /* the function whose body it is */
         entity_index function = 0;
     } function_state;

@@ -53,6 +53,8 @@ analysis_result semantic_analysis::function_this(token_index t,
         m.evaluation = constness::not_constant;
         return analysis_result::well_formed;
     }
+    if (e)
+        function_state.this_named = true;
     if (!e) {
         if (current_class())
             return ill_formed_at_token(t,
