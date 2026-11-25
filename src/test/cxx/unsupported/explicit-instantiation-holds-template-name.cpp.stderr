@@ -1,0 +1,2 @@
+explicit-instantiation-holds-template-name.cpp:11:39: error: the rules of [temp.arg.nontype] are not implemented yet
+explicit-instantiation-holds-template-name.cpp:11:39: note: refused by vcc's frontend/cplusplus/template/template-argument.cpp:N (template_argument_for)
