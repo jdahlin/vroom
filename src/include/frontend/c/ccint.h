@@ -62,6 +62,14 @@ struct cc_switch_case {
     uint32_t loc;
 };
 
+/* -Wpsabi: where a site with a vector over 16 bytes is written.  C notes a
+   definition's result; C++'s lowering, whose AST has no locations, notes
+   every site (frontend/c/ast-builder.h). */
+struct cc_psabi_site {
+    uint32_t kind, key, loc;
+    struct cc_psabi_site *next;
+};
+
 struct cc {
     /* the AST code generation reads (frontend/ast.h), first: its per-node tables stay in reach of
 	   a scaled load and of ldp (doc/quality/MEASURE-ast-split.md); c->syms and c->ast.syms are
@@ -138,6 +146,12 @@ struct cc {
     bool
         sie; /* cc_initializer_static_is_ok looks through AST_NODE_FLAG_ERROR (after such an error) */
     uint32_t tn_tdef; /* the last cc_type_name_parse's typedef (sym), 0: none */
+    struct cc_psabi_site *psabi_sites;
+    bool built; /* made by ast_builder_open (C++'s lowering): no source
+				   locations, no typedef names */
+    /* C++'s diagnostics, for -Wpsabi (ast_builder_psabi_reporter) */
+    bool (*psabi_report)(void *context, uint32_t location, const char *text);
+    void *psabi_context;
     uint32_t *ptag, nptag, cptag;
     /* tags declared in the outermost parameter list: a definition's body sees them */ /* parameter declarations being parsed: a new tag there is -Wvisibility */
     uint32_t uv_asg;
@@ -483,6 +497,8 @@ bool cc_bit_cast_object_read(cc *c, uint32_t n, uint64_t off, unsigned len,
 bool cc_builtin_object_size(cc *c, uint32_t pointer, unsigned mode, i128 *size);
 void cc_replay_restored(cc *c);
 bool cc_is_signed(cc *c, ast_qualified_type t);
+/* t as clang spells it in diagnostics (a buffer in rotation) */
+const char *cc_type_diagnostic_name(cc *c, ast_qualified_type t);
 /* Kinds for library builtins that the emitter treats specially. Other
  * builtins retain their normal call path. */
 enum {

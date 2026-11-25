@@ -1,0 +1,37 @@
+psabi_x86_vector.c:15:1: warning: AVX vector return of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   15 | v8 identity(v8 a) { return a; }
+      | ^
+psabi_x86_vector.c:15:16: warning: AVX vector argument of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   15 | v8 identity(v8 a) { return a; }
+      |                ^
+psabi_x86_vector.c:16:23: warning: AVX vector return of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   16 | __attribute__((weak)) v8 two_parameters(v8 a, v8 b) { return a; }
+      |                       ^
+psabi_x86_vector.c:16:44: warning: AVX vector argument of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   16 | __attribute__((weak)) v8 two_parameters(v8 a, v8 b) { return a; }
+      |                                            ^
+psabi_x86_vector.c:17:37: warning: AVX vector argument of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   17 | void first_wide_parameter(int x, v8 a, d8 b) {}
+      |                                     ^
+psabi_x86_vector.c:18:1: warning: AVX vector return of type 'd8' (vector of 8 'double' values) without 'avx512f' enabled changes the ABI [-Wpsabi]
+   18 | d8 wide_result(void) { d8 x = {0}; return x; }
+      | ^
+psabi_x86_vector.c:22:10: warning: AVX vector argument of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   22 |     *p = external(*p, *p);
+      |          ^
+psabi_x86_vector.c:23:10: warning: AVX vector argument of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   23 |     *p = external(*p, *p);
+      |          ^
+psabi_x86_vector.c:24:10: warning: AVX vector return of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   24 |     *p = result_only();
+      |          ^
+psabi_x86_vector.c:25:5: warning: AVX vector argument of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   25 |     variadic(1, *p);
+      |     ^
+psabi_x86_vector.c:38:29: warning: AVX vector return of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   38 | static void helper(v8 *p) { result_only(); *p = external(*p, *p); }
+      |                             ^
+psabi_x86_vector.c:38:49: warning: AVX vector argument of type 'v8' (vector of 8 'int' values) without 'avx' enabled changes the ABI [-Wpsabi]
+   38 | static void helper(v8 *p) { result_only(); *p = external(*p, *p); }
+      |                                                 ^
+12 warnings generated.

@@ -54,6 +54,9 @@ def c_string(s):
 # diagnostics from clang's other components that the front end issues in
 # phases clang gives to Sema: [lex.fcon]/3's range of a floating-point literal
 OTHER_DIAGNOSTICS = {'warn_float_overflow', 'warn_float_underflow'}
+# groups clang defines where a diagnostic uses them, not in DiagnosticGroups.td,
+# that the front end issues under
+OTHER_GROUPS = {'psabi'}
 
 
 def diagnostics(td):
@@ -61,7 +64,7 @@ def diagnostics(td):
     version = os.path.basename(td.rstrip('/'))
     names = sorted(n for n, r in diags.items()
                    if r['file'] in ('DiagnosticLexKinds.td', 'DiagnosticCommonKinds.td') or n in OTHER_DIAGNOSTICS)
-    group_names = sorted({g[0] for g in groups.values()} | {diags[n]['group'] for n in names if diags[n]['group']})
+    group_names = sorted({g[0] for g in groups.values()} | {diags[n]['group'] for n in names if diags[n]['group']} | OTHER_GROUPS)
     lines = [HEADER % f"clang {version}'s Diagnostic{{Lex,Common}}Kinds.td and a few of Sema's",
              '/* DIAGNOSTIC(name, class, default mapping, -W group or "", format) */']
     for n in names:

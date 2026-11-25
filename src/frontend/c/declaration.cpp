@@ -1,5 +1,6 @@
 /* vcc front end: declarations, cc_declaration_bind(), K&R parameters and the declaration list */
 #include "cc-internal.h"
+#include "frontend/c/ast-builder.h"
 
 /* the braced initializer of a VLA, already diagnosed: skipped unchecked */
 static void cc_declaration_vla_initializer_skip(cc *c)
@@ -536,6 +537,31 @@ static void cc_declaration_semicolon_expect(cc *c, bool file)
         cc_recovery_skip_statement(c, false);
 }
 
+CC_PRIVATE void cc_psabi_site_note(cc *c, int kind, uint32_t key, uint32_t loc)
+{
+    struct cc_psabi_site *r =
+        (struct cc_psabi_site *)cc_heap_allocate(c, sizeof *r);
+
+    r->kind = (uint32_t)kind, r->key = key, r->loc = loc;
+    r->next = c->psabi_sites;
+    c->psabi_sites = r;
+}
+
+/* -Wpsabi reports a definition's result at its return type */
+static void cc_wide_return_note(cc *c, uint32_t s,
+                                const cc_declaration_specifiers *ds)
+{
+    ast_qualified_type result = AST_TYPE(c, c->syms[s].ty)->base;
+
+    if (likely(!cc_type_is_vector(c, result) || cc_type_size(c, result) <= 16))
+        return;
+    uint32_t loc = ds->loc;
+
+    if (ds->tdef)
+        loc = ds->tdef_loc;
+    cc_psabi_site_note(c, AST_BUILDER_PSABI_RESULT, s, loc);
+}
+
 CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
 {
     cc_declaration_specifiers ds;
@@ -766,6 +792,7 @@ CC_PRIVATE void cc_declaration_parse(cc *c, cc_id_list *out, bool file)
                 cc_report_error(c, d.loc,
                                 "dllimport cannot be applied to non-inline "
                                 "function definition");
+            cc_wide_return_note(c, s, &ds);
             if (cc_lazy_body_eligible(c, s, &d))
                 cc_lazy_body_capture(c, s, &d);
             else

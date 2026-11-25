@@ -930,6 +930,10 @@ VPRIV bool wswitch_values(codegen_context *e, uint32_t n);
 /* tu.c */
 VPRIV void *codegen_memory_reserve(size_t n);
 VPRIV double codegen_clock_seconds(void);
+/* unit-emit.cpp: a definition emitted whether or not anything refers to it */
+VPRIV bool codegen_symbol_is_root(cc *c, uint32_t s);
+/* psabi-warnings.cpp: -Wpsabi; the number that -Werror made errors */
+VPRIV int codegen_psabi_warn(cc *c);
 /* type.c */
 static inline ast_qualified_type codegen_type_primitive(int k);
 static inline bool codegen_kind_is_integer(int k);

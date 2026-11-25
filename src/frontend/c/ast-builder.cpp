@@ -15,7 +15,7 @@ cc *ast_builder_open(pp *p, const cc_options *o)
        is a file-scope one, a static in .bss that every thread shared.  A
        local one is at depth 1. */
     if (c)
-        c->depth = 1;
+        c->depth = 1, c->built = true;
     return c;
 }
 
@@ -31,6 +31,26 @@ int ast_builder_emit(cc *c)
     if (c->o->emit && !c->errors)
         c->errors += codegen_unit_emit(c, c->o);
     return c->errors;
+}
+
+bool ast_builder_psabi_wanted(cc *c, ast_qualified_type t)
+{
+    return (c->o->target == PP_LINUX_X86_64) && cc_type_is_vector(c, t) &&
+           cc_type_size(c, t) > 16;
+}
+
+void ast_builder_psabi_site(cc *c, int kind, uint32_t key, uint32_t location)
+{
+    cc_psabi_site_note(c, kind, key, location);
+}
+
+void ast_builder_psabi_reporter(cc *c,
+                                bool (*report)(void *context, uint32_t location,
+                                               const char *text),
+                                void *context)
+{
+    c->psabi_report = report;
+    c->psabi_context = context;
 }
 
 void ast_builder_close(cc *c)

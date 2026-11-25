@@ -492,6 +492,9 @@ static void driver_snapshot_restore(cc *c, const driver_snapshot *s,
     c->drb = keep.drb, c->ndrb = keep.ndrb,
     c->cdrb = keep.cdrb; /* (VCC_DRCOV: this TU's) */
     c->dr = keep.dr, c->dr_on = keep.dr_on;
+    /* (a list in the recording TU's heap, not translated: -Wpsabi reports a
+       prefix definition's result at its name) */
+    c->psabi_sites = keep.psabi_sites;
     c->dops = keep.dops,
     c->ndops = keep.ndops; /* (scratch in this TU's heap) */
     c->next_n = 0,

@@ -182,6 +182,17 @@ static void report_failure(int fd, token_stream &tokens,
     }
 }
 
+/* -Wpsabi, found by the code generator: true if it is an error */
+static bool report_psabi(void *context, uint32_t location, const char *text)
+{
+    diagnostic_consumer &diagnostics =
+        *static_cast<diagnostic_consumer *>(context);
+    diagnostic_message &m =
+        diagnostics.issue(diagnostic_id::sema_psabi, location);
+    m << text;
+    return m.severity == diagnostic_severity::error;
+}
+
 /* phases 7 to 9: the parse, the analysis, and unless -fsyntax-only the
    code; the developer outputs of the parse or of the analysis on out */
 static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
@@ -225,6 +236,7 @@ static int compile_translation_unit(const cplusplus_compile_options *o, pp *p,
     }
     if (!diagnostics.error_count && co->emit) {
         cc *c = ast_builder_open(p, co);
+        ast_builder_psabi_reporter(c, report_psabi, &diagnostics);
         lowering_failure why;
         if (!lower_translation_unit(analysis, tokens, c, co->target, why,
                                     o->path, co->rtti != 0)) {

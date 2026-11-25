@@ -192,8 +192,9 @@ typedef struct cc_declaration_specifiers {
     attrs at;
     uint32_t align; /* _Alignas */
     uint32_t loc;
-    uint32_t tagdecl; /* struct/union/enum defined or declared here: its tag */
-    uint32_t tdef;    /* the typedef name the type came from (sym), 0: none */
+    uint32_t tagdecl;  /* struct/union/enum defined or declared here: its tag */
+    uint32_t tdef;     /* the typedef name the type came from (sym), 0: none */
+    uint32_t tdef_loc; /* ... and where it is written */
     bool
         tag_bare; /* "struct S" with no body (a reference or forward declaration) */
     uint32_t
@@ -243,6 +244,7 @@ typedef struct cc_record_scratch {
 
 /* tu.c */
 CC_PRIVATE void *cc_heap_allocate(cc *c, size_t n);
+CC_PRIVATE void cc_psabi_site_note(cc *c, int kind, uint32_t key, uint32_t loc);
 CC_PRIVATE void cc_replay_coverage_boundary(cc *c);
 CC_PRIVATE void cc_replay_coverage_finish(cc *c);
 CC_PRIVATE void cc_replay_coverage_init(void);

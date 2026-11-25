@@ -41,6 +41,25 @@ struct ast *ast_builder_ast(cc *c);
 int ast_builder_emit(cc *c);
 void ast_builder_close(cc *c);
 
+/* -Wpsabi (codegen/psabi-warnings.cpp).  The AST has no source locations, so
+   the other front end notes one, in its own terms, for each site whose type
+   ast_builder_psabi_wanted takes: a definition's result (key: the
+   function's symbol), a parameter (its symbol) and a call of a named
+   function, virtual ones included (the call node, location of the first
+   such argument, else of the result).  The report is the other front end's:
+   true if the warning is an error. */
+enum {
+    AST_BUILDER_PSABI_RESULT,
+    AST_BUILDER_PSABI_PARAMETER,
+    AST_BUILDER_PSABI_CALL
+};
+bool ast_builder_psabi_wanted(cc *c, ast_qualified_type t);
+void ast_builder_psabi_site(cc *c, int kind, uint32_t key, uint32_t location);
+void ast_builder_psabi_reporter(cc *c,
+                                bool (*report)(void *context, uint32_t location,
+                                               const char *text),
+                                void *context);
+
 /* ---- types ---- */
 ast_qualified_type ast_builder_type_basic(int kind); /* AST_TYPE_VOID .. */
 ast_qualified_type ast_builder_type_qualified(cc *c, ast_qualified_type t,

@@ -435,8 +435,10 @@ uint32_t c_lowering::special_call(entity_index e, uint32_t object,
     for (uint32_t i = 0; i < count; i++)
         all.append(arguments[i]);
     uint32_t n = static_cast<uint32_t>(all.size());
-    return make(AST_NODE_CALL, void_type, callee,
-                ast_builder_list(c, all.data(), n), n, 0, 0);
+    uint32_t made = make(AST_NODE_CALL, void_type, callee,
+                         ast_builder_list(c, all.data(), n), n, 0, 0);
+    psabi_constructor_call(at, made);
+    return made;
 }
 
 } // namespace cplusplus::lowering

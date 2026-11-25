@@ -317,7 +317,7 @@ static int codegen_chunk_compare(const void *a, const void *b)
     return x->key < y->key ? -1 : x->key > y->key;
 }
 
-static bool codegen_symbol_is_root(cc *c, uint32_t s)
+VPRIV bool codegen_symbol_is_root(cc *c, uint32_t s)
 {
     const sym *y = &c->syms[s];
     const attrs *a = codegen_symbol_attributes(c, s);
@@ -1106,6 +1106,10 @@ int codegen_unit_emit(cc *c, const cc_options *o)
 {
     if (!codegen_target_supports_sve(c) || !codegen_target_supports_bitint(c))
         return 1;
+    int psabi_errors = codegen_psabi_warn(c);
+
+    if (psabi_errors)
+        return psabi_errors;
 
     double t0 = codegen_clock_seconds();
     vperf v0 = vperformance_now();

@@ -322,3 +322,8 @@ CC_PRIVATE const char *tyname(cc *c, ast_qualified_type t)
     cc_type_spell(c, t, "", o, &ok);
     return o->p;
 }
+
+const char *cc_type_diagnostic_name(cc *c, ast_qualified_type t)
+{
+    return tyname(c, t);
+}

@@ -990,6 +990,7 @@ uint32_t c_lowering::call(const semantic_node &n)
     } else {
         made = make(AST_NODE_CALL, t, callee,
                     ast_builder_list(c, arguments.data(), count), count, 0, 0);
+        psabi_call(n, made);
     }
     if (member_pointer_call) {
         through.append(

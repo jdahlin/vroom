@@ -614,6 +614,7 @@ again:
                                              c->syms[ts].loc);
                 named = c->syms[ts].ty;
                 ds->tdef = ts;
+                ds->tdef_loc = t->loc;
                 c->syms[ts].flags |=
                     AST_SYMBOL_FLAG_REFERENCED; /* (-Wunused-local-typedef) */
                 have_named = true;

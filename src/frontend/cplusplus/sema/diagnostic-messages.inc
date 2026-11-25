@@ -7,6 +7,8 @@
  * DIAGNOSTIC(name, class, default mapping, -W group or "", format)
  */
 DIAGNOSTIC(sema_violation, ERROR, ERROR, "", "%0 ([%1])")
+/* [impl.clang] -Wpsabi: the code generator's text (codegen/psabi-warnings.cpp) */
+DIAGNOSTIC(sema_psabi, WARNING, WARNING, "psabi", "%0")
 /* [impl.clang] diagnose_if(..., "warning"): the attribute's message */
 DIAGNOSTIC(sema_user_warning, WARNING, WARNING, "user-defined-warnings", "%0")
 /* rules clang does not hold a program to unless asked (-pedantic,

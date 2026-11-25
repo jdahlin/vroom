@@ -748,6 +748,17 @@ class c_lowering
        default argument whose are those of the call that uses it (the call,
        and the function it is in, while the argument is lowered) */
     uint32_t source_location(const semantic_node &n);
+    /* -Wpsabi's places (lower/psabi.cpp): of a definition's result and
+       parameters, and of a call */
+    void psabi_definition(entity_index e, uint32_t s, const semantic_node &body,
+                          const owned_array<uint32_t> &parameters);
+    void psabi_call(const semantic_node &n, uint32_t call);
+    void psabi_constructor_call(token_index at, uint32_t call);
+    bool psabi_call_wanted(uint32_t call) const;
+    token_index name_before(token_index at) const;
+    token_index type_specifier_token(token_index at) const;
+    token_index parameter_token(entity_index e, token_index first,
+                                token_index end) const;
     /* [dcl.fct.def.general]/8 __func__ and clang's __FUNCTION__, __PRETTY_FUNCTION__ */
     uint32_t predefined_name(const semantic_node &n);
     uint32_t default_argument(const semantic_node &n);

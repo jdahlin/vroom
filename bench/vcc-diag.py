@@ -17,6 +17,8 @@ passes when
     level, -W flag) as clang's, in order, and the exit status agrees.
 A deliberate difference from clang in layer 1 (a better place, fewer
 follow-on errors) is declared in the case: /* diag-differs: why */.
+A .cpp case is checked for its snapshot and clang's locations (in any order)
+only.
 /* diag-vpp-flags: F */ adds flags for vcc alone (clang has no --lint).
 A test with /* diag-mode: -c */ is compiled (-c -o /dev/null) instead, for
 diagnostics that come from code generation (the error attribute).
@@ -113,7 +115,11 @@ def one(name, bless=False):
         open(snap, 'w').write(out_v)
     want = open(snap, errors='replace').read() if os.path.exists(snap) else None
     differs = re.search(r'/\*\s*diag-differs:', src) is not None
-    l1 = differs or heads(out_c) == heads(out_v)
+    # C++'s code generator warns in its lowering's order, not clang's: a set
+    order = list
+    if name.endswith('.cpp'):
+        order = sorted
+    l1 = differs or order(heads(out_c)) == order(heads(out_v))
     ok = want == out_v and l1 and (rc_c == 0) == (rc_v == 0)
     why = []
     if want is None:
@@ -124,6 +130,9 @@ def one(name, bless=False):
         why.append('locations/levels/flags differ from clang')
     if (rc_c == 0) != (rc_v == 0):
         why.append(f'exit {rc_v}, clang {rc_c}')
+    # C++'s diagnostics are its front end's own: no ids, JSON, SARIF or fix-its
+    if name.endswith('.cpp'):
+        return name, ok, out_c, out_v, want or '', ', '.join(why), out_c == out_v
     # layer 2: every diagnostic carries an id from diag/diagnostic-ids.inc (clang's name or vcc_*)
     _, out_i = run([VPP], name, ['-fdiagnostics-show-id'])
     noid = [l for l in out_i.splitlines() if HEAD.match(l) and (not re.search(r' \[(\w+)\]$', l) or l.endswith('[vcc_unknown]'))]
@@ -211,7 +220,7 @@ def main():
     if '-j' in args:
         j = int(args[args.index('-j') + 1])
     pat = [a for a in args if not a.startswith('-') and not a.isdigit()]
-    names = sorted(f for f in os.listdir(D) if f.endswith('.c') and (not pat or re.search(pat[0], f)))
+    names = sorted(f for f in os.listdir(D) if f.endswith(('.c', '.cpp')) and (not pat or re.search(pat[0], f)))
     bless = '--bless' in args
     with Pool(j) as pool:
         res = pool.starmap(one, [(n, bless) for n in names])

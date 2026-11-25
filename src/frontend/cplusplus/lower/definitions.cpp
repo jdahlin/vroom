@@ -95,6 +95,7 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     b.aux = static_cast<uint16_t>(count);
     ast_builder_symbol_body(c, s, block_node);
     ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_DEFINED);
+    psabi_definition(e, s, body, parameters);
     return true;
 }
 
