@@ -19,10 +19,14 @@ SyntaxRef semantic_analysis::out_of_class_member(SyntaxRef definition,
                                                  token_index *name) const
 {
     SyntaxRef nested = out_of_class_nested(definition, name);
-    if (!nested || nested.size() != 2 ||
-        !nested[0].is(syntax_kind::simple_template_id))
+    if (!nested)
         return 0;
-    return nested[0].index();
+    if (nested.size() == 2 && nested[0].is(syntax_kind::simple_template_id))
+        return nested[0].index();
+    if (nested.size() == 4 && nested[0].is_identifier() &&
+        nested[2].is(syntax_kind::simple_template_id))
+        return nested[2].index();
+    return 0;
 }
 
 /* a function-definition's declarator-id X<A...>::Y<B...>::f: the first
@@ -227,10 +231,39 @@ analysis_result semantic_analysis::member_definition_of_template(
     }
     lookup_result x;
     entity_index named = 0;
-    if (!template_id_name(id, x, named))
+    entity_index owner_cls = 0;
+    if (!class_member && !variable) {
+        SyntaxRef nested = out_of_class_nested(definition);
+        if (nested && nested.size() == 4 && nested[0].is_identifier() &&
+            nested[2].is(syntax_kind::simple_template_id)) {
+            lookup_result q = lookup_unqualified(
+                tokens.identifier(nested[0].token()), lookup_filter::any);
+            if (q.entity &&
+                (entity_table[q.entity].kind == entity_kind::class_type ||
+                 is_namespace(q.entity)))
+                owner_cls = q.entity;
+        }
+    }
+    if (owner_cls) {
+        SyntaxElement tname = id.simple_template_id().template_name();
+        if (!tname || !tname.is_identifier())
+            return not_supported_because(
+                n, "temp.mem.func",
+                "a member definition whose template-id is not resolved");
+        x = lookup_qualified(owner_cls, tokens.identifier(tname.token()),
+                             lookup_filter::any);
+        named = x.unknown_entity;
+        if (!named)
+            named = x.entity;
+        if (x.ambiguous || !named)
+            return not_supported_because(
+                n, "temp.mem.func",
+                "a member definition whose template-id is not resolved");
+    } else if (!template_id_name(id, x, named)) {
         return not_supported_because(
             n, "temp.mem.func",
             "a member definition whose template-id is not resolved");
+    }
     uint32_t ct = class_template_of(named);
     if (!ct) {
         analysis_result refused = not_supported(n, "temp.mem.func");
@@ -246,7 +279,11 @@ analysis_result semantic_analysis::member_definition_of_template(
     if (function_templates[ct - 1].primary)
         return not_supported_because(n, "temp.mem.func",
                                      "the class is a specialization's pattern");
-    if (!declared_in_scope_of(function_templates[ct - 1].entity, outer))
+    entity_index expected_scope = outer;
+    if (owner_cls)
+        expected_scope = owner_cls;
+    if (!declared_in_scope_of(function_templates[ct - 1].entity,
+                              expected_scope))
         return not_supported_because(
             n, "temp.mem.func",
             "the class template is declared in another scope");
