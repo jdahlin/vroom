@@ -2890,10 +2890,44 @@ semantic_analysis::member_function_definition(entity_index c,
     if (body.deleted())
         return deleted_definition(definition, last_declared);
     if (body.defaulted()) {
-        /* [class.compare.default]: the member operator== member_declarators
-           declared */
+        /* [class.compare.default]: the member operator== / operator<=>
+           member_declarators declared */
+        entity_index fn = last_declared;
         scoped_value<entity_index> compared(defaulted_comparison, c);
-        return analyse_function_body(definition, body);
+        VTRY(br, analyse_function_body(definition, body));
+        /* [class.spaceship]/3: a defaulted operator<=> implicitly declares a
+           defaulted operator== if the class does not declare one */
+        uint32_t eq_name = operator_name(preprocessing_op_or_punc::EQUAL_EQUAL);
+        if (entity_table[fn].implemented ==
+                preprocessing_op_or_punc::SPACESHIP &&
+            !entity_table.find(c, eq_name)) {
+            type_index fn_t = entity_table[fn].type.unqualified();
+            const struct type &ft = type_table[fn_t];
+            owned_array<qualified_type> params;
+            for (uint32_t i = 0; i < ft.parameter_count; i++)
+                params.append(type_table.parameters(fn_t)[i]);
+            type_index eq_type = type_table.function(
+                qualified_type::make(
+                    type_table.fundamental(fundamental_type::bool_), cv_none),
+                params.data(), static_cast<uint32_t>(params.size()), false);
+            entity_index eq =
+                entity_table.make(entity_kind::function, eq_name, c);
+            entity_table.bind(c, eq_name, eq);
+            entity_table[eq].type = qualified_type::make(eq_type, cv_none);
+            entity_table[eq].nonstatic_member = true;
+            entity_table[eq].member_cv = entity_table[fn].member_cv;
+            entity_table[eq].inline_ = true;
+            entity_table[eq].constexpr_ = entity_table[fn].constexpr_;
+            entity_table[eq].defined = true;
+            entity_table[eq].implicit = true;
+            entity_table[eq].operator_function = true;
+            entity_table[eq].implemented =
+                preprocessing_op_or_punc::EQUAL_EQUAL;
+            entity_table[eq].exceptions = entity_table[fn].exceptions;
+            last_declared = eq;
+            VTRY(eq_r, analyse_function_body(definition, body));
+        }
+        return analysis_result::well_formed;
     }
     if (!body.plain())
         return not_supported_because(definition, "dcl.fct.def.general",
