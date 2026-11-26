@@ -58,7 +58,9 @@ bool fundamental_type_is_floating(fundamental_type t)
     /* [basic.fundamental]/12: "There are three floating-point types: float,
        double, and long double." */
     return t == fundamental_type::float_ || t == fundamental_type::double_ ||
-           t == fundamental_type::long_double;
+           t == fundamental_type::long_double ||
+           /* [ext:clang_float16] arithmetic as the others are */
+           t == fundamental_type::float16;
 }
 
 uint64_t integer_wrap(const implementation_defined_behavior &behavior,

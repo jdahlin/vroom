@@ -1735,10 +1735,21 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             const struct type record = type_table[type.unqualified()];
             /* [class.base.init]/7: an array member can be initialized
                by a braced-init-list, using the ordinary array rules. */
-            if (record.kind == type_kind::array && !written.braced_list())
-                return not_supported_because(item, "class.base.init",
-                                             "an array member initializer that "
-                                             "is not a braced-init-list");
+            /* [dcl.init]/17: or by () where value-initialization of the
+               elements is zero-initialization (they are no classes) */
+            if (record.kind == type_kind::array && !written.braced_list()) {
+                qualified_type element = type;
+                while (type_table[element.unqualified()].kind ==
+                       type_kind::array)
+                    element = type_table[element.unqualified()].operand;
+                if (!written || written.list ||
+                    type_table[element.unqualified()].kind ==
+                        type_kind::class_type)
+                    return not_supported_because(
+                        item, "class.base.init",
+                        "an array member initializer that is not a "
+                        "braced-init-list or () of scalars");
+            }
             expression_meaning object;
             VTRY(r, subobject(id, e, object));
             if (record.kind == type_kind::class_type &&

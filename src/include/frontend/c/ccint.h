@@ -442,6 +442,20 @@ enum {
     CC_BUILTIN_ISFPCLASS,
     CC_BUILTIN_BODY, /* has a C body (builtin-body.cpp): substituted at the call, never reaches a code generator */
     CC_BUILTIN_X86_SIMD,
+    /* one instruction of frontend/x86-instructions.inc; a last argument,
+       added here, is its row */
+    CC_BUILTIN_X86_INSTRUCTION,
+    CC_BUILTIN_X86_STENCIL,
+    CC_BUILTIN_X86_GENERIC,
+    CC_BUILTIN_NONDETERMINISTIC,
+    CC_BUILTIN_NONTEMPORAL_STORE,
+    CC_BUILTIN_NONTEMPORAL_LOAD,
+    CC_BUILTIN_REDUCE_ADD, /* in cc_vector_reduce's order of operations */
+    CC_BUILTIN_REDUCE_MAX,
+    CC_BUILTIN_REDUCE_MIN,
+    CC_BUILTIN_REDUCE_AND,
+    CC_BUILTIN_REDUCE_OR,
+    CC_BUILTIN_REDUCE_XOR,
     CC_BUILTIN_X86_PCMPSTR,
     CC_BUILTIN_X86_BLENDVB,
     CC_BUILTIN_X86_CRC32,

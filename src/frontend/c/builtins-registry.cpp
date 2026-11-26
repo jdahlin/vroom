@@ -22,7 +22,33 @@ CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want,
 
 static const cc_builtin cc_builtin_table[] = {
 #include "frontend/c/target-builtins.inc"
+#define X86_INSTRUCTION(name, signature, mnemonic, form, feature)              \
+    {name, CC_BUILTIN_X86_INSTRUCTION, 0, signature},
+#include "frontend/x86-instructions.inc"
+#undef X86_INSTRUCTION
+#define X86_STENCIL(name, signature)                                           \
+    {"__builtin_" name, CC_BUILTIN_X86_STENCIL, 0, signature},
+#include "frontend/x86-stencil-names.inc"
+#undef X86_STENCIL
     {"__builtin_ia32_pblendvb128", CC_BUILTIN_X86_BLENDVB, 1, "BBBB"},
+    {"__builtin_elementwise_fma", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_sqrt", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_fshl", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_fshr", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_popcount", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_bitreverse", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_clzg", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_ctzg", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_reduce_mul", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_reduce_add", CC_BUILTIN_REDUCE_ADD, 1, "i."},
+    {"__builtin_reduce_max", CC_BUILTIN_REDUCE_MAX, 1, "i."},
+    {"__builtin_reduce_min", CC_BUILTIN_REDUCE_MIN, 1, "i."},
+    {"__builtin_reduce_and", CC_BUILTIN_REDUCE_AND, 1, "i."},
+    {"__builtin_reduce_or", CC_BUILTIN_REDUCE_OR, 1, "i."},
+    {"__builtin_reduce_xor", CC_BUILTIN_REDUCE_XOR, 1, "i."},
+    {"__builtin_nondeterministic_value", CC_BUILTIN_NONDETERMINISTIC, 1, "i."},
+    {"__builtin_nontemporal_store", CC_BUILTIN_NONTEMPORAL_STORE, 1, "v."},
+    {"__builtin_nontemporal_load", CC_BUILTIN_NONTEMPORAL_LOAD, 1, "i."},
     {"__builtin_elementwise_abs", CC_BUILTIN_ELEMENTWISE_ABS, 1, "i."},
     {"__builtin_elementwise_min", CC_BUILTIN_ELEMENTWISE_MIN, 1, "i."},
     {"__builtin_elementwise_max", CC_BUILTIN_ELEMENTWISE_MAX, 1, "i."},
@@ -35,6 +61,13 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_ia32_packssdw128", CC_BUILTIN_X86_SIMD, 1, "HII"},
     {"__builtin_ia32_packuswb128", CC_BUILTIN_X86_SIMD, 1, "BHH"},
     {"__builtin_ia32_packusdw128", CC_BUILTIN_X86_SIMD, 1, "HII"},
+    {"__builtin_ia32_vec_ext_v16qi", CC_BUILTIN_X86_SIMD, 1, "cBi"},
+    {"__builtin_ia32_vec_ext_v4si", CC_BUILTIN_X86_SIMD, 1, "iIi"},
+    {"__builtin_ia32_vec_ext_v2di", CC_BUILTIN_X86_SIMD, 1, "wQi"},
+    {"__builtin_ia32_vec_ext_v4sf", CC_BUILTIN_X86_SIMD, 1, "fFi"},
+    {"__builtin_ia32_vec_set_v16qi", CC_BUILTIN_X86_SIMD, 1, "BBci"},
+    {"__builtin_ia32_vec_set_v4si", CC_BUILTIN_X86_SIMD, 1, "IIii"},
+    {"__builtin_ia32_vec_set_v2di", CC_BUILTIN_X86_SIMD, 1, "QQwi"},
     {"__builtin_ia32_pshufd", CC_BUILTIN_X86_SIMD, 1, "IIi"},
     {"__builtin_ia32_pshuflw", CC_BUILTIN_X86_SIMD, 1, "HHi"},
     {"__builtin_ia32_pshufhw", CC_BUILTIN_X86_SIMD, 1, "HHi"},
@@ -532,8 +565,16 @@ CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch)
         return cc_type_basic(AST_TYPE_SHORT);
     case 'H':
         return cc_type_vector(c, cc_type_basic(AST_TYPE_SHORT), 16);
+    case 'U':
+        return cc_type_vector(c, cc_type_basic(AST_TYPE_UNSIGNED_CHAR), 16);
+    case 'G':
+        return cc_type_vector(c, cc_type_basic(AST_TYPE_UNSIGNED_SHORT), 16);
     case 'D':
         return cc_type_basic(AST_TYPE_LONG_DOUBLE);
+    case 'x': /* _Float16 in the stencils' signatures */
+        return cc_type_basic(AST_TYPE_FLOAT16);
+    case 'g':
+        return cc_type_basic(AST_TYPE_BFLOAT16);
     case 'p':
         return cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
     case 'P':
@@ -557,6 +598,25 @@ CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch)
     }
 }
 
+/* the next type of a signature: a letter; a vector of 8, 16, 32 or 64 bytes
+   as '3', '4', '5' or '6' and its element's letter; '*' or '^' (a pointer to
+   const) before the pointed-to type */
+CC_PRIVATE ast_qualified_type cc_builtin_signature_next(cc *c, const char **s)
+{
+    char ch = *(*s)++;
+
+    if (ch == '*')
+        return cc_type_pointer(c, cc_builtin_signature_next(c, s));
+    if (ch == '^')
+        return cc_type_pointer(
+            c, cc_type_qualify(c, cc_builtin_signature_next(c, s),
+                               AST_QUALIFIER_CONST));
+    if (ch >= '3' && ch <= '6')
+        return cc_type_vector(c, cc_builtin_signature_next(c, s),
+                              1u << (ch - '0'));
+    return cc_builtin_signature_type(c, ch);
+}
+
 /* the function type of a signature in vcc's letters (sigtype) */
 CC_PRIVATE ast_qualified_type
 cc_builtin_signature_function_type(cc *c, const char *sig)
@@ -565,15 +625,16 @@ cc_builtin_signature_function_type(cc *c, const char *sig)
     uint32_t n = 0;
     int fl = 0;
 
-    for (const char *s = sig + 1; *s; s++) {
+    const char *s = sig;
+    ast_qualified_type result = cc_builtin_signature_next(c, &s);
+    while (*s) {
         if (*s == '.') {
             fl |= AST_TYPE_FLAG_VARIADIC;
             break;
         }
-        par[n++] = cc_builtin_signature_type(c, *s);
+        par[n++] = cc_builtin_signature_next(c, &s);
     }
-    return cc_type_function(c, cc_builtin_signature_type(c, sig[0]), par, n,
-                            fl);
+    return cc_type_function(c, result, par, n, fl);
 }
 
 CC_PRIVATE ast_qualified_type cc_builtin_type(cc *c, const cc_builtin *b)
@@ -584,6 +645,43 @@ CC_PRIVATE ast_qualified_type cc_builtin_type(cc *c, const cc_builtin *b)
 /* ---------------- expressions: builtins ---------------- */
 
 static uint32_t *cc_builtin_directory[CC_DIRECTORY_COUNT];
+
+/*
+ * The stencils' entries are together in the table, in their rows' order: the
+ * __builtin_ia32_ ones first, sorted by name, then the generic ones.  Their
+ * names are not interned (nearly 2000 of them, in every C translation unit's
+ * start): cc_builtin_lookup searches them by name.
+ */
+enum {
+    CC_STENCIL_COUNT = 0
+#define X86_STENCIL(name, signature) +1
+#include "frontend/x86-stencil-names.inc"
+#undef X86_STENCIL
+};
+
+/* the first one's index and how many are __builtin_ia32_ ones; set by
+   cc_builtin_table_init */
+static uint32_t cc_stencil_first, cc_stencil_sorted;
+
+static const cc_builtin *cc_builtin_stencil_first(void)
+{
+    cc_builtin_table_init(); /* (C++ reaches here without a C parse) */
+    return cc_builtin_table + cc_stencil_first;
+}
+
+CC_PRIVATE uint32_t cc_builtin_stencil_row(const cc_builtin *b)
+{
+    return (uint32_t)(b - cc_builtin_stencil_first());
+}
+
+CC_PRIVATE const cc_builtin *cc_builtin_stencil_named(const char *name)
+{
+    for (const cc_builtin *b = cc_builtin_stencil_first();
+         b->id == CC_BUILTIN_X86_STENCIL; b++)
+        if (!strcmp(b->name, name))
+            return b;
+    return NULL;
+}
 
 /* __has_builtin for the names the front end implements (the pp asks through pp_builtin_known) */
 static int cc_builtin_is_known(const char *n)
@@ -617,6 +715,16 @@ CC_PRIVATE void cc_builtin_table_init(void)
         return;
     /* the table is shared by all TUs; building it twice is harmless */
     for (uint32_t i = 0; cc_builtin_table[i].name; i++) {
+        if (cc_builtin_table[i].id == CC_BUILTIN_X86_STENCIL) {
+            uint32_t sorted = CC_STENCIL_COUNT;
+            while (sorted && strncmp(cc_builtin_table[i + sorted - 1].name,
+                                     "__builtin_ia32_", 15))
+                sorted--;
+            cc_stencil_first = i;
+            cc_stencil_sorted = sorted;
+            i += CC_STENCIL_COUNT - 1;
+            continue;
+        }
         size_t l = strlen(cc_builtin_table[i].name);
         char *s = (char *)malloc(l + 17);
         uint32_t id;
@@ -637,12 +745,42 @@ CC_PRIVATE void cc_builtin_table_init(void)
     __atomic_store_n(&done, true, __ATOMIC_RELEASE);
 }
 
+/* the stencil entry of an identifier that is a __builtin_ia32_ name */
+static const cc_builtin *cc_builtin_stencil_search(uint32_t id)
+{
+    /* (not terminated) */
+    const char *name = cc_identifier_string(id);
+    size_t length = (size_t)cc_identifier_length(id);
+
+    if (length <= 15 || memcmp(name, "__builtin_ia32_", 15))
+        return NULL;
+    uint32_t low = 0, high = cc_stencil_sorted;
+    while (low < high) {
+        uint32_t middle = low + (high - low) / 2;
+        const cc_builtin *b = cc_builtin_stencil_first() + middle;
+        int order = strncmp(name, b->name, length);
+
+        if (!order) {
+            if (!b->name[length])
+                return b;
+            order = -1; /* a longer name sorts after this one */
+        }
+        if (order < 0)
+            high = middle;
+        else
+            low = middle + 1;
+    }
+    return NULL;
+}
+
 CC_PRIVATE const cc_builtin *cc_builtin_lookup(uint32_t id)
 {
     uint32_t *pg = cc_builtin_directory[id >> CC_DIRECTORY_BITS];
     uint32_t i = pg ? pg[id & (CC_DIRECTORY_PAGE - 1)] : 0;
 
-    return i ? &cc_builtin_table[i - 1] : NULL;
+    if (i)
+        return &cc_builtin_table[i - 1];
+    return cc_builtin_stencil_search(id);
 }
 
 #include "frontend/c/builtin-stubs.inc"

@@ -3038,10 +3038,12 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             v = value_of(f, x.value);
             return constness::constant;
         }
-        /* (a null pointer or void conversion is made by the conversion below) */
+        /* (a null pointer or void conversion is made by the conversion below;
+           an array a mem-initializer's `a{}` or `a()` initializes, by the
+           initialization's cases) */
         type_kind k = type_table[x.type.unqualified()].kind;
         if (k != type_kind::class_type && k != type_kind::pointer &&
-            k != type_kind::complex &&
+            k != type_kind::complex && k != type_kind::array &&
             fundamental_of(x.type) != fundamental_type::void_)
             return CONST_UNKNOWN;
     }

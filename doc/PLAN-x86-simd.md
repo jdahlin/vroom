@@ -47,10 +47,31 @@ Stockfish 17.1, `bench 16 1 13 default depth`, -O2, 2030154 nodes everywhere:
     intrinsics.  Only vectors as values in registers (XS1c) removes them.
   - XS1c: VIR: `i8x16` and `i16x8`, vector shifts and shuffles, vectors from
     source (values, not addresses), vector arguments and results.
-- **XS2** Builtins that no vector operation expresses (`pmaddwd`, packs,
-  `pmaddubsw`, ...) as target operations: a table of builtin, signature,
-  feature and instruction, generated from clang, replacing the hand-written
-  expansions.  A builtin used without its feature is an error, as clang's.
+- **XS2** (SSE through SSE4.2, AES, PCLMUL, SHA done) Builtins that are one
+  instruction: `frontend/x86-instructions.inc`, generated from clang's
+  `BuiltinsX86*.td` (`contrib/clang-builtins`) by
+  `tools/gen-builtin-registrations.py`, with each builtin's signature,
+  mnemonic, form and feature; `arch/x64/codegen/simd.cpp` emits them, and
+  `bench/vcc-x86intrinsics.py` tests every row against clang (147 of 147, C
+  and C++, -O0..3).  The table lists at its end what it leaves out (control
+  registers, fixed registers, `clflush`, `movnti`).  A function with one of
+  them is built by the direct emitter, not VIR.  The earlier hand-written
+  vector expansions can move into the table.
+- **XS2b** (done) Every other builtin the intrinsic headers use, AVX through
+  AVX-512, as *stencils*: `tools/gen-x86stencils.py` has clang compile one
+  function per builtin (per value of its constant operands) with only the
+  builtin's features, and vcc pastes those bytes, operands and result in a
+  frame block addressed by rdi (`arch/x64/codegen/simd.cpp`).  Constants a
+  stencil reads go right before it, aligned, with a jump around them.  The
+  same for clang's type-generic `__builtin_elementwise_*` and
+  `__builtin_reduce_mul` that vcc has no node for, per operand shape.  Checked
+  in: `frontend/x86-stencil-names.inc` and
+  `arch/x64/codegen/x86-stencils.inc`; clang runs only when they are
+  regenerated.  Not generated (the list is at the end of the names file): the
+  AMX tile builtins (1024-byte operands), a few whose constants have too many
+  combinations, 32-bit-only ones.  Limits: operands go through memory (slow),
+  `-S` shows `.byte` lines, and builtins the host cannot run are only
+  compile-checked.
 - **XS3** 256 bits: AVX/AVX2 with VEX, ymm registers, the System V and
   Windows rules for wide vectors, `vzeroupper`, and the front end's
   `_Float16` vector errors.  Gate: Stockfish AVX2 builds.

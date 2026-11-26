@@ -271,6 +271,125 @@ def generate_targets(reader):
     return '\n'.join(lines) + '\n'
 
 
+# x86 builtins that are one instruction.  A feature listed here gets every
+# builtin of its that the C front end's table does not already have, as the
+# instruction named like the builtin; the maps below hold what differs.
+# Adding an instruction set: add its feature, regenerate, run
+# bench/vcc-x86intrinsics.py, fix what it reports.
+X86_FEATURES = {'sse', 'sse2', 'sse3', 'ssse3', 'sse4.1', 'sse4.2', 'aes',
+                'pclmul', 'sha'}
+# signature letters (cc_builtin_signature_type)
+X86_TYPES = {
+    '_Vector<16, char>': 'B', '_Vector<16, signed char>': 'B',
+    '_Vector<16, unsigned char>': 'U', '_Vector<8, short>': 'H',
+    '_Vector<8, unsigned short>': 'G', '_Vector<4, int>': 'I',
+    '_Vector<2, long long int>': 'Q', '_Vector<4, float>': 'F',
+    '_Vector<2, double>': 'E', '_Vector<2,double>': 'E',
+    'void': 'v', 'char': 'c', 'unsigned char': 'C', 'short': 'N',
+    'unsigned short': 'h', 'int': 'i', 'unsigned int': 'u',
+    'long long int': 'w', 'unsigned long long int': 'W', 'float': 'f',
+    'char const *': 'S', 'char *': 's', 'void const *': 'P', 'void *': 'p',
+}
+X86_VECTORS = 'BUHGIQFE'
+# comi and ucomi: the compare's mask, operands swapped for > and >=
+X86_COMI = {'eq': ('cmpeq', 0), 'lt': ('cmplt', 0), 'le': ('cmple', 0),
+            'gt': ('cmplt', 1), 'ge': ('cmple', 1), 'neq': ('cmpneq', 0)}
+# ptest: the condition that is the result
+X86_PTEST = {'ptestz128': 'sete', 'ptestc128': 'setc', 'ptestnzc128': 'seta'}
+# not one instruction with operands as the builtin's; not generated
+X86_SKIP = {
+    'maskmovdqu': 'its address is in rdi',
+    'monitor': 'fixed registers', 'mwait': 'fixed registers',
+}
+
+
+def x86_row(row):
+    """(spelling, signature, mnemonic, form, feature) or a reason string"""
+    name = row['spelling'][len('__builtin_ia32_'):]
+    if name in X86_SKIP:
+        return X86_SKIP[name]
+    match = re.fullmatch(r'(.*?)\((.*)\)', row['prototype_template'])
+    result, text = match.groups()
+    parameters = [p.strip() for p in re.split(r',(?![^<]*>)', text)
+                  if p.strip() not in ('', 'void')]
+    constant = [p.startswith('_Constant ') for p in parameters]
+    types = [result.strip()] + [p.removeprefix('_Constant ') for p in parameters]
+    types = [' '.join(t.replace('*', ' *').split()) for t in types]
+    missing = [t for t in types if t not in X86_TYPES]
+    if missing:
+        return 'no signature letter for ' + missing[0]
+    codes = [X86_TYPES[t] for t in types]
+    kinds = ''
+    for code, fixed in zip(codes[1:], constant):
+        if fixed:
+            kinds += 'k'
+        elif code in X86_VECTORS:
+            kinds += 'v'
+        elif code in 'Ssp' or code == 'P':
+            kinds += 'p'
+        else:
+            kinds += 's'
+    returns = 'V' if codes[0] in X86_VECTORS else codes[0]
+    mnemonic = re.sub(r'_?128$', '', name)
+    form = None
+    comi = re.fullmatch(r'u?comi(sd)?(eq|lt|le|gt|ge|neq)', name)
+    if comi:
+        suffix = 'sd' if comi[1] else 'ss'
+        compare, swap = X86_COMI[comi[2]]
+        mnemonic = compare + suffix
+        form = 'COMPARE_SWAPPED' if swap else 'COMPARE'
+    elif name in X86_PTEST:
+        mnemonic, form = X86_PTEST[name], 'PTEST'
+    elif returns == 'V' and kinds == 'vv':
+        form = 'BINARY'
+    elif returns == 'V' and kinds == 'v':
+        form = 'UNARY'
+    elif returns == 'V' and kinds == 'vvk':
+        form = 'BINARY_CONTROL'
+    elif returns == 'V' and kinds == 'vk':
+        form = 'UNARY_CONTROL'
+    elif returns == 'V' and kinds == 'vs':
+        # the count in a general register: the form with an xmm count
+        mnemonic, form = re.sub(r'i$', '', mnemonic), 'SHIFT'
+    elif returns == 'V' and kinds == 'vvv':
+        form = 'BINARY_XMM0'
+    elif returns == 'V' and kinds == 'p':
+        form = 'LOAD'
+    elif returns in 'iuwW' and kinds == 'v':
+        # (cvtsd2si64: the register's size says it)
+        mnemonic, form = mnemonic.removesuffix('64'), 'TO_GENERAL'
+    else:
+        return f'no form for {returns}({kinds})'
+    return (row['spelling'], ''.join(codes), mnemonic, form, row['features'])
+
+
+def generate_x86(reader):
+    registry = (SRC / 'frontend/c/builtins-registry.cpp').read_text()
+    wired = set(re.findall(r'"(__builtin_ia32_\w+)"', registry))
+    lines = [GENERATED,
+             '/* X86_INSTRUCTION (spelling, signature, mnemonic, form, feature);',
+             '   NOT generated, and why, at the end */']
+    skipped = []
+    seen = set()
+    for filename in ('BuiltinsX86.td', 'BuiltinsX86_64.td'):
+        for row in read_table(reader, filename):
+            name = row['spelling']
+            if (row['features'] not in X86_FEATURES or name in wired
+                    or name in seen or not name.startswith('__builtin_ia32_')
+                    or name.startswith('__builtin_ia32_vec_')
+                    or name.startswith('__builtin_ia32_crc32')):
+                continue
+            seen.add(name)
+            made = x86_row(row)
+            if isinstance(made, str):
+                skipped.append(f'/* {name}: {made} */')
+                continue
+            spelling, signature_, mnemonic, form, feature = made
+            lines.append(f'X86_INSTRUCTION("{spelling}", "{signature_}", '
+                         f'"{mnemonic}", {form}, "{feature}")')
+    return '\n'.join(lines + skipped) + '\n'
+
+
 def generate_stubs(reader):
     groups = {
         'Builtins.td': 3,
@@ -323,6 +442,7 @@ def main():
             args.output_root / 'frontend/cxx-builtins.inc': generate_cxx(args.reader),
             args.output_root / 'frontend/c/target-builtins.inc': generate_targets(args.reader),
             args.output_root / 'frontend/c/builtin-stubs.inc': generate_stubs(args.reader),
+            args.output_root / 'frontend/x86-instructions.inc': generate_x86(args.reader),
         }
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f'{error}\n')

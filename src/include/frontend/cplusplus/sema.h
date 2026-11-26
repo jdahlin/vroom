@@ -3098,6 +3098,7 @@ class semantic_analysis
        names analysis did not follow does not hide the builtin */
     bool builtin_spelled(uint32_t name) const;
     bool builtin_letter_type(char letter, qualified_type &t);
+    bool builtin_signature_next(const char *&s, qualified_type &t);
     entity_index compiler_builtin(uint32_t name, const char *spelling,
                                   size_t length);
     entity_index declare_builtin(uint32_t name, uint32_t symbol,
@@ -3811,6 +3812,14 @@ class semantic_analysis
     bool builtin_addressof_call(SyntaxRef n);
     bool builtin_shufflevector_call(SyntaxRef n);
     int vector_builtin_kind(uint32_t name);
+
+  public:
+    static const char *x86_generic_builtin(uint8_t kind);
+
+  private:
+    analysis_result x86_generic_call(SyntaxRef n,
+                                     const owned_array<SyntaxElement> &clauses,
+                                     uint8_t kind, expression_meaning &m);
     analysis_result
     nontemporal_access(SyntaxRef n, const owned_array<SyntaxElement> &clauses,
                        bool store, expression_meaning &m);

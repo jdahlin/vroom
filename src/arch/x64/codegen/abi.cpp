@@ -233,12 +233,13 @@ static bool x64_abi_type_is_wide_record(cc *c, ast_qualified_type t)
 static void x64_abi_vector_check(codegen_context *e, uint64_t size, bool vector,
                                  bool wide_record, x86_features features)
 {
+    /* (32 bytes travel in a ymm register: x64_classify; 64 in a zmm are not
+       done) */
     bool unsupported =
-        vector && size > 16 && x86_feature_has(features, X86_FEATURE_AVX);
+        vector && size > 32 && x86_feature_has(features, X86_FEATURE_AVX);
 
-    unsupported |= wide_record &&
-                   x86_feature_has(features, size == 64 ? X86_FEATURE_AVX512F
-                                                        : X86_FEATURE_AVX);
+    unsupported |= wide_record && size == 64 &&
+                   x86_feature_has(features, X86_FEATURE_AVX512F);
     if (unsupported)
         codegen_fatal_report(e, e->current_location,
                              "x86-64: AVX vector argument or return ABI is not "
@@ -294,6 +295,20 @@ VPRIV void x64_classify(codegen_context *e, ast_qualified_type t,
     if (!unnamed && ((a->is_vector && a->size > 16) || a->is_wide_record))
         x64_abi_vector_check(e, a->size, a->is_vector, a->is_wide_record,
                              cc_x86_features_get(e->compile_context, fn));
+    /* [x86-64 psABI 3.2.3] with AVX a named __m256 (or a record of one) is
+       SSE and three SSEUP: one ymm register */
+    if (!unnamed && a->size == 32 &&
+        ((a->is_vector && !a->bool_lane_count &&
+          !codegen_type_is_bool_vector(e->compile_context, t)) ||
+         a->is_wide_record) &&
+        x86_feature_has(cc_x86_features_get(e->compile_context, fn),
+                        X86_FEATURE_AVX)) {
+        a->is_in_memory = false;
+        a->is_sse_up = true;
+        a->eightbyte_count = 1;
+        a->classes[0] = WALK_ARGUMENT_SSE;
+        a->align = 32;
+    }
     if (a->is_in_memory && a->is_sse_up && x64_target_has_no_simd(e))
         a->is_sse_up =
             false; /* a 32-byte vector: returned in memory, not xmm0:xmm1 */
@@ -403,6 +418,34 @@ static int x64_abi_registers_need(const walk_argument *a, int cl)
     for (int i = 0; i < a->eightbyte_count; i++)
         k += a->classes[i] == cl;
     return k;
+}
+
+/* the bytes one register of a value moves: an eightbyte, or with SSEUP the
+   whole xmm or ymm register */
+static int x64_abi_register_bytes(const walk_argument *a)
+{
+    if (!a->is_sse_up)
+        return 8;
+    if (a->size == 32)
+        return 32;
+    return 16;
+}
+
+static bool x64_abi_in_ymm(const walk_argument *a)
+{
+    return !a->is_in_memory && a->is_sse_up && a->size == 32;
+}
+
+/* once ymm registers are in memory: leave the upper halves clean for the SSE
+   instructions that follow */
+static void x64_vzeroupper(codegen_context *e)
+{
+    static const char text[] = "\tvzeroupper\n";
+    record *r = x64_record_emit(e, X64_OP_RAW);
+
+    r->offset = (int32_t)e->raw.n;
+    r->reference = (uint32_t)(sizeof text - 1);
+    vtext_string_append(&e->raw, text);
 }
 
 /* fldt / fstpt of l (fp.c's x87 records) */
@@ -542,7 +585,10 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
             place[k] = -1;
             continue;
         }
-        if (!a[k].is_in_memory && gp + ng <= 6 && fp + nf <= 8) {
+        /* (a variadic function takes no argument in a ymm register, named
+           or not: as clang) */
+        if (!a[k].is_in_memory && !(variadic && x64_abi_in_ymm(&a[k])) &&
+            gp + ng <= 6 && fp + nf <= 8) {
             gp += ng, fp += nf;
             place[k] = -1;
             continue;
@@ -654,7 +700,7 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         for (int w = 0; w < a[k].eightbyte_count; w++) {
             codegen_lvalue s = x64_fr(a[k].slot + 8 * w);
 
-            x64_record_emit_memory(e, X64_OP_LD, a[k].is_sse_up ? 16 : 8,
+            x64_record_emit_memory(e, X64_OP_LD, x64_abi_register_bytes(&a[k]),
                                    a[k].classes[w] == WALK_ARGUMENT_SSE
                                        ? XMM0 + fp++
                                        : x64_argument_register(gp++),
@@ -722,7 +768,7 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         for (int w = 0; w < r->eightbyte_count; w++) {
             codegen_lvalue d = x64_fr(r->slot + 8 * w);
 
-            x64_record_emit_memory(e, X64_OP_ST, r->is_sse_up ? 16 : 8,
+            x64_record_emit_memory(e, X64_OP_ST, x64_abi_register_bytes(r),
                                    r->classes[w] == WALK_ARGUMENT_SSE
                                        ? XMM0 + nf++
                                        : (ng++ ? RDX : RAX),
@@ -731,6 +777,8 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
     } else if (!r) {
         x64_call_park(e, rt);
     }
+    if (r && x64_abi_in_ymm(r))
+        x64_vzeroupper(e);
     x64_temporaries_restore(e, saved, fsaved);
     return x64_call_value(e, fn, rt, r);
 }
@@ -865,7 +913,8 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n,
         }
         if (!a[k].is_in_memory && a[k].eightbyte_count == 0)
             continue;
-        if (!a[k].is_in_memory && gp + ng <= 6 && fp + nf <= 8) {
+        if (!a[k].is_in_memory && !(variadic && x64_abi_in_ymm(&a[k])) &&
+            gp + ng <= 6 && fp + nf <= 8) {
             if (local) {
                 /* Selected homes are scalar integer/pointer words. Bind directly
 				   without creating a stack copy; preserve the usual ABI count. */
@@ -880,7 +929,8 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n,
             for (int w = 0; w < a[k].eightbyte_count; w++) {
                 codegen_lvalue d = x64_fr(a[k].slot + 8 * w);
 
-                x64_record_emit_memory(e, X64_OP_ST, a[k].is_sse_up ? 16 : 8,
+                x64_record_emit_memory(e, X64_OP_ST,
+                                       x64_abi_register_bytes(&a[k]),
                                        a[k].classes[w] == WALK_ARGUMENT_SSE
                                            ? XMM0 + fp++
                                            : x64_argument_register(gp++),
@@ -913,6 +963,11 @@ VPRIV void x64_params(codegen_context *e, walk_argument *a, int n,
         }
         stk += (int64_t)((a[k].size + 7) & ~(uint64_t)7);
     }
+    for (int k = 0; k < n; k++)
+        if (x64_abi_in_ymm(&a[k])) {
+            x64_vzeroupper(e);
+            break;
+        }
     X->general_register_arguments = gp, X->float_register_arguments = fp,
     X->stack_argument_bytes = (int32_t)stk;
     X->variadic_save_slot = 0;
@@ -996,8 +1051,9 @@ VPRIV void x64_retrec(codegen_context *e, int raddr, const walk_argument *r,
                                         .register_number = (uint8_t)raddr,
                                         .offset = 8 * w};
 
-                    x64_record_emit_memory(e, X64_OP_LD, r->is_sse_up ? 16 : 8,
-                                           dst[w], &s, false);
+                    x64_record_emit_memory(e, X64_OP_LD,
+                                           x64_abi_register_bytes(r), dst[w],
+                                           &s, false);
                 }
     }
     x64_tfree(e, raddr);

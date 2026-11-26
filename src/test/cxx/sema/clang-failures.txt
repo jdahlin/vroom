@@ -550,7 +550,7 @@ verdict SemaCXX/builtin-bswapg.cpp -std=gnu++17: ill-formed for us, accepted by 
 verdict SemaCXX/builtin-constant-p.cpp -std=c++17: ill-formed for us, accepted by clang: line 78 (2 declarations)
 verdict SemaCXX/builtin-constant-p.cpp -std=c++20: ill-formed for us, accepted by clang: line 78 (3 declarations)
 verdict SemaCXX/builtin-is-constant-evaluated.cpp -std=c++2a -Wno-constant-evaluated: ill-formed for us, accepted by clang: line 16 (2 declarations)
-verdict SemaCXX/builtins-elementwise-math.cpp -std=c++17 -pedantic: ill-formed for us, accepted by clang: line 29 (6 declarations)
+verdict SemaCXX/builtins-elementwise-math.cpp -std=c++17 -pedantic: ill-formed for us, accepted by clang: line 29 (4 declarations)
 verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -DCLANG_ABI_COMPAT=16 -Wno-invalid-offsetof: ill-formed for us, accepted by clang: line 661 (1 declarations)
 verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof -DCLANG_ABI_COMPAT=16: ill-formed for us, accepted by clang: line 661 (1 declarations)
 verdict SemaCXX/class-layout.cpp -std=c++11 -Wno-inaccessible-base -Wno-invalid-offsetof: ill-formed for us, accepted by clang: line 661 (1 declarations)

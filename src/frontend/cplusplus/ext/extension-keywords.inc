@@ -45,6 +45,8 @@ EXTENSION_KEYWORD(extension, "__extension__", gnu_extension_keyword)
 EXTENSION_KEYWORD(int128, "__int128", gnu_int128)
 EXTENSION_KEYWORD(float128, "__float128", gnu_float128)
 EXTENSION_KEYWORD(float16, "_Float16", clang_float16)
+/* (analysis takes it in a system header only: simple_type_keywords) */
+EXTENSION_KEYWORD(float16, "__fp16", clang_float16)
 EXTENSION_KEYWORD(bfloat16, "__bf16", clang_float16)
 EXTENSION_KEYWORD(typeof_, "typeof", gnu_typeof)
 EXTENSION_KEYWORD(typeof_, "__typeof", gnu_typeof)

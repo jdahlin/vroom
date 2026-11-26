@@ -123,7 +123,10 @@ static const char *const x64_condition_names[] = {
 VPRIV void x64_register_name_append(tbuf *b, int r, int sz)
 {
     if (X64_REGISTER_IS_XMM(r)) {
-        vtext_string_append(b, "%xmm");
+        if (sz == 32)
+            vtext_string_append(b, "%ymm");
+        else
+            vtext_string_append(b, "%xmm");
         vtext_unsigned_append(b, (uint64_t)(r - XMM0));
         return;
     }
@@ -758,12 +761,13 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
         case X64_OP_LDX:
         case X64_OP_LD:
             if (X64_REGISTER_IS_XMM(i->registers[0])) {
-                vtext_string_append(b, sz == 4   ? "\tmovss\t"
-                                       : sz == 8 ? "\tmovsd\t"
-                                                 : "\tmovups\t");
+                vtext_string_append(b, sz == 4    ? "\tmovss\t"
+                                       : sz == 8  ? "\tmovsd\t"
+                                       : sz == 32 ? "\tvmovups\t"
+                                                  : "\tmovups\t");
                 x64_memory_operand_append(e, b, i);
                 vtext_string_append(b, ", ");
-                x64_register_name_append(b, i->registers[0], 8);
+                x64_register_name_append(b, i->registers[0], sz);
                 break;
             }
             {
@@ -786,9 +790,10 @@ VPRIV void x64_function_print(codegen_context *e, tbuf *b, uint32_t s)
         case X64_OP_STX:
         case X64_OP_ST:
             if (X64_REGISTER_IS_XMM(i->registers[2]))
-                vtext_string_append(b, sz == 4   ? "\tmovss\t"
-                                       : sz == 8 ? "\tmovsd\t"
-                                                 : "\tmovups\t");
+                vtext_string_append(b, sz == 4    ? "\tmovss\t"
+                                       : sz == 8  ? "\tmovsd\t"
+                                       : sz == 32 ? "\tvmovups\t"
+                                                  : "\tmovups\t");
             else
                 x64_mnemonic_append(b, "mov", sz);
             x64_register_name_append(b, i->registers[2], sz);

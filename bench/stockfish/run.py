@@ -7,8 +7,9 @@ Source: work/stockfish (git clone --depth 1 --branch sf_17.1
 https://github.com/official-stockfish/Stockfish.git work/stockfish, then
 `make -C work/stockfish/src net` for the two NNUE files).  The networks are
 loaded from the source directory (NNUE_EMBEDDING_OFF: no .incbin), the build
-is Stockfish's ARCH=general-64 (--arch sse2: x86-64), single-threaded bench,
-against libc++.
+is Stockfish's ARCH=general-64 (--arch sse2: x86-64; avx2: x86-64-avx2),
+single-threaded bench, against libc++.  The CPU time of compiling the TUs one
+at a time is printed for both compilers.
 
 Each TU is compiled by `vpp -x c++ -c` (one at a time, nice, with a timeout);
 the summary groups the TUs by first error as bench/cxx-json.py does.  When
@@ -29,6 +30,7 @@ import importlib.util
 import json
 import os
 import re
+import resource
 import subprocess
 import sys
 
@@ -42,6 +44,9 @@ DEFINES = ['-DNDEBUG', '-DIS_64BIT', '-DUSE_PTHREADS', '-DNNUE_EMBEDDING_OFF']
 # Stockfish's ARCH=x86-64 (--arch sse2); the default is ARCH=general-64,
 # without intrinsics
 SSE2 = ['-DUSE_SSE2', '-msse2']
+# ARCH=x86-64-avx2
+AVX2 = SSE2 + ['-DUSE_SSSE3', '-DUSE_SSE41', '-DUSE_POPCNT', '-DUSE_AVX2',
+               '-mssse3', '-msse4.1', '-mpopcnt', '-mavx2']
 
 spec = importlib.util.spec_from_file_location(
     'cxx_json', os.path.join(B, 'cxx-json.py'))
@@ -62,15 +67,21 @@ def obj_name(src):
     return src.replace('/', '_')[:-4] + '.o'
 
 
+def children_time():
+    u = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return u.ru_utime + u.ru_stime
+
+
 def compile_vcc(vpp, src, flags, out, timeout):
     cmd = ['nice', '-n', '15', vpp] + flags + ['-c', src, '-o', out]
+    before = children_time()
     try:
         p = subprocess.run(cmd, cwd=SRC, capture_output=True, text=True,
                            timeout=timeout)
     except subprocess.TimeoutExpired:
         return {'state': 'timeout'}
     if p.returncode == 0:
-        return {'state': 'ok'}
+        return {'state': 'ok', 'seconds': children_time() - before}
     message, subclause, site, where = cj.first_error(p.stderr)
     if not message:
         return {'state': 'crash', 'message': 'status %d' % p.returncode}
@@ -84,15 +95,20 @@ def compile_vcc(vpp, src, flags, out, timeout):
 def build_clang(level, d):
     """clang++'s objects and executable in d (once per level)"""
     exe = os.path.join(d, 'stockfish')
-    if os.path.exists(exe):
+    seconds = os.path.join(d, 'compile-seconds')
+    if os.path.exists(exe) and os.path.exists(seconds):
         return exe
     os.makedirs(d, exist_ok=True)
-    procs = [subprocess.Popen(['clang++', '-std=c++17', '-stdlib=libc++',
-                               level] + DEFINES +
-                              ['-c', s, '-o', os.path.join(d, obj_name(s))],
-                              cwd=SRC) for s in sources()]
-    if any(p.wait() for p in procs):
-        sys.exit('stockfish: clang++ failed')
+    before = children_time()
+    for s in sources():
+        p = subprocess.run(['clang++', '-std=c++17', '-stdlib=libc++', level] +
+                           DEFINES +
+                           ['-c', s, '-o', os.path.join(d, obj_name(s))],
+                           cwd=SRC)
+        if p.returncode:
+            sys.exit('stockfish: clang++ failed')
+    with open(seconds, 'w') as f:
+        f.write('%.2f\n' % (children_time() - before))
     link(d, [os.path.join(d, obj_name(s)) for s in sources()], exe)
     return exe
 
@@ -133,7 +149,8 @@ def nodes(exe, depth, speed=None):
 def main():
     global OUT, CACHE
     ap = argparse.ArgumentParser()
-    ap.add_argument('--arch', choices=('general', 'sse2'), default='general')
+    ap.add_argument('--arch', choices=('general', 'sse2', 'avx2'),
+                    default='general')
     ap.add_argument('--bin-dir', default=os.environ.get('VCC_BIN') or
                     os.path.join(R, 'build', 'linux', 'src'))
     ap.add_argument('-O', dest='levels', default='2')
@@ -144,11 +161,9 @@ def main():
     ap.add_argument('-v', action='store_true')
     ap.add_argument('pattern', nargs='?')
     a = ap.parse_args()
-    if a.arch == 'sse2':
-        DEFINES.extend(SSE2)
-    else:
-        OUT = os.path.join(OUT, 'general')
-        CACHE = os.path.join(OUT, 'cache.json')
+    DEFINES.extend({'general': [], 'sse2': SSE2, 'avx2': AVX2}[a.arch])
+    OUT = os.path.join(OUT, a.arch)
+    CACHE = os.path.join(OUT, 'cache.json')
     vpp = os.path.join(a.bin_dir, 'vpp')
     if not os.path.exists(os.path.join(SRC, 'nn-1c0000000000.nnue')):
         print('stockfish: no %s with its networks (see this file\'s header)'
@@ -225,6 +240,11 @@ def main():
         got = None
         if not err:
             got, err = nodes(exe, a.depth, slow)
+        with open(os.path.join(cdir, 'compile-seconds')) as f:
+            reference = float(f.read())
+        print('stockfish %s: compile %.1f s CPU, clang++ %.1f s'
+              % (level, sum(r.get('seconds', 0) for r in results.values()),
+                 reference))
         if fast and slow:
             print('stockfish %s: %d nodes/s, clang++ %d'
                   % (level, slow[0], fast[0]))

@@ -243,6 +243,18 @@ uint32_t c_lowering::expression(uint32_t index)
         return compound_literal(n.a);
     }
     case semantic_kind::vector_shuffle: {
+        if (n.op >= 15) {
+            const uint32_t *operands = analysis.semantics.items(n.first);
+            uint32_t values[3] = {0, 0, 0};
+            for (uint32_t i = 0; i < n.count && i < 3; i++) {
+                values[i] = expression(operands[i]);
+                if (!values[i])
+                    return 0;
+            }
+            return ast_builder_x86_generic(
+                c, semantic_analysis::x86_generic_builtin(n.op), values,
+                n.count);
+        }
         uint32_t a = expression(n.a);
         if (!a)
             return 0;

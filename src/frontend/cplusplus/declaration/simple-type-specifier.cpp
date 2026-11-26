@@ -61,6 +61,8 @@ analysis_result semantic_analysis::complex_type(SyntaxRef seq,
         t = fundamental_type::float_;
     else if (k.float128 == 1 && keywords == 1)
         t = fundamental_type::float128;
+    else if (k.float16 == 1 && keywords == 1)
+        t = fundamental_type::float16;
     else if (keywords != 0)
         return not_supported_because(
             seq, "ext.gnu",

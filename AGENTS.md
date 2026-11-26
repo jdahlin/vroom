@@ -405,6 +405,8 @@ bench/vcc-ldconst.py [--target T]   # generated long double literals and folds, 
 bench/vcc-diff.py MODE -j 6 --win64 # any mode on one TU per MinGW-w64 header (+ flag variants) for x86_64-w64-mingw32 (cmp ~15 s; ref once ~1 min)
 bench/vcc-sema.py run|layout -j 6 --win64   # the same TUs: -fsyntax-only, layout claims checked by clang (layout ~5 min)
 src/tools/gen-win64data.sh          # Windows x64's predefines, -dD order, __has_* and attribute names from clang (ppdata-win64.inc, attrnames-win64.inc)
+bench/vcc-x86intrinsics.py [-j N] [-O 02] [--cxx] [--stride N] [PAT]   # every builtin of the x86 instruction and stencil tables, vpp's result vs clang's (x86-64 host; ~2 min; builtins the host cannot run are only compiled).  A builtin that is one instruction: add its feature to X86_FEATURES (tools/gen-builtin-registrations.py); a mnemonic or form it lacks: arch/x64/as, arch/x64/codegen/simd.cpp
+src/tools/gen-x86stencils.py        # the x86 builtins as clang's machine code (frontend/x86-stencil-names.inc, arch/x64/codegen/x86-stencils.inc; needs clang 23, llvm-objdump-23 and `make -C src vcc` for the .td reader; ~20 s)
 bench/vcc-f80.sh [N]                # x87 long double folding (include/common/softfloat.h) vs this x86-64 host's FPU (~3 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation, a file rewritten within a build, the win64 shim (~11 s)
 vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)
@@ -459,7 +461,7 @@ bench/vnm-coff.py -j 6              # vnm on COFF objects, archives and import r
 bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3 at vcc -O1, -O2, -O3, loops vectorized (~20 s)
 bench/vcpkg/build.py [-j N] [--clang] [-v] [PAT]   # microsoft/vcpkg-tool (C++17, 119 TUs; work/vcpkg-tool, work/vcpkg-deps-{fmt,cmrc,curl}: git clone --depth 1): vpp -x c++ -c per TU, refusals grouped by reason; --clang is the reference (all 119 build)
 bench/cxx-json.py [-v] [--force] [PAT]     # nlohmann/json's 71 test TUs (work/cxx/json/src/tests) by vpp -x c++ -std=c++17 -c against libc++, one at a time (nice, 60 s each): ok or the first error (refused subclause, vcc file:line), grouped by first error; cached in build/cxx-json.json (a rerun compiles only what changed; the full run ~1.5 min)
-bench/stockfish/run.py [-O 0123] [--depth N] [--mix] [-v]   # Stockfish 17.1 (work/stockfish, 23 TUs, SSE2, libc++) by vpp -x c++ -c, first error per TU; once all compile, linked by clang++ and `bench` node count = clang++'s, with both nodes/second (--mix: one vcc object among clang's; --arch sse2: the SIMD build; ~20 s)
+bench/stockfish/run.py [--arch sse2|avx2] [-O 0123] [--depth N] [--mix] [-v]   # Stockfish 17.1 (work/stockfish, 23 TUs, libc++) by vpp -x c++ -c, first error per TU; once all compile, linked by clang++ and `bench` node count = clang++'s, with both nodes/second (--mix: one vcc object among clang's; --arch sse2: the SIMD build; ~20 s)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
 `vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (3 s
