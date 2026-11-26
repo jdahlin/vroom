@@ -294,6 +294,13 @@ uint32_t c_lowering::assignment(const semantic_node &n)
     if (preprocessing_op_or_punc_primary(static_cast<preprocessing_op_or_punc>(
             n.op)) == preprocessing_op_or_punc::EQUAL) {
         const struct type &r = record(n.type);
+        if (empty_object(n.type) && side_effect_free(a)) {
+            /* nothing is stored; the assignment's value, the object */
+            ast_qualified_type at = pointer_to(t);
+            return dereference(
+                comma(at, cast(b, void_type, AST_CAST_VOID), address_of(a, at)),
+                t);
+        }
         if (r.kind == type_kind::class_type &&
             analysis.entity_table[r.entity].data_size <
                 analysis.entity_table[r.entity].size)

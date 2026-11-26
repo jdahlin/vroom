@@ -632,6 +632,7 @@ class c_lowering
     qualified_type returned_in_place;
     uint32_t function_symbol = 0;
     uint32_t result_node(ast_qualified_type t);
+    bool empty_object(qualified_type t) const;
     /* object = value, a call's result written there (AST_NODE_CALL_INTO) */
     uint32_t store(ast_qualified_type t, qualified_type object_type,
                    uint32_t object, uint32_t value);

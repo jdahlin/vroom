@@ -4,6 +4,12 @@
 namespace cplusplus::lowering
 {
 
+bool c_lowering::empty_object(qualified_type t) const
+{
+    const struct type &r = record(t);
+    return r.kind == type_kind::class_type && analysis.empty_class(r.entity);
+}
+
 uint32_t c_lowering::result_node(ast_qualified_type t)
 {
     return make(AST_NODE_RESULT_OBJECT, t, 0, 0, 0, 0, AST_NODE_FLAG_LVALUE);
@@ -16,6 +22,11 @@ uint32_t c_lowering::store(ast_qualified_type t, qualified_type object_type,
        built where it ends up, a call's result too */
     if (passed_indirectly(object_type) && ast_builder_node_is_call(c, value))
         return make(AST_NODE_CALL_INTO, void_type, object, value, 0, 0, 0);
+    /* an empty class has no value: its byte may be another member's
+       ([[no_unique_address]], an empty base) */
+    if (empty_object(object_type))
+        return comma(void_type, cast(value, void_type, AST_CAST_VOID),
+                     cast(object, void_type, AST_CAST_VOID));
     return assign(t, object, value);
 }
 
