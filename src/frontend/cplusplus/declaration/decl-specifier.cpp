@@ -1084,6 +1084,14 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
             names.declare_in(names.nearest_namespace_or_block(), name,
                              name_kind::type_name, region);
     }
+    scope_index type_region = 0;
+    if (!qualifier)
+        names.lookup_unqualified(name, &type_region);
+    else if (scope)
+        lookup_qualified_or_specialization(*this, scope, name, &type_region,
+                                           nullptr);
+    if (type_region)
+        facts.type_region = type_region;
     return finish_node(syntax_kind::elaborated_type_specifier, mark, first);
 }
 
