@@ -96,6 +96,24 @@ VPRIV void x64_vir_simd_emit(x64_vir_context *L, const char *op, int d, int a,
                                         X64_REGISTER_NONE);
 }
 
+/* VIR's x86 operation: two-address, so d takes a first; a unary one reads b
+   = a from there */
+VPRIV void x64_vir_x86_emit(x64_vir_context *L, uint32_t code, int d, int a,
+                            int b)
+{
+    const char *mnemonic = x64_x86_code_mnemonic(code);
+    char op[64];
+    int source = b;
+
+    if (code & X64_X86_UNARY)
+        source = a;
+    if (code & X64_X86_IMMEDIATE)
+        snprintf(op, sizeof op, "%s\t$%u,", mnemonic, code >> 16 & 0xff);
+    else
+        snprintf(op, sizeof op, "%s", mnemonic);
+    x64_vir_simd_emit(L, op, d, a, source);
+}
+
 VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
                                         uint32_t v)
 {

@@ -415,6 +415,7 @@ any vector type, I(V) the integer and F(V) the float vector of V's lane width.
 | 79 | `vreduce` | `i32` `i64` | the vector of such lanes | - | - | P | The lanes' wrapping sum |
 | 87 | `vinsert` | V | V | lane type | lane immediate | P | Replace lane `c` of `a` with `b` |
 | 88 | `vextract` | lane type | V | lane immediate | - | P | Extract lane `b` of `a` |
+| 94 | `x86` | V | v | v | code | P | An x86 instruction on `a` and `b` (a unary one reads `a`): `c` names it (bits 0-11 the mnemonic, 12 from the builtin table, 13 an immediate, 14 unary, 16-23 the immediate). Pure: it reads no memory and no state |
 
 Lane indices must be smaller than the number of lanes (T2). Insert and extract
 preserve the lane's bits, including NaN payloads and signed zeros.

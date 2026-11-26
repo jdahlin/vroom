@@ -190,6 +190,8 @@ const vir_opcode_info vir_opcode_table[256] = {
       0, VIR_EFFECT_P),
     R(VIR_OP_VEXTRACT, "vextract", VIR_FORM_STD,
       VIR_TYPE_MASK_I | VIR_TYPE_MASK_F, VLANES, IMM, NONE, 0, VIR_EFFECT_P),
+    R(VIR_OP_X86, "x86", VIR_FORM_STD, VIR_TYPE_MASK_VEC, ANY, ANY, IMM, 0,
+      VIR_EFFECT_P),
     R(VIR_OP_VREDUCE, "vreduce", VIR_FORM_STD, VIR_TYPE_MASK_I, VRED, NONE,
       NONE, 0, VIR_EFFECT_P),
     R(VIR_OP_BR, "br", VIR_FORM_BR, VIR_TYPE_MASK_V, BLK, NONE, EXT, 0,

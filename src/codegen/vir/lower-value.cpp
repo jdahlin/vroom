@@ -771,7 +771,20 @@ VPRIV bool virbuild_vector_operation(codegen_context *e, int op,
     int lane = 0;
     if (!unary && a_vector && b_vector &&
         virbuild_vector_op(e, op, vt, &vir_op, &type, &lane)) {
-        virbuild_vector_binary(e, vir_op, type, lane, ra, rb, d);
+        virbuild_vector_binary(e, vir_op, 0, type, lane, ra, rb, d);
+        return true;
+    }
+    uint32_t code = 0;
+    bool swapped = false;
+    if (!unary && a_vector && b_vector &&
+        x64_x86_operation_code(e, op, vt, &code, &swapped)) {
+        if (swapped) {
+            int t = ra;
+            ra = rb;
+            rb = t;
+        }
+        type = virbuild_vector_type(e, vt, &lane);
+        virbuild_vector_binary(e, VIR_OP_X86, code, type, lane, ra, rb, d);
         return true;
     }
     virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
@@ -785,10 +798,42 @@ VPRIV bool virbuild_vector_shuffle(codegen_context *e, const int *bytes, int ra,
         virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
     return false;
 }
+/* a builtin that is one instruction on vector values: its result in a
+   temporary, as the walker holds vectors */
 VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
 {
-    (void)n;
-    virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    uint32_t code = 0;
+    unsigned operands = 0;
+
+    if (!CODEGEN_IS_X64(c) || !codegen_type_is_vector(c, x->ty) ||
+        codegen_type_size(c, x->ty) != 16 ||
+        !x64_x86_builtin_code(e, n, &code, &operands))
+        virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+
+    const uint32_t *arg = &c->lists[x->b];
+    int r[2] = {-1, -1};
+    for (unsigned i = 0; i < operands; i++) {
+        ast_qualified_type at = N(arg[i])->ty;
+        if (!codegen_type_is_vector(c, at) || codegen_type_size(c, at) != 16)
+            virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+    }
+    for (unsigned i = 0; i < operands; i++) {
+        codegen_value v = walk_value_emit(e, arg[i]);
+        r[i] = walk_value_to_register(e, &v);
+    }
+    int lane = 0;
+    uint32_t type = virbuild_vector_type(e, x->ty, &lane);
+    codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
+                        .align = 16,
+                        .offset = walk_slot_temporary(e, 16, 16)};
+    /* (an operand's lanes may be another type's: loaded as the result's) */
+    virbuild_vector_binary(e, VIR_OP_X86, code, type, lane, r[0], r[1], &d);
+    for (unsigned i = 0; i < operands; i++)
+        WALK_LOWER(tfree)(e, r[i]);
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)WALK_LOWER(laddr)(e, &d));
 }
 VPRIV codegen_value virbuild_bigcvt(codegen_context *e, codegen_value v,
                                     ast_qualified_type from,

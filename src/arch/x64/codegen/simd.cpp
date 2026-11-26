@@ -1053,3 +1053,99 @@ VPRIV codegen_value x64_x86_instruction(codegen_context *e, uint32_t n)
     x64_tfree(e, b);
     return result;
 }
+
+/* ---- the same instructions as VIR operations (arch/x64/vir) */
+
+/* the lane-wise operators' single instructions */
+static const char *const x64_x86_operators[] = {
+    "paddb",   "paddw",   "paddd",   "paddq",   "psubb",    "psubw",
+    "psubd",   "psubq",   "pmullw",  "pand",    "por",      "pxor",
+    "pcmpeqb", "pcmpeqw", "pcmpeqd", "pcmpgtb", "pcmpgtw",  "pcmpgtd",
+    "addps",   "addpd",   "subps",   "subpd",   "mulps",    "mulpd",
+    "divps",   "divpd",   "cmpeqps", "cmpeqpd", "cmpneqps", "cmpneqpd",
+    "cmpltps", "cmpltpd", "cmpleps", "cmplepd"};
+
+VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
+{
+    if (code & X64_X86_TABLE)
+        return x64_instructions[code & 0xfff].mnemonic;
+    return x64_x86_operators[code & 0xfff];
+}
+
+/* the code of a binary operator on two vectors of type vt that is one
+   instruction, its operands swapped when *swapped */
+VPRIV bool x64_x86_operation_code(codegen_context *e, int op,
+                                  ast_qualified_type vt, uint32_t *code,
+                                  bool *swapped)
+{
+    cc *c = e->compile_context;
+    x64_simd_plan p = x64_simd_plan_for(e, op, vt, true, true, false);
+    bool dwords = op == LEX_TOKEN_STAR &&
+                  codegen_type_size(c, T(c, vt)->base) == 4 &&
+                  !codegen_type_is_float(c, T(c, vt)->base);
+
+    if (!p.op || p.invert || p.bias || dwords || op == LEX_TOKEN_LESS_LESS ||
+        op == LEX_TOKEN_GREATER_GREATER)
+        return false;
+    for (unsigned i = 0;
+         i < sizeof x64_x86_operators / sizeof *x64_x86_operators; i++)
+        if (!strcmp(p.op, x64_x86_operators[i])) {
+            *code = i;
+            *swapped = p.swap;
+            return true;
+        }
+    return false;
+}
+
+/* the code of a builtin of the instruction table that takes vectors (and a
+   constant) to a vector; the target must have its feature */
+VPRIV bool x64_x86_builtin_code(codegen_context *e, uint32_t n, uint32_t *code,
+                                unsigned *operands)
+{
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    if (x->aux != CC_BUILTIN_X86_INSTRUCTION)
+        return false;
+    const uint32_t *arg = &c->lists[x->b];
+    unsigned count = x->c - 1;
+    unsigned row = (unsigned)c->ipool[N(arg[count])->a];
+    const x64_instruction *in = &x64_instructions[row];
+    uint32_t fn = e->walk_state->inline_call
+                      ? e->walk_state->inline_call->function
+                      : e->walk_state->function_symbol;
+    int feature = x86_feature_find(in->feature);
+
+    if (feature < 0 ||
+        !x86_feature_has(cc_x86_features_get(c, fn), (unsigned)feature))
+        return false; /* (the direct emitter reports it) */
+    *code = row | X64_X86_TABLE;
+    *operands = count;
+    switch (in->form) {
+    case BINARY:
+        return true;
+    case UNARY:
+        *code |= X64_X86_UNARY;
+        return true;
+    case BINARY_CONTROL:
+    case UNARY_CONTROL: {
+        cc_value value;
+        if (!cc_eval(c, arg[count - 1], &value) ||
+            value.kind != CC_VALUE_INTEGER)
+            return false;
+        *code |= X64_X86_IMMEDIATE | (uint32_t)(value.i & 0xff) << 16;
+        if (in->form == UNARY_CONTROL)
+            *code |= X64_X86_UNARY;
+        *operands = count - 1;
+        return true;
+    }
+    case BINARY_XMM0:
+    case SHIFT:
+    case LOAD:
+    case TO_GENERAL:
+    case COMPARE:
+    case COMPARE_SWAPPED:
+    case PTEST:
+        break;
+    }
+    return false;
+}

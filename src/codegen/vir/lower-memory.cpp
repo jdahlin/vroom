@@ -309,26 +309,30 @@ VPRIV void virbuild_store(codegen_context *e, int rs, const codegen_lvalue *l,
     }
 }
 
-/* *d = *ra op *rb, op a VIR operation on the vector type vt: the operands
-   loaded as values, the result stored (a vector load or store moves 16 bytes
-   and its width is the lane's, SPEC-vir 7.5.1) */
-VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op, uint32_t vt,
-                                  int lane, int ra, int rb,
-                                  const codegen_lvalue *d)
+/* *d = *ra op *rb, op a VIR operation on the vector type vt (code its third
+   operand: VIR_OP_X86's instruction): the operands loaded as values, the
+   result stored (a vector load or store moves 16 bytes and its width is the
+   lane's, SPEC-vir 7.5.1).  rb < 0: one operand */
+VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op,
+                                  uint32_t code, uint32_t vt, int lane, int ra,
+                                  int rb, const codegen_lvalue *d)
 {
     virbuild_context *V = e->vir_builder;
     uint32_t flags = virbuild_memory_flags_make(lane, (uint32_t)lane, false);
-    uint32_t a = virbuild_register_read(e, ra, VIR_TYPE_PTR),
-             b = virbuild_register_read(e, rb, VIR_TYPE_PTR);
+    uint32_t a = virbuild_register_read(e, ra, VIR_TYPE_PTR);
     uint32_t x = virbuild_insn_append(e, VIR_OP_LOAD, vt, flags, a, 0, 0);
-    uint32_t y = virbuild_insn_append(e, VIR_OP_LOAD, vt, flags, b, 0, 0);
-    uint32_t value = virbuild_insn_append(e, op, vt, 0, x, y, 0);
+    uint32_t y = x;
+
+    if (rb >= 0) {
+        uint32_t b = virbuild_register_read(e, rb, VIR_TYPE_PTR);
+        y = virbuild_insn_append(e, VIR_OP_LOAD, vt, flags, b, 0, 0);
+    }
+    uint32_t value = virbuild_insn_append(e, op, vt, 0, x, y, code);
     uint32_t slot;
     int64_t rel;
     uint32_t at = virbuild_address_make(e, d, 16, &slot, &rel);
 
-    /* a slot written as a vector is not split into scalars, and what is
-       known of its bytes is forgotten */
+    /* what was known of the slot's bytes is forgotten */
     if (slot != VIRBUILD_BLOCK_NONE)
         V->slots[slot].exposed = 1;
     virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, flags, at, value, 0);

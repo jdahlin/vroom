@@ -107,6 +107,16 @@ deleted in the commit that gives it a table row or a generic operation.
 - **XV2** The `x86op` operation, the table and its generator, for the SSE2
   to SSE4.1 builtins Stockfish uses, in VIR and the direct emitter.  Gate:
   Stockfish SSE2 stays in VIR and is faster than XV0's.
+  - XV2a (done): the `x86` operation (SPEC-vir.md, opcode 94) for the lane
+    operators that are one instruction (bytes and words included) and the
+    table's builtins of one or two vectors and perhaps a constant; pure, so
+    value-numbered.  A function of those and loads and stores has no stack
+    traffic.  Stockfish is unchanged: 13 of `nnue/network.cpp`'s 559
+    functions still leave VIR for a vector operation, the hot ones among
+    them.
+  - XV2b: shuffles, shifts, the builtins the front end expands lane by lane
+    (`packus`, `madd`, `mulhi`, saturation) as table rows, vector parameters
+    and results (XV1c).
 - **XV3** 256 bits: types, registers, spills, ABI, `vzeroupper`; the AVX2
   builtins Stockfish uses (add, subtract, shift, pack, multiply-high,
   `maddubs`, `madd`, min, max, compare, `permutevar8x32`, `movemask`,

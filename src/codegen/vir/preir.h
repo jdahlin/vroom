@@ -347,9 +347,9 @@ VPRIV uint32_t virbuild_slot_address(codegen_context *e, uint32_t s,
 VPRIV void virbuild_store_table_clear(codegen_context *e, bool exposed_only);
 VPRIV uint32_t virbuild_vector_type(codegen_context *e, ast_qualified_type vt,
                                     int *lane);
-VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op, uint32_t vt,
-                                  int lane, int ra, int rb,
-                                  const codegen_lvalue *d);
+VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op,
+                                  uint32_t code, uint32_t vt, int lane, int ra,
+                                  int rb, const codegen_lvalue *d);
 VPRIV uint32_t virbuild_integer_log2(uint64_t x);
 VPRIV uint32_t virbuild_memory_flags_make(int size, uint32_t align, bool sgn);
 
