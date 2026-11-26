@@ -886,8 +886,9 @@ analysis_result semantic_analysis::named_specialization(
         return r;
     /* [temp.expl.spec]/14 and [temp.explicit]/2's kinds of declaration;
        default arguments are [dcl.fct.default]/4's error */
-    if (!m.has_id || m.qualified_namespace || m.literal_operator || cv ||
-        defaults || type_table[type.unqualified()].kind != type_kind::function)
+    if (!m.has_id || m.qualified_namespace || m.literal_operator ||
+        (!m.qualifier && cv) || defaults ||
+        type_table[type.unqualified()].kind != type_kind::function)
         return not_supported_because(
             n, rule, "not a function with a named declarator-id");
     if (m.qualifier &&
@@ -974,7 +975,7 @@ analysis_result semantic_analysis::named_specialization(
             /* [temp.explicit]/3, [temp.deduct.decl]/1: with template
                arguments written, each template takes them first and then
                deduces the rest from the declared type */
-            bool unique = !m.qualifier;
+            bool unique = true;
             for (uint32_t g : group) {
                 if (!unique)
                     break;
@@ -987,7 +988,7 @@ analysis_result semantic_analysis::named_specialization(
                        entity_table[home].inline_)
                     home = entity_table[home].enclosing;
                 if (home != owner_scope || c.primary ||
-                    entity_table[c.entity].member_cv)
+                    entity_table[c.entity].member_cv != cv)
                     continue;
                 owned_array<template_argument> trial;
                 owned_array<bool> trial_set;
@@ -1075,7 +1076,7 @@ analysis_result semantic_analysis::named_specialization(
     /* [temp.deduct.decl]/1: a member function template's cv-qualifiers
        are part of the function type compared (the declarator's are
        refused above) */
-    if (t.member_cv)
+    if (t.member_cv != cv)
         return not_supported_because(n, "temp.deduct.decl",
                                      "a cv-qualified member function template");
     entity_index template_home = t.enclosing;
