@@ -1436,6 +1436,7 @@ class parser
     parser_statistics counters;
     owned_array<standard_keyword> keyword_kinds;
     owned_array<extension_keyword> extension_kinds;
+    int fp16_keyword = -1; /* __fp16's index in the keyword table */
 };
 
 } // namespace cplusplus

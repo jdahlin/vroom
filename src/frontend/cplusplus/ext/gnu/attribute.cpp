@@ -683,6 +683,14 @@ analysis_result semantic_analysis::gnu_attribute_specifier(SyntaxRef n,
                 if (strlen(r.name) == spelling.size() &&
                     !memcmp(r.name, spelling.data(), spelling.size()))
                     rule = &r;
+        /* clang's align_value(N), a hint about the alignment a pointer's
+           value has: ignored in a system header, whose N is a constant it
+           allows (<movdirintrin.h>) */
+        static constexpr gnu_attribute_rule system_hint = {"align_value", 0};
+        if (!rule && spelling.size() == 11 &&
+            !memcmp(spelling.data(), "align_value", 11) &&
+            in_system_header(name_token))
+            rule = &system_hint;
         if (!rule)
             return not_supported_because(
                 at, "ext.gnu", "an unrecognized GNU or __declspec attribute");

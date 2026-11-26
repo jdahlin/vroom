@@ -64,6 +64,7 @@ parser::parser(token_stream &tokens, syntax_tree &tree, declared_names &names,
         if (i >= 0 && behavior.has(a.from))
             keyword_kinds[static_cast<size_t>(i)] = a.keyword;
     }
+    fp16_keyword = keyword_of_spelling("__fp16");
     for (const own &o : owns) {
         int i = keyword_of_spelling(o.spelling);
         if (i >= 0 && behavior.has(o.from))
@@ -110,6 +111,12 @@ extension_keyword parser::extension_keyword_of(const token &t) const
 {
     if (t.kind != token_kind::keyword || t.keyword < 0 ||
         static_cast<size_t>(t.keyword) >= extension_kinds.size())
+        return extension_keyword::none;
+    /* __fp16 is a type of its own that promotes to float, which is not
+       analysed: <f16cintrin.h> only casts bits to it, where _Float16 gives
+       the same value, so only a system header has it */
+    if (t.keyword == fp16_keyword &&
+        !tokens.files.in_system_header(t.preprocessing.location))
         return extension_keyword::none;
     return extension_kinds[static_cast<size_t>(t.keyword)];
 }

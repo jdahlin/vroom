@@ -598,6 +598,9 @@ semantic_analysis::usual_arithmetic_conversions(expression_meaning &a,
         common = fundamental_type::double_;
     else if (x == fundamental_type::float_ || y == fundamental_type::float_)
         common = fundamental_type::float_;
+    /* [ext:clang_float16] below float: an integer converts to it */
+    else if (x == fundamental_type::float16 || y == fundamental_type::float16)
+        common = fundamental_type::float16;
     if (common == fundamental_type::none) {
         /* "Otherwise, the integral promotions shall be performed on both
            operands." */
