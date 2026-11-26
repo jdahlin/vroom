@@ -1243,35 +1243,34 @@ uint32_t semantic_analysis::bound_template_template_of(SyntaxRef id) const
         named = x.unknown_entity;
     if (!named)
         return 0;
-    /* the latest of them */
-    uint32_t latest = 0;
+    /* the latest of them whose parameter has defaults and is declared by
+       the template id is written in (several templates' parameters of one
+       name may be bound to one argument; the definition of a member
+       outside its template redeclares the parameter without the defaults,
+       [temp.param]/17) */
+    uint32_t found = 0;
     for (uint32_t i = bound_templates_by_name.first(name); i;
-         i = bound_templates_by_name.after(i))
-        if (bound_template_templates[i - 1].target == named)
-            latest = i;
-    if (latest) {
-        const bound_template_template &b = bound_template_templates[latest - 1];
+         i = bound_templates_by_name.after(i)) {
+        const bound_template_template &b = bound_template_templates[i - 1];
+        if (b.target != named)
+            continue;
         uint32_t record = entity_table[b.parameter].instantiation;
         if (!record)
-            return 0;
+            continue;
         const function_template &formal = function_templates[record - 1];
-        /* (only within the template that declares the parameter: the
-           definition of its member outside it redeclares the parameter
-           without the defaults, [temp.param]/17) */
         if (id.first_token() < formal.declaration.first_token() ||
             id.first_token() >= formal.declaration.end_token())
-            return 0;
+            continue;
         for (uint32_t k = 0; k < formal.parameter_count; k++) {
             template_parameter_parts form;
             if (template_parameter_form(
                     template_parameter_nodes[formal.first_parameter + k],
                     form) &&
                 form.has_default)
-                return record;
+                found = record;
         }
-        return 0;
     }
-    return 0;
+    return found;
 }
 
 /*
