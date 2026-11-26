@@ -3088,12 +3088,11 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             if (copy_or_move_constructor(base_class, k) ||
                 (!base_type.parameter_count && !user_declared))
                 continue;
-            if (base_type.variadic || entity_table[k].first_default ||
-                entity_table[k].unknown_defaults)
+            if (base_type.variadic || entity_table[k].unknown_defaults)
                 return not_supported_because(
                     n, "namespace.udecl",
-                    "an inherited constructor that is variadic or has default "
-                    "arguments");
+                    "an inherited constructor that is variadic or has unknown "
+                    "default arguments");
             owned_array<qualified_type> parameters;
             for (uint32_t i = 0; i < base_type.parameter_count; i++) {
                 parameters.append(type_table.parameters(
@@ -3152,6 +3151,8 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             f.explicit_ = entity_table[k].explicit_;
             f.deleted = entity_table[k].deleted;
             f.access = entity_table[k].access;
+            f.first_default = entity_table[k].first_default;
+            f.default_arguments = entity_table[k].default_arguments;
             entity_index last = entity_table[c].first_constructor;
             if (!last) {
                 entity_table[c].first_constructor = e;
