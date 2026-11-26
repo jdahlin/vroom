@@ -1177,6 +1177,16 @@ int itanium_mangler::unresolved_qualifier(SyntaxElement q)
             return 0;
         return 2;
     }
+    /* [impl.clang] an alias template's dependent specialization
+       (libc++'s _CheckOptionalArgsCtor<_Up>::): its name and arguments as
+       written */
+    if (q.is(syntax_kind::simple_template_id) && q.size() >= 3 &&
+        q[0].is_identifier()) {
+        bool dependent = false;
+        if (source_name(analysis.token_identifier(q[0].token())) &&
+            written_template_args(q, dependent))
+            return 2;
+    }
     return 0;
 }
 

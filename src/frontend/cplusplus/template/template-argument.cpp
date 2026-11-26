@@ -422,6 +422,12 @@ entity_index semantic_analysis::dependent_value_structure(SyntaxElement written)
                  type_table[q].kind != type_kind::dependent) ||
                 !written_type_arguments(member, arguments))
                 return e;
+            /* [impl.clang] an alias template as Q is mangled by its name
+               and arguments as written: the expression is kept as written */
+            entity_index named = type_table[q].entity;
+            if (!named || entity_table[named].name !=
+                              tokens.identifier(qid[0][0][0].token()))
+                return e;
             qualified_type type = qualified_type::make(q, cv_none);
             uint32_t name = tokens.identifier(member[0].token());
             for (entity_index d : dependent_values) {
