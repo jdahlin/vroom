@@ -371,6 +371,38 @@ bool semantic_analysis::aggregate_built_in_place(uint32_t value) const
     return true;
 }
 
+/* [class.base.init]/9: member m, an array of a class with a default
+   constructor to call, each element default-initialized, first to last
+   ([dcl.init]/7.2); statement is left 0 for any other member */
+analysis_result
+semantic_analysis::default_array_initialization(token_index at, entity_index m,
+                                                uint32_t &statement)
+{
+    const struct type &record = type_table[entity_table[m].type.unqualified()];
+    if (record.kind != type_kind::array || !record.bound_known || !record.bound)
+        return analysis_result::well_formed;
+    qualified_type et = record.operand;
+    const struct type &er = type_table[et.unqualified()];
+    if (er.kind != type_kind::class_type ||
+        !entity_table[er.entity].first_constructor ||
+        trivial_defaulted_default_constructor(er.entity))
+        return analysis_result::well_formed;
+    /* (read before subobject and the pointer type add types, which may move
+       record) */
+    uint64_t bound = record.bound;
+    expression_meaning arr;
+    VTRY(r, subobject(at, m, arr));
+    expression_meaning elem =
+        array_element_at_index(at, arr.node, et, value_category::lvalue);
+    owned_array<expression_meaning> none;
+    initialized_value value;
+    VTRY(r2, construct(current_declaration, et, none, elem.node, value));
+    statement = array_loop_statement(
+        at, bound, false,
+        statement_node(semantic_kind::expression_statement, at, value.node));
+    return analysis_result::well_formed;
+}
+
 /* whether a mem-initializer designates m, or, m being an anonymous union or
    struct, one of its members */
 bool semantic_analysis::member_designated(
@@ -454,6 +486,8 @@ analysis_result semantic_analysis::anonymous_member_initializers(
                                object.node, value));
             made = statement_node(semantic_kind::expression_statement, at,
                                   value.node);
+        } else if (!entity_table[anonymous].union_) {
+            VTRY(r, default_array_initialization(at, m, made));
         }
         if (made)
             statements.append(made);
@@ -2238,33 +2272,10 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 current_declaration, "class.default.ctor",
                 "an implicit initialization of a subobject whose default "
                 "constructor is deleted");
-        if (record.kind == type_kind::array && record.bound_known &&
-            record.bound > 0) {
-            qualified_type et = record.operand;
-            const struct type &er = type_table[et.unqualified()];
-            if (er.kind == type_kind::class_type &&
-                entity_table[er.entity].first_constructor &&
-                !trivial_defaulted_default_constructor(er.entity)) {
-                /* (read before subobject and the pointer type add types,
-                   which may move record) */
-                uint64_t bound = record.bound;
-                expression_meaning arr;
-                VTRY(r, subobject(at, subobjects[i], arr));
-                /* [class.base.init]/9: each element default-initialized,
-                   first to last ([dcl.init]/7.2) */
-                expression_meaning elem = array_element_at_index(
-                    at, arr.node, et, value_category::lvalue);
-                owned_array<expression_meaning> none;
-                initialized_value value;
-                VTRY(r2, construct(current_declaration, et, none, elem.node,
-                                   value));
-                initialized[i] = array_loop_statement(
-                    at, bound, false,
-                    statement_node(semantic_kind::expression_statement, at,
-                                   value.node));
-                continue;
-            }
-        }
+        VTRY(ra,
+             default_array_initialization(at, subobjects[i], initialized[i]));
+        if (initialized[i])
+            continue;
         if (record.kind == type_kind::class_type &&
             entity_table[record.entity].anonymous_object == subobjects[i] &&
             entity_table[record.entity].first_constructor) {

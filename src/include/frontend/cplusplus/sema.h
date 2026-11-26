@@ -4996,6 +4996,8 @@ class semantic_analysis
         entity_index member;
         uint32_t statement;
     };
+    analysis_result default_array_initialization(token_index at, entity_index m,
+                                                 uint32_t &statement);
     bool member_designated(
         entity_index m,
         const owned_array<designated_initialization> &designated) const;
