@@ -830,6 +830,15 @@ analysis_result semantic_analysis::reference_cast(SyntaxRef at,
     value_category category = value_category::xvalue;
     if (lvalue_reference)
         category = value_category::lvalue;
+    /* [expr.static.cast]/1: a function lvalue cast to a reference to its
+       own type (std::forward<void (&)(int)>(f)): the function, an lvalue
+       whatever the reference's kind ([expr.static.cast]/1) */
+    if (type_table[referenced.unqualified()].kind == type_kind::function &&
+        referenced.unqualified() == m.type.unqualified() &&
+        m.category == value_category::lvalue) {
+        m.category = value_category::lvalue;
+        return analysis_result::well_formed;
+    }
     if (type_table[referenced.unqualified()].kind == type_kind::function ||
         m.bit_field_width)
         return not_supported_because(
