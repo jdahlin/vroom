@@ -374,7 +374,7 @@ analysis_result semantic_analysis::defaulted_equality(
     bool of_class =
         entity_table[last_declared].kind == entity_kind::function &&
         entity_table[last_declared].enclosing == defaulted_comparison;
-    if (!x.member_count || parameters.size() != 2u)
+    if ((!x.base_count && !x.member_count) || parameters.size() != 2u)
         return not_supported_because(
             current_declaration, "class.compare.default",
             "a defaulted comparison of a class with no members or without "
