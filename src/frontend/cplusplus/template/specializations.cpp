@@ -11,12 +11,49 @@
 namespace cplusplus
 {
 
+/*
+ * [temp.expl.spec]/16: each template<> specializes an enclosing template or
+ * the member template itself, so a member class's declaration
+ * (template<> ... class-key A<T>::B ;) has no more of them than its name has
+ * simple-template-ids
+ */
+bool semantic_analysis::extraneous_template_headers(SyntaxElement n) const
+{
+    unsigned headers = 1;
+    while (n.size() == 4 && n[3].is(syntax_kind::explicit_specialization)) {
+        headers++;
+        n = n[3];
+    }
+    if (headers < 2 || n.size() != 4 ||
+        !n[3].is(syntax_kind::simple_declaration) || !n[3].size())
+        return false;
+    SyntaxElement specifier = n[3][0];
+    if (specifier.is(syntax_kind::decl_specifier_seq))
+        specifier = specifier[0];
+    if (!specifier.is(syntax_kind::elaborated_type_specifier) ||
+        specifier.size() != 3 ||
+        !specifier[1].is(syntax_kind::nested_name_specifier))
+        return false;
+    unsigned ids = 0;
+    if (specifier[2].is(syntax_kind::simple_template_id))
+        ids++;
+    for (uint32_t i = 0; i < specifier[1].size(); i++)
+        if (specifier[1][i].is(syntax_kind::simple_template_id))
+            ids++;
+    return headers > ids;
+}
+
 /* [temp.expl.spec]/1: "An explicit specialization of any of the following
    ... can be declared by a declaration introduced by template<>" */
 analysis_result
 semantic_analysis::explicit_specialization(ExplicitSpecialization n)
 {
     flag_set exempt(explicit_declaration_names, true);
+    if (!nested_explicit_specialization && extraneous_template_headers(n))
+        return ill_formed(n,
+                          "extraneous 'template<>' in the declaration of a "
+                          "member class",
+                          "temp.expl.spec");
     /* template < > declaration: a class's definition, its class-head
        a simple-template-id */
     if (n.size() == 4 && n[3].is(syntax_kind::simple_declaration)) {

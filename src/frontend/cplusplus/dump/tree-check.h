@@ -251,7 +251,13 @@ struct tree_checker {
             break;
         case semantic_kind::assignment:
             child(n, node.a, tree_sort::expression, false, "left operand");
-            child(n, node.b, tree_sort::expression, false, "right operand");
+            {
+                /* a member's initialization (c) may be a zero: a() */
+                tree_sort stored = tree_sort::expression;
+                if (node.c)
+                    stored = tree_sort::initializer;
+                child(n, node.b, stored, false, "right operand");
+            }
             if (node.a &&
                 analysis.semantics[node.a].category != value_category::lvalue)
                 problem(n, "the left operand is not an lvalue");

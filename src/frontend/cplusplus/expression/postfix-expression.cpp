@@ -804,6 +804,16 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             m.evaluation = result.evaluation;
             m.value = result.value;
             m.node = result.node;
+            /* [dcl.init.list]/3.11: T{} of a scalar is value-initialized,
+               a constant like T()'s (a zero node initializes an object, and
+               is no operand) */
+            if (m.node && semantics[m.node].kind == semantic_kind::zero &&
+                m.evaluation == constness::constant &&
+                (record.kind == type_kind::fundamental ||
+                 record.kind == type_kind::enumeration ||
+                 record.kind == type_kind::pointer))
+                m.node = expression_node(semantic_kind::constant, m,
+                                         n.first_token());
             return analysis_result::well_formed;
         }
         return not_supported_because(

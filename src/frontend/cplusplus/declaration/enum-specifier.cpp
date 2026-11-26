@@ -617,6 +617,14 @@ analysis_result semantic_analysis::enum_specifier_rules(SyntaxRef n,
                                            "enumeration shall have the same "
                                            "enum-key and underlying type",
                                            "dcl.enum");
+            /* [class.mem]/5: a member is declared once, but an enumeration
+               introduced by an opaque-enum-declaration may be redeclared
+               with an enum-specifier */
+            if (opaque && defining_class)
+                return ill_formed_at_token(name_at,
+                                           "a member shall not be declared "
+                                           "twice in the member-specification",
+                                           "class.mem");
             entity_table.add_declaration(prior, current_declaration);
             type = x.type.unqualified();
             if (opaque)

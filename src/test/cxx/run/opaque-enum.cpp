@@ -27,10 +27,31 @@ int Blob::run()
     return int(p) * 1000 + int(p0) + int(Q::y);
 }
 
+int zeros();
+
 int main()
 {
     Blob b;
     printf("%d %d %d %d\n", b.run(), int(n::K::b), int(Blob::o1),
            int(Blob::o0));
+    printf("%d\n", zeros());
     return 0;
 }
+
+/* [dcl.init.list]/3.11: T{} of an enumeration or other scalar, as an
+   operand */
+enum Zero : int;
+template <class T> struct Of { enum U : T; };
+int zeros()
+{
+    return (Zero{} + 1) + (Of<int>::U{} + 2) + (int{} + 4);
+}
+
+/* [dcl.init]/11: a() of a scalar member, out of class */
+struct Zeroed {
+    Zero z;
+    int i;
+    constexpr Zeroed();
+};
+constexpr Zeroed::Zeroed() : z(), i() {}
+static_assert(Zeroed().i == 0);

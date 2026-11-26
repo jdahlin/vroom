@@ -2396,7 +2396,8 @@ uint32_t semantic_analysis::subobject_store(const expression_meaning &object,
     uint32_t assigned = expression_node(
         semantic_kind::assignment, stored, at, object.node, value,
         static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
-    if (initializes)
+    /* a zero (a(), [dcl.init]/11) is stored only to initialize */
+    if (initializes || semantics[value].kind == semantic_kind::zero)
         semantics[assigned].c = 1;
     /* a member's store of its initialization (the constant evaluator's
        places under initialization) */

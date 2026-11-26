@@ -2286,6 +2286,7 @@ class semantic_analysis
     analysis_result function_template_definition(SyntaxRef n,
                                                  SyntaxRef definition);
     analysis_result explicit_specialization(ExplicitSpecialization n);
+    bool extraneous_template_headers(SyntaxElement n) const;
     analysis_result explicit_instantiation(ExplicitInstantiation n);
     analysis_result explicitly_instantiate_class(SyntaxRef n, entity_index c,
                                                  bool extern_, uint32_t prior);
