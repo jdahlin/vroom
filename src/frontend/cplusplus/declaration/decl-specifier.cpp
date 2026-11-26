@@ -1916,8 +1916,11 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
         !n[1].is_identifier()) {
         /* [temp.names]: nested-name-specifier template_opt
            simple-template-id */
-        if (n.size() == 2 && n[0].is(syntax_kind::nested_name_specifier) &&
-            n[1].is(syntax_kind::simple_template_id)) {
+        if ((n.size() == 2 && n[0].is(syntax_kind::nested_name_specifier) &&
+             n[1].is(syntax_kind::simple_template_id)) ||
+            (n.size() == 3 && n[0].is(syntax_kind::nested_name_specifier) &&
+             n[1].is(standard_keyword::template_) &&
+             n[2].is(syntax_kind::simple_template_id))) {
             nominated_scope scope;
             VTRY(r, nested_name_specifier(n[0], scope));
             /* a namespace's member template or a class's (a member
@@ -1927,7 +1930,8 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
                 return not_supported_because(
                     n, "temp.names",
                     "a template-id qualified by neither namespace nor class");
-            return template_type(n[1], scope.entity, true, type, &cv);
+            return template_type(n[n.size() - 1], scope.entity, true, type,
+                                 &cv);
         }
         return not_supported_because(
             n, "dcl.type.simple",
