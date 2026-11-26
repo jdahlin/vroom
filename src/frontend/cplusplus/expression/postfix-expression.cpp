@@ -1714,8 +1714,15 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             VTRY_SET(r, resolve_call(n, arguments, early, set, object, f));
         }
         function_type = f.type;
-        if (member)
-            member = semantics[f.node].b;
+        if (member) {
+            if (semantics[f.node].kind ==
+                semantic_kind::bound_member_function) {
+                member = semantics[f.node].b;
+            } else {
+                object = 0;
+                member = 0;
+            }
+        }
     } else if (set.size() == 1 && f.node) {
         /* the one function the name names is the function called (its use
            is not the name's, a callee's); [dcl.fct.def.delete]/2's deleted

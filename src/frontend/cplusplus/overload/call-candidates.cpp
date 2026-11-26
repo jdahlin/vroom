@@ -214,13 +214,15 @@ semantic_analysis::resolve_call(SyntaxRef n,
     VTRY(r, best_viable_function(n, candidates, implied_object, early, chosen,
                                  nullptr, true, &arguments));
     entity_index c = set[chosen];
-    if (entity_table[c].nonstatic_member != (object != 0))
-        /* a static member function chosen for a call with an object
-           (called without it), or a non-static one without an object
+    if (entity_table[c].nonstatic_member && !object)
+        /* a non-static member function chosen for a call without an object
            ([class.mfct.non-static]/3, ill-formed): not analysed */
         return not_supported_because(n, "over.match.funcs",
                                      "a call whose chosen member's staticness "
                                      "does not match the object argument");
+    bool static_with_object = !entity_table[c].nonstatic_member && object;
+    if (static_with_object)
+        object = 0;
     /* a copy: deleted_use may define an implicit member, adding entities
        that may move entity_table's */
     const entity x = entity_table[c];
@@ -264,7 +266,13 @@ semantic_analysis::resolve_call(SyntaxRef n,
         break;
     }
     selected.type = x.type;
-    if (bound) {
+    if (static_with_object) {
+        selected.kind = semantic_kind::entity;
+        selected.a = c;
+        selected.b = 0;
+        selected.c = 0;
+        f.entity = c;
+    } else if (bound) {
         selected.b = c;
     } else {
         selected.a = c;
