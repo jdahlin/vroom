@@ -1534,6 +1534,15 @@ bool semantic_analysis::equivalent_template(const function_template &f,
        does not claim it for a non-type parameter (a refusal holds the name) */
     bool both_defined = f.definition && n.size() &&
                         n[n.size() - 1].is(syntax_kind::function_definition);
+    /* [temp.over.link]: two function template definitions with dependent
+       return types (e.g. enable_if<cond1, R>::type vs enable_if<cond2, R>::type)
+       are distinct SFINAE overloads, not redefinitions */
+    if (both_defined) {
+        const struct type &ft = type_table[type.unqualified()];
+        if (ft.kind == type_kind::function &&
+            type_table[ft.operand.unqualified()].kind == type_kind::dependent)
+            return false;
+    }
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < count; i++) {
