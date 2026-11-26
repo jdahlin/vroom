@@ -3761,6 +3761,13 @@ semantic_analysis::special_member_body(FunctionDefinition definition,
             entity_index dtor = entity_table[sub].destructor;
             if (!dtor || entity_table[dtor].constexpr_)
                 continue;
+            /* [dcl.constexpr]/6: a member of an instantiated class
+               template that would not satisfy the requirements is not
+               constexpr, and no error */
+            if (instantiating || class_instantiating || instantiation_depth) {
+                entity_table[last_declared].constexpr_ = false;
+                break;
+            }
             if (entity_table[dtor].implicit)
                 return not_supported_because(
                     definition, "dcl.constexpr",
