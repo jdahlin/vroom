@@ -1692,8 +1692,8 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         /* ns::C<args>::name: each namespace as written (std, not its
            inline namespace) a qualifier level, then the specialization:
 
-               <unresolved-name> ::= [gs] sr <unresolved-qualifier-level>+ E
-                                     <base-unresolved-name> */
+               <unresolved-name> ::= [gs] sr <unresolved-qualifier-level>+ E <base-unresolved-name>
+         */
         uint32_t last = 0;
         if (qual.size() >= 2)
             last = qual.size() - 2;

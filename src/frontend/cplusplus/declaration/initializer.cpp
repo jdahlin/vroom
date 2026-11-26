@@ -2722,7 +2722,7 @@ analysis_result semantic_analysis::designated_list_initialization(
     const designation_set &designations, qualified_type &type,
     initialized_value &result)
 {
-    /* [dcl.init.general]/1's grammar has no list that mixes clauses with
+    /* [dcl.init]/1's grammar has no list that mixes clauses with
        and without designators, and [ext.clang]'s extension is an error in
        some modes: not followed for an aggregate with base classes */
     const struct type &listed = type_table[type.unqualified()];
