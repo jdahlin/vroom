@@ -724,6 +724,9 @@ struct entity {
     /* a class: the alignment its alignment-specifiers ask for, 0 if none
        ([dcl.align]) */
     uint32_t requested_alignment = 0;
+    /* [ext.clang] #pragma pack's value where the class was defined: no
+       member's alignment exceeds it (0: none) */
+    uint8_t max_field_alignment = 0;
     /* a non-static data member with the packed attribute: aligned to 1
        before its aligned attribute ([ext:gnu_attributes]) */
     bool packed = false;
@@ -2089,6 +2092,8 @@ class semantic_analysis
     /* the size (and alignment) of a pointer, which a reference member
        takes in a class ([abi:class-types]) */
     uint64_t pointer_size() const;
+    /* whether the target is x86-64 (its va_list is an array) */
+    bool x86_64_target() const;
     uint64_t alignment_of_type(qualified_type t) const;
     /* [class.virtual]/2: whether member function e has the name,
        parameter-type-list and cv-qualification of virtual function g (a
@@ -4279,6 +4284,8 @@ class semantic_analysis
            constructed in place) or for a read: a union's member that is
            not active is made so, or is not constant */
         uint32_t writing = 0, reading = 0;
+        /* evaluate_object for the object expression of a member call */
+        bool member_call_object = false;
         /* [basic.life]/1, [expr.const]/5.8: the places whose initialization
            (a constructor's store of a member) is under way: an assignment
            to one from its own initializer is outside its lifetime */

@@ -100,36 +100,41 @@ static bool known_pragma(preprocessor &p, const preprocessing_token &t)
  * The state of the pragmas that change the layout of classes: #pragma pack
  * ([ext.clang], GCC and MSVC's: "pack(N)" sets the packing, "pack()" resets
  * it, "pack(push[, id][, N])" and "pack(pop[, id])" a stack of it),
- * "ms_struct on|off|reset", "options align=NAME" and "align".  Only whether
- * one is in effect is kept: the layout rules for a value are not written.
+ * "ms_struct on|off|reset", "options align=NAME" and "align".  A pack
+ * value is kept for the layout; the others have no rules.
  */
 void preprocessor::layout_pragma_directive(const preprocessing_token *t,
                                            size_t count)
 {
-    auto number_in = [&](size_t from) {
-        for (size_t i = from; i < count; i++)
-            if (t[i].kind == preprocessing_token_kind::pp_number)
-                return true;
-        return false;
+    /* the packing a number token sets */
+    auto packing = [&](const preprocessing_token &n) -> uint8_t {
+        for (unsigned value = 1; value <= 16; value *= 2) {
+            char spelled[4];
+            snprintf(spelled, sizeof spelled, "%u", value);
+            if (punctuator_is(files, n, spelled))
+                return static_cast<uint8_t>(value);
+        }
+        return 255;
     };
     if (spelled_as(files, t[0], "pack")) {
         /* "(" then the first operand */
         if (count < 3 || !punctuator_is(files, t[1], "(")) {
             if (count == 1)
-                files.pack_pragma = false;
+                files.pack_pragma = 0;
         } else if (spelled_as(files, t[2], "push")) {
             files.pack_stack.append(files.pack_pragma);
-            if (number_in(3))
-                files.pack_pragma = true;
+            for (size_t i = 3; i < count; i++)
+                if (t[i].kind == preprocessing_token_kind::pp_number)
+                    files.pack_pragma = packing(t[i]);
         } else if (spelled_as(files, t[2], "pop")) {
             if (files.pack_stack.size()) {
                 files.pack_pragma = files.pack_stack.back();
                 files.pack_stack.resize(files.pack_stack.size() - 1);
             }
         } else if (t[2].kind == preprocessing_token_kind::pp_number) {
-            files.pack_pragma = true;
+            files.pack_pragma = packing(t[2]);
         } else if (punctuator_is(files, t[2], ")")) {
-            files.pack_pragma = false;
+            files.pack_pragma = 0;
         }
     } else if (spelled_as(files, t[0], "ms_struct")) {
         files.ms_struct_pragma = count > 1 && spelled_as(files, t[1], "on");
@@ -140,8 +145,10 @@ void preprocessor::layout_pragma_directive(const preprocessing_token *t,
     } else if (spelled_as(files, t[0], "align")) {
         files.other_layout_pragma = true;
     }
-    files.layout_pragma = files.pack_pragma || files.ms_struct_pragma ||
-                          files.other_layout_pragma;
+    if (files.ms_struct_pragma || files.other_layout_pragma)
+        files.layout_pragma = 255;
+    else
+        files.layout_pragma = files.pack_pragma;
 }
 
 /* the pp-tokens of a pragma directive or of a _Pragma ([cpp.pragma.op]) */

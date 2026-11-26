@@ -427,8 +427,9 @@ analysis_result semantic_analysis::narrowing(SyntaxRef at,
     expression_meaning converted = m;
     convert_arithmetic(converted, t);
     if (fundamental_type_is_floating(f) && fundamental_type_is_floating(t)) {
-        /* within the range: the conversion did not overflow */
-        narrows = converted.evaluation != constness::constant;
+        /* within the range: the conversion did not overflow (unknown is a
+           rounding a pragma may change, not an overflow) */
+        narrows = converted.evaluation == constness::not_constant;
         return analysis_result::well_formed;
     }
     if (fundamental_type_is_floating(t)) {
@@ -2600,6 +2601,16 @@ analysis_result semantic_analysis::aggregate_element_clause(
             return not_supported_because(
                 list, "dcl.init.aggr",
                 "a subaggregate converted from another class");
+    }
+    if (record.kind == type_kind::vector) {
+        /* /16: a clause that is a vector initializes the whole vector;
+           scalars go to its elements, braces elided */
+        expression_meaning e;
+        VTRY(r, expression(clause, e));
+        if (type_table[e.type.unqualified()].kind == type_kind::vector) {
+            next++;
+            return initialize_with(at, e, element, false, true, one);
+        }
     }
     if (!subaggregate) {
         next++;

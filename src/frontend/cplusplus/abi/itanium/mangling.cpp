@@ -4130,9 +4130,12 @@ bool itanium_mangler::builtin_type(fundamental_type t)
         text("_");
         return true;
     case fundamental_type::bfloat16:
-        /* [impl.clang] DF16b: clang's, as the Itanium ABI's extended
-           floating-point types have it */
-        text("DF16b");
+        /* [impl.clang] clang's: DF16b, as the Itanium ABI's extended
+           floating-point types have it, on x86-64; AAPCS64's vendor type u6__bf16 on arm64 */
+        if (analysis.x86_64_target())
+            text("DF16b");
+        else
+            text("u6__bf16");
         return true;
     default:
         return false;

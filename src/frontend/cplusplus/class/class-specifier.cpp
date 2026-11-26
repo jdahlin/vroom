@@ -388,9 +388,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     if (!is_class_key(key))
         return not_supported_because(
             n, "class.pre", "a class-head whose first keyword is no class-key");
-    /* #pragma pack and the like change the layout: no rules yet, for the
-       classes in a region of one */
-    if (tokens.layout_pragma_at(n.first_token()))
+    /* #pragma pack caps the members' alignment; the other layout pragmas
+       have no rules yet, for the classes in a region of one */
+    uint8_t packing = tokens.layout_pragma_at(n.first_token());
+    if (packing == 255)
         return not_supported_because(n, "cpp.pragma",
                                      "a class in a region of a layout pragma");
     /* [class.union]/1: "A union shall not have base classes." (clang's
@@ -688,6 +689,7 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         require_complete_class--;
     }
     entity_table[c].requested_alignment = trailing_class_alignment;
+    entity_table[c].max_field_alignment = packing;
     entity_table[c].gnu_flags |= trailing_class_flags;
     trailing_class_alignment = 0;
     trailing_class_flags = 0;

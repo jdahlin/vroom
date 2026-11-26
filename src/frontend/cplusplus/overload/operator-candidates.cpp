@@ -499,6 +499,19 @@ analysis_result semantic_analysis::overloaded_operator(
             function_candidates(members, true, candidates);
             return analysis_result::well_formed;
         }
+        /* /3.2's condition on a non-member candidate's type when no operand
+           has a class type (quoted below) */
+        auto takes_enumeration = [&](qualified_type function) {
+            const struct type &f = type_table[function.unqualified()];
+            const qualified_type *parameters =
+                type_table.parameters(function.unqualified());
+            for (size_t i = 0; i < count && i < f.parameter_count; i++)
+                if (type_table[operand(i).type.unqualified()].kind ==
+                        type_kind::enumeration &&
+                    stripped(parameters[i]) == operand(i).type.unqualified())
+                    return true;
+            return false;
+        };
         owned_array<entity_index> declared;
         collected_names = &declared;
         lookup_result found =
@@ -607,10 +620,20 @@ analysis_result semantic_analysis::overloaded_operator(
             VTRY(r,
                  template_candidates(n, group, in_order.data(),
                                      static_cast<uint32_t>(count), candidates));
+            size_t kept = first;
             for (size_t i = first; i < candidates.size(); i++) {
-                candidates[i].rewritten = rewritten;
-                candidates[i].reversed = reversed;
+                /* /3.2 for a specialization too (as below): libc++'s
+                   iterator operator+(difference_type, ...) is no candidate
+                   of an enumeration's */
+                if (!any_class && candidates[i].type.unqualified() &&
+                    !takes_enumeration(candidates[i].type))
+                    continue;
+                candidates[kept] = candidates[i];
+                candidates[kept].rewritten = rewritten;
+                candidates[kept].reversed = reversed;
+                kept++;
             }
+            candidates.resize(kept);
         }
         for (entity_index e : set)
             overload_set(e, others);
@@ -628,20 +651,8 @@ analysis_result semantic_analysis::overloaded_operator(
            candidate functions." */
         for (entity_index e : others) {
             const entity &x = entity_table[e];
-            if (!any_class) {
-                const struct type &f = type_table[x.type.unqualified()];
-                const qualified_type *parameters =
-                    type_table.parameters(x.type.unqualified());
-                bool takes = false;
-                for (size_t i = 0; i < count && i < f.parameter_count; i++)
-                    if (type_table[operand(i).type.unqualified()].kind ==
-                            type_kind::enumeration &&
-                        stripped(parameters[i]) ==
-                            operand(i).type.unqualified())
-                        takes = true;
-                if (!takes)
-                    continue;
-            }
+            if (!any_class && !takes_enumeration(x.type))
+                continue;
             overload_candidate c;
             c.function = e;
             c.type = x.type;

@@ -205,6 +205,11 @@ node_index parser::noexcept_expression()
 
 /* ---- semantic analysis ---------------------------------------------- */
 
+bool semantic_analysis::x86_64_target() const
+{
+    return tokens.files.behavior.va_list_is_array;
+}
+
 uint64_t semantic_analysis::pointer_size() const
 {
     return tokens.files.behavior.long_width / 8;

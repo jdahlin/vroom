@@ -83,9 +83,9 @@ bool bit_cast_kept(const implementation_defined_behavior &behavior,
 }
 
 /* [ext:clang_bit_cast] a prvalue of the type-id's type.  [bit.cast]/1:
-   "sizeof(To) == sizeof(From) is true"; analysis handles arithmetic and
-   pointer types (a class's object representation is not known to it
-   yet).  [bit.cast]/3: a constant expression unless a type is a pointer
+   "sizeof(To) == sizeof(From) is true"; analysis handles arithmetic,
+   pointer and trivially copyable class types (a class's value is not
+   folded).  [bit.cast]/3: a constant expression unless a type is a pointer
    type (among others); folded here for arithmetic types up to 64 bits */
 analysis_result semantic_analysis::clang_bit_cast(SyntaxRef n,
                                                   expression_meaning &m)
@@ -100,11 +100,32 @@ analysis_result semantic_analysis::clang_bit_cast(SyntaxRef n,
             "__builtin_bit_cast with a dependent type or operand");
     to = qualified_type::make(to.unqualified(), cv_none);
     bool pointer = is_pointer(to) || is_pointer(m.type);
-    if ((!is_arithmetic(to) && !is_pointer(to)) ||
-        (!is_arithmetic(m.type) && !is_pointer(m.type)))
-        return not_supported_because(n, "bit.cast",
-                                     "__builtin_bit_cast of a type that is "
-                                     "neither arithmetic nor a pointer");
+    /* arithmetic types (__bf16 among them, which no arithmetic conversion
+       takes), pointers, and [bit.cast]/1's trivially copyable classes */
+    const qualified_type both[] = {to, m.type};
+    for (qualified_type t : both) {
+        const struct type &x = type_table[t.unqualified()];
+        if (is_arithmetic(t) || is_pointer(t) ||
+            (x.kind == type_kind::fundamental &&
+             x.fundamental == fundamental_type::bfloat16))
+            continue;
+        if (x.kind != type_kind::class_type ||
+            entity_table[x.entity].kind != entity_kind::class_type)
+            return not_supported_because(n, "bit.cast",
+                                         "__builtin_bit_cast of this type");
+        require_complete(x.entity);
+        bool known = true;
+        bool copyable = class_trivially_copyable(x.entity, known);
+        if (!known)
+            return not_supported_because(
+                n, "bit.cast",
+                "__builtin_bit_cast of a class whose triviality is not known");
+        if (!copyable)
+            return ill_formed(n,
+                              "__builtin_bit_cast requires trivially copyable "
+                              "types",
+                              "bit.cast");
+    }
     if (size_of_type(to) != size_of_type(m.type))
         return ill_formed(n,
                           "__builtin_bit_cast requires sizeof(To) == "

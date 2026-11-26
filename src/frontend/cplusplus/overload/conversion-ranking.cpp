@@ -78,8 +78,13 @@ int semantic_analysis::compare_conversions(const conversion_sequence &a,
            than the second standard conversion sequence of U2."  The second
            of a converting constructor's is the identity (a reference
            binding's, reference_sequence's) */
-        if (!a.function || a.function != b.function || a.ambiguous ||
-            b.ambiguous)
+        /* (/3.3 too: "or they initialize the same class in an aggregate
+           initialization": a braced list that calls no constructor) */
+        bool same_aggregate = a.from_list && b.from_list && !a.function &&
+                              !b.function &&
+                              a.target.unqualified() == b.target.unqualified();
+        if ((!same_aggregate && (!a.function || a.function != b.function)) ||
+            a.ambiguous || b.ambiguous)
             return 0;
         return compare_standard_conversions(a, b);
     }

@@ -62,10 +62,9 @@ class token_stream
     preprocessor &pp;
     source_files &files;
 
-    /* whether a pragma that changes the layout of classes is in effect at
-       token i (#pragma pack, ms_struct, options align): its regions are
-       found as the tokens are made */
-    bool layout_pragma_at(token_index i);
+    /* source_files::layout_pragma at token i (#pragma pack, ms_struct,
+       options align): its regions are found as the tokens are made */
+    uint8_t layout_pragma_at(token_index i);
     /* the tokens made so far */
     size_t made() const
     {
@@ -81,8 +80,8 @@ class token_stream
     /* the tokens at which source_files::layout_pragma changed, and what it
        changed to */
     owned_array<token_index> layout_change_at;
-    owned_array<bool> layout_change_to;
-    bool layout_pragma_before = false;
+    owned_array<uint8_t> layout_change_to;
+    uint8_t layout_pragma_before = 0;
     /* token i is preprocessing_tokens[first_piece[i] .. first_piece[i+1]) */
     owned_array<uint32_t> first_piece;
     owned_array<preprocessing_token> preprocessing_tokens;
