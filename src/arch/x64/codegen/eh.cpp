@@ -74,6 +74,8 @@ VPRIV void x64_eh_pads(codegen_context *e)
         for (uint32_t m = W->eh_sites[k].node; m && m <= n && !need[m];
              m = W->cleanup_nodes[m].parent)
             need[m] = 1, any = true;
+    W->eh_pad = (uint32_t *)vvector_reserve(W->eh_pad, &W->eh_pad_capacity,
+                                            n + 1, sizeof *W->eh_pad);
     memset(W->eh_pad, 0, (n + 1) * sizeof *W->eh_pad);
     if (!any) {
         free(need), free(run);

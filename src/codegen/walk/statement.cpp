@@ -12,6 +12,7 @@
  * parameters to the arguments, and its returns go to a label (wkinl); the prepass (prepass.c) says
  * whether a function may be inlined.
  */
+#include "common/vector.h"
 #include "common/literal.h"
 #include "walk.h"
 
@@ -701,8 +702,11 @@ static void walk_vla_scan(codegen_context *e, uint32_t n, uint32_t *top)
             W->vla_zero_generations[x->a] = W->generation;
         }
         if (y->kind == AST_SYMBOL_VARIABLE &&
-            codegen_symbol_attributes(c, x->a)->cleanup &&
-            W->cleanup_node_count + 1 < WALK_CLEANUP_MAX) {
+            codegen_symbol_attributes(c, x->a)->cleanup) {
+            /* (every one: one left out would not be run by a goto or
+               an unwind) */
+            VVECTOR_NEED(W->cleanup_nodes, W->cleanup_node_count,
+                         W->cleanup_node_capacity, 2);
             W->cleanup_node_count++;
             W->cleanup_nodes[W->cleanup_node_count].symbol = x->a;
             W->cleanup_nodes[W->cleanup_node_count].parent = *top;
