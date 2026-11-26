@@ -350,13 +350,13 @@ VPRIV uint32_t virbuild_vector_type(codegen_context *e, ast_qualified_type vt,
 VPRIV void virbuild_vector_scalar(codegen_context *e, uint32_t op,
                                   uint32_t code, uint32_t vt, int lane, int ra,
                                   int rs, unsigned size, bool splat,
-                                  const codegen_lvalue *d);
+                                  const codegen_lvalue *d, int at = 0);
 VPRIV void virbuild_vector_shuffled(codegen_context *e,
                                     const x64_x86_shuffle *s, int ra, int rb,
                                     const codegen_lvalue *d);
 VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op,
                                   uint32_t code, uint32_t vt, int lane, int ra,
-                                  int rb, const codegen_lvalue *d);
+                                  int rb, const codegen_lvalue *d, int at = 0);
 VPRIV uint32_t virbuild_integer_log2(uint64_t x);
 VPRIV uint32_t virbuild_memory_flags_make(int size, uint32_t align, bool sgn);
 

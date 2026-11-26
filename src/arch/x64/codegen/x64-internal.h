@@ -302,6 +302,8 @@ VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
                               int64_t count, uint32_t *code);
 VPRIV bool x64_x86_shuffle_code(codegen_context *e, const int *bytes,
                                 x64_x86_shuffle *shuffle);
+VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
+                               bool *count);
 VPRIV bool x64_x86_builtin_code(codegen_context *e, uint32_t n, uint32_t *code,
                                 unsigned *operands);
 VPRIV bool x64_vector_shuffle_exists(codegen_context *e, const int *bytes);

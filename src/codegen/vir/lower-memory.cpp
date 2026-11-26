@@ -311,11 +311,22 @@ VPRIV void virbuild_store(codegen_context *e, int rs, const codegen_lvalue *l,
 
 /* the vector of type vt loaded from the address in register r */
 static uint32_t virbuild_vector_load(codegen_context *e, uint32_t vt, int lane,
-                                     int r)
+                                     int r, int at)
 {
     uint32_t flags = virbuild_memory_flags_make(lane, (uint32_t)lane, false);
     uint32_t a = virbuild_register_read(e, r, VIR_TYPE_PTR);
 
+    if (at) {
+        vir_insn base = e->vir_builder->insns[a].insn;
+        if (base.op == VIR_OP_SLOTADDR) {
+            uint64_t offset = (uint64_t)base.c << 32 | base.b;
+            a = virbuild_slot_address(e, base.a, (int64_t)offset + (int64_t)at);
+        } else {
+            a = virbuild_insn_append(
+                e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, a,
+                virbuild_constant_integer(e, VIR_TYPE_I64, at), 0);
+        }
+    }
     return virbuild_insn_append(e, VIR_OP_LOAD, vt, flags, a, 0, 0);
 }
 
@@ -345,13 +356,13 @@ static void virbuild_vector_result(codegen_context *e, uint32_t op,
    one operand */
 VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op,
                                   uint32_t code, uint32_t vt, int lane, int ra,
-                                  int rb, const codegen_lvalue *d)
+                                  int rb, const codegen_lvalue *d, int at)
 {
-    uint32_t x = virbuild_vector_load(e, vt, lane, ra);
+    uint32_t x = virbuild_vector_load(e, vt, lane, ra, at);
     uint32_t y = x;
 
     if (rb >= 0)
-        y = virbuild_vector_load(e, vt, lane, rb);
+        y = virbuild_vector_load(e, vt, lane, rb, at);
     virbuild_vector_result(e, op, code, vt, lane, x, y, d);
 }
 
@@ -370,7 +381,7 @@ VPRIV void virbuild_vector_shuffled(codegen_context *e,
         int from = s->first;
         if (i)
             from = s->second;
-        value[i] = virbuild_vector_load(e, VIR_TYPE_I64X2, 8, operand[from]);
+        value[i] = virbuild_vector_load(e, VIR_TYPE_I64X2, 8, operand[from], 0);
         for (int k = 0; k < s->steps; k++)
             value[i] =
                 virbuild_insn_append(e, VIR_OP_X86, VIR_TYPE_I64X2, 0, value[i],
@@ -388,9 +399,9 @@ VPRIV void virbuild_vector_shuffled(codegen_context *e,
 VPRIV void virbuild_vector_scalar(codegen_context *e, uint32_t op,
                                   uint32_t code, uint32_t vt, int lane, int ra,
                                   int rs, unsigned size, bool splat,
-                                  const codegen_lvalue *d)
+                                  const codegen_lvalue *d, int at)
 {
-    uint32_t x = virbuild_vector_load(e, vt, lane, ra);
+    uint32_t x = virbuild_vector_load(e, vt, lane, ra, at);
     uint32_t y = 0;
 
     if (splat && size == 8) {

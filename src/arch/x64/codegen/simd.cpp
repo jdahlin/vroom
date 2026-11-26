@@ -128,7 +128,8 @@ static x64_simd_plan x64_simd_integer_plan(int op, unsigned size,
 
 static x64_simd_plan x64_simd_plan_for(codegen_context *e, int op,
                                        ast_qualified_type vt, bool a_vector,
-                                       bool b_vector, bool unary)
+                                       bool b_vector, bool unary,
+                                       unsigned width = 16)
 {
     cc *c = e->compile_context;
     x64_simd_plan none = {};
@@ -136,7 +137,7 @@ static x64_simd_plan x64_simd_plan_for(codegen_context *e, int op,
     unsigned size = (unsigned)codegen_type_size(c, et);
     bool shift = op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER;
 
-    if (x64_target_has_no_simd(e) || codegen_type_size(c, vt) != 16 ||
+    if (x64_target_has_no_simd(e) || codegen_type_size(c, vt) != width ||
         codegen_type_is_bool_vector(c, vt) || walk_type_is_wide(c, et))
         return none;
     if (codegen_type_is_float(c, et)) {
@@ -1069,7 +1070,9 @@ static const char *const x64_x86_operators[] = {
     "psrld",      "psrlq",     "punpcklbw", "punpcklwd", "punpckldq",
     "punpcklqdq", "punpckhbw", "punpckhwd", "punpckhdq", "punpckhqdq",
     "pshufd",     "shufps",    "pshuflw",   "pshufhw",   "psrldq",
-    "pslldq",     "packuswb",  "packssdw"};
+    "pslldq",     "packuswb",  "packssdw",  "packsswb",  "packusdw",
+    "pmaddubsw",  "pmaddwd",   "pmulhw",    "pmulhuw",   "pmulhrsw",
+    "pshufb"};
 
 VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
 {
@@ -1094,7 +1097,9 @@ static bool x64_x86_operator_find(const char *mnemonic, uint32_t *code)
 VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
                               int64_t count, uint32_t *code)
 {
-    x64_simd_plan p = x64_simd_plan_for(e, op, vt, true, false, false);
+    x64_simd_plan p =
+        x64_simd_plan_for(e, op, vt, true, false, false,
+                          (unsigned)codegen_type_size(e->compile_context, vt));
 
     if (!p.op || count < 0 || count > 255 || !x64_x86_operator_find(p.op, code))
         return false;
@@ -1190,7 +1195,9 @@ VPRIV bool x64_x86_operation_code(codegen_context *e, int op,
                                   bool *swapped)
 {
     cc *c = e->compile_context;
-    x64_simd_plan p = x64_simd_plan_for(e, op, vt, true, true, false);
+    x64_simd_plan p =
+        x64_simd_plan_for(e, op, vt, true, true, false,
+                          (unsigned)codegen_type_size(e->compile_context, vt));
     bool dwords = op == LEX_TOKEN_STAR &&
                   codegen_type_size(c, T(c, vt)->base) == 4 &&
                   !codegen_type_is_float(c, T(c, vt)->base);
@@ -1254,5 +1261,55 @@ VPRIV bool x64_x86_builtin_code(codegen_context *e, uint32_t n, uint32_t *code,
     case PTEST:
         break;
     }
+    return false;
+}
+
+/* the AVX2 builtins that work on each 128-bit half alone: the instruction of
+   a half, and whether the second operand is a shift count */
+static const struct x64_halved_builtin {
+    const char *name, *mnemonic;
+    bool count;
+} x64_halved_builtins[] = {
+    {"ia32_psllwi256", "psllw", true},
+    {"ia32_pslldi256", "pslld", true},
+    {"ia32_psllqi256", "psllq", true},
+    {"ia32_psrlwi256", "psrlw", true},
+    {"ia32_psrldi256", "psrld", true},
+    {"ia32_psrlqi256", "psrlq", true},
+    {"ia32_psrawi256", "psraw", true},
+    {"ia32_psradi256", "psrad", true},
+    {"ia32_packsswb256", "packsswb", false},
+    {"ia32_packssdw256", "packssdw", false},
+    {"ia32_packuswb256", "packuswb", false},
+    {"ia32_packusdw256", "packusdw", false},
+    {"ia32_pmaddubsw256", "pmaddubsw", false},
+    {"ia32_pmaddwd256", "pmaddwd", false},
+    {"ia32_pmulhw256", "pmulhw", false},
+    {"ia32_pmulhuw256", "pmulhuw", false},
+    {"ia32_pmulhrsw256", "pmulhrsw", false},
+    {"ia32_pshufb256", "pshufb", false},
+};
+
+/* the code of the half's instruction of such a builtin, node n; the target
+   must have AVX2 */
+VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
+                               bool *count)
+{
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    if (x->aux != CC_BUILTIN_X86_STENCIL || x->c != 3)
+        return false;
+    unsigned row = (unsigned)c->ipool[N(c->lists[x->b + 2])->a];
+    const char *name = x64_stencil_name(row);
+    uint32_t fn = e->walk_state->function_symbol;
+    if (e->walk_state->inline_call)
+        fn = e->walk_state->inline_call->function;
+    if (!x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX2))
+        return false; /* (the direct emitter reports it) */
+    for (const x64_halved_builtin &h : x64_halved_builtins)
+        if (!strcmp(name, h.name)) {
+            *count = h.count;
+            return x64_x86_operator_find(h.mnemonic, code);
+        }
     return false;
 }
