@@ -728,6 +728,7 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
             }
             if (!c1 || !binds_rvalues || !user_defined)
                 return of_form(sequence::form::bad);
+            require_complete(c1);
             s = class_sequence(
                 a, qualified_type::make(t1.unqualified(), cv_none), true);
             if (s.kind == sequence::form::unknown)
@@ -791,13 +792,22 @@ semantic_analysis::implicit_conversion_sequence(const expression_meaning &a,
         direct = r.kind == type_kind::class_type &&
                  y.kind == type_kind::class_type && y.entity == r.entity;
     }
-    if (!direct) {
-        require_complete(parameter);
-        require_complete(a.type);
-    }
     if (p.kind == type_kind::lvalue_reference ||
-        p.kind == type_kind::rvalue_reference)
+        p.kind == type_kind::rvalue_reference) {
+        /* [temp.inst]/9: "If the function selected by overload resolution
+           can be determined without instantiating a class template
+           definition, it is unspecified whether that instantiation
+           actually takes place".  Whether a referenced class is a base of
+           the argument's needs the argument's class alone; the referenced
+           one is completed where its constructors are looked at
+           (reference_sequence; json's output_adapter<uint8_t> takes a
+           basic_ostream<uint8_t> &, which does not instantiate) */
+        if (!direct)
+            require_complete(a.type);
         return reference_sequence(a, parameter, user_defined);
+    }
+    require_complete(parameter);
+    require_complete(a.type);
     if (p.kind == type_kind::class_type)
         return class_sequence(a, parameter, user_defined);
     const struct type y = type_table[a.type.unqualified()];
