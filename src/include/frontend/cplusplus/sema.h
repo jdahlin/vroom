@@ -2557,6 +2557,11 @@ class semantic_analysis
            (an unknown scope's refused declaration, [temp.dep], ...) */
         const char *unknown_because = nullptr;
         held_cause unknown_by = held_cause::refused;
+        /* the functions found include ones declared after the template
+           being instantiated, which the caller leaves out of what
+           unqualified lookup found ([temp.res]/10; only for a caller that
+           collects the names) */
+        bool past_horizon = false;
     };
     /* the subclause an unsupported use of the name found as r (not
        known, kind none) waits for: [temp.names] for a template's name,

@@ -646,6 +646,29 @@ analysis_result semantic_analysis::overloaded_operator(
         }
         for (entity_index e : set)
             overload_set(e, others);
+        /* [temp.dep.candidate]/1: of the functions declared after the
+           template, only argument-dependent lookup's are candidates */
+        if (found.past_horizon) {
+            owned_array<entity_index> associated_classes, associated_spaces;
+            if (!associated_namespaces(types, associated_classes,
+                                       associated_spaces))
+                return not_supported_because(
+                    n, "basic.lookup.argdep",
+                    "an operator whose associated namespaces could not be "
+                    "determined");
+            size_t kept = 0;
+            for (entity_index e : others) {
+                uint32_t d = entity_table[e].first_declaration;
+                bool visible =
+                    !d || entity_table.declaration(d).node.first_token() <=
+                              lookup_horizon;
+                for (entity_index space : associated_spaces)
+                    visible = visible || space == entity_table[e].enclosing;
+                if (visible)
+                    others[kept++] = e;
+            }
+            others.resize(kept);
+        }
         size_t first_member = candidates.size();
         function_candidates(members, true, candidates);
         for (size_t i = first_member; i < candidates.size(); i++) {

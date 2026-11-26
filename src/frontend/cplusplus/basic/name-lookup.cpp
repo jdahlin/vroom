@@ -450,8 +450,13 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
             r.entity = 0;
             r.found_in = 0;
             horizon_hidden++;
-        } else if (late)
-            mark_unknown(r, "temp.dep");
+        } else if (late) {
+            if (early && functions && collected_names && !r.unknown &&
+                !r.ambiguous)
+                r.past_horizon = true;
+            else
+                mark_unknown(r, "temp.dep");
+        }
     }
     /* a pack named outside a pack expansion's pattern: ill-formed
        ([temp.variadic]/7) unless it is one analysis has no rules for */
