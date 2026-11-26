@@ -14,7 +14,7 @@
  * virtual destructors in the primary virtual table only (two slots, the
  * complete object and the deleting destructor, [abi:vtable-components]),
  * not pure ones; no virtual operator functions, no virtual functions in
- * unions or local classes.
+ * unions.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -153,18 +153,17 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
          (entity_table[e].implemented == preprocessing_op_or_punc::EQUAL ||
           entity_table[e].implemented ==
               preprocessing_op_or_punc::EQUAL_EQUAL)) ||
-        entity_table[c].union_ || local_class_rule(c))
+        entity_table[c].union_)
         /* a virtual assignment operator, which a derived class's implicit
            copy assignment overrides ([class.copy.assign]), a virtual
            operator==, which a defaulted operator<=> declares again
-           ([class.compare.default]/4), [class.union]/2's "A union shall not have virtual functions",
-           a local class's virtual table: not analysed (a constexpr
-           virtual function is an inline one, [dcl.constexpr]/1) */
+           ([class.compare.default]/4), [class.union]/2's "A union shall
+           not have virtual functions": not analysed (a constexpr virtual
+           function is an inline one, [dcl.constexpr]/1) */
         return not_supported_because(
             declaration, "class.virtual",
             "a virtual assignment operator, operator== or three-way "
-            "comparison, or a virtual function of a union or of some local "
-            "classes");
+            "comparison, or a virtual function of a union");
     if (!entity_table[e].nonstatic_member) {
         /* [class.static.mfct]/2: "A static member function shall not be
            virtual" */

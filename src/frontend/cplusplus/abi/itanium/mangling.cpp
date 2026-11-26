@@ -54,6 +54,11 @@ bool visible_local_class(const entities &table, entity_index c)
     for (entity_index g = next_enclosing_function(table, f); g;
          g = next_enclosing_function(table, g))
         f = g;
+    /* (a static inline function, or one of an unnamed namespace, is no
+       other unit's) */
+    if (table[f].linkage_of_name == linkage::internal &&
+        !table[f].instantiation)
+        return false;
     return table[f].inline_ || table[f].instantiation;
 }
 
