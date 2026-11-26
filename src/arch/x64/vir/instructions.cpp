@@ -485,6 +485,15 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         x64_record_emit_three_registers(e, X64_OP_CRC32, 8, d, a, c);
         return;
     case VIR_OP_X86:
+        if (!vir_type_is_vector(i->type)) { /* movmsk: to a general register */
+            char text[64];
+
+            snprintf(text, sizeof text, "\t%s\t%%xmm%d, %%%s\n",
+                     x64_x86_code_mnemonic(i->c), a - XMM0,
+                     x64_register_names_32[d]);
+            x64_vir_text_append(L, text);
+            return;
+        }
         x64_vir_x86_emit(L, i->c, d, a, c);
         return;
     case VIR_OP_EHTYPEID: /* the type's index in the function's type table */
