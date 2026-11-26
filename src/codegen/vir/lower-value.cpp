@@ -709,32 +709,264 @@ VPRIV codegen_value virbuild_bigcmp(codegen_context *e, int op,
     (void)op, (void)t, (void)a, (void)b;
     virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer));
 }
-/* VIR has no vectors from source yet: a function whose vector operation the
-   x86-64 direct emitter does with SSE2 goes to it */
+/* the VIR operation and vector type of a lane-wise binary operator on two
+   vectors of type vt, where VIR has both (4 lanes of int or float, 2 of long
+   long or double) */
+static bool virbuild_vector_op(codegen_context *e, int op,
+                               ast_qualified_type vt, uint32_t *vir_op,
+                               uint32_t *type, int *lane)
+{
+    cc *c = e->compile_context;
+    ast_qualified_type element = T(c, vt)->base;
+    bool real = codegen_type_is_float(c, element);
+    uint64_t size = codegen_type_size(c, element);
+
+    if (size != 4 && size != 8)
+        return false;
+    *type = virbuild_vector_type(e, vt, lane);
+    switch (op) {
+    case LEX_TOKEN_PLUS:
+        *vir_op = VIR_OP_ADD;
+        if (real)
+            *vir_op = VIR_OP_FADD;
+        return true;
+    case LEX_TOKEN_MINUS:
+        *vir_op = VIR_OP_SUB;
+        if (real)
+            *vir_op = VIR_OP_FSUB;
+        return true;
+    case LEX_TOKEN_STAR:
+        *vir_op = VIR_OP_MUL;
+        if (real)
+            *vir_op = VIR_OP_FMUL;
+        return real || *lane == 4; /* (no 64-bit lane multiply) */
+    case LEX_TOKEN_SLASH:
+        *vir_op = VIR_OP_FDIV;
+        return real;
+    case LEX_TOKEN_AMPERSAND:
+        *vir_op = VIR_OP_AND;
+        return !real;
+    case LEX_TOKEN_PIPE:
+        *vir_op = VIR_OP_OR;
+        return !real;
+    case LEX_TOKEN_CARET:
+        *vir_op = VIR_OP_XOR;
+        return !real;
+    default:
+        return false;
+    }
+}
+
+/* one 16-byte vector operation, `at` bytes into the operands (a 16-byte
+   operation, or a half of a 32-byte one); false: no instruction for it */
+static bool virbuild_vector_lanes(codegen_context *e, int op,
+                                  ast_qualified_type vt, bool a_vector,
+                                  bool b_vector, int ra, int rb,
+                                  const codegen_lvalue *d, bool unary, int at)
+{
+    codegen_lvalue to = *d;
+    to.offset += at;
+    uint32_t vir_op = 0, type = 0;
+    int lane = 0;
+    if (!unary && a_vector && b_vector &&
+        virbuild_vector_op(e, op, vt, &vir_op, &type, &lane)) {
+        virbuild_vector_binary(e, vir_op, 0, type, lane, ra, rb, &to, at);
+        return true;
+    }
+    uint32_t code = 0;
+    bool swapped = false;
+    unsigned size = (unsigned)codegen_type_size(
+        e->compile_context, T(e->compile_context, vt)->base);
+    if (!unary && a_vector && !b_vector &&
+        (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER)) {
+        /* a shift: the count in an xmm register */
+        if (x64_x86_shift_code(e, op, vt, 0, &code)) {
+            code &= 0xfff;
+            type = virbuild_vector_type(e, vt, &lane);
+            virbuild_vector_scalar(e, VIR_OP_X86, code, type, lane, ra, rb,
+                                   size, false, &to, at);
+            return true;
+        }
+    }
+    if (!unary && a_vector && !b_vector &&
+        !codegen_type_is_float(e->compile_context,
+                               T(e->compile_context, vt)->base) &&
+        x64_x86_operation_code(e, op, vt, &code, &swapped) && !swapped) {
+        /* a vector and a scalar: the scalar in every lane */
+        type = virbuild_vector_type(e, vt, &lane);
+        virbuild_vector_scalar(e, VIR_OP_X86, code, type, lane, ra, rb, size,
+                               true, &to, at);
+        return true;
+    }
+    if (!unary && a_vector && b_vector &&
+        x64_x86_operation_code(e, op, vt, &code, &swapped)) {
+        int first = ra, second = rb;
+        if (swapped) {
+            first = rb;
+            second = ra;
+        }
+        type = virbuild_vector_type(e, vt, &lane);
+        virbuild_vector_binary(e, VIR_OP_X86, code, type, lane, first, second,
+                               &to, at);
+        return true;
+    }
+    return false;
+}
+
+/* x86-64: the operations above in VIR, a 32-byte one as its two halves (SSE
+   instructions: what AVX2 does to each); a function with another 16-byte one
+   goes to the direct emitter, and another 32-byte one is done lane by lane */
 VPRIV bool virbuild_vector_operation(codegen_context *e, int op,
                                      ast_qualified_type vt, bool a_vector,
                                      bool b_vector, int ra, int rb,
                                      const codegen_lvalue *d, bool unary)
 {
-    (void)ra, (void)rb, (void)d;
-    if (CODEGEN_IS_X64(e->compile_context) &&
-        x64_vector_operation_exists(e, op, vt, a_vector, b_vector, unary))
-        virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
-    return false;
+    cc *c = e->compile_context;
+    if (!CODEGEN_IS_X64(c))
+        return false;
+    if (codegen_type_size(c, vt) == 32) {
+        /* (both halves take the same path: nothing is done if the first has
+           none) */
+        if (!virbuild_vector_lanes(e, op, vt, a_vector, b_vector, ra, rb, d,
+                                   unary, 0))
+            return false;
+        return virbuild_vector_lanes(e, op, vt, a_vector, b_vector, ra, rb, d,
+                                     unary, 16);
+    }
+    if (!x64_vector_operation_exists(e, op, vt, a_vector, b_vector, unary))
+        return false;
+    if (virbuild_vector_lanes(e, op, vt, a_vector, b_vector, ra, rb, d, unary,
+                              0))
+        return true;
+    virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
 }
 VPRIV bool virbuild_vector_shuffle(codegen_context *e, const int *bytes, int ra,
                                    int rb, const codegen_lvalue *d)
 {
-    (void)ra, (void)rb, (void)d;
-    if (CODEGEN_IS_X64(e->compile_context) &&
-        x64_vector_shuffle_exists(e, bytes))
+    if (!CODEGEN_IS_X64(e->compile_context) ||
+        !x64_vector_shuffle_exists(e, bytes))
+        return false;
+    x64_x86_shuffle shuffle = {};
+    if (!x64_x86_shuffle_code(e, bytes, &shuffle))
         virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
-    return false;
+    virbuild_vector_shuffled(e, &shuffle, ra, rb, d);
+    return true;
 }
+/* an AVX2 builtin as its instruction on each half */
+static codegen_value virbuild_halved_builtin(codegen_context *e, uint32_t n,
+                                             uint32_t code, bool count)
+{
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    const uint32_t *arg = &c->lists[x->b];
+    int r[2];
+    for (unsigned i = 0; i < 2; i++) {
+        codegen_value v = walk_value_emit(e, arg[i]);
+        r[i] = walk_value_to_register(e, &v);
+    }
+    codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
+                        .align = 16,
+                        .offset = walk_slot_temporary(e, 32, 16)};
+    for (int at = 0; at < 32; at += 16) {
+        codegen_lvalue to = d;
+        to.offset += at;
+        if (count)
+            virbuild_vector_scalar(e, VIR_OP_X86, code, VIR_TYPE_I64X2, 8, r[0],
+                                   r[1], 4, false, &to, at);
+        else
+            virbuild_vector_binary(e, VIR_OP_X86, code, VIR_TYPE_I64X2, 8, r[0],
+                                   r[1], &to, at);
+    }
+    for (unsigned i = 0; i < 2; i++)
+        WALK_LOWER(tfree)(e, r[i]);
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)WALK_LOWER(laddr)(e, &d));
+}
+
+/* a builtin that is one instruction on vector values: its result in a
+   temporary, as the walker holds vectors */
 VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
 {
-    (void)n;
-    virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    uint32_t code = 0;
+    unsigned operands = 0;
+
+    int crossing = 0;
+    if (CODEGEN_IS_X64(c))
+        crossing = x64_x86_crossing_builtin(e, n);
+    if (crossing) {
+        const uint32_t *argument = &c->lists[x->b];
+        codegen_value v = walk_value_emit(e, argument[0]);
+        int ra = walk_value_to_register(e, &v);
+        if (crossing == 1) {
+            int result = WALK_LOWER(treg)(e);
+            virbuild_register_write(e, result,
+                                    virbuild_vector_sign_bits(e, ra));
+            WALK_LOWER(tfree)(e, ra);
+            return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                               .register_number = (uint8_t)result);
+        }
+        if (crossing == 3) {
+            /* a half: its 16 bytes */
+            cc_value half;
+            if (!cc_eval(c, argument[1], &half) ||
+                half.kind != CC_VALUE_INTEGER)
+                virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+            codegen_lvalue part = {.kind = CODEGEN_LVALUE_FRAME,
+                                   .align = 16,
+                                   .offset = walk_slot_temporary(e, 16, 16)};
+            virbuild_vector_half(e, ra, 16 * (int)(half.i & 1), &part);
+            WALK_LOWER(tfree)(e, ra);
+            return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                               .register_number =
+                                   (uint8_t)WALK_LOWER(laddr)(e, &part));
+        }
+        codegen_value w = walk_value_emit(e, argument[1]);
+        int rb = walk_value_to_register(e, &w);
+        codegen_lvalue out = {.kind = CODEGEN_LVALUE_FRAME,
+                              .align = 16,
+                              .offset = walk_slot_temporary(e, 32, 16)};
+        virbuild_vector_permute(e, ra, rb, &out);
+        WALK_LOWER(tfree)(e, ra);
+        WALK_LOWER(tfree)(e, rb);
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number =
+                               (uint8_t)WALK_LOWER(laddr)(e, &out));
+    }
+    bool count = false;
+    if (CODEGEN_IS_X64(c) && codegen_type_is_vector(c, x->ty) &&
+        codegen_type_size(c, x->ty) == 32 &&
+        x64_x86_halved_code(e, n, &code, &count))
+        return virbuild_halved_builtin(e, n, code, count);
+
+    if (!CODEGEN_IS_X64(c) || !codegen_type_is_vector(c, x->ty) ||
+        codegen_type_size(c, x->ty) != 16 ||
+        !x64_x86_builtin_code(e, n, &code, &operands))
+        virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+
+    const uint32_t *arg = &c->lists[x->b];
+    int r[2] = {-1, -1};
+    for (unsigned i = 0; i < operands; i++) {
+        ast_qualified_type at = N(arg[i])->ty;
+        if (!codegen_type_is_vector(c, at) || codegen_type_size(c, at) != 16)
+            virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+    }
+    for (unsigned i = 0; i < operands; i++) {
+        codegen_value v = walk_value_emit(e, arg[i]);
+        r[i] = walk_value_to_register(e, &v);
+    }
+    int lane = 0;
+    uint32_t type = virbuild_vector_type(e, x->ty, &lane);
+    codegen_lvalue d = {.kind = CODEGEN_LVALUE_FRAME,
+                        .align = 16,
+                        .offset = walk_slot_temporary(e, 16, 16)};
+    /* (an operand's lanes may be another type's: loaded as the result's) */
+    virbuild_vector_binary(e, VIR_OP_X86, code, type, lane, r[0], r[1], &d);
+    for (unsigned i = 0; i < operands; i++)
+        WALK_LOWER(tfree)(e, r[i]);
+    return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                       .register_number = (uint8_t)WALK_LOWER(laddr)(e, &d));
 }
 VPRIV codegen_value virbuild_bigcvt(codegen_context *e, codegen_value v,
                                     ast_qualified_type from,

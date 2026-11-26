@@ -121,6 +121,15 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
     bool r10 = true;
     uint64_t cs =
         (1u << RBX) | (1u << R12) | (1u << R13) | (1u << R14) | (1u << R15);
+    /* a slot aligned past 16 (a 32-byte vector): the printer realigns the
+       frame, with r12 its base */
+    bool realigned = false;
+    for (uint32_t i = 0; i < f->slot_count; i++)
+        realigned = realigned || f->slot[i].align > 16;
+    if (realigned) {
+        spframe = false;
+        cs &= ~(UINT64_C(1) << R12);
+    }
     if (spframe)
         cs |= 1u << RBP;
     if (ms)
@@ -189,7 +198,8 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
     uint64_t framesz =
         (uint64_t)f->insn_count * 16; /* worst-case spill slots */
     for (uint32_t i = 0; i < f->slot_count; i++) {
-        if (f->slot[i].align > 16 || f->slot[i].size > INT32_MAX / 4) {
+        if (f->slot[i].align > 64 || (ms && f->slot[i].align > 16) ||
+            f->slot[i].size > INT32_MAX / 4) {
             *why = VIRBUILD_FAILURE(x64_slot_size);
             return false;
         }

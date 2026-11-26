@@ -522,6 +522,26 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         x64_abi_vector_check(e, codegen_type_size(c, rt),
                              codegen_type_is_vector(c, rt),
                              x64_abi_type_is_wide_record(c, rt), features);
+        /* a 32-byte vector travels in a ymm register with AVX and in memory
+           without: caller and callee must agree (as clang) */
+        uint32_t caller = e->walk_state->function_symbol;
+        if (e->walk_state->inline_call)
+            caller = e->walk_state->inline_call->function;
+        bool differ =
+            x86_feature_has(features, X86_FEATURE_AVX) !=
+            x86_feature_has(cc_x86_features_get(c, caller), X86_FEATURE_AVX);
+        bool wide = codegen_type_size(c, rt) == 32 &&
+                    (codegen_type_is_vector(c, rt) ||
+                     x64_abi_type_is_wide_record(c, rt));
+        for (int k = 0; k < n; k++)
+            if (!a[k].is_unnamed && a[k].size == 32 &&
+                (a[k].is_vector || a[k].is_wide_record))
+                wide = true;
+        if (differ && wide)
+            codegen_fatal_report(
+                e, e->current_location,
+                "x86-64: AVX vector argument or return ABI differs between "
+                "caller and callee (one has 'avx', the other not)");
     }
 
     if (variadic) {

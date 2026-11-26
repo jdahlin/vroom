@@ -99,6 +99,8 @@ VPRIV void vx_mark(x64_vir_context *L, bool begin, unsigned bit, uint32_t b,
 VPRIV void vx_probe(x64_vir_context *L, unsigned bit);
 VPRIV void x64_vir_simd_emit(x64_vir_context *L, const char *op, int d, int a,
                              int b);
+VPRIV void x64_vir_x86_emit(x64_vir_context *L, uint32_t code, int d, int a,
+                            int b);
 VPRIV void x64_vir_constant_materialize(x64_vir_context *L, uint8_t dst,
                                         uint32_t v);
 VPRIV void x64_vir_slot_access(x64_vir_context *L, bool load, uint8_t reg,

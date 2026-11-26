@@ -287,6 +287,28 @@ VPRIV bool codegen_symbol_needs_got(
 VPRIV int x64_memory_base_register(codegen_context *e, const codegen_lvalue *l,
                                    uint32_t *ref);
 VPRIV bool x64_target_has_no_simd(codegen_context *e);
+/* VIR's x86 operation (VIR_OP_X86): the code naming an instruction */
+enum {
+    X64_X86_TABLE = 1 << 12,     /* bits 0-11: a row of the builtin table */
+    X64_X86_IMMEDIATE = 1 << 13, /* bits 16-23: the immediate */
+    X64_X86_UNARY = 1 << 14,
+    X64_X86_SHIFT = 1 << 15 /* op $count, d */
+};
+VPRIV const char *x64_x86_code_mnemonic(uint32_t code);
+VPRIV bool x64_x86_operation_code(codegen_context *e, int op,
+                                  ast_qualified_type vt, uint32_t *code,
+                                  bool *swapped);
+VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
+                              int64_t count, uint32_t *code);
+VPRIV bool x64_x86_shuffle_code(codegen_context *e, const int *bytes,
+                                x64_x86_shuffle *shuffle);
+VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
+                               bool *count);
+/* an AVX2 builtin that crosses the halves: 1 movmskps256, 2 permvarsi256
+   and permvarsf256, 3 extract128i256, 0 otherwise */
+VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n);
+VPRIV bool x64_x86_builtin_code(codegen_context *e, uint32_t n, uint32_t *code,
+                                unsigned *operands);
 VPRIV bool x64_vector_shuffle_exists(codegen_context *e, const int *bytes);
 VPRIV bool x64_vector_operation_exists(codegen_context *e, int op,
                                        ast_qualified_type vt, bool a_vector,

@@ -80,7 +80,7 @@ static bool virbuild_bytes_are_unwritten(virbuild_context *V,
         if (n == VIRBUILD_FAR_LOAD_WRITERS_MAX || in->op != VIR_OP_STORE)
             return false;
         virbuild_address_decompose(V, in->a, &B);
-        sw = (int64_t)1 << VIR_INSN_FLAG_WIDTH_LOG2(in->flags);
+        sw = (int64_t)virbuild_access_bytes(V, in);
         if (B.base != A->base || B.slot != A->slot ||
             B.off <= -VIRBUILD_FAR_LOAD_OFFSET_MAX ||
             B.off >= VIRBUILD_FAR_LOAD_OFFSET_MAX ||
@@ -190,8 +190,7 @@ virbuild_far_load_find(virbuild_context *V, virbuild_simplify_state *S,
         if (S->block_end_positions[V->block_order[S->loop_end[l]]] > hi)
             hi = S->block_end_positions[V->block_order[S->loop_end[l]]];
     }
-    *ok = virbuild_bytes_are_unwritten(
-        V, S, S->positions[l1], hi, A,
-        (int64_t)1 << VIR_INSN_FLAG_WIDTH_LOG2(in->flags));
+    *ok = virbuild_bytes_are_unwritten(V, S, S->positions[l1], hi, A,
+                                       (int64_t)virbuild_access_bytes(V, in));
     return t;
 }

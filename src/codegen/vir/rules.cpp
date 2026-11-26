@@ -45,6 +45,8 @@ static uint32_t virbuild_value_zero_extended_bytes(const virbuild_context *V,
 
     switch (in->op) {
     case VIR_OP_LOAD:
+        if (vir_type_is_vector(in->type))
+            return sz;
         return (in->flags & VIR_INSN_FLAG_MS) ? sz
                : 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags) < sz
                    ? 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags)

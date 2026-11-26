@@ -477,6 +477,9 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
     case VIR_OP_CRC32C64:
         x64_record_emit_three_registers(e, X64_OP_CRC32, 8, d, a, c);
         return;
+    case VIR_OP_X86:
+        x64_vir_x86_emit(L, i->c, d, a, c);
+        return;
     case VIR_OP_EHTYPEID: /* the type's index in the function's type table */
         x64_record_emit_three_registers(e, X64_OP_MOVI, 4, d, X64_REGISTER_NONE,
                                         X64_REGISTER_NONE)

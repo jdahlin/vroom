@@ -476,6 +476,8 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
             r.kind = VIRBUILD_VECTORIZE_KIND_BAD;
         break;
     case VIR_OP_LOAD:
+        if (vir_type_is_vector(in.type))
+            return virbuild_vectorize_reject(S, "a vector load");
         if (in.flags & VIR_INSN_FLAG_VOL)
             return virbuild_vectorize_reject(S, "a volatile load");
         if (!virbuild_vectorize_info_is_linear(o[0]) || !o[0]->is_exact ||
@@ -509,6 +511,9 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
         break;
     case VIR_OP_STORE: {
         uint32_t vt = V->insns[w[1]].insn.type;
+
+        if (vir_type_is_vector(vt))
+            return virbuild_vectorize_reject(S, "a vector store");
 
         if (in.flags & VIR_INSN_FLAG_VOL)
             return virbuild_vectorize_reject(S, "a volatile store");

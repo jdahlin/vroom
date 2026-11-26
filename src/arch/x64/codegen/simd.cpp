@@ -128,7 +128,8 @@ static x64_simd_plan x64_simd_integer_plan(int op, unsigned size,
 
 static x64_simd_plan x64_simd_plan_for(codegen_context *e, int op,
                                        ast_qualified_type vt, bool a_vector,
-                                       bool b_vector, bool unary)
+                                       bool b_vector, bool unary,
+                                       unsigned width = 16)
 {
     cc *c = e->compile_context;
     x64_simd_plan none = {};
@@ -136,7 +137,7 @@ static x64_simd_plan x64_simd_plan_for(codegen_context *e, int op,
     unsigned size = (unsigned)codegen_type_size(c, et);
     bool shift = op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER;
 
-    if (x64_target_has_no_simd(e) || codegen_type_size(c, vt) != 16 ||
+    if (x64_target_has_no_simd(e) || codegen_type_size(c, vt) != width ||
         codegen_type_is_bool_vector(c, vt) || walk_type_is_wide(c, et))
         return none;
     if (codegen_type_is_float(c, et)) {
@@ -1052,4 +1053,286 @@ VPRIV codegen_value x64_x86_instruction(codegen_context *e, uint32_t n)
     x64_tfree(e, a);
     x64_tfree(e, b);
     return result;
+}
+
+/* ---- the same instructions as VIR operations (arch/x64/vir) */
+
+/* the lane-wise operators' single instructions */
+static const char *const x64_x86_operators[] = {
+    "paddb",      "paddw",     "paddd",     "paddq",     "psubb",
+    "psubw",      "psubd",     "psubq",     "pmullw",    "pand",
+    "por",        "pxor",      "pcmpeqb",   "pcmpeqw",   "pcmpeqd",
+    "pcmpgtb",    "pcmpgtw",   "pcmpgtd",   "addps",     "addpd",
+    "subps",      "subpd",     "mulps",     "mulpd",     "divps",
+    "divpd",      "cmpeqps",   "cmpeqpd",   "cmpneqps",  "cmpneqpd",
+    "cmpltps",    "cmpltpd",   "cmpleps",   "cmplepd",   "psllw",
+    "pslld",      "psllq",     "psraw",     "psrad",     "psrlw",
+    "psrld",      "psrlq",     "punpcklbw", "punpcklwd", "punpckldq",
+    "punpcklqdq", "punpckhbw", "punpckhwd", "punpckhdq", "punpckhqdq",
+    "pshufd",     "shufps",    "pshuflw",   "pshufhw",   "psrldq",
+    "pslldq",     "packuswb",  "packssdw",  "packsswb",  "packusdw",
+    "pmaddubsw",  "pmaddwd",   "pmulhw",    "pmulhuw",   "pmulhrsw",
+    "pshufb"};
+
+VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
+{
+    if (code & X64_X86_TABLE)
+        return x64_instructions[code & 0xfff].mnemonic;
+    return x64_x86_operators[code & 0xfff];
+}
+
+/* the code of mnemonic, or false */
+static bool x64_x86_operator_find(const char *mnemonic, uint32_t *code)
+{
+    for (unsigned i = 0;
+         i < sizeof x64_x86_operators / sizeof *x64_x86_operators; i++)
+        if (!strcmp(mnemonic, x64_x86_operators[i])) {
+            *code = i;
+            return true;
+        }
+    return false;
+}
+
+/* every lane of a vector of type vt shifted by the constant count */
+VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
+                              int64_t count, uint32_t *code)
+{
+    x64_simd_plan p =
+        x64_simd_plan_for(e, op, vt, true, false, false,
+                          (unsigned)codegen_type_size(e->compile_context, vt));
+
+    if (!p.op || count < 0 || count > 255 || !x64_x86_operator_find(p.op, code))
+        return false;
+    *code |= X64_X86_SHIFT | (uint32_t)count << 16;
+    return true;
+}
+
+/* op $count of one vector */
+static uint32_t x64_x86_by_count(const char *mnemonic, int count)
+{
+    uint32_t code = 0;
+
+    x64_x86_operator_find(mnemonic, &code);
+    return code | X64_X86_SHIFT | (uint32_t)count << 16;
+}
+
+/* the instructions of a planned shuffle */
+VPRIV bool x64_x86_shuffle_code(codegen_context *e, const int *bytes,
+                                x64_x86_shuffle *out)
+{
+    if (x64_target_has_no_simd(e))
+        return false;
+    x64_shuffle_plan p = x64_shuffle_plan_for(bytes);
+    const char *mnemonic = NULL;
+    uint32_t extra = 0;
+
+    *out = {};
+    out->first = p.first;
+    out->second = -1;
+    switch (p.kind) {
+    case X64_SHUFFLE_UNPACK:
+        mnemonic = x64_simd_by_width((unsigned)p.width, "punpcklbw",
+                                     "punpcklwd", "punpckldq", "punpcklqdq");
+        if (p.high)
+            mnemonic =
+                x64_simd_by_width((unsigned)p.width, "punpckhbw", "punpckhwd",
+                                  "punpckhdq", "punpckhqdq");
+        out->second = p.second;
+        break;
+    case X64_SHUFFLE_PAIRS:
+        mnemonic = "shufps";
+        out->second = p.second;
+        extra = X64_X86_IMMEDIATE;
+        break;
+    case X64_SHUFFLE_DWORDS:
+        mnemonic = "pshufd";
+        extra = X64_X86_IMMEDIATE | X64_X86_UNARY;
+        break;
+    case X64_SHUFFLE_LOW:
+        mnemonic = "pshuflw";
+        extra = X64_X86_IMMEDIATE | X64_X86_UNARY;
+        break;
+    case X64_SHUFFLE_HIGH:
+        mnemonic = "pshufhw";
+        extra = X64_X86_IMMEDIATE | X64_X86_UNARY;
+        break;
+    case X64_SHUFFLE_ROTATE:
+        mnemonic = "por";
+        out->second = p.second;
+        out->steps = 1;
+        out->before[0][0] = x64_x86_by_count("psrldq", p.width);
+        out->before[1][0] = x64_x86_by_count("pslldq", 16 - p.width);
+        break;
+    case X64_SHUFFLE_EVEN:
+        /* as x64_simd_even_prepare, then the saturating pack */
+        mnemonic = "packssdw";
+        if (p.width == 1)
+            mnemonic = "packuswb";
+        out->second = p.second;
+        out->steps = 2;
+        for (int i = 0; i < 2; i++) {
+            out->before[i][0] = x64_x86_by_count("pslld", 16);
+            out->before[i][1] = x64_x86_by_count("psrad", 16);
+            if (p.width == 1) {
+                out->before[i][0] = x64_x86_by_count("psllw", 8);
+                out->before[i][1] = x64_x86_by_count("psrlw", 8);
+            }
+        }
+        break;
+    case X64_SHUFFLE_NONE:
+        return false;
+    }
+    if (!mnemonic || !x64_x86_operator_find(mnemonic, &out->code))
+        return false;
+    out->code |= extra;
+    if (extra & X64_X86_IMMEDIATE)
+        out->code |= (uint32_t)(p.control & 0xff) << 16;
+    return true;
+} /* the code of a binary operator on two vectors of type vt that is one
+   instruction, its operands swapped when *swapped */
+VPRIV bool x64_x86_operation_code(codegen_context *e, int op,
+                                  ast_qualified_type vt, uint32_t *code,
+                                  bool *swapped)
+{
+    cc *c = e->compile_context;
+    x64_simd_plan p =
+        x64_simd_plan_for(e, op, vt, true, true, false,
+                          (unsigned)codegen_type_size(e->compile_context, vt));
+    bool dwords = op == LEX_TOKEN_STAR &&
+                  codegen_type_size(c, T(c, vt)->base) == 4 &&
+                  !codegen_type_is_float(c, T(c, vt)->base);
+
+    if (!p.op || p.invert || p.bias || dwords || op == LEX_TOKEN_LESS_LESS ||
+        op == LEX_TOKEN_GREATER_GREATER)
+        return false;
+    if (!x64_x86_operator_find(p.op, code))
+        return false;
+    *swapped = p.swap;
+    return true;
+}
+
+/* the code of a builtin of the instruction table that takes vectors (and a
+   constant) to a vector; the target must have its feature */
+VPRIV bool x64_x86_builtin_code(codegen_context *e, uint32_t n, uint32_t *code,
+                                unsigned *operands)
+{
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    if (x->aux != CC_BUILTIN_X86_INSTRUCTION)
+        return false;
+    const uint32_t *arg = &c->lists[x->b];
+    unsigned count = x->c - 1;
+    unsigned row = (unsigned)c->ipool[N(arg[count])->a];
+    const x64_instruction *in = &x64_instructions[row];
+    uint32_t fn = e->walk_state->inline_call
+                      ? e->walk_state->inline_call->function
+                      : e->walk_state->function_symbol;
+    int feature = x86_feature_find(in->feature);
+
+    if (feature < 0 ||
+        !x86_feature_has(cc_x86_features_get(c, fn), (unsigned)feature))
+        return false; /* (the direct emitter reports it) */
+    *code = row | X64_X86_TABLE;
+    *operands = count;
+    switch (in->form) {
+    case BINARY:
+        return true;
+    case UNARY:
+        *code |= X64_X86_UNARY;
+        return true;
+    case BINARY_CONTROL:
+    case UNARY_CONTROL: {
+        cc_value value;
+        if (!cc_eval(c, arg[count - 1], &value) ||
+            value.kind != CC_VALUE_INTEGER)
+            return false;
+        *code |= X64_X86_IMMEDIATE | (uint32_t)(value.i & 0xff) << 16;
+        if (in->form == UNARY_CONTROL)
+            *code |= X64_X86_UNARY;
+        *operands = count - 1;
+        return true;
+    }
+    case BINARY_XMM0:
+    case SHIFT:
+    case LOAD:
+    case TO_GENERAL:
+    case COMPARE:
+    case COMPARE_SWAPPED:
+    case PTEST:
+        break;
+    }
+    return false;
+}
+
+/* the AVX2 builtins that work on each 128-bit half alone: the instruction of
+   a half, and whether the second operand is a shift count */
+static const struct x64_halved_builtin {
+    const char *name, *mnemonic;
+    bool count;
+} x64_halved_builtins[] = {
+    {"ia32_psllwi256", "psllw", true},
+    {"ia32_pslldi256", "pslld", true},
+    {"ia32_psllqi256", "psllq", true},
+    {"ia32_psrlwi256", "psrlw", true},
+    {"ia32_psrldi256", "psrld", true},
+    {"ia32_psrlqi256", "psrlq", true},
+    {"ia32_psrawi256", "psraw", true},
+    {"ia32_psradi256", "psrad", true},
+    {"ia32_packsswb256", "packsswb", false},
+    {"ia32_packssdw256", "packssdw", false},
+    {"ia32_packuswb256", "packuswb", false},
+    {"ia32_packusdw256", "packusdw", false},
+    {"ia32_pmaddubsw256", "pmaddubsw", false},
+    {"ia32_pmaddwd256", "pmaddwd", false},
+    {"ia32_pmulhw256", "pmulhw", false},
+    {"ia32_pmulhuw256", "pmulhuw", false},
+    {"ia32_pmulhrsw256", "pmulhrsw", false},
+    {"ia32_pshufb256", "pshufb", false},
+};
+
+/* the code of the half's instruction of such a builtin, node n; the target
+   must have AVX2 */
+VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
+                               bool *count)
+{
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    if (x->aux != CC_BUILTIN_X86_STENCIL || x->c != 3)
+        return false;
+    unsigned row = (unsigned)c->ipool[N(c->lists[x->b + 2])->a];
+    const char *name = x64_stencil_name(row);
+    uint32_t fn = e->walk_state->function_symbol;
+    if (e->walk_state->inline_call)
+        fn = e->walk_state->inline_call->function;
+    if (!x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX2))
+        return false; /* (the direct emitter reports it) */
+    for (const x64_halved_builtin &h : x64_halved_builtins)
+        if (!strcmp(name, h.name)) {
+            *count = h.count;
+            return x64_x86_operator_find(h.mnemonic, code);
+        }
+    return false;
+}
+
+VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n)
+{
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    if (x->aux != CC_BUILTIN_X86_STENCIL || x->c < 2)
+        return 0;
+    unsigned row = (unsigned)c->ipool[N(c->lists[x->b + x->c - 1])->a];
+    const char *name = x64_stencil_name(row);
+    uint32_t fn = e->walk_state->function_symbol;
+    if (e->walk_state->inline_call)
+        fn = e->walk_state->inline_call->function;
+    if (!x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX2))
+        return 0;
+    if (!strcmp(name, "ia32_movmskps256"))
+        return 1;
+    if (!strcmp(name, "ia32_permvarsi256") ||
+        !strcmp(name, "ia32_permvarsf256"))
+        return 2;
+    if (!strcmp(name, "ia32_extract128i256"))
+        return 3;
+    return 0;
 }

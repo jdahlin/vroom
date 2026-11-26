@@ -2266,7 +2266,10 @@ VPRIV codegen_value walk_lvalue_store_memory(codegen_context *e,
         /* Assignment yields the stored value even if another writer changes l. */
         return walk_value_from_register(snapshot);
     }
+    if (codegen_type_is_vector(e->compile_context, t))
+        e->copied_vector = t;
     WALK_LOWER(copy)(e, rd, rs, codegen_type_size(e->compile_context, t));
+    e->copied_vector = 0;
     WALK_LOWER(tfree)(e, rs);
     return walk_value_from_register(rd);
 }

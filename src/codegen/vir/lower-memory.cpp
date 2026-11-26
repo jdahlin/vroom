@@ -309,6 +309,219 @@ VPRIV void virbuild_store(codegen_context *e, int rs, const codegen_lvalue *l,
     }
 }
 
+/* the vector of type vt loaded from the address in register r */
+static uint32_t virbuild_vector_load(codegen_context *e, uint32_t vt, int lane,
+                                     int r, int at)
+{
+    uint32_t flags = virbuild_memory_flags_make(lane, (uint32_t)lane, false);
+    uint32_t a = virbuild_register_read(e, r, VIR_TYPE_PTR);
+
+    if (at) {
+        vir_insn base = e->vir_builder->insns[a].insn;
+        if (base.op == VIR_OP_SLOTADDR) {
+            uint64_t offset = (uint64_t)base.c << 32 | base.b;
+            a = virbuild_slot_address(e, base.a, (int64_t)offset + (int64_t)at);
+        } else {
+            a = virbuild_insn_append(
+                e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, a,
+                virbuild_constant_integer(e, VIR_TYPE_I64, at), 0);
+        }
+    }
+    return virbuild_insn_append(e, VIR_OP_LOAD, vt, flags, a, 0, 0);
+}
+
+/* *d = x op y (code VIR_OP_X86's instruction) */
+static void virbuild_vector_result(codegen_context *e, uint32_t op,
+                                   uint32_t code, uint32_t vt, int lane,
+                                   uint32_t x, uint32_t y,
+                                   const codegen_lvalue *d)
+{
+    virbuild_context *V = e->vir_builder;
+    uint32_t flags = virbuild_memory_flags_make(lane, (uint32_t)lane, false);
+    uint32_t value = virbuild_insn_append(e, op, vt, 0, x, y, code);
+    uint32_t slot;
+    int64_t rel;
+    uint32_t at = virbuild_address_make(e, d, 16, &slot, &rel);
+
+    /* what was known of the slot's bytes is forgotten */
+    if (slot != VIRBUILD_BLOCK_NONE)
+        V->slots[slot].exposed = 1;
+    virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, flags, at, value, 0);
+    virbuild_store_table_clear(e, true);
+}
+
+/* *d = *ra op *rb, op a VIR operation on the vector type vt (code its third
+   operand): the operands loaded as values, the result stored (a vector load or
+   store moves 16 bytes and its width is the lane's, SPEC-vir 7.5.1).  rb < 0:
+   one operand */
+VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op,
+                                  uint32_t code, uint32_t vt, int lane, int ra,
+                                  int rb, const codegen_lvalue *d, int at)
+{
+    uint32_t x = virbuild_vector_load(e, vt, lane, ra, at);
+    uint32_t y = x;
+
+    if (rb >= 0)
+        y = virbuild_vector_load(e, vt, lane, rb, at);
+    virbuild_vector_result(e, op, code, vt, lane, x, y, d);
+}
+
+/* a shuffle of the vectors at ra and rb (x64_x86_shuffle's instructions) */
+VPRIV void virbuild_vector_shuffled(codegen_context *e,
+                                    const x64_x86_shuffle *s, int ra, int rb,
+                                    const codegen_lvalue *d)
+{
+    int operand[2] = {ra, rb};
+    uint32_t value[2] = {0, 0};
+    int count = 1;
+
+    if (s->second >= 0)
+        count = 2;
+    for (int i = 0; i < count; i++) {
+        int from = s->first;
+        if (i)
+            from = s->second;
+        value[i] = virbuild_vector_load(e, VIR_TYPE_I64X2, 8, operand[from], 0);
+        for (int k = 0; k < s->steps; k++)
+            value[i] =
+                virbuild_insn_append(e, VIR_OP_X86, VIR_TYPE_I64X2, 0, value[i],
+                                     value[i], s->before[i][k]);
+    }
+    if (count == 1)
+        value[1] = value[0];
+    virbuild_vector_result(e, VIR_OP_X86, s->code, VIR_TYPE_I64X2, 8, value[0],
+                           value[1], d);
+}
+
+/* ... the second operand the scalar in register rs: in every lane of `size`
+   bytes (splat), or in lane 0 of 32-bit lanes with the rest zero (a shift's
+   count) */
+VPRIV void virbuild_vector_scalar(codegen_context *e, uint32_t op,
+                                  uint32_t code, uint32_t vt, int lane, int ra,
+                                  int rs, unsigned size, bool splat,
+                                  const codegen_lvalue *d, int at)
+{
+    uint32_t x = virbuild_vector_load(e, vt, lane, ra, at);
+    uint32_t y = 0;
+
+    if (splat && size == 8) {
+        uint32_t s = virbuild_register_read(e, rs, VIR_TYPE_I64);
+        y = virbuild_insn_append(e, VIR_OP_VSPLAT, VIR_TYPE_I64X2, 0, s, 0, 0);
+    } else {
+        uint32_t s = virbuild_register_read(e, rs, VIR_TYPE_I32);
+        if (splat && size < 4) {
+            /* the byte or word repeated through 32 bits */
+            int64_t low = 0xffff, every = 0x10001;
+            if (size == 1)
+                low = 0xff, every = 0x01010101;
+            s = virbuild_insn_append(
+                e, VIR_OP_AND, VIR_TYPE_I32, 0, s,
+                virbuild_constant_integer(e, VIR_TYPE_I32, low), 0);
+            s = virbuild_insn_append(
+                e, VIR_OP_MUL, VIR_TYPE_I32, 0, s,
+                virbuild_constant_integer(e, VIR_TYPE_I32, every), 0);
+        }
+        if (splat) {
+            y = virbuild_insn_append(e, VIR_OP_VSPLAT, VIR_TYPE_I32X4, 0, s, 0,
+                                     0);
+        } else {
+            uint32_t zero = virbuild_insn_append(
+                e, VIR_OP_VSPLAT, VIR_TYPE_I32X4, 0,
+                virbuild_constant_integer(e, VIR_TYPE_I32, 0), 0, 0);
+            y = virbuild_insn_append(e, VIR_OP_VINSERT, VIR_TYPE_I32X4, 0, zero,
+                                     s, 0);
+        }
+    }
+    virbuild_vector_result(e, op, code, vt, lane, x, y, d);
+}
+
+/* the address `at` bytes (a value) past the address in register r */
+static uint32_t virbuild_address_plus(codegen_context *e, int r, uint32_t at)
+{
+    uint32_t a = virbuild_register_read(e, r, VIR_TYPE_PTR);
+
+    return virbuild_insn_append(e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, a, at, 0);
+}
+
+static uint32_t virbuild_dword_load(codegen_context *e, int r, uint32_t at)
+{
+    return virbuild_insn_append(e, VIR_OP_LOAD, VIR_TYPE_I32,
+                                virbuild_memory_flags_make(4, 4, false),
+                                virbuild_address_plus(e, r, at), 0, 0);
+}
+
+static uint32_t virbuild_integer(codegen_context *e, uint32_t type, int64_t k)
+{
+    return virbuild_constant_integer(e, type, k);
+}
+
+/* movmskps of eight lanes at ra: the sign bit of lane i as bit i */
+VPRIV uint32_t virbuild_vector_sign_bits(codegen_context *e, int ra)
+{
+    uint32_t bits = virbuild_integer(e, VIR_TYPE_I32, 0);
+
+    for (int i = 0; i < 8; i++) {
+        uint32_t lane = virbuild_dword_load(
+            e, ra, virbuild_integer(e, VIR_TYPE_I64, 4 * i));
+        uint32_t sign =
+            virbuild_insn_append(e, VIR_OP_LSHR, VIR_TYPE_I32, 0, lane,
+                                 virbuild_integer(e, VIR_TYPE_I32, 31), 0);
+        uint32_t placed =
+            virbuild_insn_append(e, VIR_OP_SHL, VIR_TYPE_I32, 0, sign,
+                                 virbuild_integer(e, VIR_TYPE_I32, i), 0);
+        bits = virbuild_insn_append(e, VIR_OP_OR, VIR_TYPE_I32, 0, bits, placed,
+                                    0);
+    }
+    return bits;
+}
+
+/* vpermd: lane i of d is the lane of ra that lane i of rb numbers */
+VPRIV void virbuild_vector_permute(codegen_context *e, int ra, int rb,
+                                   const codegen_lvalue *d)
+{
+    virbuild_context *V = e->vir_builder;
+    uint32_t flags = virbuild_memory_flags_make(4, 4, false);
+
+    for (int i = 0; i < 8; i++) {
+        uint32_t index = virbuild_dword_load(
+            e, rb, virbuild_integer(e, VIR_TYPE_I64, 4 * i));
+        index = virbuild_insn_append(e, VIR_OP_AND, VIR_TYPE_I32, 0, index,
+                                     virbuild_integer(e, VIR_TYPE_I32, 7), 0);
+        index = virbuild_insn_append(e, VIR_OP_SHL, VIR_TYPE_I32, 0, index,
+                                     virbuild_integer(e, VIR_TYPE_I32, 2), 0);
+        uint32_t value = virbuild_dword_load(
+            e, ra,
+            virbuild_insn_append(e, VIR_OP_EXT, VIR_TYPE_I64, 2, index, 0, 0));
+        codegen_lvalue to = *d;
+        to.offset += 4 * i;
+        uint32_t slot;
+        int64_t rel;
+        uint32_t at = virbuild_address_make(e, &to, 4, &slot, &rel);
+        if (slot != VIRBUILD_BLOCK_NONE)
+            V->slots[slot].exposed = 1;
+        virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, flags, at, value,
+                             0);
+    }
+    virbuild_store_table_clear(e, true);
+}
+
+/* *d = the 16 bytes at `at` past the address in register ra */
+VPRIV void virbuild_vector_half(codegen_context *e, int ra, int at,
+                                const codegen_lvalue *d)
+{
+    virbuild_context *V = e->vir_builder;
+    uint32_t value = virbuild_vector_load(e, VIR_TYPE_I64X2, 8, ra, at);
+    uint32_t slot;
+    int64_t rel;
+    uint32_t to = virbuild_address_make(e, d, 16, &slot, &rel);
+
+    if (slot != VIRBUILD_BLOCK_NONE)
+        V->slots[slot].exposed = 1;
+    virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID,
+                         virbuild_memory_flags_make(8, 8, false), to, value, 0);
+    virbuild_store_table_clear(e, true);
+}
+
 VPRIV int virbuild_laddr(codegen_context *e, const codegen_lvalue *l)
 {
     virbuild_context *V = e->vir_builder;
@@ -342,13 +555,47 @@ static uint32_t virbuild_copy_high_word(codegen_context *e, uint32_t value)
                                 0);
 }
 
+/* the VIR type of a 16-byte vector type (of lanes VIR has no type for: two
+   of 64 bits, which only copies see) and the lane's bytes */
+VPRIV uint32_t virbuild_vector_type(codegen_context *e, ast_qualified_type vt,
+                                    int *lane)
+{
+    cc *c = e->compile_context;
+    ast_qualified_type element = T(c, vt)->base;
+    int size = (int)codegen_type_size(c, element);
+
+    *lane = 8;
+    if (size == 4) {
+        *lane = 4;
+        if (codegen_type_is_float(c, element))
+            return VIR_TYPE_F32X4;
+        return VIR_TYPE_I32X4;
+    }
+    if (size == 8 && codegen_type_is_float(c, element))
+        return VIR_TYPE_F64X2;
+    return VIR_TYPE_I64X2;
+}
+
 VPRIV void virbuild_copy(codegen_context *e, int rdst, int rsrc, uint64_t n)
 {
     uint32_t d = virbuild_register_read(e, rdst, VIR_TYPE_PTR),
              s = virbuild_register_read(e, rsrc, VIR_TYPE_PTR);
 
-    if (n == 1 || n == 2 || n == 4 ||
-        n == 8) { /* one load and store (memcpy(&u, &d, 8)): promotable */
+    if (n == 16 && e->copied_vector && !e->volatile_untag_depth &&
+        CODEGEN_IS_X64(e->compile_context) &&
+        codegen_type_size(e->compile_context, e->copied_vector) == 16 &&
+        !codegen_type_is_bool_vector(e->compile_context, e->copied_vector)) {
+        /* a vector: one value, which slot promotion can keep in a register */
+        int lane = 0;
+        uint32_t type = virbuild_vector_type(e, e->copied_vector, &lane);
+        uint32_t fl = virbuild_memory_flags_make(lane, (uint32_t)lane, false);
+
+        virbuild_insn_append(
+            e, VIR_OP_STORE, VIR_TYPE_VOID, fl, d,
+            virbuild_insn_append(e, VIR_OP_LOAD, type, fl, s, 0, 0), 0);
+    } else if (n == 1 || n == 2 || n == 4 ||
+               n ==
+                   8) { /* one load and store (memcpy(&u, &d, 8)): promotable */
         uint32_t fl = virbuild_memory_flags_make((int)n, 1, false);
 
         virbuild_insn_append(

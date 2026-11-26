@@ -37,6 +37,7 @@ VPRIV bool x64_vir_value_is_supported(const vir_function *f, uint32_t v)
     switch (i->op) {
     case VIR_OP_BSWAP:
     case VIR_OP_CRC32C64:
+    case VIR_OP_X86:
         return true;
     case VIR_OP_ACAS:
     case VIR_OP_AXADD:

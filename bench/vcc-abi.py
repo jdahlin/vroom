@@ -97,6 +97,8 @@ def one(name, wd, verbose):
         sk = re.search(r'/\*\s*vcc-skip-win64:(.*?)\*/', src, re.S)
         if sk:
             return 'skip', ' '.join(sk.group(1).split()), None
+        if name.startswith('avx'):
+            return 'skip', 'AVX: the System V x86-64 target only', None
     elif name.startswith('msabi') and not X86:
         return 'skip', 'ms_abi/sysv_abi: x86-64 only', None
     elif name.startswith('avx') and not X86:

@@ -226,7 +226,7 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
             continue;
         }
         rel = virbuild_promote_relative_offset(&V->insns[a]);
-        size = 1u << VIR_INSN_FLAG_WIDTH_LOG2(q->insn.flags);
+        size = virbuild_access_bytes(V, &q->insn);
         ty = q->insn.op == VIR_OP_STORE ? V->insns[q->insn.b].insn.type
                                         : VIR_TYPE_VOID;
         /* Simplification can remove a truncation before a narrow store.
@@ -255,6 +255,16 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
             fd[nf++] = VCC_LITERAL(virbuild_promote_field, s, rel, size,
                                    VIR_TYPE_VOID);
         }
+        /* a vector field is one vector type, read and written whole */
+        uint32_t accessed = ty;
+        if (q->insn.op == VIR_OP_LOAD)
+            accessed = q->insn.type;
+        if (size == 16) {
+            if (fd[k].type != VIR_TYPE_VOID && fd[k].type != accessed)
+                bad[s] = 1;
+            if (q->insn.op == VIR_OP_STORE)
+                ty = accessed;
+        }
         if (ty != VIR_TYPE_VOID) {
             if (fd[k].type != VIR_TYPE_VOID && fd[k].type != ty) {
                 if ((fd[k].type == VIR_TYPE_PTR ||
@@ -278,8 +288,9 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
 
             if (f->slot == ms[m].slot && f->relative_offset < hi &&
                 lo < f->relative_offset + (int64_t)f->size &&
-                !(lo <= f->relative_offset &&
-                  f->relative_offset + (int64_t)f->size <= hi))
+                (f->size == 16 || /* (no vector zero constant) */
+                 !(lo <= f->relative_offset &&
+                   f->relative_offset + (int64_t)f->size <= hi)))
                 bad[f->slot] = 1;
         }
     /* every load must take the field's stored type with one conversion at most */
@@ -291,6 +302,12 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
             continue;
         virbuild_promote_field *f = &fd[fof[i] - 1];
 
+        if (f->size == 16) {
+            /* never stored: no undefined vector constant to give it */
+            if (f->type != q->insn.type)
+                bad[q->slot_plus_one - 1] = 1;
+            continue;
+        }
         if (f->type ==
             VIR_TYPE_VOID) /* never stored: as the first load reads it */
             f->type = VIR_INSN_FLAG_WIDTH_LOG2(q->insn.flags) < 2 ||
