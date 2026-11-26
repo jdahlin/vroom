@@ -713,7 +713,9 @@ analysis_result semantic_analysis::declare(
        function; ... has its linkage determined as follows: if the enclosing
        namespace has internal linkage, the name has internal linkage" */
     bool in_unnamed = within_unnamed_namespace(scope);
-    if (in_unnamed && implied == linkage::external)
+    /* [dcl.link]/1 [impl.clang]: a name of C language linkage keeps its
+       external linkage there, its symbol the name */
+    if (in_unnamed && implied == linkage::external && !c_language)
         implied = linkage::internal;
     /* [over.pre]/1: "When two or more different declarations are specified
        for a single name in the same scope, that name is said to be

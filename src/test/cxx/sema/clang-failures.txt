@@ -284,7 +284,6 @@ lower CXX/special/class.init/class.base.init/p9-0x.cpp -std=c++11: vpp -S define
 lower CXX/temp/temp.spec/temp.explicit/p9-linkage.cpp -std=c++11: vpp -S defines ['_ZN2X0IPiE10static_varE'] clang -O0 does not, not []
 lower SemaCXX/PR38913.cpp -std=gnu++17: vpp -S defines ['_Z1av', '_Z1bv'] clang -O0 does not, not ['_Z1aB4ATAGv', '_Z1bB4BTAGv']
 lower SemaCXX/cxx11-thread-local-print.cpp -std=c++11: vpp -S defines [] clang -O0 does not, not ['_ZTW8cxx11_tl']
-lower SemaCXX/linkage.cpp -std=gnu++17 -Werror -Wno-non-c-typedef-for-linkage: vpp -S defines [] clang -O0 does not, not ['test4']
 lower SemaCXX/microsoft-constexpr3.cpp -std=c++20 -fms-compatibility: vpp -S defines ['_ZN1BD0Ev', '_ZTV1B'] clang -O0 does not, not []
 lower SemaCXX/noreturn-vars.cpp -std=gnu++17: vpp -S defines ['_ZL10const_fptr', '_ZL15const_fptr_cast', '_ZL15const_fptr_list'] clang -O0 does not, not []
 lower SemaCXX/unique_object_duplication.cpp -std=gnu++17 -Wunique-object-duplication -Wno-unused-value: vpp -S defines ['_ZGVZN15StaticLocalTest12_GLOBAL__N_122has_static_locals_anonEvE14allowedStatic2', '_ZGVZN15StaticLocalTest12_GLOBAL__N_122has_static_locals_anonEvE14allowedStatic3', '_ZGVZN15StaticLocalTest26has_static_locals_externalEvE17disallowedStatic2'] clang -O0 does not, not []
