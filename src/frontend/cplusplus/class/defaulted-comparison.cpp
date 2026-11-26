@@ -28,7 +28,8 @@ bool semantic_analysis::defaulted_equality_declared(entity_index c,
          !three_way) ||
         f.kind != type_kind::function || f.variadic || f.parameter_count != 2)
         return false;
-    if (three_way && !comparison_category(f.operand))
+    if (three_way && !comparison_category(f.operand) &&
+        !(f.operand == placeholder_type(false)))
         return false;
     if (!three_way && fundamental_of(f.operand) != fundamental_type::bool_)
         return false;
@@ -399,9 +400,39 @@ analysis_result semantic_analysis::defaulted_equality(
     expression_meaning equal_all;
     bool equal_any = false, equal_deleted = false, equal_known = true;
     bool equality_constant = true;
-    if (three_way)
+    if (three_way) {
         category =
             type_table[entity_table[last_declared].type.unqualified()].operand;
+        if (category == placeholder_type(false)) {
+            const char *cname = "strong_ordering";
+            for (uint32_t i = 0; i < x.member_count; i++) {
+                entity_index mem = class_members[x.first_member + i];
+                if (!entity_table[mem].name && entity_table[mem].bit_field)
+                    continue;
+                if (is_floating(entity_table[mem].type))
+                    cname = "partial_ordering";
+            }
+            entity_index std_ns =
+                entity_table.find(0, tokens.pp.identifier("std", 3) + 1);
+            entity_index cat_e = 0;
+            if (std_ns && is_namespace(std_ns))
+                cat_e =
+                    lookup_in_namespace(
+                        std_ns, tokens.pp.identifier(cname, strlen(cname)) + 1,
+                        lookup_filter::types)
+                        .entity;
+            if (!cat_e || entity_table[cat_e].kind != entity_kind::class_type)
+                return not_supported_because(
+                    current_declaration, "class.spaceship",
+                    "deduced defaulted operator<=> without <compare>");
+            category = qualified_type::make(
+                entity_table[cat_e].type.unqualified(), cv_none);
+            entity_table[last_declared].type =
+                replace_placeholder(entity_table[last_declared].type, category);
+            function_state.deduced = true;
+            function_state.returns = category;
+        }
+    }
     for (uint32_t i = 0; i < x.base_count + x.member_count; i++) {
         entity_index member = 0, base = 0;
         qualified_type type;
@@ -536,7 +567,8 @@ bool semantic_analysis::defaulted_member_equality(entity_index c,
         f.operand.cv())
         return false;
     bool three_way = m.implemented == preprocessing_op_or_punc::SPACESHIP;
-    if (three_way && !comparison_category(f.operand))
+    if (three_way && !comparison_category(f.operand) &&
+        !(f.operand == placeholder_type(false)))
         return false;
     if (!three_way && fundamental_of(f.operand) != fundamental_type::bool_)
         return false;
