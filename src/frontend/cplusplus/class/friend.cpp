@@ -1213,6 +1213,7 @@ analysis_result semantic_analysis::friend_function_body(
     current_declaration = definition;
     entity_index scope = current_scope;
     current_scope = c;
+    scoped_value<entity_index> grant_class(defining_class, c);
     specified s;
     bool outer = friend_allowed;
     friend_allowed = true;
