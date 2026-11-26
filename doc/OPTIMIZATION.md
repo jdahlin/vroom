@@ -126,7 +126,9 @@ What a function gets, in order (the rows of `codegen/vir/pass-table.c`):
   which runs the rest (NEON on arm64, SSE2 on x86-64); inductions, integer
   sums and ordered floating-point reductions (no reassociation).  A loop whose
   accesses it cannot prove separate stays scalar; so does a loop that is only
-  a search (a maximum and its index).
+  a search (a maximum and its index).  Loops over 2-byte elements become
+  eight lanes (`i16x8`) when the stored values need only add, subtract, and,
+  or and xor, at forward unit strides.
 - **Loop constants** (`codegen/vir/loop-constants.c`): in an innermost loop
   without calls, up to six constants that cost instructions each round (a
   symbol's address, a floating-point constant, a compare's bound that is not
