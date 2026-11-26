@@ -701,7 +701,10 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
                 "a friend redeclaration with another type, or of an extern "
                 "\"C\" function");
     } else {
-        if (type_without_external_linkage(type) ||
+        /* (within an unnamed namespace the function's linkage is internal
+           whatever its type's) */
+        if ((type_without_external_linkage(type) &&
+             !within_unnamed_namespace(space)) ||
             tokens.files.behavior.microsoft_extensions)
             return not_supported_because(
                 n, "class.friend",
