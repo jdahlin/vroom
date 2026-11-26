@@ -1677,6 +1677,38 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                        source_name(analysis.token_identifier(member.token()));
             }
         }
+        /* ns::C<args>::name: each namespace as written (std, not its
+           inline namespace) a qualifier level, then the specialization:
+
+               <unresolved-name> ::= [gs] sr <unresolved-qualifier-level>+ E
+                                     <base-unresolved-name> */
+        uint32_t last = 0;
+        if (qual.size() >= 2)
+            last = qual.size() - 2;
+        if (member.is_token() && member.is_identifier() && last > qi &&
+            qual[last].is(syntax_kind::simple_template_id) &&
+            qual[last].size() >= 3 && qual[last][0].is_identifier()) {
+            if (global)
+                text("gs");
+            text("sr");
+            for (; qi < last; qi += 2) {
+                if (!qual[qi].is_identifier() ||
+                    !source_name(analysis.token_identifier(qual[qi].token())))
+                    return false;
+            }
+            bool dependent = false;
+            if (!source_name(
+                    analysis.token_identifier(qual[last][0].token())) ||
+                !written_template_args(qual[last], dependent))
+                return false;
+            /* (with no dependent argument the member is known, and clang
+               names it, L _Z <encoding> E: not mangled yet) */
+            if (!dependent)
+                return refuse("a member of a specialization its arguments "
+                              "resolve (clang's L _Z <encoding> E)");
+            text("E");
+            return source_name(analysis.token_identifier(member.token()));
+        }
         if (member.is_token() && member.is_identifier()) {
             entity_index scope = 0;
             bool first_lookup = !global;
