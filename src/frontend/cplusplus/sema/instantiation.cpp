@@ -165,10 +165,14 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
             stage = declare_stage;
+            /* (the instantiation this one is made for, a member's
+               declarator naming this specialization in its
+               trailing-return-type, is still being made afterwards) */
+            const uint32_t outer = instantiating;
             instantiating = index + 1;
             r = declare_specialization(ft.declarator, m.id, type, s,
                                        m.exceptions, e);
-            instantiating = 0;
+            instantiating = outer;
             if (r == analysis_result::well_formed && constructor)
                 entity_table[e].explicit_ = s.explicit_;
             if (r == analysis_result::well_formed && ft.friend_class &&
