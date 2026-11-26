@@ -3972,8 +3972,12 @@ class semantic_analysis
     uint32_t expression_node_make(uint32_t tag, uint64_t word, uint32_t a,
                                   uint32_t b);
     uint32_t expression_structure(SyntaxElement e);
+    /* full_expression: x is one, whose temporaries' destructors it invokes
+       ([except.spec]/6.2) */
     analysis_result potentially_throwing(SyntaxRef n, uint32_t x,
-                                         bool &throwing);
+                                         bool &throwing,
+                                         bool full_expression = false);
+    bool temporary_destructor_throws(uint32_t x);
     analysis_result conditional_void_operand(SyntaxRef n,
                                              const expression_meaning &c,
                                              const expression_meaning &e2,
