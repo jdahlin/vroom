@@ -455,17 +455,21 @@ bool semantic_analysis::deduce_conversion_templates(
                     !(form.has_default || form.pack))
                     all_set = false;
             }
-            /* the class is being defined (an implicit member of its
-               instantiation is analysed): its default template-arguments
-               may name the class itself, which is incomplete; they wait
-               as before */
             if (!all_set)
                 continue;
+            /* the conversion function's class is being defined (an
+               implicit member of its instantiation is analysed): its
+               default template-arguments may name the class itself, which
+               is incomplete; they wait.  Another instantiation being
+               analysed (a function template's body) substitutes them */
             {
                 bool defaulted = false;
                 for (bool s : set)
                     defaulted |= !s;
-                if (defaulted && instantiation_depth)
+                entity_index owner = entity_table[ft.entity].enclosing;
+                if (defaulted && instantiation_depth &&
+                    entity_table[owner].kind == entity_kind::class_type &&
+                    !entity_table[owner].size)
                     continue;
             }
             entity_index spec = 0;
