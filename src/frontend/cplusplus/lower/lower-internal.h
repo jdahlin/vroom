@@ -124,6 +124,7 @@ class c_lowering
     bool dynamic_initialization();
     /* [basic.start.term], [abi:guards]: the run time's functions and
        __dso_handle, 0 until declared */
+    uint32_t memset_function = 0;
     uint32_t cxa_atexit = 0, dso_handle = 0, guard_acquire = 0,
              guard_release = 0, noop_coro_symbol = 0;
     uint32_t runtime_call(uint32_t &slot, const char *name,

@@ -103,7 +103,29 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
     else if (x.kind == semantic_kind::zero &&
              record(x.type).kind != type_kind::class_type)
         value = scalar_zero(x.type, t, x.at);
-    else
+    else if (x.kind == semantic_kind::zero &&
+             record(x.type).kind == type_kind::class_type &&
+             !holds_data_member_pointer(x.type)) {
+        /* the object itself zeroed (memset), never a temporary as large
+           as it (Stockfish's FeatureTransformer, 100 MB) */
+        ast_qualified_type v = pointer_to(void_type);
+        ast_qualified_type size_type =
+            ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG);
+        ast_qualified_type parameters[3] = {
+            v, ast_builder_type_basic(AST_TYPE_INT), size_type};
+        uint32_t arguments[3] = {
+            address_of(object, pointer_to(t)),
+            ast_builder_integer(c, parameters[1], 0),
+            ast_builder_integer(
+                c, size_type,
+                static_cast<int64_t>(
+                    analysis.entity_table[record(x.type).entity].size))};
+        uint32_t call = runtime_call(memset_function, "memset", v, parameters,
+                                     arguments, 3);
+        if (!call)
+            return 0;
+        return cast(call, void_type, AST_CAST_VOID);
+    } else
         value = initializer(n);
     if (!value)
         return 0;
