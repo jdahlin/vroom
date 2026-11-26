@@ -80,7 +80,14 @@ bool semantic_analysis::implicit_constructor_throws(entity_index f, bool &known)
         return false;
     }
     entity_index c = entity_table[f].enclosing;
-    bool copy = type_table[entity_table[f].type.unqualified()].parameter_count;
+    type_index ft = entity_table[f].type.unqualified();
+    bool copy = type_table[ft].parameter_count != 0;
+    bool move = false;
+    if (copy) {
+        const struct type &p =
+            type_table[type_table.parameters(ft)[0].unqualified()];
+        move = p.kind == type_kind::rvalue_reference;
+    }
     const entity x = entity_table[c];
     for (uint32_t i = 0; !copy && i < x.member_count; i++) {
         entity_index e = class_members[x.first_member + i];
@@ -99,7 +106,7 @@ bool semantic_analysis::implicit_constructor_throws(entity_index f, bool &known)
     for (entity_index k : classes) {
         if (!copy && !default_constructed(c, k))
             continue;
-        if (subobject_constructor_throws(k, copy, known))
+        if (subobject_constructor_throws(k, copy, known, move))
             return true;
         if (!known)
             return false;
@@ -107,12 +114,13 @@ bool semantic_analysis::implicit_constructor_throws(entity_index f, bool &known)
     return false;
 }
 
-/* ... the default constructor of class k, or its copy constructor from a
-   const lvalue, can throw */
+/* ... the default constructor of class k, or its copy/move constructor,
+   can throw */
 bool semantic_analysis::subobject_constructor_throws(entity_index k, bool copy,
-                                                     bool &known)
+                                                     bool &known, bool move)
 {
     entity_index found = 0;
+    entity_index found_move = 0;
     for (entity_index e = entity_table[k].first_constructor; e;
          e = entity_table[e].next_constructor) {
         const struct type &f = type_table[entity_table[e].type.unqualified()];
@@ -122,12 +130,17 @@ bool semantic_analysis::subobject_constructor_throws(entity_index k, bool copy,
             const struct type &p = type_table
                 [type_table.parameters(entity_table[e].type.unqualified())[0]
                      .unqualified()];
+            if (move && p.kind == type_kind::rvalue_reference &&
+                p.operand.unqualified() == entity_table[k].type.unqualified())
+                found_move = e;
             if (p.kind == type_kind::lvalue_reference &&
                 p.operand.unqualified() == entity_table[k].type.unqualified() &&
                 (!found || p.operand.cv() == cv_const))
                 found = e;
         }
     }
+    if (found_move)
+        found = found_move;
     if (found) {
         if (entity_table[found].implicit)
             return implicit_constructor_throws(found, known);

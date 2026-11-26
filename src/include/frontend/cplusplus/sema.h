@@ -3767,7 +3767,8 @@ class semantic_analysis
        when it cannot be told */
     bool implicit_constructor_throws(entity_index f, bool &known);
     bool default_initializer_throws(entity_index e, bool &throws);
-    bool subobject_constructor_throws(entity_index k, bool copy, bool &known);
+    bool subobject_constructor_throws(entity_index k, bool copy, bool &known,
+                                      bool move = false);
     /* declval<T>() as an expression */
     expression_meaning declval_meaning(qualified_type t);
     /* [ext:clang_type_traits] the answer of the trait of one type-id
