@@ -1130,18 +1130,23 @@ analysis_result semantic_analysis::named_specialization(
             return analysis_result::well_formed;
         }
         /* [temp.explicit]/7, /11: after an explicit specialization, a
-           second definition, a declaration after the definition or after
-           a use: clang's diagnostics, or none */
+           second definition, or a declaration after the definition */
         if (x.explicit_specialization ||
             entity_table[e].explicitly_instantiated ==
                 instantiation_kind::definition ||
-            (extern_ && (x.defined || x.pending ||
-                         entity_table[e].explicitly_instantiated !=
-                             instantiation_kind::declaration)))
+            (extern_ && x.defined))
             return not_supported_because(
                 n, rule,
                 "an explicit instantiation after a specialization, "
                 "definition or use");
+        if (extern_) {
+            instantiations[prior - 1].pending = false;
+            entity_table[e].explicitly_instantiated =
+                instantiation_kind::declaration;
+            entity_table.add_declaration(e, declaration);
+            index = prior - 1;
+            return analysis_result::well_formed;
+        }
     }
     /* clang's "explicit instantiation of undefined function template" */
     if (!specialization && !extern_ && !f.definition)

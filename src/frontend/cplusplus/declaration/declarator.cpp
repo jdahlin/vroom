@@ -526,8 +526,15 @@ node_index parser::ptr_operator(derivation *kind)
     attribute_specifier_seq(true);
     if (failed())
         return 0;
-    if (qualifiers)
+    if (qualifiers) {
         cv_qualifier_seq();
+        while (at_gnu_attribute()) {
+            gnu_attribute_specifier();
+            if (failed())
+                return 0;
+            cv_qualifier_seq();
+        }
+    }
     return finish_node(syntax_kind::ptr_operator, mark, first);
 }
 

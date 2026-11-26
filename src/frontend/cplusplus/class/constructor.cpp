@@ -925,16 +925,11 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
        are ([class.default.ctor]/4, [class.copy.ctor]/13 with
        [dcl.constexpr]/4 as of C++20, which no longer asks for every member
        to be initialized); the other functions are not analysed */
-    if (constexpr_specified && (m.destructor || x.virtual_base_count))
+    if (constexpr_specified && x.virtual_base_count)
         return not_supported_because(
             n, "dcl.fct.def.default",
-            "a constexpr defaulted destructor, or a constexpr default in a "
-            "class with virtual bases");
+            "a constexpr default in a class with virtual bases");
     if (m.destructor) {
-        if (access)
-            return not_supported_because(
-                n, "dcl.fct.def.default",
-                "a defaulted destructor that is not public");
         /* [class.dtor]/4: as the implicitly-declared destructor */
         if (x.destructor || f.parameter_count || explicit_specified)
             return not_supported_because(n, "dcl.fct.def.default",
@@ -946,14 +941,13 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
            virtual ([class.virtual]/7) */
         declare_implicit(c, special_member::destructor, false);
         entity_index e = entity_table[c].destructor;
+        entity_table[e].access = access;
+        if (constexpr_specified)
+            entity_table[e].constexpr_ = true;
         entity_table.add_declaration(e, n);
         virt_override = virt_final = virt_pure = false;
         return virtual_member(c, e, n, m.id, true);
     }
-    if (access && f.parameter_count)
-        return not_supported_because(
-            n, "dcl.fct.def.default",
-            "a defaulted constructor with parameters that is not public");
     if (!f.parameter_count) {
         if (x.defaulted_default_constructor)
             return not_supported_because(
@@ -1375,9 +1369,18 @@ analysis_result semantic_analysis::construct(
                 "does not copy its bytes");
         bool ambiguous = false;
         entity_index from = type_table[arguments[0].type.unqualified()].entity;
-        if (from != c && base_step(from, c, ambiguous)) {
-            /* its const X& bound to the base class subobject */
-            VTRY(r, to_base(at.first_token(), c, arguments[0]));
+        if (from != c) {
+            if (base_step(from, c, ambiguous)) {
+                /* its const X& bound to the base class subobject */
+                VTRY(r, to_base(at.first_token(), c, arguments[0]));
+            } else {
+                /* user-defined conversion to c (e.g. Src::operator Dst()) */
+                qualified_type dst =
+                    qualified_type::make(type.unqualified(), cv_none);
+                VTRY(r, initialize_with(at, arguments[0], dst, false, false,
+                                        result));
+                return analysis_result::well_formed;
+            }
         }
         result.evaluation = constness::unknown;
         result.value = 0;
@@ -1524,11 +1527,6 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         initialized_value value;
         VTRY(r, construct(item, entity_table[c].type, arguments, 0, value,
                           false, &listed_arguments));
-        if (semantics[value.node].kind != semantic_kind::construct ||
-            semantics[value.node].a)
-            return not_supported_because(
-                item, "class.base.init",
-                "a delegating initialization that is not a constructor call");
         expression_meaning ptr;
         VTRY_SET(r, this_pointer(id, ptr));
         expression_meaning self;
@@ -1537,10 +1535,25 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         self.evaluation = constness::not_constant;
         self.node =
             expression_node(semantic_kind::indirection, self, id, ptr.node);
-        semantics[value.node].a = self.node;
-        built =
-            statement_node(semantic_kind::expression_statement, id, value.node);
-        return analysis_result::well_formed;
+        if (semantics[value.node].kind == semantic_kind::construct &&
+            !semantics[value.node].a) {
+            semantics[value.node].a = self.node;
+            built = statement_node(semantic_kind::expression_statement, id,
+                                   value.node);
+            return analysis_result::well_formed;
+        }
+        if (semantics[value.node].type.unqualified() ==
+            entity_table[c].type.unqualified()) {
+            uint32_t copy = expression_node(
+                semantic_kind::assignment, self, id, self.node, value.node,
+                static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
+            built =
+                statement_node(semantic_kind::expression_statement, id, copy);
+            return analysis_result::well_formed;
+        }
+        return not_supported_because(
+            item, "class.base.init",
+            "a delegating initialization that is not a constructor call");
     }
     /* [class.base.init]/13: "(13.2) Then, direct base classes are
        initialized in declaration order as they appear in the
@@ -2557,7 +2570,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
            deleted when a subobject's copy constructor is deleted or not
            accessible: none is declared, and a copy of the class, which
            does not copy its bytes, is refused where it is used */
-        if (!copy_ok && !declares_copy) {
+        if (!copy_ok && (!declares_copy || x.defaulted_copy_constructor)) {
             /* C++03 has no deleted functions: [impl.clang] clang reports the
                implicit copy constructor's definition at the class */
             if (!tokens.files.behavior.has(language_feature::rvalue_references))
@@ -2565,6 +2578,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                     n, "class.default.ctor",
                     "a deleted implicit copy constructor before C++11");
             copy_deleted = true;
+            entity_table[c].defaulted_copy_constructor = false;
         }
         /* [class.copy.ctor]/10.2, [class.default.ctor]/2.7: an
            implicit constructor beside a subobject's inaccessible
@@ -2649,11 +2663,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
         if (!user_copy && !y.defaulted_copy_constructor)
             copy_deleted = true;
         if (y.defaulted_move_constructor && !trivial_move) {
-            if (y.union_)
-                return not_supported_because(
-                    n, "class.copy.ctor",
-                    "a non-trivial defaulted move constructor of a union");
             entity_table[c].defaulted_move_constructor = false;
+            /* [class.copy.ctor]/10.1: a union with a variant member that has
+               a non-trivial move constructor has its defaulted move
+               constructor defined as deleted */
+            if (y.union_)
+                move_deleted = true;
             /* [class.copy.ctor]/10: "A defaulted move constructor that
                is defined as deleted is ignored by overload resolution"
                ([over.match.funcs]/8) when a subobject can be neither

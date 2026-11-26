@@ -296,6 +296,58 @@ uint32_t c_lowering::source_location(const semantic_node &n)
         return ast_builder_integer(c, t, p.line);
     if (which == source_location_builtin::column)
         return ast_builder_integer(c, t, p.column);
+    auto make_cstr = [&](const char *str, size_t len,
+                         ast_qualified_type ptr_t) {
+        owned_array<uint8_t> bytes;
+        bytes.resize(len + 1);
+        for (size_t i = 0; i < len; i++)
+            bytes[i] = static_cast<uint8_t>(str[i]);
+        bytes[len] = 0;
+        ast_qualified_type ch = ast_builder_type_qualified(
+            c, ast_builder_type_basic(AST_TYPE_CHAR), AST_QUALIFIER_CONST);
+        uint32_t array = ast_builder_string(c, ch, bytes.data(),
+                                            static_cast<uint32_t>(bytes.size()),
+                                            1, LEX_TOKEN_STRING);
+        return cast(array, ptr_t, AST_CAST_ARRAY_DECAY);
+    };
+    if (which == source_location_builtin::object) {
+        qualified_type pointee = record(n.type).operand;
+        ast_qualified_type impl_t = type(pointee, n.at);
+        ast_qualified_type cchar_p = pointer_to(ast_builder_type_qualified(
+            c, ast_builder_type_basic(AST_TYPE_CHAR), AST_QUALIFIER_CONST));
+        const char *fname = "";
+        if (p.file_name)
+            fname = p.file_name;
+        uint32_t file_expr = make_cstr(fname, strlen(fname), cchar_p);
+        owned_buffer func_text;
+        if (function)
+            spelling(function, func_text);
+        uint32_t func_expr =
+            make_cstr(func_text.data(), func_text.size(), cchar_p);
+        ast_qualified_type uint_t =
+            ast_builder_type_basic(AST_TYPE_UNSIGNED_INT);
+        uint32_t values[4] = {
+            file_expr,
+            func_expr,
+            ast_builder_integer(c, uint_t, p.line),
+            ast_builder_integer(c, uint_t, p.column),
+        };
+        owned_buffer sym_name;
+        vbuffer_format_append(sym_name.get(), ".L__srcloc.%u",
+                              ++generated_suffix);
+        uint32_t s = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, sym_name.data(),
+                                        sym_name.size(), impl_t,
+                                        AST_STORAGE_STATIC, 0, 0);
+        ast_builder_toplevel(c, s);
+        uint32_t init = make(AST_NODE_INITIALIZER, impl_t, 0,
+                             ast_builder_list(c, values, 4), 4, 0, 0);
+        ast_builder_symbol_body(c, s, init);
+        ast_builder_symbol_flags_add(
+            c, s, AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED);
+        uint32_t var = c_variable(c, s, impl_t);
+        address_taken(var);
+        return address_of(var, t);
+    }
     owned_buffer text;
     if (which == source_location_builtin::function) {
         if (function)
@@ -309,18 +361,7 @@ uint32_t c_lowering::source_location(const semantic_node &n)
         }
         vbuffer_string_append(text.get(), name);
     }
-    /* the characters and a NUL: a string-literal's array of const char,
-       which decays */
-    owned_array<uint8_t> bytes;
-    bytes.resize(text.size() + 1);
-    for (size_t i = 0; i < text.size(); i++)
-        bytes[i] = static_cast<uint8_t>(text.data()[i]);
-    bytes[text.size()] = 0;
-    qualified_type element = record(n.type).operand;
-    uint32_t array = ast_builder_string(c, type(element, n.at), bytes.data(),
-                                        static_cast<uint32_t>(bytes.size()), 1,
-                                        LEX_TOKEN_STRING);
-    return cast(array, t, AST_CAST_ARRAY_DECAY);
+    return make_cstr(text.data(), text.size(), t);
 }
 
 /* [dcl.fct.def.general]/8: the function's name as a string constant */
@@ -345,8 +386,10 @@ uint32_t c_lowering::default_argument(const semantic_node &n)
 {
     token_index outer_at = call_site_at;
     entity_index outer_function = call_site_function;
-    call_site_at = n.at;
-    call_site_function = n.b;
+    if (!outer_at) {
+        call_site_at = n.at;
+        call_site_function = n.b;
+    }
     uint32_t made = expression(n.a);
     call_site_at = outer_at;
     call_site_function = outer_function;

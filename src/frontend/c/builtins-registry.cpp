@@ -407,6 +407,10 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin___snprintf_chk", CC_BUILTIN_LIBRARY, 0, "iszizS."},
     {"__builtin___vsprintf_chk", CC_BUILTIN_LIBRARY, 0, "isizSV"},
     {"__builtin___vsnprintf_chk", CC_BUILTIN_LIBRARY, 0, "iszizSV"},
+    {"__builtin___fprintf_chk", CC_BUILTIN_LIBRARY, 0, "ipiS."},
+    {"__builtin___printf_chk", CC_BUILTIN_LIBRARY, 0, "iiS."},
+    {"__builtin___vfprintf_chk", CC_BUILTIN_LIBRARY, 0, "ipiSV"},
+    {"__builtin___vprintf_chk", CC_BUILTIN_LIBRARY, 0, "iiSV"},
     {NULL, 0, 0, NULL}};
 
 /* name of a library builtin (sym val of an AST_SYMBOL_BUILTIN) */

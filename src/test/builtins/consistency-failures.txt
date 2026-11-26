@@ -2,10 +2,6 @@
 # --check fails on a violation not listed here and on a listed one that no longer happens: fix it, then
 # `bench/vcc-builtins-consistency.py --bless` in the same commit.  Never add a line to hide a regression.
 # The text after # is informational and not compared.
-c-only-callable __builtin___vsnprintf_chk c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-c-only-callable __builtin___vsnprintf_chk c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-c-only-callable __builtin___vsprintf_chk c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
-c-only-callable __builtin___vsprintf_chk c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
 c-only-callable __builtin_ia32_addcarryx_u64 c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
 c-only-callable __builtin_ia32_lfence c++/arm64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 c-only-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
@@ -18,26 +14,14 @@ c-only-callable __builtin_ms_va_copy c++/x86_64 # the rules of [ext.gnu] are not
 c-only-callable __builtin_ms_va_end c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
 c-only-callable __builtin_ms_va_end c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
 c-only-callable __builtin_ms_va_start c++/x86_64 # the C++ front end does not handle a declaration the parser kept as tokens yet
-c-only-callable __builtin_neon_vaddh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet
-c-only-callable __builtin_neon_vsubh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet
-c-only-callable __builtin_vsnprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-c-only-callable __builtin_vsnprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-c-only-callable __builtin_vsprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
-c-only-callable __builtin_vsprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
-claimed-not-callable __builtin___vsnprintf_chk c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-claimed-not-callable __builtin___vsnprintf_chk c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsnprintf_chk has a signature whose parameter types are not supported
-claimed-not-callable __builtin___vsprintf_chk c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
-claimed-not-callable __builtin___vsprintf_chk c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin___vsprintf_chk has a signature whose parameter types are not supported
+c-only-callable __builtin_neon_vaddh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet: a cast to a fundamental type that has no rules
+c-only-callable __builtin_neon_vsubh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet: a cast to a fundamental type that has no rules
 claimed-not-callable __builtin_ia32_addcarryx_u64 c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
 claimed-not-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_mfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
-claimed-not-callable __builtin_vsnprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-claimed-not-callable __builtin_vsnprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsnprintf has a signature whose parameter types are not supported
-claimed-not-callable __builtin_vsprintf c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
-claimed-not-callable __builtin_vsprintf c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_vsprintf has a signature whose parameter types are not supported
-constexpr-claimed-not-folded __builtin_add_overflow c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_add_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_add_overflow c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_add_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_huge_val c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_huge_val c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_huge_val c/arm64 # variably modified type declaration not allowed at file scope
@@ -46,8 +30,8 @@ constexpr-claimed-not-folded __builtin_huge_valf c++/arm64 # in any constexpr va
 constexpr-claimed-not-folded __builtin_huge_valf c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_huge_valf c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_huge_valf c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_huge_vall c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_huge_vall c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_huge_vall c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator met L341 (conversion)
+constexpr-claimed-not-folded __builtin_huge_vall c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator met L341 (conversion)
 constexpr-claimed-not-folded __builtin_huge_vall c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_huge_vall c/x86_64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_inf c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
@@ -58,38 +42,38 @@ constexpr-claimed-not-folded __builtin_inff c++/arm64 # in any constexpr variabl
 constexpr-claimed-not-folded __builtin_inff c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_inff c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_inff c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_infl c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_infl c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_infl c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator met L341 (conversion)
+constexpr-claimed-not-folded __builtin_infl c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator met L341 (conversion)
 constexpr-claimed-not-folded __builtin_infl c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_infl c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_mul_overflow c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_mul_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_nan c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_nan c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_mul_overflow c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_mul_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_nan c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_nan c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_nan c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nan c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_nanf c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_nanf c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nanf c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_nanf c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_nanf c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nanf c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_nanl c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_nanl c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nanl c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_nanl c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_nanl c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nanl c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_nans c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_nans c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nans c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_nans c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_nans c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nans c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_nansf c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_nansf c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nansf c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_nansf c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_nansf c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nansf c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_nansl c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_nansl c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_nansl c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_nansl c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_nansl c/arm64 # variably modified type declaration not allowed at file scope
 constexpr-claimed-not-folded __builtin_nansl c/x86_64 # variably modified type declaration not allowed at file scope
-constexpr-claimed-not-folded __builtin_sub_overflow c++/arm64 # the rules of [expr.const] are not implemented yet
-constexpr-claimed-not-folded __builtin_sub_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet
+constexpr-claimed-not-folded __builtin_sub_overflow c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
+constexpr-claimed-not-folded __builtin_sub_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_wcslen c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_wcslen c++/x86_64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
 constexpr-claimed-not-folded __builtin_wmemcmp c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])

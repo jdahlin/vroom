@@ -72,15 +72,21 @@ semantic_analysis::clang_source_location_object(SyntaxRef n,
                           "'std::source_location::__impl' must be defined "
                           "before '__builtin_source_location' is called",
                           "ext.clang");
-    if (!unevaluated)
-        return not_supported_because(
-            n, "ext.clang",
-            "__builtin_source_location in an evaluated context");
     qualified_type object = qualified_type::make(
         type_table.of_entity(type_kind::class_type, impl), cv_const);
+    m = expression_meaning();
     m.type = qualified_type::make(type_table.pointer_to(object), cv_none);
     m.category = value_category::prvalue;
     m.evaluation = constness::unknown;
+    source_location_uses++;
+    token_index at = n.first_token();
+    if (!call_site_depth && source_location_at)
+        at = source_location_at;
+    if (call_site_depth)
+        call_site_nodes++;
+    m.node = expression_node(
+        semantic_kind::source_location, m, at, 0, function_state.function,
+        static_cast<uint8_t>(source_location_builtin::object));
     return analysis_result::well_formed;
 }
 
@@ -197,6 +203,8 @@ uint32_t semantic_analysis::bind_call_site(uint32_t node, token_index call)
 {
     if (semantics[node].kind != semantic_kind::default_argument)
         return node;
+    if (call_site_depth)
+        call_site_nodes++;
     semantic_node bound = semantics[node];
     bound.at = call;
     bound.b = function_state.function;

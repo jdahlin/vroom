@@ -939,7 +939,12 @@ analysis_result semantic_analysis::declare(
            a given entity shall agree." */
         if (implied == linkage::internal && !in_unnamed &&
             e.linkage_of_name == linkage::external &&
-            tokens.files.behavior.microsoft_extensions) {
+            kind == entity_kind::function && (s.gnu_flags & gnu_overloadable)) {
+            /* clang's __attribute__((overloadable)) (glibc _FORTIFY_SOURCE=2):
+               a static inline fortify wrapper over an extern C declaration */
+        } else if (implied == linkage::internal && !in_unnamed &&
+                   e.linkage_of_name == linkage::external &&
+                   tokens.files.behavior.microsoft_extensions) {
             /* Microsoft's extension: the name keeps its external linkage */
             VTRY(r, extension_used(diagnostic_id::sema_static_after_non_static,
                                    id, nullptr));

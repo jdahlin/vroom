@@ -613,29 +613,45 @@ analysis_result semantic_analysis::deduce_return(SyntaxRef at,
 bool semantic_analysis::deduce_member_body_now(entity_index e)
 {
     const entity &x = entity_table[e];
-    if (x.kind != entity_kind::function || !defining_bodies ||
-        x.enclosing != defining_bodies_class ||
-        !entity_table[x.enclosing].instantiation)
+    if (x.kind != entity_kind::function)
         return false;
-    for (size_t i = 0; i < defining_bodies->size(); i++) {
-        SyntaxRef body = (*defining_bodies)[i];
-        if (!body || !declared_by(e, body))
+    if (defining_bodies && x.enclosing == defining_bodies_class &&
+        entity_table[x.enclosing].instantiation) {
+        for (size_t i = 0; i < defining_bodies->size(); i++) {
+            SyntaxRef body = (*defining_bodies)[i];
+            if (!body || !declared_by(e, body))
+                continue;
+            (*defining_bodies)[i] = nullptr;
+            SyntaxRef outer_declaration = current_declaration;
+            function_context outer_function =
+                static_cast<function_context &&>(function_state);
+            function_state = function_context();
+            owned_array<entity_index> outer_variables =
+                static_cast<owned_array<entity_index> &&>(block_variables);
+            block_variables = owned_array<entity_index>();
+            entity_index outer_scope = current_scope;
+            instantiated_member_body(x.enclosing, body);
+            current_declaration = outer_declaration;
+            function_state = static_cast<function_context &&>(outer_function);
+            block_variables =
+                static_cast<owned_array<entity_index> &&>(outer_variables);
+            current_scope = outer_scope;
+            return !contains_placeholder(entity_table[e].type);
+        }
+    }
+    for (size_t i = 0; i < postponed_bodies.size(); i++) {
+        postponed_body &b = postponed_bodies[i];
+        if (!b.c || b.c != entity_table[e].enclosing ||
+            !declared_by(e, b.body.function_definition()))
             continue;
-        (*defining_bodies)[i] = nullptr;
-        SyntaxRef outer_declaration = current_declaration;
-        function_context outer_function =
-            static_cast<function_context &&>(function_state);
-        function_state = function_context();
-        owned_array<entity_index> outer_variables =
-            static_cast<owned_array<entity_index> &&>(block_variables);
-        block_variables = owned_array<entity_index>();
-        entity_index outer_scope = current_scope;
-        instantiated_member_body(x.enclosing, body);
-        current_declaration = outer_declaration;
-        function_state = static_cast<function_context &&>(outer_function);
-        block_variables =
-            static_cast<owned_array<entity_index> &&>(outer_variables);
-        current_scope = outer_scope;
+        const postponed_body taken = b;
+        b.c = 0;
+        if (taken.function)
+            entity_table[taken.function].member_body_deferred = false;
+        instantiation_context context;
+        enter_instantiation(context, taken.scope, taken.declaration);
+        instantiated_member_body(taken.c, taken.body);
+        leave_instantiation(context);
         return !contains_placeholder(entity_table[e].type);
     }
     return false;
@@ -660,17 +676,18 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
     if (!undeduced && deduce_member_body_now(e))
         return analysis_result::well_formed;
     if (!undeduced) {
-        if (x.kind == entity_kind::variable)
+        const entity &after = entity_table[e];
+        if (after.kind == entity_kind::variable)
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",
                 "a variable whose placeholder type is not deduced "
                 "(its initializer was not analysed)");
-        if (x.kind == entity_kind::function && x.instantiation)
+        if (after.kind == entity_kind::function && after.instantiation)
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",
                 "a function template's specialization whose placeholder "
                 "type is not deduced");
-        if (x.kind == entity_kind::function)
+        if (after.kind == entity_kind::function)
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",
                 "a defined function whose placeholder type is not deduced "
@@ -718,6 +735,8 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
             n, "dcl.fct",
             "a trailing-return-type after a type other than plain auto");
     VTRY(r, declarator(declaration, n[0], type, m));
+    if (reanalysing_member_declarator)
+        return analysis_result::well_formed;
     const struct type f = type_table[type.unqualified()];
     /* (a type-id's abstract declarator has a derived-declarator-type-list:
        auto(*)() -> void is "pointer to function returning auto") */

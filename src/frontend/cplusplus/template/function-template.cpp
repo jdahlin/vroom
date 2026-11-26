@@ -179,12 +179,21 @@ semantic_analysis::function_template_definition(SyntaxRef n,
             n, "temp.fct",
             "a function template declarator of an unhandled form");
     if (m.literal_operator) {
-        if (parameters.size() != 1 || !template_parameter_is_pack(first) ||
-            entity_table[template_parameter_entities[first]].kind !=
-                entity_kind::none ||
-            fundamental_of(
-                entity_table[template_parameter_entities[first]].type) !=
-                fundamental_type::char_ ||
+        entity_index tp = 0;
+        if (parameters.size() == 1)
+            tp = template_parameter_entities[first];
+        bool char_pack =
+            tp && template_parameter_is_pack(first) &&
+            entity_table[tp].kind == entity_kind::none &&
+            fundamental_of(entity_table[tp].type) == fundamental_type::char_;
+        bool class_nttp =
+            tp && !template_parameter_is_pack(first) &&
+            entity_table[tp].kind == entity_kind::none &&
+            (type_table[entity_table[tp].type.unqualified()].kind ==
+                 type_kind::class_type ||
+             type_table[entity_table[tp].type.unqualified()].kind ==
+                 type_kind::placeholder);
+        if (parameters.size() != 1 || (!char_pack && !class_nttp) ||
             type_table[type.unqualified()].parameter_count != 0)
             return not_supported_because(
                 n, "over.literal",

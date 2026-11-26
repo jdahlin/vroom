@@ -212,6 +212,48 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                 specialization_template_argument(pr.entity, ttp_fixed);
             return deduce_pack_argument(x_pack, y_pack, deduced, set);
         }
+        /* [temp.deduct.type]/9: a trailing pack expansion in the pattern
+           covering non-pack parameters (and possibly a trailing pack) of the
+           template, e.g. Typedef<TBase, TProps...> against
+           Typedef<int, Tag, Prop1, Prop2> */
+        if (!dependent && count > 0 && count <= ar_count &&
+            specialization_template_argument(pr.entity, count - 1).kind ==
+                template_argument::kind_t::pack &&
+            (count < ar_count ||
+             specialization_template_argument(ar.entity, count - 1).kind !=
+                 template_argument::kind_t::pack)) {
+            uint32_t fixed = count - 1;
+            for (uint32_t i = 0; i < fixed; i++) {
+                const template_argument &x =
+                    specialization_template_argument(pr.entity, i);
+                const template_argument &y =
+                    specialization_template_argument(ar.entity, i);
+                if (x.kind == template_argument::kind_t::type) {
+                    if (!deduce_type(x.type, y.type, deduced, set, exact))
+                        return false;
+                } else if (!deduce_argument(x, y, deduced, set)) {
+                    return false;
+                }
+            }
+            owned_array<template_argument> flat;
+            for (uint32_t i = fixed; i < ar_count; i++) {
+                const template_argument &y =
+                    specialization_template_argument(ar.entity, i);
+                if (y.kind == template_argument::kind_t::pack) {
+                    for (uint32_t k = 0; k < y.count; k++)
+                        flat.append(pack_arguments[y.value + k]);
+                } else {
+                    flat.append(y);
+                }
+            }
+            template_argument y_pack =
+                make_pack(flat.data(), static_cast<uint32_t>(flat.size()));
+            const template_argument x_pack =
+                specialization_template_argument(pr.entity, fixed);
+            return deduce_pack_argument(x_pack, y_pack, deduced, set);
+        }
+        if (count != ar_count)
+            return false;
         for (uint32_t i = 0; i < count; i++) {
             const template_argument &x =
                 specialization_template_argument(pr.entity, i);

@@ -1273,8 +1273,12 @@ analysis_result semantic_analysis::overloaded_operator(
         call_arguments.append(ordered[i]);
         call_syntax.append(ordered_syntax[i]);
     }
-    VTRY_SET(r, call_with(n, callee, x.type, object, member, call_syntax,
-                          call_arguments, m, true));
+    if (contains_placeholder(entity_table[f].type)) {
+        VTRY(ur, undeduced_use(at, f));
+        callee.type = entity_table[f].type;
+    }
+    VTRY_SET(r, call_with(n, callee, entity_table[f].type, object, member,
+                          call_syntax, call_arguments, m, true));
     if (from_three_way) {
         /* /8: "If a rewritten operator<=> candidate is selected by overload
            resolution for an operator @, x @ y is interpreted as 0 @ (y <=>

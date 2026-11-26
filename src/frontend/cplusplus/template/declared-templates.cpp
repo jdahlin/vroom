@@ -1334,7 +1334,22 @@ analysis_result semantic_analysis::template_id_arguments(
                     tokens[first].kind == token_kind::identifier)
                     own = own_pack_parameter(tokens.identifier(first));
                 if (own) {
-                    if (arguments.size() < pack || pack >= count)
+                    if (arguments.size() < pack) {
+                        if (w + 1 != written.size())
+                            return not_supported_because(
+                                id, "temp.variadic",
+                                "an own pack expansion with arguments missing "
+                                "before the pack");
+                        template_argument v;
+                        v.kind = template_argument::kind_t::pack;
+                        v.template_entity =
+                            template_parameter_entities[own - 1];
+                        v.value = entity_table[v.template_entity].value;
+                        v.count = UINT32_MAX;
+                        arguments.append(make_pack(&v, 1));
+                        return analysis_result::well_formed;
+                    }
+                    if (pack >= count)
                         return not_supported_because(
                             id, "temp.variadic",
                             "an own pack expansion with arguments missing "

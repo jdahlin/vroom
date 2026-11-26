@@ -385,6 +385,9 @@ enum gnu_attribute_flag : uint32_t {
        own name, with or without noexcept, is of this function, as clang's
        are */
     gnu_library_function = 1048576,
+    /* clang's __attribute__((overloadable)): allows static inline fortify
+       wrappers over extern C declarations (glibc _FORTIFY_SOURCE=2) */
+    gnu_overloadable = 2097152,
     /* [dcl.attr.nouniqueaddr] [[no_unique_address]] (the standard's, not a
        GCC attribute): a non-static data member that may share its bytes
        with another subobject (entity::no_unique_address) */
@@ -1628,6 +1631,7 @@ enum class source_location_builtin : uint8_t {
     function,  /* __builtin_FUNCTION: the function's name, "" outside one */
     line,      /* __builtin_LINE */
     column,    /* __builtin_COLUMN */
+    object, /* __builtin_source_location: const std::source_location::__impl * */
 };
 
 const char *semantic_kind_name(semantic_kind kind);
@@ -3182,6 +3186,7 @@ class semantic_analysis
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
+    bool reanalysing_member_declarator = false;
     /* in a member function template's declarator: 1 the template's own
        (member-template.cpp), 2 a specialization's (instantiation.cpp) */
     uint8_t in_member_template_declarator = 0;
@@ -4709,9 +4714,11 @@ class semantic_analysis
        for a typedef-name, its cv-qualifiers */
     analysis_result named_member_type(SyntaxRef n, token_index t,
                                       entity_index e, const char *citation,
-                                      type_index &type, uint32_t &cv);
+                                      type_index &type, uint32_t &cv,
+                                      bool allow_placeholder = false);
     analysis_result qualified_type_name(SyntaxRef n, type_index &type,
-                                        uint32_t &cv);
+                                        uint32_t &cv,
+                                        bool allow_placeholder = false);
     /* [dcl.enum]: an enum-specifier, the enumeration's type */
     analysis_result enum_specifier(SyntaxRef n, type_index &type);
     analysis_result enum_specifier_rules(SyntaxRef n, type_index &type);

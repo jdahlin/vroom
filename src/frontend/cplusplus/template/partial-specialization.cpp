@@ -666,8 +666,6 @@ analysis_result semantic_analysis::substitute_specialization(
            bound where the specialization was declared */
         if (written.qualified_class_head_name() && written.size() == 2 &&
             written[0].is(syntax_kind::nested_name_specifier) &&
-            written[0].size() == 2 &&
-            written[0][0].is(syntax_kind::simple_template_id) &&
             written[1].is(syntax_kind::simple_template_id))
             id = written[1].index();
     }

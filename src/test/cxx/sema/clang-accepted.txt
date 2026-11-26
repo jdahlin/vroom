@@ -260,6 +260,10 @@ CXX/dcl.dcl/dcl.attr/dcl.attr.noreturn/p1.cpp:28 -std=c++11
 CXX/dcl.dcl/dcl.attr/dcl.attr.noreturn/p1.cpp:37 -std=c++11
 CXX/dcl.dcl/dcl.attr/dcl.attr.noreturn/p1.cpp:40 -std=c++11
 CXX/dcl.dcl/dcl.spec/dcl.constexpr/dtor.cpp:29 -std=c++2a
+CXX/dcl.dcl/dcl.spec/dcl.constexpr/p1.cpp:78 -DMS_ABI -std=c++11
+CXX/dcl.dcl/dcl.spec/dcl.constexpr/p1.cpp:78 -std=c++11
+CXX/dcl.dcl/dcl.spec/dcl.constexpr/p1.cpp:78 -std=c++14
+CXX/dcl.dcl/dcl.spec/dcl.constexpr/p1.cpp:78 -std=c++17
 CXX/dcl.dcl/dcl.spec/dcl.constexpr/p3.cpp:275 -std=c++11
 CXX/dcl.dcl/dcl.spec/dcl.constexpr/p4.cpp:138 -std=c++11 -Werror=c++14-extensions -Werror=c++20-extensions
 CXX/dcl.dcl/dcl.spec/dcl.constexpr/p4.cpp:138 -std=c++14 -DCXX14 -Werror=c++20-extensions
@@ -324,6 +328,9 @@ CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p5.cpp:68 -std=c++11
 CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p7-cxx14.cpp:55 -std=c++14
 CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p7-cxx14.cpp:55 -std=c++20
 CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p7-cxx14.cpp:55 -std=c++23
+CXX/dcl.dcl/dcl.spec/dcl.type/dcl.type.class.deduct/p2.cpp:11 -std=c++17
+CXX/dcl.dcl/dcl.spec/dcl.type/dcl.type.class.deduct/p2.cpp:11 -std=c++20
+CXX/dcl.dcl/dcl.spec/dcl.type/dcl.type.class.deduct/p2.cpp:22 -std=c++17
 CXX/dcl.dcl/dcl.spec/dcl.type/dcl.type.elab/p2-0x.cpp:19 -std=c++11
 CXX/dcl.dcl/dcl.spec/dcl.type/dcl.type.elab/p2-0x.cpp:9 -std=c++11
 CXX/dcl.dcl/dcl.spec/dcl.type/dcl.type.elab/p3.cpp:59 -std=c++11
@@ -354,8 +361,6 @@ CXX/dcl.decl/dcl.init/dcl.init.general/p16-cxx20.cpp:29 -std=c++20
 CXX/dcl.decl/dcl.init/dcl.init.general/p16-cxx20.cpp:31 -std=c++20
 CXX/dcl.decl/dcl.init/dcl.init.general/p16-cxx20.cpp:37 -std=c++20
 CXX/dcl.decl/dcl.init/dcl.init.general/p16-cxx20.cpp:38 -std=c++20
-CXX/dcl.decl/dcl.init/dcl.init.list/p3.cpp:248 -std=c++11
-CXX/dcl.decl/dcl.init/dcl.init.list/p3.cpp:248 -std=c++14
 CXX/dcl.decl/dcl.init/dcl.init.ref/p5-cxx03-extra-copy.cpp:29 -std=c++03 -Wbind-to-temporary-copy
 CXX/dcl.decl/dcl.init/dcl.init.ref/p5-cxx03-extra-copy.cpp:37 -std=c++03 -Wbind-to-temporary-copy
 CXX/dcl.decl/dcl.init/p5.cpp:15 -Wno-deprecated-builtins -std=c++98
@@ -711,6 +716,17 @@ CXX/drs/cwg14xx.cpp:54 -std=c++20 -pedantic-errors
 CXX/drs/cwg14xx.cpp:54 -std=c++23 -pedantic-errors
 CXX/drs/cwg14xx.cpp:54 -std=c++2c -pedantic-errors
 CXX/drs/cwg14xx.cpp:54 -std=c++98 -pedantic-errors
+CXX/drs/cwg14xx.cpp:772 -std=c++11 -pedantic-errors
+CXX/drs/cwg14xx.cpp:772 -std=c++14 -pedantic-errors
+CXX/drs/cwg14xx.cpp:772 -std=c++17 -pedantic-errors
+CXX/drs/cwg14xx.cpp:772 -std=c++20 -pedantic-errors
+CXX/drs/cwg14xx.cpp:772 -std=c++23 -pedantic-errors
+CXX/drs/cwg14xx.cpp:772 -std=c++2c -pedantic-errors
+CXX/drs/cwg14xx.cpp:791 -std=c++14 -pedantic-errors
+CXX/drs/cwg14xx.cpp:791 -std=c++17 -pedantic-errors
+CXX/drs/cwg14xx.cpp:791 -std=c++20 -pedantic-errors
+CXX/drs/cwg14xx.cpp:791 -std=c++23 -pedantic-errors
+CXX/drs/cwg14xx.cpp:791 -std=c++2c -pedantic-errors
 CXX/drs/cwg15xx.cpp:332 -std=c++11 -pedantic-errors
 CXX/drs/cwg15xx.cpp:332 -std=c++14 -pedantic-errors
 CXX/drs/cwg15xx.cpp:332 -std=c++17 -pedantic-errors
@@ -1895,12 +1911,21 @@ CXX/special/class.copy/p23-cxx11.cpp:98 -std=c++11 -Wno-defaulted-function-delet
 CXX/special/class.copy/p25-0x.cpp:14 -std=c++11 -Wno-deprecated-builtins -DCLANG_ABI_COMPAT=14
 CXX/special/class.copy/p28-cxx11.cpp:8 -std=c++11
 CXX/special/class.ctor/p5-0x.cpp:101 -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted
+CXX/special/class.ctor/p5-0x.cpp:139 -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted
+CXX/special/class.ctor/p5-0x.cpp:141 -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted
+CXX/special/class.ctor/p5-0x.cpp:143 -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted
+CXX/special/class.ctor/p5-0x.cpp:145 -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted
 CXX/special/class.ctor/p5-0x.cpp:62 -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted
 CXX/special/class.ctor/p5-0x.cpp:64 -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted
 CXX/special/class.dtor/p10-0x.cpp:17 -std=c++11
 CXX/special/class.dtor/p10-0x.cpp:18 -std=c++11
 CXX/special/class.dtor/p3.cpp:16 -std=c++11
 CXX/special/class.dtor/p5-0x.cpp:101 -std=c++11 -Wno-defaulted-function-deleted
+CXX/special/class.dtor/p5-0x.cpp:53 -std=c++11 -Wno-defaulted-function-deleted
+CXX/special/class.dtor/p5-0x.cpp:63 -std=c++11 -Wno-defaulted-function-deleted
+CXX/special/class.dtor/p5-0x.cpp:77 -std=c++11 -Wno-defaulted-function-deleted
+CXX/special/class.dtor/p5-0x.cpp:81 -std=c++11 -Wno-defaulted-function-deleted
+CXX/special/class.dtor/p5-0x.cpp:83 -std=c++11 -Wno-defaulted-function-deleted
 CXX/special/class.inhctor/elsewhere.cpp:35 -std=c++11
 CXX/special/class.inhctor/elsewhere.cpp:42 -std=c++11
 CXX/special/class.inhctor/elsewhere.cpp:49 -std=c++11
@@ -2032,7 +2057,10 @@ CXX/temp/temp.decls/temp.mem/p5.cpp:64 -std=c++20
 CXX/temp/temp.decls/temp.mem/p5.cpp:64 -std=c++23
 CXX/temp/temp.decls/temp.mem/p5.cpp:64 -std=c++98
 CXX/temp/temp.decls/temp.mem/p5.cpp:64 -std=gnu++17
+CXX/temp/temp.decls/temp.variadic/fixed-expansion.cpp:125 -std=c++11
+CXX/temp/temp.decls/temp.variadic/fixed-expansion.cpp:126 -std=c++11
 CXX/temp/temp.decls/temp.variadic/fixed-expansion.cpp:132 -std=c++11
+CXX/temp/temp.decls/temp.variadic/fixed-expansion.cpp:134 -std=c++11
 CXX/temp/temp.decls/temp.variadic/init-capture.cpp:17 -std=c++2a
 CXX/temp/temp.decls/temp.variadic/multi-level-substitution.cpp:217 -std=c++11
 CXX/temp/temp.decls/temp.variadic/multi-level-substitution.cpp:279 -std=c++11
@@ -2360,6 +2388,7 @@ SemaCXX/attr-no-specializations.cpp:62 -std=gnu++17
 SemaCXX/attr-no-specializations.cpp:68 -std=gnu++17
 SemaCXX/attr-nonnull.cpp:87 -std=c++23
 SemaCXX/attr-section.cpp:48 -std=gnu++17
+SemaCXX/attr-section.cpp:70 -std=gnu++17
 SemaCXX/attr-section.cpp:77 -std=gnu++17
 SemaCXX/attr-section.cpp:92 -std=gnu++17
 SemaCXX/attr-target-mv.cpp:58 -std=c++14
@@ -2435,6 +2464,12 @@ SemaCXX/constant-expression-cxx11.cpp:127 -std=c++20 -isystem./Inputs -Wno-strin
 SemaCXX/constant-expression-cxx11.cpp:127 -std=c++23 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:2036 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:2036 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
+SemaCXX/constant-expression-cxx11.cpp:2074 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
+SemaCXX/constant-expression-cxx11.cpp:2086 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
+SemaCXX/constant-expression-cxx11.cpp:2110 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
+SemaCXX/constant-expression-cxx11.cpp:2110 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
+SemaCXX/constant-expression-cxx11.cpp:2111 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
+SemaCXX/constant-expression-cxx11.cpp:2111 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:2154 -std=c++11 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:2154 -std=c++20 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/constant-expression-cxx11.cpp:2154 -std=c++23 -isystem./Inputs -Wno-string-plus-int -Wno-pointer-arith -Wno-zero-length-array -Wno-c99-designator -pedantic -Wno-comment -Wno-tautological-pointer-compare -Wno-bool-conversion -isystem /usr/lib/llvm-23/lib/clang/23/include
@@ -2464,6 +2499,9 @@ SemaCXX/constant-expression-cxx14.cpp:187 -std=c++20 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:243 -std=c++14 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:243 -std=c++20 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:243 -std=c++23 -Werror=return-type
+SemaCXX/constant-expression-cxx14.cpp:254 -std=c++14 -Werror=return-type
+SemaCXX/constant-expression-cxx14.cpp:254 -std=c++20 -Werror=return-type
+SemaCXX/constant-expression-cxx14.cpp:254 -std=c++23 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:262 -std=c++14 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:262 -std=c++20 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:262 -std=c++23 -Werror=return-type
@@ -2479,6 +2517,16 @@ SemaCXX/constant-expression-cxx14.cpp:830 -std=c++20 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:830 -std=c++23 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:851 -std=c++14 -Werror=return-type
 SemaCXX/constant-expression-cxx14.cpp:851 -std=c++20 -Werror=return-type
+SemaCXX/constant-expression-cxx14.cpp:889 -std=c++14 -Werror=return-type
+SemaCXX/constant-expression-cxx14.cpp:889 -std=c++20 -Werror=return-type
+SemaCXX/constant-expression-cxx14.cpp:963 -std=c++14 -Werror=return-type
+SemaCXX/constant-expression-cxx14.cpp:963 -std=c++20 -Werror=return-type
+SemaCXX/constant-expression-cxx14.cpp:963 -std=c++23 -Werror=return-type
+SemaCXX/constant-expression-cxx2a.cpp:1031 -std=c++2a -Wno-mismatched-new-delete
+SemaCXX/constant-expression-cxx2a.cpp:1032 -std=c++2a -Wno-mismatched-new-delete
+SemaCXX/constant-expression-cxx2a.cpp:1033 -std=c++2a -Wno-mismatched-new-delete
+SemaCXX/constant-expression-cxx2a.cpp:1034 -std=c++2a -Wno-mismatched-new-delete
+SemaCXX/constant-expression-cxx2a.cpp:1035 -std=c++2a -Wno-mismatched-new-delete
 SemaCXX/constant-expression-cxx2a.cpp:1082 -std=c++2a -Wno-mismatched-new-delete
 SemaCXX/constant-expression-cxx2a.cpp:1112 -std=c++2a -Wno-mismatched-new-delete
 SemaCXX/constant-expression-cxx2a.cpp:1113 -std=c++2a -Wno-mismatched-new-delete
@@ -2692,10 +2740,6 @@ SemaCXX/cxx1y-generic-lambdas-capturing.cpp:1080 -std=c++1y
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:1080 -std=c++2a -Wno-deprecated-this-capture
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:1100 -std=c++1y
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:1100 -std=c++2a -Wno-deprecated-this-capture
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:1209 -std=c++1y
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:1209 -std=c++2a -Wno-deprecated-this-capture
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:1235 -std=c++1y
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:1235 -std=c++2a -Wno-deprecated-this-capture
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:252 -std=c++1y
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:252 -std=c++2a -Wno-deprecated-this-capture
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:274 -std=c++1y
@@ -2718,18 +2762,10 @@ SemaCXX/cxx1y-generic-lambdas-capturing.cpp:445 -std=c++1y
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:445 -std=c++2a -Wno-deprecated-this-capture
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:467 -std=c++1y
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:467 -std=c++2a -Wno-deprecated-this-capture
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:522 -std=c++1y
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:522 -std=c++2a -Wno-deprecated-this-capture
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:560 -std=c++1y
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:560 -std=c++2a -Wno-deprecated-this-capture
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:631 -std=c++1y
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:631 -std=c++2a -Wno-deprecated-this-capture
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:654 -std=c++1y
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:654 -std=c++2a -Wno-deprecated-this-capture
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:693 -std=c++1y
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:693 -std=c++2a -Wno-deprecated-this-capture
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:901 -std=c++1y
-SemaCXX/cxx1y-generic-lambdas-capturing.cpp:901 -std=c++2a -Wno-deprecated-this-capture
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:942 -std=c++1y
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:942 -std=c++2a -Wno-deprecated-this-capture
 SemaCXX/cxx1y-generic-lambdas-capturing.cpp:964 -std=c++1y
@@ -2797,11 +2833,11 @@ SemaCXX/cxx1z-class-template-argument-deduction.cpp:178 -std=c++1z -DERRORS -Wun
 SemaCXX/cxx1z-class-template-argument-deduction.cpp:187 -std=c++1z -DERRORS -Wundefined-func-template
 SemaCXX/cxx1z-class-template-argument-deduction.cpp:317 -std=c++1z -DERRORS -Wundefined-func-template
 SemaCXX/cxx1z-class-template-argument-deduction.cpp:323 -std=c++1z -DERRORS -Wundefined-func-template
+SemaCXX/cxx1z-class-template-argument-deduction.cpp:326 -std=c++1z -DERRORS -Wundefined-func-template
 SemaCXX/cxx1z-class-template-argument-deduction.cpp:332 -std=c++1z -DERRORS -Wundefined-func-template
 SemaCXX/cxx1z-class-template-argument-deduction.cpp:333 -std=c++1z -DERRORS -Wundefined-func-template
 SemaCXX/cxx1z-class-template-argument-deduction.cpp:334 -std=c++1z -DERRORS -Wundefined-func-template
 SemaCXX/cxx1z-class-template-argument-deduction.cpp:335 -std=c++1z -DERRORS -Wundefined-func-template
-SemaCXX/cxx1z-class-template-argument-deduction.cpp:336 -std=c++1z -DERRORS -Wundefined-func-template
 SemaCXX/cxx1z-constexpr-lambdas.cpp:132 -std=c++1z
 SemaCXX/cxx1z-constexpr-lambdas.cpp:132 -std=c++20
 SemaCXX/cxx1z-constexpr-lambdas.cpp:17 -std=c++14 -DCPP14_AND_EARLIER
@@ -2920,6 +2956,8 @@ SemaCXX/cxx2a-template-lambdas.cpp:54 -std=c++17 -Wno-c++20-extensions
 SemaCXX/cxx2a-template-lambdas.cpp:54 -std=c++20
 SemaCXX/cxx2b-consteval-propagate.cpp:204 -std=c++2a -Wno-unused-value
 SemaCXX/cxx2b-consteval-propagate.cpp:204 -std=c++2b -Wno-unused-value
+SemaCXX/cxx2b-consteval-propagate.cpp:284 -std=c++2a -Wno-unused-value
+SemaCXX/cxx2b-consteval-propagate.cpp:284 -std=c++2b -Wno-unused-value
 SemaCXX/cxx2b-consteval-propagate.cpp:465 -std=c++2a -Wno-unused-value
 SemaCXX/cxx2b-consteval-propagate.cpp:465 -std=c++2b -Wno-unused-value
 SemaCXX/cxx2b-consteval-propagate.cpp:49 -std=c++2a -Wno-unused-value
@@ -2931,6 +2969,8 @@ SemaCXX/cxx2b-consteval-propagate.cpp:574 -std=c++2b -Wno-unused-value
 SemaCXX/cxx2b-consteval-propagate.cpp:602 -std=c++2b -Wno-unused-value
 SemaCXX/cxx2b-consteval-propagate.cpp:649 -std=c++2a -Wno-unused-value
 SemaCXX/cxx2b-consteval-propagate.cpp:649 -std=c++2b -Wno-unused-value
+SemaCXX/cxx2b-consteval-propagate.cpp:80 -std=c++2a -Wno-unused-value
+SemaCXX/cxx2b-consteval-propagate.cpp:80 -std=c++2b -Wno-unused-value
 SemaCXX/cxx2b-deducing-this-coro.cpp:32 -std=c++2b -Wno-coroutines-unsupported-target
 SemaCXX/cxx2b-deducing-this-coro.cpp:6 -std=c++2b -Wno-coroutines-unsupported-target
 SemaCXX/cxx2b-overloaded-operator.cpp:104 -std=c++23
@@ -3006,6 +3046,13 @@ SemaCXX/default1.cpp:96 -std=gnu++17
 SemaCXX/default2.cpp:122 -std=gnu++17
 SemaCXX/default2.cpp:133 -std=gnu++17
 SemaCXX/default2.cpp:136 -std=gnu++17
+SemaCXX/defaulted-private-dtor.cpp:19 -std=c++11
+SemaCXX/defaulted-private-dtor.cpp:23 -std=c++11
+SemaCXX/defaulted-private-dtor.cpp:24 -std=c++11
+SemaCXX/defaulted-private-dtor.cpp:27 -std=c++11
+SemaCXX/defaulted-private-dtor.cpp:31 -std=c++11
+SemaCXX/defaulted-private-dtor.cpp:34 -std=c++11
+SemaCXX/defaulted-private-dtor.cpp:8 -std=c++11
 SemaCXX/delete-and-function-templates.cpp:62 -std=c++11
 SemaCXX/delete-and-function-templates.cpp:62 -std=c++11 -fms-extensions
 SemaCXX/delete-and-function-templates.cpp:78 -std=c++11
@@ -3243,6 +3290,8 @@ SemaCXX/libstdcxx_pair_swap_hack.cpp:84 -std=c++11 -D__GLIBCXX__=20100000L -DCLA
 SemaCXX/libstdcxx_pair_swap_hack.cpp:84 -std=c++11 -D__GLIBCXX__=20100000L -DCLASS=stack
 SemaCXX/linkage2.cpp:10 -Wno-non-c-typedef-for-linkage -Wno-c++11-extensions -Wno-local-type-template-args -std=gnu++98
 SemaCXX/linkage2.cpp:10 -Wno-non-c-typedef-for-linkage -std=gnu++11
+SemaCXX/linkage2.cpp:115 -Wno-non-c-typedef-for-linkage -Wno-c++11-extensions -Wno-local-type-template-args -std=gnu++98
+SemaCXX/linkage2.cpp:115 -Wno-non-c-typedef-for-linkage -std=gnu++11
 SemaCXX/linkage2.cpp:250 -Wno-non-c-typedef-for-linkage -Wno-c++11-extensions -Wno-local-type-template-args -std=gnu++98
 SemaCXX/literal-operators.cpp:51 -std=c++14 -isystem /usr/lib/llvm-23/lib/clang/23/include
 SemaCXX/literal-type.cpp:58 -std=c++11
@@ -3466,6 +3515,8 @@ SemaCXX/overloaded-operator.cpp:638 -std=c++11
 SemaCXX/overloaded-operator.cpp:638 -std=c++23
 SemaCXX/paren-list-agg-init.cpp:454 -Wc++20-extensions -std=c++20
 SemaCXX/paren-list-agg-init.cpp:454 -std=c++20
+SemaCXX/pass-object-size.cpp:119 -std=c++11
+SemaCXX/pass-object-size.cpp:88 -std=c++11
 SemaCXX/placement-new-matrix.cpp:5 -std=c++11
 SemaCXX/pr25181-crash-on-invalid.cpp:4 -std=c++11
 SemaCXX/pr36536.cpp:17 -std=c++11
@@ -3492,6 +3543,8 @@ SemaCXX/recovery-expr-type.cpp:14 -std=gnu++20
 SemaCXX/recovery-expr-type.cpp:191 -std=gnu++20
 SemaCXX/recovery-expr-type.cpp:53 -std=gnu++17
 SemaCXX/recovery-expr-type.cpp:53 -std=gnu++20
+SemaCXX/recovery-expr-type.cpp:77 -std=gnu++17
+SemaCXX/recovery-expr-type.cpp:77 -std=gnu++20
 SemaCXX/redeclared-auto.cpp:19 -std=c++11
 SemaCXX/requires-nested-non-constant.cpp:3 -std=c++23
 SemaCXX/return-void.cpp:20 -std=c++11
@@ -3534,6 +3587,10 @@ SemaCXX/sizeless-1.cpp:315 -Wall -Wno-deprecated-builtins -Wno-unused-but-set-va
 SemaCXX/sizeless-1.cpp:327 -Wall -Wno-deprecated-builtins -Wno-unused-but-set-variable -Wrange-loop-analysis -std=c++11
 SemaCXX/sizeless-1.cpp:327 -Wall -Wno-deprecated-builtins -Wno-unused-but-set-variable -Wrange-loop-analysis -std=c++17
 SemaCXX/sizeless-1.cpp:327 -Wall -Wno-deprecated-builtins -Wno-unused-but-set-variable -Wrange-loop-analysis -std=gnu++17
+SemaCXX/source_location_err.cpp:25 -std=c++1z -DTEST=1
+SemaCXX/source_location_err.cpp:37 -std=c++1z -DTEST=2
+SemaCXX/source_location_err.cpp:51 -std=c++1z -DTEST=3
+SemaCXX/source_location_err.cpp:65 -std=c++1z -DTEST=4
 SemaCXX/statements.cpp:70 -std=gnu++17 -pedantic
 SemaCXX/static-assert.cpp:17 -std=c++11 -pedantic -Wno-invalid-utf8
 SemaCXX/static-assert.cpp:24 -std=c++11 -pedantic -Wno-invalid-utf8
@@ -3577,7 +3634,6 @@ SemaCXX/type_pack_element.cpp:43 -std=c++11
 SemaCXX/typedef-redecl.cpp:54 -std=gnu++17
 SemaCXX/typedef-redecl.cpp:64 -std=gnu++17
 SemaCXX/typedef-redecl.cpp:77 -std=gnu++17
-SemaCXX/typeid-incomplete-local-crash.cpp:16 -std=c++17
 SemaCXX/typeid-incomplete-local-crash.cpp:30 -std=c++17
 SemaCXX/typeid-incomplete-local-crash.cpp:44 -std=c++17
 SemaCXX/typeid-incomplete-local-crash.cpp:8 -std=c++17
@@ -3987,6 +4043,7 @@ SemaTemplate/ctad.cpp:150 -std=c++17 -Wno-c++20-extensions
 SemaTemplate/ctad.cpp:150 -std=c++20
 SemaTemplate/ctad.cpp:158 -std=c++17 -Wno-c++20-extensions
 SemaTemplate/ctad.cpp:158 -std=c++20
+SemaTemplate/ctad.cpp:90 -std=c++17 -Wno-c++20-extensions
 SemaTemplate/current-instantiation.cpp:11 -std=gnu++17
 SemaTemplate/current-instantiation.cpp:146 -std=gnu++17
 SemaTemplate/current-instantiation.cpp:248 -std=gnu++17

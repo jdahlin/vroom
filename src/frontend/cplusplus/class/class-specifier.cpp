@@ -2786,10 +2786,12 @@ semantic_analysis::member_function_definition(entity_index c,
         declarator_meaning m;
         function_cv = 0;
         in_member_declarator = true;
+        reanalysing_member_declarator = true;
         entity_index saved_class = defining_class;
         defining_class = c;
         analysis_result r = declarator(definition, tail[at], type, m);
         defining_class = saved_class;
+        reanalysing_member_declarator = false;
         in_member_declarator = false;
         if (r != analysis_result::well_formed)
             return r;
@@ -2818,6 +2820,7 @@ semantic_analysis::member_function_definition(entity_index c,
     bool outer_virtual_allowed = virtual_allowed;
     virtual_allowed = true;
     placeholder_allowed = true;
+    reanalysing_member_declarator = true;
     analysis_result r = decl_specifier_seq(seq, s, false);
     virtual_allowed = outer_virtual_allowed;
     qualified_type type = s.type;
@@ -2830,6 +2833,7 @@ semantic_analysis::member_function_definition(entity_index c,
         if (r == analysis_result::well_formed)
             r = misplaced_function_qualifiers(definition, type, true);
     }
+    reanalysing_member_declarator = false;
     defining_class = saved_class;
     if (r != analysis_result::well_formed)
         return r;

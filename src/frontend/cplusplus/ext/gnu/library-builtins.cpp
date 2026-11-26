@@ -298,6 +298,18 @@ bool semantic_analysis::builtin_letter_type(char letter, qualified_type &t)
     case 'S':
         t = builtin_pointer(fundamental_type::char_, cv_const);
         return true;
+    case 'V':
+        if (tokens.files.behavior.va_list_is_array) {
+            qualified_type tag = qualified_type::make(
+                type_table.fundamental(fundamental_type::builtin_va_list_tag),
+                cv_none);
+            t = qualified_type::make(type_table.pointer_to(tag), cv_none);
+        } else {
+            t = qualified_type::make(
+                type_table.fundamental(fundamental_type::builtin_va_list),
+                cv_none);
+        }
+        return true;
     default:
         break;
     }

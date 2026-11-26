@@ -1414,12 +1414,10 @@ analysis_result semantic_analysis::scalar_list_initialization(
     qualified_type type, bool direct, initialized_value &result)
 {
     const struct type target = type_table[type.unqualified()];
-    /* (3.8), an enumeration from one element, is not analysed */
-    bool empty_enumeration =
-        target.kind == type_kind::enumeration && clauses.empty();
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer &&
-        target.kind != type_kind::pointer_to_member && !empty_enumeration)
+        target.kind != type_kind::pointer_to_member &&
+        target.kind != type_kind::enumeration)
         return not_supported_because(list, "dcl.init.list",
                                      "list-initialization of this type");
     if (clauses.empty()) {
@@ -1448,6 +1446,34 @@ analysis_result semantic_analysis::scalar_list_initialization(
         /* braces around a scalar's initializer: clang's warning */
         return not_supported_because(
             list, "dcl.init.list", "extra braces around a scalar initializer");
+    if (target.kind == type_kind::enumeration) {
+        expression_meaning e;
+        VTRY(r, target_expression(clauses[0], type, e));
+        if (e.type.unqualified() == type.unqualified())
+            return initialize_with(list, e, type, direct, true, result);
+        const entity &en = entity_table[target.entity];
+        if (!direct || !en.fixed_underlying ||
+            en.underlying == fundamental_type::none)
+            return initialize_with(list, e, type, direct, true, result);
+        /* [dcl.init.list]/3.8: direct-list-initialization of an enumeration
+           with a fixed underlying type from a single element convertible to
+           the underlying type without narrowing */
+        qualified_type underlying = qualified_type::make(
+            type_table.fundamental(en.underlying), cv_none);
+        initialized_value u;
+        VTRY(ur, initialize_with(list, e, underlying, false, true, u));
+        result.evaluation = u.evaluation;
+        result.value = u.value;
+        expression_meaning converted;
+        converted.type = qualified_type::make(type.unqualified(), cv_none);
+        converted.category = value_category::prvalue;
+        converted.evaluation = u.evaluation;
+        converted.value = u.value;
+        result.node = expression_node(
+            semantic_kind::conversion, converted, list.first_token(), u.node, 0,
+            static_cast<uint8_t>(conversion_kind::integral));
+        return analysis_result::well_formed;
+    }
     /* (3.9) */
     return initialize_from(list, clauses[0], type, direct, true, result);
 }
@@ -1947,19 +1973,61 @@ analysis_result semantic_analysis::constructor_list_initialization(
     if (arguments.size() == 1 &&
         !clauses[0].is(syntax_kind::braced_init_list) &&
         arguments[0].category == value_category::prvalue &&
-        arguments[0].type.unqualified() == type.unqualified())
-        /* one prvalue of the class itself: clang initializes the object
-           from it with no constructor (CWG2311), the copy or move one
-           deleted or not */
+        arguments[0].type.unqualified() == type.unqualified()) {
+        /* [dcl.init.list]/3.4 (CWG 2311): in C++17 and later, a braced-init-list
+           of a single prvalue of the same class type directly initializes the
+           object with no copy/move constructor */
+        if (tokens.files.behavior.edition >= standard_edition::cplusplus_17) {
+            result.node = arguments[0].node;
+            result.evaluation = arguments[0].evaluation;
+            result.value = arguments[0].value;
+            return analysis_result::well_formed;
+        }
         return not_supported_because(list, "dcl.init.list",
                                      "a list of one prvalue of the same class");
+    }
+    /* [dcl.init.list]/3.7, CWG 2327: direct-list-initialization of a class
+       from a single expression of another class type with an explicit
+       conversion function to the target class (e.g. local_days{ymd} in
+       libc++ <chrono>) */
+    if (direct && arguments.size() == 1 &&
+        !clauses[0].is(syntax_kind::braced_init_list) &&
+        type_table[arguments[0].type.unqualified()].kind ==
+            type_kind::class_type &&
+        arguments[0].type.unqualified() != type.unqualified()) {
+        qualified_type unqualified =
+            qualified_type::make(type.unqualified(), cv_none);
+        bool ambiguous = false, unknown = false;
+        entity_index conv = conversion_function_for(arguments[0], unqualified,
+                                                    true, ambiguous, unknown);
+        if (conv && entity_table[conv].explicit_ && !ambiguous && !unknown) {
+            bool converted = false;
+            VTRY(r, conversion_function_call(list, arguments[0], unqualified,
+                                             true, converted));
+            if (converted &&
+                arguments[0].type.unqualified() == type.unqualified()) {
+                result.node = arguments[0].node;
+                result.evaluation = arguments[0].evaluation;
+                result.value = arguments[0].value;
+                return analysis_result::well_formed;
+            }
+        }
+    }
     /* the arguments before the conversions overload resolution adds */
     owned_array<expression_meaning> before;
     for (const expression_meaning &e : arguments)
         before.append(e);
     VTRY(r, construct(list, type, arguments, 0, result, false, &clauses));
+    if (semantics[result.node].kind != semantic_kind::construct) {
+        if (arguments.size() == 1 &&
+            !clauses[0].is(syntax_kind::braced_init_list) &&
+            semantics[result.node].type.unqualified() == type.unqualified())
+            return analysis_result::well_formed;
+        return not_supported_because(list, "over.match.list",
+                                     "no constructor chosen for the list");
+    }
     entity_index chosen = semantics[result.node].b;
-    if (!chosen || semantics[result.node].kind != semantic_kind::construct)
+    if (!chosen)
         return not_supported_because(list, "over.match.list",
                                      "no constructor chosen for the list");
     if (!direct && entity_table[chosen].explicit_)
