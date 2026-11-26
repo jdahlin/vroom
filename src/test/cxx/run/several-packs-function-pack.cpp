@@ -5,7 +5,7 @@ typedef decltype(sizeof 0) size_t;
 template <size_t... I> struct seq {};
 template <int N> struct V { int v[N]; int operator[](int i) const { return v[i]; } };
 template <typename Fn, typename... Args, size_t... I>
-static inline auto map(seq<I...>, Fn&& fn, const Args&... args) -> V<sizeof...(I)> {
+inline auto map(seq<I...>, Fn&& fn, const Args&... args) -> V<sizeof...(I)> {
     auto lane = [&](size_t i) { return fn(args[static_cast<int>(i)]...); };
     return { lane(I)... };
 }
