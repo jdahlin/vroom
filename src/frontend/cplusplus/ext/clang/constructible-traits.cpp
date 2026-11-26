@@ -308,10 +308,28 @@ analysis_result semantic_analysis::constructible_types(
         /* an array of unknown bound has no object to make */
         if (!k.bound_known)
             return analysis_result::well_formed;
-        if (count)
+        if (count) {
+            /* before C++20 (P0960R3), an array cannot be parenthesized-
+               initialized from arguments; in C++20+, more arguments than the
+               bound or an array argument (copy/move construction of an array)
+               is ill-formed */
+            if (tokens.files.behavior.edition <
+                    standard_edition::cplusplus_20 ||
+                count > k.bound)
+                return analysis_result::well_formed;
+            if (count == 1) {
+                qualified_type arg = types[0];
+                const struct type &ak = type_table[arg.unqualified()];
+                if (ak.kind == type_kind::lvalue_reference ||
+                    ak.kind == type_kind::rvalue_reference)
+                    arg = ak.operand;
+                if (type_table[arg.unqualified()].kind == type_kind::array)
+                    return analysis_result::well_formed;
+            }
             return not_supported_because(n, "dcl.init.aggr",
                                          "a constructibility trait: an array "
                                          "initialized from arguments");
+        }
         return constructible_types(n, k.operand, types, 0, nothrow, value);
     }
     bool reference = k.kind == type_kind::lvalue_reference ||
