@@ -1412,14 +1412,32 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         /* [namespace.udir]/6: functions of several namespaces (nominated by
            using-directives) are one overload set */
         bool several = functions_of_several_namespaces(x, declared);
-        /* [temp.res]/10: an instantiation whose lookup would see one
-           declared after its template: not told apart, as before */
-        for (entity_index d : declared) {
-            uint32_t at = entity_table[d].first_declaration;
-            if (lookup_horizon && at &&
-                entity_table.declaration(at).node.first_token() >
-                    lookup_horizon)
-                several = false;
+        /* [temp.res]/10: an instantiation does not see the functions
+           declared after its template; a namespace with both earlier and
+           later ones is not told apart */
+        if (several && lookup_horizon) {
+            owned_array<entity_index> earlier;
+            for (entity_index d : declared) {
+                bool late = false, before = false;
+                for (entity_index o = d; o; o = entity_table[o].next_overload) {
+                    uint32_t at = entity_table[o].first_declaration;
+                    if (at && entity_table.declaration(at).node.first_token() >
+                                  lookup_horizon)
+                        late = true;
+                    else
+                        before = true;
+                }
+                if (late && before)
+                    several = false;
+                if (!late)
+                    earlier.append(d);
+            }
+            several = several && !earlier.empty();
+            if (several) {
+                declared.resize(0);
+                for (entity_index d : earlier)
+                    declared.append(d);
+            }
         }
         /* ([lex.name]/3 reserves __builtin_x to the implementation: a
            builtin function, found by the call's analysis of the name) */
