@@ -3311,7 +3311,8 @@ analysis_result semantic_analysis::static_member_definition(
  *         override
  *         final
  *
- * One virt-specifier is its token; more are a virt-specifier-seq node.
+ * One virt-specifier is its token; more, or [ext:gnu_attributes] after
+ * them (not applied), are a virt-specifier-seq node.
  */
 bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
                                        bool &final_) const
@@ -3336,7 +3337,7 @@ bool semantic_analysis::virt_specifier(SyntaxElement d, bool &override_,
     if (!d.is(syntax_kind::virt_specifier_seq))
         return false;
     for (auto t : d.elements())
-        if (!one(t))
+        if (!t.is(syntax_kind::gnu_attribute_specifier) && !one(t))
             return false;
     return true;
 }

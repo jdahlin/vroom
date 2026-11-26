@@ -1070,15 +1070,19 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
     name_kind found = name_kind::not_declared;
     if (!qualifier && !template_id)
         found = names.lookup_elaborated(name);
+    /* [dcl.type.elab], [basic.scope.pdecl]/7: class-key identifier ;
+       declares the class in this scope, whatever an enclosing one has */
+    bool alone = facts.count == 0 && at(preprocessing_op_or_punc::SEMICOLON);
     if (!qualifier && !template_id && !facts.friend_ &&
-        found != name_kind::type_name && found != name_kind::template_name) {
+        ((found != name_kind::type_name && found != name_kind::template_name) ||
+         (alone && !names.declares_here(name)))) {
         /* the class's region, empty until a class-specifier defines it
            (names.define_class): a typedef-name of the class made before
            the definition finds its members */
         scope_index outer = names.current();
         scope_index region = names.enter(scope_kind::class_);
         names.reenter(outer);
-        if (facts.count == 0 && at(preprocessing_op_or_punc::SEMICOLON))
+        if (alone)
             names.declare(name, declared_kind(name_kind::type_name), region);
         else
             names.declare_in(names.nearest_namespace_or_block(), name,

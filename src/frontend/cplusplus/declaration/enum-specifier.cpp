@@ -189,7 +189,8 @@ node_index parser::opaque_enum_declaration()
                         "dcl.enum", position);
     if (!accept(preprocessing_op_or_punc::SEMICOLON))
         return expected("';' after the opaque-enum-declaration", "dcl.enum");
-    if (name)
+    /* [dcl.enum]/3: a redeclaration; the definition's enumerators stay */
+    if (name && !names.declares_here(name))
         names.declare(name, name_kind::type_name);
     return finish_node(syntax_kind::opaque_enum_declaration, mark, first);
 }
