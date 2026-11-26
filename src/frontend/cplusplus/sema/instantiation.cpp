@@ -1292,6 +1292,9 @@ bool semantic_analysis::emitted_functions_needed()
 {
     bool marked = false;
     for (entity_index f = 1; f < entity_table.size(); f++) {
+        /* (the walk waits on memory: entities are large) */
+        if (f + 16 < entity_table.size())
+            __builtin_prefetch(&entity_table[f + 16]);
         entity &x = entity_table[f];
         if (x.kind != entity_kind::function || !x.defined ||
             x.member_definition_needed || x.member_body_deferred ||

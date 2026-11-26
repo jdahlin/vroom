@@ -2863,6 +2863,8 @@ class semantic_analysis
         entity_index nominated = 0;
     };
     owned_array<using_directive_record> using_directives;
+    /* ... by their scope */
+    mutable record_chains using_directives_by_scope;
     /* [basic.scope.namespace]/1, [namespace.def] */
     analysis_result namespace_definition(SyntaxRef n);
     /* [namespace.udir], [namespace.alias], [namespace.udecl] */
@@ -2933,6 +2935,7 @@ class semantic_analysis
     bool pack_depends(entity_index pack) const;
     owned_array<entity_index> dependent_members;
     owned_array<entity_index> dependent_written_types;
+    record_chains written_types_by_key;
     /* the names of a dependent_written type's tokens that an alias
        template's instantiation bound to a dependent type, with the
        type (element UINT32_MAX), or to the elements of a pack (one
