@@ -33,6 +33,14 @@ Stockfish 17.1, `bench 16 1 13 default depth`, -O2, 2030154 nodes everywhere:
 - **XS1** 128-bit vector operations as SSE2 instructions, in VIR's x86-64
   lowering (-O2, -O3) with vector registers, spills and calls, and in the
   direct emitter (-O0, -O1).  Gate: Stockfish SSE2 nodes/second.
+  - XS1a (done): the walker's vector operators use SSE2
+    (`arch/x64/codegen/simd.cpp`); a function with one leaves VIR for the
+    direct emitter.  Stockfish bench depth 13: 8275 nodes/second.  77% of the
+    time is in `affine_transform_non_ssse3`; its unpacks are shuffles, which
+    are still lane by lane.
+  - XS1b: shuffles as SSE2 instructions.
+  - XS1c: VIR: `i8x16` and `i16x8`, vector shifts and shuffles, vectors from
+    source (values, not addresses), vector arguments and results.
 - **XS2** Builtins that no vector operation expresses (`pmaddwd`, packs,
   `pmaddubsw`, ...) as target operations: a table of builtin, signature,
   feature and instruction, generated from clang, replacing the hand-written

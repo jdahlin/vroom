@@ -67,6 +67,7 @@
     X(loop_analysis, "VIR: loops")                                             \
     X(allocation_failed, "VIR: allocation failed")                             \
     X(allocation_check_failed, "VIR: the allocation check failed")             \
+    X(vector_operation, "a vector operation (the direct emitter's)")           \
     X(lowering_failed, "VIR lowering: failed")                                 \
     X(constant_not_materializable,                                             \
       "VIR lowering: a constant it cannot materialize")                        \

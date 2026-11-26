@@ -709,6 +709,19 @@ VPRIV codegen_value virbuild_bigcmp(codegen_context *e, int op,
     (void)op, (void)t, (void)a, (void)b;
     virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer));
 }
+/* VIR has no vectors from source yet: a function whose vector operation the
+   x86-64 direct emitter does with SSE2 goes to it */
+VPRIV bool virbuild_vector_operation(codegen_context *e, int op,
+                                     ast_qualified_type vt, bool a_vector,
+                                     bool b_vector, int ra, int rb,
+                                     const codegen_lvalue *d, bool unary)
+{
+    (void)ra, (void)rb, (void)d;
+    if (CODEGEN_IS_X64(e->compile_context) &&
+        x64_vector_operation_exists(e, op, vt, a_vector, b_vector, unary))
+        virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+    return false;
+}
 VPRIV codegen_value virbuild_bigcvt(codegen_context *e, codegen_value v,
                                     ast_qualified_type from,
                                     ast_qualified_type to)

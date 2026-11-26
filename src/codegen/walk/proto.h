@@ -233,6 +233,13 @@ VPRIV codegen_value WALK_LOWER(wcvt)(
     codegen_context *e, codegen_value v, ast_qualified_type from,
     ast_qualified_type to);                      /* __int128 on either side */
 VPRIV int WALK_LOWER(ftreg)(codegen_context *e); /* a free float temporary */
+/* a GNU vector operation with the CPU's vector instructions into *d; false:
+   none, the caller does it lane by lane.  ra, rb: a vector operand's address,
+   a scalar operand's value */
+VPRIV bool WALK_LOWER(vector_operation)(codegen_context *e, int op,
+                                        ast_qualified_type vt, bool a_vector,
+                                        bool b_vector, int ra, int rb,
+                                        const codegen_lvalue *d, bool unary);
 VPRIV codegen_value
     WALK_LOWER(fconst)(codegen_context *e, uint64_t bits,
                        int size); /* a float (4) or double (8) constant */
