@@ -1736,6 +1736,24 @@ VPRIV bool walk_symbol_constant_get(codegen_context *e, uint32_t s,
  * inlining).  Not: variadic or unprototyped, recursive, a label address
  * taken (one copy only), deeper than 16.
  */
+#ifdef WALK_PREFIX
+/* whether a function of type t passes or returns a 32-byte vector */
+static bool walk_passes_wide_vector(cc *c, ast_qualified_type t)
+{
+    const ctype *ft = T(c, t);
+
+    if (codegen_type_is_vector(c, ft->base) &&
+        codegen_type_size(c, ft->base) == 32)
+        return true;
+    for (uint32_t i = 0; i < ft->n; i++) {
+        ast_qualified_type p = c->params[ft->aux + i];
+        if (codegen_type_is_vector(c, p) && codegen_type_size(c, p) == 32)
+            return true;
+    }
+    return false;
+}
+#endif
+
 /* a tiny static function clang would inline: no opaque inline asm, no locals aligned above 16
    (either could need registers the caller's frame holds) */
 VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
@@ -1771,6 +1789,14 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
         if (codegen_type_is_variably_modified(
                 c, c->syms[c->lists[N(y->body)->a + i]].ty))
             return false; /* (a parameter's VLA sizes) */
+    /* VIR passes no 32-byte vector: a static function that does is inlined
+       whatever its shape, as its call would take the caller out of VIR */
+    bool wide = false;
+#ifdef WALK_PREFIX
+    wide = e->vir_try && CODEGEN_IS_X64(c) && y->sc == AST_STORAGE_STATIC &&
+           walk_passes_wide_vector(c, y->ty);
+#endif
+    (void)wide; /* (the direct emitter's instance) */
     if (!(y->flags & AST_SYMBOL_FLAG_ALWAYS_INLINE)) {
         uint32_t lim = WALK_INLINE_NODE_MAX;
 
@@ -1809,8 +1835,10 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
                 codegen_inline_has_constant_argument(e->unit, c, s, call))
                 lim = WALK_INLINE_CONSTANT_FACTOR * WALK_INLINE_VIR_MAX;
             codegen_function_prepass_request(e, s);
-            if (!once && size > lim)
+            if (!once && !wide && size > lim)
                 return false;
+            if (wide)
+                lim = WALK_INLINE_ONCE_MAX;
         }
 #endif
         codegen_function_prepass_request(e, s);
@@ -1819,7 +1847,7 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
         /* (VIR's instance, under WALK_PREFIX, accepts crc32q's asm: walk.h is included once
            in the unity build, so this is tested here, not through a macro of walk.h) */
 #ifdef WALK_PREFIX
-        if (!(y->flags & AST_SYMBOL_FLAG_INLINE) &&
+        if (!wide && !(y->flags & AST_SYMBOL_FLAG_INLINE) &&
             !codegen_statement_is_tiny(c, y->body, true))
             return false;
 #else

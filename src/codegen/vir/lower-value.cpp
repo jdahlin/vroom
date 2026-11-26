@@ -907,6 +907,21 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
             return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
                                .register_number = (uint8_t)result);
         }
+        if (crossing == 3) {
+            /* a half: its 16 bytes */
+            cc_value half;
+            if (!cc_eval(c, argument[1], &half) ||
+                half.kind != CC_VALUE_INTEGER)
+                virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+            codegen_lvalue part = {.kind = CODEGEN_LVALUE_FRAME,
+                                   .align = 16,
+                                   .offset = walk_slot_temporary(e, 16, 16)};
+            virbuild_vector_half(e, ra, 16 * (int)(half.i & 1), &part);
+            WALK_LOWER(tfree)(e, ra);
+            return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                               .register_number =
+                                   (uint8_t)WALK_LOWER(laddr)(e, &part));
+        }
         codegen_value w = walk_value_emit(e, argument[1]);
         int rb = walk_value_to_register(e, &w);
         codegen_lvalue out = {.kind = CODEGEN_LVALUE_FRAME,

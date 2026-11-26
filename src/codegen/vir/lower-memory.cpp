@@ -505,6 +505,23 @@ VPRIV void virbuild_vector_permute(codegen_context *e, int ra, int rb,
     virbuild_store_table_clear(e, true);
 }
 
+/* *d = the 16 bytes at `at` past the address in register ra */
+VPRIV void virbuild_vector_half(codegen_context *e, int ra, int at,
+                                const codegen_lvalue *d)
+{
+    virbuild_context *V = e->vir_builder;
+    uint32_t value = virbuild_vector_load(e, VIR_TYPE_I64X2, 8, ra, at);
+    uint32_t slot;
+    int64_t rel;
+    uint32_t to = virbuild_address_make(e, d, 16, &slot, &rel);
+
+    if (slot != VIRBUILD_BLOCK_NONE)
+        V->slots[slot].exposed = 1;
+    virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID,
+                         virbuild_memory_flags_make(8, 8, false), to, value, 0);
+    virbuild_store_table_clear(e, true);
+}
+
 VPRIV int virbuild_laddr(codegen_context *e, const codegen_lvalue *l)
 {
     virbuild_context *V = e->vir_builder;

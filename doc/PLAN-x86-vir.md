@@ -134,10 +134,15 @@ deleted in the commit that gives it a table row or a generic operation.
     objects aligned to 32 or 64 are realigned by the x86-64 lowering.
     Stockfish AVX2, depth 13: 50600 to 91800 nodes/second (clang++ 1990000;
     SSE2 by vcc: 119900).
-  - Left: 32-byte vector parameters and results leave VIR
-    (`record_argument_or_result`, 6 functions of `nnue/network.cpp`, the
-    dot-product helper and the `propagate`s among them); real 256-bit
-    operations.
+  - 32-byte vector parameters (done by inlining, not by an ABI): VIR
+    inlines a static function that passes or returns one, whatever its
+    shape; `extract128i256` is a copy.  No function of `nnue/network.cpp`
+    leaves VIR for a vector reason.  Stockfish AVX2, depth 13: 91800 to
+    106700 nodes/second (measured with another session compiling; clang++
+    1990000).
+  - Left: the 32-byte ABI in VIR (calls that are not inlined), real 256-bit
+    operations, and the front end's lane expansions (`madd`, `maddubs`,
+    `mulhi`, `packus`, saturation) as instructions.
 - **XV4** The rest of SSE through AVX2, by family.
 - **XV5** AVX-512: 512 bits, mask registers, EVEX rounding and broadcast.
 - **XV6** Delete the stencils and `tools/gen-x86stencils.py`, or keep them

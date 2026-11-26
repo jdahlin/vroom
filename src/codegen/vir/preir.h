@@ -357,6 +357,8 @@ VPRIV void virbuild_vector_shuffled(codegen_context *e,
 VPRIV uint32_t virbuild_vector_sign_bits(codegen_context *e, int ra);
 VPRIV void virbuild_vector_permute(codegen_context *e, int ra, int rb,
                                    const codegen_lvalue *d);
+VPRIV void virbuild_vector_half(codegen_context *e, int ra, int at,
+                                const codegen_lvalue *d);
 VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op,
                                   uint32_t code, uint32_t vt, int lane, int ra,
                                   int rb, const codegen_lvalue *d, int at = 0);

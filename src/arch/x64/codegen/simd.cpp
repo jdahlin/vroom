@@ -1332,5 +1332,7 @@ VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n)
     if (!strcmp(name, "ia32_permvarsi256") ||
         !strcmp(name, "ia32_permvarsf256"))
         return 2;
+    if (!strcmp(name, "ia32_extract128i256"))
+        return 3;
     return 0;
 }
