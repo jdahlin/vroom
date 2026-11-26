@@ -444,7 +444,12 @@ analysis_result semantic_analysis::member_definition_of_template(
                 n, "temp.mem",
                 "a constrained or undeclared out-of-class member template");
     }
+    bool nested_member_template =
+        !variable && inner && !out_of_class_member(definition) &&
+        out_of_class_nested(definition).size() == 4 &&
+        out_of_class_nested(definition)[2].is_identifier();
     if (!variable && inner && !out_of_class_member(definition) &&
+        !nested_member_template &&
         of.definition.is(syntax_kind::class_specifier)) {
         /* [temp.mem]/1, [basic.lookup.qual]/3: the member class template
            the second template-head and Y<U> name, declared in the class
@@ -533,8 +538,9 @@ analysis_result semantic_analysis::member_definition_of_template(
     record.inner = inner;
     record.template_entity = function_templates[ct - 1].entity;
     record.pattern = pattern;
-    record.member_class =
-        !variable && inner && !out_of_class_member(definition);
+    record.member_class = !variable && inner &&
+                          !out_of_class_member(definition) &&
+                          !nested_member_template;
     return record_template_member(record);
 }
 
