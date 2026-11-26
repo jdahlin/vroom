@@ -4399,6 +4399,7 @@ class semantic_analysis
        the arguments (diagnose_if_call) */
     bool diagnose_if_holds(uint32_t condition, const entity_index *parameters,
                            size_t parameter_count, const uint32_t *arguments);
+    bool function_pointer_type(qualified_type t) const;
     constness evaluate_object(constant_evaluation &state, uint32_t node,
                               uint32_t &object);
     constness evaluate_read(constant_evaluation &state, uint32_t node,

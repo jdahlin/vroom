@@ -1393,6 +1393,13 @@ constant_value semantic_analysis::copy_value(constant_evaluation &state,
     return r;
 }
 
+bool semantic_analysis::function_pointer_type(qualified_type t) const
+{
+    const struct type &p = type_table[t.unqualified()];
+    return p.kind == type_kind::pointer &&
+           type_table[p.operand.unqualified()].kind == type_kind::function;
+}
+
 /*
  * The object a glvalue designates: [expr.const]/5.8's "object whose
  * lifetime began within the evaluation of E", a local variable or
@@ -1663,6 +1670,15 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
     }
     /* [expr.call]/14: a call of a function that returns a reference is a
        glvalue, the object its result refers to ([dcl.ref]/5) */
+    case semantic_kind::bind_reference: {
+        /* a glvalue reached through a reference binding: its object */
+        constant_value bound;
+        constness held = evaluate_binding(state, node, bound);
+        if (held != constness::constant)
+            return held;
+        object = bound.first;
+        return constness::constant;
+    }
     case semantic_kind::call: {
         if (x.category == value_category::prvalue)
             break;
@@ -2087,6 +2103,22 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
     }
     default:
         break;
+    }
+    /* [class.temporary]/2: a scalar prvalue where an object is needed
+       holds its value */
+    if (x.category == value_category::prvalue &&
+        function_pointer_type(x.type)) {
+        constant_value u;
+        constness held = evaluate_node(state, node, u);
+        if (held != constness::constant)
+            return held;
+        constant_evaluation::object o;
+        o.frame = state.frame;
+        o.value = u;
+        object = static_cast<uint32_t>(state.objects.size());
+        append_object(state, o);
+        pin_objects(state);
+        return constness::constant;
     }
     /* [conv.rval]: a prvalue of class type where an object is needed
        (the object expression of a member access or call) materializes a
@@ -2741,7 +2773,11 @@ constness semantic_analysis::evaluate_binding(constant_evaluation &state,
        own lifetimes, not modelled) */
     uint32_t object = 0;
     constness c;
-    if (semantics[bound].category == value_category::prvalue && state.frame)
+    /* (in a function's invocation, whose temporaries' lifetimes are not
+       modelled, only a function pointer, which a table of them is built
+       from) */
+    if (semantics[bound].category == value_category::prvalue && state.frame &&
+        !function_pointer_type(semantics[bound].type))
         return CONST_UNKNOWN;
     if (semantics[bound].category == value_category::prvalue &&
         !evaluated_class(semantics[bound].type)) {

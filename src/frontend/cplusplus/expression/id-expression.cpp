@@ -1103,30 +1103,68 @@ analysis_result semantic_analysis::qualified_template_id(SyntaxRef n,
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
     VTRY_SET(r, written_arguments_of(id, written, expansion));
-    if (written.size() != function_templates[ft - 1].parameter_count)
-        return not_supported_because(
-            n, "over.over", "a template-id not giving every template argument");
+    const function_template &of = function_templates[ft - 1];
+    uint32_t parameters = of.parameter_count;
+    bool trailing_pack = parameters && template_parameter_is_pack(
+                                           of.first_parameter + parameters - 1);
     owned_array<template_argument> specified;
     for (size_t i = 0; i < written.size(); i++) {
-        if (expansion[i])
-            return not_supported_because(
-                n, "temp.variadic",
-                "a pack expansion in explicit template arguments of a member");
-        uint32_t position =
-            explicit_argument_position(ft, static_cast<uint32_t>(i));
-        if (position == UINT32_MAX)
-            return not_supported_because(
-                n, "temp.arg.explicit",
-                "an explicit template argument with no matching parameter");
-        template_argument a;
-        VTRY_SET(r, template_argument_for(id.index(), ft, position, written[i],
-                                          specified.data(), a));
-        if (depends_on_template_parameter(a.type) || a.template_entity ||
-            a.kind == template_argument::kind_t::pack)
-            return not_supported_because(
-                n, "temp.dep",
-                "a dependent, template or pack explicit template argument");
-        specified.append(a);
+        /* [temp.variadic]/5: a pack expansion's pattern, once per element */
+        uint32_t times = 1;
+        if (expansion[i]) {
+            /* (a substitution failure of the specialization named is not
+               all found yet: refused where one decides) */
+            if (substituting)
+                return not_supported_because(
+                    n, "temp.variadic",
+                    "a pack expansion in explicit template arguments of a "
+                    "member in a substitution");
+            token_index first = first_token(written[i]);
+            token_index end = first + 1;
+            if (!written[i].is_token())
+                end = written[i].end_token();
+            if (end > first + 1 && SyntaxElement::from_token(end - 1).is(
+                                       preprocessing_op_or_punc::ELLIPSIS))
+                end--;
+            if (!expansion_count(first, end, times))
+                return not_supported_because(
+                    n, "temp.variadic",
+                    "an explicit argument pack expansion of undetermined "
+                    "length");
+        }
+        for (uint32_t k = 0; k < times; k++) {
+            uint32_t position = explicit_argument_position(
+                ft, static_cast<uint32_t>(specified.size()));
+            if (position == UINT32_MAX)
+                return not_supported_because(
+                    n, "temp.arg.explicit",
+                    "an explicit template argument with no matching parameter");
+            template_argument a;
+            {
+                expansion_scope each(*this, expansion[i], k, true);
+                VTRY_SET(r, template_argument_for(id.index(), ft, position,
+                                                  written[i], specified.data(),
+                                                  a));
+            }
+            if (depends_on_template_parameter(a.type) || a.template_entity ||
+                a.kind == template_argument::kind_t::pack)
+                return not_supported_because(
+                    n, "temp.dep",
+                    "a dependent, template or pack explicit template argument");
+            specified.append(a);
+        }
+    }
+    uint32_t fixed = parameters - trailing_pack;
+    if (specified.size() < fixed ||
+        (!trailing_pack && specified.size() != fixed))
+        return not_supported_because(
+            n, "over.over", "a template-id not giving every template argument");
+    if (trailing_pack) {
+        template_argument rest =
+            make_pack(specified.data() + fixed,
+                      static_cast<uint32_t>(specified.size()) - fixed);
+        specified.resize(fixed);
+        specified.append(rest);
     }
     entity_index e = 0;
     VTRY_SET(r,
