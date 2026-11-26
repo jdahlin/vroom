@@ -925,16 +925,11 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
        are ([class.default.ctor]/4, [class.copy.ctor]/13 with
        [dcl.constexpr]/4 as of C++20, which no longer asks for every member
        to be initialized); the other functions are not analysed */
-    if (constexpr_specified && (m.destructor || x.virtual_base_count))
+    if (constexpr_specified && x.virtual_base_count)
         return not_supported_because(
             n, "dcl.fct.def.default",
-            "a constexpr defaulted destructor, or a constexpr default in a "
-            "class with virtual bases");
+            "a constexpr default in a class with virtual bases");
     if (m.destructor) {
-        if (access)
-            return not_supported_because(
-                n, "dcl.fct.def.default",
-                "a defaulted destructor that is not public");
         /* [class.dtor]/4: as the implicitly-declared destructor */
         if (x.destructor || f.parameter_count || explicit_specified)
             return not_supported_because(n, "dcl.fct.def.default",
@@ -946,6 +941,9 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
            virtual ([class.virtual]/7) */
         declare_implicit(c, special_member::destructor, false);
         entity_index e = entity_table[c].destructor;
+        entity_table[e].access = access;
+        if (constexpr_specified)
+            entity_table[e].constexpr_ = true;
         entity_table.add_declaration(e, n);
         virt_override = virt_final = virt_pure = false;
         return virtual_member(c, e, n, m.id, true);
