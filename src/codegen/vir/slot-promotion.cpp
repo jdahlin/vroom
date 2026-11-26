@@ -24,6 +24,14 @@ static bool virbuild_promote_load_conversion(uint32_t st, uint32_t ty,
 {
     uint32_t w = VIR_INSN_FLAG_WIDTH_LOG2(fl);
 
+    if (vir_type_is_vector(st) || vir_type_is_vector(ty)) {
+        /* __m128i stored as two i64 and read as four i32: the same bits */
+        if (st == ty)
+            *op = VIRBUILD_PROMOTE_NO_CONVERSION;
+        else
+            *op = VIR_OP_BITCAST;
+        return vir_type_is_vector(st) && vir_type_is_vector(ty);
+    }
     /* A narrow load, or an i32 field read into i64, extends its stored bits. */
     if (w < 2 || (fl & VIR_INSN_FLAG_MS) ||
         (w == 2 && st == VIR_TYPE_I32 && ty == VIR_TYPE_I64)) {
@@ -255,15 +263,12 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
             fd[nf++] = VCC_LITERAL(virbuild_promote_field, s, rel, size,
                                    VIR_TYPE_VOID);
         }
-        /* a vector field is one vector type, read and written whole */
-        uint32_t accessed = ty;
-        if (q->insn.op == VIR_OP_LOAD)
-            accessed = q->insn.type;
-        if (size == 16) {
-            if (fd[k].type != VIR_TYPE_VOID && fd[k].type != accessed)
+        /* a vector field takes the type first stored; others are bitcast to and from it */
+        if (size == 16 && ty != VIR_TYPE_VOID) {
+            if (!vir_type_is_vector(ty))
                 bad[s] = 1;
-            if (q->insn.op == VIR_OP_STORE)
-                ty = accessed;
+            if (fd[k].type != VIR_TYPE_VOID)
+                ty = fd[k].type;
         }
         if (ty != VIR_TYPE_VOID) {
             if (fd[k].type != VIR_TYPE_VOID && fd[k].type != ty) {
@@ -304,7 +309,7 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
 
         if (f->size == 16) {
             /* never stored: no undefined vector constant to give it */
-            if (f->type != q->insn.type)
+            if (f->type == VIR_TYPE_VOID || !vir_type_is_vector(q->insn.type))
                 bad[q->slot_plus_one - 1] = 1;
             continue;
         }
@@ -342,6 +347,8 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
             op = VIR_OP_P2I;
         else if (to == VIR_TYPE_I32 && from == VIR_TYPE_I64)
             op = VIR_OP_TRUNC;
+        else if (vir_type_is_vector(to) && to != from)
+            op = VIR_OP_BITCAST;
         else
             continue;
         b = V->insns[i].block;

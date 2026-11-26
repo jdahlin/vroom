@@ -393,6 +393,8 @@ is left out). Lane 0 is at the lowest address.
 `store` operand. A `load` or `store` of a vector moves 16 bytes; its width
 field is the lane's, and its alignment is at least the lane's, never 16 by
 default.
+7.5.1b `bitcast` of a vector type takes any vector type: the same 128 bits.
+
 7.5.2 These operations take a vector type as their result type, lane by lane:
 `add sub and or xor neg not` on `i32x4` and `i64x2`, `mul` on `i32x4` only
 (no target has a 64-bit lane multiply); `fadd fsub fmul fdiv fneg fabs fsqrt`
