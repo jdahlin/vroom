@@ -485,7 +485,9 @@ bool semantic_analysis::copy_assignment_operator(entity_index f,
                                                  entity_index c) const
 {
     const entity &x = entity_table[f];
-    if (!x.nonstatic_member || x.enclosing != c)
+    /* (/1: a function template's specialization is none, whatever its
+       parameter) */
+    if (x.instantiation || !x.nonstatic_member || x.enclosing != c)
         return false;
     /* an operator+ or operator== of that parameter is none */
     if (!x.operator_function ||

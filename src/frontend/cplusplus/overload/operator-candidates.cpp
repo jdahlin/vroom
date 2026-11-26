@@ -838,9 +838,20 @@ analysis_result semantic_analysis::overloaded_operator(
            implicitly": a candidate too, which analysis does not form */
         entity_index c = type_table[operands[0].type.unqualified()].entity;
         bool copy = false;
-        for (const overload_candidate &k : candidates)
+        /* (a template specialization is none, [class.copy.assign]/1; where
+           the implicit one is not deleted, one taking c is taken to be the
+           better candidate and no implicit one is weighed against it) */
+        for (const overload_candidate &k : candidates) {
             if (copy_assignment_operator(k.function, c))
                 copy = true;
+            const struct type &ft = type_table[k.type.unqualified()];
+            if (k.template_index && ft.kind == type_kind::function &&
+                ft.parameter_count == 1 &&
+                stripped(type_table.parameters(k.type.unqualified())[0]) ==
+                    entity_table[c].type.unqualified() &&
+                !copy_assignment_deleted(c))
+                copy = true;
+        }
         /* [class.copy.assign]/3, /9: X& operator=(X&&) = default beside a
            user-declared copy assignment operator, of a class assigned
            bitwise: trivial, no entity (implicit_assignments), and the
@@ -1011,22 +1022,42 @@ analysis_result semantic_analysis::overloaded_operator(
     r = best_viable_function(n, candidates, nullptr, arguments, chosen,
                              &none_viable, true, &argument_syntax);
     if (r == analysis_result::well_formed && deleted_copy) {
-        /* the deleted copy assignment operator is viable for the left
-           operand and the class's own type on the right: with no other
-           candidate viable it is selected; a viable move assignment
-           operator binds a non-const rvalue better ([over.ics.rank]/3.2.3),
-           any other choice is not analysed */
+        /* the deleted copy assignment operator, const X&, is viable for the
+           left operand and the class's own type on the right: it is selected,
+           or the call ambiguous, or a non-template preferred to a template
+           ([over.match.best]/2), unless another operator= binds the right
+           operand better: for a non-const lvalue a reference to X less
+           cv-qualified than const X& ([over.ics.rank]/3.2.6); a non-const
+           rvalue is bound better by an rvalue reference (/3.2.3), which any
+           choice but X by value is taken to be */
         bool movable = operands[1].category != value_category::lvalue &&
                        !(operands[1].type.cv() & cv_const);
-        if (none_viable || (operands[0].type.cv() & cv_const))
+        bool better = false;
+        if (!none_viable && !(operands[0].type.cv() & cv_const)) {
+            const overload_candidate &win = candidates[chosen];
+            const struct type &ft = type_table[win.type.unqualified()];
+            better = movable;
+            if (ft.parameter_count == 1) {
+                qualified_type parameter =
+                    type_table.parameters(win.type.unqualified())[0];
+                const struct type &reference =
+                    type_table[parameter.unqualified()];
+                if (movable)
+                    better = parameter.unqualified() !=
+                             operands[1].type.unqualified();
+                else
+                    better = !(operands[1].type.cv() & cv_const) &&
+                             reference.kind == type_kind::lvalue_reference &&
+                             reference.operand.unqualified() ==
+                                 operands[1].type.unqualified() &&
+                             !(reference.operand.cv() & cv_const);
+            }
+        }
+        if (!better)
             return ill_formed(n,
                               "the implicitly-declared copy assignment "
                               "operator is defined as deleted",
                               "class.copy.assign");
-        if (!movable)
-            return not_supported_because(
-                n, "class.copy.assign",
-                "a deleted copy assignment against another viable operator=");
     }
     if (r == analysis_result::well_formed && none_viable && converts) {
         /* a built-in candidate may be viable through the conversion */
