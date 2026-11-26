@@ -440,7 +440,7 @@ analysis_result semantic_analysis::usual_deallocation(
             unsized = sized = 0;
         }
     }
-    if (class_complete && in_class && other)
+    if (class_complete && in_class && other && !unsized && !sized)
         /* a class's deallocation functions that are not all usual ones:
            clang's ambiguities ("multiple suitable 'operator delete'") are
            not followed */
