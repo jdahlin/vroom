@@ -1414,12 +1414,10 @@ analysis_result semantic_analysis::scalar_list_initialization(
     qualified_type type, bool direct, initialized_value &result)
 {
     const struct type target = type_table[type.unqualified()];
-    /* (3.8), an enumeration from one element, is not analysed */
-    bool empty_enumeration =
-        target.kind == type_kind::enumeration && clauses.empty();
     if (target.kind != type_kind::fundamental &&
         target.kind != type_kind::pointer &&
-        target.kind != type_kind::pointer_to_member && !empty_enumeration)
+        target.kind != type_kind::pointer_to_member &&
+        target.kind != type_kind::enumeration)
         return not_supported_because(list, "dcl.init.list",
                                      "list-initialization of this type");
     if (clauses.empty()) {
@@ -1448,6 +1446,34 @@ analysis_result semantic_analysis::scalar_list_initialization(
         /* braces around a scalar's initializer: clang's warning */
         return not_supported_because(
             list, "dcl.init.list", "extra braces around a scalar initializer");
+    if (target.kind == type_kind::enumeration) {
+        expression_meaning e;
+        VTRY(r, target_expression(clauses[0], type, e));
+        if (e.type.unqualified() == type.unqualified())
+            return initialize_with(list, e, type, direct, true, result);
+        const entity &en = entity_table[target.entity];
+        if (!direct || !en.fixed_underlying ||
+            en.underlying == fundamental_type::none)
+            return initialize_with(list, e, type, direct, true, result);
+        /* [dcl.init.list]/3.8: direct-list-initialization of an enumeration
+           with a fixed underlying type from a single element convertible to
+           the underlying type without narrowing */
+        qualified_type underlying = qualified_type::make(
+            type_table.fundamental(en.underlying), cv_none);
+        initialized_value u;
+        VTRY(ur, initialize_with(list, e, underlying, false, true, u));
+        result.evaluation = u.evaluation;
+        result.value = u.value;
+        expression_meaning converted;
+        converted.type = qualified_type::make(type.unqualified(), cv_none);
+        converted.category = value_category::prvalue;
+        converted.evaluation = u.evaluation;
+        converted.value = u.value;
+        result.node = expression_node(
+            semantic_kind::conversion, converted, list.first_token(), u.node, 0,
+            static_cast<uint8_t>(conversion_kind::integral));
+        return analysis_result::well_formed;
+    }
     /* (3.9) */
     return initialize_from(list, clauses[0], type, direct, true, result);
 }
