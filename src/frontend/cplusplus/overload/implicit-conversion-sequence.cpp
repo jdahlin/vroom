@@ -82,6 +82,18 @@ semantic_analysis::standard_conversion_sequence(const expression_meaning &a,
         return s;
     s.identity = false;
     s.rank = 2;
+    /* [ext:gnu_vector_size] clang's lax vector conversions are between
+       integer vectors only: vectors of different element types, one of
+       them floating, do not convert (x86 intrinsic types' overloads).
+       The other pairs are left unknown below. */
+    if (f.kind == type_kind::vector && t.kind == type_kind::vector &&
+        f.operand.unqualified() != t.operand.unqualified()) {
+        const qualified_type elements[] = {f.operand, t.operand};
+        for (qualified_type element : elements)
+            if (is_floating(element) ||
+                fundamental_of(element) == fundamental_type::bfloat16)
+                return of_form(sequence::form::bad);
+    }
     fundamental_type ff = fundamental_of(from), tf = fundamental_of(to);
     if (f.kind == type_kind::enumeration) {
         /* [conv.prom]/4: "A prvalue of an unscoped enumeration type whose
