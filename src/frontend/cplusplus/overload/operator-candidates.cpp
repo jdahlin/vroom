@@ -1059,7 +1059,13 @@ analysis_result semantic_analysis::overloaded_operator(
                               "operator is defined as deleted",
                               "class.copy.assign");
     }
-    if (r == analysis_result::well_formed && none_viable && converts) {
+    /* [over.match.oper]/9: "If the operator is the operator ,, the unary
+       operator &, or the operator ->, and there are no viable functions,
+       then the operator is assumed to be the built-in operator": no
+       conversion takes part */
+    bool address_of = unary_prefix && op == preprocessing_op_or_punc::AMPERSAND;
+    if (r == analysis_result::well_formed && none_viable && converts &&
+        !address_of) {
         /* a built-in candidate may be viable through the conversion */
         analysis_result br = builtin_via_conversion();
         if (br != analysis_result::ill_formed)
