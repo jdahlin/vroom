@@ -371,12 +371,36 @@ bool semantic_analysis::aggregate_built_in_place(uint32_t value) const
     return true;
 }
 
+/* whether a mem-initializer designates m, or, m being an anonymous union or
+   struct, one of its members */
+bool semantic_analysis::member_designated(
+    entity_index m,
+    const owned_array<designated_initialization> &designated) const
+{
+    for (const designated_initialization &d : designated)
+        for (entity_index target = d.member; target;
+             target =
+                 entity_table[entity_table[target].enclosing].anonymous_object)
+            if (target == m)
+                return true;
+    return false;
+}
+
 analysis_result semantic_analysis::anonymous_member_initializers(
-    token_index at, entity_index anonymous, uint32_t &statement)
+    token_index at, entity_index anonymous,
+    const owned_array<designated_initialization> &designated,
+    uint32_t &statement)
 {
     owned_array<uint32_t> statements;
     uint32_t first = entity_table[anonymous].first_member;
     uint32_t count = entity_table[anonymous].member_count;
+    /* [class.base.init]/9: no other variant member is initialized when
+       one is designated */
+    bool variant_designated = false;
+    if (entity_table[anonymous].union_)
+        for (uint32_t i = 0; i < count; i++)
+            if (member_designated(class_members[first + i], designated))
+                variant_designated = true;
     for (uint32_t i = 0; i < count; i++) {
         entity_index m = class_members[first + i];
         if (entity_table[m].kind != entity_kind::variable ||
@@ -389,7 +413,17 @@ analysis_result semantic_analysis::anonymous_member_initializers(
             entity_table[record.entity].anonymous_object == m)
             inner = record.entity;
         uint32_t made = 0;
-        if (entity_table[m].default_initializer) {
+        for (const designated_initialization &d : designated)
+            if (d.member == m)
+                made = d.statement;
+        if (made) {
+            statements.append(made);
+            continue;
+        }
+        bool partly_designated = member_designated(m, designated);
+        if (variant_designated && !partly_designated)
+            continue;
+        if (entity_table[m].default_initializer && !partly_designated) {
             SyntaxRef init = entity_table[m].default_initializer;
             if (!entity_table[anonymous].union_)
                 for (token_index t = init.first_token(); t < init.end_token();
@@ -405,7 +439,7 @@ analysis_result semantic_analysis::anonymous_member_initializers(
                             "of an anonymous struct");
             VTRY(r, default_member_initializer(at, m, made));
         } else if (inner) {
-            VTRY(r, anonymous_member_initializers(at, inner, made));
+            VTRY(r, anonymous_member_initializers(at, inner, designated, made));
         } else if (record.kind == type_kind::class_type &&
                    entity_table[record.entity].first_constructor &&
                    !trivial_defaulted_default_constructor(record.entity) &&
@@ -1658,9 +1692,13 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
     for (uint32_t &i : initialized)
         i = 0;
     /* [class.base.init]/2: the distinct members of an anonymous struct
-       share its unnamed object's slot: their initializations run in the
-       order written */
+       share its unnamed object's slot: their initializations are collected,
+       and run with those of the members not named (below) */
+    owned_array<designated_initialization> designated;
+    entity_index designated_member = 0;
     auto set_slot = [&](size_t slot, token_index where, uint32_t statement) {
+        if (designated_member && designated_member != subobjects[slot])
+            designated.append({designated_member, statement});
         if (!initialized[slot]) {
             initialized[slot] = statement;
             return;
@@ -1791,6 +1829,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             }
             /* [class.base.init]/2: a member of an anonymous union
            ([class.union.anon]) is initialized in its unnamed object */
+            designated_member = e;
             entity_index target = e;
             while (entity_index anon =
                        entity_table[entity_table[target].enclosing]
@@ -2098,6 +2137,18 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
             set_slot(slot, id, subobject_store(object, type, id, value.node));
         }
     }
+    /* [class.base.init]/9, /13.3: an anonymous object with designated
+       members: those and the default initialization of the others, in
+       declaration order */
+    for (size_t i = 0; i < subobjects.size(); i++) {
+        const struct type &record =
+            type_table[entity_table[subobjects[i]].type.unqualified()];
+        if (!initialized[i] || record.kind != type_kind::class_type ||
+            entity_table[record.entity].anonymous_object != subobjects[i])
+            continue;
+        VTRY(r, anonymous_member_initializers(at, record.entity, designated,
+                                              initialized[i]));
+    }
     /* [class.base.init]/9: "In a non-delegating constructor, if a given
        potentially constructed subobject is not designated by a
        mem-initializer-id ... (9.3) otherwise, the entity is
@@ -2247,7 +2298,7 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                             "a constexpr constructor that leaves an anonymous "
                             "union uninitialized before C++20");
                 }
-            VTRY(r, anonymous_member_initializers(at, record.entity,
+            VTRY(r, anonymous_member_initializers(at, record.entity, designated,
                                                   initialized[i]));
             continue;
         }
