@@ -981,6 +981,14 @@ uint32_t c_lowering::call(const semantic_node &n)
             /* a class's object initialized by a braced-init-list
                ([dcl.init.list]/3.4): its value */
             a = compound_literal(items[i]);
+        else if (builtin && node(items[i]).evaluation == constness::constant &&
+                 record(node(items[i]).type).kind == type_kind::fundamental &&
+                 record(node(items[i]).type).fundamental ==
+                     fundamental_type::int_)
+            /* a builtin's immediate operand may be a constexpr variable,
+               no constant to C: its value */
+            a = ast_builder_integer(c, type(node(items[i]).type, n.at),
+                                    static_cast<int64_t>(node(items[i]).value));
         else
             a = expression(items[i]);
         if (!a)
