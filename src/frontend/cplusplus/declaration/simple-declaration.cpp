@@ -1083,6 +1083,14 @@ semantic_analysis::declarator_access_class(SyntaxRef declaration) const
     auto nested = first.id.qualified_id().nested_name_specifier();
     if (!nested)
         return 0;
+    return qualifier_class(nested);
+}
+
+/* the class a nested-name-specifier of plain names nominates, as
+   declarator_access_class (a qualified class-head-name's too), or 0 */
+entity_index
+semantic_analysis::qualifier_class(NestedNameSpecifier nested) const
+{
     entity_index scope = 0;
     bool qualified = false;
     if (nested.global())

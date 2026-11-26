@@ -548,9 +548,25 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
     if (object.kind == type_kind::class_type)
         no_storage = unevaluated > default_argument_unevaluated &&
                      !entity_table[object.entity].destructor;
+    /* an array's or scalar's list temporary is a literal object (static at
+       namespace scope), unless elements need destroying */
+    bool destroyed_elements = false;
+    if (object.kind == type_kind::array) {
+        qualified_type element = m.type;
+        while (type_table[element.unqualified()].kind == type_kind::array)
+            element = type_table[element.unqualified()].operand;
+        const struct type &last = type_table[element.unqualified()];
+        if (last.kind == type_kind::class_type) {
+            const entity &c = entity_table[last.entity];
+            /* (or an element class that is not complete) */
+            destroyed_elements = c.destructor || (!c.defined && !c.size);
+        }
+    }
+    bool no_room =
+        destroyed_elements || (object.kind == type_kind::class_type &&
+                               !at_block_scope() && !binding_extends);
     if (aggregate_prvalue(m) && !closure_prvalue_binding(m) && !no_storage &&
-        (object.kind != type_kind::class_type ||
-         (!at_block_scope() && !binding_extends)))
+        no_room)
         return not_supported_because(
             at, "class.temporary",
             "an array's or scalar's list temporary, or a temporary of a call's "
@@ -1604,6 +1620,18 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
             return not_supported_because(
                 init, "dcl.init",
                 "a parenthesized initializer with no expressions");
+        /* [dcl.init]/17.1: only a non-parenthesized braced-init-list
+           list-initializes; a reference binds no list in parentheses */
+        if (!parts.list_of_several() &&
+            parts.list.is(syntax_kind::braced_init_list) &&
+            (type_table[type.unqualified()].kind ==
+                 type_kind::lvalue_reference ||
+             type_table[type.unqualified()].kind ==
+                 type_kind::rvalue_reference))
+            return ill_formed(init,
+                              "a reference cannot be initialized by a "
+                              "parenthesized braced-init-list",
+                              "dcl.init");
         /* a braced-init-list argument of a constructor ([over.best.ics]/1:
            its sequence is [over.ics.list]'s), kept as written.  (Not an
            empty one: the ambiguity of B b({}) with the copy constructor,

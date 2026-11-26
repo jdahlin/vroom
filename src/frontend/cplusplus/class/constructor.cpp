@@ -3851,6 +3851,11 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
     declarator_meaning m;
     function_cv = 0;
     function_parameters.clear();
+    /* [class.access]/6, as init_declarators */
+    entity_index context = declarator_access_class(n);
+    if (!context)
+        context = access_class;
+    scoped_value<entity_index> member_context(access_class, context);
     analysis_result r = declarator(n, n[at], type, m);
     in_member_declarator = false;
     if (r != analysis_result::well_formed)

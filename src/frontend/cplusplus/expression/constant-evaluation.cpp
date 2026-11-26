@@ -2131,6 +2131,15 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
         pin_objects(state);
         return constness::constant;
     }
+    /* [class.temporary]: an array's list temporary */
+    if (x.category == value_category::prvalue &&
+        type_table[x.type.unqualified()].kind == type_kind::array) {
+        constant_evaluation::object o;
+        o.frame = state.frame;
+        object = static_cast<uint32_t>(state.objects.size());
+        append_object(state, o);
+        return evaluate_initialization(state, x.type, node, false, object);
+    }
     /* [conv.rval]: a prvalue of class type where an object is needed
        (the object expression of a member access or call) materializes a
        temporary */
@@ -2808,7 +2817,9 @@ constness semantic_analysis::evaluate_binding(constant_evaluation &state,
     uint32_t object = 0;
     constness c;
     if (semantics[bound].category == value_category::prvalue &&
-        !evaluated_class(semantics[bound].type)) {
+        !evaluated_class(semantics[bound].type) &&
+        type_table[semantics[bound].type.unqualified()].kind !=
+            type_kind::array) {
         /* a scalar prvalue: the temporary holds its value */
         type_kind bk = type_table[semantics[bound].type.unqualified()].kind;
         if (bk != type_kind::pointer &&

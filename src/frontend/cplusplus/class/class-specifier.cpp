@@ -368,6 +368,14 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             "qualified name (an attribute that is not one "
             "without effect, or another form)");
     }
+    /* [class.access]/6: the names of a qualified class-head and its
+       base-clause are used by the class nominated's member */
+    entity_index head_context = access_class;
+    if (head_qualifier)
+        if (auto q = name_syntax.qualified_class_head_name())
+            if (entity_index in = qualifier_class(q.nested_name_specifier()))
+                head_context = in;
+    scoped_value<entity_index> head_access(access_class, head_context);
     bool is_final = false;
     uint32_t next = 2;
     if (unnamed)
@@ -440,9 +448,15 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             bool declared = y &&
                             entity_table[y].kind == entity_kind::class_type &&
                             entity_table[y].enclosing == q.entity;
+            /* (X itself may be a nested class: X::Y::Z) */
+            entity_index around = entity_table[q.entity].enclosing;
+            while (!is_namespace(around) &&
+                   entity_table[around].kind == entity_kind::class_type &&
+                   !entity_table[around].instantiation)
+                around = entity_table[around].enclosing;
             if (!declared ||
                 entity_table[q.entity].kind != entity_kind::class_type ||
-                !is_namespace(entity_table[q.entity].enclosing)) {
+                !is_namespace(around)) {
                 /* the class this would define is not known to be
                    incomplete from here on */
                 if (declared) {

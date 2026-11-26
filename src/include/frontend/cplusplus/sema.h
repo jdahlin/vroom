@@ -5256,6 +5256,7 @@ class semantic_analysis
     bool friend_names_class(const friend_record &f, entity_index scope,
                             uint32_t name) const;
     entity_index declarator_access_class(SyntaxRef declaration) const;
+    entity_index qualifier_class(NestedNameSpecifier nested) const;
     /* the tokens of the member-specification of the class being defined
        (class_specifier), 0 outside one */
     token_index defining_members_first = 0, defining_members_end = 0;

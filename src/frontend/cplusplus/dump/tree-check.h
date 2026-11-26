@@ -79,7 +79,9 @@ struct tree_checker {
             return false;
         const struct type &record =
             analysis.type_table[node.type.unqualified()];
-        return record.kind == type_kind::class_type;
+        /* (an array's list temporary too) */
+        return record.kind == type_kind::class_type ||
+               record.kind == type_kind::array;
     }
 
     bool is_bool(qualified_type t) const
