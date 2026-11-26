@@ -66,19 +66,36 @@ bool semantic_analysis::orderable(qualified_type t, bool packs) const
         for (uint32_t i = 0; i < specialization_argument_count(r.entity); i++) {
             const template_argument &x =
                 specialization_template_argument(r.entity, i);
-            if (x.kind == template_argument::kind_t::type)
-                continue;
             /* a non-type argument that is a value or a non-type parameter
                (deduce_type's TT<i>), not an expression naming parameters
                (a non-deduced context, [temp.deduct.type]/5.3) */
-            if (x.kind != template_argument::kind_t::value ||
-                (x.template_entity &&
-                 (entity_table[x.template_entity].kind ==
-                      entity_kind::dependent_value ||
-                  contains_placeholder(entity_table[x.template_entity].type))))
+            auto comparable = [&](const template_argument &y) {
+                if (y.kind == template_argument::kind_t::type)
+                    return true;
+                if (y.kind != template_argument::kind_t::value)
+                    return false;
                 /* (a parameter of placeholder type, auto or decltype(auto),
                    is ordered by that type too: [temp.func.order]) */
-                return false;
+                return !y.template_entity ||
+                       (entity_table[y.template_entity].kind !=
+                            entity_kind::dependent_value &&
+                        !contains_placeholder(
+                            entity_table[y.template_entity].type));
+            };
+            if (x.kind != template_argument::kind_t::pack) {
+                if (!comparable(x))
+                    return false;
+                continue;
+            }
+            /* a pack of arguments, S<I...>: each element the same, or
+               the expansion of a parameter pack */
+            for (uint32_t k = 0; k < x.count; k++) {
+                const template_argument &y = pack_arguments[x.value + k];
+                bool expansion = y.kind == template_argument::kind_t::pack &&
+                                 y.template_entity;
+                if (!expansion && !comparable(y))
+                    return false;
+            }
         }
         return true;
     case type_kind::template_parameter:
@@ -372,8 +389,7 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
             template_parameter_parts form;
             if (!template_parameter_form(
                     template_parameter_nodes[t.first_parameter + i], form) ||
-                (dependent_types &&
-                 (form.template_template || (!form.type && form.pack))))
+                (dependent_types && form.template_template))
                 unknown = true;
         }
         qualified_type type = entity_table[t.entity].type;
