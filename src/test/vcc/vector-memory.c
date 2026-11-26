@@ -66,8 +66,59 @@ __attribute__((noinline)) static void reals(f4 *f, d2 *d, l2 *l)
     *l = (*l + *l) - (*l ^ *l);
 }
 
+__attribute__((noinline)) static void opaque(int *p)
+{
+    *p += 1;
+}
+
+/* vectors as loop values, live across a call, chosen by a branch */
+__attribute__((noinline)) static int carried(const v4 *a, int n)
+{
+    v4 sum = {0, 0, 0, 0}, other = {1, 1, 1, 1};
+    int calls = 0;
+    for (int i = 0; i < n; i++) {
+        v4 x = a[i % 3];
+        if (i & 1)
+            sum = sum + x;
+        else
+            sum = sum ^ x;
+        opaque(&calls);
+        v4 swapped = other;
+        other = sum;
+        sum = sum + swapped;
+    }
+    union {
+        v4 v;
+        int i[4];
+    } u;
+    u.v = sum + other;
+    return u.i[0] + u.i[1] * 3 + u.i[2] * 5 + u.i[3] * 7 + calls;
+}
+
+/* more vectors live at once than there are registers */
+__attribute__((noinline)) static void pressure(v4 *out, const v4 *in)
+{
+    v4 a = in[0] + in[1], b = in[1] + in[2], c = in[2] + in[3];
+    v4 d = in[3] + in[4], e = in[4] + in[5], f = in[5] + in[6];
+    v4 g = in[6] + in[7], h = in[7] + in[8], i = in[8] + in[9];
+    v4 j = in[9] + in[10], k = in[10] + in[11], l = in[11] + in[12];
+    v4 m = in[12] + in[13], n = in[13] + in[14], o = in[14] + in[15];
+    v4 p = in[15] + in[0], q = in[0] * in[3], r = in[1] * in[5];
+    int dummy = 0;
+    opaque(&dummy);
+    *out = (a - b) ^ (c - d) ^ (e - f) ^ (g - h) ^ (i - j) ^ (k - l) ^
+           (m - n) ^ (o - p) ^ (q + r) ^ (a + c + e + g + i + k + m + o) ^
+           (b + d + f + h + j + l + n + p);
+}
+
 int main(void)
 {
+    v4 many[16], mixed;
+    for (int i = 0; i < 16; i++)
+        many[i] = (v4){i * 3, i * 5 + 1, 100 - i, i * i};
+    printf("%d %d\n", carried(many, 7), carried(many + 5, 12));
+    pressure(&mixed, many);
+    printf("%d %d %d %d\n", mixed[0], mixed[1], mixed[2], mixed[3]);
     v4 p = {1, 2, 3, 4}, a = {10, 20, 30, 40};
     printf("%d\n", across(&p, &a));
     printf("%d\n", looped(&p, &a, 6));

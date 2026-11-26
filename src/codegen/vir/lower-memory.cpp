@@ -368,13 +368,47 @@ static uint32_t virbuild_copy_high_word(codegen_context *e, uint32_t value)
                                 0);
 }
 
+/* the VIR type of a 16-byte vector type (of lanes VIR has no type for: two
+   of 64 bits, which only copies see) and the lane's bytes */
+VPRIV uint32_t virbuild_vector_type(codegen_context *e, ast_qualified_type vt,
+                                    int *lane)
+{
+    cc *c = e->compile_context;
+    ast_qualified_type element = T(c, vt)->base;
+    int size = (int)codegen_type_size(c, element);
+
+    *lane = 8;
+    if (size == 4) {
+        *lane = 4;
+        if (codegen_type_is_float(c, element))
+            return VIR_TYPE_F32X4;
+        return VIR_TYPE_I32X4;
+    }
+    if (size == 8 && codegen_type_is_float(c, element))
+        return VIR_TYPE_F64X2;
+    return VIR_TYPE_I64X2;
+}
+
 VPRIV void virbuild_copy(codegen_context *e, int rdst, int rsrc, uint64_t n)
 {
     uint32_t d = virbuild_register_read(e, rdst, VIR_TYPE_PTR),
              s = virbuild_register_read(e, rsrc, VIR_TYPE_PTR);
 
-    if (n == 1 || n == 2 || n == 4 ||
-        n == 8) { /* one load and store (memcpy(&u, &d, 8)): promotable */
+    if (n == 16 && e->copied_vector && !e->volatile_untag_depth &&
+        CODEGEN_IS_X64(e->compile_context) &&
+        codegen_type_size(e->compile_context, e->copied_vector) == 16 &&
+        !codegen_type_is_bool_vector(e->compile_context, e->copied_vector)) {
+        /* a vector: one value, which slot promotion can keep in a register */
+        int lane = 0;
+        uint32_t type = virbuild_vector_type(e, e->copied_vector, &lane);
+        uint32_t fl = virbuild_memory_flags_make(lane, (uint32_t)lane, false);
+
+        virbuild_insn_append(
+            e, VIR_OP_STORE, VIR_TYPE_VOID, fl, d,
+            virbuild_insn_append(e, VIR_OP_LOAD, type, fl, s, 0, 0), 0);
+    } else if (n == 1 || n == 2 || n == 4 ||
+               n ==
+                   8) { /* one load and store (memcpy(&u, &d, 8)): promotable */
         uint32_t fl = virbuild_memory_flags_make((int)n, 1, false);
 
         virbuild_insn_append(

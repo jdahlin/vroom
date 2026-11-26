@@ -94,8 +94,16 @@ deleted in the commit that gives it a table row or a generic operation.
     vectors still live in memory (copies are two 8-byte moves), so no speed
     claim.  Passes that sized an access by its width field now take all 16
     bytes of a vector one (`virbuild_access_bytes`).
-  - XV1b: values: copies, locals and block parameters of vector type, so the
-    memory traffic goes; then `i8x16`, `i16x8`, parameters and results.
+  - XV1b (done): a copy of a 16-byte vector is one vector load and store
+    of its type, and slot promotion keeps a slot read and written whole as
+    one vector type in a register: across loops, branches and calls.  A slot
+    reinterpreted as another vector type, zeroed by memset or never stored
+    stays in memory.  A loop of lane arithmetic (4 x int, 1024 vectors,
+    200000 rounds, x86-64): -O1 (the direct emitter, what -O2 did before)
+    1.48 s, -O2 0.16 s, clang -O2 -fno-vectorize 0.15 s.  Stockfish is
+    unchanged: its functions use intrinsics and leave VIR (XV2).
+  - XV1c: `i8x16` and `i16x8`, vector shifts, comparisons and shuffles;
+    vector parameters and results.
 - **XV2** The `x86op` operation, the table and its generator, for the SSE2
   to SSE4.1 builtins Stockfish uses, in VIR and the direct emitter.  Gate:
   Stockfish SSE2 stays in VIR and is faster than XV0's.

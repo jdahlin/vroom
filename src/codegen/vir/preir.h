@@ -345,6 +345,8 @@ VPRIV uint32_t virbuild_slot_find(codegen_context *e, int64_t off,
 VPRIV uint32_t virbuild_slot_address(codegen_context *e, uint32_t s,
                                      int64_t rel);
 VPRIV void virbuild_store_table_clear(codegen_context *e, bool exposed_only);
+VPRIV uint32_t virbuild_vector_type(codegen_context *e, ast_qualified_type vt,
+                                    int *lane);
 VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op, uint32_t vt,
                                   int lane, int ra, int rb,
                                   const codegen_lvalue *d);

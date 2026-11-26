@@ -511,6 +511,8 @@ typedef struct codegen_context {
     uint32_t *live_slots,
         live_slot_count; /* the live ones (indices into sla, deepest last) */
     int volatile_untag_depth; /* inside a volatile access: its records stay untagged */
+    ast_qualified_type
+        copied_vector; /* the 16-byte vector type a copy moves, or 0 */
     uint32_t
         current_location; /* innermost statement being generated (diagnostics) */
     uint32_t reuse_from,

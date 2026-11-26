@@ -719,17 +719,11 @@ static bool virbuild_vector_op(codegen_context *e, int op,
     cc *c = e->compile_context;
     ast_qualified_type element = T(c, vt)->base;
     bool real = codegen_type_is_float(c, element);
-    *lane = (int)codegen_type_size(c, element);
-    if (*lane != 4 && *lane != 8)
+    uint64_t size = codegen_type_size(c, element);
+
+    if (size != 4 && size != 8)
         return false;
-    if (real && *lane == 4)
-        *type = VIR_TYPE_F32X4;
-    else if (real)
-        *type = VIR_TYPE_F64X2;
-    else if (*lane == 4)
-        *type = VIR_TYPE_I32X4;
-    else
-        *type = VIR_TYPE_I64X2;
+    *type = virbuild_vector_type(e, vt, lane);
     switch (op) {
     case LEX_TOKEN_PLUS:
         *vir_op = VIR_OP_ADD;

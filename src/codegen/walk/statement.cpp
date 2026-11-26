@@ -350,7 +350,10 @@ static void walk_initializer_elements_store(codegen_context *e,
             WALK_LOWER(zero)(e, rd, bytes);
             bytes = codegen_type_size(c, AST_QUALIFIED_TYPE(T(c, ty)->n, 0));
         }
+        if (codegen_type_is_vector(c, ty))
+            e->copied_vector = ty;
         WALK_LOWER(copy)(e, rd, rs, bytes);
+        e->copied_vector = 0;
         WALK_LOWER(tfree)(e, rs);
         WALK_LOWER(tfree)(e, rd);
         return;
