@@ -1636,8 +1636,13 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
 
     /* [dcl.fct]/18: an abbreviated member function template */
     if (node.is(syntax_kind::function_definition) &&
-        is_namespace(entity_table[c].enclosing) && abbreviated_function(node))
-        return member_function_template(c, node, node, access);
+        abbreviated_function(node)) {
+        entity_index top = entity_table[c].enclosing;
+        while (top && entity_table[top].kind == entity_kind::class_type)
+            top = entity_table[top].enclosing;
+        if (is_namespace(top))
+            return member_function_template(c, node, node, access);
+    }
     if (SyntaxRef id = conversion_function_id_of(node))
         return conversion_function_member(c, node, id, access, bodies);
 
