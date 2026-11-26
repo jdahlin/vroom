@@ -854,6 +854,9 @@ struct entity {
     /* a special member function declared implicitly ([class.default.ctor]/1,
        [class.copy.ctor]/6, [class.dtor]/4) */
     bool implicit = false;
+    /* a defaulted comparison operator function without a noexcept-specifier
+       that compares scalars only: it is not potentially-throwing */
+    bool compares_scalars = false;
     /* a constructor of a class that a using-declarator names a base
        class's constructors for ([namespace.udecl]/3): the base's
        constructor it forwards to ([class.inhctor.init]/1); implicit too */
@@ -2783,6 +2786,7 @@ class semantic_analysis
     bool defaulted_member_equality(entity_index c, SyntaxElement d,
                                    const specified &s, uint8_t access);
     entity_index defaulted_comparison = 0;
+    bool cannot_throw_comparison(entity_index c);
     bool declared_constexpr = false;
     analysis_result constexpr_compatible(SyntaxRef n, bool compatible);
     analysis_result

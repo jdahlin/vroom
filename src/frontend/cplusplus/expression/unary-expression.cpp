@@ -1219,7 +1219,10 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
                     n, "expr.unary.noexcept",
                     "noexcept of a call to a nothrow function declared without "
                     "noexcept");
-            if (!f.non_throwing) {
+            bool scalar_comparison = callee.kind == semantic_kind::entity &&
+                                     callee.a &&
+                                     entity_table[callee.a].compares_scalars;
+            if (!f.non_throwing && !scalar_comparison) {
                 throwing = true;
                 break;
             }
