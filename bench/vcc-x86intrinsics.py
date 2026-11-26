@@ -19,6 +19,7 @@ import concurrent.futures
 import os
 import platform
 import re
+import resource
 import subprocess
 import sys
 import tempfile
@@ -369,6 +370,23 @@ def check_stencil(row, vpp, levels, directory, language):
     return short, '', runs
 
 
+def cheap_crashes():
+    """Crashes are expected here and must not cost seconds.
+
+    Programs of instructions this CPU lacks die by SIGILL, on purpose.  A
+    core_pattern pipe (apport, systemd-coredump) takes seconds per death and
+    ignores a limit of 0; 1 is the value for which the kernel skips the pipe
+    (core(5)).
+
+    clang also crashes ("Cannot select": check_stencil then adds features),
+    and symbolizing its stack trace can wait minutes on a debuginfod server,
+    past run()'s timeout.  Both settings are inherited by every child."""
+    os.environ['LLVM_DISABLE_SYMBOLIZATION'] = '1'
+    hard = resource.getrlimit(resource.RLIMIT_CORE)[1]
+    if hard == resource.RLIM_INFINITY or hard >= 1:
+        resource.setrlimit(resource.RLIMIT_CORE, (1, hard))
+
+
 def run(command):
     return subprocess.run(command, capture_output=True, text=True, timeout=120)
 
@@ -434,6 +452,7 @@ def main():
         if 'sha_ni' not in f.read():
             rows = [r for r in rows if r[4] != 'sha']
     rows = rows[::a.stride]
+    cheap_crashes()
     vpp = os.path.join(a.bin_dir, 'vpp')
     language = 'c'
     if a.cxx:
