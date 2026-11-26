@@ -177,6 +177,12 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
             "a function without an object parameter that would be virtual "
             "without the virtual specifier");
     }
+    /* [expr.const]/5: a constexpr virtual function of a local class, whose
+       calls and destructions constant evaluation does not diagnose yet */
+    if (local_class_rule(c) && entity_table[e].constexpr_)
+        return not_supported_because(
+            declaration, "class.virtual",
+            "a constexpr virtual function of a local class");
     if (overridden) {
         const entity &g = entity_table[overridden];
         /* [class.virtual]/8: "The return type of an overriding function
