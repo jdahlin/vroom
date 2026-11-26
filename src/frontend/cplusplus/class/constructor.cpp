@@ -3822,6 +3822,22 @@ analysis_result semantic_analysis::class_direct_initialization(
                     return analysis_result::well_formed;
                 }
             }
+        } else if (cannot_tell) {
+            bool ambiguous = false, unknown = false;
+            entity_index fn = conversion_function_for(arguments[0], type, true,
+                                                      ambiguous, unknown);
+            if (fn && entity_table[fn].explicit_ && !ambiguous && !unknown) {
+                expression_meaning conv = arguments[0];
+                bool converted = false;
+                VTRY(cr,
+                     conversion_function_call(n, conv, type, true, converted));
+                if (converted &&
+                    conv.type.unqualified() == type.unqualified() &&
+                    conv.category == value_category::prvalue) {
+                    m = conv;
+                    return analysis_result::well_formed;
+                }
+            }
         }
     }
     initialized_value value;

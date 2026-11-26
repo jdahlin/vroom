@@ -1030,6 +1030,24 @@ semantic_analysis::class_initialization(SyntaxRef at, expression_meaning &m,
                 "conversion functions that cannot be decided");
         }
     }
+    if (direct && !same &&
+        type_table[m.type.unqualified()].kind == type_kind::class_type) {
+        /* [dcl.init]/17.6.2, CWG 2327: direct-initialization of a class
+           from a single expression of another class type with an explicit
+           conversion function to the target class (e.g. FMT_STRING) */
+        qualified_type unqualified =
+            qualified_type::make(type.unqualified(), cv_none);
+        bool ambiguous = false, unknown = false;
+        entity_index conv =
+            conversion_function_for(m, unqualified, true, ambiguous, unknown);
+        if (conv && entity_table[conv].explicit_ && !ambiguous && !unknown) {
+            bool converted = false;
+            VTRY_SET(r, conversion_function_call(at, m, unqualified, true,
+                                                 converted));
+            if (converted && m.type.unqualified() == type.unqualified())
+                same = true;
+        }
+    }
     if (!(same && m.category == value_category::prvalue) &&
         (entity_table[target.entity].first_constructor ||
          /* its deleted implicit copy constructor (construct) */
