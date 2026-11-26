@@ -6256,6 +6256,7 @@ class semantic_analysis
                                 bool &unknown, bool f_reversed = false,
                                 bool g_reversed = false);
     int constraint_subsumption_order(uint32_t f, uint32_t g) const;
+    bool member_of_unknown_specialization(qualified_type t) const;
     /* a type partial ordering compares with deduce_type's rules alone;
        pack_argument set when a specialization in it has a pack of
        arguments */

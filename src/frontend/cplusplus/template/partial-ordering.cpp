@@ -50,6 +50,18 @@ bool more_cv(unsigned a, unsigned b)
 
 } // namespace
 
+/* typename X<T>::type, or a reference to one: as a parameter's type a
+   non-deduced context ([temp.deduct.type]/5.1), as an argument's a unique
+   type */
+bool semantic_analysis::member_of_unknown_specialization(qualified_type t) const
+{
+    if (is_reference(type_table, t))
+        t = type_table[t.unqualified()].operand;
+    const struct type &r = type_table[t.unqualified()];
+    return r.kind == type_kind::dependent &&
+           entity_table[r.entity].kind == entity_kind::dependent_member;
+}
+
 /* a type partial ordering compares with deduce_type's rules alone */
 bool semantic_analysis::orderable(qualified_type t, bool packs,
                                   bool *pack_argument) const
@@ -215,6 +227,7 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
     }
     bool deduced = true;
     bool penalty = false;
+    bool skipped = false;
     for (size_t k = 0; k < arguments; k++) {
         bool apack = k >= ffixed, ppack = k >= gfixed;
         qualified_type a = fparam(k), p = gparam(k);
@@ -228,6 +241,11 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
            template argument deduction fails." */
         if (apack && !ppack)
             return false;
+        /* [temp.deduct.type]/5.1: nothing is deduced from this pair */
+        if (member_of_unknown_specialization(p)) {
+            skipped = true;
+            continue;
+        }
         bool references =
             is_reference(type_table, a) && is_reference(type_table, p);
         bool a_lvalue =
@@ -294,6 +312,17 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
                 values[i] = one[i];
                 set[i] = true;
             }
+    }
+    /* [temp.deduct.partial]/12: a parameter that only a skipped pair
+       uses may be left without a value; whether one does is not looked
+       into, so every type parameter needs one from the other pairs */
+    for (uint32_t i = 0; skipped && deduced && i < gg.parameter_count; i++) {
+        template_parameter_parts form;
+        if (!set[i] &&
+            (!template_parameter_form(
+                 template_parameter_nodes[gg.first_parameter + i], form) ||
+             form.type))
+            unknown = true;
     }
     return deduced && !penalty;
 }
@@ -407,7 +436,8 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
         if (r.kind != type_kind::function || r.variadic)
             unknown = true;
         for (uint32_t i = 0; i < r.parameter_count && !unknown; i++)
-            if (!orderable(list[i], true, &packs_taken))
+            if (!member_of_unknown_specialization(list[i]) &&
+                !orderable(list[i], true, &packs_taken))
                 unknown = true;
     }
     if (unknown)
