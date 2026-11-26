@@ -575,7 +575,8 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
         y.kind != type_kind::none)
         return converted_temporary_binding(at, m, reference);
     if (y.kind == type_kind::class_type &&
-        (x.kind == type_kind::fundamental || x.kind == type_kind::pointer)) {
+        (x.kind == type_kind::fundamental || x.kind == type_kind::pointer ||
+         x.kind == type_kind::enumeration)) {
         /* [dcl.init.ref]/5.1.2, /5.3.2, /5.4.1: "has a class type (i.e., T2
            is a class type), where T1 is not reference-related to T2, and can
            be converted to an lvalue [or rvalue] of type "cv3 T3", where "cv1
