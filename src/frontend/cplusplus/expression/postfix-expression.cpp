@@ -2342,15 +2342,19 @@ analysis_result semantic_analysis::template_call(
         for (entity_index held : adl_templates)
             inline_set_functions(held, functions);
     /* [basic.lookup.argdep]/3: the non-template functions argument-dependent
-       lookup found are candidates too */
+       lookup found are candidates too, every overload of each */
     if (!template_id)
-        for (entity_index e : others) {
-            bool present = false;
-            for (entity_index g : functions)
-                if (g == e)
-                    present = true;
-            if (!present)
-                functions.append(e);
+        for (entity_index head : others) {
+            owned_array<entity_index> overloads;
+            overload_set(head, overloads);
+            for (entity_index e : overloads) {
+                bool present = false;
+                for (entity_index g : functions)
+                    if (g == e)
+                        present = true;
+                if (!present)
+                    functions.append(e);
+            }
         }
     entity_index specialization = 0;
     if (group.empty() && functions.empty())
