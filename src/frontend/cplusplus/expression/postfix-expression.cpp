@@ -1860,9 +1860,9 @@ uint32_t semantic_analysis::explicit_argument_position(uint32_t ft,
                                                        uint32_t i) const
 {
     const function_template &f = function_templates[ft - 1];
-    /* the template parameter pack, wherever it is: explicit arguments from
+    /* the first template parameter pack, wherever it is: explicit arguments from
        its position on are its elements */
-    for (uint32_t k = f.parameter_count; k-- > 0;)
+    for (uint32_t k = 0; k < f.parameter_count; k++)
         if (template_parameter_is_pack(f.first_parameter + k)) {
             if (i >= k)
                 return k;

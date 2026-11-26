@@ -282,8 +282,10 @@ bool semantic_analysis::expansion_count(token_index first, token_index end,
             continue;
         /* [temp.variadic]/5: a name an inner expansion of it alone expands
            (f(g<Ts...>(a...), us)...) is not the outer one's */
+        /* (not a declarator's ellipsis, T ...A) */
         if (t + 1 < end &&
-            token_is(tokens, t + 1, preprocessing_op_or_punc::ELLIPSIS)) {
+            token_is(tokens, t + 1, preprocessing_op_or_punc::ELLIPSIS) &&
+            (t + 2 >= end || tokens[t + 2].kind != token_kind::identifier)) {
             t++;
             continue;
         }

@@ -1502,8 +1502,31 @@ analysis_result semantic_analysis::default_template_arguments(
                is an empty pack; a non-type pack of the same template
                that has elements may be typed by it (T ...A), and its
                length is then the pack's ([temp.deduct.type]/10) */
+            uint32_t own =
+                entity_table[template_parameter_entities[ft.first_parameter +
+                                                         i]]
+                    .name;
             for (uint32_t j = 0; j < ft.parameter_count; j++) {
                 template_parameter_parts other;
+                bool names_it = false;
+                SyntaxRef declared =
+                    template_parameter_nodes[ft.first_parameter + j];
+                /* (the node may start after the type: T ...A) */
+                token_index from = declared.first_token();
+                while (from > 0 &&
+                       !is_operator(tokens[from - 1],
+                                    preprocessing_op_or_punc::COMMA) &&
+                       !is_operator(tokens[from - 1],
+                                    preprocessing_op_or_punc::LESS))
+                    from--;
+                for (token_index k = from; j != i && k < declared.end_token();
+                     k++)
+                    names_it =
+                        names_it ||
+                        (own && tokens[k].kind == token_kind::identifier &&
+                         tokens.identifier(k) == own);
+                if (!names_it)
+                    continue;
                 if (j != i && set[j] &&
                     template_parameter_form(
                         template_parameter_nodes[ft.first_parameter + j],
