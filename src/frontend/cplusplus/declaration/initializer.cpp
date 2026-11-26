@@ -1579,7 +1579,7 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
             entity_index c = type_table[type.unqualified()].entity;
             require_complete(c);
             if (entity_table[c].kind == entity_kind::class_type &&
-                entity_table[c].first_constructor) {
+                entity_table[c].first_constructor && !is_aggregate(c)) {
                 owned_array<expression_meaning> arguments;
                 owned_array<SyntaxElement> written;
                 VTRY(r,

@@ -1757,10 +1757,14 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 /* [class.base.init]/7: direct-initialization: a constructor */
                 owned_array<expression_meaning> arguments;
                 owned_array<SyntaxElement> listed_arguments;
-                if (written.list)
+                SyntaxElement braced = written.braced_list();
+                if (!braced && written.list &&
+                    written.list.is(syntax_kind::braced_init_list))
+                    braced = written.list;
+                if (written.list && !braced)
                     r = expression_list_meanings(written.list, arguments,
                                                  &listed_arguments);
-                else if (SyntaxElement braced = written.braced_list()) {
+                else if (braced) {
                     bool base = entity_table[e].base_subobject;
                     if (base && is_aggregate(record.entity))
                         return not_supported_because(
