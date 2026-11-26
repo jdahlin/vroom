@@ -665,35 +665,99 @@ static const char *const x64_stencil_features_names[] = {
 #undef X86_STENCIL_FEATURES
 };
 
-static const x64_stencil x64_stencils[] = {
-#define X86_STENCIL_ROWS
+/* rows, groups, keys, fixups, bytes */
+static constexpr uint32_t x64_stencil_counts[] = {
+#define X86_STENCIL_LAYOUT
 #include "x86-stencils.inc"
-#undef X86_STENCIL_ROWS
+#undef X86_STENCIL_LAYOUT
 };
 
-static const x64_stencil_group x64_stencil_groups[] = {
-#define X86_STENCIL_GROUPS
+static const char x64_stencil_packed[] =
+#define X86_STENCIL_PACKED
 #include "x86-stencils.inc"
-#undef X86_STENCIL_GROUPS
-};
+#undef X86_STENCIL_PACKED
+    ;
 
-static const x64_stencil_key x64_stencil_keys[] = {
-#define X86_STENCIL_KEYS
-#include "x86-stencils.inc"
-#undef X86_STENCIL_KEYS
-};
+static_assert(sizeof(x64_stencil) == 8 && sizeof(x64_stencil_group) == 28 &&
+                  sizeof(x64_stencil_key) == 8,
+              "the layout the generator packs");
 
-static const uint32_t x64_stencil_fixups[] = {
-#define X86_STENCIL_FIXUPS
-#include "x86-stencils.inc"
-#undef X86_STENCIL_FIXUPS
-};
+static constexpr size_t x64_stencil_size =
+    x64_stencil_counts[0] * sizeof(x64_stencil) +
+    x64_stencil_counts[1] * sizeof(x64_stencil_group) +
+    x64_stencil_counts[2] * sizeof(x64_stencil_key) +
+    x64_stencil_counts[3] * sizeof(uint32_t) + x64_stencil_counts[4];
 
-static const uint8_t x64_stencil_bytes[] = {
-#define X86_STENCIL_BYTES
-#include "x86-stencils.inc"
-#undef X86_STENCIL_BYTES
-};
+/* the tables, unpacked at the first stencil a process emits */
+typedef struct x64_stencil_tables {
+    const x64_stencil *rows;
+    const x64_stencil_group *groups;
+    const x64_stencil_key *keys;
+    const uint32_t *fixups;
+    const uint8_t *bytes;
+} x64_stencil_tables;
+
+/* the next byte of the base64 text */
+static uint8_t x64_stencil_byte(const char **text, uint32_t *bits, int *count)
+{
+    while (*count < 8) {
+        char ch = *(*text)++;
+        uint32_t value = 63; /* '/' */
+        if (ch >= 'A' && ch <= 'Z')
+            value = (uint32_t)(ch - 'A');
+        else if (ch >= 'a' && ch <= 'z')
+            value = (uint32_t)(ch - 'a') + 26;
+        else if (ch >= '0' && ch <= '9')
+            value = (uint32_t)(ch - '0') + 52;
+        else if (ch == '+')
+            value = 62;
+        *bits = *bits << 6 | value;
+        *count += 6;
+    }
+    *count -= 8;
+    return (uint8_t)(*bits >> *count);
+}
+
+static x64_stencil_tables x64_stencil_unpacked;
+
+static void x64_stencil_unpack(void)
+{
+    alignas(4) static uint8_t data[x64_stencil_size];
+    const char *text = x64_stencil_packed;
+    uint32_t bits = 0;
+    int count = 0;
+
+    for (size_t at = 0; at < sizeof data;) {
+        unsigned token = x64_stencil_byte(&text, &bits, &count);
+        if (token < 128) {
+            for (unsigned i = 0; i <= token; i++)
+                data[at++] = x64_stencil_byte(&text, &bits, &count);
+            continue;
+        }
+        size_t distance = x64_stencil_byte(&text, &bits, &count);
+        distance |= (size_t)x64_stencil_byte(&text, &bits, &count) << 8;
+        for (unsigned i = 0; i < token - 128 + 4; i++, at++)
+            data[at] = data[at - distance];
+    }
+    x64_stencil_tables &t = x64_stencil_unpacked;
+    const uint8_t *p = data;
+    t.rows = (const x64_stencil *)(const void *)p;
+    p += x64_stencil_counts[0] * sizeof(x64_stencil);
+    t.groups = (const x64_stencil_group *)(const void *)p;
+    p += x64_stencil_counts[1] * sizeof(x64_stencil_group);
+    t.keys = (const x64_stencil_key *)(const void *)p;
+    p += x64_stencil_counts[2] * sizeof(x64_stencil_key);
+    t.fixups = (const uint32_t *)(const void *)p;
+    t.bytes = p + x64_stencil_counts[3] * sizeof(uint32_t);
+}
+
+static const x64_stencil_tables &x64_stencil_data(void)
+{
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+
+    pthread_once(&once, x64_stencil_unpack);
+    return x64_stencil_unpacked;
+}
 
 /* the names, one after another */
 static const char x64_stencil_names[] =
@@ -773,11 +837,12 @@ static const x64_stencil_group *
 x64_stencil_find(const x64_stencil *s, uint32_t key, unsigned *variant)
 {
     for (unsigned i = 0; i < s->groups; i++) {
-        const x64_stencil_group *g = &x64_stencil_groups[s->first + i];
+        const x64_stencil_group *g = &x64_stencil_data().groups[s->first + i];
         unsigned before = 0;
 
         for (unsigned k = 0; k < g->ranges; k++) {
-            const x64_stencil_key *range = &x64_stencil_keys[g->keys + k];
+            const x64_stencil_key *range =
+                &x64_stencil_data().keys[g->keys + k];
 
             if (key >= range->key && key - range->key < range->keys) {
                 *variant = before + (key - range->key);
@@ -799,10 +864,10 @@ static void x64_stencil_emit(codegen_context *e, const x64_stencil_group *g,
     uint8_t *code = (uint8_t *)malloc(size);
     if (!code)
         vout_of_memory();
-    memcpy(code, x64_stencil_bytes + g->code, size);
-    const uint32_t *fixup = &x64_stencil_fixups[g->fixups];
-    const uint8_t *own =
-        x64_stencil_bytes + g->columns + (size_t)variant * g->stored;
+    const uint8_t *bytes = x64_stencil_data().bytes;
+    memcpy(code, bytes + g->code, size);
+    const uint32_t *fixup = &x64_stencil_data().fixups[g->fixups];
+    const uint8_t *own = bytes + g->columns + (size_t)variant * g->stored;
     for (unsigned i = 0; i < g->stored; i++)
         code[fixup[i]] = own[i];
     for (unsigned i = g->stored; i < (unsigned)g->stored + g->patched; i++) {
@@ -827,7 +892,7 @@ static codegen_value x64_x86_stencil(codegen_context *e, uint32_t n)
     const uint32_t *arg = &c->lists[x->b];
     unsigned count = x->c - 1;
     unsigned row = (unsigned)c->ipool[N(arg[count])->a];
-    const x64_stencil *s = &x64_stencils[row];
+    const x64_stencil *s = &x64_stencil_data().rows[row];
     uint32_t fn = e->walk_state->inline_call
                       ? e->walk_state->inline_call->function
                       : e->walk_state->function_symbol;
