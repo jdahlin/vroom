@@ -1973,12 +1973,19 @@ analysis_result semantic_analysis::constructor_list_initialization(
     if (arguments.size() == 1 &&
         !clauses[0].is(syntax_kind::braced_init_list) &&
         arguments[0].category == value_category::prvalue &&
-        arguments[0].type.unqualified() == type.unqualified())
-        /* one prvalue of the class itself: clang initializes the object
-           from it with no constructor (CWG2311), the copy or move one
-           deleted or not */
+        arguments[0].type.unqualified() == type.unqualified()) {
+        /* [dcl.init.list]/3.4 (CWG 2311): in C++17 and later, a braced-init-list
+           of a single prvalue of the same class type directly initializes the
+           object with no copy/move constructor */
+        if (tokens.files.behavior.edition >= standard_edition::cplusplus_17) {
+            result.node = arguments[0].node;
+            result.evaluation = arguments[0].evaluation;
+            result.value = arguments[0].value;
+            return analysis_result::well_formed;
+        }
         return not_supported_because(list, "dcl.init.list",
                                      "a list of one prvalue of the same class");
+    }
     /* [dcl.init.list]/3.7, CWG 2327: direct-list-initialization of a class
        from a single expression of another class type with an explicit
        conversion function to the target class (e.g. local_days{ymd} in
