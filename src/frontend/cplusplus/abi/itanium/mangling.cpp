@@ -1694,9 +1694,6 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
 
                <unresolved-name> ::= [gs] sr <unresolved-qualifier-level>+ E <base-unresolved-name>
          */
-        uint32_t last = 0;
-        if (qual.size() >= 2)
-            last = qual.size() - 2;
         if (member.is_token() && member.is_identifier() && last > qi &&
             qual[last].is(syntax_kind::simple_template_id) &&
             qual[last].size() >= 3 && qual[last][0].is_identifier()) {
