@@ -7413,6 +7413,7 @@ struct LambdaExpression : SyntaxExtra<LambdaExpression> {
         narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
     }
     static bool accepts(syntax_kind k);
+    AttributeSpecifierSeq attribute_specifier_seq() const;
     CompoundStatement compound_statement() const;
     LambdaDeclarator lambda_declarator() const;
     LambdaIntroducer lambda_introducer() const;
@@ -13038,6 +13039,11 @@ inline bool LambdaExpression::accepts(syntax_kind k)
     return k == syntax_kind::lambda_expression;
 }
 
+inline AttributeSpecifierSeq LambdaExpression::attribute_specifier_seq() const
+{
+    return first<AttributeSpecifierSeq>();
+}
+
 inline CompoundStatement LambdaExpression::compound_statement() const
 {
     return first<CompoundStatement>();
@@ -17973,7 +17979,7 @@ static const uint64_t syntax_allowed_children[][4] = {
     {0x60813f8000000u, 0x1c000000000000u, 0x30003000000000u, 0xc7b1c0u}, /* await_expression */
     {0xfffe081ff8000000u, 0x1c000002000001u, 0x30003000000000u, 0xc7b1c0u}, /* yield_expression */
     {0xfffe081ff8000000u, 0x1c000000000001u, 0x30003000000000u, 0xc7b1c0u}, /* throw_expression */
-    {0x6000000000u, 0x800000000080000u, 0x4c0000000u, 0xc00000u}, /* lambda_expression */
+    {0x6000000000u, 0x800000000080000u, 0x40000004c01c0000u, 0xc00000u}, /* lambda_expression */
     {0x78000000000u, 0x0u, 0x0u, 0xc00000u}, /* lambda_introducer */
     {0x80u, 0x1e0800u, 0x40000000801c0000u, 0xc00000u}, /* lambda_declarator */
     {0x70000000000u, 0x0u, 0x0u, 0xc00000u}, /* lambda_capture */

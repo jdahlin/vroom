@@ -478,7 +478,7 @@ uint32_t c_lowering::conversion(const semantic_node &n)
     case conversion_kind::pointer_cast:
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
     case conversion_kind::dynamic_cast_: {
-        /* [abi:dynamic-cast]: void *__dynamic_cast(const void *sub,
+        /* [abi:dynamic_cast]: void *__dynamic_cast(const void *sub,
            const __class_type_info *src, const __class_type_info *dst,
            ptrdiff_t src2dst_offset); null pointer yields null without calling
            __dynamic_cast */

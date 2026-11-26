@@ -4061,6 +4061,9 @@ constness semantic_analysis::evaluate_invocation(
                     .initializer_located)
                 return CONST_UNKNOWN;
     }
+    /* analysing a postponed body makes entities, which moves entity_table:
+       `e` is not read after it */
+    bool nonnull = e.gnu_flags & gnu_nonnull;
     analyse_postponed_body(f);
     uint32_t body = entity_table[f].definition;
     uint32_t with_this = 0;
@@ -4121,8 +4124,8 @@ constness semantic_analysis::evaluate_invocation(
         /* clang: "null passed to a callee that requires a non-null
            argument" is not a constant expression; which argument the
            attribute names is not modelled */
-        else if ((e.gnu_flags & gnu_nonnull) &&
-                 value.kind == constant_value_kind::pointer && !value.count) {
+        else if (nonnull && value.kind == constant_value_kind::pointer &&
+                 !value.count) {
             restore(state, before_arguments,
                     kept_elements(state, before_argument_elements, returned,
                                   result));

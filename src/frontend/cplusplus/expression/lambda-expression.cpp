@@ -107,9 +107,9 @@ node_index parser::lambda_expression()
         }
     }
     scope_index enclosing = names.current();
-    /* P2173R1 (C++23, clang extension in C++20): attributes on a lambda
-       before the lambda-declarator or compound-statement appertain to the
-       function call operator */
+    /* [ext:clang_lambda_attributes] P2173R1: attributes before the
+       lambda-declarator or compound-statement appertain to the function
+       call operator */
     attribute_specifier_seq();
     if (failed())
         return 0;

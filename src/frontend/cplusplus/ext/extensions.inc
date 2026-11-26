@@ -183,6 +183,9 @@ EXTENSION(clang_convertvector, clang,
 EXTENSION(clang_lambda_template_parameters, clang,
           "clang: a template-parameter-list after the lambda-introducer (P0428R2) is "
           "accepted before C++20 (libc++'s <__algorithm/simd_utils.h> uses it in C++17)")
+EXTENSION(clang_lambda_attributes, clang,
+          "clang: an attribute-specifier-seq before the lambda-declarator or compound-statement "
+          "(P2173R1, C++23) is accepted in earlier editions (libc++'s <format> uses it)")
 
 /* Microsoft (-fms-extensions) */
 EXTENSION(microsoft_declspec, microsoft,
