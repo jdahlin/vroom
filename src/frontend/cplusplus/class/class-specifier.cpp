@@ -1651,6 +1651,15 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
             in_member_declaration = outer;
             return r;
         },
+        [&](OpaqueEnumDeclaration e) {
+            /* [class.mem]/1: an opaque-enum-declaration is a
+               member-declaration */
+            declaration_access = access;
+            type_index type = 0;
+            analysis_result r = enum_specifier(e, type);
+            declaration_access = 0;
+            return r;
+        },
         [&](MemberDeclaration other) {
             analysis_result refused = not_supported(other);
             last_unsupported_detail(syntax_kind_name(other.kind()),
