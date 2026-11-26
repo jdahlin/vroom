@@ -38,8 +38,8 @@ OUT = os.path.join(R, 'build', 'stockfish')
 CACHE = os.path.join(OUT, 'cache.json')
 LIBCXX = '/usr/lib/llvm-23/include/c++/v1'
 DEFINES = ['-DNDEBUG', '-DIS_64BIT', '-DUSE_PTHREADS', '-DNNUE_EMBEDDING_OFF']
-# Stockfish's ARCH=x86-64 (--arch sse2); the default, ARCH=general-64, has no
-# intrinsics: vcc has no x86 SIMD builtins yet
+# Stockfish's ARCH=x86-64 (--arch sse2); the default is ARCH=general-64,
+# without intrinsics
 SSE2 = ['-DUSE_SSE2', '-msse2']
 
 spec = importlib.util.spec_from_file_location(
