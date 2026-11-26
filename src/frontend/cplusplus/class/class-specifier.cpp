@@ -3146,11 +3146,26 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
             "volatile or unhandled type");
     analysis_result r = analysis_result::well_formed;
     bool wide = false;
-    if (!deduced)
+    if (!deduced) {
+        qualified_type before = type;
         VTRY_SET(r, initializer(init, type, value));
+        if (!(before == type)) {
+            /* [dcl.array]/7: an array of unknown bound completed by its
+               initializer */
+            entity_table[e].type = type;
+            if (!declared_names.empty() && declared_names.back().entity == e)
+                declared_names.back().type = type;
+        }
+    }
     /* [expr.const]/5: an initializer that calls a function (a constexpr
        function, or a builtin clang evaluates) is the evaluator's */
-    if (constexpr_class && value.node) {
+    /* (an array initialized by a string literal is constant as written,
+       [dcl.init.string]; the evaluator does not model the literal) */
+    bool literal_array =
+        record.kind == type_kind::array && value.node &&
+        value.evaluation == constness::constant &&
+        semantics[value.node].kind != semantic_kind::initializer_list;
+    if (constexpr_class && value.node && !literal_array) {
         uint32_t data = 0;
         constness c =
             evaluate_variable(type, value.node, semantics[value.node].at, data);
