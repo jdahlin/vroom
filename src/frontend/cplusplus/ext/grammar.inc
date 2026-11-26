@@ -48,6 +48,13 @@ PRODUCTION(clang_embed, "control-line", "# embed pp-tokens new-line")
 /* (MSVC's __pragma ( pp-tokens_opt ) is an operator like _Pragma, which
    no production has either: [cpp.pragma.op]) */
 
+/* clang, P2173R1 (C++23): attributes after the lambda-introducer or its
+   template-parameter-list */
+PRODUCTION(clang_lambda_attributes, "lambda-expression",
+           "lambda-introducer attribute-specifier-seq lambda-declarator_opt compound-statement")
+PRODUCTION(clang_lambda_attributes, "lambda-expression",
+           "lambda-introducer < template-parameter-list > requires-clause_opt attribute-specifier-seq lambda-declarator_opt compound-statement")
+
 /* ---- GCC's attributes (GCC manual 6.39, Attribute Syntax) ---- */
 
 PRODUCTION(gnu_attributes, "gnu-attribute-specifier", "__attribute__ ( ( gnu-attribute-list ) )")
