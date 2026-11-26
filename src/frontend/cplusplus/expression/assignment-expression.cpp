@@ -141,13 +141,27 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
             if (found.entity && !found.ambiguous && !found.unknown) {
                 owned_array<entity_index> candidates;
                 overload_set(found.entity, candidates);
-                for (entity_index f : candidates)
-                    if (!copy_assignment_operator(f, c) &&
-                        !move_assignment_operator(f, c))
-                        return not_supported_because(
-                            n, "over.match.oper",
-                            "a braced assignment to a class with other "
-                            "assignment operators");
+                bool others = false, declared_copy = false;
+                for (entity_index f : candidates) {
+                    if (copy_assignment_operator(f, c))
+                        declared_copy = true;
+                    else if (!move_assignment_operator(f, c))
+                        others = true;
+                }
+                /* a class that declares its copy assignment operator has no
+                   implicit one beside what it declares
+                   ([class.copy.assign]/2, /4): overload resolution takes
+                   the list as the argument */
+                if (others && declared_copy &&
+                    !entity_table[c].defaulted_copy_assignment &&
+                    !entity_table[c].defaulted_move_assignment)
+                    return braced_assignment(n, left, m);
+                if (others)
+                    return not_supported_because(
+                        n, "over.match.oper",
+                        "a braced assignment to a class with other "
+                        "assignment operators and an implicit or defaulted "
+                        "one");
             }
         }
         right.type = qualified_type::make(left.type.unqualified(), cv_none);
@@ -165,6 +179,30 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
     if (r != analysis_result::well_formed)
         return r;
     return assignment_of(n, n[1].token(), op, n[0], n[2], left, right, m);
+}
+
+/* [expr.ass]/8: x = {v} of a class means x.operator=({v}): the member
+   operator functions are the candidates and the list is the argument, which
+   initializes the chosen one's parameter ([over.ics.list]) */
+analysis_result semantic_analysis::braced_assignment(SyntaxRef n,
+                                                     expression_meaning &left,
+                                                     expression_meaning &m)
+{
+    owned_array<SyntaxElement> syntax;
+    owned_array<expression_meaning> operands;
+    syntax.append(n[0]);
+    operands.append(left);
+    syntax.append(n[2]);
+    operands.append(expression_meaning());
+    bool handled = false;
+    analysis_result r =
+        overloaded_operator(n, n[1].token(), preprocessing_op_or_punc::EQUAL,
+                            false, syntax, operands, handled, m);
+    if (r != analysis_result::well_formed || handled)
+        return r;
+    return not_supported_because(
+        n, "over.match.oper",
+        "a braced assignment with no handled operator function");
 }
 
 /* [expr.ass] of the analysed operands: the operator function the overload
