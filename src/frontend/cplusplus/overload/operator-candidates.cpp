@@ -960,9 +960,7 @@ analysis_result semantic_analysis::overloaded_operator(
                ostreambuf_iterator, whose operator=(_CharT) takes no
                iterator): the built-in copy (class_assignment) */
             if (implicit_viable && !declares_move &&
-                !copy_assignment_deleted(c) &&
-                !entity_table[c].defaulted_copy_assignment &&
-                operands.size() == 2 &&
+                !copy_assignment_deleted(c) && operands.size() == 2 &&
                 operands[1].type.unqualified() ==
                     operands[0].type.unqualified() &&
                 !(operands[0].type.cv() & cv_const) && assigned_bitwise(c)) {
