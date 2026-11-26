@@ -827,6 +827,11 @@ bool semantic_analysis::argument_dependent_lookup(
         if (!e || e == known)
             continue;
         if (entity_table[e].kind == entity_kind::none) {
+            /* (4.2): a class or alias template's name (std::hash, beside a
+               call of another hash) is ignored */
+            if (!function_template_of(e) &&
+                (class_template_of(e) || alias_template_of(e)))
+                continue;
             /* [temp.over]/1: a function template's specializations are
                candidates too */
             if (!function_template_of(e)) {
