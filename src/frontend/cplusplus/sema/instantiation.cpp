@@ -1133,6 +1133,12 @@ int semantic_analysis::definition_parameter_count(SyntaxRef definition) const
         SyntaxElement c = n[i];
         if (!c.is(syntax_kind::parameters_and_qualifiers))
             continue;
+        /* a parameter pack declares as many parameters as the
+           specialization's pack has: any count */
+        for (token_index k = c.first_token(); k < c.end_token(); k++)
+            if (tokens[k].kind == token_kind::operator_or_punctuator &&
+                is_operator(tokens[k], preprocessing_op_or_punc::ELLIPSIS))
+                return -1;
         int count = clause_parameters(c);
         /* (void): no parameter, [dcl.fct]/4 */
         if (count == 1)

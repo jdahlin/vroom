@@ -257,12 +257,12 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     if (analysis.entity_table[e].c11_thread_local)
         per_thread = AST_SYMBOL_FLAG_THREAD;
     if (weak_guard) {
-        guard =
-            ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
-                               guard_name.size(), i64, AST_STORAGE_NONE,
-                               AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
-                                   AST_SYMBOL_FLAG_DEFINED | per_thread,
-                               1);
+        guard = ast_builder_symbol(
+            c, AST_SYMBOL_VARIABLE, guard_name.data(), guard_name.size(), i64,
+            AST_STORAGE_NONE,
+            AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
+                AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED | per_thread,
+            0);
         ast_builder_toplevel(c, guard);
     } else {
         guard = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),

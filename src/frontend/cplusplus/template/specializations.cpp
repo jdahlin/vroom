@@ -1609,9 +1609,10 @@ semantic_analysis::explicitly_instantiated(entity_index f) const
         return instantiation_kind::none;
     if (x.explicitly_instantiated != instantiation_kind::none)
         return x.explicitly_instantiated;
-    /* /10: a class's member functions that are not special members
-       (an implicitly-declared one is defined where used, [class.default.ctor]/4) */
-    if (x.special != special_member::none || x.implicit)
+    /* /10: a class's member functions, the special members it declares
+       among them (an implicitly-declared one is defined where used,
+       [class.default.ctor]/4) */
+    if (x.implicit)
         return instantiation_kind::none;
     for (entity_index c = x.enclosing;
          c && entity_table[c].kind == entity_kind::class_type;

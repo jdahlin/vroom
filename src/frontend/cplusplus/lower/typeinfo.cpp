@@ -206,7 +206,10 @@ uint32_t c_lowering::typeinfo(type_index t, token_index at)
         return fail("a std::type_info object with -fno-rtti", at);
     } else if (typeinfo_internal(t)) {
         storage = AST_STORAGE_STATIC;
-    } else if (d && d->key_function) {
+    } else if (d && d->key_function &&
+               !analysis.entity_table[d->key_function].inline_ &&
+               !analysis.entity_table[analysis.type_table[t].entity]
+                    .instantiation) {
         if (!analysis.entity_table[d->key_function].defined) {
             storage = AST_STORAGE_EXTERN;
             define = false;

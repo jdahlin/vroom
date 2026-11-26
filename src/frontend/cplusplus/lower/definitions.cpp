@@ -191,7 +191,11 @@ bool c_lowering::function_definition(entity_index e)
     if (x.virtual_ && x.special == special_member::destructor &&
         !deleting_destructor(e, body.at, true))
         return false;
-    if (x.special == special_member::none || x.inline_)
+    /* (an explicit instantiation's is called from other units, as one not
+       inline) */
+    if (x.special == special_member::none ||
+        (x.inline_ &&
+         analysis.explicitly_instantiated(e) != instantiation_kind::definition))
         return true;
     /* [abi:mangling-special-ctor-dtor]: the complete object variant, which
        for a class without virtual bases does what the base object one does

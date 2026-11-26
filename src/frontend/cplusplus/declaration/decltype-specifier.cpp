@@ -572,7 +572,12 @@ void semantic_analysis::collect_written_bindings(
             continue;
         }
         entity_index pack = find_pack(id);
-        if (!pack || !pack_depends(pack))
+        /* (sizeof...(P) is mangled by P's position whatever P is) */
+        bool measured =
+            t >= 2 &&
+            tokens[t - 2].kind == token_kind::operator_or_punctuator &&
+            is_operator(tokens[t - 2], preprocessing_op_or_punc::ELLIPSIS);
+        if (!pack || (!pack_depends(pack) && !measured))
             continue;
         for (uint32_t i = 0; i < entity_table[pack].member_count; i++) {
             entity_index a = pack_elements[entity_table[pack].value + i];

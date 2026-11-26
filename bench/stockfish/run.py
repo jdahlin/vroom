@@ -7,7 +7,8 @@ Source: work/stockfish (git clone --depth 1 --branch sf_17.1
 https://github.com/official-stockfish/Stockfish.git work/stockfish, then
 `make -C work/stockfish/src net` for the two NNUE files).  The networks are
 loaded from the source directory (NNUE_EMBEDDING_OFF: no .incbin), the build
-is Stockfish's ARCH=x86-64 (SSE2), single-threaded bench, against libc++.
+is Stockfish's ARCH=general-64 (--arch sse2: x86-64), single-threaded bench,
+against libc++.
 
 Each TU is compiled by `vpp -x c++ -c` (one at a time, nice, with a timeout);
 the summary groups the TUs by first error as bench/cxx-json.py does.  When
@@ -36,8 +37,10 @@ SRC = os.path.join(R, 'work', 'stockfish', 'src')
 OUT = os.path.join(R, 'build', 'stockfish')
 CACHE = os.path.join(OUT, 'cache.json')
 LIBCXX = '/usr/lib/llvm-23/include/c++/v1'
-DEFINES = ['-DNDEBUG', '-DIS_64BIT', '-DUSE_PTHREADS', '-DUSE_SSE2', '-msse2',
-           '-DNNUE_EMBEDDING_OFF']
+DEFINES = ['-DNDEBUG', '-DIS_64BIT', '-DUSE_PTHREADS', '-DNNUE_EMBEDDING_OFF']
+# Stockfish's ARCH=x86-64 (--arch sse2); the default, ARCH=general-64, has no
+# intrinsics: vcc has no x86 SIMD builtins yet
+SSE2 = ['-DUSE_SSE2', '-msse2']
 
 spec = importlib.util.spec_from_file_location(
     'cxx_json', os.path.join(B, 'cxx-json.py'))
@@ -94,7 +97,10 @@ def build_clang(level, d):
 
 
 def link(d, objs, exe):
-    p = subprocess.run(['clang++', '-stdlib=libc++', '-pthread'] + objs +
+    # -no-pie: vcc's address of a libc function (tolower) is PC-relative even
+    # with -fPIE, which ld rejects in a PIE
+    p = subprocess.run(['clang++', '-stdlib=libc++', '-pthread', '-no-pie'] +
+                       objs +
                        ['-o', exe], capture_output=True, text=True)
     if p.returncode:
         return p.stderr.strip().splitlines()[-1]
@@ -119,7 +125,9 @@ def nodes(exe, depth):
 
 
 def main():
+    global OUT, CACHE
     ap = argparse.ArgumentParser()
+    ap.add_argument('--arch', choices=('general', 'sse2'), default='general')
     ap.add_argument('--bin-dir', default=os.environ.get('VCC_BIN') or
                     os.path.join(R, 'build', 'linux', 'src'))
     ap.add_argument('-O', dest='levels', default='2')
@@ -130,6 +138,11 @@ def main():
     ap.add_argument('-v', action='store_true')
     ap.add_argument('pattern', nargs='?')
     a = ap.parse_args()
+    if a.arch == 'sse2':
+        DEFINES.extend(SSE2)
+    else:
+        OUT = os.path.join(OUT, 'general')
+        CACHE = os.path.join(OUT, 'cache.json')
     vpp = os.path.join(a.bin_dir, 'vpp')
     if not os.path.exists(os.path.join(SRC, 'nn-1c0000000000.nnue')):
         print('stockfish: no %s with its networks (see this file\'s header)'
@@ -143,7 +156,7 @@ def main():
     for level in ('-O' + c for c in a.levels):
         vdir = os.path.join(OUT, 'vcc' + level)
         os.makedirs(vdir, exist_ok=True)
-        flags = ['-x', 'c++', '-std=c++17', '-nostdinc++', '-isystem', LIBCXX,
+        flags = ['-x', 'c++', '-std=c++17', '-fPIE', '-nostdinc++', '-isystem', LIBCXX,
                  level] + DEFINES
         results = {}
         for s in sources():

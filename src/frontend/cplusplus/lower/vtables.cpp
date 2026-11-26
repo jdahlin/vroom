@@ -36,11 +36,16 @@ uint32_t c_lowering::vtable(entity_index k, token_index at)
     if (!itanium_vtable_name(analysis, tokens.pp, k, name.get()))
         return fail("a virtual table whose symbol is not mangled", at);
     const entity &x = analysis.entity_table[k];
-    bool here =
-        !d->key_function || analysis.entity_table[d->key_function].defined;
+    /* [abi:vague-vtable]: a template specialization's tables, and those of
+       a key function declared inline after the class, are emitted where
+       used */
+    entity_index key = d->key_function;
+    if (key && (x.instantiation || analysis.entity_table[key].inline_))
+        key = 0;
+    bool here = !key || analysis.entity_table[key].defined;
     int storage = AST_STORAGE_NONE;
     uint32_t flags = AST_SYMBOL_FLAG_GLOBAL;
-    if (!d->key_function)
+    if (!key)
         flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
     if (class_internal(k)) {
         storage = AST_STORAGE_STATIC;
