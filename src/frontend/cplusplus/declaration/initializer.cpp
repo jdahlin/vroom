@@ -1301,8 +1301,16 @@ analysis_result semantic_analysis::gather_clauses(
         bool expansion = k + 1 < n && node[static_cast<uint32_t>(k + 1)].is(
                                           preprocessing_op_or_punc::ELLIPSIS);
         if (expansion) {
-            if (!packs || !pending.empty() || c.is_token() ||
-                !expansion_count(c.first_token(), c.end_token(), count))
+            token_index first_t = 0, end_t = 0;
+            if (c.is_token()) {
+                first_t = c.token();
+                end_t = first_t + 1;
+            } else {
+                first_t = c.first_token();
+                end_t = c.end_token();
+            }
+            if (!packs || !pending.empty() ||
+                !expansion_count(first_t, end_t, count))
                 return not_supported_because(
                     list, "temp.variadic",
                     "a pack expansion in this initializer list");
