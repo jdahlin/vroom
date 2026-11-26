@@ -330,3 +330,81 @@ VPRIV void virbuild_critical_edges_split(codegen_context *e)
         memcpy(V->block_order, o, (size_t)m * sizeof *o);
     }
 }
+
+/* ---------------- straight-line blocks ---------------- */
+
+/* whether block t, the only successor of a block ending in br, can become its tail */
+static bool virbuild_block_can_join(virbuild_context *V, uint32_t b, uint32_t t)
+{
+    const virbuild_preir_block *k = &V->blocks[t];
+
+    if (t == b || t == V->block_order[0] || k->predecessor_count != 1 ||
+        k->is_landing_pad || !k->terminator)
+        return false;
+    for (uint32_t p = k->first_parameter; p; p = V->insns[p].next)
+        if (V->forward[p] == p)
+            return false;
+    return true;
+}
+
+/*
+ * A block ending in br takes in its successor when no other block reaches that one: what
+ * inlining leaves behind.  The lowerings fuse a compare with its branch or select only within
+ * a block.
+ */
+VPRIV bool virbuild_straight_blocks_join(codegen_context *e)
+{
+    virbuild_context *V = e->vir_builder;
+    uint32_t n = 0;
+    bool changed = false;
+
+    /* a label's address names a block */
+    for (uint32_t i = 0; i < V->insn_count; i++)
+        if (V->insns[i].insn.op == VIR_OP_LABELADDR)
+            return false;
+    for (uint32_t i = 0; i < V->block_order_count; i++) {
+        uint32_t b = V->block_order[i];
+        virbuild_preir_block *k = &V->blocks[b];
+
+        while (k->is_reachable && k->terminator &&
+               V->insns[k->terminator].insn.op == VIR_OP_BR) {
+            uint32_t t = V->insns[k->terminator].insn.a;
+
+            if (!virbuild_block_can_join(V, b, t))
+                break;
+            virbuild_preir_block *q = &V->blocks[t];
+
+            for (uint32_t x = q->first_insn; x; x = V->insns[x].next)
+                V->insns[x].block = b;
+            if (q->first_insn) {
+                if (k->last_insn)
+                    V->insns[k->last_insn].next = q->first_insn;
+                else
+                    k->first_insn = q->first_insn;
+                k->last_insn = q->last_insn;
+            }
+            k->terminator = q->terminator;
+            V->insns[k->terminator].block = b;
+            uint32_t successors = virbuild_block_successor_count(V, b);
+
+            for (uint32_t s = 0; s < successors; s++) {
+                virbuild_preir_block *next =
+                    &V->blocks[*virbuild_block_successor_pointer(V, b, s)];
+
+                for (uint32_t j = 0; j < next->predecessor_count; j++)
+                    if (V->predecessors[next->predecessor_first + j] == t)
+                        V->predecessors[next->predecessor_first + j] = b;
+            }
+            q->first_insn = q->last_insn = q->terminator = 0;
+            q->is_reachable = 0;
+            changed = true;
+        }
+    }
+    if (!changed)
+        return false;
+    for (uint32_t i = 0; i < V->block_order_count; i++)
+        if (V->blocks[V->block_order[i]].is_reachable)
+            V->block_order[n++] = V->block_order[i];
+    V->block_order_count = n;
+    return true;
+}

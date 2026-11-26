@@ -375,6 +375,7 @@ VPRIV void virbuild_block_predecessors_compute(codegen_context *e);
 VPRIV uint32_t virbuild_block_predecessor_index(const virbuild_context *V,
                                                 uint32_t j, uint32_t b);
 VPRIV void virbuild_critical_edges_split(codegen_context *e);
+VPRIV bool virbuild_straight_blocks_join(codegen_context *e);
 
 /* block-parameters.c */
 VPRIV bool virbuild_parameters_trivial_remove(codegen_context *e);
