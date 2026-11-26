@@ -361,6 +361,20 @@ int semantic_analysis::conversion_template_order(entity_index t1,
     return 0;
 }
 
+/* whether function template t's parameter i is a template parameter, by
+   value or by reference */
+bool semantic_analysis::template_parameter_alone(uint32_t t, uint32_t i) const
+{
+    qualified_type type = entity_table[function_templates[t - 1].entity].type;
+    const struct type &r = type_table[type.unqualified()];
+    if (r.kind != type_kind::function || i >= r.parameter_count)
+        return false;
+    unsigned cv = 0;
+    qualified_type p = transformed(
+        type_table, type_table.parameters(type.unqualified())[i], cv);
+    return type_table[p.unqualified()].kind == type_kind::template_parameter;
+}
+
 int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
                                                size_t arguments, bool &unknown,
                                                bool f_reversed, bool g_reversed)
@@ -404,8 +418,19 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
         for (uint32_t i = 0; i < r.parameter_count && !unknown; i++)
             /* (a non-deduced parameter itself: at_least_as_specialized
                compares nothing with it as P) */
-            if (!non_deduced(list[i]) && !orderable(list[i], true))
-                unknown = true;
+            if (!non_deduced(list[i]) && !orderable(list[i], true)) {
+                /* (a class template's specialization with an expression
+                   among its arguments, Vec128<T, 8 / sizeof(T)>: where
+                   the other's parameter is a template parameter alone, it
+                   is deduced from anything, and nothing of this one is
+                   deduced from that parameter's unique type) */
+                uint32_t other = f;
+                if (x == f)
+                    other = g;
+                if (f_reversed || g_reversed ||
+                    !template_parameter_alone(other, i))
+                    unknown = true;
+            }
     }
     if (unknown)
         return 0;
