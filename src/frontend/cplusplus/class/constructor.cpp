@@ -3822,7 +3822,7 @@ analysis_result semantic_analysis::class_direct_initialization(
                     return analysis_result::well_formed;
                 }
             }
-        } else if (cannot_tell) {
+        } else {
             bool ambiguous = false, unknown = false;
             entity_index fn = conversion_function_for(arguments[0], type, true,
                                                       ambiguous, unknown);
