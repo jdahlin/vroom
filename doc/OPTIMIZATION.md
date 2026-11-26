@@ -91,6 +91,9 @@ What a function gets, in order (the rows of `codegen/vir/pass-table.c`):
    addresses (a select or block parameter: an inlined function returning a
    reference to an argument) into a choice of the loaded values, so that the
    slots can be promoted.
+   `vector-elements` (`vector-from-elements.cpp`) builds a vector that a
+   slot's element stores have just filled (the set intrinsics) with `vsplat`
+   and `vinsert`.
 6. **Condition merge** (`condition-merge.c`): `a && b` and `a || b` whose
    result is a value become one compare chain (arm64: `ccmp`).
 7. **If-conversion** (`if-conversion.c`): diamonds and triangles with small

@@ -93,31 +93,6 @@ static bool virbuild_slot_load_possible(virbuild_context *V, uint32_t v,
     return true;
 }
 
-/* a new instruction of block b after *prev (0: first), or at b's end (prev NULL) */
-static uint32_t virbuild_slot_load_insert(codegen_context *e, uint32_t b,
-                                          uint32_t *prev, vir_insn in)
-{
-    virbuild_context *V = e->vir_builder;
-
-    if (!prev)
-        return virbuild_block_insn_append(e, b, in.op, in.type, in.flags, in.a,
-                                          in.b, in.c);
-    uint32_t i = virbuild_preir_insn_add(e, in.op, in.type, in.flags, in.a,
-                                         in.b, in.c, b);
-
-    if (*prev) {
-        V->insns[i].next = V->insns[*prev].next;
-        V->insns[*prev].next = i;
-    } else {
-        V->insns[i].next = V->blocks[b].first_insn;
-        V->blocks[b].first_insn = i;
-    }
-    if (V->blocks[b].last_insn == *prev)
-        V->blocks[b].last_insn = i;
-    *prev = i;
-    return i;
-}
-
 /* the value load reads through v (virbuild_slot_load_possible), built at *prev of block b */
 static uint32_t virbuild_slot_load_build(codegen_context *e, uint32_t v,
                                          vir_insn load, uint32_t b,
@@ -130,7 +105,7 @@ static uint32_t virbuild_slot_load_build(codegen_context *e, uint32_t v,
 
     if (in.op == VIR_OP_SLOTADDR) {
         load.a = v;
-        return virbuild_slot_load_insert(e, b, prev, load);
+        return virbuild_preir_insn_insert(e, b, prev, load);
     }
     if (in.op == VIR_OP_SELECT) {
         uint32_t yes = virbuild_slot_load_build(e, in.b, load, b, prev);
@@ -140,7 +115,7 @@ static uint32_t virbuild_slot_load_build(codegen_context *e, uint32_t v,
         select.type = load.type;
         select.b = yes;
         select.c = no;
-        return virbuild_slot_load_insert(e, b, prev, select);
+        return virbuild_preir_insn_insert(e, b, prev, select);
     }
     uint32_t merge = V->insns[v].block;
     uint32_t n = V->blocks[merge].predecessor_count;
