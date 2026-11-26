@@ -3245,6 +3245,9 @@ class semantic_analysis
     /* a declarator analysed now may have a cv-qualifier-seq: a member
        declarator, or one whose declarator-id is a qualified-id */
     bool in_member_declarator = false;
+    /* in a member-declaration, where clang::reinitializes is without
+       effect; elsewhere clang rejects it, and vcc refuses it */
+    bool in_member_declaration = false;
     bool reanalysing_member_declarator = false;
     /* in a member function template's declarator: 1 the template's own
        (member-template.cpp), 2 a specialization's (instantiation.cpp) */

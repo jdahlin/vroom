@@ -1622,10 +1622,20 @@ semantic_analysis::member_declaration(entity_index c, MemberDeclaration m,
             return static_assert_declaration(s);
         },
         [&](FunctionDefinition f) {
-            return member_declaration_with_specifiers(c, f, access, bodies);
+            bool outer = in_member_declaration;
+            in_member_declaration = true;
+            analysis_result r =
+                member_declaration_with_specifiers(c, f, access, bodies);
+            in_member_declaration = outer;
+            return r;
         },
         [&](MemberSimpleDeclaration d) {
-            return member_declaration_with_specifiers(c, d, access, bodies);
+            bool outer = in_member_declaration;
+            in_member_declaration = true;
+            analysis_result r =
+                member_declaration_with_specifiers(c, d, access, bodies);
+            in_member_declaration = outer;
+            return r;
         },
         [&](MemberDeclaration other) {
             analysis_result refused = not_supported(other);
