@@ -3801,6 +3801,21 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
         last_declared = e;
         return br;
     }
+    if (!conversion && instantiating && !m.destructor &&
+        tokens.identifier(m.id) == entity_table[c].name) {
+        /* [temp.expl.spec]/1: the definition of an explicit
+           specialization of a constructor template, which declares the
+           specialization (named_specialization made it) */
+        specified s;
+        s.constexpr_ = constexpr_specified;
+        s.inline_ = inline_specified;
+        entity_index e = 0;
+        VTRY_SET(r, declare_specialization(n, m.id, type, s, m.exceptions, e));
+        last_declared = e;
+        analysis_result br = special_member_body(n, body);
+        last_declared = e;
+        return br;
+    }
     entity_index e = 0;
     if (conversion) {
         /* [class.conv.fct]: the conversion function of the declared type
