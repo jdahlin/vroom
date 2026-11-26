@@ -509,15 +509,16 @@ uint32_t semantic_analysis::find_instantiation(entity_index t,
                                                const template_argument *a,
                                                uint32_t count) const
 {
-    for (uint32_t k = 0; k < instantiations.size(); k++) {
-        const instantiation_record &x = instantiations[k];
-        if (x.template_entity != t || x.argument_count != count)
+    const record_chains &chains = instantiations_of_templates();
+    for (uint32_t k = chains.first(t); k; k = chains.after(k)) {
+        const instantiation_record &x = instantiations[k - 1];
+        if (x.argument_count != count)
             continue;
         bool same = true;
         for (uint32_t i = 0; i < x.argument_count && same; i++)
             same = template_arguments[x.first_argument + i] == a[i];
         if (same)
-            return k + 1;
+            return k;
     }
     return 0;
 }

@@ -49,14 +49,29 @@ entity_index entities::find_c_linkage(uint32_t name, entity_kind kind) const
 {
     const entity *entries = records.data();
     size_t count = records.size();
-    for (entity_index i = 1; i < count; i++) {
-        const entity &e = entries[i];
-        if (e.name == name && e.kind == kind && e.c_language_linkage &&
+    c_linkage_by_name.update(c_linkage,
+                             [&](entity_index e) { return entries[e].name; });
+    /* (the first made of them) */
+    entity_index found = 0;
+    for (uint32_t i = c_linkage_by_name.first(name); i;
+         i = c_linkage_by_name.after(i)) {
+        entity_index at = c_linkage[i - 1];
+        const entity &e = entries[at];
+        if (at < count && e.kind == kind &&
             (!e.enclosing ||
-             entries[e.enclosing].kind == entity_kind::namespace_entity))
-            return i;
+             entries[e.enclosing].kind == entity_kind::namespace_entity) &&
+            (!found || at < found))
+            found = at;
     }
-    return 0;
+    return found;
+}
+
+void entities::give_c_linkage(entity_index e)
+{
+    if (records[e].c_language_linkage)
+        return;
+    records[e].c_language_linkage = true;
+    c_linkage.append(e);
 }
 
 bool entities::bound_by_using(entity_index scope, uint32_t name) const

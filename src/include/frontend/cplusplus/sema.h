@@ -1018,6 +1018,9 @@ class entities
        ([dcl.enum]/11) */
     entity_index find(entity_index scope, uint32_t name) const;
     entity_index find_c_linkage(uint32_t name, entity_kind kind) const;
+    /* e has C language linkage: the one way to say so, as find_c_linkage
+       looks only among those */
+    void give_c_linkage(entity_index e);
     void bind(entity_index scope, uint32_t name, entity_index e,
               bool by_using_declaration = false);
     /* whether the name is bound in the scope by a using-declaration
@@ -1058,6 +1061,9 @@ class entities
     owned_array<binding> slots;
     size_t used = 0;
     void grow();
+    /* the entities with C language linkage, chained by name */
+    owned_array<entity_index> c_linkage;
+    mutable record_chains c_linkage_by_name;
 };
 
 /* ---- analysis ----------------------------------------------------------- */
@@ -5467,6 +5473,24 @@ class semantic_analysis
         bool guides_made = false;
     };
     owned_array<function_template> function_templates;
+    /* function_templates by the held entity (name) and by its identifier,
+       instantiations by template_entity: made as they are asked for */
+    mutable record_chains templates_by_held, templates_by_identifier,
+        instantiations_by_template;
+    const record_chains &held_templates() const
+    {
+        templates_by_held.update(
+            function_templates,
+            [](const function_template &t) { return t.name; });
+        return templates_by_held;
+    }
+    const record_chains &instantiations_of_templates() const
+    {
+        instantiations_by_template.update(
+            instantiations,
+            [](const instantiation_record &x) { return x.template_entity; });
+        return instantiations_by_template;
+    }
     /* the function type of an implicit guide specialization: the
        constructor's parameters returning the class specialization */
     analysis_result implicit_guide_type(const function_template &ft,
