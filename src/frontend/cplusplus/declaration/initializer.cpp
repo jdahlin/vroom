@@ -691,11 +691,6 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
                               "initializer expression shall not be an lvalue",
                               "dcl.init.ref");
     }
-    /* (a temporary of or from an enumeration: not yet) */
-    if (x.kind == type_kind::enumeration || y.kind == type_kind::enumeration)
-        return not_supported_because(
-            at, "dcl.init.ref",
-            "a reference temporary of or from an enumeration");
     VTRY(result, operand_value(at, m));
     return implicit_conversion(at, m, t1, false);
 }
