@@ -124,10 +124,13 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
         return r;
     if (n[2].is(syntax_kind::braced_init_list)) {
         /* [expr.ass]/8: a braced-init-list on the right of '=' initializes a
-           temporary of the left operand's type, which is then assigned */
-        if (op != preprocessing_op_or_punc::EQUAL)
-            return not_supported_because(
-                n, "expr.ass", "a compound assignment with a braced-init-list");
+           temporary of the left operand's type, which is then assigned; of a
+           class it is the argument of the operator function, compound ones
+           too (Example 1: z += {1, 2} is z.operator+=({1, 2});
+           [impl.clang] a non-member operator+= takes it as well) */
+        if (op != preprocessing_op_or_punc::EQUAL &&
+            type_table[left.type.unqualified()].kind == type_kind::class_type)
+            return braced_assignment(n, op, left, m);
         if (type_table[left.type.unqualified()].kind == type_kind::class_type) {
             /* [expr.ass]/8: x = {...} means x.operator=({...}) of a class:
                its operator= functions take the list, the left operand's
@@ -155,7 +158,7 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
                 if (others && declared_copy &&
                     !entity_table[c].defaulted_copy_assignment &&
                     !entity_table[c].defaulted_move_assignment)
-                    return braced_assignment(n, left, m);
+                    return braced_assignment(n, op, left, m);
                 if (others)
                     return not_supported_because(
                         n, "over.match.oper",
@@ -164,6 +167,8 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
                         "one");
             }
         }
+        /* [impl.clang] a scalar's E1 op= {v} is E1 op= T{v}, T the left
+           operand's type */
         right.type = qualified_type::make(left.type.unqualified(), cv_none);
         initialized_value value;
         VTRY_SET(r, list_initialization(n[2], right.type, false, value));
@@ -181,12 +186,13 @@ analysis_result semantic_analysis::assignment(SyntaxRef n,
     return assignment_of(n, n[1].token(), op, n[0], n[2], left, right, m);
 }
 
-/* [expr.ass]/8: x = {v} of a class means x.operator=({v}): the member
-   operator functions are the candidates and the list is the argument, which
+/* [expr.ass]/8: x = {v} of a class means x.operator=({v}), x op= {v}
+   x.operator op=({v}): the operator functions are the candidates and the list is the argument, which
    initializes the chosen one's parameter ([over.ics.list]) */
-analysis_result semantic_analysis::braced_assignment(SyntaxRef n,
-                                                     expression_meaning &left,
-                                                     expression_meaning &m)
+analysis_result
+semantic_analysis::braced_assignment(SyntaxRef n, preprocessing_op_or_punc op,
+                                     expression_meaning &left,
+                                     expression_meaning &m)
 {
     owned_array<SyntaxElement> syntax;
     owned_array<expression_meaning> operands;
@@ -195,11 +201,16 @@ analysis_result semantic_analysis::braced_assignment(SyntaxRef n,
     syntax.append(n[2]);
     operands.append(expression_meaning());
     bool handled = false;
-    analysis_result r =
-        overloaded_operator(n, n[1].token(), preprocessing_op_or_punc::EQUAL,
-                            false, syntax, operands, handled, m);
+    analysis_result r = overloaded_operator(n, n[1].token(), op, false, syntax,
+                                            operands, handled, m);
     if (r != analysis_result::well_formed || handled)
         return r;
+    /* [over.match.oper]/9: a class has no built-in compound assignment */
+    if (op != preprocessing_op_or_punc::EQUAL)
+        return ill_formed(n,
+                          "no operator function for a compound assignment to "
+                          "a class",
+                          "over.match.oper");
     return not_supported_because(
         n, "over.match.oper",
         "a braced assignment with no handled operator function");

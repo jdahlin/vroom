@@ -3989,7 +3989,8 @@ class semantic_analysis
     /* [expr.ass] */
     analysis_result assignment(SyntaxRef n, expression_meaning &m);
     /* x = {...} of a class with a declared copy assignment operator */
-    analysis_result braced_assignment(SyntaxRef n, expression_meaning &left,
+    analysis_result braced_assignment(SyntaxRef n, preprocessing_op_or_punc op,
+                                      expression_meaning &left,
                                       expression_meaning &m);
     analysis_result
     assignment_of(SyntaxRef n, token_index at, preprocessing_op_or_punc op,
