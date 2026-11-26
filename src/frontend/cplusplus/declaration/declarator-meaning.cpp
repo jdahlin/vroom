@@ -57,6 +57,11 @@ analysis_result semantic_analysis::pointer_qualifier(SyntaxRef op,
     case extension_keyword::nullability:
         return analysis_result::well_formed;
     case extension_keyword::restrict:
+        /* (GCC's restricted reference: nothing of the type changes) */
+        if (type_table[type.unqualified()].kind ==
+                type_kind::lvalue_reference ||
+            type_table[type.unqualified()].kind == type_kind::rvalue_reference)
+            return analysis_result::well_formed;
         if (type_table[type.unqualified()].kind != type_kind::pointer)
             return not_supported_because(
                 op, "ext.gnu", "restrict on a type that is no pointer");
