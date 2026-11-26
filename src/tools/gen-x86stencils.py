@@ -341,24 +341,42 @@ def variants_with(builtin, work):
     return codes
 
 
-def patch_position(codes):
-    """the one byte that is the constant in every variant, or None"""
-    if len(codes) < 3 or len(next(iter(codes))) != 1:
-        return None
-    if any(pool for pool, _ in codes.values()):
-        return None
-    items = [(key, code) for key, (_, code) in codes.items()]
-    (a, x), (b, y) = items[0], items[1]
-    if len(x) != len(y):
-        return None
-    differing = [i for i in range(len(x)) if x[i] != y[i]]
-    if len(differing) != 1:
-        return None
-    at = differing[0]
-    for (value,), code in items:
-        if code != x[:at] + bytes([value]) + x[at + 1:]:
-            return None
-    return at
+def groups_of(codes):
+    """[(keys, template, constants' bytes, fixups, stored)]: the variants of
+    one length, as one code and, per variant, the bytes that differ from it
+    and are not simply one of the constants.  A fixup is a position in the
+    code: first those of the stored bytes, in their order, then those that are
+    constant j, with j + 1 in the top byte."""
+    by_shape = {}
+    for value, (pool, body) in codes.items():
+        key = sum((v & 0xff) << (8 * k) for k, v in enumerate(value))
+        by_shape.setdefault((len(pool), len(pool + body)), []).append(
+            (key, pool + body))
+    groups = []
+    for (pool, length), variants in sorted(by_shape.items()):
+        variants.sort()
+        template = variants[0][1]
+        stored, patched = [], []
+        for at in range(length):
+            if all(code[at] == template[at] for _, code in variants):
+                continue
+            for constant in range(4):
+                if all(code[at] == (key >> (8 * constant)) & 0xff
+                       for key, code in variants):
+                    patched.append(at | (constant + 1) << 24)
+                    break
+            else:
+                stored.append(at)
+        columns = bytes(code[at] for _, code in variants for at in stored)
+        keys = []
+        for key, _ in variants:
+            if keys and keys[-1][0] + keys[-1][1] == key:
+                keys[-1][1] += 1
+            else:
+                keys.append([key, 1])
+        groups.append((keys, template, pool, [*stored, *patched], columns,
+                       len(stored)))
+    return groups
 
 
 # clang's type-generic vector builtins that <immintrin.h> uses and the front
@@ -499,56 +517,56 @@ def main():
         return offsets[code]
 
     names = [GENERATED, '/* X86_STENCIL (spelling, signature) */']
-    table = [GENERATED,
-             '/* X86_STENCIL_ROW (features, constant operands as a mask, first',
-             '   variant, variants, patched byte or -1), in the names\' order;',
-             '   X86_STENCIL_VARIANTS: {constants, one per byte; how many consecutive',
-             '   values; offset; code length; bytes of constants before the code}; X86_STENCIL_BYTES: the code. */',
-             '#ifdef X86_STENCIL_ROW']
-    variant_lines = []
+    features, rows, groups, keys, fixups = {}, [], [], [], []
+    fixup_runs, key_runs = {}, {}
+
+    def run(items, table, runs):
+        """items' first index in table, shared between equal runs"""
+        if items not in runs:
+            runs[items] = len(table)
+            table.extend(items)
+        return runs[items]
+
     for builtin, codes in made:
         names.append(f'X86_STENCIL("{builtin.table_name}", "{builtin.signature()}")')
         mask = sum(1 << i for i in builtin.constants)
-        at = patch_position(codes)
-        first = len(variant_lines)
-        items = sorted(codes.items())
-        if at is not None:
-            # one stencil; the values it takes are listed with it
-            shared = items[0][1]
-            items = [(value, shared) for value, _ in items]
-        # consecutive constants with the same code share a row
-        ranges = []
-        for value, code in items:
-            key = sum((v & 0xff) << (8 * k) for k, v in enumerate(value))
-            pool, body = code
-            ranges.append((key, place(pool + body), len(body), len(pool)))
-        ranges.sort()
-        merged = []
-        for key, offset, length, pool in ranges:
-            if (merged and merged[-1][0] + merged[-1][1] == key
-                    and merged[-1][2:] == [offset, length, pool]):
-                merged[-1][1] += 1
-            else:
-                merged.append([key, 1, offset, length, pool])
-        for key, keys, offset, length, pool in merged:
-            variant_lines.append(
-                f'{{{key}u,{keys},{offset},{length},{pool}}},')
-        patched = -1
-        if at is not None:
-            patched = at
-        table.append(f'X86_STENCIL_ROW("{builtin.features}", {mask}, {first}, '
-                     f'{len(variant_lines) - first}, {patched})')
-    table += ['#endif', '#ifdef X86_STENCIL_VARIANTS', *variant_lines, '#endif',
-              '#ifdef X86_STENCIL_BYTES']
-    for i in range(0, len(blob), 16):
-        table.append(''.join(f'{b},' for b in blob[i:i + 16]))
-    table.append('#endif')
+        feature = features.setdefault(builtin.features, len(features))
+        first = len(groups)
+        for ranges, template, pool, fixed, columns, stored in groups_of(codes):
+            offset = place(template)
+            groups.append(
+                f'{{{offset},{place(columns)},'
+                f'{run(tuple(fixed), fixups, fixup_runs)},'
+                f'{run(tuple(map(tuple, ranges)), keys, key_runs)},'
+                f'{len(template) - pool},{pool},{stored},'
+                f'{len(fixed) - stored},{len(ranges)}}},')
+        rows.append(f'{{{feature},{mask},{len(groups) - first},{first}}},')
+
+    def section(name, lines):
+        return [f'#ifdef {name}', *lines, '#endif']
+
+    table = [
+        GENERATED,
+        '/* Rows in the names\' order: {features, constant operands as a mask,',
+        '   groups, first group}.  A group (a builtin\'s variants of one length):',
+        '   {code, per-variant bytes, first fixup, first key range, code length,',
+        '   bytes of constants before the code, stored bytes per variant,',
+        '   patched bytes, key ranges}; a key is the constants, a byte each. */',
+        *section('X86_STENCIL_FEATURES', [f'"{f}",' for f in features]),
+        *section('X86_STENCIL_ROWS', rows),
+        *section('X86_STENCIL_GROUPS', groups),
+        *section('X86_STENCIL_KEYS', [f'{{{k}u,{n}}},' for k, n in keys]),
+        *section('X86_STENCIL_FIXUPS', [f'{f}u,' for f in fixups]),
+        *section('X86_STENCIL_BYTES',
+                 [''.join(f'{b},' for b in blob[i:i + 24])
+                  for i in range(0, len(blob), 24)]),
+    ]
     for name, reason in skipped:
         names.append(f'/* {name}: {reason} */')
     NAMES.write_text('\n'.join(names) + '\n')
     CODE.write_text('\n'.join(table) + '\n')
-    print(f'{len(made)} stencils, {len(variant_lines)} variants, '
-          f'{len(blob)} bytes of code, {len(skipped)} skipped')
+    print(f'{len(made)} stencils, {len(groups)} groups, {len(blob)} bytes, '
+          f'{len(skipped)} skipped')
 
 
 if __name__ == '__main__':

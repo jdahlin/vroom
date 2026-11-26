@@ -134,6 +134,8 @@ CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want,
                                        const cc_id_list *args);
 CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch);
 CC_PRIVATE ast_qualified_type cc_builtin_signature_next(cc *c, const char **s);
+CC_PRIVATE uint32_t cc_builtin_stencil_row(const cc_builtin *b);
+CC_PRIVATE const cc_builtin *cc_builtin_stencil_named(const char *name);
 CC_PRIVATE ast_qualified_type cc_builtin_type(cc *c, const cc_builtin *b);
 CC_PRIVATE uint32_t cc_vector_saturate(cc *c, bool sub, uint32_t a, uint32_t b,
                                        uint32_t loc);

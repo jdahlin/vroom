@@ -180,17 +180,27 @@ def stencil_rows(bin_dir):
                             re.M)
     with open(code) as f:
         text = f.read()
-    rows = re.findall(r'^X86_STENCIL_ROW\("([^"]*)", (\d+), (\d+), (\d+), '
-                      r'-?\d+\)', text, re.M)
-    variants = [(int(k), int(n)) for k, n in
-                re.findall(r'^\{(\d+)u,(\d+),\d+,\d+,\d+\},', text, re.M)]
+
+    def section(name):
+        body = text.split('#ifdef %s\n' % name)[1].split('#endif')[0]
+        return body.splitlines()
+
+    def numbers(line):
+        return [int(x) for x in re.findall(r'\d+', line)]
+
+    features = [line.strip(' ",') for line in section('X86_STENCIL_FEATURES')]
+    rows = [numbers(line) for line in section('X86_STENCIL_ROWS')]
+    groups = [numbers(line) for line in section('X86_STENCIL_GROUPS')]
+    ranges = [numbers(line) for line in section('X86_STENCIL_KEYS')]
     made = []
-    for (name, signature), (features, mask, first, count) in zip(listed, rows):
+    for (name, signature), (feature, mask, count, first) in zip(listed, rows):
         keys = []
-        for key, many in variants[int(first):int(first) + int(count)]:
-            keys.extend(range(key, key + many))
+        for group in groups[first:first + count]:
+            for key, many in ranges[group[3]:group[3] + group[8]]:
+                keys.extend(range(key, key + many))
+        keys.sort()
         picked = sorted({keys[i * (len(keys) - 1) // 5] for i in range(6)})
-        made.append((name, signature, features, int(mask), picked))
+        made.append((name, signature, features[feature], mask, picked))
     return made
 
 

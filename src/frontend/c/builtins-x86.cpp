@@ -94,12 +94,6 @@ CC_PRIVATE uint32_t cc_builtin_x86_instruction_build(cc *c, const cc_builtin *b,
     return cc_builtin_node_new(c, CC_BUILTIN_X86_INSTRUCTION, rt, loc, args);
 }
 
-static const char *const x86_stencil_names[] = {
-#define X86_STENCIL(name, signature) name,
-#include "frontend/x86-stencil-names.inc"
-#undef X86_STENCIL
-};
-
 /* a builtin of frontend/x86-stencil-names.inc: as above, its code the
    stencil of its row */
 CC_PRIVATE uint32_t cc_builtin_x86_stencil_build(cc *c, const cc_builtin *b,
@@ -107,21 +101,17 @@ CC_PRIVATE uint32_t cc_builtin_x86_stencil_build(cc *c, const cc_builtin *b,
                                                  ast_qualified_type rt,
                                                  uint32_t loc)
 {
-    unsigned row = 0;
-    unsigned count = sizeof x86_stencil_names / sizeof *x86_stencil_names;
-
-    while (row < count && strcmp(x86_stencil_names[row], b->name))
-        row++;
     if (!CC_X86_64(c)) {
         cc_report_error(c, loc, "builtin '%s' requires an x86-64 target",
                         b->name);
         return cc_node_error_new(c, loc);
     }
     /* (a wrong number of arguments: the call has reported it) */
-    if (row == count || args->n != AST_TYPE(c, cc_builtin_type(c, b))->n)
+    if (args->n != AST_TYPE(c, cc_builtin_type(c, b))->n)
         return cc_node_error_new(c, loc);
-    cc_id_list_append(
-        c, args, cc_node_integer_new(c, row, cc_type_basic(AST_TYPE_INT), loc));
+    cc_id_list_append(c, args,
+                      cc_node_integer_new(c, cc_builtin_stencil_row(b),
+                                          cc_type_basic(AST_TYPE_INT), loc));
     return cc_builtin_node_new(c, CC_BUILTIN_X86_STENCIL, rt, loc, args);
 }
 
@@ -161,11 +151,8 @@ CC_PRIVATE uint32_t cc_x86_generic_build(cc *c, const char *name,
     snprintf(shaped, sizeof shaped, "%s/%u%c%u/%u", name, width, kind,
              (unsigned)cc_type_size(c, element), n);
 
-    unsigned row = 0;
-    unsigned count = sizeof x86_stencil_names / sizeof *x86_stencil_names;
-    while (row < count && strcmp(x86_stencil_names[row], shaped))
-        row++;
-    if (row == count) {
+    const cc_builtin *found = cc_builtin_stencil_named(shaped);
+    if (!found) {
         cc_report_error(c, loc, "'%s' of this operand type is not supported",
                         name);
         return cc_node_error_new(c, loc);
@@ -173,9 +160,9 @@ CC_PRIVATE uint32_t cc_x86_generic_build(cc *c, const char *name,
     ast_qualified_type result = t;
     if (strstr(name, "reduce"))
         result = element;
-    cc_id_list_append(
-        c, &args,
-        cc_node_integer_new(c, row, cc_type_basic(AST_TYPE_INT), loc));
+    cc_id_list_append(c, &args,
+                      cc_node_integer_new(c, cc_builtin_stencil_row(found),
+                                          cc_type_basic(AST_TYPE_INT), loc));
     return cc_builtin_node_new(c, CC_BUILTIN_X86_STENCIL, result, loc, &args);
 }
 

@@ -646,6 +646,30 @@ CC_PRIVATE ast_qualified_type cc_builtin_type(cc *c, const cc_builtin *b)
 
 static uint32_t *cc_builtin_directory[CC_DIRECTORY_COUNT];
 
+/* the stencils' entries are together in the table, in their rows' order */
+static const cc_builtin *cc_builtin_stencil_first(void)
+{
+    const cc_builtin *b = cc_builtin_table;
+
+    while (b->id != CC_BUILTIN_X86_STENCIL)
+        b++;
+    return b;
+}
+
+CC_PRIVATE uint32_t cc_builtin_stencil_row(const cc_builtin *b)
+{
+    return (uint32_t)(b - cc_builtin_stencil_first());
+}
+
+CC_PRIVATE const cc_builtin *cc_builtin_stencil_named(const char *name)
+{
+    for (const cc_builtin *b = cc_builtin_stencil_first();
+         b->id == CC_BUILTIN_X86_STENCIL; b++)
+        if (!strcmp(b->name, name))
+            return b;
+    return NULL;
+}
+
 /* __has_builtin for the names the front end implements (the pp asks through pp_builtin_known) */
 static int cc_builtin_is_known(const char *n)
 {
