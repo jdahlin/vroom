@@ -5514,6 +5514,7 @@ class semantic_analysis
         /* a class template whose implicit guides are made */
         bool guides_made = false;
     };
+    entity_index template_lexical_outer(const function_template &ft) const;
     owned_array<function_template> function_templates;
     /* function_templates by the held entity (name) and by its identifier,
        instantiations by template_entity: made as they are asked for */
