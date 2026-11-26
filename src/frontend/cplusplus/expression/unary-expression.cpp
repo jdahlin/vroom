@@ -1166,6 +1166,23 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
         case semantic_kind::string_literal:
         case semantic_kind::entity:
         case semantic_kind::zero:
+        case semantic_kind::allocated:
+            break;
+        case semantic_kind::throw_exception:
+            /* /6.3 */
+            throwing = true;
+            break;
+        case semantic_kind::new_object:
+            /* /6.2: the allocation function (a, a call) and the object's
+               initialization (b), an immediate subexpression.  An array of
+               a class (d) constructs each element: not here */
+            if (s.d)
+                return not_supported_because(
+                    n, "expr.unary.noexcept",
+                    "noexcept of a new-expression of an array of a class");
+            work.append(s.a);
+            if (s.b)
+                work.append(s.b);
             break;
         case semantic_kind::conversion:
         case semantic_kind::unary:
@@ -1261,8 +1278,8 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
             break;
         }
         default:
-            /* a temporary's destruction, a new- or delete-expression, a
-               member pointer: no rule here */
+            /* a temporary's destruction, a delete-expression, a member
+               pointer: no rule here */
             return not_supported_because(
                 n, "expr.unary.noexcept",
                 "noexcept of an operand with a construct that has no rules");
