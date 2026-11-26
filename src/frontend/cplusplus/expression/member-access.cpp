@@ -124,7 +124,8 @@ bool semantic_analysis::trivial_zero_initialized(entity_index c)
  * prvalue, materialized: [basic.lval]/7) of the member's class.
  */
 analysis_result semantic_analysis::member_access(token_index at, entity_index e,
-                                                 expression_meaning &m)
+                                                 expression_meaning &m,
+                                                 entity_index written_class)
 {
     /* E1.E2 names no structured binding, whatever E1 does */
     m.binding = 0;
@@ -158,7 +159,12 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
     bool overloads_called = at == overloaded_callee &&
                             entity_table[e].kind == entity_kind::function &&
                             entity_table[e].next_overload;
-    if (!overloads_called && !accessible(e, object_class))
+    /* [class.protected]/1: the object expression's class, not that of
+       the base subobject a qualified name converted it to */
+    entity_index accessed_through = object_class;
+    if (written_class)
+        accessed_through = written_class;
+    if (!overloads_called && !accessible(e, accessed_through))
         /* [class.access]/1.1: "private; that is, its name can be used only
            by members and friends of the class in which it is declared" */
         return ill_formed_at_token(at,
@@ -281,7 +287,7 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         /* the class of the object expression as written, before the
            conversion to the member's class above: [class.protected]/1's
            check of the function chosen is made against it */
-        semantics[result.node].c = object_class;
+        semantics[result.node].c = accessed_through;
         m = result;
         return analysis_result::well_formed;
     }
@@ -695,7 +701,10 @@ analysis_result semantic_analysis::member_reference(SyntaxRef n,
                                    "the id-expression shall name a member "
                                    "of the class",
                                    "expr.ref");
-    return member_access(name, e, m);
+    entity_index written_class = 0;
+    if (qual_class)
+        written_class = c;
+    return member_access(name, e, m, written_class);
 }
 
 } // namespace cplusplus

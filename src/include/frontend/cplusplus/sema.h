@@ -4930,7 +4930,8 @@ class semantic_analysis
                                                FunctionDefinition definition);
     /* [expr.ref]: the member e of the object m (a glvalue of class type) */
     analysis_result member_access(token_index at, entity_index e,
-                                  expression_meaning &m);
+                                  expression_meaning &m,
+                                  entity_index written_class = 0);
     /* [class.mfct.non-static]/2: a name of a non-static member used in a
        member function: (*this).name */
     analysis_result implicit_member_access(token_index at, entity_index e,

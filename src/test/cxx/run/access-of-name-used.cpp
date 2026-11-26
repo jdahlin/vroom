@@ -49,9 +49,34 @@ int Clip::go()
     Layer l(7);
     return b.run() * 10 + l;
 }
+/* [class.protected]/1: this->Base::f() is through this's class */
+struct Flat {
+    virtual int flatten() const
+    {
+        return 1;
+    }
+};
+class Middle : public Flat {
+protected:
+    int flatten() const override
+    {
+        return 2;
+    }
+};
+class Derived : public Middle {
+public:
+    int flatten() const override;
+};
+int Derived::flatten() const
+{
+    return this->Middle::flatten() + 1;
+}
+
 int main()
 {
     Owner o;
     printf("%d %d\n", o.f(), Clip::go());
+    if (Derived().flatten() != 3)
+        return 1;
     return !(o.f() == 1 && Clip::go() == 57);
 }
