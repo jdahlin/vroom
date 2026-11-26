@@ -738,6 +738,8 @@ void semantic_analysis::function_template_overloads(
         }
     }
     /* in declaration order, each once */
+    if (out.size() < 2)
+        return;
     qsort(out.begin(), out.size(), sizeof(uint32_t),
           [](const void *x, const void *y) {
               uint32_t l = *static_cast<const uint32_t *>(x);
