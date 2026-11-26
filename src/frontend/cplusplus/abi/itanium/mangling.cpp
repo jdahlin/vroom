@@ -184,6 +184,7 @@ class itanium_mangler
     bool integer_literal(token_index token);
     bool constraint_parameter(entity_index t, entity_index parameter);
     bool constraint_template_args(entity_index t, SyntaxElement c);
+    bool compound_requirement(entity_index t, SyntaxElement req);
     bool constraint_namespace_member(entity_index t, SyntaxElement qualifier,
                                      SyntaxElement id);
     bool dependent_expression(SyntaxElement c);
@@ -599,7 +600,9 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
     }
     case syntax_kind::requires_expression: {
         /* [abi:expressions]: requires-expression without parameter list
-           ("rq" <requirement>+ "E"), simple-requirement ("X" <expression>) */
+           ("rq" <requirement>+ "E"), simple-requirement ("X" <expression>),
+           compound-requirement ("X" <expression> ["N"]
+           ["R" <type-constraint>]) */
         if (c.size() != 2)
             return false;
         SyntaxElement body = c[1];
@@ -620,6 +623,9 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
             if (req.is(syntax_kind::simple_requirement) && req.size() >= 1) {
                 text("X");
                 if (!dependent_expression(req[0]))
+                    return false;
+            } else if (req.is(syntax_kind::compound_requirement)) {
+                if (!compound_requirement(t, req))
                     return false;
             } else {
                 return false;
@@ -665,6 +671,43 @@ bool itanium_mangler::constraint_expression(entity_index t, SyntaxElement c)
     default:
         return false;
     }
+}
+
+/* { e } noexcept -> C<args>; in t's requires-clause, C a concept named
+   unqualified */
+bool itanium_mangler::compound_requirement(entity_index t, SyntaxElement req)
+{
+    if (req.size() < 3)
+        return false;
+    text("X");
+    if (!dependent_expression(req[1]))
+        return false;
+    for (uint32_t i = 3; i < req.size(); i++) {
+        if (req[i].is(standard_keyword::noexcept_)) {
+            text("N");
+            continue;
+        }
+        if (!req[i].is(syntax_kind::return_type_requirement))
+            continue;
+        if (req[i].size() != 2)
+            return false;
+        SyntaxElement q = req[i][1];
+        if (!q.is(syntax_kind::type_constraint) || !q.size() ||
+            !q[0].is_identifier())
+            return false;
+        entity_index found = analysis.constraint_name(
+            analysis.entity_table[t].enclosing, q[0].token());
+        if (!found)
+            return false;
+        text("R");
+        if (!name(found))
+            return false;
+        if (q.size() > 1 &&
+            (q.size() < 3 || !q[1].is(preprocessing_op_or_punc::LESS) ||
+             !constraint_template_args(t, q)))
+            return false;
+    }
+    return true;
 }
 
 /* ns::v<args> in t's requires-clause, v a concept or variable template of

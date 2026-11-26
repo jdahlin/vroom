@@ -4227,6 +4227,8 @@ class semantic_analysis
     /* the noexcept-specifier of the member function declarator analysed last
        that waits for its class's closing } ([class.mem]/6), or 0 */
     SyntaxRef deferred_noexcept = 0;
+    /* implicit_guide_type's declarator: no exception specification */
+    bool forming_guide_type = false;
     struct pending_noexcept {
         entity_index function = 0;
         SyntaxRef specifier = 0;

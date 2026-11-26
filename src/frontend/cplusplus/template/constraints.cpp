@@ -636,8 +636,16 @@ uint32_t semantic_analysis::function_parameter_position(entity_index t,
     if (!ft || !name)
         return 0;
     SyntaxRef d = function_templates[ft - 1].declarator;
+    SyntaxRef lambda = function_templates[ft - 1].declaration;
     owned_array<SyntaxElement> work;
-    work.append(d[leading_gnu_attributes(d) + 1]);
+    if (lambda && lambda.is(syntax_kind::lambda_expression)) {
+        /* a generic lambda's are its lambda-declarator's */
+        for (uint32_t k = 1; k + 1 < lambda.size(); k++)
+            if (lambda[k].is(syntax_kind::lambda_declarator))
+                work.append(lambda[k]);
+    } else {
+        work.append(d[leading_gnu_attributes(d) + 1]);
+    }
     uint32_t position = 0;
     bool inside = false;
     /* (depth first, children in order: the parameters in theirs) */

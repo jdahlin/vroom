@@ -325,7 +325,12 @@ semantic_analysis::implicit_guide_type(const function_template &ft,
     entity_index saved_scope = current_scope;
     if (!ft.guide_of_template)
         current_scope = c;
+    /* [over.match.class.deduct]/1: a guide has its constructor's template
+       parameters, parameter types and class, not its exception
+       specification, which may name members of the class */
+    forming_guide_type = true;
     analysis_result res = function(ft.declarator, type);
+    forming_guide_type = false;
     current_scope = saved_scope;
     return res;
 }
