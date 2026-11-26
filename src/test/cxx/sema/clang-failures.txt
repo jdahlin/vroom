@@ -294,7 +294,6 @@ lower SemaCXX/warn-float-conversion.cpp -std=gnu++17 -Wno-literal-conversion -Wf
 lower SemaCXX/warn-large-by-value-copy.cpp -std=gnu++17: vpp -S defines ['_ZN11rdar85480506NonPODC2ERKS0_'] clang -O0 does not, not ['_ZN11rdar85480506NonPODC2EOS0_']
 lower SemaCXX/warn-pure-virtual-call-from-ctor-dtor.cpp -std=gnu++17 -Wcall-to-pure-virtual-from-ctor-dtor: vpp -S defines [] clang -O0 does not, not ['_ZN2TAIiEC2Ev', '_ZN2TCC2Ev']
 lower SemaTemplate/GH161657.cpp -std=c++20: vpp -S defines ['_ZZ3foovENK3$_0clEv'] clang -O0 does not, not ['_ZNK1SIiE3$_0clEv']
-lower SemaTemplate/defaulted-destructor-in-temporary.cpp -std=c++11: vpp -S defines [] clang -O0 does not, not ['_ZN3StrD2Ev']
 lower SemaTemplate/inject-templated-friend-post.cpp -std=c++98 -DINSTANTIATE: vpp -S defines [] clang -O0 does not, not ['_ZN8StreamerI3FooEC5ERKS0_']
 lower SemaTemplate/inject-templated-friend-post.cpp -std=c++98 -DPROTOTYPE -DINSTANTIATE: vpp -S defines [] clang -O0 does not, not ['_ZN8StreamerI3FooEC5ERKS0_']
 lower SemaTemplate/instantiate-deeply.cpp -std=gnu++17 -Wall: vpp -S defines [] clang -O0 does not, not ['_ZN3FooIiEC5Ev']
