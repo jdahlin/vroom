@@ -1112,6 +1112,32 @@ semantic_analysis::declarator_access_class(SyntaxRef declaration) const
     return scope;
 }
 
+/* The scope and name of an unqualified declarator-id at namespace scope
+   (friend_function_head), empty elsewhere. */
+semantic_analysis::class_head_context
+semantic_analysis::declarator_function_name(SyntaxRef declaration)
+{
+    class_head_context named;
+    if (function_state.active || defining_class || !is_namespace(current_scope))
+        return named;
+    SyntaxElement id = DeclaratorParts::of_declaration(declaration).id;
+    if (!id)
+        return named;
+    token_index at = 0;
+    if (id.is_identifier()) {
+        at = id.token();
+    } else if (id.is(syntax_kind::operator_function_id) &&
+               id.operator_function_id().operator_keyword().is_token()) {
+        name_operator_declarator(id);
+        at = id.operator_function_id().operator_keyword().token();
+    } else {
+        return named;
+    }
+    named.scope = current_scope;
+    named.name = tokens.identifier(at);
+    return named;
+}
+
 /*
  * The declarators of a simple-declaration, or the one of a
  * function-definition.  [dcl.decl]/3: "Each init-declarator in a declaration
@@ -1151,6 +1177,8 @@ analysis_result semantic_analysis::init_declarators(SyntaxRef declaration,
     if (!declarator_context)
         declarator_context = access_class;
     scoped_value<entity_index> member_context(access_class, declarator_context);
+    scoped_value<class_head_context> function_context(
+        friend_function_head, declarator_function_name(declaration));
     /* [dcl.type.class.deduct]/1: a placeholder for a deduced class type
        (C b(args); or O::C b(args);) */
     analysis_result r = analysis_result::well_formed;

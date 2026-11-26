@@ -1504,6 +1504,19 @@ bool semantic_analysis::accessible_here(entity_index member,
             if (friend_names_class(f, friend_head.scope, friend_head.name) &&
                 as_member_of(f.granting))
                 return true;
+    /* [class.access]/6: so do the types of a friend function's declaration
+       outside the class */
+    if (friend_function_head.name && !function_state.active)
+        for (const friend_record &f : friends) {
+            if (!f.befriended)
+                continue;
+            const entity &function = entity_table[f.befriended];
+            if (function.kind == entity_kind::function &&
+                function.name == friend_function_head.name &&
+                function.enclosing == friend_function_head.scope &&
+                as_member_of(f.granting))
+                return true;
+        }
     /* (a default argument is checked in its function's declaration:
        [class.access]/8, a friend function's has the friend's access) */
     entity_index starts[5] = {0, defining_class, 0, access_class,

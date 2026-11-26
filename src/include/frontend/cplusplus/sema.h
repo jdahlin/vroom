@@ -5224,6 +5224,12 @@ class semantic_analysis
         uint32_t name = 0;
     };
     class_head_context friend_head;
+    /* [class.access]/6: the name an unqualified function declarator at
+       namespace scope declares, while its declaration is analysed: a friend
+       function of that name may be named by its return and parameter
+       types */
+    class_head_context friend_function_head;
+    class_head_context declarator_function_name(SyntaxRef declaration);
     bool friend_names_class(const friend_record &f, entity_index scope,
                             uint32_t name) const;
     entity_index declarator_access_class(SyntaxRef declaration) const;
