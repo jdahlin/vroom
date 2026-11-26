@@ -221,8 +221,9 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
             fof[i] = UINT32_MAX - nms++; /* (a memset: its index in ms) */
             continue;
         }
-        if (q->insn.flags & VIR_INSN_FLAG_VOL) {
-            bad[s] = 1;
+        if ((q->insn.flags & VIR_INSN_FLAG_VOL) ||
+            virbuild_access_bytes(V, &q->insn) == 16) {
+            bad[s] = 1; /* (a vector is not split into fields) */
             continue;
         }
         rel = virbuild_promote_relative_offset(&V->insns[a]);

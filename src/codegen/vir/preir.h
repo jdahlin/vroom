@@ -257,6 +257,19 @@ static inline uint32_t virbuild_value_resolve(virbuild_context *V, uint32_t v)
     return r;
 }
 
+/* the bytes a load or store touches: its width, but all of a vector (whose
+   width field is the lane's, SPEC-vir 7.5.1) */
+static inline uint32_t virbuild_access_bytes(const virbuild_context *V,
+                                             const vir_insn *in)
+{
+    uint32_t type = in->type;
+    if (in->op == VIR_OP_STORE)
+        type = V->insns[in->b].insn.type;
+    if (vir_type_is_vector(type))
+        return 16;
+    return 1u << VIR_INSN_FLAG_WIDTH_LOG2(in->flags);
+}
+
 /* what the files share (each defined in the file named) */
 /* preir.c */
 VPRIV void *virbuild_pass_scratch_get(codegen_context *e, uint64_t bytes);
@@ -332,6 +345,9 @@ VPRIV uint32_t virbuild_slot_find(codegen_context *e, int64_t off,
 VPRIV uint32_t virbuild_slot_address(codegen_context *e, uint32_t s,
                                      int64_t rel);
 VPRIV void virbuild_store_table_clear(codegen_context *e, bool exposed_only);
+VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op, uint32_t vt,
+                                  int lane, int ra, int rb,
+                                  const codegen_lvalue *d);
 VPRIV uint32_t virbuild_integer_log2(uint64_t x);
 VPRIV uint32_t virbuild_memory_flags_make(int size, uint32_t align, bool sgn);
 

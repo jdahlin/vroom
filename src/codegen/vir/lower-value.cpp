@@ -709,18 +709,78 @@ VPRIV codegen_value virbuild_bigcmp(codegen_context *e, int op,
     (void)op, (void)t, (void)a, (void)b;
     virbuild_fail(e, VIRBUILD_FAILURE(bit_precise_integer));
 }
-/* VIR has no vectors from source yet: a function whose vector operation the
-   x86-64 direct emitter does with SSE2 goes to it */
+/* the VIR operation and vector type of a lane-wise binary operator on two
+   vectors of type vt, where VIR has both (4 lanes of int or float, 2 of long
+   long or double) */
+static bool virbuild_vector_op(codegen_context *e, int op,
+                               ast_qualified_type vt, uint32_t *vir_op,
+                               uint32_t *type, int *lane)
+{
+    cc *c = e->compile_context;
+    ast_qualified_type element = T(c, vt)->base;
+    bool real = codegen_type_is_float(c, element);
+    *lane = (int)codegen_type_size(c, element);
+    if (*lane != 4 && *lane != 8)
+        return false;
+    if (real && *lane == 4)
+        *type = VIR_TYPE_F32X4;
+    else if (real)
+        *type = VIR_TYPE_F64X2;
+    else if (*lane == 4)
+        *type = VIR_TYPE_I32X4;
+    else
+        *type = VIR_TYPE_I64X2;
+    switch (op) {
+    case LEX_TOKEN_PLUS:
+        *vir_op = VIR_OP_ADD;
+        if (real)
+            *vir_op = VIR_OP_FADD;
+        return true;
+    case LEX_TOKEN_MINUS:
+        *vir_op = VIR_OP_SUB;
+        if (real)
+            *vir_op = VIR_OP_FSUB;
+        return true;
+    case LEX_TOKEN_STAR:
+        *vir_op = VIR_OP_MUL;
+        if (real)
+            *vir_op = VIR_OP_FMUL;
+        return real || *lane == 4; /* (no 64-bit lane multiply) */
+    case LEX_TOKEN_SLASH:
+        *vir_op = VIR_OP_FDIV;
+        return real;
+    case LEX_TOKEN_AMPERSAND:
+        *vir_op = VIR_OP_AND;
+        return !real;
+    case LEX_TOKEN_PIPE:
+        *vir_op = VIR_OP_OR;
+        return !real;
+    case LEX_TOKEN_CARET:
+        *vir_op = VIR_OP_XOR;
+        return !real;
+    default:
+        return false;
+    }
+}
+
+/* x86-64: the operations above in VIR; a function with another one the
+   direct emitter does with SSE2 goes to it */
 VPRIV bool virbuild_vector_operation(codegen_context *e, int op,
                                      ast_qualified_type vt, bool a_vector,
                                      bool b_vector, int ra, int rb,
                                      const codegen_lvalue *d, bool unary)
 {
-    (void)ra, (void)rb, (void)d;
-    if (CODEGEN_IS_X64(e->compile_context) &&
-        x64_vector_operation_exists(e, op, vt, a_vector, b_vector, unary))
-        virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
-    return false;
+    if (!CODEGEN_IS_X64(e->compile_context) ||
+        !x64_vector_operation_exists(e, op, vt, a_vector, b_vector, unary))
+        return false;
+    uint32_t vir_op = 0, type = 0;
+    int lane = 0;
+    if (!unary && a_vector && b_vector &&
+        virbuild_vector_op(e, op, vt, &vir_op, &type, &lane)) {
+        virbuild_vector_binary(e, vir_op, type, lane, ra, rb, d);
+        return true;
+    }
+    virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
 }
 VPRIV bool virbuild_vector_shuffle(codegen_context *e, const int *bytes, int ra,
                                    int rb, const codegen_lvalue *d)

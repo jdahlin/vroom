@@ -88,6 +88,14 @@ deleted in the commit that gives it a table row or a generic operation.
   locals, parameters, results, loads and stores of any alignment.  Gate: the
   vector tests at -O2 and -O3 stay in VIR (`bench/vir-failures.py`); arm64
   output unchanged (`bench/vcc-same.py`).
+  - XV1a (done): VIR builds `+ - * / & | ^` of two vectors of 4 lanes of
+    `int` or `float` or 2 of `long long` or `double` as vector load,
+    operation and store, so such a function stays in VIR (-O2, -O3).  The
+    vectors still live in memory (copies are two 8-byte moves), so no speed
+    claim.  Passes that sized an access by its width field now take all 16
+    bytes of a vector one (`virbuild_access_bytes`).
+  - XV1b: values: copies, locals and block parameters of vector type, so the
+    memory traffic goes; then `i8x16`, `i16x8`, parameters and results.
 - **XV2** The `x86op` operation, the table and its generator, for the SSE2
   to SSE4.1 builtins Stockfish uses, in VIR and the direct emitter.  Gate:
   Stockfish SSE2 stays in VIR and is faster than XV0's.
