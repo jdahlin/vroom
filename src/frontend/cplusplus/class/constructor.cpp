@@ -1292,7 +1292,7 @@ analysis_result semantic_analysis::construct(
     SyntaxRef at, qualified_type type,
     owned_array<expression_meaning> &arguments, uint32_t object,
     initialized_value &result, bool copy,
-    const owned_array<SyntaxElement> *written_arguments)
+    const owned_array<SyntaxElement> *written_arguments, bool nested_list)
 {
     entity_index c = type_table[type.unqualified()].entity;
     /* (a copy: instantiating a constructor template can move the table) */
@@ -1405,9 +1405,14 @@ analysis_result semantic_analysis::construct(
        ... that is a candidate by [over.match.copy]", copy-initialization of
        a class by a user-defined conversion, "user-defined conversion
        sequences are not considered" */
+    /* (/4's last case: the second phase of [over.match.list] with one
+       element that is itself an initializer list) */
+    entity_index list_class = 0;
+    if (nested_list)
+        list_class = c;
     VTRY(resolved,
          best_viable_function(at, candidates, nullptr, arguments, best, nullptr,
-                              !copy, written_arguments));
+                              !copy, written_arguments, list_class));
     entity_index chosen = candidates[best].function;
     if (uint32_t g = candidates[best].template_index) {
         /* the chosen specialization's definition ([temp.inst]/4) */

@@ -2052,7 +2052,10 @@ analysis_result semantic_analysis::constructor_list_initialization(
     owned_array<expression_meaning> before;
     for (const expression_meaning &e : arguments)
         before.append(e);
-    VTRY(r, construct(list, type, arguments, 0, result, false, &clauses));
+    bool nested_list =
+        clauses.size() == 1 && clauses[0].is(syntax_kind::braced_init_list);
+    VTRY(r, construct(list, type, arguments, 0, result, false, &clauses,
+                      nested_list));
     if (semantics[result.node].kind != semantic_kind::construct) {
         if (arguments.size() == 1 &&
             !clauses[0].is(syntax_kind::braced_init_list) &&

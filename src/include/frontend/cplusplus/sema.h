@@ -5174,7 +5174,8 @@ class semantic_analysis
     construct(SyntaxRef at, qualified_type type,
               owned_array<expression_meaning> &arguments, uint32_t object,
               initialized_value &result, bool copy = false,
-              const owned_array<SyntaxElement> *written_arguments = nullptr);
+              const owned_array<SyntaxElement> *written_arguments = nullptr,
+              bool nested_list = false);
     /* [expr.type.conv]: C(expression-list) or C{} of the class c */
     analysis_result class_conversion(SyntaxRef n, entity_index c,
                                      expression_meaning &m);
@@ -7190,7 +7191,11 @@ class semantic_analysis
         const expression_meaning *object,
         const owned_array<expression_meaning> &arguments, size_t &chosen,
         bool *none_viable = nullptr, bool user_defined = true,
-        const owned_array<SyntaxElement> *written_arguments = nullptr);
+        const owned_array<SyntaxElement> *written_arguments = nullptr,
+        entity_index list_class = 0);
+    /* whether the braced-init-list list converts to the class x with no
+       user-defined conversion ([over.ics.list]) */
+    bool list_is_identity(SyntaxElement list, entity_index x);
     /* the functions of the overload set whose first is e
        (entity::next_overload), each once, added to out */
     void overload_set(entity_index e, owned_array<entity_index> &out) const;

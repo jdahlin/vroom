@@ -106,6 +106,35 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
 }
 
 /*
+ * [over.ics.list]/2: "If the parameter type is a class X and the
+ * initializer list has a single element of type cv U, where U is X or a
+ * class derived from X, the implicit conversion sequence is the one
+ * required to initialize the parameter from that element"; every other
+ * list converts to X by a user-defined conversion sequence
+ */
+bool semantic_analysis::list_is_identity(SyntaxElement list, entity_index x)
+{
+    owned_array<SyntaxElement> clauses;
+    if (list_clauses(list, clauses) != analysis_result::well_formed ||
+        clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list) ||
+        clauses[0].is(syntax_kind::designated_initializer_clause))
+        return false;
+    substitution_mark mark = mark_substitution();
+    expression_meaning e;
+    substituting++;
+    analysis_result r = expression(clauses[0], e);
+    substituting--;
+    undo_substitution(mark);
+    if (r != analysis_result::well_formed || !e.node)
+        return false;
+    const struct type &t = type_table[e.type.unqualified()];
+    if (t.kind != type_kind::class_type)
+        return false;
+    bool ambiguous = false;
+    return t.entity == x || base_step(t.entity, x, ambiguous);
+}
+
+/*
  * [over.ics.list]/6: "if the parameter type is 'array of N X' or 'array of
  * unknown bound of X', if there exists an implicit conversion sequence
  * from each element of the initializer list (and from {} in the former
@@ -220,7 +249,8 @@ analysis_result semantic_analysis::best_viable_function(
     const expression_meaning *object,
     const owned_array<expression_meaning> &arguments, size_t &chosen,
     bool *none_viable, bool user_defined,
-    const owned_array<SyntaxElement> *written_arguments)
+    const owned_array<SyntaxElement> *written_arguments,
+    entity_index list_class)
 {
     size_t n = arguments.size();
     /* each candidate's conversion sequences: the implicit object
@@ -302,8 +332,19 @@ analysis_result semantic_analysis::best_viable_function(
                          (referred.cv() & cv_const)))
                         list_target = qualified_type::make(
                             tr.operand.unqualified(), cv_none);
-                    if (type_table[list_target.unqualified()].kind ==
-                        type_kind::class_type) {
+                    if (list_class && i == first &&
+                        type_table[list_target.unqualified()].kind ==
+                            type_kind::class_type &&
+                        type_table[list_target.unqualified()].entity ==
+                            list_class &&
+                        !list_is_identity((*written_arguments)[k],
+                                          list_class)) {
+                        /* [over.best.ics]/4: "user-defined conversion
+                           sequences are not considered" for this
+                           parameter, of a copy or move constructor */
+                        a.kind = sequence::form::bad;
+                    } else if (type_table[list_target.unqualified()].kind ==
+                               type_kind::class_type) {
                         /* [over.ics.list]: probe class list initialization.
                            The selected parameter is copy-list-initialized
                            in call_with or construct. */
