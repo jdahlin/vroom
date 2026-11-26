@@ -1075,9 +1075,13 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
        type-id's 'new class P;' is no declaration */
     bool alone = !facts.type_specifier_seq && facts.count == 0 &&
                  at(preprocessing_op_or_punc::SEMICOLON);
+    /* (a template-declaration's keeps the enclosing one's: refused where
+       used, until templates are checked well enough to take it) */
+    bool hides = alone && names.declaring_scope() == names.current() &&
+                 !names.declares_here(name);
     if (!qualifier && !template_id && !facts.friend_ &&
         ((found != name_kind::type_name && found != name_kind::template_name) ||
-         (alone && !names.declares_here(name)))) {
+         hides)) {
         /* the class's region, empty until a class-specifier defines it
            (names.define_class): a typedef-name of the class made before
            the definition finds its members */

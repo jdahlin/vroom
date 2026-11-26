@@ -79,6 +79,14 @@ node_index parser::base_specifier(scope_index derived)
     if (failed())
         return 0;
     bool concrete = names.dependent_found == before;
+    /* [class.derived]/2, [class.mem]/6: the class's own name, in a template
+       definition too (a simple-template-id may name another
+       specialization, so only a name alone) */
+    if (base && base == derived && position == name_first + 1 &&
+        names.within_template())
+        return violates("a class-name in a base-specifier shall not denote "
+                        "the incompletely defined class it belongs to",
+                        "class.derived", name_first);
     if (base)
         names.add_base(derived, base, concrete);
     if (!base && !concrete)
