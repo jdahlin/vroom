@@ -1427,10 +1427,13 @@ analysis_result semantic_analysis::template_id_arguments(
        the default, "in instantiation of default argument" the use; neither
        declaration is judged */
     analysis_result r = default_template_arguments(id, ct, arguments, set);
-    if (r == analysis_result::ill_formed)
+    if (r == analysis_result::ill_formed) {
+        if (substituting)
+            return r;
         return not_supported_because(
             id, "temp.arg",
             "a default template argument that is ill-formed here");
+    }
     return r;
 }
 
