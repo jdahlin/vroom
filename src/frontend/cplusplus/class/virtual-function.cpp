@@ -14,7 +14,7 @@
  * virtual destructors in the primary virtual table only (two slots, the
  * complete object and the deleting destructor, [abi:vtable-components]),
  * not pure ones; no virtual operator functions, no virtual functions in
- * unions or local classes.
+ * unions.
  */
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
@@ -153,18 +153,17 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
          (entity_table[e].implemented == preprocessing_op_or_punc::EQUAL ||
           entity_table[e].implemented ==
               preprocessing_op_or_punc::EQUAL_EQUAL)) ||
-        entity_table[c].union_ || local_class_rule(c))
+        entity_table[c].union_)
         /* a virtual assignment operator, which a derived class's implicit
            copy assignment overrides ([class.copy.assign]), a virtual
            operator==, which a defaulted operator<=> declares again
-           ([class.compare.default]/4), [class.union]/2's "A union shall not have virtual functions",
-           a local class's virtual table: not analysed (a constexpr
-           virtual function is an inline one, [dcl.constexpr]/1) */
+           ([class.compare.default]/4), [class.union]/2's "A union shall
+           not have virtual functions": not analysed (a constexpr virtual
+           function is an inline one, [dcl.constexpr]/1) */
         return not_supported_because(
             declaration, "class.virtual",
             "a virtual assignment operator, operator== or three-way "
-            "comparison, or a virtual function of a union or of some local "
-            "classes");
+            "comparison, or a virtual function of a union");
     if (!entity_table[e].nonstatic_member) {
         /* [class.static.mfct]/2: "A static member function shall not be
            virtual" */
@@ -178,6 +177,12 @@ analysis_result semantic_analysis::virtual_member(entity_index c,
             "a function without an object parameter that would be virtual "
             "without the virtual specifier");
     }
+    /* [expr.const]/5: a constexpr virtual function of a local class, whose
+       calls and destructions constant evaluation does not diagnose yet */
+    if (local_class_rule(c) && entity_table[e].constexpr_)
+        return not_supported_because(
+            declaration, "class.virtual",
+            "a constexpr virtual function of a local class");
     if (overridden) {
         const entity &g = entity_table[overridden];
         /* [class.virtual]/8: "The return type of an overriding function
@@ -645,9 +650,12 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                                          "delete is deleted or not public");
     }
     /* the key function is among all the class's virtual functions,
-       overriders too, in declaration order */
+       overriders too, in declaration order.  A local class has none: its
+       members are defined in it or nowhere ([class.local]), and its
+       virtual table and type information are this translation unit's */
+    bool local = local_class_rule(c) != nullptr;
     for (const declared_virtual &v : declared_virtuals)
-        if (v.c == c && !d.key_function && !entity_table[v.f].pure &&
+        if (v.c == c && !local && !d.key_function && !entity_table[v.f].pure &&
             !entity_table[v.f].inline_)
             d.key_function = v.f;
     for (uint32_t k = d.first_slot; k < vtable_slots.size(); k++)

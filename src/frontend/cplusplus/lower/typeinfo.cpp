@@ -56,12 +56,16 @@ uint32_t vmi_flags(const semantic_analysis &analysis, entity_index base,
 } // namespace
 
 /* a class without linkage or with internal linkage, or an instantiation
-   of a template with such an argument: its symbols are local */
+   of a template with such an argument: its symbols are local.  [impl.clang]
+   not a local class that other translation units name too
+   (visible_local_class: of an inline or templated function), whose virtual
+   table and type information link as one */
 bool c_lowering::class_internal(entity_index k) const
 {
     const entity &x = analysis.entity_table[k];
     return x.linkage_of_name == linkage::internal ||
-           x.linkage_of_name == linkage::none ||
+           (x.linkage_of_name == linkage::none &&
+            !visible_local_class(analysis.entity_table, k)) ||
            (x.instantiation &&
             analysis.type_without_external_linkage(x.type, true, true));
 }

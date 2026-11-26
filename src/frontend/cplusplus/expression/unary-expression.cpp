@@ -1141,15 +1141,34 @@ analysis_result semantic_analysis::noexcept_operator(SyntaxRef n,
     if (r != analysis_result::well_formed)
         return r;
     bool throwing = false;
-    VTRY_SET(r, potentially_throwing(n, e.node, throwing));
+    VTRY_SET(r, potentially_throwing(n, e.node, throwing, true));
     m = integer_constant(fundamental_type::bool_, !throwing, n.first_token());
     return analysis_result::well_formed;
 }
 
+/* [class.temporary]/4, [except.spec]/6.2: whether the node x is a prvalue
+   of a class (or an array of one) whose temporary's destruction, at the end
+   of the full-expression, can throw */
+bool semantic_analysis::temporary_destructor_throws(uint32_t x)
+{
+    const semantic_node &s = semantics[x];
+    if (s.category != value_category::prvalue)
+        return false;
+    qualified_type object;
+    if (!element_destructor(s.type, object))
+        return false;
+    bool throws = false;
+    class_destructible(type_table[object.unqualified()].entity, throws);
+    return throws;
+}
+
 /* [except.spec]/6 of the semantic node x (0: none) */
 analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
-                                                        bool &throwing)
+                                                        bool &throwing,
+                                                        bool full_expression)
 {
+    /* a new-expression's initialization is of no temporary */
+    uint32_t allocated_object = 0;
     owned_array<uint32_t> work;
     if (x)
         work.append(x);
@@ -1161,11 +1180,34 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
         if (!k)
             continue;
         const semantic_node s = semantics[k];
+        if (full_expression && k != allocated_object &&
+            temporary_destructor_throws(k)) {
+            throwing = true;
+            break;
+        }
         switch (s.kind) {
         case semantic_kind::constant:
         case semantic_kind::string_literal:
         case semantic_kind::entity:
         case semantic_kind::zero:
+        case semantic_kind::allocated:
+            break;
+        case semantic_kind::throw_exception:
+            /* /6.3 */
+            throwing = true;
+            break;
+        case semantic_kind::new_object:
+            /* /6.2: the allocation function (a, a call) and the object's
+               initialization (b), an immediate subexpression.  An array of
+               a class (d) constructs each element: not here */
+            if (s.d)
+                return not_supported_because(
+                    n, "expr.unary.noexcept",
+                    "noexcept of a new-expression of an array of a class");
+            work.append(s.a);
+            if (s.b)
+                work.append(s.b);
+            allocated_object = s.b;
             break;
         case semantic_kind::conversion:
         case semantic_kind::unary:
@@ -1219,7 +1261,10 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
                     n, "expr.unary.noexcept",
                     "noexcept of a call to a nothrow function declared without "
                     "noexcept");
-            if (!f.non_throwing) {
+            bool scalar_comparison = callee.kind == semantic_kind::entity &&
+                                     callee.a &&
+                                     entity_table[callee.a].compares_scalars;
+            if (!f.non_throwing && !scalar_comparison) {
                 throwing = true;
                 break;
             }
@@ -1258,8 +1303,8 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
             break;
         }
         default:
-            /* a temporary's destruction, a new- or delete-expression, a
-               member pointer: no rule here */
+            /* a temporary's destruction, a delete-expression, a member
+               pointer: no rule here */
             return not_supported_because(
                 n, "expr.unary.noexcept",
                 "noexcept of an operand with a construct that has no rules");

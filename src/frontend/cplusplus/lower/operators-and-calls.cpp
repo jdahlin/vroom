@@ -278,6 +278,18 @@ uint32_t c_lowering::assignment(const semantic_node &n)
 {
     uint32_t a = object(n.a);
     uint32_t b = 0;
+    if (a && n.c && node(n.b).kind == semantic_kind::initializer_list &&
+        piecewise_initializer(n.b)) {
+        /* [class.base.init]/9: the member built where it is, its
+           constructed elements never copied; the value, the object */
+        ast_qualified_type t =
+            AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
+        uint32_t made = initialize_list_into(a, n.type, t, n.b);
+        if (!made)
+            return 0;
+        ast_qualified_type pointer = pointer_to(t);
+        return dereference(comma(pointer, made, address_of(a, pointer)), t);
+    }
     if (node(n.b).kind == semantic_kind::initializer_list)
         /* [dcl.init.list]/3.4: a member's braced default member
            initializer ([class.base.init]/9.1): its object, copied in */

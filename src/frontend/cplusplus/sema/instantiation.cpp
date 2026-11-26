@@ -165,10 +165,14 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
         entity_index e = 0;
         if (r == analysis_result::well_formed) {
             stage = declare_stage;
+            /* (the instantiation this one is made for, a member's
+               declarator naming this specialization in its
+               trailing-return-type, is still being made afterwards) */
+            const uint32_t outer = instantiating;
             instantiating = index + 1;
             r = declare_specialization(ft.declarator, m.id, type, s,
                                        m.exceptions, e);
-            instantiating = 0;
+            instantiating = outer;
             if (r == analysis_result::well_formed && constructor)
                 entity_table[e].explicit_ = s.explicit_;
             if (r == analysis_result::well_formed && ft.friend_class &&
@@ -196,8 +200,16 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
            uses it */
         if (r == analysis_result::well_formed && ft.default_arguments) {
             size_t unsupported_before = unsupported.size();
-            if (default_arguments(ft.declarator, e, entity_kind::function,
-                                  true) != analysis_result::well_formed) {
+            /* (nor are its diagnostics the program's: a map's
+               `= key_compare()` of a comparison without a default
+               constructor) */
+            substitution_mark default_mark = mark_substitution();
+            substituting++;
+            analysis_result checked = default_arguments(
+                ft.declarator, e, entity_kind::function, true);
+            substituting--;
+            if (checked != analysis_result::well_formed) {
+                undo_substitution(default_mark);
                 unsupported.resize(unsupported_before);
                 entity_table[e].unknown_defaults = true;
             }

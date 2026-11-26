@@ -141,7 +141,11 @@ void semantic_analysis::require_destructor_definition(qualified_type type)
 
 void semantic_analysis::mark_needed(entity_index function)
 {
-    if (needs_deferred_by && function != needs_deferred_by) {
+    if (needs_deferred_by) {
+        /* ([basic.def.odr]: a recursive function's use of itself in a
+           body nothing is known to use makes it no more used) */
+        if (function == needs_deferred_by)
+            return;
         deferred_need d;
         d.by = needs_deferred_by;
         d.needed = function;
@@ -202,8 +206,13 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
             a && entity_table[a].kind == entity_kind::function)
             function = a;
         else if (kind == semantic_kind::construct ||
-                 kind == semantic_kind::destroy ||
-                 kind == semantic_kind::bound_member_function)
+                 kind == semantic_kind::destroy)
+            function = b;
+        /* ([basic.def.odr]/4: an overload set named before overload
+           resolution is no use of its first function; the call's node
+           of the one chosen is) */
+        else if (kind == semantic_kind::bound_member_function && b &&
+                 !entity_table[b].next_overload)
             function = b;
         else if ((kind == semantic_kind::entity) && a &&
                  entity_table[a].kind == entity_kind::variable)

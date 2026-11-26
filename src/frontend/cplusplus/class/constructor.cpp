@@ -335,6 +335,42 @@ bool semantic_analysis::aggregate_value_stored(entity_index c,
     return trivial_class(c);
 }
 
+/*
+ * [class.base.init]/9, [dcl.init.aggr]/4: a member of a class that is not
+ * trivial can be initialized from a braced-init-list in place, element by
+ * element (the lowering's initialize_list_into): a class without bases or an
+ * array with an initializer for each element, whose elements of class type
+ * are constructor calls or such lists.
+ */
+bool semantic_analysis::aggregate_built_in_place(uint32_t value) const
+{
+    const semantic_node &n = semantics[value];
+    if (n.kind != semantic_kind::initializer_list)
+        return false;
+    const struct type &t = type_table[n.type.unqualified()];
+    if (t.kind == type_kind::class_type) {
+        const entity &c = entity_table[t.entity];
+        if (c.union_ || c.base_count || n.count != c.member_count)
+            return false;
+    } else if (t.kind != type_kind::array || n.count != t.bound) {
+        return false;
+    }
+    const uint32_t *items = semantics.items(n.first);
+    for (uint32_t i = 0; i < n.count; i++) {
+        const semantic_node &item = semantics[items[i]];
+        if (item.kind == semantic_kind::construct && !item.a)
+            continue;
+        const struct type &of = type_table[item.type.unqualified()];
+        if (of.kind != type_kind::class_type && of.kind != type_kind::array)
+            continue;
+        if (of.kind == type_kind::class_type && trivial_class(of.entity))
+            continue;
+        if (!aggregate_built_in_place(items[i]))
+            return false;
+    }
+    return true;
+}
+
 analysis_result semantic_analysis::anonymous_member_initializers(
     token_index at, entity_index anonymous, uint32_t &statement)
 {
@@ -471,10 +507,26 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     /* [dcl.init]/17.6.1: a prvalue of the class that is no constructor
        call (a function call's result) initializes the member itself,
        whatever the class's constructors do, as in a mem-initializer */
+    /* [dcl.init]/8.2: value-initialization by a trivial default
+       constructor zero-initializes the member itself, also one that
+       cannot be copied (std::atomic<int> a{}) */
+    if (constructed && !aggregate_value_stored(record.entity, value.node) &&
+        semantics[value.node].kind == semantic_kind::zero &&
+        semantics[value.node].type.unqualified() == type.unqualified()) {
+        entity_table[e].initializer_throws =
+            initializer_exception::cannot_throw;
+        statement = subobject_store(object, type, at, value.node, true);
+        return analysis_result::well_formed;
+    }
     if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         semantics[value.node].kind == semantic_kind::call &&
         semantics[value.node].category == value_category::prvalue &&
         semantics[value.node].type.unqualified() == type.unqualified()) {
+        statement = subobject_store(object, type, at, value.node, true);
+        return analysis_result::well_formed;
+    }
+    if (constructed && !aggregate_value_stored(record.entity, value.node) &&
+        aggregate_built_in_place(value.node)) {
         statement = subobject_store(object, type, at, value.node, true);
         return analysis_result::well_formed;
     }
@@ -1187,6 +1239,15 @@ semantic_analysis::trivial_constructor_candidate(qualified_type parameter)
     return one;
 }
 
+/* [dcl.init]/16: a braced-init-list written as an argument in parentheses */
+bool semantic_analysis::parenthesized_argument(SyntaxElement list) const
+{
+    token_index before = list.first_token() - 1;
+    return tokens[before].kind == token_kind::operator_or_punctuator &&
+           preprocessing_op_or_punc_primary(tokens[before].op_or_punc) ==
+               preprocessing_op_or_punc::LEFT_PARENTHESIS;
+}
+
 /*
  * Whether the deleted implicit copy constructor of class c can take part
  * in a construction from these arguments ([over.match.ctor]/1): its one
@@ -1231,7 +1292,7 @@ analysis_result semantic_analysis::construct(
     SyntaxRef at, qualified_type type,
     owned_array<expression_meaning> &arguments, uint32_t object,
     initialized_value &result, bool copy,
-    const owned_array<SyntaxElement> *written_arguments)
+    const owned_array<SyntaxElement> *written_arguments, bool nested_list)
 {
     entity_index c = type_table[type.unqualified()].entity;
     /* (a copy: instantiating a constructor template can move the table) */
@@ -1344,9 +1405,14 @@ analysis_result semantic_analysis::construct(
        ... that is a candidate by [over.match.copy]", copy-initialization of
        a class by a user-defined conversion, "user-defined conversion
        sequences are not considered" */
+    /* (/4's last case: the second phase of [over.match.list] with one
+       element that is itself an initializer list) */
+    entity_index list_class = 0;
+    if (nested_list)
+        list_class = c;
     VTRY(resolved,
          best_viable_function(at, candidates, nullptr, arguments, best, nullptr,
-                              !copy, written_arguments));
+                              !copy, written_arguments, list_class));
     entity_index chosen = candidates[best].function;
     if (uint32_t g = candidates[best].template_index) {
         /* the chosen specialization's definition ([temp.inst]/4) */
@@ -1367,6 +1433,20 @@ analysis_result semantic_analysis::construct(
                 at, "class.copy.ctor",
                 "a copy or move with no chosen constructor of a class that "
                 "does not copy its bytes");
+        if (written_arguments && !written_arguments->empty() &&
+            (*written_arguments)[0].is(syntax_kind::braced_init_list) &&
+            /* (not T{{a}}, where [over.best.ics]/4 allows the parameter no
+               user-defined conversion: not told apart here) */
+            parenthesized_argument((*written_arguments)[0])) {
+            /* [over.ics.list]/7, [dcl.init.list]/3: T x({a, b}): the
+               parameter is copy-list-initialized from the list, and the
+               trivial constructor's copy of that temporary is elided into
+               the object */
+            qualified_type temporary =
+                qualified_type::make(type.unqualified(), cv_none);
+            return list_initialization((*written_arguments)[0], temporary,
+                                       false, result);
+        }
         bool ambiguous = false;
         entity_index from = type_table[arguments[0].type.unqualified()].entity;
         if (from != c) {
@@ -1814,14 +1894,17 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     }
                     /* [dcl.init.list]/3.4: store the value of an aggregate
                        member. A base's tail padding can hold derived members. */
+                    bool stored =
+                        aggregate_value_stored(record.entity, listed.node);
                     if (base ||
-                        !aggregate_value_stored(record.entity, listed.node))
+                        (!stored && !aggregate_built_in_place(listed.node)))
                         return not_supported_because(
                             item, "class.base.init",
                             "a braced initializer whose value cannot be stored "
                             "in the base or member");
                     set_slot(slot, id,
-                             subobject_store(object, type, id, listed.node));
+                             subobject_store(object, type, id, listed.node,
+                                             !stored));
                     continue;
                 } else if (!written)
                     return not_supported_because(
@@ -2507,8 +2590,12 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
                aggregate initialization of c may not (not analysed for an
                aggregate c; any other class initializes k in its own
                members' context) */
+            /* [class.default.ctor]/1: "A default constructor for a class X
+               is a constructor of class X for which each parameter that is
+               not a function parameter pack has a default argument" */
             bool is_default =
-                !type_table[entity_table[q].type.unqualified()].parameter_count;
+                type_table[entity_table[q].type.unqualified()]
+                    .parameter_count == entity_table[q].default_arguments;
             if (entity_table[q].access && grants(k, c) && !is_default &&
                 is_aggregate(c))
                 return not_supported_because(
@@ -2546,7 +2633,7 @@ analysis_result semantic_analysis::implicit_special_members(entity_index c,
             }
             if (!usable)
                 continue;
-            if (!type_table[entity_table[q].type.unqualified()].parameter_count)
+            if (is_default)
                 default_ok = true;
             /* [class.copy.ctor]/10.1: a move constructor does not copy */
             if (copy_or_move_constructor(k, q) && !is_move)
@@ -3720,6 +3807,21 @@ analysis_result semantic_analysis::special_member_definition(SyntaxRef n,
         last_declared = e;
         analysis_result br =
             analyse_function_body(n, body.compound_statement());
+        last_declared = e;
+        return br;
+    }
+    if (!conversion && instantiating && !m.destructor &&
+        tokens.identifier(m.id) == entity_table[c].name) {
+        /* [temp.expl.spec]/1: the definition of an explicit
+           specialization of a constructor template, which declares the
+           specialization (named_specialization made it) */
+        specified s;
+        s.constexpr_ = constexpr_specified;
+        s.inline_ = inline_specified;
+        entity_index e = 0;
+        VTRY_SET(r, declare_specialization(n, m.id, type, s, m.exceptions, e));
+        last_declared = e;
+        analysis_result br = special_member_body(n, body);
         last_declared = e;
         return br;
     }

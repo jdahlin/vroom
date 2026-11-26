@@ -106,6 +106,76 @@ bool semantic_analysis::list_sequence_possible(SyntaxRef list,
 }
 
 /*
+ * [over.ics.list]/2: "If the parameter type is a class X and the
+ * initializer list has a single element of type cv U, where U is X or a
+ * class derived from X, the implicit conversion sequence is the one
+ * required to initialize the parameter from that element"; every other
+ * list converts to X by a user-defined conversion sequence
+ */
+bool semantic_analysis::list_is_identity(SyntaxElement list, entity_index x)
+{
+    owned_array<SyntaxElement> clauses;
+    if (list_clauses(list, clauses) != analysis_result::well_formed ||
+        clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list) ||
+        clauses[0].is(syntax_kind::designated_initializer_clause))
+        return false;
+    substitution_mark mark = mark_substitution();
+    expression_meaning e;
+    substituting++;
+    analysis_result r = expression(clauses[0], e);
+    substituting--;
+    undo_substitution(mark);
+    if (r != analysis_result::well_formed || !e.node)
+        return false;
+    const struct type &t = type_table[e.type.unqualified()];
+    if (t.kind != type_kind::class_type)
+        return false;
+    bool ambiguous = false;
+    return t.entity == x || base_step(t.entity, x, ambiguous);
+}
+
+/*
+ * [over.ics.list]/10: "if the parameter type is not a class: if the
+ * initializer list has one element that is not itself an initializer
+ * list, the implicit conversion sequence is the one required to convert
+ * the element to the parameter type ... if the initializer list has no
+ * elements, the implicit conversion sequence is the identity conversion";
+ * unknown for a reference, and bad else
+ */
+semantic_analysis::conversion_sequence
+semantic_analysis::list_scalar_sequence(SyntaxElement list, qualified_type to)
+{
+    conversion_sequence s;
+    type_kind kind = type_table[to.unqualified()].kind;
+    owned_array<SyntaxElement> clauses;
+    s.kind = conversion_sequence::form::unknown;
+    if (kind == type_kind::lvalue_reference ||
+        kind == type_kind::rvalue_reference ||
+        list_clauses(list, clauses) != analysis_result::well_formed)
+        return s;
+    if (clauses.empty()) {
+        s.kind = conversion_sequence::form::standard;
+        s.from_list = true;
+        return s;
+    }
+    if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list) ||
+        clauses[0].is(syntax_kind::designated_initializer_clause)) {
+        s.kind = conversion_sequence::form::bad;
+        return s;
+    }
+    substitution_mark mark = mark_substitution();
+    expression_meaning e;
+    substituting++;
+    analysis_result r = expression(clauses[0], e);
+    if (r == analysis_result::well_formed && e.node)
+        s = implicit_conversion_sequence(e, to, false);
+    substituting--;
+    undo_substitution(mark);
+    s.from_list = true;
+    return s;
+}
+
+/*
  * [over.ics.list]/6: "if the parameter type is 'array of N X' or 'array of
  * unknown bound of X', if there exists an implicit conversion sequence
  * from each element of the initializer list (and from {} in the former
@@ -220,7 +290,8 @@ analysis_result semantic_analysis::best_viable_function(
     const expression_meaning *object,
     const owned_array<expression_meaning> &arguments, size_t &chosen,
     bool *none_viable, bool user_defined,
-    const owned_array<SyntaxElement> *written_arguments)
+    const owned_array<SyntaxElement> *written_arguments,
+    entity_index list_class)
 {
     size_t n = arguments.size();
     /* each candidate's conversion sequences: the implicit object
@@ -240,11 +311,13 @@ analysis_result semantic_analysis::best_viable_function(
         size_t defaults = 0;
         if (c.function)
             defaults = entity_table[c.function].default_arguments;
-        if (c.function && entity_table[c.function].unknown_defaults &&
-            n < count + first)
-            return not_supported_because(
-                at, "dcl.fct.default",
-                "a call relying on default arguments that are not known");
+        /* default arguments that are not known: the candidate is taken to
+           have them until an argument given rules it out */
+        bool assumed = c.function &&
+                       entity_table[c.function].unknown_defaults &&
+                       n < count + first;
+        if (assumed)
+            defaults = count;
         viability v = viability::viable;
         /* [over.match.viable]/2: "If there are m arguments in the list, all
            candidate functions having exactly m parameters are viable.  A
@@ -300,8 +373,19 @@ analysis_result semantic_analysis::best_viable_function(
                          (referred.cv() & cv_const)))
                         list_target = qualified_type::make(
                             tr.operand.unqualified(), cv_none);
-                    if (type_table[list_target.unqualified()].kind ==
-                        type_kind::class_type) {
+                    if (list_class && i == first &&
+                        type_table[list_target.unqualified()].kind ==
+                            type_kind::class_type &&
+                        type_table[list_target.unqualified()].entity ==
+                            list_class &&
+                        !list_is_identity((*written_arguments)[k],
+                                          list_class)) {
+                        /* [over.best.ics]/4: "user-defined conversion
+                           sequences are not considered" for this
+                           parameter, of a copy or move constructor */
+                        a.kind = sequence::form::bad;
+                    } else if (type_table[list_target.unqualified()].kind ==
+                               type_kind::class_type) {
                         /* [over.ics.list]: probe class list initialization.
                            The selected parameter is copy-list-initialized
                            in call_with or construct. */
@@ -344,6 +428,11 @@ analysis_result semantic_analysis::best_viable_function(
                     } else if (argument.node) {
                         a = implicit_conversion_sequence(argument, target,
                                                          user_defined);
+                    } else if (list_class) {
+                        /* (T{{0}} to T(int): the constructor that is left
+                           when T's copy constructors take no list) */
+                        a = list_scalar_sequence((*written_arguments)[k],
+                                                 target);
                     }
                 } else if (argument.overload_name) {
                     a = overload_set_sequence(argument, target);
@@ -367,6 +456,10 @@ analysis_result semantic_analysis::best_viable_function(
             else if (a.kind == sequence::form::unknown)
                 v = viability::unknown;
         }
+        if (assumed && v != viability::not_viable)
+            return not_supported_because(
+                at, "dcl.fct.default",
+                "a call relying on default arguments that are not known");
         state.append(v);
     }
     /* an unknown sequence at its best */
@@ -677,12 +770,14 @@ analysis_result semantic_analysis::best_viable_function(
             "a best function that depends on an unknown partial ordering");
     /* [over.best.ics]/10: "If a function that uses the ambiguous conversion
        sequence is selected as the best viable function, the call will be
-       ill-formed" (clang's diagnostic names the conversions: not analysed) */
+       ill-formed" */
     for (size_t i = 0; i < width; i++)
         if (ics[w * width + i].ambiguous)
-            return not_supported_because(
-                at, "over.best.ics",
-                "a best function that uses an ambiguous conversion sequence");
+            return ill_formed(at,
+                              "a function that uses an ambiguous conversion "
+                              "sequence is selected as the best viable "
+                              "function, and the call is ill-formed",
+                              "over.best.ics");
     chosen = w;
     return analysis_result::well_formed;
 }

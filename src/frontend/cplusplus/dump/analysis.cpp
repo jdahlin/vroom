@@ -505,7 +505,7 @@ static void dump_lookup_claims(const semantic_analysis &analysis,
  */
 static bool layout_class_name(const semantic_analysis &analysis,
                               token_stream &tokens, entity_index c, bool nested,
-                              vbuffer *out)
+                              bool base, vbuffer *out)
 {
     const entity &x = analysis.entity_table[c];
     /* a class template's specialization: clang writes its arguments
@@ -520,9 +520,10 @@ static bool layout_class_name(const semantic_analysis &analysis,
             if (nested)
                 return false;
         } else if (s.kind == entity_kind::namespace_entity) {
-            if (!layout_class_name(analysis, tokens, scope, true, out))
+            if (!layout_class_name(analysis, tokens, scope, true, false, out))
                 return false;
-        } else if (!layout_class_name(analysis, tokens, scope, true, out)) {
+        } else if (!layout_class_name(analysis, tokens, scope, true, false,
+                                      out)) {
             return false;
         }
     }
@@ -534,10 +535,15 @@ static bool layout_class_name(const semantic_analysis &analysis,
             return true;
         }
     }
-    if (x.name) {
+    /* a class a typedef names for linkage purposes: clang writes that
+       name for it as a base and as a scope, not as the record's own */
+    uint32_t spelled_name = x.name;
+    if (!spelled_name && (nested || base) && x.kind == entity_kind::class_type)
+        spelled_name = x.linkage_name;
+    if (spelled_name) {
         size_t length = 0;
         const char *spelled =
-            tokens.pp.identifier_spelling(x.name - 1, &length);
+            tokens.pp.identifier_spelling(spelled_name - 1, &length);
         vbuffer_append(out, spelled, length);
     } else if (x.kind == entity_kind::class_type && x.defined) {
         source_position at = tokens.position(x.class_key);
@@ -580,7 +586,7 @@ static void dump_layout_claims(const semantic_analysis &analysis,
             tokens[x.class_key].preprocessing.expansion)
             continue;
         name.clear();
-        if (!layout_class_name(analysis, tokens, c, false, name.get()))
+        if (!layout_class_name(analysis, tokens, c, false, false, name.get()))
             continue;
         source_position at = tokens.position(x.class_key);
         lines.clear();
@@ -605,7 +611,7 @@ static void dump_layout_claims(const semantic_analysis &analysis,
             if (!layout_class_name(
                     analysis, tokens,
                     analysis.type_table[b.type.unqualified()].entity, false,
-                    name.get()))
+                    true, name.get()))
                 nameable = false;
             vbuffer_format_append(lines.get(), "base\t%llu\t",
                                   static_cast<unsigned long long>(b.offset));
@@ -645,7 +651,7 @@ static void dump_layout_claims(const semantic_analysis &analysis,
             if (!layout_class_name(
                     analysis, tokens,
                     analysis.type_table[b.type.unqualified()].entity, false,
-                    name.get()))
+                    true, name.get()))
                 nameable = false;
             vbuffer_format_append(lines.get(), "base\t%llu\t",
                                   static_cast<unsigned long long>(b.offset));

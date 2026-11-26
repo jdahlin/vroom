@@ -57,7 +57,8 @@ analysis_result semantic_analysis::compare_subobjects(
     expression_meaning y, expression_meaning &all, bool &any, bool &deleted,
     owned_array<uint32_t> *statements, qualified_type category, bool &constant)
 {
-    const struct type &t = type_table[type.unqualified()];
+    /* a copy: array_element interns types, which moves the table */
+    const struct type t = type_table[type.unqualified()];
     if (t.kind == type_kind::array) {
         if (!t.bound_known || t.variable_bound || t.bound > 64)
             return not_supported_because(
@@ -351,6 +352,37 @@ int semantic_analysis::comparison_category(qualified_type t)
     return 0;
 }
 
+/* whether the defaulted comparison being declared, of class c, invokes
+   nothing that can throw: no noexcept-specifier, no base class, members
+   that are fundamental types or pointers (or arrays of them), and a result
+   of bool, auto or a comparison category */
+bool semantic_analysis::cannot_throw_comparison(entity_index c)
+{
+    for (token_index t = current_declaration.first_token();
+         t < current_declaration.end_token(); t++)
+        if (tokens[t].kind == token_kind::keyword &&
+            syntax_parser.keyword_of(tokens[t]) == standard_keyword::noexcept_)
+            return false;
+    qualified_type returned =
+        type_table[entity_table[last_declared].type.unqualified()].operand;
+    if (!(returned == placeholder_type(false)) &&
+        fundamental_of(returned) != fundamental_type::bool_ &&
+        !comparison_category(returned))
+        return false;
+    const entity &x = entity_table[c];
+    if (x.base_count)
+        return false;
+    for (uint32_t i = 0; i < x.member_count; i++) {
+        qualified_type t = entity_table[class_members[x.first_member + i]].type;
+        while (type_table[t.unqualified()].kind == type_kind::array)
+            t = type_table[t.unqualified()].operand;
+        type_kind k = type_table[t.unqualified()].kind;
+        if (k != type_kind::fundamental && k != type_kind::pointer)
+            return false;
+    }
+    return true;
+}
+
 /*
  * [class.eq]/3: "The return value V of a defaulted == operator function
  * with parameters x and y is determined by comparing corresponding
@@ -368,6 +400,8 @@ analysis_result semantic_analysis::defaulted_equality(
     scoped_value<entity_index> clear_compared(defaulted_comparison, 0);
     const entity x = entity_table[compared];
     entity_table[last_declared].inline_ = true;
+    entity_table[last_declared].compares_scalars =
+        cannot_throw_comparison(compared);
     declared_constexpr = entity_table[last_declared].constexpr_;
     /* (provisionally: a body analysis does not complete is a function not
        known to be non-constexpr) */

@@ -398,17 +398,15 @@ analysis_result semantic_analysis::range_based_for(SyntaxRef n,
         /* [stmt.ranged]/1, [dcl.type.auto.deduct]/4: a braced-init-list
            range deduces an array of the common element type */
         owned_array<SyntaxElement> clauses;
-        for (SyntaxElement e : initializer.elements()) {
-            if (e.is(syntax_kind::initializer_list)) {
-                for (SyntaxElement item : e.elements()) {
-                    if (!item.is(preprocessing_op_or_punc::COMMA))
-                        clauses.append(item);
-                }
-            }
-        }
+        VTRY_SET(r, list_clauses(initializer.index(), clauses));
+        if (r != analysis_result::well_formed)
+            return failed(r);
+        /* [dcl.type.auto.deduct]/4: nothing is deduced from {} */
         if (clauses.empty())
-            return failed(not_supported_because(n, "stmt.ranged",
-                                                "an empty braced range"));
+            return failed(ill_formed(n,
+                                     "the element type cannot be deduced from "
+                                     "an empty braced range",
+                                     "dcl.type.auto.deduct"));
         qualified_type elem;
         for (size_t i = 0; i < clauses.size(); i++) {
             expression_meaning item;

@@ -69,7 +69,15 @@ uint32_t c_lowering::initialization(entity_index e, uint32_t init,
     if (!s)
         return 0;
     qualified_type t = analysis.entity_table[e].type;
-    return initialize_into(s, t, type(t, at), init);
+    ast_qualified_type u = type(t, at);
+    /* [dcl.init.aggr]/4: an array's elements, some not constant, are each
+       initialized in order in the zeroed object ([basic.start.static]/2):
+       an array is not assigned */
+    if (node(init).kind == semantic_kind::initializer_list &&
+        record(t).kind == type_kind::array)
+        return initialize_list_into(c_variable(c, s, u), t,
+                                    AST_QUALIFIED_TYPE_UNQUALIFIED(u), init);
+    return initialize_into(s, t, u, init);
 }
 
 /* [intro.execution]/5.3: the initialization of a static variable, a
@@ -223,11 +231,6 @@ void c_lowering::guarded_initialization(const semantic_node &n,
         analysis.entity_table[function].inline_ &&
         analysis.entity_table[function].linkage_of_name != linkage::internal;
     bool constant = !n.b || constant_initializer(n.b);
-    if (!constant && node(n.b).kind == semantic_kind::initializer_list &&
-        record(analysis.entity_table[e].type).kind == type_kind::array) {
-        fail("dynamic initialization of an array", n.at);
-        return;
-    }
     uint32_t s = symbol(e, n.at);
     if (!s)
         return;
@@ -345,10 +348,6 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
 {
     const entity &x = analysis.entity_table[e];
     const semantic_node &init = node(x.definition);
-    if (!only_destroy && init.kind == semantic_kind::initializer_list &&
-        record(x.type).kind == type_kind::array)
-        /* an array's elements, some not constant: each stored */
-        return fail("dynamic initialization of an array", init.at);
     uint32_t f = generated_function("__cxx_global_var_init");
     in_function = true;
     labels.clear();
