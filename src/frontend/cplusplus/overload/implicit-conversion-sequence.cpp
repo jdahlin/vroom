@@ -671,21 +671,27 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                        directly: the user-defined conversion sequence of
                        that function, its second conversion an identity
                        ([over.ics.ref]/2) */
-                    if (functions && !cannot_tell && !rvalue_reference &&
+                    if (functions && !cannot_tell &&
                         found.kind == sequence::form::user_defined &&
                         found.function && found.rank == 0) {
+                        expression_meaning res =
+                            conversion_function_result(found.function);
                         const struct type &fr =
-                            type_table[conversion_function_result(
-                                           found.function)
-                                           .type.unqualified()];
-                        qualified_type referent =
-                            conversion_function_result(found.function).type;
+                            type_table[res.type.unqualified()];
                         bool yields_lvalue =
-                            conversion_function_result(found.function)
-                                .category == value_category::lvalue;
-                        if (yields_lvalue && fr.kind == type_kind::class_type &&
-                            fr.entity == c1 && !(referent.cv() & ~t1.cv()))
-                            return found;
+                            res.category == value_category::lvalue;
+                        if (fr.kind == type_kind::class_type &&
+                            fr.entity == c1 && !(res.type.cv() & ~t1.cv())) {
+                            if (yields_lvalue && !rvalue_reference)
+                                return found;
+                            if (!yields_lvalue && binds_rvalues) {
+                                found.reference = true;
+                                found.rvalue_reference = rvalue_reference;
+                                found.binds_rvalue = true;
+                                found.target = t1;
+                                return found;
+                            }
+                        }
                     }
                 }
                 /* [over.match.ref]/1: a non-const lvalue reference to no

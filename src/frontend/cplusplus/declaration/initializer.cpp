@@ -1987,7 +1987,7 @@ analysis_result semantic_analysis::constructor_list_initialization(
     if (semantics[result.node].kind != semantic_kind::construct) {
         if (arguments.size() == 1 &&
             !clauses[0].is(syntax_kind::braced_init_list) &&
-            arguments[0].type.unqualified() == type.unqualified())
+            semantics[result.node].type.unqualified() == type.unqualified())
             return analysis_result::well_formed;
         return not_supported_because(list, "over.match.list",
                                      "no constructor chosen for the list");

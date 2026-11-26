@@ -1369,9 +1369,18 @@ analysis_result semantic_analysis::construct(
                 "does not copy its bytes");
         bool ambiguous = false;
         entity_index from = type_table[arguments[0].type.unqualified()].entity;
-        if (from != c && base_step(from, c, ambiguous)) {
-            /* its const X& bound to the base class subobject */
-            VTRY(r, to_base(at.first_token(), c, arguments[0]));
+        if (from != c) {
+            if (base_step(from, c, ambiguous)) {
+                /* its const X& bound to the base class subobject */
+                VTRY(r, to_base(at.first_token(), c, arguments[0]));
+            } else {
+                /* user-defined conversion to c (e.g. Src::operator Dst()) */
+                qualified_type dst =
+                    qualified_type::make(type.unqualified(), cv_none);
+                VTRY(r, initialize_with(at, arguments[0], dst, false, false,
+                                        result));
+                return analysis_result::well_formed;
+            }
         }
         result.evaluation = constness::unknown;
         result.value = 0;
