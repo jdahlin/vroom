@@ -1759,8 +1759,30 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 owned_array<SyntaxElement> listed_arguments;
                 SyntaxElement braced = written.braced_list();
                 if (!braced && written.list &&
-                    written.list.is(syntax_kind::braced_init_list))
-                    braced = written.list;
+                    written.list.is(syntax_kind::braced_init_list)) {
+                    bool use_list = is_aggregate(record.entity);
+                    if (!use_list) {
+                        /* m({a, b}) where the class has no 1-parameter
+                           non-copy/move constructor initializes via its
+                           implicit copy/move constructor from {a, b} */
+                        use_list = true;
+                        for (entity_index cf =
+                                 entity_table[record.entity].first_constructor;
+                             cf; cf = entity_table[cf].next_overload) {
+                            if (entity_table[cf].implicit)
+                                continue;
+                            uint32_t np =
+                                type_table[entity_table[cf].type.unqualified()]
+                                    .parameter_count;
+                            if (np == 1) {
+                                use_list = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (use_list)
+                        braced = written.list;
+                }
                 if (written.list && !braced)
                     r = expression_list_meanings(written.list, arguments,
                                                  &listed_arguments);
