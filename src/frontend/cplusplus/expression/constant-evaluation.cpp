@@ -3816,7 +3816,19 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
             state.member_call_object = outer_call_object;
             state.reading = outer_reading;
         }
-        if (c != constness::constant)
+        /* (an unqualified static member's call in a member function names
+           *this, whose value is not known there: nothing of it is read) */
+        uint32_t of = object_expression;
+        while (semantics[of].kind == semantic_kind::indirection ||
+               semantics[of].kind == semantic_kind::conversion)
+            of = semantics[of].a;
+        bool implicit_this =
+            of != object_expression &&
+            semantics[of].kind == semantic_kind::entity && semantics[of].a &&
+            entity_table[semantics[of].a].kind == entity_kind::variable &&
+            !entity_table[semantics[of].a].name;
+        if (c != constness::constant &&
+            !(c == constness::unknown && implicit_this))
             return c;
         callee = semantics[callee].b;
     }
