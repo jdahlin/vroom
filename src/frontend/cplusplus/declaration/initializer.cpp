@@ -1614,11 +1614,15 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
             }
         }
         if (parts.list_of_several()) {
-            if (has_pack_expansion(parts.list))
+            const struct type target = type_table[type.unqualified()];
+            /* [temp.variadic]/5: a class's constructor takes the
+               expansion's elements as arguments (expression_list_meanings);
+               other targets of one are not analysed */
+            if (target.kind != type_kind::class_type &&
+                has_pack_expansion(parts.list))
                 return not_supported_because(
                     init, "temp.variadic",
                     "a pack expansion in a parenthesized initializer");
-            const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
                 return not_supported_because(
                     init, "dcl.init",
