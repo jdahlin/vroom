@@ -926,13 +926,21 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             for (entity_index f = first_member_entity; f < entity_table.size();
                  f++) {
                 const entity &member = entity_table[f];
-                if (member.kind == entity_kind::function &&
-                    declared_by(f, body)) {
+                if (member.kind != entity_kind::function ||
+                    !declared_by(f, body))
+                    continue;
+                /* a specialization instantiated while the members were
+                   declared (A<A<T>> in A<A<A<T>>>) has its functions in
+                   the range too, declared by the same syntax: not them.
+                   A friend's function is no member of c */
+                if (member.enclosing == c) {
                     body_fn = f;
-                    if (member.enclosing == c && member.placeholder_return)
-                        placeholder = true;
+                    placeholder = member.placeholder_return;
                     break;
                 }
+                if (!body_fn && entity_table[member.enclosing].kind !=
+                                    entity_kind::class_type)
+                    body_fn = f;
             }
             if (placeholder && !incomplete_argument) {
                 instantiated_member_body(c, body);
