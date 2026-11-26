@@ -125,6 +125,10 @@ class c_lowering
     /* [basic.start.term], [abi:guards]: the run time's functions and
        __dso_handle, 0 until declared */
     uint32_t memset_function = 0;
+    /* the guard variables made, by their entity: a function body lowered
+       again (a member template's) defines its guard once */
+    owned_array<entity_index> guarded_entities;
+    owned_array<uint32_t> guards;
     uint32_t cxa_atexit = 0, cxa_thread_atexit = 0, cxa_dynamic_cast = 0,
              dso_handle = 0, guard_acquire = 0, guard_release = 0,
              noop_coro_symbol = 0;
@@ -136,6 +140,7 @@ class c_lowering
     uint32_t destructor_registration(uint32_t d, ast_qualified_type f,
                                      uint32_t object,
                                      bool thread_local_var = false);
+    ast_qualified_type writable_type(qualified_type t, token_index at);
     uint32_t initialization(entity_index e, uint32_t init, token_index at);
     void static_initialization(entity_index e, uint32_t init,
                                owned_array<uint32_t> &out, token_index at);

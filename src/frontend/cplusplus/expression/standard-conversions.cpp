@@ -430,10 +430,12 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
             else
                 f = static_cast<float>(static_cast<uint64_t>(v));
             d = f;
+        } else if (to == fundamental_type::float16) {
+            d = half_rounded(d);
         }
         /* an inexact value depends on the rounding mode */
         if (tokens.files.floating_point_pragma &&
-            static_cast<__int128>(d) != v) {
+            (!isfinite(d) || static_cast<__int128>(d) != v)) {
             m.evaluation = constness::unknown;
             return;
         }
@@ -476,6 +478,8 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
            range is the infinity, as clang folds it: no diagnostic) [impl.clang] */
         float f = static_cast<float>(d);
         m.value = floating_kept(f);
+    } else if (to == fundamental_type::float16) {
+        m.value = floating_kept(half_rounded(d));
     }
 }
 

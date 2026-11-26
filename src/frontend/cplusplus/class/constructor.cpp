@@ -1317,7 +1317,14 @@ analysis_result semantic_analysis::construct(
         arguments[0].category == value_category::xvalue &&
         declares_move_constructor(c))
         moved = true;
-    if (!arguments.empty() && x.implicit_copy_deleted && !moved &&
+    /* [over.best.ics]/4: a braced-init-list's elements do not reach a
+       class's own constructors' copy by a user-defined conversion, so the
+       deleted copy takes no part for a class that is no aggregate */
+    bool listed =
+        arguments.size() == 1 &&
+        type_table[arguments[0].type.unqualified()].kind == type_kind::none &&
+        !is_aggregate(c);
+    if (!arguments.empty() && x.implicit_copy_deleted && !moved && !listed &&
         !x.defaulted_move_constructor &&
         copy_argument_candidate(c, arguments)) {
         if (arguments.size() == 1 &&

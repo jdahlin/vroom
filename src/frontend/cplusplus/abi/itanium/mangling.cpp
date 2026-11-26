@@ -1437,6 +1437,7 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             analysis.entity_table[encoding_template].enclosing,
             expression[0].token());
         if (!named || (!analysis.names_function_template(named) &&
+                       !analysis.names_member_template(named) &&
                        !analysis.names_variable_template(named)))
             return false;
         if (!source_name(analysis.token_identifier(expression[0].token())))
@@ -2257,6 +2258,9 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
     /* typename __remove_cvref(T)::name: the transformation's own <type>,
        as clang writes it */
     if (prefix.kind == entity_kind::type_transformation)
+        return type(t);
+    /* typename decltype(e)::name: the <decltype>, [abi:mangle.name] */
+    if (prefix.kind == entity_kind::dependent_written)
         return type(t);
     if (prefix.kind != entity_kind::template_specialization &&
         prefix.kind != entity_kind::dependent_member)

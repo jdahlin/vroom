@@ -154,6 +154,16 @@ void c_lowering::describe_entity(entity_index e, const char *lead,
                 .node.first_token();
 }
 
+/* the C type of t without its cv-qualifiers, an array's elements' too */
+ast_qualified_type c_lowering::writable_type(qualified_type t, token_index at)
+{
+    const struct type &r = record(t);
+    if (r.kind != type_kind::array)
+        return type(qualified_type::make(t.unqualified(), cv_none), at);
+    ast_qualified_type element = writable_type(r.operand, at);
+    return ast_builder_type_array(c, element, r.bound, true);
+}
+
 /* the C symbol of a function or variable, made at its first use: named by
    its symbol (itanium_symbol_name) if it has one, by its identifier if it
    is automatic */
@@ -225,13 +235,15 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
        semantics are not applied on an object under destruction"; nor is
        an object with a mutable subobject, [dcl.stc]/8 */
     qualified_type element;
+    /* (an array's const is its elements') */
+    qualified_type object = x.type;
+    while (record(object).kind == type_kind::array)
+        object = record(object).operand;
     if (x.kind == entity_kind::variable && !x.automatic && x.definition &&
-        (x.type.cv() & cv_const) &&
+        (object.cv() & cv_const) &&
         (!constant_initializer(x.definition) ||
          element_destructor(x.type, element) || has_mutable_subobject(x.type)))
-        t = type(
-            qualified_type::make(x.type.unqualified(), x.type.cv() & ~cv_const),
-            at);
+        t = writable_type(x.type, at);
     owned_buffer name;
     uint32_t s = 0;
     if (x.kind == entity_kind::variable && x.automatic) {

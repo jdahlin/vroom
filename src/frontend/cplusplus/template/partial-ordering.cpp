@@ -62,6 +62,21 @@ bool semantic_analysis::member_of_unknown_specialization(qualified_type t) const
            entity_table[r.entity].kind == entity_kind::dependent_member;
 }
 
+/* [temp.deduct.type]/5.1 and /5.2: Q::name and decltype(expression),
+   dependent: nothing is deduced from them */
+bool semantic_analysis::non_deduced(qualified_type t) const
+{
+    const struct type &r = type_table[t.unqualified()];
+    if (r.kind != type_kind::dependent)
+        return false;
+    const entity &x = entity_table[r.entity];
+    if (x.kind == entity_kind::dependent_member)
+        return true;
+    return x.kind == entity_kind::dependent_written &&
+           SyntaxRef(node_index(static_cast<uint32_t>(x.value)))
+               .is(syntax_kind::decltype_specifier);
+}
+
 /* a type partial ordering compares with deduce_type's rules alone */
 bool semantic_analysis::orderable(qualified_type t, bool packs,
                                   bool *pack_argument) const
@@ -73,8 +88,9 @@ bool semantic_analysis::orderable(qualified_type t, bool packs,
            in the template's own parameters, which deduce_type compares
            argument by argument against the other's (type arguments only: a
            non-type or pack argument is not compared by deduce_type here) */
-        if (entity_table[r.entity].kind == entity_kind::dependent_member ||
-            !entity_table[r.entity].instantiation)
+        if (entity_table[r.entity].kind == entity_kind::dependent_member)
+            return false;
+        if (!entity_table[r.entity].instantiation)
             return false;
         for (uint32_t i = 0; i < specialization_argument_count(r.entity); i++) {
             const template_argument &x =
@@ -286,6 +302,10 @@ bool semantic_analysis::at_least_as_specialized(uint32_t f, uint32_t g,
                     penalty = true;
             }
         }
+        /* [temp.deduct.type]/4: a non-deduced context deduces nothing,
+           and takes no part in whether deduction succeeds */
+        if (non_deduced(pt))
+            continue;
         if (!ppack) {
             if (!deduce_type(pt, at, values, set, true))
                 deduced = false;
@@ -391,6 +411,20 @@ int semantic_analysis::conversion_template_order(entity_index t1,
     return 0;
 }
 
+/* whether function template t's parameter i is a template parameter, by
+   value or by reference */
+bool semantic_analysis::template_parameter_alone(uint32_t t, uint32_t i) const
+{
+    qualified_type type = entity_table[function_templates[t - 1].entity].type;
+    const struct type &r = type_table[type.unqualified()];
+    if (r.kind != type_kind::function || i >= r.parameter_count)
+        return false;
+    unsigned cv = 0;
+    qualified_type p = transformed(
+        type_table, type_table.parameters(type.unqualified())[i], cv);
+    return type_table[p.unqualified()].kind == type_kind::template_parameter;
+}
+
 int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
                                                size_t arguments, bool &unknown,
                                                bool f_reversed, bool g_reversed)
@@ -436,9 +470,23 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
         if (r.kind != type_kind::function || r.variadic)
             unknown = true;
         for (uint32_t i = 0; i < r.parameter_count && !unknown; i++)
-            if (!member_of_unknown_specialization(list[i]) &&
-                !orderable(list[i], true, &packs_taken))
-                unknown = true;
+            /* (a non-deduced parameter itself: at_least_as_specialized
+               compares nothing with it as P) */
+            if (!non_deduced(list[i]) &&
+                !member_of_unknown_specialization(list[i]) &&
+                !orderable(list[i], true, &packs_taken)) {
+                /* (a class template's specialization with an expression
+                   among its arguments, Vec128<T, 8 / sizeof(T)>: where
+                   the other's parameter is a template parameter alone, it
+                   is deduced from anything, and nothing of this one is
+                   deduced from that parameter's unique type) */
+                uint32_t other = f;
+                if (x == f)
+                    other = g;
+                if (f_reversed || g_reversed ||
+                    !template_parameter_alone(other, i))
+                    unknown = true;
+            }
     }
     if (unknown)
         return 0;

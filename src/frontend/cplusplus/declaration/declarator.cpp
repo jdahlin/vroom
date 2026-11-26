@@ -526,7 +526,11 @@ node_index parser::ptr_operator(derivation *kind)
     attribute_specifier_seq(true);
     if (failed())
         return 0;
-    if (qualifiers) {
+    if (!qualifiers) {
+        /* [ext:gnu_restrict] a restricted reference, T &__restrict__ r */
+        while (accept(extension_keyword::restrict))
+            ;
+    } else {
         cv_qualifier_seq();
         while (at_gnu_attribute()) {
             gnu_attribute_specifier();

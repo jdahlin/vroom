@@ -282,7 +282,8 @@ fundamental_type semantic_analysis::evaluated_type(qualified_type t) const
             return fundamental_type::none;
         f = entity_table[e].underlying;
     }
-    if (f == fundamental_type::float_ || f == fundamental_type::double_)
+    if (f == fundamental_type::float_ || f == fundamental_type::double_ ||
+        f == fundamental_type::float16 || f == fundamental_type::bfloat16)
         return f;
     if (!fundamental_type_is_integral(f) ||
         f == fundamental_type::bit_precise_int ||
@@ -303,7 +304,8 @@ constant_value semantic_analysis::value_of(fundamental_type t,
                                            uint64_t kept) const
 {
     constant_value r;
-    if (fundamental_type_is_floating(t)) {
+    /* (__bf16, which no arithmetic takes, is kept as a floating value too) */
+    if (fundamental_type_is_floating(t) || t == fundamental_type::bfloat16) {
         r.kind = constant_value_kind::floating;
         r.floating = floating_value(kept);
         return r;
@@ -351,6 +353,10 @@ constness semantic_analysis::evaluate_conversion(constant_value &v,
                          integer_wrap(tokens.files.behavior, to, v.integer));
         return constness::constant;
     }
+    /* __bf16 converts to nothing but itself here */
+    if (from != to && (from == fundamental_type::bfloat16 ||
+                       to == fundamental_type::bfloat16))
+        return CONST_UNKNOWN;
     expression_meaning m;
     m.type = qualified_type::make(type_table.fundamental(from), cv_none);
     m.evaluation = constness::constant;
@@ -2341,6 +2347,14 @@ semantic_analysis::base_subobject_place(const constant_evaluation &state,
 {
     if (!base)
         return CONST_UNKNOWN;
+    /* an inherited member function called on a variable that is no
+       constant (Highway's st.LanesPerKey()): its object has no value, and
+       nothing of it is read through the base either */
+    if (state.member_call_object && !(place & element_place) &&
+        place < state.objects.size() && state.objects[place].opaque) {
+        out = place;
+        return constness::constant;
+    }
     const constant_value &o = place_value(state, place);
     if (o.kind != constant_value_kind::class_object || !o.designator)
         return CONST_UNKNOWN;
@@ -3816,7 +3830,19 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
             state.member_call_object = outer_call_object;
             state.reading = outer_reading;
         }
-        if (c != constness::constant)
+        /* (an unqualified static member's call in a member function names
+           *this, whose value is not known there: nothing of it is read) */
+        uint32_t of = object_expression;
+        while (semantics[of].kind == semantic_kind::indirection ||
+               semantics[of].kind == semantic_kind::conversion)
+            of = semantics[of].a;
+        bool implicit_this =
+            of != object_expression &&
+            semantics[of].kind == semantic_kind::entity && semantics[of].a &&
+            entity_table[semantics[of].a].kind == entity_kind::variable &&
+            !entity_table[semantics[of].a].name;
+        if (c != constness::constant &&
+            !(c == constness::unknown && implicit_this))
             return c;
         callee = semantics[callee].b;
     }

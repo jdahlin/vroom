@@ -1944,6 +1944,17 @@ analysis_result semantic_analysis::template_callee_parts(
     else
         x = lookup_unqualified(tokens.identifier(name), lookup_filter::any);
     function_template = function_template_of(x.unknown_entity, member);
+    /* a static member template of the enclosing class named without its
+       class (Highway's &CallClosure<Closure>) */
+    if (!qualified && !function_template && x.unknown_entity) {
+        entity_index of = entity_table[x.unknown_entity].enclosing;
+        if (of && entity_table[of].kind == entity_kind::class_type) {
+            uint32_t found = function_template_of(x.unknown_entity, true);
+            if (found && !entity_table[function_templates[found - 1].entity]
+                              .nonstatic_member)
+                function_template = found;
+        }
+    }
     if (member && function_template &&
         entity_table[function_templates[function_template - 1].entity]
             .nonstatic_member)

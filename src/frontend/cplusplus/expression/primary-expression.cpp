@@ -183,6 +183,9 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
             float f;
             memcpy(&f, &bits, sizeof f);
             m.value = floating_kept(f);
+        } else if (k.type == fundamental_type::float16) {
+            /* the literal's value is its binary16 bits */
+            m.value = half_kept(static_cast<uint32_t>(v.floating_bits_low));
         } else {
             m.value = v.floating_bits_low;
         }

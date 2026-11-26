@@ -348,9 +348,10 @@ void semantic_analysis::use_ill_formed(SyntaxRef d)
  * use found later instantiates it again, with its diagnostics; the result
  * goes back to the quiet body, which fails with it.
  */
-analysis_result semantic_analysis::quiet_definition_failed(SyntaxRef at,
-                                                           uint32_t index,
-                                                           analysis_result r)
+analysis_result
+semantic_analysis::quiet_definition_failed(SyntaxRef at, uint32_t index,
+                                           analysis_result r,
+                                           const unsupported_construct *cause)
 {
     instantiation_record &x = instantiations[index];
     x.defined = false;
@@ -367,9 +368,12 @@ analysis_result semantic_analysis::quiet_definition_failed(SyntaxRef at,
     /* (and code that calls it, analysed before it failed, is refused
        when lowered, as a member's body that failed) */
     size_t before = unsupported.size();
-    not_supported_because(
-        at, "temp.inst",
-        "a specialization whose definition failed in a quiet instantiation");
+    static const char *const what =
+        "a specialization whose definition failed in a quiet instantiation";
+    if (cause)
+        not_supported_caused_by(at, "temp.inst", what, *cause);
+    else
+        not_supported_because(at, "temp.inst", what);
     body_failures.append(unsupported[before]);
     unsupported.resize(before);
     entity_table[x.specialization].unsupported_body =
@@ -504,8 +508,16 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     if (r == analysis_result::well_formed)
         return r;
     if (quiet) {
+        /* (the first refusal inside it, which the report names) */
+        unsupported_construct cause;
+        bool refused = unsupported.size() > unsupported_before;
+        if (refused)
+            cause = unsupported[unsupported_before];
         unsupported.resize(unsupported_before);
-        return quiet_definition_failed(at, index, r);
+        const unsupported_construct *why = nullptr;
+        if (refused)
+            why = &cause;
+        return quiet_definition_failed(at, index, r, why);
     }
     /* (one analysed where a substitution is tried is not diagnosed here) */
     instantiations[index].body_ill_formed =

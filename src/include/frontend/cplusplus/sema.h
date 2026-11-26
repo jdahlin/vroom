@@ -1285,6 +1285,10 @@ double floating_value(uint64_t kept);
 bool floating_is_signaling_nan(uint64_t kept);
 uint32_t float_storage_bits(uint64_t kept);
 uint64_t floating_kept(double v);
+/* v rounded to _Float16's value (binary16, to nearest, ties to even) */
+double half_rounded(double v);
+uint32_t half_storage_bits(uint64_t kept);
+uint64_t half_kept(uint32_t bits);
 /* the least power of two that is n or more (1 for 0) */
 uint64_t power_of_two_at_least(uint64_t n);
 /* [bit.cast]/1 of a value as an expression_meaning keeps it, from one
@@ -6280,6 +6284,8 @@ class semantic_analysis
                                 bool &unknown, bool f_reversed = false,
                                 bool g_reversed = false);
     int constraint_subsumption_order(uint32_t f, uint32_t g) const;
+    bool template_parameter_alone(uint32_t t, uint32_t i) const;
+    bool non_deduced(qualified_type t) const;
     bool member_of_unknown_specialization(qualified_type t) const;
     /* a type partial ordering compares with deduce_type's rules alone;
        pack_argument set when a specialization in it has a pack of
@@ -6385,7 +6391,8 @@ class semantic_analysis
     owned_array<uint32_t> specializations_instantiated;
     void want_definition(instantiation_record &x, uint32_t index);
     analysis_result quiet_definition_failed(SyntaxRef at, uint32_t index,
-                                            analysis_result r);
+                                            analysis_result r,
+                                            const unsupported_construct *cause);
     /* the instantiation record of the template's specialization for the
        arguments, plus one; 0 if there is none yet */
     uint32_t find_instantiation(entity_index t, const template_argument *a,
@@ -6731,6 +6738,11 @@ class semantic_analysis
     bool names_function_template(entity_index held) const
     {
         return function_template_of(held) != 0;
+    }
+    /* ... or a class's member template (Is<E>() written in the class) */
+    bool names_member_template(entity_index held) const
+    {
+        return member_templates_of(held) != 0;
     }
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
