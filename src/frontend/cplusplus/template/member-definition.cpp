@@ -143,13 +143,18 @@ bool semantic_analysis::member_class_function_unjudged(
         if (qualified && !typename_seen)
             return true;
     }
+    bool in_params = false;
     for (token_index t = parts[static_cast<uint32_t>(last - 1)].first_token();
          t < parts[static_cast<uint32_t>(last)].first_token(); t++) {
         const token &x = tokens[t];
-        if (x.kind == token_kind::operator_or_punctuator &&
-            preprocessing_op_or_punc_primary(x.op_or_punc) ==
-                preprocessing_op_or_punc::EQUAL)
-            return true;
+        if (x.kind == token_kind::operator_or_punctuator) {
+            preprocessing_op_or_punc op =
+                preprocessing_op_or_punc_primary(x.op_or_punc);
+            if (op == preprocessing_op_or_punc::LEFT_PARENTHESIS)
+                in_params = true;
+            else if (in_params && op == preprocessing_op_or_punc::EQUAL)
+                return true;
+        }
     }
     return false;
 }
