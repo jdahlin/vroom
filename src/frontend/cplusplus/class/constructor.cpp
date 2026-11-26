@@ -335,6 +335,42 @@ bool semantic_analysis::aggregate_value_stored(entity_index c,
     return trivial_class(c);
 }
 
+/*
+ * [class.base.init]/9, [dcl.init.aggr]/4: a member of a class that is not
+ * trivial can be initialized from a braced-init-list in place, element by
+ * element (the lowering's initialize_list_into): a class without bases or an
+ * array with an initializer for each element, whose elements of class type
+ * are constructor calls or such lists.
+ */
+bool semantic_analysis::aggregate_built_in_place(uint32_t value) const
+{
+    const semantic_node &n = semantics[value];
+    if (n.kind != semantic_kind::initializer_list)
+        return false;
+    const struct type &t = type_table[n.type.unqualified()];
+    if (t.kind == type_kind::class_type) {
+        const entity &c = entity_table[t.entity];
+        if (c.union_ || c.base_count || n.count != c.member_count)
+            return false;
+    } else if (t.kind != type_kind::array || n.count != t.bound) {
+        return false;
+    }
+    const uint32_t *items = semantics.items(n.first);
+    for (uint32_t i = 0; i < n.count; i++) {
+        const semantic_node &item = semantics[items[i]];
+        if (item.kind == semantic_kind::construct && !item.a)
+            continue;
+        const struct type &of = type_table[item.type.unqualified()];
+        if (of.kind != type_kind::class_type && of.kind != type_kind::array)
+            continue;
+        if (of.kind == type_kind::class_type && trivial_class(of.entity))
+            continue;
+        if (!aggregate_built_in_place(items[i]))
+            return false;
+    }
+    return true;
+}
+
 analysis_result semantic_analysis::anonymous_member_initializers(
     token_index at, entity_index anonymous, uint32_t &statement)
 {
@@ -486,6 +522,11 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
         semantics[value.node].kind == semantic_kind::call &&
         semantics[value.node].category == value_category::prvalue &&
         semantics[value.node].type.unqualified() == type.unqualified()) {
+        statement = subobject_store(object, type, at, value.node, true);
+        return analysis_result::well_formed;
+    }
+    if (constructed && !aggregate_value_stored(record.entity, value.node) &&
+        aggregate_built_in_place(value.node)) {
         statement = subobject_store(object, type, at, value.node, true);
         return analysis_result::well_formed;
     }
@@ -1848,14 +1889,17 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                     }
                     /* [dcl.init.list]/3.4: store the value of an aggregate
                        member. A base's tail padding can hold derived members. */
+                    bool stored =
+                        aggregate_value_stored(record.entity, listed.node);
                     if (base ||
-                        !aggregate_value_stored(record.entity, listed.node))
+                        (!stored && !aggregate_built_in_place(listed.node)))
                         return not_supported_because(
                             item, "class.base.init",
                             "a braced initializer whose value cannot be stored "
                             "in the base or member");
                     set_slot(slot, id,
-                             subobject_store(object, type, id, listed.node));
+                             subobject_store(object, type, id, listed.node,
+                                             !stored));
                     continue;
                 } else if (!written)
                     return not_supported_because(

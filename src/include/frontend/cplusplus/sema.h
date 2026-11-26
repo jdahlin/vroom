@@ -4962,6 +4962,7 @@ class semantic_analysis
                                               SyntaxElement init,
                                               const specified &s);
     bool aggregate_value_stored(entity_index c, uint32_t value) const;
+    bool aggregate_built_in_place(uint32_t value) const;
     /* [class.union.anon]/1: the default member initializers of an anonymous
        union's (or anonymous struct's) members, run in the constructor of the
        enclosing class as clang does (the unnamed class has no constructor of
