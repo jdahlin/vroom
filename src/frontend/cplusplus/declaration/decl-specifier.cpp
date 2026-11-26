@@ -1071,8 +1071,10 @@ node_index parser::elaborated_or_class_specifier(decl_specifier_facts &facts)
     if (!qualifier && !template_id)
         found = names.lookup_elaborated(name);
     /* [dcl.type.elab], [basic.scope.pdecl]/7: class-key identifier ;
-       declares the class in this scope, whatever an enclosing one has */
-    bool alone = facts.count == 0 && at(preprocessing_op_or_punc::SEMICOLON);
+       declares the class in this scope, whatever an enclosing one has; a
+       type-id's 'new class P;' is no declaration */
+    bool alone = !facts.type_specifier_seq && facts.count == 0 &&
+                 at(preprocessing_op_or_punc::SEMICOLON);
     if (!qualifier && !template_id && !facts.friend_ &&
         ((found != name_kind::type_name && found != name_kind::template_name) ||
          (alone && !names.declares_here(name)))) {

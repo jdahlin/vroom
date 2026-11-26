@@ -44,6 +44,19 @@ struct taker {
     taker(mode m) : v((int)m) {}
 };
 
+/* 'new struct s;' names the class: it declares no local one */
+struct node {
+    int a;
+};
+static int fresh(int node)
+{
+    struct node *p = new struct node;
+    p->a = node;
+    int a = p->a;
+    delete p;
+    return a;
+}
+
 int main()
 {
     locked l;
@@ -54,6 +67,8 @@ int main()
     taker t(mode::b);
     printf("%d %d %d %d %d\n", base->lock(), base->unlock(), (int)c->get(),
            h.n, t.v);
+    if (fresh(6) != 6)
+        return 1;
     return !(base->lock() == 3 && base->unlock() == 4 && c->get() == 1 &&
              h.n == 5 && t.v == 1);
 }
