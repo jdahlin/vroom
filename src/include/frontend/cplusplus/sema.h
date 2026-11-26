@@ -1905,6 +1905,10 @@ class semantic_analysis
         entity_index entity = 0;
     };
     owned_array<definition_record> definitions;
+    /* the static data members a constexpr declaration at namespace scope
+       defines or redeclares ([depr.static.constexpr]/1): emitted weak,
+       whether used or not */
+    owned_array<entity_index> weak_static_members;
     /* the non-static data members of the classes (entity::first_member) */
     owned_array<entity_index> class_members;
     /* the direct base class subobjects of the classes (entity::first_base) */
