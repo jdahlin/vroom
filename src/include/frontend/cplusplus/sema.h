@@ -7174,6 +7174,9 @@ class semantic_analysis
        sequence, more than 0 when b is, 0 when neither is */
     int compare_conversions(const conversion_sequence &a,
                             const conversion_sequence &b) const;
+    /* [over.ics.list]/10 */
+    conversion_sequence list_scalar_sequence(SyntaxElement list,
+                                             qualified_type to);
     /* [over.ics.list]/6 */
     conversion_sequence list_array_sequence(SyntaxElement list,
                                             qualified_type array,

@@ -15,8 +15,19 @@ struct T {
     T(S v) : s(v), how(1) {}
 };
 
+struct C {
+    int n;
+    C(int v) : n(v) {}
+};
+struct D {
+    C &&r;
+};
+
 int main()
 {
+    D d{{{7}}};
+    C c{{8}};
+    printf("%d\n", c.n + (&d.r != &c));
     auto a = T{{"non-pod"}};
     T b{{}};
     printf("%d %d %d %d\n", a.s.n, a.how, b.s.n, b.how);

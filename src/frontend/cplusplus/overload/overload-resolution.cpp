@@ -135,6 +135,47 @@ bool semantic_analysis::list_is_identity(SyntaxElement list, entity_index x)
 }
 
 /*
+ * [over.ics.list]/10: "if the parameter type is not a class: if the
+ * initializer list has one element that is not itself an initializer
+ * list, the implicit conversion sequence is the one required to convert
+ * the element to the parameter type ... if the initializer list has no
+ * elements, the implicit conversion sequence is the identity conversion";
+ * unknown for a reference, and bad else
+ */
+semantic_analysis::conversion_sequence
+semantic_analysis::list_scalar_sequence(SyntaxElement list, qualified_type to)
+{
+    conversion_sequence s;
+    type_kind kind = type_table[to.unqualified()].kind;
+    owned_array<SyntaxElement> clauses;
+    s.kind = conversion_sequence::form::unknown;
+    if (kind == type_kind::lvalue_reference ||
+        kind == type_kind::rvalue_reference ||
+        list_clauses(list, clauses) != analysis_result::well_formed)
+        return s;
+    if (clauses.empty()) {
+        s.kind = conversion_sequence::form::standard;
+        s.from_list = true;
+        return s;
+    }
+    if (clauses.size() != 1 || clauses[0].is(syntax_kind::braced_init_list) ||
+        clauses[0].is(syntax_kind::designated_initializer_clause)) {
+        s.kind = conversion_sequence::form::bad;
+        return s;
+    }
+    substitution_mark mark = mark_substitution();
+    expression_meaning e;
+    substituting++;
+    analysis_result r = expression(clauses[0], e);
+    if (r == analysis_result::well_formed && e.node)
+        s = implicit_conversion_sequence(e, to, false);
+    substituting--;
+    undo_substitution(mark);
+    s.from_list = true;
+    return s;
+}
+
+/*
  * [over.ics.list]/6: "if the parameter type is 'array of N X' or 'array of
  * unknown bound of X', if there exists an implicit conversion sequence
  * from each element of the initializer list (and from {} in the former
@@ -387,6 +428,11 @@ analysis_result semantic_analysis::best_viable_function(
                     } else if (argument.node) {
                         a = implicit_conversion_sequence(argument, target,
                                                          user_defined);
+                    } else if (list_class) {
+                        /* (T{{0}} to T(int): the constructor that is left
+                           when T's copy constructors take no list) */
+                        a = list_scalar_sequence((*written_arguments)[k],
+                                                 target);
                     }
                 } else if (argument.overload_name) {
                     a = overload_set_sequence(argument, target);
