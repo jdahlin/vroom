@@ -2270,6 +2270,21 @@ constness semantic_analysis::evaluate_read(constant_evaluation &state,
                 return CONST_NOT_CONSTANT;
         }
     }
+    /* [class.copy.ctor]/14: the copy of an empty class reads nothing, so
+       an automatic variable that is no constant may be its source
+       (Highway's MaxLanes(d)); not a closure's */
+    if (tk == type_kind::class_type && x.kind == semantic_kind::entity && x.a &&
+        frame_object(state, x.a) == no_frame_object) {
+        const entity &e = entity_table[x.a];
+        entity_index c = type_table[x.type.unqualified()].entity;
+        if (e.kind == entity_kind::variable && e.automatic && !e.constexpr_ &&
+            empty_class(c) && copy_reads_nothing(c) &&
+            !entity_table[c].lambda) {
+            v = constant_value();
+            v.kind = constant_value_kind::class_object;
+            return constness::constant;
+        }
+    }
     uint32_t object = 0;
     /* [class.union]/2: a read of a member that is not active; inside the
        read nothing is written (the subscripts' operands) */
