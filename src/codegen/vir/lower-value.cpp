@@ -776,6 +776,29 @@ VPRIV bool virbuild_vector_operation(codegen_context *e, int op,
     }
     uint32_t code = 0;
     bool swapped = false;
+    unsigned size = (unsigned)codegen_type_size(
+        e->compile_context, T(e->compile_context, vt)->base);
+    if (!unary && a_vector && !b_vector &&
+        (op == LEX_TOKEN_LESS_LESS || op == LEX_TOKEN_GREATER_GREATER)) {
+        /* a shift: the count in an xmm register */
+        if (x64_x86_shift_code(e, op, vt, 0, &code)) {
+            code &= 0xfff;
+            type = virbuild_vector_type(e, vt, &lane);
+            virbuild_vector_scalar(e, VIR_OP_X86, code, type, lane, ra, rb,
+                                   size, false, d);
+            return true;
+        }
+    }
+    if (!unary && a_vector && !b_vector &&
+        !codegen_type_is_float(e->compile_context,
+                               T(e->compile_context, vt)->base) &&
+        x64_x86_operation_code(e, op, vt, &code, &swapped) && !swapped) {
+        /* a vector and a scalar: the scalar in every lane */
+        type = virbuild_vector_type(e, vt, &lane);
+        virbuild_vector_scalar(e, VIR_OP_X86, code, type, lane, ra, rb, size,
+                               true, d);
+        return true;
+    }
     if (!unary && a_vector && b_vector &&
         x64_x86_operation_code(e, op, vt, &code, &swapped)) {
         if (swapped) {
@@ -792,11 +815,14 @@ VPRIV bool virbuild_vector_operation(codegen_context *e, int op,
 VPRIV bool virbuild_vector_shuffle(codegen_context *e, const int *bytes, int ra,
                                    int rb, const codegen_lvalue *d)
 {
-    (void)ra, (void)rb, (void)d;
-    if (CODEGEN_IS_X64(e->compile_context) &&
-        x64_vector_shuffle_exists(e, bytes))
+    if (!CODEGEN_IS_X64(e->compile_context) ||
+        !x64_vector_shuffle_exists(e, bytes))
+        return false;
+    x64_x86_shuffle shuffle = {};
+    if (!x64_x86_shuffle_code(e, bytes, &shuffle))
         virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
-    return false;
+    virbuild_vector_shuffled(e, &shuffle, ra, rb, d);
+    return true;
 }
 /* a builtin that is one instruction on vector values: its result in a
    temporary, as the walker holds vectors */

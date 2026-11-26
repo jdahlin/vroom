@@ -1058,12 +1058,18 @@ VPRIV codegen_value x64_x86_instruction(codegen_context *e, uint32_t n)
 
 /* the lane-wise operators' single instructions */
 static const char *const x64_x86_operators[] = {
-    "paddb",   "paddw",   "paddd",   "paddq",   "psubb",    "psubw",
-    "psubd",   "psubq",   "pmullw",  "pand",    "por",      "pxor",
-    "pcmpeqb", "pcmpeqw", "pcmpeqd", "pcmpgtb", "pcmpgtw",  "pcmpgtd",
-    "addps",   "addpd",   "subps",   "subpd",   "mulps",    "mulpd",
-    "divps",   "divpd",   "cmpeqps", "cmpeqpd", "cmpneqps", "cmpneqpd",
-    "cmpltps", "cmpltpd", "cmpleps", "cmplepd"};
+    "paddb",      "paddw",     "paddd",     "paddq",     "psubb",
+    "psubw",      "psubd",     "psubq",     "pmullw",    "pand",
+    "por",        "pxor",      "pcmpeqb",   "pcmpeqw",   "pcmpeqd",
+    "pcmpgtb",    "pcmpgtw",   "pcmpgtd",   "addps",     "addpd",
+    "subps",      "subpd",     "mulps",     "mulpd",     "divps",
+    "divpd",      "cmpeqps",   "cmpeqpd",   "cmpneqps",  "cmpneqpd",
+    "cmpltps",    "cmpltpd",   "cmpleps",   "cmplepd",   "psllw",
+    "pslld",      "psllq",     "psraw",     "psrad",     "psrlw",
+    "psrld",      "psrlq",     "punpcklbw", "punpcklwd", "punpckldq",
+    "punpcklqdq", "punpckhbw", "punpckhwd", "punpckhdq", "punpckhqdq",
+    "pshufd",     "shufps",    "pshuflw",   "pshufhw",   "psrldq",
+    "pslldq",     "packuswb",  "packssdw"};
 
 VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
 {
@@ -1072,7 +1078,112 @@ VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
     return x64_x86_operators[code & 0xfff];
 }
 
-/* the code of a binary operator on two vectors of type vt that is one
+/* the code of mnemonic, or false */
+static bool x64_x86_operator_find(const char *mnemonic, uint32_t *code)
+{
+    for (unsigned i = 0;
+         i < sizeof x64_x86_operators / sizeof *x64_x86_operators; i++)
+        if (!strcmp(mnemonic, x64_x86_operators[i])) {
+            *code = i;
+            return true;
+        }
+    return false;
+}
+
+/* every lane of a vector of type vt shifted by the constant count */
+VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
+                              int64_t count, uint32_t *code)
+{
+    x64_simd_plan p = x64_simd_plan_for(e, op, vt, true, false, false);
+
+    if (!p.op || count < 0 || count > 255 || !x64_x86_operator_find(p.op, code))
+        return false;
+    *code |= X64_X86_SHIFT | (uint32_t)count << 16;
+    return true;
+}
+
+/* op $count of one vector */
+static uint32_t x64_x86_by_count(const char *mnemonic, int count)
+{
+    uint32_t code = 0;
+
+    x64_x86_operator_find(mnemonic, &code);
+    return code | X64_X86_SHIFT | (uint32_t)count << 16;
+}
+
+/* the instructions of a planned shuffle */
+VPRIV bool x64_x86_shuffle_code(codegen_context *e, const int *bytes,
+                                x64_x86_shuffle *out)
+{
+    if (x64_target_has_no_simd(e))
+        return false;
+    x64_shuffle_plan p = x64_shuffle_plan_for(bytes);
+    const char *mnemonic = NULL;
+    uint32_t extra = 0;
+
+    *out = {};
+    out->first = p.first;
+    out->second = -1;
+    switch (p.kind) {
+    case X64_SHUFFLE_UNPACK:
+        mnemonic = x64_simd_by_width((unsigned)p.width, "punpcklbw",
+                                     "punpcklwd", "punpckldq", "punpcklqdq");
+        if (p.high)
+            mnemonic =
+                x64_simd_by_width((unsigned)p.width, "punpckhbw", "punpckhwd",
+                                  "punpckhdq", "punpckhqdq");
+        out->second = p.second;
+        break;
+    case X64_SHUFFLE_PAIRS:
+        mnemonic = "shufps";
+        out->second = p.second;
+        extra = X64_X86_IMMEDIATE;
+        break;
+    case X64_SHUFFLE_DWORDS:
+        mnemonic = "pshufd";
+        extra = X64_X86_IMMEDIATE | X64_X86_UNARY;
+        break;
+    case X64_SHUFFLE_LOW:
+        mnemonic = "pshuflw";
+        extra = X64_X86_IMMEDIATE | X64_X86_UNARY;
+        break;
+    case X64_SHUFFLE_HIGH:
+        mnemonic = "pshufhw";
+        extra = X64_X86_IMMEDIATE | X64_X86_UNARY;
+        break;
+    case X64_SHUFFLE_ROTATE:
+        mnemonic = "por";
+        out->second = p.second;
+        out->steps = 1;
+        out->before[0][0] = x64_x86_by_count("psrldq", p.width);
+        out->before[1][0] = x64_x86_by_count("pslldq", 16 - p.width);
+        break;
+    case X64_SHUFFLE_EVEN:
+        /* as x64_simd_even_prepare, then the saturating pack */
+        mnemonic = "packssdw";
+        if (p.width == 1)
+            mnemonic = "packuswb";
+        out->second = p.second;
+        out->steps = 2;
+        for (int i = 0; i < 2; i++) {
+            out->before[i][0] = x64_x86_by_count("pslld", 16);
+            out->before[i][1] = x64_x86_by_count("psrad", 16);
+            if (p.width == 1) {
+                out->before[i][0] = x64_x86_by_count("psllw", 8);
+                out->before[i][1] = x64_x86_by_count("psrlw", 8);
+            }
+        }
+        break;
+    case X64_SHUFFLE_NONE:
+        return false;
+    }
+    if (!mnemonic || !x64_x86_operator_find(mnemonic, &out->code))
+        return false;
+    out->code |= extra;
+    if (extra & X64_X86_IMMEDIATE)
+        out->code |= (uint32_t)(p.control & 0xff) << 16;
+    return true;
+} /* the code of a binary operator on two vectors of type vt that is one
    instruction, its operands swapped when *swapped */
 VPRIV bool x64_x86_operation_code(codegen_context *e, int op,
                                   ast_qualified_type vt, uint32_t *code,
@@ -1087,14 +1198,10 @@ VPRIV bool x64_x86_operation_code(codegen_context *e, int op,
     if (!p.op || p.invert || p.bias || dwords || op == LEX_TOKEN_LESS_LESS ||
         op == LEX_TOKEN_GREATER_GREATER)
         return false;
-    for (unsigned i = 0;
-         i < sizeof x64_x86_operators / sizeof *x64_x86_operators; i++)
-        if (!strcmp(p.op, x64_x86_operators[i])) {
-            *code = i;
-            *swapped = p.swap;
-            return true;
-        }
-    return false;
+    if (!x64_x86_operator_find(p.op, code))
+        return false;
+    *swapped = p.swap;
+    return true;
 }
 
 /* the code of a builtin of the instruction table that takes vectors (and a

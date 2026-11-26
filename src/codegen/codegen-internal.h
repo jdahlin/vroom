@@ -723,6 +723,15 @@ enum {
 #define CODEGEN_FIXED_REFERENCE(k)                                             \
     CODEGEN_REFERENCE_MAKE(CODEGEN_REFERENCE_NAME, 0x8000000u + (uint32_t)(k))
 
+/* a shuffle as VIR operations: `steps` shifts of each operand, then one
+   instruction on the two (or, one operand, on the first) */
+typedef struct x64_x86_shuffle {
+    int first, second; /* the operands, 0 or 1; second < 0: one operand */
+    int steps;
+    uint32_t before[2][2]; /* [operand][step] */
+    uint32_t code;
+} x64_x86_shuffle;
+
 /* ---------------- object backend: records -> machine code ---------------- */
 
 /*

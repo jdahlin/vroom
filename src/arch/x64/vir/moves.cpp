@@ -105,6 +105,16 @@ VPRIV void x64_vir_x86_emit(x64_vir_context *L, uint32_t code, int d, int a,
     char op[64];
     int source = b;
 
+    if (code & X64_X86_SHIFT) {
+        char text[96];
+        if (d != a)
+            x64_record_emit_three_registers(L->context, X64_OP_MOV, 16, d, a,
+                                            X64_REGISTER_NONE);
+        snprintf(text, sizeof text, "\t%s\t$%u, %%xmm%d\n", mnemonic,
+                 code >> 16 & 0xff, d - XMM0);
+        x64_vir_text_append(L, text);
+        return;
+    }
     if (code & X64_X86_UNARY)
         source = a;
     if (code & X64_X86_IMMEDIATE)

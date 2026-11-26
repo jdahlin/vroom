@@ -347,6 +347,13 @@ VPRIV uint32_t virbuild_slot_address(codegen_context *e, uint32_t s,
 VPRIV void virbuild_store_table_clear(codegen_context *e, bool exposed_only);
 VPRIV uint32_t virbuild_vector_type(codegen_context *e, ast_qualified_type vt,
                                     int *lane);
+VPRIV void virbuild_vector_scalar(codegen_context *e, uint32_t op,
+                                  uint32_t code, uint32_t vt, int lane, int ra,
+                                  int rs, unsigned size, bool splat,
+                                  const codegen_lvalue *d);
+VPRIV void virbuild_vector_shuffled(codegen_context *e,
+                                    const x64_x86_shuffle *s, int ra, int rb,
+                                    const codegen_lvalue *d);
 VPRIV void virbuild_vector_binary(codegen_context *e, uint32_t op,
                                   uint32_t code, uint32_t vt, int lane, int ra,
                                   int rb, const codegen_lvalue *d);

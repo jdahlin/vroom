@@ -114,9 +114,15 @@ deleted in the commit that gives it a table row or a generic operation.
     traffic.  Stockfish is unchanged: 13 of `nnue/network.cpp`'s 559
     functions still leave VIR for a vector operation, the hot ones among
     them.
-  - XV2b: shuffles, shifts, the builtins the front end expands lane by lane
-    (`packus`, `madd`, `mulhi`, saturation) as table rows, vector parameters
-    and results (XV1c).
+  - XV2b (done for what Stockfish SSE2 uses): shuffles (rotations and the
+    even lanes as two or three operations), shifts by a count, and a vector
+    with a number (the number in every lane).  No function of
+    `nnue/network.cpp` leaves VIR for a vector operation.  Stockfish SSE2,
+    depth 13, x86-64: 8829 to 118784 nodes/second (clang++: 919870).
+    AVX2 is unchanged (50579): its operations are 256 bits (XV3).
+  - Left: vector parameters and results, comparisons that need inversion or
+    a sign bias, 32-bit multiply on the generic path, the front end's lane
+    expansions (`madd`, `mulhi`, `packus`, saturation) as one instruction.
 - **XV3** 256 bits: types, registers, spills, ABI, `vzeroupper`; the AVX2
   builtins Stockfish uses (add, subtract, shift, pack, multiply-high,
   `maddubs`, `madd`, min, max, compare, `permutevar8x32`, `movemask`,
