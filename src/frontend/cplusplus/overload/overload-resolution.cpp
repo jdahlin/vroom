@@ -240,11 +240,13 @@ analysis_result semantic_analysis::best_viable_function(
         size_t defaults = 0;
         if (c.function)
             defaults = entity_table[c.function].default_arguments;
-        if (c.function && entity_table[c.function].unknown_defaults &&
-            n < count + first)
-            return not_supported_because(
-                at, "dcl.fct.default",
-                "a call relying on default arguments that are not known");
+        /* default arguments that are not known: the candidate is taken to
+           have them until an argument given rules it out */
+        bool assumed = c.function &&
+                       entity_table[c.function].unknown_defaults &&
+                       n < count + first;
+        if (assumed)
+            defaults = count;
         viability v = viability::viable;
         /* [over.match.viable]/2: "If there are m arguments in the list, all
            candidate functions having exactly m parameters are viable.  A
@@ -367,6 +369,10 @@ analysis_result semantic_analysis::best_viable_function(
             else if (a.kind == sequence::form::unknown)
                 v = viability::unknown;
         }
+        if (assumed && v != viability::not_viable)
+            return not_supported_because(
+                at, "dcl.fct.default",
+                "a call relying on default arguments that are not known");
         state.append(v);
     }
     /* an unknown sequence at its best */
