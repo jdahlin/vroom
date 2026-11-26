@@ -1678,6 +1678,17 @@ semantic_analysis::function_template
 semantic_analysis::new_template(uint32_t name, entity_index outer, SyntaxRef n,
                                 uint32_t index, uint32_t first, uint32_t count)
 {
+    /* the declaration's analysis may have instantiated templates, whose
+       records came since index was taken ([temp.inst]/2): the record, and
+       with it the parameters, go at the end */
+    if (index != function_templates.size()) {
+        index = static_cast<uint32_t>(function_templates.size());
+        for (uint32_t i = 0; i < count; i++) {
+            entity_index e = template_parameter_entities[first + i];
+            if (entity_table[e].kind != entity_kind::template_entity)
+                entity_table[e].instantiation = index + 1;
+        }
+    }
     entity_index t =
         entity_table.make(entity_kind::template_entity, name, outer);
     entity_table[t].instantiation = index + 1;
