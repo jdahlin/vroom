@@ -336,7 +336,6 @@ tree SemaCXX/constant-expression-cxx14.cpp -std=c++23 -Werror=return-type: const
 tree SemaCXX/constant-expression-cxx14.cpp -std=c++23 -Werror=return-type: constant-expression-cxx14.cpp:845:5: return_statement: the operand is a statement_expression
 tree SemaCXX/constant-expression-cxx14.cpp -std=c++23 -Werror=return-type: constant-expression-cxx14.cpp:852:5: expression_statement: the expression is a statement_expression
 tree SemaCXX/constexpr-late-instantiation.cpp -std=c++2c: constexpr-late-instantiation.cpp:228:3: if_statement: no substatement
-tree SemaCXX/lambda-expressions-gh56071.cpp -Wno-unused-value -std=c++17: lambda-expressions-gh56071.cpp:40:11: comma: the left operand is a zero
 tree SemaCXX/lambda-expressions.cpp -std=c++11 -Wno-unused-value: lambda-expressions.cpp:426:12: initializer_list: no element
 tree SemaCXX/lambda-expressions.cpp -std=c++14 -Wno-unused-value: lambda-expressions.cpp:426:12: initializer_list: no element
 tree SemaCXX/lambda-expressions.cpp -std=c++17 -Wno-unused-value: lambda-expressions.cpp:426:12: initializer_list: no element
@@ -508,14 +507,6 @@ types SemaCXX/constexpr-builtin-bit-cast.cpp -std=c++2a: 355:37: `one ( ) . x [ 
 types SemaCXX/constexpr-late-instantiation.cpp -std=c++14: 36:24: `f ( )` is not the constant 0ULL
 types SemaCXX/constexpr-late-instantiation.cpp -std=c++20: 36:24: `f ( )` is not the constant 0ULL
 types SemaCXX/constexpr-late-instantiation.cpp -std=c++2c: 36:24: `f ( )` is not the constant 0ULL
-types SemaCXX/cxx1y-variable-templates_top_level.cpp -std=c++11 -Wno-unused-value -Wno-c++1y-extensions: 494:58: `C < int , 0 , 1 , 2 , 3 , 4 > :: VALUEARRAY` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::array_of_unknown_bound<::vcc_claim::const_<int>>>`
-types SemaCXX/cxx1y-variable-templates_top_level.cpp -std=c++11 -Wno-unused-value -Wno-c++1y-extensions: 495:58: `C < int , 0 , 1 , 2 , 3 , 4 > :: VALUEARRAY` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::array_of_unknown_bound<::vcc_claim::const_<int>>>`
-types SemaCXX/cxx1y-variable-templates_top_level.cpp -std=c++17 -Wno-unused-value: 494:58: `C < int , 0 , 1 , 2 , 3 , 4 > :: VALUEARRAY` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::array_of_unknown_bound<::vcc_claim::const_<int>>>`
-types SemaCXX/cxx1y-variable-templates_top_level.cpp -std=c++17 -Wno-unused-value: 495:58: `C < int , 0 , 1 , 2 , 3 , 4 > :: VALUEARRAY` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::array_of_unknown_bound<::vcc_claim::const_<int>>>`
-types SemaCXX/cxx1y-variable-templates_top_level.cpp -std=c++20 -Wno-unused-value: 494:58: `C < int , 0 , 1 , 2 , 3 , 4 > :: VALUEARRAY` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::array_of_unknown_bound<::vcc_claim::const_<int>>>`
-types SemaCXX/cxx1y-variable-templates_top_level.cpp -std=c++20 -Wno-unused-value: 495:58: `C < int , 0 , 1 , 2 , 3 , 4 > :: VALUEARRAY` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::array_of_unknown_bound<::vcc_claim::const_<int>>>`
-types SemaCXX/cxx1y-variable-templates_top_level.cpp -std=c++2c -Wno-unused-value: 494:58: `C < int , 0 , 1 , 2 , 3 , 4 > :: VALUEARRAY` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::array_of_unknown_bound<::vcc_claim::const_<int>>>`
-types SemaCXX/cxx1y-variable-templates_top_level.cpp -std=c++2c -Wno-unused-value: 495:58: `C < int , 0 , 1 , 2 , 3 , 4 > :: VALUEARRAY` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::array_of_unknown_bound<::vcc_claim::const_<int>>>`
 types SemaCXX/decltype.cpp -std=c++17 -Wno-c99-designator: 260:36: `C :: XBitMask < 0 >` is no `::vcc_claim::lvalue_reference_to<::vcc_claim::const_<int>>`
 types SemaCXX/embed-init-list.cpp -std=gnu++17 -Wno-c++26-extensions: 105:41: `returned ( ) . size == 2` is not the constant 1ULL
 types SemaCXX/embed-init-list.cpp -std=gnu++17 -Wno-c++26-extensions: 98:48: `functional_cast ( ) . size == 2` is not the constant 1ULL
@@ -548,7 +539,6 @@ verdict CXX/class.access/class.friend/p1.cpp -std=c++14: ill-formed for us, acce
 verdict CXX/class.access/class.friend/p1.cpp -std=c++98: ill-formed for us, accepted by clang: line 295 (2 declarations)
 verdict CXX/class.access/class.friend/p1.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 295 (2 declarations)
 verdict CXX/class.access/class.protected/p1-cxx11.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 16 (1 declarations)
-verdict CXX/class.access/class.protected/p1.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 394 (2 declarations)
 verdict CXX/class/class.compare/class.compare.default/p1.cpp -std=c++2a: ill-formed for us, accepted by clang: line 258 (1 declarations)
 verdict CXX/class/class.compare/class.spaceship/p2.cpp -std=c++2a: ill-formed for us, accepted by clang: line 83 (10 declarations)
 verdict CXX/class/class.init/class.copy.elision/p3.cpp -std=c++11: ill-formed for us, accepted by clang: line 432 (1 declarations)
@@ -631,7 +621,6 @@ verdict SemaCXX/MicrosoftCompatibilityNoExceptions.cpp -std=gnu++17 -fms-compati
 verdict SemaCXX/alignof.cpp -std=c++11: ill-formed for us, accepted by clang: line 102 (1 declarations)
 verdict SemaCXX/ast-print.cpp -std=gnu++11: ill-formed for us, accepted by clang: line 266 (1 declarations)
 verdict SemaCXX/attr-aligned.cpp -std=c++11: ill-formed for us, accepted by clang: line 5 (1 declarations)
-verdict SemaCXX/attr-lifetimebound.cpp -std=c++23: ill-formed for us, accepted by clang: line 361 (1 declarations)
 verdict SemaCXX/builtin-assume-aligned.cpp -std=c++11: ill-formed for us, accepted by clang: line 12 (6 declarations)
 verdict SemaCXX/builtin-assume-aligned.cpp -std=c++26: ill-formed for us, accepted by clang: line 12 (10 declarations)
 verdict SemaCXX/builtin-bswapg.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 4 (7 declarations)
