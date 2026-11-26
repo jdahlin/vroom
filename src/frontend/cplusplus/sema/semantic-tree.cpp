@@ -202,8 +202,13 @@ uint32_t semantic_analysis::expression_node(semantic_kind kind,
             a && entity_table[a].kind == entity_kind::function)
             function = a;
         else if (kind == semantic_kind::construct ||
-                 kind == semantic_kind::destroy ||
-                 kind == semantic_kind::bound_member_function)
+                 kind == semantic_kind::destroy)
+            function = b;
+        /* ([basic.def.odr]/4: an overload set named before overload
+           resolution is no use of its first function; the call's node
+           of the one chosen is) */
+        else if (kind == semantic_kind::bound_member_function && b &&
+                 !entity_table[b].next_overload)
             function = b;
         else if ((kind == semantic_kind::entity) && a &&
                  entity_table[a].kind == entity_kind::variable)
