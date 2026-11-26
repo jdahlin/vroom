@@ -503,6 +503,27 @@ uint32_t c_lowering::stdc_bits(const semantic_node &n, ast_qualified_type t,
     return comma(t, stored, r);
 }
 
+/* [ext:gnu_library_builtins] a call of a function of C language linkage with
+   no definition that names an x86-64 instruction (_mm_pause, __rdtsc, ...) */
+uint32_t c_lowering::x86_header_call(uint32_t function,
+                                     const owned_array<uint32_t> &arguments)
+{
+    if (node(function).kind == semantic_kind::conversion &&
+        static_cast<conversion_kind>(node(function).op) ==
+            conversion_kind::function_to_pointer)
+        function = node(function).a;
+    if (node(function).kind != semantic_kind::entity)
+        return 0;
+    const entity &f = analysis.entity_table[node(function).a];
+    if (f.kind != entity_kind::function || !f.c_language_linkage || f.defined ||
+        !f.name)
+        return 0;
+    size_t length = 0;
+    const char *name = tokens.pp.identifier_spelling(f.name - 1, &length);
+    return ast_builder_x86_header_call(c, name, length, arguments.data(),
+                                       static_cast<uint32_t>(arguments.size()));
+}
+
 uint32_t c_lowering::special_builtin(builtin_lowering lowering,
                                      const semantic_node &n,
                                      ast_qualified_type t,
@@ -1005,9 +1026,13 @@ uint32_t c_lowering::call(const semantic_node &n)
         made = ast_builder_builtin_call(c, spelling, length, t,
                                         arguments.data(), count);
     } else {
-        made = make(AST_NODE_CALL, t, callee,
-                    ast_builder_list(c, arguments.data(), count), count, 0, 0);
-        psabi_call(n, made);
+        made = x86_header_call(n.a, arguments);
+        if (!made) {
+            made =
+                make(AST_NODE_CALL, t, callee,
+                     ast_builder_list(c, arguments.data(), count), count, 0, 0);
+            psabi_call(n, made);
+        }
     }
     if (member_pointer_call) {
         through.append(

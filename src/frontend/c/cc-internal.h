@@ -710,6 +710,10 @@ CC_PRIVATE uint32_t cc_builtin_arguments_parse(cc *c, cc_id_list *args);
 struct cc_body_binding;
 CC_PRIVATE const struct cc_body_binding *
 cc_builtin_body_find(const cc *c, const cc_builtin *b);
+CC_PRIVATE uint32_t cc_x86_header_call_build(cc *c, const char *name,
+                                             size_t length,
+                                             const uint32_t *args, uint32_t n,
+                                             uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_body_apply(cc *c,
                                           const struct cc_body_binding *k,
                                           const cc_builtin *b,

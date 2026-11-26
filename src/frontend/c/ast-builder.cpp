@@ -576,6 +576,12 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     return cc_builtin_node_new(c, b->id, t, 0, &list);
 }
 
+uint32_t ast_builder_x86_header_call(cc *c, const char *name, size_t length,
+                                     const uint32_t *args, uint32_t n)
+{
+    return cc_x86_header_call_build(c, name, length, args, n, 0);
+}
+
 uint32_t ast_builder_shuffle_vector(cc *c, ast_qualified_type t, uint32_t a,
                                     uint32_t b, const int32_t *indices,
                                     uint32_t count)
