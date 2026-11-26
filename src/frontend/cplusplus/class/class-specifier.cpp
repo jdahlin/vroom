@@ -2825,7 +2825,9 @@ semantic_analysis::member_function_definition(entity_index c,
     if (r == analysis_result::well_formed) {
         function_cv = 0;
         in_member_declarator = true;
+        reanalysing_member_declarator = true;
         r = declarator(definition, definition.declarator(), type, m);
+        reanalysing_member_declarator = false;
         in_member_declarator = false;
         if (r == analysis_result::well_formed)
             r = misplaced_function_qualifiers(definition, type, true);

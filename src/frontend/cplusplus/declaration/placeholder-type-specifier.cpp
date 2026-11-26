@@ -718,6 +718,8 @@ analysis_result semantic_analysis::trailing_return(SyntaxRef declaration,
             n, "dcl.fct",
             "a trailing-return-type after a type other than plain auto");
     VTRY(r, declarator(declaration, n[0], type, m));
+    if (reanalysing_member_declarator)
+        return analysis_result::well_formed;
     const struct type f = type_table[type.unqualified()];
     /* (a type-id's abstract declarator has a derived-declarator-type-list:
        auto(*)() -> void is "pointer to function returning auto") */
