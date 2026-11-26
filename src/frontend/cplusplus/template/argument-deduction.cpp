@@ -327,7 +327,13 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
         return true;
     }
     const struct type &ar = type_table[a.unqualified()];
-    if (pr.kind != ar.kind || p.cv() != a.cv())
+    /* [temp.deduct.call]/4.1: a deduced A more cv-qualified than a vector
+       argument, as a template parameter's above */
+    bool more_qualified_vector =
+        !exact &&
+        (pr.kind == type_kind::ext_vector || pr.kind == type_kind::vector) &&
+        !(a.cv() & ~p.cv());
+    if (pr.kind != ar.kind || (p.cv() != a.cv() && !more_qualified_vector))
         return false;
     switch (pr.kind) {
     case type_kind::pointer:
@@ -397,6 +403,27 @@ bool semantic_analysis::deduce_type(qualified_type p, qualified_type a,
                    ar.entity) {
             return false;
         }
+        return deduce_type(pr.operand, ar.operand, deduced, set, exact);
+    case type_kind::ext_vector:
+        /* [ext:clang_ext_vector_type] T ext_vector_type(N): N deduced from
+           A's element count, as T[N]'s bound ([temp.deduct.type]/8) */
+        if (pr.entity && ar.entity) {
+            /* [temp.deduct.partial]: N against the other template's own,
+               not compared here */
+            deduction_unknowns++;
+            return false;
+        }
+        if (pr.entity) {
+            if (!deduce_bound(pr.entity, ar.bound, deduced, set))
+                return false;
+        } else if (pr.bound != ar.bound || ar.entity) {
+            return false;
+        }
+        return deduce_type(pr.operand, ar.operand, deduced, set, exact);
+    case type_kind::vector:
+        /* [ext:gnu_vector_size] the element deduced, the count the same */
+        if (pr.bound != ar.bound)
+            return false;
         return deduce_type(pr.operand, ar.operand, deduced, set, exact);
     case type_kind::function: {
         /* [temp.deduct.decl]/1: the declaration's noexcept-specifier is not

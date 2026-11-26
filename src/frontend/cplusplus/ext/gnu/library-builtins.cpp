@@ -1984,12 +1984,18 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
 {
     owned_array<SyntaxElement> clauses;
     analysis_result r = analysis_result::well_formed;
+    int kind = vector_builtin_kind(tokens.identifier(n[0].token()));
+    /* [temp.variadic]/7: __builtin_shufflevector's indices may be a pack
+       expansion (a, b, I...) */
+    owned_array<uint32_t> index_packs;
+    owned_array<uint32_t> *index_expansions = nullptr;
+    if (kind == 1)
+        index_expansions = &index_packs;
     if (n[2].is(syntax_kind::initializer_list)) {
-        VTRY_SET(r, list_clauses(n[2].index(), clauses));
+        VTRY_SET(r, list_clauses(n[2].index(), clauses, index_expansions));
     } else {
         clauses.append(n[2]);
     }
-    int kind = vector_builtin_kind(tokens.identifier(n[0].token()));
     if (kind == 26) {
         /* any value of the operand's type: its own */
         if (clauses.size() != 1)
@@ -2098,7 +2104,11 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
     }
     for (size_t i = 2; i < clauses.size(); i++) {
         expression_meaning e;
-        VTRY_SET(r, expression(clauses[i], e));
+        const owned_array<uint32_t> *saved = clause_packs;
+        clause_packs = &index_packs;
+        r = clause_expression(clauses, i, e);
+        clause_packs = saved;
+        VTRY(checked, r);
         bool constant = false;
         if (!is_integral(e.type))
             return not_supported_because(
