@@ -660,17 +660,18 @@ analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
     if (!undeduced && deduce_member_body_now(e))
         return analysis_result::well_formed;
     if (!undeduced) {
-        if (x.kind == entity_kind::variable)
+        const entity &after = entity_table[e];
+        if (after.kind == entity_kind::variable)
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",
                 "a variable whose placeholder type is not deduced "
                 "(its initializer was not analysed)");
-        if (x.kind == entity_kind::function && x.instantiation)
+        if (after.kind == entity_kind::function && after.instantiation)
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",
                 "a function template's specialization whose placeholder "
                 "type is not deduced");
-        if (x.kind == entity_kind::function)
+        if (after.kind == entity_kind::function)
             return not_supported_because(
                 current_declaration, "dcl.spec.auto",
                 "a defined function whose placeholder type is not deduced "
