@@ -94,6 +94,92 @@ CC_PRIVATE uint32_t cc_builtin_x86_instruction_build(cc *c, const cc_builtin *b,
     return cc_builtin_node_new(c, CC_BUILTIN_X86_INSTRUCTION, rt, loc, args);
 }
 
+static const char *const x86_stencil_names[] = {
+#define X86_STENCIL(name, signature) name,
+#include "frontend/x86-stencil-names.inc"
+#undef X86_STENCIL
+};
+
+/* a builtin of frontend/x86-stencil-names.inc: as above, its code the
+   stencil of its row */
+CC_PRIVATE uint32_t cc_builtin_x86_stencil_build(cc *c, const cc_builtin *b,
+                                                 cc_id_list *args,
+                                                 ast_qualified_type rt,
+                                                 uint32_t loc)
+{
+    unsigned row = 0;
+    unsigned count = sizeof x86_stencil_names / sizeof *x86_stencil_names;
+
+    while (row < count && strcmp(x86_stencil_names[row], b->name))
+        row++;
+    if (!CC_X86_64(c)) {
+        cc_report_error(c, loc, "builtin '%s' requires an x86-64 target",
+                        b->name);
+        return cc_node_error_new(c, loc);
+    }
+    if (row == count || args->n != AST_TYPE(c, cc_builtin_type(c, b))->n) {
+        cc_report_error(c, loc, "wrong number of arguments to '%s'", b->name);
+        return cc_node_error_new(c, loc);
+    }
+    cc_id_list_append(
+        c, args, cc_node_integer_new(c, row, cc_type_basic(AST_TYPE_INT), loc));
+    return cc_builtin_node_new(c, CC_BUILTIN_X86_STENCIL, rt, loc, args);
+}
+
+/* clang's type-generic vector builtins that are stencils of x86-64 here
+   (tools/gen-x86stencils.py, GENERIC): the row is that of the first operand's
+   shape; the result is of its type, a reduction's of its element's */
+CC_PRIVATE uint32_t cc_x86_generic_build(cc *c, const char *name,
+                                         const uint32_t *values, uint32_t n,
+                                         uint32_t loc)
+{
+    cc_id_list args;
+    cc_id_list_init(&args);
+    if (!CC_X86_64(c) || !n) {
+        cc_report_error(c, loc, "builtin '%s' requires an x86-64 target", name);
+        return cc_node_error_new(c, loc);
+    }
+    /* the operands in their own types: no integer promotion */
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t a = cc_conversion_decay(c, values[i]);
+        cc_id_list_append(
+            c, &args,
+            cc_conversion_apply(
+                c, a, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(a)->ty)));
+    }
+    ast_qualified_type t =
+        AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(args.v[0])->ty);
+    ast_qualified_type element = t;
+    unsigned width = 0;
+    if (cc_type_is_vector(c, t)) {
+        width = (unsigned)cc_type_size(c, t);
+        element = AST_TYPE(c, t)->base;
+    }
+    char kind = 'f';
+    if (cc_type_is_integer(c, element))
+        kind = 'i';
+    char shaped[80];
+    snprintf(shaped, sizeof shaped, "%s/%u%c%u/%u", name, width, kind,
+             (unsigned)cc_type_size(c, element), n);
+
+    unsigned row = 0;
+    unsigned count = sizeof x86_stencil_names / sizeof *x86_stencil_names;
+    while (row < count && strcmp(x86_stencil_names[row], shaped))
+        row++;
+    if (row == count) {
+        cc_report_error(c, loc, "'%s' of this operand type is not supported",
+                        name);
+        return cc_node_error_new(c, loc);
+    }
+    ast_qualified_type result = t;
+    if (strstr(name, "reduce"))
+        result = element;
+    cc_id_list_append(
+        c, &args,
+        cc_node_integer_new(c, row, cc_type_basic(AST_TYPE_INT), loc));
+    return cc_builtin_node_new(c, CC_BUILTIN_X86_STENCIL, result, loc, &args);
+}
+
 /* The builtin converts its constant control to char, as Clang does. The final hidden
  * argument identifies the result projection and explicit-length variant. */
 CC_PRIVATE uint32_t cc_builtin_x86_pcmpstr_build(cc *c, const cc_builtin *b,

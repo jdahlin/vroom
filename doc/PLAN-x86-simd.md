@@ -57,6 +57,21 @@ Stockfish 17.1, `bench 16 1 13 default depth`, -O2, 2030154 nodes everywhere:
   registers, fixed registers, `clflush`, `movnti`).  A function with one of
   them is built by the direct emitter, not VIR.  The earlier hand-written
   vector expansions can move into the table.
+- **XS2b** (done) Every other builtin the intrinsic headers use, AVX through
+  AVX-512, as *stencils*: `tools/gen-x86stencils.py` has clang compile one
+  function per builtin (per value of its constant operands) with only the
+  builtin's features, and vcc pastes those bytes, operands and result in a
+  frame block addressed by rdi (`arch/x64/codegen/simd.cpp`).  Constants a
+  stencil reads go right before it, aligned, with a jump around them.  The
+  same for clang's type-generic `__builtin_elementwise_*` and
+  `__builtin_reduce_mul` that vcc has no node for, per operand shape.  Checked
+  in: `frontend/x86-stencil-names.inc` and
+  `arch/x64/codegen/x86-stencils.inc`; clang runs only when they are
+  regenerated.  Not generated (the list is at the end of the names file): the
+  AMX tile builtins (1024-byte operands), a few whose constants have too many
+  combinations, 32-bit-only ones.  Limits: operands go through memory (slow),
+  `-S` shows `.byte` lines, and builtins the host cannot run are only
+  compile-checked.
 - **XS3** 256 bits: AVX/AVX2 with VEX, ymm registers, the System V and
   Windows rules for wide vectors, `vzeroupper`, and the front end's
   `_Float16` vector errors.  Gate: Stockfish AVX2 builds.

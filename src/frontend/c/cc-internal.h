@@ -133,6 +133,7 @@ CC_PRIVATE uint32_t cc_builtin_os_log_build(cc *c, int id, uint32_t loc);
 CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want,
                                        const cc_id_list *args);
 CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch);
+CC_PRIVATE ast_qualified_type cc_builtin_signature_next(cc *c, const char **s);
 CC_PRIVATE ast_qualified_type cc_builtin_type(cc *c, const cc_builtin *b);
 CC_PRIVATE uint32_t cc_vector_saturate(cc *c, bool sub, uint32_t a, uint32_t b,
                                        uint32_t loc);
@@ -147,6 +148,9 @@ CC_PRIVATE uint32_t cc_builtin_elementwise_minmax_build(cc *c,
                                                         uint32_t loc);
 CC_PRIVATE uint32_t cc_vector_abs(cc *c, uint32_t arg, uint32_t loc);
 CC_PRIVATE uint32_t cc_vector_reduce(cc *c, int op, uint32_t arg, uint32_t loc);
+CC_PRIVATE uint32_t cc_x86_generic_build(cc *c, const char *name,
+                                         const uint32_t *values, uint32_t n,
+                                         uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_elementwise_abs_build(cc *c, const cc_builtin *b,
                                                      uint32_t loc);
 CC_PRIVATE bool cc_builtin_has_effects(cc *c, uint32_t n, bool load);
@@ -161,6 +165,10 @@ CC_PRIVATE uint32_t cc_builtin_x86_instruction_build(cc *c, const cc_builtin *b,
                                                      cc_id_list *args,
                                                      ast_qualified_type rt,
                                                      uint32_t loc);
+CC_PRIVATE uint32_t cc_builtin_x86_stencil_build(cc *c, const cc_builtin *b,
+                                                 cc_id_list *args,
+                                                 ast_qualified_type rt,
+                                                 uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_x86_simd_build(cc *c, const cc_builtin *b,
                                               cc_id_list *args,
                                               ast_qualified_type rt,

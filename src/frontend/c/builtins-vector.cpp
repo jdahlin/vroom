@@ -445,6 +445,16 @@ CC_PRIVATE uint32_t cc_builtin_elementwise_minmax_build(cc *c,
         cc_builtin_arity_check(c, loc, 2, &args);
         return cc_node_error_new(c, loc);
     }
+    if (CC_X86_64(c) && (b->id == CC_BUILTIN_ELEMENTWISE_MIN ||
+                         b->id == CC_BUILTIN_ELEMENTWISE_MAX)) {
+        uint32_t values[2] = {cc_conversion_decay(c, args.v[0]),
+                              cc_conversion_decay(c, args.v[1])};
+        ast_qualified_type t = AST_NODE(values[0])->ty;
+        if (cc_type_is_vector(c, t))
+            t = AST_TYPE(c, t)->base;
+        if (!cc_type_is_integer(c, t))
+            return cc_x86_generic_build(c, b->name, values, 2, loc);
+    }
     if (b->id == CC_BUILTIN_ELEMENTWISE_ADD_SAT ||
         b->id == CC_BUILTIN_ELEMENTWISE_SUB_SAT)
         return cc_vector_saturate(c, b->id == CC_BUILTIN_ELEMENTWISE_SUB_SAT,

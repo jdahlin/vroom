@@ -552,7 +552,8 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     }
     /* the x86 vector builtins expanded into lanes, as the parsed call does:
        the arguments converted to the signature's types first */
-    if (b->id == CC_BUILTIN_X86_SIMD || b->id == CC_BUILTIN_X86_INSTRUCTION) {
+    if (b->id == CC_BUILTIN_X86_SIMD || b->id == CC_BUILTIN_X86_INSTRUCTION ||
+        b->id == CC_BUILTIN_X86_STENCIL) {
         const ctype *f = AST_TYPE(c, cc_builtin_type(c, b));
         cc_id_list typed;
         cc_id_list_init(&typed);
@@ -564,6 +565,8 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
         }
         if (b->id == CC_BUILTIN_X86_INSTRUCTION)
             return cc_builtin_x86_instruction_build(c, b, &typed, t, 0);
+        if (b->id == CC_BUILTIN_X86_STENCIL)
+            return cc_builtin_x86_stencil_build(c, b, &typed, t, 0);
         return cc_builtin_x86_simd_build(c, b, &typed, t, 0);
     }
     cc_id_list list;
@@ -607,6 +610,12 @@ uint32_t ast_builder_vector_abs(cc *c, uint32_t a)
 uint32_t ast_builder_vector_reduce(cc *c, int op, uint32_t a)
 {
     return cc_vector_reduce(c, op, a, 0);
+}
+
+uint32_t ast_builder_x86_generic(cc *c, const char *name,
+                                 const uint32_t *values, uint32_t n)
+{
+    return cc_x86_generic_build(c, name, values, n, 0);
 }
 
 uint32_t ast_builder_complex(cc *c, ast_qualified_type t, uint32_t re,

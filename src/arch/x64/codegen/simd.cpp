@@ -631,10 +631,210 @@ static void x64_simd_general_text(codegen_context *e, const char *before, int r,
     x64_simd_text(e, line);
 }
 
+/* ---- builtins that are a stencil of clang's code (tools/gen-x86stencils.py) */
+
+typedef struct x64_stencil {
+    const char *features;
+    uint8_t constants; /* the constant operands, as a mask */
+    uint32_t first;    /* in x64_stencil_variants */
+    uint16_t variants;
+    int16_t patched; /* the byte that is the constant, or -1 */
+} x64_stencil;
+
+typedef struct x64_stencil_variant {
+    uint32_t key; /* the constants, a byte each */
+    uint16_t keys;
+    uint32_t offset; /* in x64_stencil_code: constants, then the code */
+    uint16_t length;
+    uint16_t constants;
+} x64_stencil_variant;
+
+static const x64_stencil x64_stencils[] = {
+#define X86_STENCIL_ROW(features, constants, first, variants, patched)         \
+    {features, constants, first, variants, patched},
+#include "x86-stencils.inc"
+#undef X86_STENCIL_ROW
+};
+
+static const x64_stencil_variant x64_stencil_variants[] = {
+#define X86_STENCIL_VARIANTS
+#include "x86-stencils.inc"
+#undef X86_STENCIL_VARIANTS
+};
+
+static const uint8_t x64_stencil_code[] = {
+#define X86_STENCIL_BYTES
+#include "x86-stencils.inc"
+#undef X86_STENCIL_BYTES
+};
+
+static const char *const x64_stencil_names[] = {
+#define X86_STENCIL(name, signature) name,
+#include "frontend/x86-stencil-names.inc"
+#undef X86_STENCIL
+};
+
+/* whether the target has the features: names joined by ',' (all of) and '|'
+   (one of), with parentheses */
+static bool x64_stencil_features(codegen_context *e, const char *&p,
+                                 const x86_features &have)
+{
+    bool any = false, all = true;
+
+    for (;;) {
+        bool one = true;
+        if (*p == '(') {
+            p++;
+            one = x64_stencil_features(e, p, have);
+            if (*p == ')')
+                p++;
+        } else {
+            char name[32];
+            size_t n = strcspn(p, ",|()");
+            if (n && n < sizeof name) {
+                memcpy(name, p, n);
+                name[n] = 0;
+                int bit = x86_feature_find(name);
+                one = bit >= 0 && x86_feature_has(have, (unsigned)bit);
+            }
+            p += n;
+        }
+        all = all && one;
+        if (*p == ',') {
+            p++;
+            continue;
+        }
+        any = any || all;
+        if (*p != '|')
+            return any;
+        p++;
+        all = true;
+    }
+}
+
+static void x64_stencil_text(codegen_context *e, const uint8_t *code,
+                             unsigned length, int patched, uint8_t value)
+{
+    for (unsigned i = 0; i < length; i += 16) {
+        char text[16 * 4 + 16];
+        int n = snprintf(text, sizeof text, "\t.byte\t");
+
+        for (unsigned k = i; k < length && k < i + 16; k++) {
+            unsigned byte = code[k];
+            if ((int)k == patched)
+                byte = value;
+            const char *comma = ",";
+            if (k == i)
+                comma = "";
+            n += snprintf(text + n, sizeof text - (size_t)n, "%s%u", comma,
+                          byte);
+        }
+        snprintf(text + n, sizeof text - (size_t)n, "\n");
+        x64_simd_text(e, text);
+    }
+}
+
+/* the operands and the result in one frame block, at multiples of 16 (the
+   result first), its address in rdi, then clang's code for the builtin */
+static codegen_value x64_x86_stencil(codegen_context *e, uint32_t n)
+{
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    const uint32_t *arg = &c->lists[x->b];
+    unsigned count = x->c - 1;
+    unsigned row = (unsigned)c->ipool[N(arg[count])->a];
+    const x64_stencil *s = &x64_stencils[row];
+    uint32_t fn = e->walk_state->inline_call
+                      ? e->walk_state->inline_call->function
+                      : e->walk_state->function_symbol;
+    const char *features = s->features;
+
+    x64_nofp(e);
+    if (!x64_stencil_features(e, features, cc_x86_features_get(c, fn)))
+        codegen_fatal_report(e, x->loc, "'%s' needs target feature %s",
+                             x64_stencil_names[row], s->features);
+
+    uint32_t key = 0;
+    unsigned constants = 0;
+    uint64_t result_size = 0;
+    if (KIND(c, x->ty) != AST_TYPE_VOID)
+        result_size = (codegen_type_size(c, x->ty) + 15) & ~(uint64_t)15;
+    uint64_t size = result_size;
+    for (unsigned i = 0; i < count; i++) {
+        if (!(s->constants & (1u << i))) {
+            size += (codegen_type_size(c, N(arg[i])->ty) + 15) & ~(uint64_t)15;
+            continue;
+        }
+        cc_value value;
+        if (!cc_eval(c, arg[i], &value) || value.kind != CC_VALUE_INTEGER)
+            codegen_fatal_report(e, x->loc,
+                                 "argument to '%s' must be a constant integer",
+                                 x64_stencil_names[row]);
+        key |= (uint32_t)(value.i & 0xff) << (8 * constants++);
+    }
+    const x64_stencil_variant *found = NULL;
+    for (unsigned i = 0; i < s->variants; i++) {
+        const x64_stencil_variant *v = &x64_stencil_variants[s->first + i];
+        if (key >= v->key && key - v->key < v->keys)
+            found = v;
+    }
+    if (!found)
+        codegen_fatal_report(e, x->loc,
+                             "constant argument to '%s' is out of range",
+                             x64_stencil_names[row]);
+
+    codegen_lvalue block = {.kind = CODEGEN_LVALUE_FRAME, .align = 16};
+    if (size)
+        block.offset = walk_slot_temporary(e, size, 16);
+    codegen_lvalue operand = block;
+    operand.offset += (int64_t)result_size;
+    for (unsigned i = 0; i < count; i++) {
+        if (s->constants & (1u << i))
+            continue;
+        walk_initializer_emit(e, &operand, N(arg[i])->ty, arg[i]);
+        operand.offset += (int64_t)((codegen_type_size(c, N(arg[i])->ty) + 15) &
+                                    ~(uint64_t)15);
+    }
+
+    /* the code uses the caller-saved registers as it likes, and the stack
+       below rsp: as a call */
+    x64_lowering_context *X = e->x64_context;
+    uint32_t saved = X->temporaries_in_use & X64_TEMPORARIES,
+             fsaved = X->temporaries_in_use & X64_FLOAT_TEMPORARIES;
+    e->has_calls = true;
+    x64_temporaries_save(e, saved, fsaved);
+    int pad = 8;
+    if (X->outstanding_pushes & 1)
+        pad = 0;
+    if (pad)
+        x64_record_emit(e, X64_OP_ADJSP)->immediate = -pad;
+    if (size)
+        x64_record_emit_memory(e, X64_OP_LEA, 8, RDI, &block, false);
+    const uint8_t *code = x64_stencil_code + found->offset;
+    if (found->constants) {
+        /* the code reads them rip-relative: right before it, aligned, with
+           a jump around them */
+        x64_simd_text(e, "\tjmp\t99f\n\t.p2align\t6\n");
+        x64_stencil_text(e, code, found->constants, -1, 0);
+        x64_simd_text(e, "99:\n");
+        code += found->constants;
+    }
+    x64_stencil_text(e, code, found->length, s->patched, (uint8_t)key);
+    if (pad)
+        x64_record_emit(e, X64_OP_ADJSP)->immediate = pad;
+    x64_temporaries_restore(e, saved, fsaved);
+
+    if (!result_size)
+        return codegen_value_constant(0);
+    return walk_lvalue_reload(e, &block, x->ty);
+}
+
 VPRIV codegen_value x64_x86_instruction(codegen_context *e, uint32_t n)
 {
     cc *c = e->compile_context;
     const node *x = N(n);
+    if (x->aux == CC_BUILTIN_X86_STENCIL)
+        return x64_x86_stencil(e, n);
     const uint32_t *arg = &c->lists[x->b];
     unsigned count = x->c - 1;
     const x64_instruction *in =

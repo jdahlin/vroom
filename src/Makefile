@@ -290,7 +290,7 @@ $(BUILTIN_GENERATED) &: $(OUT)/clang-builtin-reader tools/gen-builtin-registrati
 
 builtin-registrations: $(BUILTIN_GENERATED)
 
-$(OBJ)/unity/pp.o $(call o,$(pp_SRC)) $(OBJ)/unity/cc.o $(call o,$(cc_SRC)) $(OBJ)/unity/cplusplus.o $(call o,$(cplusplus_SRC) $(cxxlower_SRC)): $(BUILTIN_GENERATED)
+$(OBJ)/unity/codegen.o $(call o,$(codegen_SRC)) $(OBJ)/unity/pp.o $(call o,$(pp_SRC)) $(OBJ)/unity/cc.o $(call o,$(cc_SRC)) $(OBJ)/unity/cplusplus.o $(call o,$(cplusplus_SRC) $(cxxlower_SRC)): $(BUILTIN_GENERATED)
 
 # viralloc: VIR register allocation with a synthetic target (PLAN-vir.md V4)
 VIRALLOC_SRC = $(VIRA_SRC) vir/synthetic-target.cpp

@@ -26,7 +26,29 @@ static const cc_builtin cc_builtin_table[] = {
     {name, CC_BUILTIN_X86_INSTRUCTION, 0, signature},
 #include "frontend/x86-instructions.inc"
 #undef X86_INSTRUCTION
+#define X86_STENCIL(name, signature)                                           \
+    {name, CC_BUILTIN_X86_STENCIL, 0, signature},
+#include "frontend/x86-stencil-names.inc"
+#undef X86_STENCIL
     {"__builtin_ia32_pblendvb128", CC_BUILTIN_X86_BLENDVB, 1, "BBBB"},
+    {"__builtin_elementwise_fma", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_sqrt", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_fshl", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_fshr", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_popcount", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_bitreverse", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_clzg", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_elementwise_ctzg", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_reduce_mul", CC_BUILTIN_X86_GENERIC, 1, "i."},
+    {"__builtin_reduce_add", CC_BUILTIN_REDUCE_ADD, 1, "i."},
+    {"__builtin_reduce_max", CC_BUILTIN_REDUCE_MAX, 1, "i."},
+    {"__builtin_reduce_min", CC_BUILTIN_REDUCE_MIN, 1, "i."},
+    {"__builtin_reduce_and", CC_BUILTIN_REDUCE_AND, 1, "i."},
+    {"__builtin_reduce_or", CC_BUILTIN_REDUCE_OR, 1, "i."},
+    {"__builtin_reduce_xor", CC_BUILTIN_REDUCE_XOR, 1, "i."},
+    {"__builtin_nondeterministic_value", CC_BUILTIN_NONDETERMINISTIC, 1, "i."},
+    {"__builtin_nontemporal_store", CC_BUILTIN_NONTEMPORAL_STORE, 1, "v."},
+    {"__builtin_nontemporal_load", CC_BUILTIN_NONTEMPORAL_LOAD, 1, "i."},
     {"__builtin_elementwise_abs", CC_BUILTIN_ELEMENTWISE_ABS, 1, "i."},
     {"__builtin_elementwise_min", CC_BUILTIN_ELEMENTWISE_MIN, 1, "i."},
     {"__builtin_elementwise_max", CC_BUILTIN_ELEMENTWISE_MAX, 1, "i."},
@@ -549,6 +571,10 @@ CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch)
         return cc_type_vector(c, cc_type_basic(AST_TYPE_UNSIGNED_SHORT), 16);
     case 'D':
         return cc_type_basic(AST_TYPE_LONG_DOUBLE);
+    case 'x': /* _Float16 in the stencils' signatures */
+        return cc_type_basic(AST_TYPE_FLOAT16);
+    case 'g':
+        return cc_type_basic(AST_TYPE_BFLOAT16);
     case 'p':
         return cc_type_pointer(c, cc_type_basic(AST_TYPE_VOID));
     case 'P':
@@ -572,6 +598,25 @@ CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch)
     }
 }
 
+/* the next type of a signature: a letter; a vector of 8, 16, 32 or 64 bytes
+   as '3', '4', '5' or '6' and its element's letter; '*' or '^' (a pointer to
+   const) before the pointed-to type */
+CC_PRIVATE ast_qualified_type cc_builtin_signature_next(cc *c, const char **s)
+{
+    char ch = *(*s)++;
+
+    if (ch == '*')
+        return cc_type_pointer(c, cc_builtin_signature_next(c, s));
+    if (ch == '^')
+        return cc_type_pointer(
+            c, cc_type_qualify(c, cc_builtin_signature_next(c, s),
+                               AST_QUALIFIER_CONST));
+    if (ch >= '3' && ch <= '6')
+        return cc_type_vector(c, cc_builtin_signature_next(c, s),
+                              1u << (ch - '0'));
+    return cc_builtin_signature_type(c, ch);
+}
+
 /* the function type of a signature in vcc's letters (sigtype) */
 CC_PRIVATE ast_qualified_type
 cc_builtin_signature_function_type(cc *c, const char *sig)
@@ -580,15 +625,16 @@ cc_builtin_signature_function_type(cc *c, const char *sig)
     uint32_t n = 0;
     int fl = 0;
 
-    for (const char *s = sig + 1; *s; s++) {
+    const char *s = sig;
+    ast_qualified_type result = cc_builtin_signature_next(c, &s);
+    while (*s) {
         if (*s == '.') {
             fl |= AST_TYPE_FLAG_VARIADIC;
             break;
         }
-        par[n++] = cc_builtin_signature_type(c, *s);
+        par[n++] = cc_builtin_signature_next(c, &s);
     }
-    return cc_type_function(c, cc_builtin_signature_type(c, sig[0]), par, n,
-                            fl);
+    return cc_type_function(c, result, par, n, fl);
 }
 
 CC_PRIVATE ast_qualified_type cc_builtin_type(cc *c, const cc_builtin *b)

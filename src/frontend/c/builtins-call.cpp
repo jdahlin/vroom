@@ -182,7 +182,8 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
                                           uint32_t loc)
 {
     cc_id_list args;
-    ast_qualified_type rt = cc_builtin_signature_type(c, b->sig[0]);
+    const char *signature = b->sig;
+    ast_qualified_type rt = cc_builtin_signature_next(c, &signature);
     bool handled;
     uint32_t math = cc_builtin_math_call_build(c, b, loc, &handled);
     if (handled)
@@ -209,6 +210,71 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
     case CC_BUILTIN_STDC_ROTL:
     case CC_BUILTIN_STDC_ROTR:
         return cc_builtin_rotate_build(c, b, loc);
+    case CC_BUILTIN_X86_GENERIC: {
+        cc_id_list operands;
+        cc_builtin_arguments_parse(c, &operands);
+        for (uint32_t i = 0; i < operands.n; i++)
+            operands.v[i] = cc_conversion_decay(c, operands.v[i]);
+        return cc_x86_generic_build(c, b->name, operands.v, operands.n, loc);
+    }
+    case CC_BUILTIN_NONDETERMINISTIC: {
+        /* any value of the operand's type: its own */
+        cc_id_list operands;
+        cc_builtin_arguments_parse(c, &operands);
+        if (operands.n != 1) {
+            cc_builtin_arity_check(c, loc, 1, &operands);
+            return cc_node_error_new(c, loc);
+        }
+        uint32_t a = cc_conversion_decay(c, operands.v[0]);
+        return cc_conversion_apply(
+            c, a, AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(a)->ty));
+    }
+    case CC_BUILTIN_NONTEMPORAL_STORE:
+    case CC_BUILTIN_NONTEMPORAL_LOAD: {
+        /* the access through the pointer; the cache hint is left out */
+        bool store = b->id == CC_BUILTIN_NONTEMPORAL_STORE;
+        uint32_t wanted = 1;
+        if (store)
+            wanted = 2;
+        cc_id_list operands;
+        cc_builtin_arguments_parse(c, &operands);
+        if (operands.n != wanted) {
+            cc_builtin_arity_check(c, loc, wanted, &operands);
+            return cc_node_error_new(c, loc);
+        }
+        uint32_t address = cc_conversion_decay(c, operands.v[wanted - 1]);
+        if (!cc_type_is_pointer(c, AST_NODE(address)->ty)) {
+            cc_report_error(c, loc, "'%s' needs a pointer", b->name);
+            return cc_node_error_new(c, loc);
+        }
+        ast_qualified_type t = AST_TYPE(c, AST_NODE(address)->ty)->base;
+        uint32_t object = cc_node_new(c, AST_NODE_DEREFERENCE, t, loc);
+        AST_NODE(object)->a = address;
+        AST_NODE(object)->flags = AST_NODE_FLAG_LVALUE;
+        if (!store)
+            return cc_node_rvalue(c, object);
+        uint32_t value =
+            cc_conversion_apply(c, cc_conversion_decay(c, operands.v[0]),
+                                AST_QUALIFIED_TYPE_UNQUALIFIED(t));
+        return cc_conversion_apply(
+            c, cc_node_new_operands(c, AST_NODE_ASSIGN, t, loc, object, value),
+            cc_type_basic(AST_TYPE_VOID));
+    }
+    case CC_BUILTIN_REDUCE_ADD:
+    case CC_BUILTIN_REDUCE_MAX:
+    case CC_BUILTIN_REDUCE_MIN:
+    case CC_BUILTIN_REDUCE_AND:
+    case CC_BUILTIN_REDUCE_OR:
+    case CC_BUILTIN_REDUCE_XOR: {
+        cc_id_list operands;
+        cc_builtin_arguments_parse(c, &operands);
+        if (operands.n != 1) {
+            cc_builtin_arity_check(c, loc, 1, &operands);
+            return cc_node_error_new(c, loc);
+        }
+        return cc_vector_reduce(c, (int)(b->id - CC_BUILTIN_REDUCE_ADD),
+                                cc_conversion_decay(c, operands.v[0]), loc);
+    }
     case CC_BUILTIN_ELEMENTWISE_ABS:
         return cc_builtin_elementwise_abs_build(c, b, loc);
     case CC_BUILTIN_ELEMENTWISE_MIN:
@@ -434,6 +500,8 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
             return cc_builtin_x86_pcmpstr_build(c, b, &args, rt, loc);
         if (b->id == CC_BUILTIN_X86_INSTRUCTION)
             return cc_builtin_x86_instruction_build(c, b, &args, rt, loc);
+        if (b->id == CC_BUILTIN_X86_STENCIL)
+            return cc_builtin_x86_stencil_build(c, b, &args, rt, loc);
         if (b->id == CC_BUILTIN_X86_SIMD)
             return cc_builtin_x86_simd_build(c, b, &args, rt, loc);
         switch (b->id) {

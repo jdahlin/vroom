@@ -193,6 +193,7 @@ VPRIV int x64_i_zero(as_context *a, char *mn, XOp *o, int nops)
             {"mwait", {0x0f, 0x01, 0xc9}, 3},
             {"serialize", {0x0f, 0x01, 0xe8}, 3},
             {"encls", {0x0f, 0x01, 0xcf}, 3},
+            {"enclv", {0x0f, 0x01, 0xc0}, 3},
             {"enclu", {0x0f, 0x01, 0xd7}, 3},
             {"vzeroupper", {0xc5, 0xf8, 0x77}, 3},
             {"vzeroall", {0xc5, 0xfc, 0x77}, 3},

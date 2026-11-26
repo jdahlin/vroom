@@ -228,6 +228,8 @@ uint32_t ast_builder_vector_saturate(cc *c, bool sub, uint32_t a, uint32_t b);
 uint32_t ast_builder_vector_minmax(cc *c, bool max, uint32_t a, uint32_t b);
 uint32_t ast_builder_vector_abs(cc *c, uint32_t a);
 uint32_t ast_builder_vector_reduce(cc *c, int op, uint32_t a);
+uint32_t ast_builder_x86_generic(cc *c, const char *name,
+                                 const uint32_t *values, uint32_t n);
 uint32_t ast_builder_complex(cc *c, ast_qualified_type t, uint32_t re,
                              uint32_t im);
 uint32_t ast_builder_complex_part(cc *c, uint32_t v, int op);

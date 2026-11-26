@@ -214,7 +214,7 @@ entity_index semantic_analysis::declare_builtin(
 
 /* the scalar letters of the C front end's builtin signatures and their
    types */
-static const char signature_letters[] = "vbcChiulLwWzfdDFBHIQENUG";
+static const char signature_letters[] = "vbcChiulLwWzfdDFBHIQENUGxg";
 static const fundamental_type signature_types[] = {
     fundamental_type::void_,
     fundamental_type::bool_,
@@ -245,6 +245,9 @@ static const fundamental_type signature_types[] = {
     /* U and G: vectors of unsigned char and unsigned short */
     fundamental_type::unsigned_char,
     fundamental_type::unsigned_short_int,
+    /* x and g: _Float16 and __bf16 */
+    fundamental_type::float16,
+    fundamental_type::bfloat16,
 };
 
 enum class floating_builtin {
@@ -328,6 +331,33 @@ bool semantic_analysis::builtin_letter_type(char letter, qualified_type &t)
     return true;
 }
 
+/* the next type of a signature (cc_builtin_signature_next): a letter, a vector
+   of 8, 16, 32 or 64 bytes ('3' to '6' and its element) or a pointer ('*', '^'
+   to const) */
+bool semantic_analysis::builtin_signature_next(const char *&s,
+                                               qualified_type &t)
+{
+    char letter = *s++;
+    if (letter == '*' || letter == '^') {
+        if (!builtin_signature_next(s, t))
+            return false;
+        if (letter == '^')
+            t = qualified_type::make(t.unqualified(), cv_const);
+        t = qualified_type::make(type_table.pointer_to(t), cv_none);
+        return true;
+    }
+    if (letter >= '3' && letter <= '6') {
+        if (!builtin_signature_next(s, t))
+            return false;
+        /* [ext:gnu_vector_size] */
+        t = qualified_type::make(
+            type_table.vector_of(t, (1u << (letter - '0')) / size_of_type(t)),
+            cv_none);
+        return true;
+    }
+    return builtin_letter_type(letter, t);
+}
+
 /* a builtin of vcc's C front end (frontend/c/builtins-registry.cpp): its
    function type is the table's signature when the registry has no row of
    another form, and the call lowers to the C front end's builtin node
@@ -381,15 +411,17 @@ entity_index semantic_analysis::compiler_builtin(uint32_t name,
         owned_array<qualified_type> types_of;
         bool known = signature != nullptr;
         bool variadic = false;
-        for (const char *s = signature; known && *s; s++) {
+        for (const char *s = signature; known && *s;) {
+            bool first = s == signature;
             qualified_type t;
             if (*s == '.') {
-                variadic = s != signature;
+                variadic = !first;
                 known = variadic && !s[1];
                 break;
             }
             /* a parameter of type void is no scalar */
-            if (!builtin_letter_type(*s, t) || (s != signature && *s == 'v'))
+            bool nothing = *s == 'v';
+            if (!builtin_signature_next(s, t) || (!first && nothing))
                 known = false;
             else
                 types_of.append(t);
@@ -1772,6 +1804,60 @@ analysis_result semantic_analysis::builtin_addressof(SyntaxRef n,
     return analysis_result::well_formed;
 }
 
+/* the type-generic vector builtins that are x86-64 stencils in the C front
+   end (cc_x86_generic_build): kinds 15 and up, in this order */
+static const char *const x86_generic_builtins[] = {
+    "__builtin_elementwise_fma",      "__builtin_elementwise_sqrt",
+    "__builtin_elementwise_fshl",     "__builtin_elementwise_fshr",
+    "__builtin_elementwise_popcount", "__builtin_elementwise_bitreverse",
+    "__builtin_elementwise_clzg",     "__builtin_elementwise_ctzg",
+    "__builtin_reduce_mul",           "__builtin_elementwise_min",
+    "__builtin_elementwise_max",
+};
+
+const char *semantic_analysis::x86_generic_builtin(uint8_t kind)
+{
+    return x86_generic_builtins[kind - 15];
+}
+
+/* the operands of one of them: of one type; the result's is the first's, a
+   reduction's its element's */
+analysis_result
+semantic_analysis::x86_generic_call(SyntaxRef n,
+                                    const owned_array<SyntaxElement> &clauses,
+                                    uint8_t kind, expression_meaning &m)
+{
+    owned_array<uint32_t> operands;
+    qualified_type first;
+    analysis_result r = analysis_result::well_formed;
+    if (clauses.size() < 1 || clauses.size() > 3)
+        return ill_formed(n, "wrong number of arguments to the builtin",
+                          "ext.clang");
+    for (size_t i = 0; i < clauses.size(); i++) {
+        expression_meaning a;
+        VTRY_SET(r, expression(clauses[i], a));
+        VTRY_SET(r, operand_value(n, a));
+        if (!i)
+            first = qualified_type::make(a.type.unqualified(), cv_none);
+        else if (a.type.unqualified() != first.unqualified())
+            return ill_formed(n, "the operands shall be of one type",
+                              "ext.clang");
+        operands.append(a.node);
+    }
+    const struct type t = type_table[first.unqualified()];
+    m = expression_meaning();
+    m.type = first;
+    if (kind == 15 + 8 && t.kind == type_kind::vector)
+        m.type = qualified_type::make(t.operand.unqualified(), cv_none);
+    m.category = value_category::prvalue;
+    m.evaluation = constness::not_constant;
+    m.beyond_integral_constant = true;
+    m.node = expression_node(semantic_kind::vector_shuffle, m, n.first_token(),
+                             operands[0], operands[0], kind);
+    semantics.set_list(m.node, operands.data(), operands.size());
+    return analysis_result::well_formed;
+}
+
 /* which of clang's vector builtins that nothing declares a name is: 1
    __builtin_shufflevector, 2 and 3 __builtin_elementwise_min and _max */
 int semantic_analysis::vector_builtin_kind(uint32_t name)
@@ -1818,6 +1904,15 @@ int semantic_analysis::vector_builtin_kind(uint32_t name)
         return 13;
     if (name == tokens.pp.identifier(red_xor, sizeof red_xor - 1) + 1)
         return 14;
+    /* (min and max are kinds 2 and 3 until the operands' type is known) */
+    for (int i = 0; i < 9; i++) {
+        const char *s = x86_generic_builtins[i];
+        if (name == tokens.pp.identifier(s, strlen(s)) + 1)
+            return 15 + i;
+    }
+    static const char any[] = "__builtin_nondeterministic_value";
+    if (name == tokens.pp.identifier(any, sizeof any - 1) + 1)
+        return 26;
     return 0;
 }
 
@@ -1888,6 +1983,16 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
         clauses.append(n[2]);
     }
     int kind = vector_builtin_kind(tokens.identifier(n[0].token()));
+    if (kind == 26) {
+        /* any value of the operand's type: its own */
+        if (clauses.size() != 1)
+            return ill_formed(n, "wrong number of arguments to the builtin",
+                              "ext.clang");
+        VTRY_SET(r, expression(clauses[0], m));
+        return operand_value(n, m);
+    }
+    if (kind >= 15)
+        return x86_generic_call(n, clauses, static_cast<uint8_t>(kind), m);
     if (kind >= 9) {
         if (clauses.size() != 1)
             return ill_formed(n, "wrong number of arguments to the builtin",
@@ -1954,6 +2059,8 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
     VTRY_SET(r, operand_value(n, a));
     VTRY_SET(r, operand_value(n, b));
     const struct type vector = type_table[a.type.unqualified()];
+    if ((kind == 2 || kind == 3) && is_floating(a.type))
+        return x86_generic_call(n, clauses, static_cast<uint8_t>(kind + 22), m);
     if (vector.kind != type_kind::vector ||
         a.type.unqualified() != b.type.unqualified())
         return ill_formed(n,
@@ -1964,10 +2071,14 @@ analysis_result semantic_analysis::builtin_shufflevector(SyntaxRef n,
     if (kind != 1) {
         /* __builtin_elementwise_min, _max, _add_sat and _sub_sat of
            integer vectors */
-        if (!is_integral(vector.operand))
-            return not_supported_because(
-                n, "ext.gnu",
-                "an elementwise builtin on a vector of non-integer elements");
+        if (!is_integral(vector.operand)) {
+            if (kind > 3)
+                return not_supported_because(
+                    n, "ext.gnu",
+                    "a saturating builtin on a vector of non-integer elements");
+            return x86_generic_call(n, clauses, static_cast<uint8_t>(kind + 22),
+                                    m);
+        }
         m = expression_meaning();
         m.type = qualified_type::make(a.type.unqualified(), cv_none);
         m.category = value_category::prvalue;

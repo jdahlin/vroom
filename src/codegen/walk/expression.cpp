@@ -3914,6 +3914,7 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
 
     switch (x->aux) {
     case CC_BUILTIN_X86_INSTRUCTION:
+    case CC_BUILTIN_X86_STENCIL:
         return WALK_LOWER(x86_instruction)(e, n);
     case CC_BUILTIN_X86_PCMPSTR:
     case CC_BUILTIN_X86_BLENDVB:
