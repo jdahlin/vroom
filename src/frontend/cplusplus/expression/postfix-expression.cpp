@@ -592,10 +592,26 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             return r;
         }
     }
-    if (named_cv)
+    if (named_cv & ~cv_const)
         return not_supported_because(
             n, "expr.type.conv",
-            "a cv-qualified type specifier in an explicit type conversion");
+            "a volatile type specifier in an explicit type conversion");
+    if (named_cv) {
+        /* [expr.type]/2: a prvalue that is no class or array loses the
+           cv-qualifiers (below); a const class's prvalue keeps them */
+        entity_index const_class = class_named;
+        if (!const_class && named &&
+            type_table[named].kind == type_kind::class_type &&
+            entity_table[type_table[named].entity].kind ==
+                entity_kind::class_type)
+            const_class = type_table[named].entity;
+        if (const_class) {
+            VTRY(r, class_conversion(n, const_class, m));
+            if (m.category == value_category::prvalue)
+                m.type = qualified_type::make(m.type.unqualified(), named_cv);
+            return r;
+        }
+    }
     if (class_named)
         return class_conversion(n, class_named, m);
     if ((parenthesized || braced) && n[0].is(syntax_kind::simple_template_id)) {
