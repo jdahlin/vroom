@@ -4650,6 +4650,7 @@ class semantic_analysis
        [over.match.list]/1.1 considers its initializer-list constructors
        with the empty list */
     bool empty_list_uses_constructors(entity_index c) const;
+    bool empty_list_runs_code(qualified_type type) const;
     analysis_result class_list_initialization(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type type, bool direct, initialized_value &result);

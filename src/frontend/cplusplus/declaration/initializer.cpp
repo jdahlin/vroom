@@ -2268,7 +2268,8 @@ analysis_result semantic_analysis::aggregate_elements(
                              .kind == entity_kind::class_type &&
                      (entity_table[type_table[element.unqualified()].entity]
                           .first_constructor ||
-                      destroys(type_table[element.unqualified()].entity)))) {
+                      destroys(type_table[element.unqualified()].entity))) &&
+                   !empty_list_runs_code(element)) {
             /* the rest of an array: zero, as the lowering fills it */
             break;
         } else {
@@ -2476,6 +2477,36 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     return analysis_result::well_formed;
 }
 
+/* whether an object of type initialized from an empty list may be more
+   than zeros: a class, or an array of one, with a virtual table, a
+   destructor, a declared constructor or a default member initializer, in it
+   or in a subobject */
+bool semantic_analysis::empty_list_runs_code(qualified_type type) const
+{
+    while (type_table[type.unqualified()].kind == type_kind::array)
+        type = type_table[type.unqualified()].operand;
+    const struct type &t = type_table[type.unqualified()];
+    if (t.kind != type_kind::class_type ||
+        entity_table[t.entity].kind != entity_kind::class_type)
+        return false;
+    const entity &x = entity_table[t.entity];
+    if (x.dynamic || x.destructor)
+        return true;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (!entity_table[k].implicit)
+            return true;
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (entity_table[class_members[x.first_member + i]].default_initializer)
+            return true;
+    owned_array<entity_index> classes;
+    subobject_classes(t.entity, classes);
+    for (entity_index k : classes)
+        if (empty_list_runs_code(entity_table[k].type))
+            return true;
+    return false;
+}
+
 /* the value of an element no clause initializes ([dcl.init.aggr]/5) */
 analysis_result semantic_analysis::omitted_element_value(
     SyntaxRef list, qualified_type element, SyntaxRef default_initializer,
@@ -2507,13 +2538,38 @@ analysis_result semantic_analysis::omitted_element_value(
                 "a class member default that needs construction in place");
         return analysis_result::well_formed;
     }
-    /* (5.2): from an empty initializer list: value-initialization
+    /* (5.2): from an empty initializer list, a class's own elements when
+       it is an aggregate ([dcl.init.list]/3.4) in which something is to
+       run; else value-initialization
        ([dcl.init.list]/3.11 for a scalar, a default constructor for a
        class with constructors, all zero otherwise) */
     const struct type of_element = type_table[element.unqualified()];
+    if (of_element.kind == type_kind::array && empty_list_runs_code(element))
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "an omitted array whose elements need construction");
+    if (of_element.kind == type_kind::class_type &&
+        empty_list_runs_code(element) && is_aggregate(of_element.entity)) {
+        owned_array<SyntaxElement> no_clauses;
+        return class_list_initialization(list, no_clauses, element, false, one);
+    }
     if (of_element.kind == type_kind::class_type &&
         entity_table[of_element.entity].kind == entity_kind::class_type &&
         entity_table[of_element.entity].first_constructor) {
+        /* [dcl.init.list]/3.6: an initializer_list without a default
+           constructor (not the library's) has a backing array of no
+           elements, which is not made */
+        bool backed = named(of_element.entity, "initializer_list") &&
+                      std_namespace(entity_table[of_element.entity].enclosing);
+        for (entity_index k = entity_table[of_element.entity].first_constructor;
+             k; k = entity_table[k].next_constructor)
+            if (type_table[entity_table[k].type.unqualified()]
+                    .parameter_count == entity_table[k].default_arguments)
+                backed = false;
+        if (backed)
+            return not_supported_because(
+                list, "dcl.init.list",
+                "an omitted initializer_list without a default constructor");
         owned_array<expression_meaning> none;
         if (empty_list_uses_constructors(of_element.entity)) {
             owned_array<SyntaxElement> no_clauses;
