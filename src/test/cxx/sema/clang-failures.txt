@@ -90,6 +90,7 @@ layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-o
 layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-offsetof -Wno-c++11-extensions: 667: layout of `non_pod_packed::t1`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
 layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-offsetof -Wno-c++11-extensions: 671: layout of `non_pod_packed::t2`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)
 layout SemaCXX/class-layout.cpp -std=c++98 -Wno-inaccessible-base -Wno-invalid-offsetof -Wno-c++11-extensions: 88: layout of `I`: sizeof, dsize, align (5, 5, 1), clang (8, 8, 4)
+layout SemaCXX/constant-expression-cxx2a.cpp -std=c++2a -Wno-mismatched-new-delete: 155: layout of `Virtual::C`: base 12 Virtual::NonZeroOffset, clang base 0 Virtual::A
 layout SemaCXX/constexpr-x86-avx-builtins.cpp -std=c++20 -isystem /usr/lib/llvm-23/lib/clang/23/include: 1580: layout of `__mm_load1_pd_struct`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 8)
 layout SemaCXX/constexpr-x86-avx-builtins.cpp -std=c++20 -isystem /usr/lib/llvm-23/lib/clang/23/include: 1638: layout of `__loadu_si64`: sizeof, dsize, align (8, 8, 1), clang (8, 8, 8)
 layout SemaCXX/constexpr-x86-avx-builtins.cpp -std=c++20 -isystem /usr/lib/llvm-23/lib/clang/23/include: 1657: layout of `__loadu_si32`: sizeof, dsize, align (4, 4, 1), clang (4, 4, 4)

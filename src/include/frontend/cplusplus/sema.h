@@ -7453,7 +7453,8 @@ class semantic_analysis
                                        bool &sized, bool class_complete = false,
                                        bool cookie = false,
                                        bool over_aligned = false,
-                                       bool at_definition = false);
+                                       bool at_definition = false,
+                                       bool allow_sized = true);
     /* [abi:array-cookies]: the size of the cookie before an array of
        element (of class c, 0 if none) that a new[] or delete[] (::delete[]
        when global) gives, 0 if none */

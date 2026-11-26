@@ -614,17 +614,18 @@ const char *class_layout::allocation_of_members()
     if (x.max_field_alignment &&
         (x.base_count || x.virtual_base_count || x.dynamic))
         return "cpp.pragma";
-    /* a primary base that is a virtual base is allocated first, at offset
-       0 (the others are the first non-virtual base) */
+    /* [abi:class-types] II: the primary base (virtual or non-virtual) is
+       allocated first, at offset 0 */
     const dynamic_class *dyn = analysis.dynamic_of(c);
-    if (dyn && dyn->primary_is_virtual) {
+    if (dyn && dyn->primary_base) {
         const char *rule = base(table[dyn->primary_base]);
         if (rule)
             return rule;
     }
     for (uint32_t i = 0; i < x.base_count; i++) {
-        entity &b = table[analysis.class_bases[x.first_base + i]];
-        if (b.virtual_base)
+        entity_index specifier = analysis.class_bases[x.first_base + i];
+        entity &b = table[specifier];
+        if (b.virtual_base || (dyn && dyn->primary_base == specifier))
             continue;
         const char *rule = base(b);
         if (rule)

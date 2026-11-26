@@ -2553,6 +2553,7 @@ analysis_result semantic_analysis::omitted_element_value(
             (entity_table[member.entity].first_constructor ||
              destroys(member.entity)) &&
             !aggregate_value_stored(member.entity, one.node) &&
+            !aggregate_built_in_place(one.node) &&
             (!one.node || semantics[one.node].kind != semantic_kind::construct))
             /* a class with constructors initialized in place by something
                other than a constructor call: not analysed */

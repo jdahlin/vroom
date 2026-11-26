@@ -1104,18 +1104,40 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
         }
         auto members =
             ct_rec.definition.class_specifier().member_specification();
+        bool has_constructor = false;
         for (SyntaxElement mem : members.elements()) {
+            if (mem.is(syntax_kind::template_declaration)) {
+                SyntaxElement inner = mem.template_declaration().declaration();
+                if (inner.is(syntax_kind::function_definition,
+                             syntax_kind::member_declaration)) {
+                    uint32_t at = leading_gnu_attributes(inner.index());
+                    if (at < inner.size() &&
+                        inner[at].is(syntax_kind::decl_specifier_seq))
+                        at++;
+                    if (at < inner.size()) {
+                        DeclaratorParts ctor(inner[at]);
+                        if (ctor.direct && ctor.id.is_identifier() &&
+                            tokens.identifier(ctor.id.token()) == class_name &&
+                            ctor.parameters())
+                            has_constructor = true;
+                    }
+                }
+                continue;
+            }
             if (!mem.is(syntax_kind::function_definition,
                         syntax_kind::member_declaration))
                 continue;
             uint32_t at = leading_gnu_attributes(mem.index());
             if (at < mem.size() && mem[at].is(syntax_kind::decl_specifier_seq))
                 at++;
+            if (at >= mem.size())
+                continue;
             DeclaratorParts ctor(mem[at]);
             if (!ctor.direct || !ctor.id.is_identifier() ||
                 tokens.identifier(ctor.id.token()) != class_name ||
                 !ctor.parameters())
                 continue;
+            has_constructor = true;
             current_scope = param_scope;
             defining_class = 0;
             function_cv = 0;
@@ -1173,6 +1195,25 @@ analysis_result semantic_analysis::deduced_class(SyntaxRef n, uint32_t ct,
         function_cv = saved_cv;
         function_parameters =
             static_cast<owned_array<parameter_meaning> &&>(saved_params);
+        /* [over.match.class.deduct]/1.2: if the primary class template has no
+           user-declared constructors, an additional fictional function
+           template corresponding to a hypothetical default constructor */
+        if (!has_constructor && arguments.size() == 0) {
+            owned_array<template_argument> values;
+            owned_array<bool> set;
+            for (uint32_t i = 0; i < ct_rec.parameter_count; i++) {
+                values.append(template_argument());
+                set.append(false);
+            }
+            if (default_template_arguments(n, ct, values, set) ==
+                analysis_result::well_formed) {
+                expressions.resize(expressions_before);
+                name_uses.resize(uses_before);
+                return instantiate_class(n, ct, values.data(),
+                                         static_cast<uint32_t>(values.size()),
+                                         c);
+            }
+        }
     }
     return not_supported_because(
         n, "over.match.class.deduct",
@@ -2483,8 +2524,12 @@ analysis_result semantic_analysis::template_call(
                 n, "temp.over",
                 "a call where deduction left no candidate template");
         }
+        const owned_array<SyntaxElement> *call_written = nullptr;
+        if (!given && arguments.size() == early.size())
+            call_written = &arguments;
         size_t chosen = 0;
-        VTRY(r, best_viable_function(n, candidates, nullptr, early, chosen));
+        VTRY(r, best_viable_function(n, candidates, nullptr, early, chosen,
+                                     nullptr, true, call_written));
         if (!candidates[chosen].template_index) {
             /* a non-template function: [dcl.fct.def.delete]/2 "If a
                function is overloaded, it is referenced only if the

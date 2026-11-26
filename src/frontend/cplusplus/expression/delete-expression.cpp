@@ -97,30 +97,35 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
         return not_supported_because(n, "expr.delete",
                                      "a delete of a pointer to void");
     entity_index c = 0;
+    bool incomplete = false;
     if (object.kind == type_kind::class_type) {
         c = object.entity;
         require_complete(c);
         if (entity_table[c].kind != entity_kind::class_type ||
-            !entity_table[c].size)
+            !entity_table[c].size) {
             /* /5: "If the object being deleted has incomplete class type at
                the point of deletion and the complete class has a
                non-trivial destructor or a deallocation function, the
-               behavior is undefined." */
-            return not_supported_because(
-                n, "expr.delete",
-                "a delete of a pointer to an incomplete class");
+               behavior is undefined."  Otherwise it is well-formed: call the
+               unsized global deallocation function with no destructor. */
+            incomplete = true;
+            c = 0;
+        }
     }
-    uint64_t size = size_of_type(object_type);
-    if (!size)
-        return not_supported_because(n, "expr.delete",
-                                     "a delete of a type with no known size");
+    uint64_t size = 0;
+    if (!incomplete) {
+        size = size_of_type(object_type);
+        if (!size)
+            return not_supported_because(
+                n, "expr.delete", "a delete of a type with no known size");
+    }
     /* [basic.align]/3: new-extended alignment: the deallocation function
        with std::align_val_t is preferred ([expr.delete]/10) */
     bool over_aligned =
-        alignment_of_type(object_type) > 16 &&
+        !incomplete && alignment_of_type(object_type) > 16 &&
         tokens.files.behavior.has(language_feature::aligned_allocation);
     qualified_type align_type;
-    if (alignment_of_type(object_type) > 16 &&
+    if (!incomplete && alignment_of_type(object_type) > 16 &&
         (!over_aligned || !align_val_type(align_type) ||
          (c && entity_table[c].destructor &&
           entity_table[entity_table[c].destructor].virtual_)))
@@ -223,8 +228,9 @@ analysis_result semantic_analysis::delete_expression(DeleteExpression n,
     }
     entity_index function = 0;
     bool sized = false;
-    VTRY_SET(r, usual_deallocation(n, c, global, array, function, sized, false,
-                                   cookie != 0, over_aligned));
+    VTRY_SET(r, usual_deallocation(n, c, global || incomplete, array, function,
+                                   sized, false, cookie != 0, over_aligned,
+                                   false, !incomplete));
     owned_array<expression_meaning> arguments;
     arguments.append(deleted);
     if (sized)
@@ -351,7 +357,7 @@ analysis_result semantic_analysis::array_cookie(SyntaxRef n, entity_index c,
 analysis_result semantic_analysis::usual_deallocation(
     SyntaxRef n, entity_index c, bool global, bool array,
     entity_index &function, bool &is_sized, bool class_complete, bool cookie,
-    bool over_aligned, bool at_definition)
+    bool over_aligned, bool at_definition, bool allow_sized)
 {
     /* /9: "When the keyword delete in a delete-expression is preceded by
        the unary :: operator, the deallocation function's name is looked up
@@ -461,7 +467,7 @@ analysis_result semantic_analysis::usual_deallocation(
        sized one for a single object and an array with a cookie, the unsized one
        for another array. */
     function = unsized;
-    if (!unsized || (sized && !in_class && (!array || cookie)))
+    if (allow_sized && (!unsized || (sized && !in_class && (!array || cookie))))
         function = sized;
     is_sized = function && function == sized;
     if (!function && in_class && !at_definition && all_void_first)

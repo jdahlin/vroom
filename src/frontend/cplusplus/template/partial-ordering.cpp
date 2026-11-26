@@ -117,8 +117,14 @@ bool semantic_analysis::orderable(qualified_type t, bool packs,
                 continue;
             }
             /* a pack of arguments, S<I...>: each element the same, or
-               the expansion of a parameter pack */
-            if (pack_argument)
+               the expansion of a parameter pack.  A pure pack expansion
+               S<Ts...> has no fixed elements for CWG1432 to separate from
+               another S<Us...>. */
+            bool pure_expansion = x.count == 1 &&
+                                  pack_arguments[x.value].kind ==
+                                      template_argument::kind_t::pack &&
+                                  pack_arguments[x.value].template_entity;
+            if (pack_argument && !pure_expansion)
                 *pack_argument = true;
             for (uint32_t k = 0; k < x.count; k++) {
                 const template_argument &y = pack_arguments[x.value + k];
