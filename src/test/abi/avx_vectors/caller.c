@@ -24,6 +24,11 @@ int main(void)
     v32qi c;
     for (int k = 0; k < 32; k++)
         c[k] = (char)k;
+    union overlaid u;
+    u.v = a;
+    show("overlaid", overlaid(u).v);
+    struct padded pd = {a};
+    show("padded", padded(pd).v);
     show("add", add(a, b));
     v8sf m = mix(1, f, 2.0, d, 3, c);
     printf("mix");

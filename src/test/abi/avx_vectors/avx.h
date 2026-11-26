@@ -12,6 +12,18 @@ struct pair {
     v8si a, b;
 };
 
+/* unions and structs clang also passes in a ymm register */
+union overlaid {
+    v8si v;
+    long a[4];
+};
+struct padded {
+    v8si v;
+    unsigned : 0;
+};
+union overlaid overlaid(union overlaid x);
+struct padded padded(struct padded x);
+
 v8si add(v8si a, v8si b);
 v8sf mix(int i, v8sf a, double d, v4df b, long n, v32qi c);
 v8si many(v8si a, v8si b, v8si c, v8si d, v8si e, v8si f, v8si g, v8si h,

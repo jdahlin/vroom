@@ -2,6 +2,18 @@
 #include <stdarg.h>
 #include "avx.h"
 
+union overlaid overlaid(union overlaid x)
+{
+    x.a[1] += 1000;
+    return x;
+}
+
+struct padded padded(struct padded x)
+{
+    x.v += 7;
+    return x;
+}
+
 v8si add(v8si a, v8si b)
 {
     return a + b;
