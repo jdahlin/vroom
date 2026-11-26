@@ -809,7 +809,7 @@ void semantic_analysis::adjust_call_deduction(qualified_type &p,
 int semantic_analysis::deduce_from_braced_list(
     qualified_type p, const expression_meaning &m,
     owned_array<template_argument> &deduced, owned_array<bool> &set,
-    bool &unknown)
+    uint32_t first_deducible, bool &unknown)
 {
     unknown = false;
     const struct type *pt = &type_table[p.unqualified()];
@@ -841,11 +841,40 @@ int semantic_analysis::deduce_from_braced_list(
        it, T not deduced elsewhere is an error of the call */
     if (m.braced_count == 0)
         return 0;
-    for (uint32_t k = 0; k < m.braced_count; k++) {
+    /* /1: an element type of explicitly specified parameters alone
+       ([temp.arg.explicit]/7) deduces nothing from the elements: each
+       needs only an implicit conversion to it ([over.ics.list]/6) */
+    bool converted = !depends_on_parameter_from(element, first_deducible);
+    /* (a specified element type is not substituted here: the call's
+       initialization checks those) */
+    bool concrete =
+        pr.kind == type_kind::array && !depends_on_parameter_from(element, 0);
+    uint32_t elements = m.braced_count;
+    for (uint32_t k = 0; k < elements; k++) {
         const expression_meaning &e = braced_elements[m.braced_first + k];
+        if (converted) {
+            if (concrete && e.node &&
+                implicit_conversion_sequence(e, element, true).kind ==
+                    conversion_sequence::form::bad)
+                return -1;
+            continue;
+        }
         qualified_type pp = element;
         qualified_type a = e.type;
         const struct type ar = type_table[a.unqualified()];
+        if (!e.node && ar.kind == type_kind::none) {
+            /* [temp.deduct.type]/5.6: a nested list is non-deduced unless
+               P' is itself std::initializer_list or an array, which is
+               not analysed */
+            const struct type er = type_table[element.unqualified()];
+            if (er.kind == type_kind::array ||
+                (er.kind == type_kind::dependent &&
+                 entity_table[er.entity].instantiation)) {
+                unknown = true;
+                return 0;
+            }
+            continue;
+        }
         if (ar.kind == type_kind::none || ar.kind == type_kind::placeholder ||
             ar.kind == type_kind::dependent) {
             unknown = true;
@@ -861,7 +890,9 @@ int semantic_analysis::deduce_from_braced_list(
             return -1;
         }
     }
-    if (bound_parameter &&
+    /* a specified N is not deduced from the length: the list may be
+       shorter */
+    if (bound_parameter && entity_table[pr.entity].value >= first_deducible &&
         !deduce_bound(pr.entity, m.braced_count, deduced, set))
         return -1;
     return 1;
@@ -990,8 +1021,8 @@ analysis_result semantic_analysis::deduce_from_call(
         }
         if (arguments[i].braced_known) {
             bool unknown = false;
-            int found =
-                deduce_from_braced_list(p, arguments[i], values, set, unknown);
+            int found = deduce_from_braced_list(p, arguments[i], values, set,
+                                                first_deducible, unknown);
             if (unknown || (found && i >= fixed))
                 return not_supported_because(
                     at, "temp.deduct.call",

@@ -6485,7 +6485,8 @@ class semantic_analysis
        a non-deduced context, -1 deduction failed */
     int deduce_from_braced_list(qualified_type p, const expression_meaning &m,
                                 owned_array<template_argument> &deduced,
-                                owned_array<bool> &set, bool &unknown);
+                                owned_array<bool> &set,
+                                uint32_t first_deducible, bool &unknown);
     analysis_result deduce_from_call(SyntaxRef at, uint32_t function_template,
                                      const expression_meaning *arguments,
                                      uint32_t count,

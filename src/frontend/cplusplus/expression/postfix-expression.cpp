@@ -2292,9 +2292,12 @@ semantic_analysis::braced_deduction_elements(SyntaxElement list,
             return analysis_result::well_formed;
     owned_array<expression_meaning> found;
     for (SyntaxElement c : clauses) {
-        if (c.is(syntax_kind::braced_init_list))
-            return analysis_result::well_formed;
         expression_meaning e;
+        if (c.is(syntax_kind::braced_init_list)) {
+            /* an element of no node and no type: a nested list */
+            found.append(e);
+            continue;
+        }
         size_t uses_before = name_uses.size();
         VTRY(r, passed_expression(c, e));
         if (!e.node || e.overload_name) {

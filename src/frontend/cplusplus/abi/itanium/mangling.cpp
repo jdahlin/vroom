@@ -2004,6 +2004,11 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         text("Lb0E");
         return true;
     }
+    /* [abi:mangling.literal]: nullptr is its type alone */
+    if (expression.is(standard_keyword::nullptr_)) {
+        text("LDnE");
+        return true;
+    }
     return integer_literal(expression.token());
 }
 
@@ -4515,6 +4520,11 @@ bool itanium_mangler::structure_expression(uint32_t s)
             return false;
         number(word);
         text("E");
+        return true;
+    }
+    if (tag == sa::tag_literal + (uint32_t)literal_kind::pointer_literal) {
+        /* [abi:mangling.literal]: nullptr is its type alone */
+        text("LDnE");
         return true;
     }
     if (tag != sa::tag_node)
