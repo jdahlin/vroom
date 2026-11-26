@@ -35,7 +35,9 @@ template <int N> int cond(W<N ? 3 : 2>) { return 5; }
 int main()
 {
     S s;
-    int qualified();
+    int qualified(), literals();
+    if (literals())
+        return 2;
     return kw(s) + al(s) + cl(s) + cast(W<4>(), s) + cond<1>(W<3>()) +
                qualified() !=
            17;
@@ -55,3 +57,17 @@ template <class V> using D = V;
 template <class V, EI<h::n::D<V>::k == 4> * = nullptr> int outer(V) { return 2; }
 
 int qualified() { return outer(K()); }
+
+/* integer-literals of every base and suffix, and T{n} of a typedef-name */
+typedef unsigned long size_type;
+template <class T, int K> W<(K << 8) + 0x200> *hex(T) { return nullptr; }
+template <class T> W<sizeof(T) == 0x10u ? 07 : 2ULL> *suffixes(T)
+{
+    return nullptr;
+}
+template <class T, EI<(sizeof(T) > size_type{1})> * = nullptr> int braced(T)
+{
+    return 0;
+}
+
+int literals() { return !hex<int, 1>(1) + !suffixes(1) + braced(1) - 2; }

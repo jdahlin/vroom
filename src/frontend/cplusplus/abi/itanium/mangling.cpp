@@ -176,6 +176,7 @@ class itanium_mangler
     bool encoding(entity_index e);
     bool specialization_encoding(entity_index e);
     bool constraint_expression(entity_index t, SyntaxElement c);
+    bool integer_literal(token_index token);
     bool constraint_parameter(entity_index t, entity_index parameter);
     bool constraint_template_args(entity_index t, SyntaxElement c);
     bool constraint_namespace_member(entity_index t, SyntaxElement qualifier,
@@ -1886,18 +1887,80 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         text("Lb0E");
         return true;
     }
+    return integer_literal(expression.token());
+}
+
+/* [abi:mangling.literal] an integer-literal: L <type> <value> E, the type
+   the first of [lex.icon]'s table that holds it (long is as wide as a
+   pointer), the value in decimal */
+bool itanium_mangler::integer_literal(token_index token)
+{
     owned_buffer spelling;
-    analysis.token_spelling(expression.token(), spelling.get());
-    if (!spelling.size() || spelling.size() > 9 ||
-        (spelling.data()[0] == '0' && spelling.size() > 1))
-        return false;
-    for (size_t i = 0; i < spelling.size(); i++)
-        if (spelling.data()[i] < '0' || spelling.data()[i] > '9')
+    analysis.token_spelling(token, spelling.get());
+    const char *p = spelling.data();
+    const char *end = p + spelling.size();
+    unsigned base = 10;
+    if (end - p > 1 && p[0] == '0') {
+        base = 8;
+        if (p[1] == 'x' || p[1] == 'X') {
+            base = 16;
+            p += 2;
+        } else if (p[1] == 'b' || p[1] == 'B') {
+            base = 2;
+            p += 2;
+        }
+    }
+    uint64_t value = 0;
+    bool digits = false;
+    for (; p < end; p++) {
+        unsigned digit = base;
+        if (*p >= '0' && *p <= '9')
+            digit = static_cast<unsigned>(*p - '0');
+        else if (*p >= 'a' && *p <= 'f')
+            digit = static_cast<unsigned>(*p - 'a') + 10;
+        else if (*p >= 'A' && *p <= 'F')
+            digit = static_cast<unsigned>(*p - 'A') + 10;
+        else if (*p == '\'')
+            continue;
+        if (digit >= base)
+            break;
+        if (value > (UINT64_MAX - digit) / base)
             return false;
-    text("Li");
-    vbuffer_append(out, spelling.data(), spelling.size());
-    text("E");
-    return true;
+        value = value * base + digit;
+        digits = true;
+    }
+    bool is_unsigned = false;
+    unsigned longs = 0;
+    for (; p < end; p++) {
+        if (*p == 'u' || *p == 'U')
+            is_unsigned = true;
+        else if (*p == 'l' || *p == 'L')
+            longs++;
+        else
+            return false;
+    }
+    if (!digits || longs > 2)
+        return false;
+    /* int, unsigned, long, unsigned long, long long, unsigned long long */
+    static const char codes[] = "ijlmxy";
+    unsigned long_bits = static_cast<unsigned>(analysis.pointer_size()) * 8;
+    const unsigned widths[] = {32, long_bits, 64};
+    for (unsigned rank = longs; rank < 3; rank++) {
+        for (unsigned u = 0; u < 2; u++) {
+            /* a decimal literal without u is never unsigned */
+            if (u != is_unsigned && (is_unsigned || base == 10))
+                continue;
+            unsigned bits = widths[rank] - 1 + u;
+            if (bits < 64 && value >> bits)
+                continue;
+            text("L");
+            vbuffer_append(out, &codes[rank * 2 + u], 1);
+            number(value);
+            text("E");
+            return true;
+        }
+    }
+    return false;
 }
 
 /*

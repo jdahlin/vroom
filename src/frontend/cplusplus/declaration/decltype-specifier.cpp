@@ -354,6 +354,23 @@ void semantic_analysis::collect_written_casts(
             found.append(b);
         }
     }
+    /* size_t{1}, a typedef-name of a fundamental type: that type, for
+       tl <type> */
+    if (x.is(syntax_kind::postfix_expression) && x.size() == 2 &&
+        x[0].is_identifier() && x[1].is(syntax_kind::braced_init_list)) {
+        entity_index e = lookup_unqualified(tokens.identifier(x[0].token()),
+                                            lookup_filter::any)
+                             .entity;
+        if (e && entity_table[e].kind == entity_kind::typedef_name &&
+            type_table[entity_table[e].type.unqualified()].kind ==
+                type_kind::fundamental) {
+            written_binding b;
+            SyntaxRef ar = x;
+            b.cast = ar.index().index();
+            b.type = entity_table[e].type;
+            found.append(b);
+        }
+    }
     /* Q<args>:: in a nested-name-specifier, Q a class template: its
        (dependent) specialization, for the mangler (cast the template-id's
        node) */
