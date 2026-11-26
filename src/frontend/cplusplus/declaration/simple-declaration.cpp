@@ -1912,21 +1912,6 @@ analysis_result semantic_analysis::declare_with_initializer(
             return not_supported_because(
                 declaration, "dcl.constexpr",
                 "thread_local in a constexpr function");
-        if (s.cxx_thread_local) {
-            /* [basic.stc.thread]/2: the object is destroyed when its
-               thread exits, by a destructor whose access and deletion
-               analysis does not check for static storage: not analysed */
-            qualified_type element = type;
-            while (type_table[element.unqualified()].kind == type_kind::array)
-                element = type_table[element.unqualified()].operand;
-            const struct type &k = type_table[element.unqualified()];
-            if (k.kind == type_kind::class_type &&
-                entity_table[k.entity].destructor &&
-                !entity_table[entity_table[k.entity].destructor].implicit)
-                return not_supported_because(
-                    declaration, "basic.stc.thread",
-                    "a thread_local object with a user destructor");
-        }
         x.c11_thread_local = true;
     }
     /* [ext:gnu_asm_labels] the symbol of a function or variable with
@@ -1961,7 +1946,7 @@ analysis_result semantic_analysis::declare_with_initializer(
     if (r == analysis_result::well_formed && c_language && !at_block_scope() &&
         (kind == entity_kind::function || kind == entity_kind::variable) &&
         entity_table[declared_entity].linkage_of_name != linkage::internal)
-        entity_table[declared_entity].c_language_linkage = true;
+        entity_table.give_c_linkage(declared_entity);
     if (r == analysis_result::well_formed && kind == entity_kind::variable &&
         entity_table[declared_entity].defined)
         require_destructor_definition(type);

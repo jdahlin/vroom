@@ -143,7 +143,7 @@ void c_lowering::static_destruction(entity_index e, owned_array<uint32_t> &out,
     if (!count) {
         registered = destructor_registration(
             special_callee(destructor, at), entity_type(destructor, at),
-            address_of(c_variable(c, s, t), pointer_to(t)));
+            address_of(c_variable(c, s, t), pointer_to(t)), x.c11_thread_local);
     } else {
         /* [class.dtor]/13, [impl.clang]: __cxx_global_array_dtor (then
            .1, ...), destroying the elements in reverse order */
@@ -157,14 +157,16 @@ void c_lowering::static_destruction(entity_index e, owned_array<uint32_t> &out,
             f, ast_builder_type_function(c, void_type, nullptr, 0, 0),
             cast(ast_builder_integer(c, ast_builder_type_basic(AST_TYPE_LONG),
                                      0),
-                 pointer_to(void_type), AST_CAST_INTEGER_TO_POINTER));
+                 pointer_to(void_type), AST_CAST_INTEGER_TO_POINTER),
+            x.c11_thread_local);
     }
     if (registered)
         out.append(c_statement(c, registered));
 }
 
 uint32_t c_lowering::destructor_registration(uint32_t d, ast_qualified_type f,
-                                             uint32_t object)
+                                             uint32_t object,
+                                             bool thread_local_var)
 {
     if (!d || !object)
         return 0;
@@ -186,6 +188,10 @@ uint32_t c_lowering::destructor_registration(uint32_t d, ast_qualified_type f,
         address_of(c_variable(c, dso_handle, byte), pointer_to(byte));
     ast_qualified_type parameters[3] = {pointer_to(dt), pointer, pointer};
     uint32_t arguments[3] = {function, object, handle};
+    if (thread_local_var)
+        return runtime_call(cxa_thread_atexit, "__cxa_thread_atexit",
+                            ast_builder_type_basic(AST_TYPE_INT), parameters,
+                            arguments, 3);
     return runtime_call(cxa_atexit, "__cxa_atexit",
                         ast_builder_type_basic(AST_TYPE_INT), parameters,
                         arguments, 3);
@@ -279,8 +285,11 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     if (analysis.entity_table[e].c11_thread_local) {
         /* [stmt.dcl]/3, [impl.clang]: one thread's object, so no
            concurrent initialization: a thread-local guard byte, set once
-           the object is made (a trivially destroyed one) */
-        static_initialization(e, n.b, inner, n.at);
+           the object is made */
+        if (!constant)
+            static_initialization(e, n.b, inner, n.at);
+        if (destructor)
+            static_destruction(e, inner, n.at);
         if (failure.what)
             return;
         inner.append(c_statement(c, assign(i64, c_variable(c, guard, i64),

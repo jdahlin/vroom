@@ -67,7 +67,7 @@ FRONTEND = os.path.join(R, 'src', 'frontend', 'cplusplus')
 
 ABI_INDEX = os.path.join(R, 'docs', 'itanium-abi-index.tsv')
 ABI_GRAMMAR = os.path.join(R, 'docs', 'itanium-abi-grammar.tsv')
-ABI_CITATION = re.compile(r'\[abi:([a-z0-9][a-z0-9.-]*)\]')
+ABI_CITATION = re.compile(r'\[abi:([a-z0-9][a-z0-9._-]*)\]')
 # the clauses whose rules analysis enforces
 RULE_CLAUSES = ('basic', 'class', 'dcl', 'except', 'expr', 'module', 'over', 'stmt', 'temp')
 EXT_INDEX = os.path.join(FRONTEND, 'ext', 'extensions.inc')

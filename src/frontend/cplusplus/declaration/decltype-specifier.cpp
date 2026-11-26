@@ -607,7 +607,34 @@ type_index semantic_analysis::dependent_written_type(SyntaxRef n,
 {
     owned_array<written_binding> bindings;
     collect_written_bindings(n, bindings, every_name);
-    for (entity_index e : dependent_written_types) {
+    /* (chained by a hash of the operand's length and its bindings) */
+    auto mix = [](uint64_t h, uint64_t v) {
+        h = (h ^ v) * 0x9E3779B97F4A7C15u;
+        return h ^ (h >> 29);
+    };
+    auto hashed = [&](uint64_t length, const written_binding *b,
+                      uint32_t count) {
+        uint64_t h = mix(length, count);
+        for (uint32_t i = 0; i < count; i++) {
+            h = mix(h, static_cast<uint64_t>(b[i].identifier) << 32 |
+                           b[i].type.bits);
+            h = mix(h, static_cast<uint64_t>(b[i].element) << 32 |
+                           b[i].pack_position);
+        }
+        return static_cast<size_t>(h >> 48);
+    };
+    written_types_by_key.update(dependent_written_types, [&](entity_index e) {
+        auto y =
+            SyntaxRef(node_index(static_cast<uint32_t>(entity_table[e].value)));
+        return hashed(y.end_token() - y.first_token(),
+                      written_bindings.data() + entity_table[e].first_member,
+                      entity_table[e].member_count);
+    });
+    for (uint32_t k = written_types_by_key.first(
+             hashed(n.end_token() - n.first_token(), bindings.data(),
+                    static_cast<uint32_t>(bindings.size())));
+         k; k = written_types_by_key.after(k)) {
+        entity_index e = dependent_written_types[k - 1];
         auto y =
             SyntaxRef(node_index(static_cast<uint32_t>(entity_table[e].value)));
         bool same =

@@ -462,9 +462,11 @@ analysis_result semantic_analysis::composite_pointer_type(SyntaxRef at,
                 "a composite pointer type of pointees that have no rules");
         }
     } else {
-        return not_supported_because(
-            at, "expr.type",
-            "a composite pointer type of operand types that have no rules");
+        /* [expr.type]/3.8: "otherwise, a program that necessitates the
+           determination of a composite pointer type is ill-formed" (e.g.
+           comparing a pointer with a non-null-pointer-constant integer) */
+        return ill_formed(at, "operands have no composite pointer type",
+                          "expr.type");
     }
     analysis_result r = implicit_conversion(at, a, composite, false);
     if (r == analysis_result::well_formed)

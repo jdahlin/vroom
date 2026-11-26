@@ -917,13 +917,15 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             if (!body || queue_body_until_used(body))
                 continue;
             bool placeholder = false;
+            entity_index body_fn = 0;
             for (entity_index f = first_member_entity; f < entity_table.size();
                  f++) {
                 const entity &member = entity_table[f];
                 if (member.kind == entity_kind::function &&
-                    member.enclosing == c && member.placeholder_return &&
                     declared_by(f, body)) {
-                    placeholder = true;
+                    body_fn = f;
+                    if (member.enclosing == c && member.placeholder_return)
+                        placeholder = true;
                     break;
                 }
             }
@@ -932,8 +934,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 current_declaration = outer_declaration;
                 continue;
             }
-            postponed_bodies.append(postponed_body{c, body, postponed_scope,
-                                                   postponed_declaration});
+            postponed_bodies.append(postponed_body{
+                c, body, postponed_scope, postponed_declaration, body_fn});
         }
         for (size_t i = nested_start; i < nested_bodies.size(); i++)
             postponed_bodies.append(
@@ -1083,6 +1085,28 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
                                          "class-key disagrees about union");
         used(t, c);
         type = entity_table[c].type.unqualified();
+        return analysis_result::well_formed;
+    }
+    if (count == 2 && e[at].is(syntax_kind::simple_template_id)) {
+        /* [dcl.type.elab]/1: class-key simple-template-id */
+        type_index t = 0;
+        VTRY(r, template_type(e[at], 0, false, t));
+        if (type_table[t].kind == type_kind::dependent)
+            return not_supported_because(
+                n, "dcl.type.elab",
+                "a dependent elaborated-type-specifier with a "
+                "simple-template-id");
+        if (type_table[t].kind != type_kind::class_type)
+            return ill_formed(n,
+                              "an elaborated-type-specifier with a "
+                              "simple-template-id shall name a class",
+                              "dcl.type.elab");
+        entity_index c = type_table[t].entity;
+        if (entity_table[c].union_ != is_union)
+            return not_supported_because(n, "dcl.type.elab",
+                                         "an elaborated type whose "
+                                         "class-key disagrees about union");
+        type = t;
         return analysis_result::well_formed;
     }
     if (count != 2 || !e[at].is_identifier())
@@ -2409,12 +2433,6 @@ analysis_result semantic_analysis::member_declarator(
         /* [class.static.data]/3: "The declaration of a non-inline static
            data member in its class definition is not a definition and may
            be of an incomplete type other than cv void." */
-        /* an inline static data member ([dcl.inline]/6: defined in the
-           class) has rules when it is const too: the constexpr path */
-        if (s.inline_ && !s.constexpr_ && !(type.cv() & cv_const))
-            return not_supported_because(declaration, "class.static.data",
-                                         "an inline static data member that is "
-                                         "neither const nor constexpr");
         /* [dcl.constexpr]/10: "A constexpr specifier used in an object
            declaration declares the object as const"; [dcl.constexpr]/1 a
            constexpr static data member is an inline variable, defined by
@@ -2439,7 +2457,8 @@ analysis_result semantic_analysis::member_declarator(
         /* [class.static.data]/1: "A static data member is not part of the
            subobjects of a class." */
         entity_table[e].nonstatic_member = false;
-        entity_table[e].defined = false;
+        entity_table[e].inline_ = s.inline_;
+        entity_table[e].defined = s.inline_;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
         /* its first declaration, which a name found refers to (the
            definition outside the class is a later one) */
@@ -3000,6 +3019,19 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     if (s.constexpr_ ||
         ((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration))
         entity_table[e].usable = constness::unknown;
+    const bool dynamic_inline =
+        s.inline_ && !s.constexpr_ &&
+        !((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration);
+    if (dynamic_inline) {
+        if (!deduced) {
+            VTRY(r, initializer(init, type, value));
+        }
+        entity &x = entity_table[e];
+        x.definition = value.node;
+        x.inline_ = true;
+        x.defined = true;
+        return analysis_result::well_formed;
+    }
     if (!(cv & cv_const) || (cv & cv_volatile) ||
         (!integral_or_enumeration && !constexpr_floating && !constexpr_class))
         return not_supported_because(

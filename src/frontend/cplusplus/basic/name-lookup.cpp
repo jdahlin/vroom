@@ -318,17 +318,21 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
             /* the directives of s, and of each namespace they nominate
                (visible grows as they are added) */
             size_t next = visible.size();
-            for (const using_directive_record &u : using_directives)
-                if (u.scope == s)
-                    visible.append(
-                        {u.nominated, common_namespace(from, u.nominated)});
+            using_directives_by_scope.update(
+                using_directives,
+                [](const using_directive_record &u) { return u.scope; });
+            for (uint32_t i = using_directives_by_scope.first(s); i;
+                 i = using_directives_by_scope.after(i)) {
+                entity_index nominated = using_directives[i - 1].nominated;
+                visible.append({nominated, common_namespace(from, nominated)});
+            }
             for (; next < visible.size(); next++) {
                 entity_index n = visible[next].nominated;
                 if (!entity_table[n].has_using_directive)
                     continue;
-                for (const using_directive_record &u : using_directives) {
-                    if (u.scope != n)
-                        continue;
+                for (uint32_t i = using_directives_by_scope.first(n); i;
+                     i = using_directives_by_scope.after(i)) {
+                    const using_directive_record &u = using_directives[i - 1];
                     visible_namespace v = {u.nominated,
                                            common_namespace(from, u.nominated)};
                     bool seen = false;

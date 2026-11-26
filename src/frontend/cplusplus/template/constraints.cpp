@@ -744,18 +744,49 @@ analysis_result semantic_analysis::template_constraints_satisfied(
             continue;
         auto q = x.constraint;
         uint32_t parts = q.size();
-        if ((parts != 1 && parts < 3) || !q[0].is_token())
+        uint32_t name_at = 0;
+        entity_index lookup_scope = entity_table[ft.entity].enclosing;
+        bool qualified = false;
+        if (parts >= 2 && q[0].is(syntax_kind::nested_name_specifier)) {
+            nominated_scope ns;
+            entity_index saved = current_scope;
+            current_scope = lookup_scope;
+            analysis_result nr = nested_name_specifier(q[0], ns);
+            current_scope = saved;
+            if (nr != analysis_result::well_formed)
+                return nr;
+            if (!is_namespace(ns.entity))
+                return not_supported_because(
+                    x.constraint, "temp.param",
+                    "a constrained parameter's type-constraint qualified by a "
+                    "non-namespace");
+            lookup_scope = ns.entity;
+            name_at = 1;
+            qualified = true;
+        }
+        uint32_t rest = parts - name_at;
+        if ((rest != 1 && rest < 3) || !q[name_at].is_token())
             return not_supported_because(
                 x.constraint, "temp.param",
                 "a constrained parameter's type-constraint of an unhandled "
                 "form");
-        entity_index named =
-            constraint_concept(entity_table[ft.entity].enclosing, q[0].token());
+        entity_index named = 0;
+        if (qualified) {
+            lookup_result found = lookup_qualified(
+                lookup_scope, tokens.identifier(q[name_at].token()),
+                lookup_filter::any);
+            if (found.entity)
+                named = found.entity;
+            else if (found.unknown_entity)
+                named = found.unknown_entity;
+        } else {
+            named = constraint_concept(lookup_scope, q[name_at].token());
+        }
         uint32_t ct = 0;
         if (named)
             ct = concept_of(named);
         if (!ct ||
-            (parts == 1 && function_templates[ct - 1].parameter_count != 1) ||
+            (rest == 1 && function_templates[ct - 1].parameter_count != 1) ||
             template_parameter_is_pack(
                 function_templates[ct - 1].first_parameter))
             return not_supported_because(x.constraint, "temp.param",
@@ -764,7 +795,7 @@ analysis_result semantic_analysis::template_constraints_satisfied(
         owned_array<template_argument> arguments;
         arguments.append(values[i]);
         analysis_result r = analysis_result::well_formed;
-        if (parts != 1)
+        if (rest != 1)
             r = template_id_arguments_in(x.constraint, ct, scope, arguments);
         if (r == analysis_result::well_formed)
             VTRY_SET(r,

@@ -308,6 +308,51 @@ class owned_string
     char *characters = nullptr;
 };
 
+/*
+ * The records of an append-only array by a key of theirs: a chain per key,
+ * in the array's order.  Keys are dense numbers (entities, identifiers), so
+ * they index the chains' ends directly.  update() takes in the records
+ * appended since the last call; a record's key must not change.
+ */
+class record_chains
+{
+  public:
+    template <typename T, typename Key>
+    void update(const owned_array<T> &records, Key key)
+    {
+        for (size_t i = next.size(); i < records.size(); i++) {
+            size_t k = key(records[i]);
+            while (ends.size() <= k)
+                ends.append(chain{0, 0});
+            uint32_t at = static_cast<uint32_t>(i + 1);
+            if (ends[k].last)
+                next[ends[k].last - 1] = at;
+            else
+                ends[k].first = at;
+            ends[k].last = at;
+            next.append(0);
+        }
+    }
+    /* a record's index plus one, 0 at the chain's end */
+    uint32_t first(size_t k) const
+    {
+        if (k < ends.size())
+            return ends[k].first;
+        return 0;
+    }
+    uint32_t after(uint32_t record) const
+    {
+        return next[record - 1];
+    }
+
+  private:
+    struct chain {
+        uint32_t first, last;
+    };
+    owned_array<chain> ends;
+    owned_array<uint32_t> next;
+};
+
 } // namespace cplusplus
 
 #endif

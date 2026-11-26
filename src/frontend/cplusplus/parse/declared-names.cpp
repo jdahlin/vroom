@@ -36,8 +36,24 @@ declared_names::find(scope_index in, uint32_t name, unsigned depth) const
     /* the latest declaration first: a later one of another kind is the one
        in effect ([basic.scope.hiding] is not modelled further) */
     const declaration *declarations = s.declarations.data();
-    for (size_t i = s.declarations.size(); i-- > 0;) {
-        const declaration &d = declarations[i];
+    /* a large region is indexed by name as far as it is declared */
+    bool indexed = s.declarations.size() > 16;
+    size_t i = s.declarations.size();
+    if (indexed) {
+        by_name &names = s.names;
+        for (size_t k = names.previous.size(); k < i; k++) {
+            by_name::slot &at = names.of(declarations[k].name);
+            names.previous.append(at.latest);
+            at.latest = static_cast<uint32_t>(k + 1);
+        }
+        i = names.of(name).latest;
+    }
+    while (i) {
+        const declaration &d = declarations[i - 1];
+        if (indexed)
+            i = s.names.previous[i - 1];
+        else
+            i--;
         if (d.name != name)
             continue;
         if (ignoring_non_types && d.kind != name_kind::type_name &&
@@ -59,6 +75,37 @@ declared_names::find(scope_index in, uint32_t name, unsigned depth) const
             return d;
     }
     return nullptr;
+}
+
+/* the name's slot, made (latest 0) if there is none; no slot is removed, and
+   an empty one has name
+   UINT32_MAX */
+declared_names::by_name::slot &declared_names::by_name::of(uint32_t name)
+{
+    if (2 * (used + 1) > slots.size()) {
+        owned_array<slot> old;
+        for (const slot &x : slots)
+            old.append(x);
+        size_t grown = 64;
+        if (slots.size())
+            grown = 2 * slots.size();
+        slots.resize(grown);
+        for (slot &x : slots)
+            x = {UINT32_MAX, 0};
+        used = 0;
+        for (const slot &x : old)
+            if (x.name != UINT32_MAX)
+                of(x.name).latest = x.latest;
+    }
+    size_t mask = slots.size() - 1;
+    size_t i = (name * 0x9E3779B1u) & mask;
+    while (slots[i].name != name && slots[i].name != UINT32_MAX)
+        i = (i + 1) & mask;
+    if (slots[i].name == UINT32_MAX) {
+        slots[i].name = name;
+        used++;
+    }
+    return slots[i];
 }
 
 scope_index declared_names::enter_namespace(uint32_t name, bool inline_)
@@ -295,8 +342,15 @@ void declared_names::rollback(mark m)
         scope &s = scopes[entry & 0x7FFFFFFFu];
         if (entry & 0x80000000u)
             s.searched_with.resize(s.searched_with.size() - 1);
-        else
-            s.declarations.resize(s.declarations.size() - 1);
+        else {
+            size_t last = s.declarations.size() - 1;
+            if (s.names.previous.size() > last) {
+                s.names.of(s.declarations[last].name).latest =
+                    s.names.previous[last];
+                s.names.previous.resize(last);
+            }
+            s.declarations.resize(last);
+        }
     }
     current_scope = m.current;
 }

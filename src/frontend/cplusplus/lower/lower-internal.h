@@ -125,15 +125,17 @@ class c_lowering
     /* [basic.start.term], [abi:guards]: the run time's functions and
        __dso_handle, 0 until declared */
     uint32_t memset_function = 0;
-    uint32_t cxa_atexit = 0, dso_handle = 0, guard_acquire = 0,
-             guard_release = 0, noop_coro_symbol = 0;
+    uint32_t cxa_atexit = 0, cxa_thread_atexit = 0, cxa_dynamic_cast = 0,
+             dso_handle = 0, guard_acquire = 0, guard_release = 0,
+             noop_coro_symbol = 0;
     uint32_t runtime_call(uint32_t &slot, const char *name,
                           ast_qualified_type result,
                           const ast_qualified_type *parameters,
                           const uint32_t *arguments, uint32_t count);
     /* __cxa_atexit(d, object, &__dso_handle): d a function of type f */
     uint32_t destructor_registration(uint32_t d, ast_qualified_type f,
-                                     uint32_t object);
+                                     uint32_t object,
+                                     bool thread_local_var = false);
     uint32_t initialization(entity_index e, uint32_t init, token_index at);
     void static_initialization(entity_index e, uint32_t init,
                                owned_array<uint32_t> &out, token_index at);

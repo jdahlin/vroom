@@ -107,6 +107,12 @@ node_index parser::lambda_expression()
         }
     }
     scope_index enclosing = names.current();
+    /* [ext:clang_lambda_attributes] P2173R1: attributes before the
+       lambda-declarator or compound-statement appertain to the function
+       call operator */
+    attribute_specifier_seq();
+    if (failed())
+        return 0;
     if (at(preprocessing_op_or_punc::LEFT_PARENTHESIS)) {
         scope_index parameters = 0;
         lambda_declarator(&parameters);
@@ -417,7 +423,9 @@ semantic_analysis::lambda_expression_analysed(LambdaExpression n,
                       syntax_kind::parameter_declaration))
             /* (a list of one template-parameter is that parameter) */
             template_list = x;
-        else if (!x.is_token() && !x.is(syntax_kind::requires_clause))
+        else if (!x.is_token() && !x.is(syntax_kind::requires_clause,
+                                        syntax_kind::attribute_specifier_seq,
+                                        syntax_kind::attribute_specifier))
             return not_supported_because(
                 n, "expr.prim.lambda",
                 "an unhandled part in a lambda-expression");

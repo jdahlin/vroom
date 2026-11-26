@@ -1757,10 +1757,36 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                 /* [class.base.init]/7: direct-initialization: a constructor */
                 owned_array<expression_meaning> arguments;
                 owned_array<SyntaxElement> listed_arguments;
-                if (written.list)
+                SyntaxElement braced = written.braced_list();
+                if (!braced && written.list &&
+                    written.list.is(syntax_kind::braced_init_list)) {
+                    bool use_list = is_aggregate(record.entity);
+                    if (!use_list) {
+                        /* m({a, b}) where the class has no 1-parameter
+                           non-copy/move constructor initializes via its
+                           implicit copy/move constructor from {a, b} */
+                        use_list = true;
+                        for (entity_index cf =
+                                 entity_table[record.entity].first_constructor;
+                             cf; cf = entity_table[cf].next_overload) {
+                            if (entity_table[cf].implicit)
+                                continue;
+                            uint32_t np =
+                                type_table[entity_table[cf].type.unqualified()]
+                                    .parameter_count;
+                            if (np == 1) {
+                                use_list = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (use_list)
+                        braced = written.list;
+                }
+                if (written.list && !braced)
                     r = expression_list_meanings(written.list, arguments,
                                                  &listed_arguments);
-                else if (SyntaxElement braced = written.braced_list()) {
+                else if (braced) {
                     bool base = entity_table[e].base_subobject;
                     if (base && is_aggregate(record.entity))
                         return not_supported_because(
@@ -1804,6 +1830,24 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
                         "nor braces that is not handled");
                 if (r != analysis_result::well_formed)
                     return r;
+                if (!entity_table[e].base_subobject && arguments.size() == 1 &&
+                    !listed_arguments[0].is(syntax_kind::braced_init_list) &&
+                    type_table[arguments[0].type.unqualified()].kind ==
+                        type_kind::class_type &&
+                    arguments[0].type.unqualified() != type.unqualified()) {
+                    qualified_type unqualified =
+                        qualified_type::make(type.unqualified(), cv_none);
+                    bool ambiguous = false, unknown = false;
+                    entity_index conv = conversion_function_for(
+                        arguments[0], unqualified, true, ambiguous, unknown);
+                    if (conv && entity_table[conv].explicit_ && !ambiguous &&
+                        !unknown) {
+                        bool converted = false;
+                        VTRY(cr, conversion_function_call(item, arguments[0],
+                                                          unqualified, true,
+                                                          converted));
+                    }
+                }
                 /* [dcl.init]/17.6.1: a member initialized from a prvalue of
                its class is that object, no constructor called: only one
                whose class copies its bytes is analysed (below) */
@@ -3807,6 +3851,22 @@ analysis_result semantic_analysis::class_direct_initialization(
             conversion_sequence s = class_sequence(arguments[0], type, true);
             if (s.kind == conversion_sequence::form::user_defined &&
                 !s.ambiguous && s.function == found.function) {
+                expression_meaning conv = arguments[0];
+                bool converted = false;
+                VTRY(cr,
+                     conversion_function_call(n, conv, type, true, converted));
+                if (converted &&
+                    conv.type.unqualified() == type.unqualified() &&
+                    conv.category == value_category::prvalue) {
+                    m = conv;
+                    return analysis_result::well_formed;
+                }
+            }
+        } else {
+            bool ambiguous = false, unknown = false;
+            entity_index fn = conversion_function_for(arguments[0], type, true,
+                                                      ambiguous, unknown);
+            if (fn && entity_table[fn].explicit_ && !ambiguous && !unknown) {
                 expression_meaning conv = arguments[0];
                 bool converted = false;
                 VTRY(cr,

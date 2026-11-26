@@ -670,12 +670,14 @@ analysis_result semantic_analysis::declare_template_parameters(
 uint32_t semantic_analysis::function_template_of(entity_index held,
                                                  bool member) const
 {
-    for (size_t i = 0; i < function_templates.size(); i++) {
-        const function_template &f = function_templates[i];
-        if (f.name == held && held && !f.unusable && !f.is_class &&
-            !f.is_alias && !f.is_variable &&
+    if (!held)
+        return 0;
+    const record_chains &chains = held_templates();
+    for (uint32_t i = chains.first(held); i; i = chains.after(i)) {
+        const function_template &f = function_templates[i - 1];
+        if (!f.unusable && !f.is_class && !f.is_alias && !f.is_variable &&
             is_namespace(entity_table[f.entity].enclosing) != member)
-            return static_cast<uint32_t>(i + 1);
+            return i;
     }
     return 0;
 }
@@ -711,23 +713,44 @@ void semantic_analysis::function_template_overloads(
     uint32_t held_id = entity_table[held].name;
     if (in_ns)
         base_ns = non_inline_ns(entity_table[held].enclosing);
-    auto matches_held = [&](entity_index fn) {
-        for (entity_index h = held; h; h = entity_table[h].using_shadow_of)
-            if (fn == h)
-                return true;
-        return false;
+    auto usable = [&](uint32_t i) {
+        const function_template &f = function_templates[i - 1];
+        return !f.unusable && !f.is_class && !f.is_alias && !f.is_variable;
     };
-    for (size_t i = 0; i < function_templates.size(); i++) {
-        if (function_templates[i].unusable || function_templates[i].is_class ||
-            function_templates[i].is_alias || function_templates[i].is_variable)
-            continue;
-        entity_index fn = function_templates[i].name;
-        if (matches_held(fn) ||
-            (in_ns && fn && entity_table[fn].name == held_id &&
-             is_namespace(entity_table[fn].enclosing) &&
-             non_inline_ns(entity_table[fn].enclosing) == base_ns))
-            out.append(static_cast<uint32_t>(i + 1));
+    /* the templates the held entity, or one it shadows, holds */
+    const record_chains &chains = held_templates();
+    for (entity_index h = held; h; h = entity_table[h].using_shadow_of)
+        for (uint32_t i = chains.first(h); i; i = chains.after(i))
+            if (usable(i))
+                out.append(i);
+    /* and the namespace's of that name, over its inline namespaces */
+    if (in_ns) {
+        templates_by_identifier.update(function_templates,
+                                       [&](const function_template &t) {
+                                           return entity_table[t.name].name;
+                                       });
+        for (uint32_t i = templates_by_identifier.first(held_id); i;
+             i = templates_by_identifier.after(i)) {
+            entity_index fn = function_templates[i - 1].name;
+            if (usable(i) && fn && is_namespace(entity_table[fn].enclosing) &&
+                non_inline_ns(entity_table[fn].enclosing) == base_ns)
+                out.append(i);
+        }
     }
+    /* in declaration order, each once */
+    if (out.size() < 2)
+        return;
+    qsort(out.begin(), out.size(), sizeof(uint32_t),
+          [](const void *x, const void *y) {
+              uint32_t l = *static_cast<const uint32_t *>(x);
+              uint32_t r = *static_cast<const uint32_t *>(y);
+              return (l > r) - (l < r);
+          });
+    size_t kept = 0;
+    for (size_t i = 0; i < out.size(); i++)
+        if (!kept || out[kept - 1] != out[i])
+            out[kept++] = out[i];
+    out.resize(kept);
 }
 
 void semantic_analysis::inline_set_functions(
@@ -818,10 +841,11 @@ semantic_analysis::template_of_form(entity_index e,
 {
     if (!e)
         return 0;
-    for (size_t i = 0; i < function_templates.size(); i++)
-        if (function_templates[i].name == e && function_templates[i].*form &&
-            !function_templates[i].unusable)
-            return static_cast<uint32_t>(i + 1);
+    const record_chains &chains = held_templates();
+    for (uint32_t i = chains.first(e); i; i = chains.after(i))
+        if (function_templates[i - 1].*form &&
+            !function_templates[i - 1].unusable)
+            return i;
     return 0;
 }
 
@@ -854,15 +878,10 @@ bool semantic_analysis::template_id_name(SyntaxRef id, lookup_result &x,
 type_index semantic_analysis::dependent_specialization(
     entity_index t, const owned_array<template_argument> &arguments)
 {
-    for (const instantiation_record &x : instantiations) {
-        if (x.template_entity != t || x.argument_count != arguments.size())
-            continue;
-        bool same = true;
-        for (uint32_t i = 0; i < x.argument_count && same; i++)
-            same = template_arguments[x.first_argument + i] == arguments[i];
-        if (same)
-            return entity_table[x.specialization].type.unqualified();
-    }
+    if (uint32_t k = find_instantiation(
+            t, arguments.data(), static_cast<uint32_t>(arguments.size())))
+        return entity_table[instantiations[k - 1].specialization]
+            .type.unqualified();
     instantiation_record record;
     record.template_entity = t;
     record.first_argument = static_cast<uint32_t>(template_arguments.size());
@@ -1213,16 +1232,25 @@ uint32_t semantic_analysis::bound_template_template_of(SyntaxRef id) const
         tokens[first.token()].kind != token_kind::identifier)
         return 0;
     uint32_t name = tokens.identifier(first.token());
+    bound_templates_by_name.update(
+        bound_template_templates,
+        [](const bound_template_template &b) { return b.name; });
+    if (!bound_templates_by_name.first(name))
+        return 0;
     lookup_result x = lookup_unqualified(name, lookup_filter::any);
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
     if (!named)
         return 0;
-    for (size_t i = bound_template_templates.size(); i-- > 0;) {
-        const bound_template_template &b = bound_template_templates[i];
-        if (b.name != name || b.target != named)
-            continue;
+    /* the latest of them */
+    uint32_t latest = 0;
+    for (uint32_t i = bound_templates_by_name.first(name); i;
+         i = bound_templates_by_name.after(i))
+        if (bound_template_templates[i - 1].target == named)
+            latest = i;
+    if (latest) {
+        const bound_template_template &b = bound_template_templates[latest - 1];
         uint32_t record = entity_table[b.parameter].instantiation;
         if (!record)
             return 0;
@@ -1427,10 +1455,13 @@ analysis_result semantic_analysis::template_id_arguments(
        the default, "in instantiation of default argument" the use; neither
        declaration is judged */
     analysis_result r = default_template_arguments(id, ct, arguments, set);
-    if (r == analysis_result::ill_formed)
+    if (r == analysis_result::ill_formed) {
+        if (substituting)
+            return r;
         return not_supported_because(
             id, "temp.arg",
             "a default template argument that is ill-formed here");
+    }
     return r;
 }
 

@@ -503,7 +503,19 @@ class declared_names
            ([temp.dep.type]) */
         bool dependent = false;
     };
+    /* a large region's declarations by name: the latest of each (index plus
+       one) in open-addressed slots, and the one before each */
+    struct by_name {
+        struct slot {
+            uint32_t name, latest;
+        };
+        owned_array<slot> slots;
+        owned_array<uint32_t> previous;
+        size_t used = 0;
+        slot &of(uint32_t name);
+    };
     struct scope {
+        mutable by_name names;
         scope_kind kind;
         scope_index enclosing;
         owned_array<declaration> declarations;

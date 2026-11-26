@@ -159,6 +159,12 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
             if (tokens[t].kind != token_kind::identifier ||
                 unevaluated_depth >= 0)
                 continue;
+            if (t > first &&
+                (is_operator(tokens[t - 1],
+                             preprocessing_op_or_punc::COLON_COLON) ||
+                 is_operator(tokens[t - 1], preprocessing_op_or_punc::DOT) ||
+                 is_operator(tokens[t - 1], preprocessing_op_or_punc::ARROW)))
+                continue;
             lookup_result found = lookup_qualified(
                 x.enclosing, tokens.identifier(t), lookup_filter::any);
             if (found.unknown || found.ambiguous ||
@@ -168,13 +174,21 @@ analysis_result semantic_analysis::default_arguments(SyntaxRef n,
                     "a default argument naming a non-static or unknown class "
                     "member");
         }
-        for (token_index t = first; t < end; t++)
+        for (token_index t = first; t < end; t++) {
+            if (tokens[t].kind != token_kind::identifier)
+                continue;
+            if (t > first &&
+                (is_operator(tokens[t - 1],
+                             preprocessing_op_or_punc::COLON_COLON) ||
+                 is_operator(tokens[t - 1], preprocessing_op_or_punc::DOT) ||
+                 is_operator(tokens[t - 1], preprocessing_op_or_punc::ARROW)))
+                continue;
             for (const parameter_meaning &q : function_parameters)
-                if (q.id && tokens[t].kind == token_kind::identifier &&
-                    tokens.identifier(t) == tokens.identifier(q.id))
+                if (q.id && tokens.identifier(t) == tokens.identifier(q.id))
                     return not_supported_because(
                         p.declaration, "dcl.fct.default",
                         "a default argument naming a parameter");
+        }
         qualified_type type =
             type_table.parameters(entity_table[f].type.unqualified())[i];
         initialized_value value;

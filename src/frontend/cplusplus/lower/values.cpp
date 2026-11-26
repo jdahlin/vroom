@@ -477,6 +477,47 @@ uint32_t c_lowering::conversion(const semantic_node &n)
     case conversion_kind::qualification_cast:
     case conversion_kind::pointer_cast:
         return cast(expression(n.a), t, AST_CAST_POINTER_TO_POINTER);
+    case conversion_kind::dynamic_cast_: {
+        /* [abi:dynamic_cast]: void *__dynamic_cast(const void *sub,
+           const __class_type_info *src, const __class_type_info *dst,
+           ptrdiff_t src2dst_offset); null pointer yields null without calling
+           __dynamic_cast */
+        reread r;
+        uint32_t first =
+            read_first(n.a, r,
+                       "a dynamic_cast operand with side effects outside a "
+                       "statement");
+        if (!first)
+            return 0;
+        ast_qualified_type vp = pointer_to(void_type);
+        ast_qualified_type ptrdiff = ast_builder_type_basic(AST_TYPE_LONG);
+        uint32_t src_ti =
+            typeinfo_address(analysis.type_table[node(n.a).type.unqualified()]
+                                 .operand.unqualified(),
+                             n.at);
+        uint32_t dst_ti = typeinfo_address(
+            analysis.type_table[n.type.unqualified()].operand.unqualified(),
+            n.at);
+        if (!src_ti || !dst_ti)
+            return 0;
+        uint32_t sub = cast(read_again(r), vp, AST_CAST_POINTER_TO_POINTER);
+        ast_qualified_type params[4] = {vp, vp, vp, ptrdiff};
+        uint32_t args[4] = {sub, src_ti, dst_ti,
+                            ast_builder_integer(c, ptrdiff, -1)};
+        uint32_t call = runtime_call(cxa_dynamic_cast, "__dynamic_cast", vp,
+                                     params, args, 4);
+        uint32_t null_src =
+            cast(ast_builder_integer(c, ptrdiff, 0), type(node(n.a).type, n.at),
+                 AST_CAST_INTEGER_TO_POINTER);
+        uint32_t null_dst = cast(ast_builder_integer(c, ptrdiff, 0), t,
+                                 AST_CAST_INTEGER_TO_POINTER);
+        uint32_t nonnull =
+            make(AST_NODE_BINARY, ast_builder_type_basic(AST_TYPE_INT), first,
+                 null_src, 0, LEX_TOKEN_EXCLAMATION_EQUAL, 0);
+        return make(AST_NODE_CONDITIONAL, AST_QUALIFIED_TYPE_UNQUALIFIED(t),
+                    nonnull, cast(call, t, AST_CAST_POINTER_TO_POINTER),
+                    null_dst, 0, 0);
+    }
     case conversion_kind::derived_to_base:
         if (analysis.entity_table[n.b].virtual_base) {
             /* [class.mi]/4: a virtual base, where the object's virtual

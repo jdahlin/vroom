@@ -376,6 +376,10 @@ bool semantic_analysis::conversion_function_to_class(
     }
     entity_index chosen = 0;
     for (entity_index f : candidates) {
+        /* [over.match.copy]/1.2: only non-explicit conversion functions are
+           candidates for an implicit conversion sequence */
+        if (entity_table[f].explicit_)
+            continue;
         expression_meaning value = conversion_function_result(f);
         const struct type &r = type_table[value.type.unqualified()];
         if (r.kind != type_kind::class_type)
@@ -390,7 +394,7 @@ bool semantic_analysis::conversion_function_to_class(
         /* a ref-qualified one: [class.copy.elision]/3's first overload
            resolution takes the returned lvalue as an rvalue, which the
            sequence of an argument is not told apart from */
-        if (ambiguous || entity_table[f].explicit_ || chosen ||
+        if (ambiguous || chosen ||
             (entity_table[f].member_cv & (cv_ref_lvalue | cv_ref_rvalue))) {
             unknown = true;
             return false;

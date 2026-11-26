@@ -2773,12 +2773,6 @@ constness semantic_analysis::evaluate_binding(constant_evaluation &state,
        own lifetimes, not modelled) */
     uint32_t object = 0;
     constness c;
-    /* (in a function's invocation, whose temporaries' lifetimes are not
-       modelled, only a function pointer, which a table of them is built
-       from) */
-    if (semantics[bound].category == value_category::prvalue && state.frame &&
-        evaluated_class(semantics[bound].type))
-        return CONST_UNKNOWN;
     if (semantics[bound].category == value_category::prvalue &&
         !evaluated_class(semantics[bound].type)) {
         /* a scalar prvalue: the temporary holds its value */
@@ -3977,8 +3971,19 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
     }
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         postponed_body &b = postponed_bodies[i];
-        if (!b.c || b.c != entity_table[f].enclosing ||
-            !declared_by(f, b.body.function_definition()))
+        if (!b.c)
+            continue;
+        if (b.function) {
+            if (b.function != f)
+                continue;
+        } else if (!declared_by(f, b.body.function_definition())) {
+            continue;
+        }
+        bool still_defining = false;
+        for (entity_index d = defining_class; d; d = entity_table[d].enclosing)
+            if (d == b.c)
+                still_defining = true;
+        if (still_defining)
             continue;
         const postponed_body taken = b;
         b.c = 0;
@@ -4056,6 +4061,9 @@ constness semantic_analysis::evaluate_invocation(
                     .initializer_located)
                 return CONST_UNKNOWN;
     }
+    /* analysing a postponed body makes entities, which moves entity_table:
+       `e` is not read after it */
+    bool nonnull = e.gnu_flags & gnu_nonnull;
     analyse_postponed_body(f);
     uint32_t body = entity_table[f].definition;
     uint32_t with_this = 0;
@@ -4116,8 +4124,8 @@ constness semantic_analysis::evaluate_invocation(
         /* clang: "null passed to a callee that requires a non-null
            argument" is not a constant expression; which argument the
            attribute names is not modelled */
-        else if ((e.gnu_flags & gnu_nonnull) &&
-                 value.kind == constant_value_kind::pointer && !value.count) {
+        else if (nonnull && value.kind == constant_value_kind::pointer &&
+                 !value.count) {
             restore(state, before_arguments,
                     kept_elements(state, before_argument_elements, returned,
                                   result));

@@ -42,12 +42,19 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     uint32_t k = 0;
     if (k < d.size() && d[k].is_token() && d[k].is_identifier())
         id = d[k++].token();
-    if (k + 2 != d.size() || !d[k].is(preprocessing_op_or_punc::COLON))
+    SyntaxRef default_init = 0;
+    if (k + 3 == d.size() && d[k].is(preprocessing_op_or_punc::COLON) &&
+        d[k + 2].is(syntax_kind::brace_or_equal_initializer,
+                    syntax_kind::braced_init_list) &&
+        tokens.files.behavior.edition >= standard_edition::cplusplus_20) {
+        default_init = d[k + 2].index();
+    } else if (k + 2 != d.size() || !d[k].is(preprocessing_op_or_punc::COLON)) {
         /* attributes, a brace-or-equal-initializer */
         return not_supported_because(
             d.index(), "class.bit",
             "a bit-field declarator with attributes, an initializer or another "
             "form than name : width");
+    }
     SyntaxElement width_expression = d[k + 1];
     if (!s.has_type || s.typedef_ || s.static_ || s.extern_ || s.mutable_ ||
         s.inline_ || s.constexpr_ || s.aligned || s.gnu_flags)
@@ -127,6 +134,8 @@ analysis_result semantic_analysis::member_bit_field(entity_index c,
     entity_table[e].field = entity_table[c].member_count;
     entity_table[e].bit_field = true;
     entity_table[e].bit_width = static_cast<uint16_t>(width);
+    if (default_init)
+        entity_table[e].default_initializer = default_init;
     entity_table[e].linkage_of_name = entity_table[c].linkage_of_name;
     entity_table[e].access = access;
     class_members.append(e);

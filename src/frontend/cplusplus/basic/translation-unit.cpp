@@ -727,8 +727,9 @@ analysis_result semantic_analysis::declare(
         entity_table[prior].enclosing == scope && (!c_language || joined_set)) {
         /* (only while a usable template holds it) */
         bool usable = false;
-        for (const function_template &t : function_templates)
-            if (t.name == prior && !t.unusable)
+        const record_chains &chains = held_templates();
+        for (uint32_t i = chains.first(prior); i; i = chains.after(i))
+            if (!function_templates[i - 1].unusable)
                 usable = true;
         if (!usable)
             return not_supported_because(
@@ -1329,7 +1330,8 @@ analysis_result semantic_analysis::declare_in_block_with_linkage(
         if (within_unnamed_namespace(space))
             made.linkage_of_name = linkage::internal;
         /* [dcl.link]/5 */
-        made.c_language_linkage = c_language;
+        if (c_language)
+            entity_table.give_c_linkage(target);
         block_declared.append(target);
     }
     if (s.inline_)

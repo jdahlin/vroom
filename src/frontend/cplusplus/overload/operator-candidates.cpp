@@ -1276,6 +1276,8 @@ analysis_result semantic_analysis::overloaded_operator(
     if (contains_placeholder(entity_table[f].type)) {
         VTRY(ur, undeduced_use(at, f));
         callee.type = entity_table[f].type;
+        if (callee.node)
+            semantics[callee.node].type = callee.type;
     }
     VTRY_SET(r, call_with(n, callee, entity_table[f].type, object, member,
                           call_syntax, call_arguments, m, true));

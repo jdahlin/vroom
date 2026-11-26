@@ -368,14 +368,6 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
         right.category = value_category::prvalue;
         right.node = converted.node;
     }
-    /* [class.copy.assign]/12: the implicitly-defined copy assignment
-       operator "performs memberwise copy assignment of its subobjects":
-       one that calls an operator function is not analysed */
-    if (!assigned_bitwise(c) &&
-        !(right.category != value_category::lvalue && moved_bitwise(c)))
-        return not_supported_because(
-            n, "class.copy.assign",
-            "an implicit class assignment that calls an operator function");
     /* [class.copy.assign]/7.2: a const non-static data member of a class
        (or of a subobject's class) defines the implicit operator deleted */
     /* [over.ics.rank]/3.2.3: an rvalue is assigned by a defaulted move
@@ -395,6 +387,14 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
                           "is defined as deleted",
                           "class.copy.assign");
     }
+    /* [class.copy.assign]/12: the implicitly-defined copy assignment
+       operator "performs memberwise copy assignment of its subobjects":
+       one that calls an operator function is not analysed */
+    if (!assigned_bitwise(c) &&
+        !(right.category != value_category::lvalue && moved_bitwise(c)))
+        return not_supported_because(
+            n, "class.copy.assign",
+            "an implicit class assignment that calls an operator function");
     /* [over.match.viable]: the implicit object parameter of the copy
        assignment operator, which is not const, binds only to a non-const
        object; an rvalue binds to it too ([over.match.funcs]/5) */

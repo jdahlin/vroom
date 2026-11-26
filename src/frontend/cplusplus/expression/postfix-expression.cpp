@@ -272,6 +272,53 @@ analysis_result semantic_analysis::named_cast(PostfixOperationNamedCast cast,
     SyntaxRef n = cast.node;
     standard_keyword keyword = cast.keyword().keyword();
     uint8_t kinds = cast_static;
+    if (keyword == standard_keyword::dynamic_cast_) {
+        qualified_type to;
+        VTRY(r, type_id(cast.type_id(), to));
+        VTRY(er, target_expression(cast.operand(), to, m));
+        if (!is_pointer(to))
+            return not_supported_because(
+                n, "expr.dynamic.cast", "a dynamic_cast to a non-pointer type");
+        if (m.category != value_category::prvalue && is_pointer(m.type)) {
+            m.type = qualified_type::make(m.type.unqualified(), cv_none);
+            m.category = value_category::prvalue;
+            converted(m, conversion_kind::lvalue_to_rvalue);
+        }
+        if (!is_pointer(m.type))
+            return not_supported_because(
+                n, "expr.dynamic.cast",
+                "a dynamic_cast from a non-pointer type");
+        qualified_type to_pt = type_table[to.unqualified()].operand;
+        qualified_type from_pt = type_table[m.type.unqualified()].operand;
+        if (type_table[to_pt.unqualified()].kind != type_kind::class_type ||
+            type_table[from_pt.unqualified()].kind != type_kind::class_type)
+            return not_supported_because(
+                n, "expr.dynamic.cast",
+                "a dynamic_cast with a non-class pointee");
+        if (from_pt.cv() & ~to_pt.cv())
+            return ill_formed(n, "dynamic_cast cannot cast away qualifiers",
+                              "expr.dynamic.cast");
+        entity_index src = type_table[from_pt.unqualified()].entity;
+        entity_index dst = type_table[to_pt.unqualified()].entity;
+        require_complete(src);
+        require_complete(dst);
+        if (!entity_table[src].defined || !entity_table[dst].defined)
+            return not_supported_because(
+                n, "expr.dynamic.cast",
+                "a dynamic_cast involving an incomplete class");
+        bool ambiguous = false;
+        if (src == dst || base_step(src, dst, ambiguous))
+            return explicit_conversion(n, to, m, cast_static);
+        if (!polymorphic_class(src))
+            return ill_formed(
+                n, "the operand of a runtime dynamic_cast shall be polymorphic",
+                "expr.dynamic.cast");
+        m.type = to;
+        m.category = value_category::prvalue;
+        m.evaluation = constness::not_constant;
+        converted(m, conversion_kind::dynamic_cast_);
+        return analysis_result::well_formed;
+    }
     if (keyword == standard_keyword::const_cast_)
         kinds = cast_const;
     else if (keyword == standard_keyword::reinterpret_cast_)
@@ -1355,6 +1402,20 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 if (r != analysis_result::well_formed)
                     return r;
                 looked_up = true;
+            } else if (substituting && !x.entity && set.empty() && !x.unknown &&
+                       !x.ambiguous) {
+                /* [basic.lookup.argdep]: neither unqualified lookup nor
+                   argument-dependent lookup found any declaration during
+                   template substitution (SFINAE, e.g. fmt's format_as) */
+                size_t spelled_length = 0;
+                const char *spelled =
+                    tokens.pp.identifier_spelling(name - 1, &spelled_length);
+                if (!builtin_spelled(name) &&
+                    !clang_has_builtin(tokens.files.behavior, spelled,
+                                       spelled_length))
+                    return ill_formed_at_token(
+                        t, "use of an undeclared identifier",
+                        "basic.lookup.unqual");
             }
         }
     }

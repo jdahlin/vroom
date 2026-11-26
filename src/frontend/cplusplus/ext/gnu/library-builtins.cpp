@@ -206,7 +206,7 @@ entity_index semantic_analysis::declare_builtin(
         type_table.function(result, parameters, count, variadic, non_throwing),
         cv_none);
     entity_table[e].linkage_of_name = linkage::external;
-    entity_table[e].c_language_linkage = true;
+    entity_table.give_c_linkage(e);
     entity_table[e].gnu_flags = flags;
     entity_table.bind(0, name, e);
     return e;

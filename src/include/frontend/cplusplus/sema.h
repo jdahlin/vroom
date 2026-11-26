@@ -1018,6 +1018,9 @@ class entities
        ([dcl.enum]/11) */
     entity_index find(entity_index scope, uint32_t name) const;
     entity_index find_c_linkage(uint32_t name, entity_kind kind) const;
+    /* e has C language linkage: the one way to say so, as find_c_linkage
+       looks only among those */
+    void give_c_linkage(entity_index e);
     void bind(entity_index scope, uint32_t name, entity_index e,
               bool by_using_declaration = false);
     /* whether the name is bound in the scope by a using-declaration
@@ -1058,6 +1061,9 @@ class entities
     owned_array<binding> slots;
     size_t used = 0;
     void grow();
+    /* the entities with C language linkage, chained by name */
+    owned_array<entity_index> c_linkage;
+    mutable record_chains c_linkage_by_name;
 };
 
 /* ---- analysis ----------------------------------------------------------- */
@@ -1654,6 +1660,7 @@ enum class conversion_kind : uint8_t {
     qualification_cast,  /* [expr.const.cast]/3: the same address */
     pointer_cast,        /* [expr.static.cast]/13, [expr.reinterpret.cast]/6,
                             /7, /8: the same address, another type */
+    dynamic_cast_,       /* [expr.dynamic.cast]: run-time __dynamic_cast */
     pointer_to_integral, /* [expr.reinterpret.cast]/4 */
     integral_to_pointer, /* [expr.reinterpret.cast]/5 */
     /* [conv.ptr]/3: a pointer to a derived class to a pointer to its base
@@ -2856,6 +2863,8 @@ class semantic_analysis
         entity_index nominated = 0;
     };
     owned_array<using_directive_record> using_directives;
+    /* ... by their scope */
+    mutable record_chains using_directives_by_scope;
     /* [basic.scope.namespace]/1, [namespace.def] */
     analysis_result namespace_definition(SyntaxRef n);
     /* [namespace.udir], [namespace.alias], [namespace.udecl] */
@@ -2926,6 +2935,7 @@ class semantic_analysis
     bool pack_depends(entity_index pack) const;
     owned_array<entity_index> dependent_members;
     owned_array<entity_index> dependent_written_types;
+    record_chains written_types_by_key;
     /* the names of a dependent_written type's tokens that an alias
        template's instantiation bound to a dependent type, with the
        type (element UINT32_MAX), or to the elements of a pack (one
@@ -3766,7 +3776,8 @@ class semantic_analysis
        when it cannot be told */
     bool implicit_constructor_throws(entity_index f, bool &known);
     bool default_initializer_throws(entity_index e, bool &throws);
-    bool subobject_constructor_throws(entity_index k, bool copy, bool &known);
+    bool subobject_constructor_throws(entity_index k, bool copy, bool &known,
+                                      bool move = false);
     /* declval<T>() as an expression */
     expression_meaning declval_meaning(qualified_type t);
     /* [ext:clang_type_traits] the answer of the trait of one type-id
@@ -5465,6 +5476,24 @@ class semantic_analysis
         bool guides_made = false;
     };
     owned_array<function_template> function_templates;
+    /* function_templates by the held entity (name) and by its identifier,
+       instantiations by template_entity: made as they are asked for */
+    mutable record_chains templates_by_held, templates_by_identifier,
+        instantiations_by_template;
+    const record_chains &held_templates() const
+    {
+        templates_by_held.update(
+            function_templates,
+            [](const function_template &t) { return t.name; });
+        return templates_by_held;
+    }
+    const record_chains &instantiations_of_templates() const
+    {
+        instantiations_by_template.update(
+            instantiations,
+            [](const instantiation_record &x) { return x.template_entity; });
+        return instantiations_by_template;
+    }
     /* the function type of an implicit guide specialization: the
        constructor's parameters returning the class specialization */
     analysis_result implicit_guide_type(const function_template &ft,
@@ -5507,6 +5536,8 @@ class semantic_analysis
         entity_index parameter;
     };
     owned_array<bound_template_template> bound_template_templates;
+    /* ... by name; function_templates by primary (partial specializations) */
+    mutable record_chains bound_templates_by_name, templates_by_primary;
     /* the instantiation whose specialization the declaration analysed
        now declares (its record's index plus one), and how deep
        instantiations nest ([temp.inst]/16) */
@@ -5896,6 +5927,40 @@ class semantic_analysis
                                                    bool negated,
                                                    entity_index scope = 0);
     owned_array<entity_index> dependent_values;
+    /* those of dependent_values whose value and name are these (and maybe
+       others of the hash's bucket), in order.  Neither changes once an
+       entity is among them */
+    record_chains dependent_values_by_key;
+    struct dependent_value_range {
+        const record_chains &chains;
+        const owned_array<entity_index> &values;
+        uint32_t head;
+        struct iterator {
+            const dependent_value_range &range;
+            uint32_t at;
+            entity_index operator*() const
+            {
+                return range.values[at - 1];
+            }
+            void operator++()
+            {
+                at = range.chains.after(at);
+            }
+            bool operator!=(const iterator &o) const
+            {
+                return at != o.at;
+            }
+        };
+        iterator begin() const
+        {
+            return {*this, head};
+        }
+        iterator end() const
+        {
+            return {*this, 0};
+        }
+    };
+    dependent_value_range dependent_values_like(uint64_t value, uint32_t name);
     bool written_type_arguments(SyntaxElement id,
                                 owned_array<qualified_type> &out);
     analysis_result substituted_parameter_type(uint32_t template_index,
@@ -6190,6 +6255,7 @@ class semantic_analysis
     /* Packs returned by make_pack, indexed separately from their elements:
        an overlapping element sequence may appear only after a pack exists. */
     owned_array<template_argument> canonical_packs;
+    record_chains canonical_packs_by_key;
     template_argument make_pack(const template_argument *elements,
                                 uint32_t count);
     bool deduce_argument(const template_argument &x, const template_argument &y,
@@ -6278,6 +6344,12 @@ class semantic_analysis
        arguments, plus one; 0 if there is none yet */
     uint32_t find_instantiation(entity_index t, const template_argument *a,
                                 uint32_t count) const;
+    /* instantiations in 64K buckets by a hash of template and arguments,
+       none of which changes once recorded */
+    mutable record_chains instantiations_by_key;
+    static size_t instantiation_bucket(entity_index t,
+                                       const template_argument *a,
+                                       uint32_t count);
     /* a new instantiation record of function template ft (its entity the
        template's) for the arguments, with a block scope in the template's
        enclosing scope binding the template-parameters' names to them
