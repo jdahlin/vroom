@@ -4711,9 +4711,11 @@ class semantic_analysis
        for a typedef-name, its cv-qualifiers */
     analysis_result named_member_type(SyntaxRef n, token_index t,
                                       entity_index e, const char *citation,
-                                      type_index &type, uint32_t &cv);
+                                      type_index &type, uint32_t &cv,
+                                      bool allow_placeholder = false);
     analysis_result qualified_type_name(SyntaxRef n, type_index &type,
-                                        uint32_t &cv);
+                                        uint32_t &cv,
+                                        bool allow_placeholder = false);
     /* [dcl.enum]: an enum-specifier, the enumeration's type */
     analysis_result enum_specifier(SyntaxRef n, type_index &type);
     analysis_result enum_specifier_rules(SyntaxRef n, type_index &type);

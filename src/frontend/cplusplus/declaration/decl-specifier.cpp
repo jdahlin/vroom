@@ -1309,7 +1309,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 cv |= named_cv;
             } else if (c.is(syntax_kind::simple_type_specifier)) {
                 uint32_t named_cv = 0;
-                r = qualified_type_name(c, class_type, named_cv);
+                r = qualified_type_name(c, class_type, named_cv,
+                                        allow_placeholder);
                 cv |= named_cv;
             } else if (c.is(syntax_kind::typename_specifier)) {
                 uint32_t named_cv = 0;
@@ -1457,6 +1458,18 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                 continue;
             }
             if (!e || entity_table[e].kind != entity_kind::typedef_name) {
+                entity_index cand = e;
+                if (!cand)
+                    cand = found.unknown_entity;
+                if (allow_placeholder && cand && class_template_of(cand)) {
+                    if (named || !k.first)
+                        k.first = t;
+                    if (named)
+                        k.alone++;
+                    named = placeholder_type(false).unqualified();
+                    named_at = t;
+                    continue;
+                }
                 entity_index unknown = e;
                 if (!unknown) {
                     analysis_result r = not_supported(
@@ -1881,7 +1894,8 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
  */
 analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
                                                        type_index &type,
-                                                       uint32_t &cv)
+                                                       uint32_t &cv,
+                                                       bool allow_placeholder)
 {
     cv = 0;
     if (n.size() != 2 || !n[0].is(syntax_kind::nested_name_specifier) ||
@@ -1925,7 +1939,22 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
                                    "namespaces",
                                    "namespace.qual");
     entity_index e = found.entity;
-    return named_member_type(n, t, e, "basic.lookup.qual", type, cv);
+    if (!e && allow_placeholder) {
+        entity_index cand = found.unknown_entity;
+        if (!cand) {
+            lookup_result any = lookup_qualified(
+                scope.entity, tokens.identifier(t), lookup_filter::any);
+            if (!any.ambiguous) {
+                cand = any.entity;
+                if (!cand)
+                    cand = any.unknown_entity;
+            }
+        }
+        if (cand && class_template_of(cand))
+            e = cand;
+    }
+    return named_member_type(n, t, e, "basic.lookup.qual", type, cv,
+                             allow_placeholder);
 }
 
 /*
@@ -1933,11 +1962,10 @@ analysis_result semantic_analysis::qualified_type_name(SyntaxRef n,
  * enumeration or typedef-name, accessible ([class.access]/1), as a type and
  * its cv-qualifiers; anything else is not supported yet (cited by citation).
  */
-analysis_result semantic_analysis::named_member_type(SyntaxRef n, token_index t,
-                                                     entity_index e,
-                                                     const char *citation,
-                                                     type_index &type,
-                                                     uint32_t &cv)
+analysis_result
+semantic_analysis::named_member_type(SyntaxRef n, token_index t, entity_index e,
+                                     const char *citation, type_index &type,
+                                     uint32_t &cv, bool allow_placeholder)
 {
     /* [temp.res]/3, [dcl.type.simple]/2: the name of a
        typename-specifier or type-name names a type; a variable, function
@@ -1948,6 +1976,10 @@ analysis_result semantic_analysis::named_member_type(SyntaxRef n, token_index t,
               entity_table[e].kind == entity_kind::enumerator))
         return ill_formed_at_token(t, "the qualified name does not name a type",
                                    citation);
+    if (allow_placeholder && e && class_template_of(e)) {
+        type = placeholder_type(false).unqualified();
+        return analysis_result::well_formed;
+    }
     if (!e || (entity_table[e].kind != entity_kind::class_type &&
                entity_table[e].kind != entity_kind::enumeration &&
                entity_table[e].kind != entity_kind::typedef_name))
