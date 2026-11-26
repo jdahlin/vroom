@@ -349,9 +349,10 @@ analysis_result semantic_analysis::string_initialization(
  * source is a constant expression decides and analysis cannot tell.
  */
 analysis_result semantic_analysis::narrowing(SyntaxRef at,
-                                             const expression_meaning &m,
+                                             const expression_meaning &source,
                                              qualified_type to, bool &narrows)
 {
+    expression_meaning m = source;
     const implementation_defined_behavior &b = tokens.files.behavior;
     narrows = false;
     fundamental_type f = fundamental_of(m.type), t = fundamental_of(to);
@@ -393,6 +394,19 @@ analysis_result semantic_analysis::narrowing(SyntaxRef at,
     }
     if (!may_narrow)
         return analysis_result::well_formed;
+    /* a constexpr function's call is not folded as it is analysed: its
+       value is [dcl.init.list]/7's constant expression's */
+    if (m.evaluation == constness::unknown && m.node &&
+        fundamental_type_is_integral(f)) {
+        constant_value v;
+        constness k = evaluate_value(m.node, v);
+        if (k == constness::constant &&
+            v.kind == constant_value_kind::integer &&
+            fundamental_type_width(b, f) <= 64) {
+            m.evaluation = k;
+            m.value = static_cast<uint64_t>(v.integer);
+        }
+    }
     if (m.evaluation == constness::not_constant) {
         narrows = true;
         return analysis_result::well_formed;
