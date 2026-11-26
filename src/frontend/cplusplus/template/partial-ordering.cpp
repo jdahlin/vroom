@@ -51,7 +51,8 @@ bool more_cv(unsigned a, unsigned b)
 } // namespace
 
 /* a type partial ordering compares with deduce_type's rules alone */
-bool semantic_analysis::orderable(qualified_type t, bool packs) const
+bool semantic_analysis::orderable(qualified_type t, bool packs,
+                                  bool *pack_argument) const
 {
     const struct type &r = type_table[t.unqualified()];
     switch (r.kind) {
@@ -89,6 +90,8 @@ bool semantic_analysis::orderable(qualified_type t, bool packs) const
             }
             /* a pack of arguments, S<I...>: each element the same, or
                the expansion of a parameter pack */
+            if (pack_argument)
+                *pack_argument = true;
             for (uint32_t k = 0; k < x.count; k++) {
                 const template_argument &y = pack_arguments[x.value + k];
                 bool expansion = y.kind == template_argument::kind_t::pack &&
@@ -104,26 +107,27 @@ bool semantic_analysis::orderable(qualified_type t, bool packs) const
     case type_kind::class_type:
         return true;
     case type_kind::pack_expansion:
-        return packs && orderable(r.operand, packs);
+        return packs && orderable(r.operand, packs, pack_argument);
     case type_kind::pointer_to_member:
         if (!r.entity &&
             !orderable(
                 qualified_type::make(static_cast<type_index>(r.bound), cv_none),
-                packs))
+                packs, pack_argument))
             return false;
-        return orderable(r.operand, packs);
+        return orderable(r.operand, packs, pack_argument);
     case type_kind::pointer:
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
-        return orderable(r.operand, packs);
+        return orderable(r.operand, packs, pack_argument);
     case type_kind::array:
-        return (r.bound_known || r.entity) && orderable(r.operand, packs);
+        return (r.bound_known || r.entity) &&
+               orderable(r.operand, packs, pack_argument);
     case type_kind::function: {
-        if (!orderable(r.operand, packs))
+        if (!orderable(r.operand, packs, pack_argument))
             return false;
         const qualified_type *list = type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < r.parameter_count; i++)
-            if (!orderable(list[i], packs))
+            if (!orderable(list[i], packs, pack_argument))
                 return false;
         return true;
     }
@@ -363,6 +367,9 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
                                                bool f_reversed, bool g_reversed)
 {
     unknown = false;
+    /* a non-type pack parameter or a specialization with a pack of
+       arguments took part */
+    bool packs_taken = false;
     const uint32_t both[2] = {f, g};
     for (uint32_t x : both) {
         const function_template t = function_templates[x - 1];
@@ -391,6 +398,8 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
                     template_parameter_nodes[t.first_parameter + i], form) ||
                 (dependent_types && form.template_template))
                 unknown = true;
+            else if (dependent_types && !form.type && form.pack)
+                packs_taken = true;
         }
         qualified_type type = entity_table[t.entity].type;
         const struct type r = type_table[type.unqualified()];
@@ -398,7 +407,7 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
         if (r.kind != type_kind::function || r.variadic)
             unknown = true;
         for (uint32_t i = 0; i < r.parameter_count && !unknown; i++)
-            if (!orderable(list[i], true))
+            if (!orderable(list[i], true, &packs_taken))
                 unknown = true;
     }
     if (unknown)
@@ -407,6 +416,11 @@ int semantic_analysis::function_template_order(uint32_t f, uint32_t g,
                                       g_reversed);
     bool gf = at_least_as_specialized(g, f, arguments, unknown, g_reversed,
                                       f_reversed);
+    /* (a tie with packs of arguments is not claimed:
+       [temp.deduct.type]/9's ignored pack expansion leaves clang to order
+       such templates by CWG1432, which is open) */
+    if (packs_taken && fg == gf)
+        unknown = true;
     if (unknown)
         return 0;
     if (fg && !gf)
