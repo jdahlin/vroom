@@ -10746,6 +10746,7 @@ struct VirtSpecifierSeq : SyntaxExtra<VirtSpecifierSeq> {
         narrow(!e.is_token() && (!e || accepts(e.kind())), file, line);
     }
     static bool accepts(syntax_kind k);
+    GnuAttributeSpecifier gnu_attribute_specifier() const;
     VirtSpecifierSeq virt_specifier_seq() const;
 };
 
@@ -14950,6 +14951,11 @@ inline bool VirtSpecifierSeq::accepts(syntax_kind k)
     return k == syntax_kind::virt_specifier_seq;
 }
 
+inline GnuAttributeSpecifier VirtSpecifierSeq::gnu_attribute_specifier() const
+{
+    return first<GnuAttributeSpecifier>();
+}
+
 inline VirtSpecifierSeq VirtSpecifierSeq::virt_specifier_seq() const
 {
     return first<VirtSpecifierSeq>();
@@ -18047,7 +18053,7 @@ static const uint64_t syntax_allowed_children[][4] = {
     {0x1a0800b8u, 0x1c00e0400000f0u, 0x40000c30901c4000u, 0xc00020u}, /* member_declaration */
     {0x18000000u, 0x1c00c0000000f0u, 0x3080000000u, 0xc00000u}, /* member_declarator_list */
     {0xfffe0813f8000000u, 0x1c0300030000f0u, 0x40300030801c0000u, 0xc7b1c0u}, /* member_declarator */
-    {0x0u, 0x10000000000u, 0x0u, 0xc00000u}, /* virt_specifier_seq */
+    {0x0u, 0x10000000000u, 0x4000000000000000u, 0xc00000u}, /* virt_specifier_seq */
     {0x0u, 0x0u, 0x0u, 0xc00000u}, /* pure_specifier */
     {0x6000u, 0x380000000000u, 0x1000000000u, 0xc00000u}, /* base_clause */
     {0x2000u, 0x380000000000u, 0x1000000000u, 0xc00000u}, /* base_specifier_list */
