@@ -57,7 +57,8 @@ analysis_result semantic_analysis::compare_subobjects(
     expression_meaning y, expression_meaning &all, bool &any, bool &deleted,
     owned_array<uint32_t> *statements, qualified_type category, bool &constant)
 {
-    const struct type &t = type_table[type.unqualified()];
+    /* a copy: array_element interns types, which moves the table */
+    const struct type t = type_table[type.unqualified()];
     if (t.kind == type_kind::array) {
         if (!t.bound_known || t.variable_bound || t.bound > 64)
             return not_supported_because(
