@@ -1651,19 +1651,25 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         token_index id = item[0].token();
         owned_array<expression_meaning> arguments;
         owned_array<SyntaxElement> listed_arguments;
-        if (item.size() == 4) {
-            VTRY(r, expression_list_meanings(item[2], arguments,
-                                             &listed_arguments));
-        } else if (item.size() != 3) {
-            return not_supported_because(
-                item, "class.base.init",
-                "a delegating mem-initializer of an unhandled form");
-        }
         initialized_value value;
-        VTRY(r, construct(item, entity_table[c].type, arguments, 0, value,
-                          false, &listed_arguments));
+        SyntaxElement braced = InitializerParts::after(item, 1).braced_list();
+        if (braced) {
+            VTRY(r, list_initialization(braced, entity_table[c].type, true,
+                                        value));
+        } else {
+            if (item.size() == 4) {
+                VTRY(r, expression_list_meanings(item[2], arguments,
+                                                 &listed_arguments));
+            } else if (item.size() != 3) {
+                return not_supported_because(
+                    item, "class.base.init",
+                    "a delegating mem-initializer of an unhandled form");
+            }
+            VTRY(r, construct(item, entity_table[c].type, arguments, 0, value,
+                              false, &listed_arguments));
+        }
         expression_meaning ptr;
-        VTRY_SET(r, this_pointer(id, ptr));
+        VTRY(pointed, this_pointer(id, ptr));
         expression_meaning self;
         self.type = entity_table[c].type;
         self.category = value_category::lvalue;
