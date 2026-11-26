@@ -95,9 +95,7 @@ static uint32_t x64_vir_eh_site_begin(x64_vir_context *L, const vir_insn *in)
     const vir_function *f = L->function;
     uint32_t unwind = f->extra[in->c + 2 + f->extra[in->c]];
 
-    if (W->eh_nsites >= WALK_EH_SITES)
-        x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
-    uint32_t node = x64_vir_eh_pad_node(L, unwind), k = W->eh_nsites++;
+    uint32_t node = x64_vir_eh_pad_node(L, unwind), k = x64_eh_site_new(W);
 
     x64_vir_eh_pad_mark(L, unwind, node);
     W->eh_sites[k].node = node;
@@ -516,11 +514,8 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         {
             /* (a call site without a pad: C++'s personality routine terminates at an address in none) */
             walk_state *W = e->walk_state;
-            uint32_t k = W->eh_nsites;
+            uint32_t k = x64_eh_site_new(W);
 
-            if (W->eh_nsites >= WALK_EH_SITES)
-                x64_vir_fail(L, VIRBUILD_FAILURE(exceptions_lowering));
-            W->eh_nsites++;
             W->eh_sites[k].node = 0;
             W->eh_sites[k].begin = ++W->eh_marks;
             x64_record_emit(e, X64_OP_EHMARK)->label = W->eh_sites[k].begin;

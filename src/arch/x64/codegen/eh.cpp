@@ -6,7 +6,16 @@
  * its enclosing nodes' to the outermost, then _Unwind_Resume(exception).  x64_eh_table (print.c) writes
  * .gcc_except_table, each call a call site, its landing pad that node's (0: none), action 0: a cleanup.
  */
+#include "common/vector.h"
 #include "x64-internal.h"
+
+/* the index of a new call site (no limit: a function without all of them in its table would let an
+   exception pass its handlers and destructors, [except.ctor]) */
+VPRIV uint32_t x64_eh_site_new(walk_state *W)
+{
+    VVECTOR_NEED(W->eh_sites, W->eh_nsites, W->eh_site_capacity, 1);
+    return W->eh_nsites++;
+}
 
 /* a catch scope's dispatch at a landing pad: the exception pointer into the scope's variable, then
    the handlers in order, the selector against the type table; falls out of it when none matches */
@@ -57,7 +66,7 @@ VPRIV void x64_eh_pads(codegen_context *e)
     uint8_t *need;
     bool any = false, catches = false;
 
-    if (!W->eh_fn || W->eh_overflow || !c->eh_resume_sym)
+    if (!W->eh_fn || !c->eh_resume_sym)
         return;
     need = (uint8_t *)calloc(n + 1, 1),
     run = (uint32_t *)calloc(n + 1, sizeof *run);
@@ -163,7 +172,7 @@ VPRIV bool x64_eh_wanted(codegen_context *e)
 {
     walk_state *W = e->walk_state;
 
-    if (!W || !W->eh_fn || W->eh_overflow)
+    if (!W || !W->eh_fn)
         return false;
     for (uint32_t k = 0; k < W->eh_nsites; k++) {
         uint32_t m = W->eh_sites[k].node;
@@ -202,8 +211,13 @@ VPRIV void x64_eh_table(codegen_context *e, tbuf *b, uint32_t s)
     walk_state *W = e->walk_state;
     cc *c = e->compile_context;
     uint32_t f = W->function_symbol;
-    uint32_t action[WALK_EH_SITES], pads[WALK_EH_SITES];
+    uint32_t *action =
+        (uint32_t *)calloc(2 * (size_t)W->eh_nsites + 1, sizeof *action);
+    uint32_t *pads = action ? action + W->eh_nsites : NULL;
     bool term = W->eh_term && W->eh_seen && W->eh_seen[W->eh_term];
+
+    if (!action)
+        vout_of_memory();
 
     for (uint32_t k = 0; k < W->eh_nsites; k++) {
         uint32_t m = W->eh_sites[k].node, pad = m == UINT32_MAX
@@ -267,4 +281,5 @@ VPRIV void x64_eh_table(codegen_context *e, tbuf *b, uint32_t s)
     }
     gap(0);
     codegen_eh_table_end(b, c, &W->eh_lsda, f);
+    free(action);
 }
