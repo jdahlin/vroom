@@ -71,8 +71,18 @@ Each step keeps `bench/vcc-x86intrinsics.py` green; a builtin's stencil is
 deleted in the commit that gives it a table row or a generic operation.
 
 - **XV0** Baseline: add `--arch avx2` to `bench/stockfish/run.py`; get it to
-  compile (not tried since `<immintrin.h>` compiles); record nodes/second and
-  compile time against clang for SSE2 and AVX2.
+  compile; record nodes/second and compile time against clang for SSE2 and
+  AVX2.  Done for SSE2; AVX2 stops on one TU (`nnue/network.cpp`) at the ABI
+  for 256-bit vector arguments and results (XV3), 22 of 23 compile (two C++
+  front-end fixes: `array()` mem-initializers, constant array prvalues).
+  2026-11-26, -O2, x86-64 host with AVX-512, depth 13, 2030154 nodes:
+
+  | SSE2 | vcc | clang++ |
+  | --- | --- | --- |
+  | nodes/second | 8502 | 903897 |
+  | compile CPU, 23 TUs | 16.4 s | 13.9 s |
+
+  (AVX2: not measured.)
 - **XV1** 128-bit vector values from source in VIR, x86-64: `i8x16`, `i16x8`,
   locals, parameters, results, loads and stores of any alignment.  Gate: the
   vector tests at -O2 and -O3 stay in VIR (`bench/vir-failures.py`); arm64
