@@ -1072,7 +1072,7 @@ static const char *const x64_x86_operators[] = {
     "pshufd",     "shufps",    "pshuflw",   "pshufhw",   "psrldq",
     "pslldq",     "packuswb",  "packssdw",  "packsswb",  "packusdw",
     "pmaddubsw",  "pmaddwd",   "pmulhw",    "pmulhuw",   "pmulhrsw",
-    "pshufb"};
+    "pshufb",     "pminsw",    "pmaxsw"};
 
 VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
 {
@@ -1125,6 +1125,21 @@ VPRIV bool x64_x86_shift_immediate_code(uint32_t code, uint32_t count,
             return true;
         }
     return false;
+}
+
+/* the code of the operator named mnemonic when code is the operator `is`, else false */
+VPRIV bool x64_x86_operator_is(uint32_t code, const char *is)
+{
+    return code < sizeof x64_x86_operators / sizeof *x64_x86_operators &&
+           !strcmp(x64_x86_operators[code], is);
+}
+
+VPRIV uint32_t x64_x86_operator_code(const char *mnemonic)
+{
+    uint32_t code = 0;
+
+    x64_x86_operator_find(mnemonic, &code);
+    return code;
 }
 
 /* op $count of one vector */

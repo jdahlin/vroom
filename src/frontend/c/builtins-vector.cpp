@@ -597,69 +597,6 @@ static bool cc_x86_constant(cc *c, uint32_t n, const char *name, uint32_t loc,
     return true;
 }
 
-/* packsswb, packssdw, packuswb, packusdw: both operands' signed lanes clamped
- * to the narrow type's range, then the low half of each (little-endian) */
-static uint32_t cc_x86_pack_build(cc *c, const char *name, uint32_t a,
-                                  uint32_t b, ast_qualified_type rt,
-                                  uint32_t loc)
-{
-    bool dwords = strstr(name, "dw") != NULL;
-    bool to_unsigned = name[4] == 'u';
-    ast_qualified_type et = cc_type_basic(AST_TYPE_SHORT);
-    ast_qualified_type narrow = cc_type_basic(AST_TYPE_CHAR);
-    int bits = 8;
-    if (dwords) {
-        et = cc_type_basic(AST_TYPE_INT);
-        narrow = cc_type_basic(AST_TYPE_SHORT);
-        bits = 16;
-    }
-    int most = (1 << (bits - 1)) - 1;
-    int least = -most - 1;
-    if (to_unsigned) {
-        most = (1 << bits) - 1;
-        least = 0;
-    }
-    ast_qualified_type vt = cc_type_vector(c, et, 16);
-    ast_qualified_type nt = cc_type_vector(c, narrow, 16);
-    uint32_t pre = 0;
-    uint32_t packed[2];
-    uint32_t operands[2] = {a, b};
-    for (unsigned i = 0; i < 2; i++) {
-        uint32_t v = cc_vector_hold(
-            c,
-            cc_cast_insert(c, cc_node_rvalue(c, operands[i]), vt, AST_CAST_NOP),
-            vt, &pre, loc);
-        uint32_t zero =
-            cc_vector_op(c, LEX_TOKEN_CARET, vt, cc_node_rvalue(c, v),
-                         cc_node_rvalue(c, v), loc);
-        uint32_t lo = cc_vector_hold(
-            c,
-            cc_vector_op(c, LEX_TOKEN_PLUS, vt, zero,
-                         cc_node_integer_new(c, least, et, loc), loc),
-            vt, &pre, loc);
-        uint32_t hi = cc_vector_hold(
-            c,
-            cc_vector_op(c, LEX_TOKEN_PLUS, vt, cc_node_rvalue(c, lo),
-                         cc_node_integer_new(c, most - least, et, loc), loc),
-            vt, &pre, loc);
-        uint32_t clamped = cc_vector_hold(
-            c, cc_vector_minmax(c, true, v, lo, loc), vt, &pre, loc);
-        clamped = cc_vector_hold(
-            c, cc_vector_minmax(c, false, clamped, hi, loc), vt, &pre, loc);
-        packed[i] =
-            cc_cast_insert(c, cc_node_rvalue(c, clamped), nt, AST_CAST_NOP);
-    }
-    int idx[16];
-    unsigned n = 16;
-    if (dwords)
-        n = 8;
-    for (unsigned i = 0; i < n; i++)
-        idx[i] = (int)(2 * i);
-    uint32_t picked = cc_vector_pick(c, nt, packed[0], packed[1], idx, n, loc);
-    return cc_lowering_sequence(c, pre,
-                                cc_cast_insert(c, picked, rt, AST_CAST_NOP));
-}
-
 /* the SSE2 builtins that are shuffles, shifts and conversions: ordinary
  * vector operations (a shuffle, a shift by a splat, a converted vector), so
  * that code generation picks the instructions; true when name is one */
@@ -673,14 +610,6 @@ CC_PRIVATE bool cc_builtin_x86_sse2_build(cc *c, const char *name,
     ast_qualified_type it = cc_type_basic(AST_TYPE_INT);
     i128 imm = 0;
     int idx[16];
-    if (!strncmp(name, "pack", 4)) {
-        if (args->n != 2) {
-            *out = cc_node_error_new(c, loc);
-            return true;
-        }
-        *out = cc_x86_pack_build(c, name, args->v[0], args->v[1], rt, loc);
-        return true;
-    }
     if (!strcmp(name, "emms")) {
         *out = cc_cast_insert(c, cc_node_integer_new(c, 0, it, loc),
                               cc_type_basic(AST_TYPE_VOID), AST_CAST_VOID);

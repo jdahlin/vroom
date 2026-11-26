@@ -95,6 +95,66 @@ VPRIV uint32_t virbuild_simplify_undefined_value(codegen_context *e,
 }
 
 /* q rewritten in place (true), or the value that replaces it in *r */
+/* v's instruction when it is the x86 operator named, in a block; else NULL */
+static const vir_insn *virbuild_x86_operator(virbuild_context *V, uint32_t v,
+                                             const char *named)
+{
+    const virbuild_preir_insn *x = &V->insns[virbuild_value_resolve(V, v)];
+
+    if (x->insn.op != VIR_OP_X86 || x->block == VIRBUILD_BLOCK_NONE ||
+        !x64_x86_operator_is(x->insn.c, named))
+        return NULL;
+    return &x->insn;
+}
+
+/*
+ * y ^ ((x ^ y) & (a > b)), words, {a, b} = {x, y}: the front end's elementwise max or min
+ * (__builtin_elementwise_max: _mm_max_epi16), one instruction on x86-64.
+ */
+static bool virbuild_minmax_simplify(virbuild_context *V,
+                                     virbuild_simplify_state *S, uint32_t q)
+{
+    vir_insn in = V->insns[q].insn;
+
+    if (!x64_x86_operator_is(in.c, "pxor"))
+        return false;
+    uint32_t y = virbuild_value_resolve(V, in.a);
+    const vir_insn *chosen = virbuild_x86_operator(V, in.b, "pand");
+
+    if (!chosen)
+        return false;
+    const vir_insn *differ = virbuild_x86_operator(V, chosen->a, "pxor");
+    const vir_insn *greater = virbuild_x86_operator(V, chosen->b, "pcmpgtw");
+
+    if (!differ || !greater)
+        return false;
+    uint32_t x = virbuild_value_resolve(V, differ->a);
+    uint32_t other = virbuild_value_resolve(V, differ->b);
+
+    if (x == y)
+        x = other;
+    else if (other != y)
+        return false;
+    uint32_t a = virbuild_value_resolve(V, greater->a);
+    uint32_t b = virbuild_value_resolve(V, greater->b);
+    const char *mnemonic;
+
+    if (a == x && b == y)
+        mnemonic = "pmaxsw";
+    else if (a == y && b == x)
+        mnemonic = "pminsw";
+    else
+        return false;
+    virbuild_use_count_decrement(V, S, in.a),
+        virbuild_use_count_decrement(V, S, in.b);
+    virbuild_use_count_increment(V, S, x),
+        virbuild_use_count_increment(V, S, y);
+    V->insns[q].insn.a = x;
+    V->insns[q].insn.b = y;
+    V->insns[q].insn.c = x64_x86_operator_code(mnemonic);
+    return true;
+}
+
 /* icmp's condition cc (eq ne slt sle sgt sge ult ule ugt uge) of two constants of type ty */
 static bool virbuild_compare_constants(uint32_t cc, uint32_t ty, int64_t a,
                                        int64_t b)
@@ -211,7 +271,10 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
              V->insns[in.a].insn.op == VIR_OP_FCMP))
             *r = in.a;
         return false;
-    case VIR_OP_X86: { /* a shift by a constant in a vector: by an immediate */
+    case VIR_OP_X86: {
+        if (virbuild_minmax_simplify(V, S, q))
+            return true;
+        /* a shift by a constant in a vector: by an immediate */
         vir_insn count = V->insns[in.b].insn;
         uint32_t code = 0;
 

@@ -1,5 +1,5 @@
-/* SSE2 shifts by constant and run-time counts, in and past the lane's width, and the
-   pair multiplies. */
+/* SSE2 shifts by constant and run-time counts, in and past the lane's width, the pair
+   multiplies, min, max and the packs. */
 #ifdef __x86_64__
 #include <emmintrin.h>
 int printf(const char *, ...);
@@ -46,6 +46,25 @@ __attribute__((noinline)) static void multiply(__m128i a, __m128i b)
     show("pmulhw", 0, _mm_mulhi_epi16(a, b));
 }
 
+/* min and max, and idioms close to theirs that are neither */
+__attribute__((noinline)) static void order(__m128i x, __m128i y)
+{
+    show("min", 0, _mm_min_epi16(x, y));
+    show("min", 1, _mm_min_epi16(y, x));
+    show("max", 0, _mm_max_epi16(x, y));
+    show("max", 1, _mm_max_epi16(y, x));
+    show("minub", 0, _mm_min_epu8(x, y));
+    show("maxub", 0, _mm_max_epu8(x, y));
+    __m128i gt = _mm_cmpgt_epi16(x, y), diff = _mm_xor_si128(x, y);
+    show("by-x", 0, _mm_xor_si128(x, _mm_and_si128(diff, gt)));
+    show("by-y", 0, _mm_xor_si128(_mm_and_si128(diff, gt), y));
+    __m128i other = _mm_cmpgt_epi16(x, _mm_set1_epi16(5));
+    show("other", 0, _mm_xor_si128(y, _mm_and_si128(diff, other)));
+    show("packsswb", 0, _mm_packs_epi16(x, y));
+    show("packssdw", 0, _mm_packs_epi32(x, y));
+    show("packuswb", 0, _mm_packus_epi16(x, y));
+}
+
 int main(void)
 {
     __m128i a = _mm_set_epi32(0x80008000, 0x7fff8001, 0x12345678, 0xfedcba98);
@@ -56,6 +75,11 @@ int main(void)
     multiply(a, a);
     multiply(a, _mm_set1_epi16(-3));
     multiply(m, m);
+    __m128i b = _mm_set_epi32(0x7fff8000, 0x00ff0100, 0xff80007f, 0xffff0001);
+    order(a, b);
+    order(b, a);
+    order(m, b);
+    order(a, a);
     return 0;
 }
 #else
