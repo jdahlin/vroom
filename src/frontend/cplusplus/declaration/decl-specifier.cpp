@@ -1441,6 +1441,12 @@ analysis_result semantic_analysis::decl_specifier_seq(SyntaxRef seq,
                lookup ([basic.lookup.unqual]) */
             lookup_result found =
                 lookup_unqualified(tokens.identifier(t), lookup_filter::any);
+            if (reanalysing_member_declarator && found.entity &&
+                entity_table[found.entity].kind != entity_kind::class_type &&
+                entity_table[found.entity].kind != entity_kind::enumeration &&
+                entity_table[found.entity].kind != entity_kind::typedef_name)
+                found = lookup_unqualified(tokens.identifier(t),
+                                           lookup_filter::types);
             if (found.ambiguous)
                 return ill_formed_at_token(
                     t,
