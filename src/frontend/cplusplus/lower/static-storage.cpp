@@ -253,18 +253,21 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     ast_qualified_type i64p = pointer_to(i64);
     ast_qualified_type int_type = ast_builder_type_basic(AST_TYPE_INT);
     uint32_t guard = 0;
+    uint32_t per_thread = 0;
+    if (analysis.entity_table[e].c11_thread_local)
+        per_thread = AST_SYMBOL_FLAG_THREAD;
     if (weak_guard) {
         guard =
             ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
                                guard_name.size(), i64, AST_STORAGE_NONE,
                                AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK |
-                                   AST_SYMBOL_FLAG_DEFINED,
+                                   AST_SYMBOL_FLAG_DEFINED | per_thread,
                                1);
         ast_builder_toplevel(c, guard);
     } else {
         guard = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
                                    guard_name.size(), i64, AST_STORAGE_STATIC,
-                                   0, 1);
+                                   per_thread, 1);
         ast_builder_symbol_flags_add(c, guard, AST_SYMBOL_FLAG_DEFINED);
     }
     ast_builder_symbol_assembler_name(c, guard, written.data(), written.size());
@@ -273,6 +276,21 @@ void c_lowering::guarded_initialization(const semantic_node &n,
         return address_of(c_variable(c, guard, i64), i64p);
     };
     owned_array<uint32_t> inner;
+    if (analysis.entity_table[e].c11_thread_local) {
+        /* [stmt.dcl]/3, [impl.clang]: one thread's object, so no
+           concurrent initialization: a thread-local guard byte, set once
+           the object is made (a trivially destroyed one) */
+        static_initialization(e, n.b, inner, n.at);
+        if (failure.what)
+            return;
+        inner.append(c_statement(c, assign(i64, c_variable(c, guard, i64),
+                                           ast_builder_integer(c, i64, 1))));
+        uint32_t unmade =
+            make(AST_NODE_BINARY, int_type, c_variable(c, guard, i64),
+                 ast_builder_integer(c, i64, 0), 0, LEX_TOKEN_EQUAL_EQUAL, 0);
+        out.append(if_statement(unmade, block(inner), 0));
+        return;
+    }
     if (!constant)
         static_initialization(e, n.b, inner, n.at);
     if (destructor)

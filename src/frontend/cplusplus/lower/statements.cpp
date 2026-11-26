@@ -87,13 +87,10 @@ void c_lowering::initialized_variable(const semantic_node &n,
             root = &node(root->a);
         extended_temporary = root;
     }
-    if (x.c11_thread_local &&
-        (destructor || (n.b && !constant_initializer(n.b))))
-        /* clang: "initializer for thread-local variable must be a constant
-           expression", "type of thread-local variable has non-trivial
-           destruction" */
-        return (void)fail("a _Thread_local variable initialized or "
-                          "destroyed at run time",
+    if (x.c11_thread_local && destructor)
+        /* (its destruction at thread exit, __cxa_thread_atexit, is not
+           made) */
+        return (void)fail("a _Thread_local variable destroyed at run time",
                           n.at);
     if (!x.automatic && (destructor || (n.b && !constant_initializer(n.b)))) {
         /* [stmt.dcl]/4: initialized the first time control passes
