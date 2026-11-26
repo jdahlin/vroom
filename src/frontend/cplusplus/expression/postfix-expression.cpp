@@ -2275,6 +2275,12 @@ analysis_result semantic_analysis::template_call(
     if (!template_id)
         inline_set_functions(function_templates[function_template - 1].name,
                              functions);
+    /* [basic.lookup.argdep]/4: the lookup in an associated namespace takes
+       "(possibly overloaded) functions and function templates": the
+       functions declared beside a template found there too */
+    if (!template_id)
+        for (entity_index held : adl_templates)
+            inline_set_functions(held, functions);
     /* [basic.lookup.argdep]/3: the non-template functions argument-dependent
        lookup found are candidates too */
     if (!template_id)
