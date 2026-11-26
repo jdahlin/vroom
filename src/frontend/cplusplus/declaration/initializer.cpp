@@ -1979,6 +1979,33 @@ analysis_result semantic_analysis::constructor_list_initialization(
            deleted or not */
         return not_supported_because(list, "dcl.init.list",
                                      "a list of one prvalue of the same class");
+    /* [dcl.init.list]/3.7, CWG 2327: direct-list-initialization of a class
+       from a single expression of another class type with an explicit
+       conversion function to the target class (e.g. local_days{ymd} in
+       libc++ <chrono>) */
+    if (direct && arguments.size() == 1 &&
+        !clauses[0].is(syntax_kind::braced_init_list) &&
+        type_table[arguments[0].type.unqualified()].kind ==
+            type_kind::class_type &&
+        arguments[0].type.unqualified() != type.unqualified()) {
+        qualified_type unqualified =
+            qualified_type::make(type.unqualified(), cv_none);
+        bool ambiguous = false, unknown = false;
+        entity_index conv = conversion_function_for(arguments[0], unqualified,
+                                                    true, ambiguous, unknown);
+        if (conv && entity_table[conv].explicit_ && !ambiguous && !unknown) {
+            bool converted = false;
+            VTRY(r, conversion_function_call(list, arguments[0], unqualified,
+                                             true, converted));
+            if (converted &&
+                arguments[0].type.unqualified() == type.unqualified()) {
+                result.node = arguments[0].node;
+                result.evaluation = arguments[0].evaluation;
+                result.value = arguments[0].value;
+                return analysis_result::well_formed;
+            }
+        }
+    }
     /* the arguments before the conversions overload resolution adds */
     owned_array<expression_meaning> before;
     for (const expression_meaning &e : arguments)
