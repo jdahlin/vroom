@@ -2088,6 +2088,7 @@ class semantic_analysis
        defined as deleted (class/deleted-special-members.cpp) */
     bool default_constructed(entity_index c, entity_index k) const;
     bool default_constructor_deleted(entity_index c) const;
+    bool may_be_default_constructible(entity_index c);
     bool destructor_deleted(entity_index c) const;
     bool copy_constructor_deleted_by_move(entity_index c) const;
     bool declares_move_assignment(entity_index c);

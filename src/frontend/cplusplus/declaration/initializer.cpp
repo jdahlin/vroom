@@ -1633,12 +1633,16 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                               "parenthesized braced-init-list",
                               "dcl.init");
         /* a braced-init-list argument of a constructor ([over.best.ics]/1:
-           its sequence is [over.ics.list]'s), kept as written.  (Not an
-           empty one: the ambiguity of B b({}) with the copy constructor,
-           CWG1902, is not told) */
+           its sequence is [over.ics.list]'s), kept as written.  An empty
+           one only for a class with no constructor callable without
+           arguments, whose copy constructor {} then cannot reach: the
+           ambiguity with it otherwise (CWG1902) is not told */
         if (!parts.list_of_several() &&
             parts.list.is(syntax_kind::braced_init_list) &&
-            parts.list.end_token() > parts.list.first_token() + 2 &&
+            (parts.list.end_token() > parts.list.first_token() + 2 ||
+             (type_table[type.unqualified()].kind == type_kind::class_type &&
+              !may_be_default_constructible(
+                  type_table[type.unqualified()].entity))) &&
             type_table[type.unqualified()].kind == type_kind::class_type) {
             entity_index c = type_table[type.unqualified()].entity;
             require_complete(c);
@@ -2180,6 +2184,28 @@ analysis_result semantic_analysis::too_many_clauses(
                           "of the aggregate",
                           "dcl.init.aggr");
     return analysis_result::well_formed;
+}
+
+/* whether a constructor of class c may be callable with no arguments: an
+   implicit or defaulted default one, one with no parameters or default
+   arguments, or a constructor template */
+bool semantic_analysis::may_be_default_constructible(entity_index c)
+{
+    require_complete(c);
+    const entity &x = entity_table[c];
+    if (x.defaulted_default_constructor || x.constructor_templates ||
+        !x.first_constructor)
+        return true;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor) {
+        const entity &f = entity_table[k];
+        if (f.implicit)
+            continue;
+        uint32_t count = type_table[f.type.unqualified()].parameter_count;
+        if (count == 0 || f.default_arguments >= count)
+            return true;
+    }
+    return false;
 }
 
 /* whether the initializer init has only literals (true, false, nullptr; not string or

@@ -1049,7 +1049,18 @@ analysis_result semantic_analysis::deduce_from_call(
             return not_supported_because(at, "temp.deduct.call",
                                          "an argument of no, placeholder or "
                                          "dependent type in deduction");
+        bool reference =
+            type_table[p.unqualified()].kind == type_kind::lvalue_reference ||
+            type_table[p.unqualified()].kind == type_kind::rvalue_reference;
         adjust_call_deduction(p, a, arguments[i].category);
+        /* [temp.deduct.call]/4.1: "the transformed A can be more
+           cv-qualified than the deduced A": an array's cv-qualifiers are its
+           elements' ([basic.type.qualifier]/3), which the match below
+           compares as types */
+        if (reference && type_table[p.unqualified()].kind == type_kind::array &&
+            type_table[a.unqualified()].kind == type_kind::array &&
+            !(cv_of(type_table, a) & ~cv_of(type_table, p)))
+            a = add_cv(a, cv_of(type_table, p));
         /* a parameter that does not match: deduction fails, which
            overload resolution of the function templates of the name and
            its other functions decides; neither is analysed yet */

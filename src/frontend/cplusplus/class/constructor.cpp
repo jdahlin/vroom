@@ -1465,6 +1465,40 @@ analysis_result semantic_analysis::construct(
     entity_index list_class = 0;
     if (nested_list)
         list_class = c;
+    /* [over.match.ref]/1.1 through [over.match.ctor]: in direct-initialization
+       an explicit conversion function binds the copy constructor's reference
+       parameter (T(x) of a class with explicit operator const T&).  Tried
+       where no constructor takes the argument otherwise */
+    bool none_viable = false;
+    bool may_convert = !copy && arguments.size() == 1 &&
+                       type_table[arguments[0].type.unqualified()].kind ==
+                           type_kind::class_type &&
+                       arguments[0].type.unqualified() != type.unqualified() &&
+                       !same_or_derived_class(arguments[0], c);
+    if (may_convert) {
+        owned_array<expression_meaning> trial;
+        for (const expression_meaning &e : arguments)
+            trial.append(e);
+        VTRY(tried, best_viable_function(at, candidates, nullptr, trial, best,
+                                         &none_viable, true, written_arguments,
+                                         list_class));
+        if (none_viable) {
+            qualified_type unqualified =
+                qualified_type::make(type.unqualified(), cv_none);
+            bool ambiguous = false, unknown = false;
+            entity_index conv = conversion_function_for(
+                arguments[0], unqualified, true, ambiguous, unknown);
+            if (conv && entity_table[conv].explicit_ && !ambiguous &&
+                !unknown) {
+                bool converted = false;
+                VTRY(r, conversion_function_call(at, arguments[0], unqualified,
+                                                 true, converted));
+                if (converted &&
+                    arguments[0].type.unqualified() == type.unqualified())
+                    return construct(at, type, arguments, object, result, copy);
+            }
+        }
+    }
     VTRY(resolved,
          best_viable_function(at, candidates, nullptr, arguments, best, nullptr,
                               !copy, written_arguments, list_class));
