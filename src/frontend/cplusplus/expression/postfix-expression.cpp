@@ -1412,6 +1412,15 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         /* [namespace.udir]/6: functions of several namespaces (nominated by
            using-directives) are one overload set */
         bool several = functions_of_several_namespaces(x, declared);
+        /* [temp.res]/10: an instantiation whose lookup would see one
+           declared after its template: not told apart, as before */
+        for (entity_index d : declared) {
+            uint32_t at = entity_table[d].first_declaration;
+            if (lookup_horizon && at &&
+                entity_table.declaration(at).node.first_token() >
+                    lookup_horizon)
+                several = false;
+        }
         /* ([lex.name]/3 reserves __builtin_x to the implementation: a
            builtin function, found by the call's analysis of the name) */
         bool dependent =
