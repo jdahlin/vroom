@@ -661,7 +661,16 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
             entity_table[record.entity].kind == entity_kind::class_type)
             /* a typedef-name of a class */
             return class_conversion(n, record.entity, m);
-        if (record.kind != type_kind::fundamental &&
+        /* [expr.type.conv]/2: with a parenthesized single expression, the
+           cast expression, whatever the type: a reference or a pointer to
+           member too */
+        bool single = parenthesized && written.list &&
+                      !written.list_of_several() &&
+                      !has_pack_expansion(written.list);
+        bool as_cast = single && (record.kind == type_kind::lvalue_reference ||
+                                  record.kind == type_kind::rvalue_reference ||
+                                  record.kind == type_kind::pointer_to_member);
+        if (!as_cast && record.kind != type_kind::fundamental &&
             record.kind != type_kind::pointer &&
             record.kind != type_kind::enumeration)
             return not_supported_because(

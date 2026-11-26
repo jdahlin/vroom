@@ -4526,7 +4526,6 @@ SemaTemplate/matrix-type.cpp:172 -std=c++11
 SemaTemplate/matrix-type.cpp:175 -std=c++11
 SemaTemplate/matrix-type.cpp:33 -std=c++11
 SemaTemplate/member-access-ambig.cpp:49 -std=gnu++17 -Wno-unused-comparison
-SemaTemplate/member-access-ambig.cpp:61 -std=gnu++17 -Wno-unused-comparison
 SemaTemplate/member-access-expr.cpp:166 -std=c++11
 SemaTemplate/member-access-expr.cpp:166 -std=c++98
 SemaTemplate/member-access-expr.cpp:166 -std=gnu++17
