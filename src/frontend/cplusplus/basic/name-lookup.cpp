@@ -829,7 +829,15 @@ bool semantic_analysis::argument_dependent_lookup(
         if (entity_table[e].kind == entity_kind::none) {
             /* [temp.over]/1: a function template's specializations are
                candidates too */
-            if (!templates || !function_template_of(e))
+            if (!function_template_of(e)) {
+                /* /4.2: a class, alias or variable template's name is
+                   ignored */
+                if (class_template_of(e) || alias_template_of(e) ||
+                    variable_template_of(e))
+                    continue;
+                return false;
+            }
+            if (!templates)
                 return false;
             bool listed = false;
             for (entity_index other : *templates)
