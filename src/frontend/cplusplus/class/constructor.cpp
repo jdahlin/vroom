@@ -3567,10 +3567,14 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
                     "an array element's copy is ill-formed");
             if (r != analysis_result::well_formed)
                 return r;
-            statements.append(array_loop_statement(
-                at, bound, false,
-                statement_node(semantic_kind::expression_statement, at,
-                               value.node)));
+            /* (a trivial constructor selected: the element's bytes) */
+            uint32_t element = value.node;
+            if (element == arguments[0].node)
+                element = subobject_store(dst_elem, et, at, element);
+            else
+                element = statement_node(semantic_kind::expression_statement,
+                                         at, element);
+            statements.append(array_loop_statement(at, bound, false, element));
             continue;
         }
         if (record.kind == type_kind::class_type &&
@@ -3597,8 +3601,15 @@ analysis_result semantic_analysis::implicit_copy(entity_index c, SyntaxRef n,
                     "inaccessible (defined as deleted)");
             if (r != analysis_result::well_formed)
                 return r;
-            statements.append(statement_node(
-                semantic_kind::expression_statement, at, value.node));
+            /* a trivial constructor selected where the class's copy is
+               not (X(X&&) = default beside a user's X(const X&)): construct
+               gives the source, whose bytes are the subobject's */
+            if (value.node == arguments[0].node)
+                statements.append(
+                    subobject_store(object, type, at, value.node));
+            else
+                statements.append(statement_node(
+                    semantic_kind::expression_statement, at, value.node));
             if (entity_table[e].virtual_base)
                 statements.back() = complete_object(statements.back());
             continue;
