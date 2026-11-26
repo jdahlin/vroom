@@ -1518,11 +1518,6 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         initialized_value value;
         VTRY(r, construct(item, entity_table[c].type, arguments, 0, value,
                           false, &listed_arguments));
-        if (semantics[value.node].kind != semantic_kind::construct ||
-            semantics[value.node].a)
-            return not_supported_because(
-                item, "class.base.init",
-                "a delegating initialization that is not a constructor call");
         expression_meaning ptr;
         VTRY_SET(r, this_pointer(id, ptr));
         expression_meaning self;
@@ -1531,10 +1526,25 @@ semantic_analysis::ctor_initializer(SyntaxElement list, uint32_t &built,
         self.evaluation = constness::not_constant;
         self.node =
             expression_node(semantic_kind::indirection, self, id, ptr.node);
-        semantics[value.node].a = self.node;
-        built =
-            statement_node(semantic_kind::expression_statement, id, value.node);
-        return analysis_result::well_formed;
+        if (semantics[value.node].kind == semantic_kind::construct &&
+            !semantics[value.node].a) {
+            semantics[value.node].a = self.node;
+            built = statement_node(semantic_kind::expression_statement, id,
+                                   value.node);
+            return analysis_result::well_formed;
+        }
+        if (semantics[value.node].type.unqualified() ==
+            entity_table[c].type.unqualified()) {
+            uint32_t copy = expression_node(
+                semantic_kind::assignment, self, id, self.node, value.node,
+                static_cast<uint8_t>(preprocessing_op_or_punc::EQUAL));
+            built =
+                statement_node(semantic_kind::expression_statement, id, copy);
+            return analysis_result::well_formed;
+        }
+        return not_supported_because(
+            item, "class.base.init",
+            "a delegating initialization that is not a constructor call");
     }
     /* [class.base.init]/13: "(13.2) Then, direct base classes are
        initialized in declaration order as they appear in the
