@@ -1066,6 +1066,18 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
         if (fc.kind == type_kind::class_type && fc.entity &&
             !has_conversion_functions(fc.entity))
             return ill_formed(at, rule, "dcl.init");
+        /* [over.match.conv]/1: nor does a class none of whose conversion
+           functions yields what converts to the pointer */
+        if (fc.kind == type_kind::class_type && fc.entity) {
+            bool several = false, cannot_tell = false;
+            entity_index found =
+                conversion_function_for(m, to, false, several, cannot_tell);
+            /* ([temp.deduct.conv]/6's deductions of a pointer are not all
+               made here) */
+            if (!found && !several && !cannot_tell &&
+                !has_conversion_function_templates(fc.entity))
+                return ill_formed(at, rule, "dcl.init");
+        }
         return not_supported_because(
             at, "conv", "a conversion to pointer from a type with no rules");
     }

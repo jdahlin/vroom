@@ -69,50 +69,15 @@ uint32_t c_lowering::initialization(entity_index e, uint32_t init,
     if (!s)
         return 0;
     qualified_type t = analysis.entity_table[e].type;
-    if (!copied_array(t, init))
-        return initialize_into(s, t, type(t, at), init);
-    /* an array's elements, some not constant: C assigns no array, so a
-       compound literal's bytes are copied */
-    ast_qualified_type array = type(t, at);
-    uint32_t value = compound_literal(init);
-    if (!value)
-        return 0;
-    ast_qualified_type v = pointer_to(void_type);
-    ast_qualified_type size = ast_builder_type_basic(AST_TYPE_UNSIGNED_LONG);
-    ast_qualified_type parameters[3] = {v, v, size};
-    uint32_t arguments[3] = {
-        cast(address_of(c_variable(c, s, array), pointer_to(array)), v,
-             AST_CAST_POINTER_TO_POINTER),
-        cast(address_of(value, pointer_to(array)), v,
-             AST_CAST_POINTER_TO_POINTER),
-        ast_builder_integer(c, size,
-                            static_cast<int64_t>(analysis.size_of_type(t)))};
-    return runtime_call(memcpy_function, "memcpy", v, parameters, arguments, 3);
-}
-
-/* the C type of array type t without its elements' cv-qualifiers */
-ast_qualified_type c_lowering::writable_array(qualified_type t, token_index at)
-{
-    const struct type &r = record(t);
-    if (r.kind != type_kind::array)
-        return type(qualified_type::make(t.unqualified(), cv_none), at);
-    ast_qualified_type element = writable_array(r.operand, at);
-    return ast_builder_type_array(c, element, r.bound, true);
-}
-
-/* whether t is an array of a scalar type (nothing to construct) and init a
-   braced-init-list of it */
-bool c_lowering::copied_array(qualified_type t, uint32_t init) const
-{
-    if (!init || node(init).kind != semantic_kind::initializer_list ||
-        record(t).kind != type_kind::array)
-        return false;
-    qualified_type element = t;
-    while (record(element).kind == type_kind::array)
-        element = record(element).operand;
-    type_kind k = record(element).kind;
-    return k == type_kind::fundamental || k == type_kind::pointer ||
-           k == type_kind::enumeration;
+    ast_qualified_type u = type(t, at);
+    /* [dcl.init.aggr]/4: an array's elements, some not constant, are each
+       initialized in order in the zeroed object ([basic.start.static]/2):
+       an array is not assigned */
+    if (node(init).kind == semantic_kind::initializer_list &&
+        record(t).kind == type_kind::array)
+        return initialize_list_into(c_variable(c, s, u), t,
+                                    AST_QUALIFIED_TYPE_UNQUALIFIED(u), init);
+    return initialize_into(s, t, u, init);
 }
 
 /* [intro.execution]/5.3: the initialization of a static variable, a
@@ -266,12 +231,6 @@ void c_lowering::guarded_initialization(const semantic_node &n,
         analysis.entity_table[function].inline_ &&
         analysis.entity_table[function].linkage_of_name != linkage::internal;
     bool constant = !n.b || constant_initializer(n.b);
-    if (!constant && node(n.b).kind == semantic_kind::initializer_list &&
-        record(analysis.entity_table[e].type).kind == type_kind::array &&
-        !copied_array(analysis.entity_table[e].type, n.b)) {
-        fail("dynamic initialization of an array", n.at);
-        return;
-    }
     uint32_t s = symbol(e, n.at);
     if (!s)
         return;
@@ -400,11 +359,6 @@ bool c_lowering::global_initializer(entity_index e, bool only_destroy)
 {
     const entity &x = analysis.entity_table[e];
     const semantic_node &init = node(x.definition);
-    if (!only_destroy && init.kind == semantic_kind::initializer_list &&
-        record(x.type).kind == type_kind::array &&
-        !copied_array(x.type, x.definition))
-        /* an array's elements, some not constant: each stored */
-        return fail("dynamic initialization of an array", init.at);
     uint32_t f = generated_function("__cxx_global_var_init");
     in_function = true;
     labels.clear();

@@ -832,7 +832,10 @@ analysis_result semantic_analysis::named_specialization(
         tail.size() > 0 && tail[0].is(syntax_kind::decl_specifier_seq);
     if (leading_gnu_attributes(declaration) != lead)
         return not_supported_because(n, rule, "leading attributes");
-    if (!has_spec && !conversion)
+    /* (a constructor need not have a decl-specifier-seq, [class.ctor]/1:
+       whether this is one is known once the template's class is,
+       below) */
+    if (!has_spec && !conversion && !specialization)
         return not_supported_because(
             n, rule, "no decl-specifier-seq (a constructor or destructor)");
     if (tail.size() != 2 + has_spec || tail[has_spec].is_token())
@@ -843,8 +846,16 @@ analysis_result semantic_analysis::named_specialization(
                            syntax_kind::ptr_declarator))
         return not_supported_because(
             n, rule, "a declarator that is neither noptr nor ptr");
+    /* a mem-initializer-list is a constructor's body ([class.base.init]),
+       which only an explicit specialization defines here */
+    bool ctor_body =
+        declaration.is(syntax_kind::function_definition) && specialization &&
+        !declaration.function_definition().function_body().deleted() &&
+        !declaration.function_definition().function_body().defaulted() &&
+        declaration.function_definition().function_body().ctor_initializer();
     if (declaration.is(syntax_kind::function_definition) &&
-        !declaration.function_definition().function_body().plain())
+        !declaration.function_definition().function_body().plain() &&
+        !ctor_body)
         return not_supported_because(
             n, rule, "a function definition with a non-plain body");
     if (declaration.is(syntax_kind::simple_declaration,
@@ -882,6 +893,12 @@ analysis_result semantic_analysis::named_specialization(
     uint32_t cv = 0;
     if (r == analysis_result::well_formed) {
         type = s.type;
+        /* [class.ctor]/4: no return type is written for a constructor,
+           whose templates' type returns void (as
+           constructor_template_declarator makes it) */
+        if (specialization && !conversion && !s.has_type)
+            type = qualified_type::make(
+                type_table.fundamental(fundamental_type::void_), 0);
         if (conversion)
             r = qualified_conversion_type(declaration, conversion, type);
     }
@@ -958,12 +975,25 @@ analysis_result semantic_analysis::named_specialization(
     entity_index member_of = m.qualifier;
     if (!member_of && specialization && !friend_of && defining_class)
         member_of = defining_class;
+    /* [class.ctor]/1: a declarator-id that is the class's name declares a
+       constructor, whose templates have no name to find */
+    bool constructor = specialization && member_of && !m.destructor &&
+                       !m.template_id && !conversion &&
+                       entity_table[member_of].name == tokens.identifier(m.id);
+    if (specialization && !conversion && !s.has_type && !constructor &&
+        !m.destructor)
+        return not_supported_because(n, rule,
+                                     "no return type (not a constructor)");
     if (member_of) {
         owner_scope = member_of;
-        entity_index held =
-            entity_table.find(member_of, tokens.identifier(m.id));
-        if (held)
-            held = member_templates_of(held);
+        entity_index held = 0;
+        if (constructor) {
+            held = entity_table[member_of].constructor_templates;
+        } else {
+            held = entity_table.find(member_of, tokens.identifier(m.id));
+            if (held)
+                held = member_templates_of(held);
+        }
         if (held)
             ft = member_function_template_of(held);
         if (ft && m.template_id && m.template_id.size() > 3) {

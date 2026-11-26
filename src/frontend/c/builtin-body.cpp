@@ -331,3 +331,90 @@ CC_PRIVATE uint32_t cc_builtin_body_apply(cc *c, const cc_body_binding *k,
         e = cc_lowering_sequence(c, pre[i], e);
     return e;
 }
+
+/*
+ * x86-64: functions clang's <emmintrin.h>, <xmmintrin.h> and <prfchwintrin.h>
+ * only declare (TARGET_HEADER_BUILTIN), and __rdtsc, which no header declares:
+ * a call is the instruction.  A program's own definition (vcc's headers for
+ * Windows) is called as any function.
+ */
+typedef struct cc_x86_header_body {
+    const char *name;
+    const char *text; /* __x: the parameter */
+    char result;      /* a signature letter */
+    uint8_t params;   /* 0 or 1 */
+} cc_x86_header_body;
+
+#define X86_ASM(text) "({ __asm__ __volatile__(\"" text "\" ::: \"memory\"); })"
+
+static const cc_x86_header_body cc_x86_header_bodies[] = {
+    {"__rdtsc",
+     "({ unsigned __l, __h; __asm__ __volatile__(\"rdtsc\" : \"=a\"(__l), "
+     "\"=d\"(__h)); (unsigned long long)__h << 32 | __l; })",
+     'W', 0},
+    {"_m_prefetch", "__builtin_prefetch(__x, 0, 3)", 'v', 1},
+    {"_m_prefetchw", "__builtin_prefetch((const void *)__x, 1, 3)", 'v', 1},
+    {"_mm_clflush",
+     "({ __asm__ __volatile__(\"clflush %0\" :: "
+     "\"m\"(*(const volatile char *)__x) : \"memory\"); })",
+     'v', 1},
+    {"_mm_getcsr",
+     "({ unsigned __r; __asm__ __volatile__(\"stmxcsr %0\" : \"=m\"(__r)); "
+     "__r; })",
+     'u', 0},
+    {"_mm_lfence", X86_ASM("lfence"), 'v', 0},
+    {"_mm_mfence", X86_ASM("mfence"), 'v', 0},
+    {"_mm_pause", X86_ASM("pause"), 'v', 0},
+    {"_mm_setcsr", "({ __asm__ __volatile__(\"ldmxcsr %0\" :: \"m\"(__x)); })",
+     'v', 1},
+    {"_mm_sfence", X86_ASM("sfence"), 'v', 0},
+};
+
+#undef X86_ASM
+
+uint32_t cc_x86_header_call_build(cc *c, const char *name, size_t length,
+                                  const uint32_t *args, uint32_t n,
+                                  uint32_t loc)
+{
+    const cc_x86_header_body *k = NULL;
+
+    if (!CC_X86_64(c) || length < 7 || name[0] != '_')
+        return 0;
+    for (size_t i = 0;
+         i < sizeof cc_x86_header_bodies / sizeof *cc_x86_header_bodies; i++) {
+        const cc_x86_header_body *b = &cc_x86_header_bodies[i];
+
+        if (strlen(b->name) == length && !memcmp(b->name, name, length)) {
+            k = b;
+            break;
+        }
+    }
+    /* (declared with another number of parameters: the program's function) */
+    if (!k || n != k->params || (n && AST_NODE_IS_ERROR(args[0])))
+        return 0;
+
+    ast_qualified_type result = cc_builtin_signature_type(c, k->result);
+    uint32_t pre = 0, value = 0, e;
+
+    if (n) {
+        value = cc_conversion_decay(c, args[0]);
+        /* ldmxcsr's memory operand wants an lvalue: always a temporary */
+        value = cc_lowering_save(c, value, &pre);
+    }
+    cc_scope_open(c);
+    if (n) {
+        uint32_t s =
+            cc_symbol_new(c, AST_SYMBOL_BODY_ARGUMENT, vintern_cstr("__x"),
+                          AST_NODE(value)->ty, loc);
+
+        c->syms[s].body = value;
+        cc_symbol_bind(c, s);
+    }
+    e = cc_body_parse(c, k->text, loc);
+    cc_scope_close_prototype(c);
+    if (!AST_NODE_IS_ERROR(e))
+        e = cc_conversion_apply(c, cc_node_rvalue(c, e), result);
+    if (pre)
+        e = cc_lowering_sequence(c, pre, e);
+    return e;
+}

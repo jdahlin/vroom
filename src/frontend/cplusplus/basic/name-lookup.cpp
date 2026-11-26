@@ -450,8 +450,13 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
             r.entity = 0;
             r.found_in = 0;
             horizon_hidden++;
-        } else if (late)
-            mark_unknown(r, "temp.dep");
+        } else if (late) {
+            if (early && functions && collected_names && !r.unknown &&
+                !r.ambiguous)
+                r.past_horizon = true;
+            else
+                mark_unknown(r, "temp.dep");
+        }
     }
     /* a pack named outside a pack expansion's pattern: ill-formed
        ([temp.variadic]/7) unless it is one analysis has no rules for */
@@ -625,9 +630,10 @@ semantic_analysis::lookup_qualified(entity_index scope, uint32_t name,
  * associated with the member type together with those associated with X." A
  * parameter of reference type contributes what the type referred to does.
  */
-bool semantic_analysis::associated_with(
-    qualified_type t, owned_array<entity_index> &classes,
-    owned_array<entity_index> &namespaces) const
+bool semantic_analysis::associated_with(qualified_type t,
+                                        owned_array<entity_index> &classes,
+                                        owned_array<entity_index> &namespaces,
+                                        bool complete) const
 {
     auto add_namespace = [&](entity_index scope) {
         entity_index n = enclosing_namespace(scope);
@@ -645,7 +651,51 @@ bool semantic_analysis::associated_with(
         /* ([temp.inst]/1: its bases and friends are those of the specialization
            once defined: one named where no complete type was needed is
            defined now) */
-        require_complete(c);
+        if (complete)
+            require_complete(c);
+        /* "if T is a class template specialization", also the entities
+           associated with its template type arguments, and the templates
+           and their classes or namespaces given as template template
+           arguments (once: a class already met has them) */
+        bool first_time = true;
+        for (entity_index other : classes)
+            if (other == c)
+                first_time = false;
+        if (first_time && entity_table[c].instantiation) {
+            classes.append(c);
+            add_namespace(entity_table[c].enclosing);
+            for (uint32_t i = 0; i < specialization_argument_count(c); i++) {
+                uint32_t pack = specialization_pack(c, i);
+                uint32_t first = 0, end = 1;
+                if (pack) {
+                    first = 1;
+                    end = pack;
+                }
+                for (uint32_t k = first; k < end; k++) {
+                    const template_argument a =
+                        specialization_template_argument(c, i, k);
+                    if (a.kind == template_argument::kind_t::type) {
+                        /* (one analysis cannot follow adds nothing) */
+                        associated_with(a.type, classes, namespaces, false);
+                    } else if (a.kind ==
+                               template_argument::kind_t::template_name) {
+                        entity_index named = static_cast<entity_index>(a.value);
+                        entity_index in = entity_table[named].enclosing;
+                        if (in &&
+                            entity_table[in].kind == entity_kind::class_type)
+                            classes.append(in);
+                        add_namespace(in);
+                    }
+                }
+            }
+            /* (the walk below takes c itself again for its bases) */
+            for (size_t i = 0; i < classes.size(); i++)
+                if (classes[i] == c) {
+                    classes[i] = classes.back();
+                    classes.resize(classes.size() - 1);
+                    break;
+                }
+        }
         /* the class and its direct and indirect base classes, each once */
         owned_array<entity_index> work;
         work.append(c);
@@ -694,20 +744,20 @@ bool semantic_analysis::associated_with(
     case type_kind::lvalue_reference:
     case type_kind::rvalue_reference:
     case type_kind::block_pointer:
-        return associated_with(record.operand, classes, namespaces);
+        return associated_with(record.operand, classes, namespaces, complete);
     case type_kind::function: {
         const qualified_type *parameters =
             type_table.parameters(t.unqualified());
         for (uint32_t i = 0; i < record.parameter_count; i++)
-            if (!associated_with(parameters[i], classes, namespaces))
+            if (!associated_with(parameters[i], classes, namespaces, complete))
                 return false;
-        return associated_with(record.operand, classes, namespaces);
+        return associated_with(record.operand, classes, namespaces, complete);
     }
     case type_kind::pointer_to_member:
         if (!associated_with(entity_table[record.entity].type, classes,
-                             namespaces))
+                             namespaces, complete))
             return false;
-        return associated_with(record.operand, classes, namespaces);
+        return associated_with(record.operand, classes, namespaces, complete);
     default:
         return true;
     }
@@ -782,9 +832,22 @@ bool semantic_analysis::argument_dependent_lookup(
         if (!e || e == known)
             continue;
         if (entity_table[e].kind == entity_kind::none) {
+            /* (4.2): a class or alias template's name (std::hash, beside a
+               call of another hash) is ignored */
+            if (!function_template_of(e) &&
+                (class_template_of(e) || alias_template_of(e)))
+                continue;
             /* [temp.over]/1: a function template's specializations are
                candidates too */
-            if (!templates || !function_template_of(e))
+            if (!function_template_of(e)) {
+                /* /4.2: a class, alias or variable template's name is
+                   ignored */
+                if (class_template_of(e) || alias_template_of(e) ||
+                    variable_template_of(e))
+                    continue;
+                return false;
+            }
+            if (!templates)
                 return false;
             bool listed = false;
             for (entity_index other : *templates)

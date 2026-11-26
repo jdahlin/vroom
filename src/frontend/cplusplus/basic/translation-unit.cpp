@@ -122,6 +122,13 @@ bool semantic_analysis::type_without_external_linkage(qualified_type t,
             return false;
         if (x.linkage_of_name != linkage::external)
             return true;
+        /* [basic.link]/4: an unnamed enumeration of namespace scope with
+           no typedef name for linkage purposes has no name another
+           translation unit could write (for a template argument) */
+        if (arguments && !x.name && !x.linkage_name && !x.lambda &&
+            (!x.enclosing ||
+             entity_table[x.enclosing].kind == entity_kind::namespace_entity))
+            return true;
         /* [basic.link]/4 (clang's template argument list linkage): a class
            template specialization has the weakest linkage of its template
            arguments (overloaded<closure type of main>); one that is a local

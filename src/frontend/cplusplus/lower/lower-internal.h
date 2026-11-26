@@ -124,7 +124,7 @@ class c_lowering
     bool dynamic_initialization();
     /* [basic.start.term], [abi:guards]: the run time's functions and
        __dso_handle, 0 until declared */
-    uint32_t memset_function = 0, memcpy_function = 0;
+    uint32_t memset_function = 0;
     /* the guard variables made, by their entity: a function body lowered
        again (a member template's) defines its guard once */
     owned_array<entity_index> guarded_entities;
@@ -140,8 +140,6 @@ class c_lowering
     uint32_t destructor_registration(uint32_t d, ast_qualified_type f,
                                      uint32_t object,
                                      bool thread_local_var = false);
-    bool copied_array(qualified_type t, uint32_t init) const;
-    ast_qualified_type writable_array(qualified_type t, token_index at);
     uint32_t initialization(entity_index e, uint32_t init, token_index at);
     void static_initialization(entity_index e, uint32_t init,
                                owned_array<uint32_t> &out, token_index at);
@@ -746,6 +744,10 @@ class c_lowering
     /* C23's <stdbit.h> functions and __builtin_bitreverseg at run time */
     uint32_t stdc_bits(const semantic_node &n, ast_qualified_type t,
                        uint32_t argument);
+    /* x86-64: the instruction in place of a call of a function clang's
+       headers only declare; 0 if the call is of another */
+    uint32_t x86_header_call(uint32_t function,
+                             const owned_array<uint32_t> &arguments);
     uint32_t special_builtin(builtin_lowering lowering, const semantic_node &n,
                              ast_qualified_type t,
                              const owned_array<uint32_t> &arguments);

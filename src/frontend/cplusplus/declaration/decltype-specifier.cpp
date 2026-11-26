@@ -301,23 +301,43 @@ void semantic_analysis::collect_written_casts(
             }
         }
     }
-    /* S<A>{...}: the class it makes, for tl <type> */
+    /* S<A>{...}: the class it makes, for tl <type>; S<T>{} of a dependent
+       specialization ([temp.dep.type]), the type the name denotes */
     if (x.is(syntax_kind::postfix_expression) && x.size() == 2 &&
         x[0].is(syntax_kind::simple_template_id,
                 syntax_kind::simple_type_specifier) &&
-        names_nothing_dependent(SyntaxRef(x[0])) &&
         x[1].is(syntax_kind::braced_init_list)) {
+        SyntaxRef named = x[0];
+        bool dependent =
+            !names_nothing_dependent(named) ||
+            names_dependent_entity(named.first_token(), named.end_token());
         size_t unsupported_before = unsupported.size();
-        expression_meaning m;
-        unevaluated++;
-        analysis_result r = expression(x, m);
-        unevaluated--;
+        qualified_type t;
+        bool ok = false;
+        if (!dependent) {
+            expression_meaning m;
+            unevaluated++;
+            ok = expression(x, m) == analysis_result::well_formed;
+            unevaluated--;
+            t = m.type;
+        } else if (x[1].size() == 2) {
+            type_index q = 0;
+            uint32_t cv = 0;
+            if (x[0].is(syntax_kind::simple_template_id))
+                ok = template_type(x[0], 0, false, q) ==
+                     analysis_result::well_formed;
+            else
+                ok = qualified_type_name(x[0], q, cv) ==
+                     analysis_result::well_formed;
+            ok = ok && q;
+            t = qualified_type::make(q, cv);
+        }
         unsupported.resize(unsupported_before);
-        if (r == analysis_result::well_formed) {
+        if (ok) {
             written_binding b;
             SyntaxRef whole = x;
             b.cast = whole.index().index();
-            b.type = m.type;
+            b.type = t;
             found.append(b);
         }
     }
@@ -671,11 +691,14 @@ void semantic_analysis::collect_written_bindings(
 
 /* the dependent type of decltype-specifier n: one for the operands of the
    same tokens and the same bindings of its names */
-type_index semantic_analysis::dependent_written_type(SyntaxRef n,
-                                                     bool every_name)
+type_index semantic_analysis::dependent_written_type(
+    SyntaxRef n, bool every_name, const owned_array<written_binding> *also)
 {
     owned_array<written_binding> bindings;
     collect_written_bindings(n, bindings, every_name);
+    if (also)
+        for (const written_binding &b : *also)
+            bindings.append(b);
     /* (chained by a hash of the operand's length and its bindings) */
     auto mix = [](uint64_t h, uint64_t v) {
         h = (h ^ v) * 0x9E3779B97F4A7C15u;
@@ -720,6 +743,7 @@ type_index semantic_analysis::dependent_written_type(SyntaxRef n,
                    a.cast == bindings[i].cast &&
                    a.pack_position == bindings[i].pack_position &&
                    a.element == bindings[i].element &&
+                   a.specialization == bindings[i].specialization &&
                    a.type == bindings[i].type;
         }
         if (same)

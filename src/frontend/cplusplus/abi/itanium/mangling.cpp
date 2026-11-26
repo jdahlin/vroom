@@ -54,6 +54,11 @@ bool visible_local_class(const entities &table, entity_index c)
     for (entity_index g = next_enclosing_function(table, f); g;
          g = next_enclosing_function(table, g))
         f = g;
+    /* (a static inline function, or one of an unnamed namespace, is no
+       other unit's) */
+    if (table[f].linkage_of_name == linkage::internal &&
+        !table[f].instantiation)
+        return false;
     return table[f].inline_ || table[f].instantiation;
 }
 
@@ -221,8 +226,15 @@ class itanium_mangler
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
     bool template_arg_of(entity_index c, uint32_t i, uint32_t element);
     bool template_template_arg(entity_index t, uint32_t parameter);
+    /* (the <template-param>s written so far; an alias template's
+       specialization in a value-dependent argument was refused, and is to
+       be written as its type: parameter_type) */
+    uint64_t template_params_written = 0;
+    bool alias_value_refused = false, alias_value_trial = false;
+    bool parameter_type(entity_index c, uint32_t i, qualified_type declared);
     void template_param(uint64_t position)
     {
+        template_params_written++;
         text("T");
         if (position)
             number(position - 1);
@@ -238,6 +250,7 @@ class itanium_mangler
     void number(uint64_t n);
     bool local_name(entity_index e, entity_index function);
     bool closure_type_name(entity_index c);
+    bool translation_unit_number(entity_index c);
     bool closure_numbered(entity_index c) const;
     entity_index local_function(entity_index e,
                                 entity_index *local_class = nullptr) const;
@@ -1677,6 +1690,35 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                        source_name(analysis.token_identifier(member.token()));
             }
         }
+        /* ns::C<args>::name: each namespace as written (std, not its
+           inline namespace) a qualifier level, then the specialization:
+
+               <unresolved-name> ::= [gs] sr <unresolved-qualifier-level>+ E <base-unresolved-name>
+         */
+        if (member.is_token() && member.is_identifier() && last > qi &&
+            qual[last].is(syntax_kind::simple_template_id) &&
+            qual[last].size() >= 3 && qual[last][0].is_identifier()) {
+            if (global)
+                text("gs");
+            text("sr");
+            for (; qi < last; qi += 2) {
+                if (!qual[qi].is_identifier() ||
+                    !source_name(analysis.token_identifier(qual[qi].token())))
+                    return false;
+            }
+            bool dependent = false;
+            if (!source_name(
+                    analysis.token_identifier(qual[last][0].token())) ||
+                !written_template_args(qual[last], dependent))
+                return false;
+            /* (with no dependent argument the member is known, and clang
+               names it, L _Z <encoding> E: not mangled yet) */
+            if (!dependent)
+                return refuse("a member of a specialization its arguments "
+                              "resolve (clang's L _Z <encoding> E)");
+            text("E");
+            return source_name(analysis.token_identifier(member.token()));
+        }
         if (member.is_token() && member.is_identifier()) {
             entity_index scope = 0;
             bool first_lookup = !global;
@@ -2340,12 +2382,6 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return false;
     entity_index local_class = 0;
     entity_index local = local_function(c, &local_class);
-    /* (an unnamed class of a class is its Ut _ unnamed-type-name,
-       unqualified_name_untagged) */
-    if (!x.name && !x.linkage_name && !x.lambda && c != local_class &&
-        !(x.kind == entity_kind::class_type && x.enclosing &&
-          table[x.enclosing].kind == entity_kind::class_type))
-        return false;
     /* [abi:mangling-compression]: a template's name seen before, with its
        prefix, is a <substitution> before the arguments */
     if (x.instantiation && x.enclosing && !is_std(x.enclosing) && !local &&
@@ -2473,6 +2509,49 @@ bool itanium_mangler::class_template_args(entity_index c)
 }
 
 /*
+ * The type of non-type parameter i of the function template specialization
+ * c, declared with the dependent type declared.  [temp.alias]/2: an alias
+ * template's specialization is its type-id's type, so is_same<void,
+ * void_t<T>>::value depends on no parameter; [impl.clang] clang then writes
+ * the parameter's type in the specialization (enable_if_t<that, int>: i).
+ * Told apart by a second mangling with each such alias as its type: where
+ * that names no <template-param>, nothing else made the type dependent.
+ */
+bool itanium_mangler::parameter_type(entity_index c, uint32_t i,
+                                     qualified_type declared)
+{
+    size_t length = out->n;
+    owned_array<candidate> saved;
+    for (const candidate &x : candidates)
+        saved.append(x);
+    const char *before = refused;
+    alias_value_refused = false;
+    if (type(declared))
+        return true;
+    if (before || !alias_value_refused)
+        return false;
+    const char *why = refused, *where = refused_in;
+    refused = nullptr;
+    out->n = length;
+    candidates.clear();
+    uint64_t written = template_params_written;
+    alias_value_trial = true;
+    bool resolved = type(declared) && written == template_params_written;
+    alias_value_trial = false;
+    out->n = length;
+    candidates.clear();
+    for (const candidate &x : saved)
+        candidates.append(x);
+    if (!resolved) {
+        refused = why;
+        refused_in = where;
+        return false;
+    }
+    refused = nullptr;
+    return type(analysis.specialization_argument(c, i, 0));
+}
+
+/*
  * <template-args> of a template's specialization c.  [abi:mangle.template-arg]:
  *
  *     <template-arg> ::= <expr-primary>
@@ -2528,7 +2607,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             text("Tn");
             const char *outer_part = mangling_part;
             mangling_part = "a non-type template parameter's type";
-            bool typed = type(declared);
+            bool typed = parameter_type(c, i, declared);
             mangling_part = outer_part;
             if (!typed)
                 return false;
@@ -3094,9 +3173,16 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
     }
     if (x.kind == entity_kind::class_type && x.lambda)
         return closure_type_name(e);
-    if (x.kind == entity_kind::class_type && !x.name && !x.linkage_name &&
-        !(as_type && analysis.number_closures)) {
+    bool unnamed = !x.name && !x.linkage_name &&
+                   (x.kind == entity_kind::class_type ||
+                    x.kind == entity_kind::enumeration);
+    if (unnamed) {
         if (entity_index function = enclosing_function(table, e)) {
+            /* [impl.clang]: as a closure type, one of a function that is
+               neither inline nor a specialization is unique to the
+               translation unit, $_N */
+            if (!closure_numbered(e))
+                return translation_unit_number(e);
             /* [abi:mangling.named]: <unnamed-type-name> ::= Ut [ <nonnegative number> ] _ */
             text("Ut");
             if (uint64_t ordinal = local_class_ordinal(e, function))
@@ -3105,8 +3191,7 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
             return true;
         }
     }
-    if (x.kind == entity_kind::class_type && !x.name && !x.linkage_name &&
-        !(as_type && analysis.number_closures) && x.enclosing &&
+    if (unnamed && x.enclosing &&
         table[x.enclosing].kind == entity_kind::class_type) {
         /* [abi:mangling.named]: an unnamed class of a class (clang's
            _ZN1OUt0_C2Ev): Ut, the number of the unnamed classes and
@@ -3126,35 +3211,16 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
         text("_");
         return true;
     }
+    /* [impl.clang]: one of namespace scope with no name for linkage
+       purposes is unique to the translation unit too */
+    if (unnamed && (!x.enclosing ||
+                    table[x.enclosing].kind == entity_kind::namespace_entity))
+        return translation_unit_number(e);
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration)) {
         if (x.linkage_name)
             return source_name(x.linkage_name);
-        /* [impl.clang]: an unnamed local class/union without a typedef name is
-           mangled as $_<n> in its enclosing function */
-        if (x.kind == entity_kind::class_type && enclosing_function(table, e) &&
-            analysis.number_closures) {
-            entity_index context = enclosing_function(table, e);
-            size_t n = 0;
-            bool seen = false;
-            for (entity_index k : analysis.unnumbered_closures) {
-                if (k == e) {
-                    seen = true;
-                    break;
-                }
-                if (enclosing_function(table, k) == context)
-                    n++;
-            }
-            if (!seen)
-                analysis.unnumbered_closures.append(e);
-            char buf[32];
-            size_t len =
-                static_cast<size_t>(snprintf(buf, sizeof(buf), "$_%zu", n));
-            number(len);
-            vbuffer_append(out, buf, len);
-            return true;
-        }
         return false;
     }
     return source_name(x.name);
@@ -3466,12 +3532,18 @@ entity_index itanium_mangler::local_function(entity_index e,
 {
     const entities &table = analysis.entity_table;
     entity_index c = e;
-    if (table[c].kind != entity_kind::class_type)
+    /* (a local enumeration is a local entity as a class is,
+       [basic.scope.block]; one of a class goes with its class) */
+    if (table[c].kind == entity_kind::enumeration) {
+        if (table[table[c].enclosing].kind == entity_kind::class_type)
+            c = table[c].enclosing;
+    } else if (table[c].kind != entity_kind::class_type)
         c = table[c].enclosing;
     while (c && table[c].kind == entity_kind::class_type &&
            table[table[c].enclosing].kind == entity_kind::class_type)
         c = table[c].enclosing;
-    if (!c || table[c].kind != entity_kind::class_type)
+    if (!c || (table[c].kind != entity_kind::class_type &&
+               table[c].kind != entity_kind::enumeration))
         return 0;
     entity_index function = enclosing_function(table, c);
     if (function && local_class)
@@ -3479,8 +3551,8 @@ entity_index itanium_mangler::local_function(entity_index e,
     return function;
 }
 
-/* [abi:mangling-scope]: count earlier classes with the same name in the
-   function. Unnamed classes have their own sequence, separate from lambdas. */
+/* [abi:mangling-scope]: count earlier classes and enumerations with the
+   same name in the function. Unnamed ones have their own sequence, separate from lambdas. */
 uint64_t itanium_mangler::local_class_ordinal(entity_index c,
                                               entity_index function) const
 {
@@ -3494,8 +3566,10 @@ uint64_t itanium_mangler::local_class_ordinal(entity_index c,
         uint32_t other_name = x.name;
         if (!other_name)
             other_name = x.linkage_name;
-        if (x.kind == entity_kind::class_type && !x.lambda &&
-            other_name == name && enclosing_function(table, other) == function)
+        if ((x.kind == entity_kind::class_type ||
+             x.kind == entity_kind::enumeration) &&
+            !x.lambda && other_name == name &&
+            enclosing_function(table, other) == function)
             ordinal++;
     }
     return ordinal;
@@ -3588,6 +3662,43 @@ bool itanium_mangler::closure_numbered(entity_index c) const
     return false;
 }
 
+/* [impl.clang]: the name of a closure type, or of an unnamed local class or
+   enumeration, that is unique to the translation unit: the <source-name>
+   $_N, N its number among those of its function (or of namespace scope,
+   which counts others of functions too) in the order their names are first mangled (as clang's code generator mangles them) */
+bool itanium_mangler::translation_unit_number(entity_index c)
+{
+    const entities &table = analysis.entity_table;
+    if (!analysis.number_closures)
+        return false;
+    entity_index context = enclosing_function(table, c);
+    size_t n = 0;
+    bool seen = false;
+    for (entity_index k : analysis.unnumbered_closures) {
+        if (k == c) {
+            seen = true;
+            break;
+        }
+        /* ([impl.clang] a generic lambda's closure of a function takes
+           a number of the translation unit's too, and an unnamed class or
+           enumeration of namespace scope counts every one before it) */
+        if (enclosing_function(table, k) == context ||
+            (!context &&
+             (!table[c].lambda ||
+              (table[k].lambda && table[table[k].call_operator].kind ==
+                                      entity_kind::template_entity))))
+            n++;
+    }
+    if (!seen)
+        analysis.unnumbered_closures.append(c);
+    owned_buffer written;
+    vbuffer_format_append(written.get(), "$_%llu",
+                          static_cast<unsigned long long>(n));
+    number(written.size());
+    vbuffer_append(out, written.data(), written.size());
+    return true;
+}
+
 /*
  * [abi:closure-types]:
  *
@@ -3597,11 +3708,8 @@ bool itanium_mangler::closure_numbered(entity_index c) const
  * "The number is omitted for the first closure type with a given
  * <lambda-sig> in a given context; it is n-2 for the nth closure type (in
  * lexical order) with that same <lambda-sig> and context."  A closure type
- * unique to the translation unit has no encoding in the ABI: [impl.clang]
- * names it $_N, a <source-name>, N the closure's number among those of
- * its function (or of namespace scope, which a generic lambda's of a
- * function counts too) in the order their names are first mangled (as
- * clang's code generator mangles them).
+ * unique to the translation unit has no encoding in the ABI
+ * (translation_unit_number).
  */
 bool itanium_mangler::closure_type_name(entity_index c)
 {
@@ -3609,33 +3717,8 @@ bool itanium_mangler::closure_type_name(entity_index c)
     entity_index call = table[c].call_operator;
     if (!call)
         return false;
-    if (!closure_numbered(c)) {
-        if (!analysis.number_closures)
-            return false;
-        entity_index context = enclosing_function(table, c);
-        size_t n = 0;
-        bool seen = false;
-        for (entity_index k : analysis.unnumbered_closures) {
-            if (k == c) {
-                seen = true;
-                break;
-            }
-            /* ([impl.clang] a generic lambda's closure of a function takes
-               a number of the translation unit's too) */
-            if (enclosing_function(table, k) == context ||
-                (!context && table[table[k].call_operator].kind ==
-                                 entity_kind::template_entity))
-                n++;
-        }
-        if (!seen)
-            analysis.unnumbered_closures.append(c);
-        owned_buffer written;
-        vbuffer_format_append(written.get(), "$_%llu",
-                              static_cast<unsigned long long>(n));
-        number(written.size());
-        vbuffer_append(out, written.data(), written.size());
-        return true;
-    }
+    if (!closure_numbered(c))
+        return translation_unit_number(c);
     /* [impl.clang] the context of a closure type in an inline variable's
        initializer (the ABI's later data-member-prefix): the variable's
        <source-name> and M */
@@ -3821,11 +3904,13 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
        there */
     if (r.kind == type_kind::dependent &&
         analysis.entity_table[r.entity].alias_expansion.unqualified()) {
-        if (dependent_value_depth)
+        if (dependent_value_depth && !alias_value_trial) {
+            alias_value_refused = true;
             return refuse("an alias template's specialization of dependent "
                           "arguments and a non-dependent type in a "
                           "value-dependent template argument (clang "
                           "evaluates it)");
+        }
         qualified_type x = analysis.entity_table[r.entity].alias_expansion;
         return type(qualified_type::make(x.unqualified(), x.cv() | t.cv()),
                     member_class);
@@ -4033,6 +4118,39 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
                 if (!type(a.type))
                     return false;
             }
+            text("EE");
+            add_candidate(t);
+            return true;
+        }
+        if (n.is(syntax_kind::simple_template_id)) {
+            /* [abi:mangling-type]: a template-id's <class-enum-type>
+               <template-args>; [impl.clang] __make_integer_seq<B, T, N>
+               of a dependent length keeps the builtin template's name
+               (builtin_make_integer_seq's bindings) */
+            const entity &w = analysis.entity_table[r.entity];
+            const semantic_analysis::written_binding *parts[3] = {};
+            for (uint32_t i = 0; i < w.member_count; i++) {
+                const auto &b = analysis.written_bindings[w.first_member + i];
+                if (b.cast == w.value && !b.identifier && b.element < 3)
+                    parts[b.element] = &b;
+            }
+            if (!parts[0] || !parts[1] || !parts[2] ||
+                !parts[0]->specialization)
+                return false;
+            /* (the builtin template's name a candidate as a template
+               prefix is; no entity: a scope of its own) */
+            if (!substitution(UINT32_MAX)) {
+                text("18__make_integer_seq");
+                candidate builtin;
+                builtin.scope = UINT32_MAX;
+                candidates.append(builtin);
+            }
+            text("I");
+            if (!template_template_arg(parts[0]->specialization, 0) ||
+                !type(parts[1]->type))
+                return false;
+            text("X");
+            template_param(parts[2]->pack_position - 1);
             text("EE");
             add_candidate(t);
             return true;

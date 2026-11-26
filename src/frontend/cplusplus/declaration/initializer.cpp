@@ -539,14 +539,17 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
        one bound to a base class's reference needs the conversion to the
        base subobject, and at namespace scope the temporary has static
        storage ([class.temporary]/6): _ZGR<name>_ (lowering) */
-    /* (a scalar's or array's list temporary in an unevaluated operand,
-       [expr.context]/1, has no storage to give) */
-    bool scalar_in_unevaluated =
-        unevaluated &&
-        type_table[m.type.unqualified()].kind != type_kind::class_type;
-    if (aggregate_prvalue(m) && !closure_prvalue_binding(m) &&
-        !scalar_in_unevaluated &&
-        (type_table[m.type.unqualified()].kind != type_kind::class_type ||
+    /* (a temporary in an unevaluated operand, [expr.context]/1, has no
+       storage to give.  A class's: not in a default argument, which is
+       evaluated by its calls, and without a destructor, whose call
+       potentially_throwing does not see for an aggregate's temporary) */
+    const struct type object = type_table[m.type.unqualified()];
+    bool no_storage = unevaluated && object.kind != type_kind::class_type;
+    if (object.kind == type_kind::class_type)
+        no_storage = unevaluated > default_argument_unevaluated &&
+                     !entity_table[object.entity].destructor;
+    if (aggregate_prvalue(m) && !closure_prvalue_binding(m) && !no_storage &&
+        (object.kind != type_kind::class_type ||
          (!at_block_scope() && !binding_extends)))
         return not_supported_because(
             at, "class.temporary",
@@ -586,7 +589,8 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
         y.kind != type_kind::none)
         return converted_temporary_binding(at, m, reference);
     if (y.kind == type_kind::class_type &&
-        (x.kind == type_kind::fundamental || x.kind == type_kind::pointer)) {
+        (x.kind == type_kind::fundamental || x.kind == type_kind::pointer ||
+         x.kind == type_kind::enumeration)) {
         /* [dcl.init.ref]/5.1.2, /5.3.2, /5.4.1: "has a class type (i.e., T2
            is a class type), where T1 is not reference-related to T2, and can
            be converted to an lvalue [or rvalue] of type "cv3 T3", where "cv1
@@ -1189,24 +1193,18 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
     owned_array<uint32_t> packs;
     designation_set designations;
     VTRY(gathered, list_clauses(list, clauses, &packs, &designations));
-    /* the expansions are known to the array path only: another type's
-       clauses are analysed without them */
+    /* the expansions are known to the aggregate and constructor paths:
+       another type's clauses are analysed without them */
     bool expanded = false;
     for (size_t i = 0; i < packs.size(); i++)
         if (packs[i] != no_expansion)
             expanded = true;
-    /* (std::initializer_list<E> is initialized from its backing array,
-       const E[N], by this list: the array path, [dcl.init.list]/5) */
-    const struct type &target = type_table[type.unqualified()];
-    bool initializer_list_target =
-        target.kind == type_kind::class_type && target.entity &&
-        named(target.entity, "initializer_list") &&
-        std_namespace(entity_table[target.entity].enclosing);
-    if (expanded && (designations.any || (target.kind != type_kind::array &&
-                                          !initializer_list_target)))
+    type_kind target = type_table[type.unqualified()].kind;
+    if (expanded && (designations.any || (target != type_kind::array &&
+                                          target != type_kind::class_type)))
         return not_supported_because(
             list, "temp.variadic",
-            "a designated or non-array list with a pack expansion");
+            "a designated or scalar list with a pack expansion");
     const owned_array<uint32_t> *saved = clause_packs;
     clause_packs = nullptr;
     if (expanded)
@@ -1630,11 +1628,15 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
             }
         }
         if (parts.list_of_several()) {
-            if (has_pack_expansion(parts.list))
+            const struct type target = type_table[type.unqualified()];
+            /* [temp.variadic]/5: a class's constructor takes the
+               expansion's elements as arguments (expression_list_meanings);
+               other targets of one are not analysed */
+            if (target.kind != type_kind::class_type &&
+                has_pack_expansion(parts.list))
                 return not_supported_because(
                     init, "temp.variadic",
                     "a pack expansion in a parenthesized initializer");
-            const struct type target = type_table[type.unqualified()];
             if (target.kind == type_kind::array)
                 return not_supported_because(
                     init, "dcl.init",
@@ -1642,9 +1644,15 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
             if (target.kind == type_kind::class_type) {
                 /* [dcl.init]/17.6.2: the constructor called with the
                    expression-list as its arguments */
+                /* (a union with constructor templates only: its
+                   constructors' deleted-destructor rules are not
+                   followed) */
                 if (entity_table[target.entity].kind !=
                         entity_kind::class_type ||
-                    !entity_table[target.entity].first_constructor)
+                    (!entity_table[target.entity].first_constructor &&
+                     entity_table[target.entity].union_) ||
+                    (!entity_table[target.entity].first_constructor &&
+                     !entity_table[target.entity].constructor_templates))
                     return not_supported_because(
                         init, "dcl.init",
                         "several arguments for a class without constructors");
@@ -1924,7 +1932,7 @@ analysis_result semantic_analysis::class_list_initialization(
         /* (3.2): an element of the class's own type or of a class derived
            from it (CWG 1467) */
         expression_meaning e;
-        VTRY(r, expression(clauses[0], e));
+        VTRY(r, clause_expression(clauses, 0, e));
         if (e.type.unqualified() == type.unqualified() ||
             same_or_derived_class(e, c))
             return initialize_with(list, e, type, false, true, result);
@@ -2004,10 +2012,10 @@ analysis_result semantic_analysis::constructor_list_initialization(
                                      "several initializer_list constructors");
     }
     owned_array<expression_meaning> arguments;
-    for (SyntaxElement clause : clauses) {
+    for (size_t i = 0; i < clauses.size(); i++) {
         expression_meaning e;
-        if (!clause.is(syntax_kind::braced_init_list)) {
-            VTRY(r, expression(clause, e));
+        if (!clauses[i].is(syntax_kind::braced_init_list)) {
+            VTRY(r, clause_expression(clauses, i, e));
         }
         arguments.append(e);
     }
@@ -2058,7 +2066,10 @@ analysis_result semantic_analysis::constructor_list_initialization(
     owned_array<expression_meaning> before;
     for (const expression_meaning &e : arguments)
         before.append(e);
-    VTRY(r, construct(list, type, arguments, 0, result, false, &clauses));
+    bool nested_list =
+        clauses.size() == 1 && clauses[0].is(syntax_kind::braced_init_list);
+    VTRY(r, construct(list, type, arguments, 0, result, false, &clauses,
+                      nested_list));
     if (semantics[result.node].kind != semantic_kind::construct) {
         if (arguments.size() == 1 &&
             !clauses[0].is(syntax_kind::braced_init_list) &&
@@ -2115,6 +2126,21 @@ analysis_result semantic_analysis::constructor_list_initialization(
         }
     }
     return analysis_result::well_formed;
+}
+
+/* the expression of clauses[i]: a pack expansion's pattern for its element
+   ([temp.variadic]/7) */
+analysis_result
+semantic_analysis::clause_expression(const owned_array<SyntaxElement> &clauses,
+                                     size_t i, expression_meaning &e)
+{
+    bool has_pack = clause_packs && i < clause_packs->size() &&
+                    (*clause_packs)[i] != no_expansion;
+    uint32_t element = 0;
+    if (has_pack)
+        element = (*clause_packs)[i];
+    expansion_scope scope(*this, has_pack, element);
+    return expression(clauses[i], e);
 }
 
 /* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the number of
@@ -2264,7 +2290,8 @@ analysis_result semantic_analysis::aggregate_elements(
                              .kind == entity_kind::class_type &&
                      (entity_table[type_table[element.unqualified()].entity]
                           .first_constructor ||
-                      destroys(type_table[element.unqualified()].entity)))) {
+                      destroys(type_table[element.unqualified()].entity))) &&
+                   !empty_list_runs_code(element)) {
             /* the rest of an array: zero, as the lowering fills it */
             break;
         } else {
@@ -2472,6 +2499,36 @@ analysis_result semantic_analysis::member_default_in_aggregate(
     return analysis_result::well_formed;
 }
 
+/* whether an object of type initialized from an empty list may be more
+   than zeros: a class, or an array of one, with a virtual table, a
+   destructor, a declared constructor or a default member initializer, in it
+   or in a subobject */
+bool semantic_analysis::empty_list_runs_code(qualified_type type) const
+{
+    while (type_table[type.unqualified()].kind == type_kind::array)
+        type = type_table[type.unqualified()].operand;
+    const struct type &t = type_table[type.unqualified()];
+    if (t.kind != type_kind::class_type ||
+        entity_table[t.entity].kind != entity_kind::class_type)
+        return false;
+    const entity &x = entity_table[t.entity];
+    if (x.dynamic || x.destructor)
+        return true;
+    for (entity_index k = x.first_constructor; k;
+         k = entity_table[k].next_constructor)
+        if (!entity_table[k].implicit)
+            return true;
+    for (uint32_t i = 0; i < x.member_count; i++)
+        if (entity_table[class_members[x.first_member + i]].default_initializer)
+            return true;
+    owned_array<entity_index> classes;
+    subobject_classes(t.entity, classes);
+    for (entity_index k : classes)
+        if (empty_list_runs_code(entity_table[k].type))
+            return true;
+    return false;
+}
+
 /* the value of an element no clause initializes ([dcl.init.aggr]/5) */
 analysis_result semantic_analysis::omitted_element_value(
     SyntaxRef list, qualified_type element, SyntaxRef default_initializer,
@@ -2503,13 +2560,38 @@ analysis_result semantic_analysis::omitted_element_value(
                 "a class member default that needs construction in place");
         return analysis_result::well_formed;
     }
-    /* (5.2): from an empty initializer list: value-initialization
+    /* (5.2): from an empty initializer list, a class's own elements when
+       it is an aggregate ([dcl.init.list]/3.4) in which something is to
+       run; else value-initialization
        ([dcl.init.list]/3.11 for a scalar, a default constructor for a
        class with constructors, all zero otherwise) */
     const struct type of_element = type_table[element.unqualified()];
+    if (of_element.kind == type_kind::array && empty_list_runs_code(element))
+        return not_supported_because(
+            list, "dcl.init.aggr",
+            "an omitted array whose elements need construction");
+    if (of_element.kind == type_kind::class_type &&
+        empty_list_runs_code(element) && is_aggregate(of_element.entity)) {
+        owned_array<SyntaxElement> no_clauses;
+        return class_list_initialization(list, no_clauses, element, false, one);
+    }
     if (of_element.kind == type_kind::class_type &&
         entity_table[of_element.entity].kind == entity_kind::class_type &&
         entity_table[of_element.entity].first_constructor) {
+        /* [dcl.init.list]/3.6: an initializer_list without a default
+           constructor (not the library's) has a backing array of no
+           elements, which is not made */
+        bool backed = named(of_element.entity, "initializer_list") &&
+                      std_namespace(entity_table[of_element.entity].enclosing);
+        for (entity_index k = entity_table[of_element.entity].first_constructor;
+             k; k = entity_table[k].next_constructor)
+            if (type_table[entity_table[k].type.unqualified()]
+                    .parameter_count == entity_table[k].default_arguments)
+                backed = false;
+        if (backed)
+            return not_supported_because(
+                list, "dcl.init.list",
+                "an omitted initializer_list without a default constructor");
         owned_array<expression_meaning> none;
         if (empty_list_uses_constructors(of_element.entity)) {
             owned_array<SyntaxElement> no_clauses;
@@ -2662,6 +2744,21 @@ analysis_result semantic_analysis::designated_list_initialization(
     const designation_set &designations, qualified_type &type,
     initialized_value &result)
 {
+    /* [dcl.init]/1's grammar has no list that mixes clauses with
+       and without designators, and [ext.clang]'s extension is an error in
+       some modes: not followed for an aggregate with base classes */
+    const struct type &listed = type_table[type.unqualified()];
+    if (listed.kind == type_kind::class_type &&
+        !entity_table[listed.entity].name &&
+        !entity_table[listed.entity].linkage_name &&
+        entity_table[listed.entity].base_count) {
+        for (size_t i = 0; i < clauses.size(); i++)
+            if (!designations.of[i].count)
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "designated and other clauses mixed for an aggregate "
+                    "with base classes and no name");
+    }
     owned_array<designated_item> items;
     for (size_t i = 0; i < clauses.size(); i++) {
         designated_item item;

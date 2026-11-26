@@ -278,6 +278,18 @@ uint32_t c_lowering::assignment(const semantic_node &n)
 {
     uint32_t a = object(n.a);
     uint32_t b = 0;
+    if (a && n.c && node(n.b).kind == semantic_kind::initializer_list &&
+        piecewise_initializer(n.b)) {
+        /* [class.base.init]/9: the member built where it is, its
+           constructed elements never copied; the value, the object */
+        ast_qualified_type t =
+            AST_QUALIFIED_TYPE_UNQUALIFIED(type(n.type, n.at));
+        uint32_t made = initialize_list_into(a, n.type, t, n.b);
+        if (!made)
+            return 0;
+        ast_qualified_type pointer = pointer_to(t);
+        return dereference(comma(pointer, made, address_of(a, pointer)), t);
+    }
     if (node(n.b).kind == semantic_kind::initializer_list)
         /* [dcl.init.list]/3.4: a member's braced default member
            initializer ([class.base.init]/9.1): its object, copied in */
@@ -501,6 +513,27 @@ uint32_t c_lowering::stdc_bits(const semantic_node &n, ast_qualified_type t,
                     n.at);
     r = cast(r, t, AST_CAST_INTEGER);
     return comma(t, stored, r);
+}
+
+/* [ext:gnu_library_builtins] a call of a function of C language linkage with
+   no definition that names an x86-64 instruction (_mm_pause, __rdtsc, ...) */
+uint32_t c_lowering::x86_header_call(uint32_t function,
+                                     const owned_array<uint32_t> &arguments)
+{
+    if (node(function).kind == semantic_kind::conversion &&
+        static_cast<conversion_kind>(node(function).op) ==
+            conversion_kind::function_to_pointer)
+        function = node(function).a;
+    if (node(function).kind != semantic_kind::entity)
+        return 0;
+    const entity &f = analysis.entity_table[node(function).a];
+    if (f.kind != entity_kind::function || !f.c_language_linkage || f.defined ||
+        !f.name)
+        return 0;
+    size_t length = 0;
+    const char *name = tokens.pp.identifier_spelling(f.name - 1, &length);
+    return ast_builder_x86_header_call(c, name, length, arguments.data(),
+                                       static_cast<uint32_t>(arguments.size()));
 }
 
 uint32_t c_lowering::special_builtin(builtin_lowering lowering,
@@ -1013,9 +1046,13 @@ uint32_t c_lowering::call(const semantic_node &n)
         made = ast_builder_builtin_call(c, spelling, length, t,
                                         arguments.data(), count);
     } else {
-        made = make(AST_NODE_CALL, t, callee,
-                    ast_builder_list(c, arguments.data(), count), count, 0, 0);
-        psabi_call(n, made);
+        made = x86_header_call(n.a, arguments);
+        if (!made) {
+            made =
+                make(AST_NODE_CALL, t, callee,
+                     ast_builder_list(c, arguments.data(), count), count, 0, 0);
+            psabi_call(n, made);
+        }
     }
     if (member_pointer_call) {
         through.append(

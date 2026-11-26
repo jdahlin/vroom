@@ -992,6 +992,23 @@ static __attribute__((noinline)) uint32_t cc_primary_unbound_parse(cc *c,
             c->syms[ls].flags |= AST_SYMBOL_FLAG_USED;
             return n;
         }
+        /* x86-64: clang declares __rdtsc itself, with no header */
+        if (CC_X86_64(c) && cc_identifier_length(id) == 7 &&
+            !memcmp(cc_identifier_string(id), "__rdtsc", 7)) {
+            cc_declaration_specifiers ds = {
+                .ty = cc_builtin_signature_type(c, 'W'),
+                .sc = AST_STORAGE_EXTERN,
+                .loc = loc};
+            cc_declarator d = {.name = id, .loc = loc};
+            uint32_t fs = cc_declaration_bind(
+                c, &ds, &d, cc_builtin_signature_function_type(c, "W"),
+                c->depth == 0);
+            uint32_t n = cc_node_new(c, AST_NODE_VARIABLE, c->syms[fs].ty, loc);
+
+            AST_NODE(n)->a = fs;
+            c->syms[fs].flags |= AST_SYMBOL_FLAG_USED;
+            return n;
+        }
         if (cc_builtin_stub_known(c, id)) {
             cc_id_list args;
             cc_report_error(c, loc, "builtin '%.*s' is not implemented",

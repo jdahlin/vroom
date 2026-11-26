@@ -410,9 +410,32 @@ bool semantic_analysis::class_property_trait(int which, qualified_type t,
         if (unbounded)
             return false;
         bool trivial = false, layout = false;
-        if (!class_property_trait(int(unary_trait_kind::is_trivial), t,
-                                  trivial) ||
-            !class_property_trait(int(unary_trait_kind::is_standard_layout), t,
+        if (is_class &&
+            clang_template_default_constructor_of(entity_table[c])) {
+            /* [ext:clang_type_traits] __is_pod asks the declaration, where
+               a constructor template is no default constructor: without
+               X() = default there is none to be trivial (X() = delete,
+               which clang counts, is not followed) */
+            if (entity_table[c].defaulted_default_constructor) {
+                bool known = true, known_default = true;
+                trivial = class_trivially_copyable(c, known) &&
+                          clang_trivial_special_members(c) &&
+                          trivial_default_constructor(c, known_default);
+                if (!known || !known_default)
+                    return false;
+            } else {
+                for (entity_index k = entity_table[c].first_constructor; k;
+                     k = entity_table[k].next_constructor)
+                    if (declared_deleted(k) &&
+                        !type_table[entity_table[k].type.unqualified()]
+                             .parameter_count)
+                        return false;
+            }
+        } else if (!class_property_trait(int(unary_trait_kind::is_trivial), t,
+                                         trivial)) {
+            return false;
+        }
+        if (!class_property_trait(int(unary_trait_kind::is_standard_layout), t,
                                   layout))
             return false;
         answer = trivial && layout;

@@ -854,6 +854,9 @@ struct entity {
     /* a special member function declared implicitly ([class.default.ctor]/1,
        [class.copy.ctor]/6, [class.dtor]/4) */
     bool implicit = false;
+    /* a defaulted comparison operator function without a noexcept-specifier
+       that compares scalars only: it is not potentially-throwing */
+    bool compares_scalars = false;
     /* a constructor of a class that a using-declarator names a base
        class's constructors for ([namespace.udecl]/3): the base's
        constructor it forwards to ([class.inhctor.init]/1); implicit too */
@@ -2558,6 +2561,11 @@ class semantic_analysis
            (an unknown scope's refused declaration, [temp.dep], ...) */
         const char *unknown_because = nullptr;
         held_cause unknown_by = held_cause::refused;
+        /* the functions found include ones declared after the template
+           being instantiated, which the caller leaves out of what
+           unqualified lookup found ([temp.res]/10; only for a caller that
+           collects the names) */
+        bool past_horizon = false;
     };
     /* the subclause an unsupported use of the name found as r (not
        known, kind none) waits for: [temp.names] for a template's name,
@@ -2581,6 +2589,12 @@ class semantic_analysis
     /* when set, lookup_unqualified appends the declarations it finds in
        namespaces: the overload set of functions of several */
     owned_array<entity_index> *collected_names = nullptr;
+    bool functions_of_several_namespaces(
+        const lookup_result &found,
+        const owned_array<entity_index> &declared) const;
+    /* [namespace.udir]/6: template_call's further non-template candidates,
+       found in other namespaces than its template */
+    owned_array<entity_index> using_directive_functions;
     /* [namespace.qual]/2: the name looked up in the namespace n (0: the
        global namespace) */
     lookup_result lookup_in_namespace(entity_index n, uint32_t name,
@@ -2614,9 +2628,11 @@ class semantic_analysis
                                owned_array<entity_index> &namespaces) const;
     /* [basic.lookup.argdep]/2: the associated entities (classes) and
        namespaces of the type t, added to the sets; false if a class of it
-       is one analysis did not follow */
+       is one analysis did not follow.  A class not complete is defined
+       only when complete is set: not one met as a template argument */
     bool associated_with(qualified_type t, owned_array<entity_index> &classes,
-                         owned_array<entity_index> &namespaces) const;
+                         owned_array<entity_index> &namespaces,
+                         bool complete = true) const;
     /* [basic.scope.namespace]: whether s is a namespace (0: the global
        one), and the innermost namespace that encloses the scope s */
     bool is_namespace(entity_index s) const;
@@ -2785,6 +2801,7 @@ class semantic_analysis
     bool defaulted_member_equality(entity_index c, SyntaxElement d,
                                    const specified &s, uint8_t access);
     entity_index defaulted_comparison = 0;
+    bool cannot_throw_comparison(entity_index c);
     bool declared_constexpr = false;
     analysis_result constexpr_compatible(SyntaxRef n, bool compatible);
     analysis_result
@@ -2939,7 +2956,6 @@ class semantic_analysis
                               uint32_t name, uint64_t value);
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
-    type_index dependent_written_type(SyntaxRef n, bool every_name = false);
     bool names_dependent_entity(token_index first, token_index end) const;
     bool pack_depends(entity_index pack) const;
     owned_array<entity_index> dependent_members;
@@ -2966,6 +2982,10 @@ class semantic_analysis
         entity_index specialization = 0;
     };
     owned_array<written_binding> written_bindings;
+    /* (also: bindings of the caller's, which tell the type apart too) */
+    type_index
+    dependent_written_type(SyntaxRef n, bool every_name = false,
+                           const owned_array<written_binding> *also = nullptr);
     /* the tags of an expression's structure (expression_structure): a
        node (word its syntax_kind, a its first tag_children: a the child,
        b the next), a token (word its kind << 48, keyword << 24 and
@@ -3964,8 +3984,12 @@ class semantic_analysis
     uint32_t expression_node_make(uint32_t tag, uint64_t word, uint32_t a,
                                   uint32_t b);
     uint32_t expression_structure(SyntaxElement e);
+    /* full_expression: x is one, whose temporaries' destructors it invokes
+       ([except.spec]/6.2) */
     analysis_result potentially_throwing(SyntaxRef n, uint32_t x,
-                                         bool &throwing);
+                                         bool &throwing,
+                                         bool full_expression = false);
+    bool temporary_destructor_throws(uint32_t x);
     analysis_result conditional_void_operand(SyntaxRef n,
                                              const expression_meaning &c,
                                              const expression_meaning &e2,
@@ -3986,6 +4010,10 @@ class semantic_analysis
                                          expression_meaning &m);
     /* [expr.ass] */
     analysis_result assignment(SyntaxRef n, expression_meaning &m);
+    /* x = {...} of a class with a declared copy assignment operator */
+    analysis_result braced_assignment(SyntaxRef n, preprocessing_op_or_punc op,
+                                      expression_meaning &left,
+                                      expression_meaning &m);
     analysis_result
     assignment_of(SyntaxRef n, token_index at, preprocessing_op_or_punc op,
                   SyntaxElement left_syntax, SyntaxElement right_syntax,
@@ -4634,6 +4662,7 @@ class semantic_analysis
        [over.match.list]/1.1 considers its initializer-list constructors
        with the empty list */
     bool empty_list_uses_constructors(entity_index c) const;
+    bool empty_list_runs_code(qualified_type type) const;
     analysis_result class_list_initialization(
         SyntaxRef list, const owned_array<SyntaxElement> &clauses,
         qualified_type type, bool direct, initialized_value &result);
@@ -4889,6 +4918,7 @@ class semantic_analysis
        default argument, enumerator-list and initializer, an instantiation
        the declaration causes; a function body is function_state.active */
     bool explicit_declaration_names = false;
+    bool parenthesized_argument(SyntaxElement list) const;
     bool copy_argument_candidate(
         entity_index c, const owned_array<expression_meaning> &arguments) const;
     /* [class.derived]: class c's base class subobject of class base,
@@ -4955,6 +4985,7 @@ class semantic_analysis
                                               SyntaxElement init,
                                               const specified &s);
     bool aggregate_value_stored(entity_index c, uint32_t value) const;
+    bool aggregate_built_in_place(uint32_t value) const;
     /* [class.union.anon]/1: the default member initializers of an anonymous
        union's (or anonymous struct's) members, run in the constructor of the
        enclosing class as clang does (the unnamed class has no constructor of
@@ -5147,7 +5178,8 @@ class semantic_analysis
     construct(SyntaxRef at, qualified_type type,
               owned_array<expression_meaning> &arguments, uint32_t object,
               initialized_value &result, bool copy = false,
-              const owned_array<SyntaxElement> *written_arguments = nullptr);
+              const owned_array<SyntaxElement> *written_arguments = nullptr,
+              bool nested_list = false);
     /* [expr.type.conv]: C(expression-list) or C{} of the class c */
     analysis_result class_conversion(SyntaxRef n, entity_index c,
                                      expression_meaning &m);
@@ -5486,6 +5518,7 @@ class semantic_analysis
         /* a class template whose implicit guides are made */
         bool guides_made = false;
     };
+    entity_index template_lexical_outer(const function_template &ft) const;
     owned_array<function_template> function_templates;
     /* function_templates by the held entity (name) and by its identifier,
        instantiations by template_entity: made as they are asked for */
@@ -6251,10 +6284,14 @@ class semantic_analysis
                                 bool &unknown, bool f_reversed = false,
                                 bool g_reversed = false);
     int constraint_subsumption_order(uint32_t f, uint32_t g) const;
-    /* a type partial ordering compares with deduce_type's rules alone */
     bool template_parameter_alone(uint32_t t, uint32_t i) const;
     bool non_deduced(qualified_type t) const;
-    bool orderable(qualified_type t, bool packs) const;
+    bool member_of_unknown_specialization(qualified_type t) const;
+    /* a type partial ordering compares with deduce_type's rules alone;
+       pack_argument set when a specialization in it has a pack of
+       arguments */
+    bool orderable(qualified_type t, bool packs,
+                   bool *pack_argument = nullptr) const;
     bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
                                  bool &unknown, bool f_reversed = false,
                                  bool g_reversed = false);
@@ -6318,6 +6355,8 @@ class semantic_analysis
        is no pack expansion's pattern: no_expansion), or null */
     static constexpr uint32_t no_expansion = 0xffffffffu;
     const owned_array<uint32_t> *clause_packs = nullptr;
+    analysis_result clause_expression(const owned_array<SyntaxElement> &clauses,
+                                      size_t i, expression_meaning &e);
     bool bound_pack_is_dependent(entity_index e) const;
     entity_index make_bound_pack(entity_index scope, uint32_t name,
                                  const entity_index *elements, uint32_t count);
@@ -7071,6 +7110,7 @@ class semantic_analysis
     /* whether class c or a base class of it declares a conversion
        function ([class.conv.fct]/4: "Conversion functions are
        inherited") */
+    bool has_conversion_function_templates(entity_index c);
     bool has_conversion_functions(entity_index c) const;
     /* whether a conversion function of class c, or a specialization of one
        of its templates deduced for to, may yield an lvalue (true when not
@@ -7141,6 +7181,9 @@ class semantic_analysis
        sequence, more than 0 when b is, 0 when neither is */
     int compare_conversions(const conversion_sequence &a,
                             const conversion_sequence &b) const;
+    /* [over.ics.list]/10 */
+    conversion_sequence list_scalar_sequence(SyntaxElement list,
+                                             qualified_type to);
     /* [over.ics.list]/6 */
     conversion_sequence list_array_sequence(SyntaxElement list,
                                             qualified_type array,
@@ -7159,7 +7202,11 @@ class semantic_analysis
         const expression_meaning *object,
         const owned_array<expression_meaning> &arguments, size_t &chosen,
         bool *none_viable = nullptr, bool user_defined = true,
-        const owned_array<SyntaxElement> *written_arguments = nullptr);
+        const owned_array<SyntaxElement> *written_arguments = nullptr,
+        entity_index list_class = 0);
+    /* whether the braced-init-list list converts to the class x with no
+       user-defined conversion ([over.ics.list]) */
+    bool list_is_identity(SyntaxElement list, entity_index x);
     /* the functions of the overload set whose first is e
        (entity::next_overload), each once, added to out */
     void overload_set(entity_index e, owned_array<entity_index> &out) const;

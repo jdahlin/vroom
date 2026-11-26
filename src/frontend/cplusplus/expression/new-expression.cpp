@@ -764,6 +764,10 @@ analysis_result semantic_analysis::new_expression(NewExpression n,
             v.a = object.node;
         else if (c && v.kind != semantic_kind::initializer_list &&
                  v.kind != semantic_kind::zero &&
+                 /* a call, or a conditional's operand, whose prvalue the
+                    lowering builds in the allocated object */
+                 v.kind != semantic_kind::call &&
+                 v.kind != semantic_kind::conditional &&
                  !(v.kind == semantic_kind::conversion &&
                    v.op ==
                        static_cast<uint8_t>(conversion_kind::lvalue_to_rvalue)))

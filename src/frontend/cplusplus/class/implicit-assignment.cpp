@@ -48,7 +48,10 @@ bool semantic_analysis::move_assignment_operator(entity_index f,
                                                  entity_index c) const
 {
     const entity &x = entity_table[f];
-    if (!x.nonstatic_member || x.enclosing != c || !x.operator_function ||
+    /* (a function template's specialization is none, whatever its
+       parameter) */
+    if (x.instantiation || !x.nonstatic_member || x.enclosing != c ||
+        !x.operator_function ||
         x.implemented != preprocessing_op_or_punc::EQUAL)
         return false;
     const struct type &function = type_table[x.type.unqualified()];

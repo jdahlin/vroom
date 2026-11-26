@@ -200,6 +200,25 @@ bool semantic_analysis::converts_to_lvalue_reference(entity_index c) const
     return false;
 }
 
+/* whether an unqualified lookup is unknown only because it found functions
+   of several namespaces (declared: what it collected) */
+bool semantic_analysis::functions_of_several_namespaces(
+    const lookup_result &found, const owned_array<entity_index> &declared) const
+{
+    if (!found.unknown || found.ambiguous || found.unknown_entity ||
+        declared.empty())
+        return false;
+    bool apart = false;
+    for (entity_index d : declared) {
+        if (entity_table[d].kind != entity_kind::function ||
+            !is_namespace(entity_table[d].enclosing))
+            return false;
+        apart = apart || entity_table[d].enclosing !=
+                             entity_table[declared[0]].enclosing;
+    }
+    return apart;
+}
+
 analysis_result semantic_analysis::overloaded_operator(
     SyntaxRef n, token_index at, preprocessing_op_or_punc op, bool postfix,
     const owned_array<SyntaxElement> &syntax,
@@ -519,17 +538,7 @@ analysis_result semantic_analysis::overloaded_operator(
         collected_names = nullptr;
         /* [namespace.udir]/6: functions of several namespaces are one
            overload set */
-        bool several = found.unknown && !found.ambiguous &&
-                       !found.unknown_entity && !declared.empty();
-        for (entity_index d : declared)
-            several = several &&
-                      entity_table[d].kind == entity_kind::function &&
-                      is_namespace(entity_table[d].enclosing);
-        bool apart = false;
-        for (entity_index d : declared)
-            apart = apart || entity_table[d].enclosing !=
-                                 entity_table[declared[0]].enclosing;
-        several = several && apart;
+        bool several = functions_of_several_namespaces(found, declared);
         /* [temp.over]/1: operator function templates by that name, whose
            specializations deduced from the operands are candidates too */
         owned_array<entity_index> held_names;
@@ -637,6 +646,36 @@ analysis_result semantic_analysis::overloaded_operator(
         }
         for (entity_index e : set)
             overload_set(e, others);
+        /* [temp.dep.candidate]/1: of the functions declared after the
+           template, only argument-dependent lookup's are candidates, and
+           only for a dependent call: one of an associated namespace that
+           unqualified lookup also searched is not told apart */
+        if (found.past_horizon) {
+            owned_array<entity_index> associated_classes, associated_spaces;
+            if (!associated_namespaces(types, associated_classes,
+                                       associated_spaces))
+                return not_supported_because(
+                    n, "basic.lookup.argdep",
+                    "an operator whose associated namespaces could not be "
+                    "determined");
+            size_t kept = 0;
+            for (entity_index e : others) {
+                uint32_t d = entity_table[e].first_declaration;
+                if (entity_table[e].enclosing != found.found_in || !d ||
+                    entity_table.declaration(d).node.first_token() <=
+                        lookup_horizon) {
+                    others[kept++] = e;
+                    continue;
+                }
+                for (entity_index space : associated_spaces)
+                    if (space == found.found_in)
+                        return not_supported_because(
+                            n, "temp.dep.candidate",
+                            "an operator declared after the template in an "
+                            "associated namespace");
+            }
+            others.resize(kept);
+        }
         size_t first_member = candidates.size();
         function_candidates(members, true, candidates);
         for (size_t i = first_member; i < candidates.size(); i++) {
@@ -838,9 +877,20 @@ analysis_result semantic_analysis::overloaded_operator(
            implicitly": a candidate too, which analysis does not form */
         entity_index c = type_table[operands[0].type.unqualified()].entity;
         bool copy = false;
-        for (const overload_candidate &k : candidates)
+        /* (a template specialization is none, [class.copy.assign]/1; where
+           the implicit one is not deleted, one taking c is taken to be the
+           better candidate and no implicit one is weighed against it) */
+        for (const overload_candidate &k : candidates) {
             if (copy_assignment_operator(k.function, c))
                 copy = true;
+            const struct type &ft = type_table[k.type.unqualified()];
+            if (k.template_index && ft.kind == type_kind::function &&
+                ft.parameter_count == 1 &&
+                stripped(type_table.parameters(k.type.unqualified())[0]) ==
+                    entity_table[c].type.unqualified() &&
+                !copy_assignment_deleted(c))
+                copy = true;
+        }
         /* [class.copy.assign]/3, /9: X& operator=(X&&) = default beside a
            user-declared copy assignment operator, of a class assigned
            bitwise: trivial, no entity (implicit_assignments), and the
@@ -1011,24 +1061,50 @@ analysis_result semantic_analysis::overloaded_operator(
     r = best_viable_function(n, candidates, nullptr, arguments, chosen,
                              &none_viable, true, &argument_syntax);
     if (r == analysis_result::well_formed && deleted_copy) {
-        /* the deleted copy assignment operator is viable for the left
-           operand and the class's own type on the right: with no other
-           candidate viable it is selected; a viable move assignment
-           operator binds a non-const rvalue better ([over.ics.rank]/3.2.3),
-           any other choice is not analysed */
+        /* the deleted copy assignment operator, const X&, is viable for the
+           left operand and the class's own type on the right: it is selected,
+           or the call ambiguous, or a non-template preferred to a template
+           ([over.match.best]/2), unless another operator= binds the right
+           operand better: for a non-const lvalue a reference to X less
+           cv-qualified than const X& ([over.ics.rank]/3.2.6); a non-const
+           rvalue is bound better by an rvalue reference (/3.2.3), which any
+           choice but X by value is taken to be */
         bool movable = operands[1].category != value_category::lvalue &&
                        !(operands[1].type.cv() & cv_const);
-        if (none_viable || (operands[0].type.cv() & cv_const))
+        bool better = false;
+        if (!none_viable && !(operands[0].type.cv() & cv_const)) {
+            const overload_candidate &win = candidates[chosen];
+            const struct type &ft = type_table[win.type.unqualified()];
+            better = movable;
+            if (ft.parameter_count == 1) {
+                qualified_type parameter =
+                    type_table.parameters(win.type.unqualified())[0];
+                const struct type &reference =
+                    type_table[parameter.unqualified()];
+                if (movable)
+                    better = parameter.unqualified() !=
+                             operands[1].type.unqualified();
+                else
+                    better = !(operands[1].type.cv() & cv_const) &&
+                             reference.kind == type_kind::lvalue_reference &&
+                             reference.operand.unqualified() ==
+                                 operands[1].type.unqualified() &&
+                             !(reference.operand.cv() & cv_const);
+            }
+        }
+        if (!better)
             return ill_formed(n,
                               "the implicitly-declared copy assignment "
                               "operator is defined as deleted",
                               "class.copy.assign");
-        if (!movable)
-            return not_supported_because(
-                n, "class.copy.assign",
-                "a deleted copy assignment against another viable operator=");
     }
-    if (r == analysis_result::well_formed && none_viable && converts) {
+    /* [over.match.oper]/9: "If the operator is the operator ,, the unary
+       operator &, or the operator ->, and there are no viable functions,
+       then the operator is assumed to be the built-in operator": no
+       conversion takes part */
+    bool address_of = unary_prefix && op == preprocessing_op_or_punc::AMPERSAND;
+    if (r == analysis_result::well_formed && none_viable && converts &&
+        !address_of) {
         /* a built-in candidate may be viable through the conversion */
         analysis_result br = builtin_via_conversion();
         if (br != analysis_result::ill_formed)
@@ -1082,10 +1158,14 @@ analysis_result semantic_analysis::overloaded_operator(
                                          "a viable operator function that may "
                                          "not beat the built-in candidates");
     }
-    if (r == analysis_result::well_formed && none_viable && member_only &&
-        op != preprocessing_op_or_punc::EQUAL &&
-        has_conversion_functions(
-            type_table[operands[0].type.unqualified()].entity))
+    bool may_convert = member_only && op != preprocessing_op_or_punc::EQUAL &&
+                       has_conversion_functions(
+                           type_table[operands[0].type.unqualified()].entity);
+    /* [over.call.object]/2: a call has surrogate call functions only, of
+       conversion functions to function pointers or references */
+    if (op == preprocessing_op_or_punc::LEFT_PARENTHESIS)
+        may_convert = converts;
+    if (r == analysis_result::well_formed && none_viable && may_convert)
         /* [over.match.oper]/3.3, [over.built]: a conversion may make a
            built-in subscript or a surrogate call viable.  Assignment's
            built-in candidates require a non-class left operand without a

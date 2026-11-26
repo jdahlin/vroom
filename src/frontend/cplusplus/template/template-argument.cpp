@@ -815,6 +815,17 @@ entity_index semantic_analysis::dependent_variable_specialization(
     return e;
 }
 
+/* the scope around a template's own parameters: [temp.friend]/2, a friend
+   template of a class is in the lexical scope of the class, whose names (a
+   class template's arguments) its parameters see */
+entity_index
+semantic_analysis::template_lexical_outer(const function_template &ft) const
+{
+    if (ft.friend_class)
+        return ft.friend_class;
+    return entity_table[ft.entity].enclosing;
+}
+
 analysis_result semantic_analysis::substituted_parameter_type(
     uint32_t template_index, uint32_t position, const template_argument *before,
     qualified_type &type)
@@ -827,7 +838,7 @@ analysis_result semantic_analysis::substituted_parameter_type(
             node, "temp.param",
             "a non-type template parameter of an unhandled form");
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                           entity_table[ft.entity].enclosing);
+                                           template_lexical_outer(ft));
     for (uint32_t k = 0; k < position; k++)
         bind_template_argument(
             scope, template_parameter_entities[ft.first_parameter + k],
@@ -1505,7 +1516,6 @@ analysis_result semantic_analysis::default_template_arguments(
     owned_array<template_argument> &arguments, const owned_array<bool> &set)
 {
     const function_template ft = function_templates[template_index - 1];
-    entity_index t = ft.entity;
     entity_index saved = current_scope;
     token_index saved_horizon = lookup_horizon;
     for (uint32_t i = 0; i < ft.parameter_count; i++) {
@@ -1564,7 +1574,7 @@ analysis_result semantic_analysis::default_template_arguments(
             return not_supported_because(
                 at, "temp.arg", "a parameter with no argument and no default");
         entity_index scope = entity_table.make(entity_kind::block_scope, 0,
-                                               entity_table[t].enclosing);
+                                               template_lexical_outer(ft));
         /* the names of the declaration that gave the default
            ([temp.param]/12, merged: they may differ from the
            definition's) */

@@ -191,7 +191,7 @@ analysis_result semantic_analysis::requirement_satisfied(SyntaxElement r,
             for (uint32_t i = 3; i < r.size(); i++) {
                 if (r[i].is(standard_keyword::noexcept_)) {
                     bool throwing = false;
-                    VTRY(t, potentially_throwing(r, v.node, throwing));
+                    VTRY(t, potentially_throwing(r, v.node, throwing, true));
                     if (throwing)
                         satisfied = false;
                 } else if (r[i].is(syntax_kind::return_type_requirement) &&

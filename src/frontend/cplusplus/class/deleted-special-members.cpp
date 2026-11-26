@@ -265,7 +265,8 @@ bool semantic_analysis::copy_assignment_deleted(entity_index c)
     /* [class.copy.assign]/2: only an implicitly-declared copy assignment
        operator is defined as deleted by a declared move constructor; a
        defaulted X& operator=(const X&) is a declaration of it */
-    if ((declares_move_constructor(c) &&
+    if (((declares_move_constructor(c) ||
+          entity_table[c].defaulted_move_constructor) &&
          !entity_table[c].defaulted_copy_assignment) ||
         entity_table[c].closure_assignment_deleted)
         return true;

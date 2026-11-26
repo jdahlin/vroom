@@ -553,6 +553,13 @@ entity_index semantic_analysis::library_builtin(uint32_t name)
     size_t length = 0;
     /* the identifier's number is the preprocessor's plus one */
     const char *spelling = tokens.pp.identifier_spelling(name - 1, &length);
+    /* [ext:gnu_library_builtins] x86-64: __rdtsc, which clang declares
+       itself; a call lowers to the instruction */
+    if (length == 7 && !memcmp(spelling, "__rdtsc", 7) && x86_64_target())
+        return declare_builtin(
+            name, name,
+            builtin_scalar(fundamental_type::unsigned_long_long_int), nullptr,
+            0, false, 0, true);
     if (length <= 10 || memcmp(spelling, "__builtin_", 10))
         return compiler_builtin(name, spelling, length);
     /* clang's bool __builtin_is_constant_evaluated(void) (Builtins.td):
