@@ -1983,6 +1983,8 @@ analysis_result semantic_analysis::template_candidates(
         entity_index e = 0;
         const struct function_template ft = function_templates[g - 1];
         if (r == analysis_result::well_formed && !failed) {
+            scoped_value<bool> collecting(collecting_candidates,
+                                          !target_function);
             unevaluated++;
             r = instantiate(n, ft.entity, d.data(),
                             static_cast<uint32_t>(d.size()), e);

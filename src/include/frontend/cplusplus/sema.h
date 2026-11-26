@@ -5540,6 +5540,7 @@ class semantic_analysis
        definitions instantiated meanwhile are outside the immediate
        context, their failures counted */
     unsigned substituting = 0;
+    bool collecting_candidates = false;
     /* [temp.res]/6, /8: the statement (or parameter) analysed in an
        instantiation has named a template argument (entity::argument_bound,
        a member of a class specialization found from its scope, this): an

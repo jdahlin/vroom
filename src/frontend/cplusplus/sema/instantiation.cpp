@@ -252,7 +252,7 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
        specialization whose return type is not deduced yet instantiates
        its definition there, in an unevaluated operand too */
     bool deducing =
-        !substituting &&
+        !collecting_candidates &&
         contains_placeholder(
             type_table[entity_table[specialization].type.unqualified()]
                 .operand);
