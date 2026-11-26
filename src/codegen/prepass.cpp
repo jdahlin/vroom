@@ -398,7 +398,8 @@ VPRIV bool codegen_inline_is_candidate(codegen_unit *E, cc *c, uint32_t s)
     if (y->flags & AST_SYMBOL_FLAG_ALWAYS_INLINE)
         return true;
     return !(y->flags & AST_SYMBOL_FLAG_NOINLINE) &&
-           ((y->flags & AST_SYMBOL_FLAG_INLINE) || y->sc == AST_STORAGE_STATIC);
+           ((y->flags & (AST_SYMBOL_FLAG_INLINE | AST_SYMBOL_FLAG_LINKONCE)) ||
+            y->sc == AST_STORAGE_STATIC);
 }
 
 /*

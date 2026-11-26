@@ -1807,7 +1807,8 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
         if (!e->unit->options->opt)
             return false;
         if ((y->flags & AST_SYMBOL_FLAG_NOINLINE) ||
-            (!(y->flags & AST_SYMBOL_FLAG_INLINE) &&
+            (!(y->flags &
+               (AST_SYMBOL_FLAG_INLINE | AST_SYMBOL_FLAG_LINKONCE)) &&
              y->sc != AST_STORAGE_STATIC))
             return false;
 #ifdef WALK_PREFIX
@@ -1851,11 +1852,12 @@ VPRIV bool walk_call_can_inline(codegen_context *e, uint32_t s, uint32_t call)
         /* (VIR's instance, under WALK_PREFIX, accepts crc32q's asm: walk.h is included once
            in the unity build, so this is tested here, not through a macro of walk.h) */
 #ifdef WALK_PREFIX
-        if (!wide && !(y->flags & AST_SYMBOL_FLAG_INLINE) &&
+        if (!wide &&
+            !(y->flags & (AST_SYMBOL_FLAG_INLINE | AST_SYMBOL_FLAG_LINKONCE)) &&
             !codegen_statement_is_tiny(c, y->body, true))
             return false;
 #else
-        if (!(y->flags & AST_SYMBOL_FLAG_INLINE) &&
+        if (!(y->flags & (AST_SYMBOL_FLAG_INLINE | AST_SYMBOL_FLAG_LINKONCE)) &&
             !codegen_statement_is_tiny(c, y->body, false))
             return false;
 #endif

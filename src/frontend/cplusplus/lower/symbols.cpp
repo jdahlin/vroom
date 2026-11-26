@@ -353,8 +353,10 @@ void c_lowering::gnu_attributes(entity_index e, uint32_t s)
         flags |= AST_SYMBOL_FLAG_ALWAYS_INLINE;
     if (x.gnu_flags & gnu_noreturn)
         flags |= AST_SYMBOL_FLAG_NORETURN;
+    /* a weak definition may be replaced at link time, an inline one too:
+       a call to it stays a call, as clang's */
     if (x.gnu_flags & gnu_weak)
-        flags |= AST_SYMBOL_FLAG_WEAK;
+        flags |= AST_SYMBOL_FLAG_WEAK | AST_SYMBOL_FLAG_NOINLINE;
     /* an inline gnu_inline function: C's GNU extern inline, which the
        code generator inlines and never emits */
     if ((x.gnu_flags & gnu_inline_definition) && x.inline_)
