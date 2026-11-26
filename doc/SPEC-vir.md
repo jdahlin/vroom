@@ -185,7 +185,7 @@ one sweep when a pass asks for it.
 | 9 | `f64x2` | Two `f64` lanes, 128 bits (section 7.5) |
 | 10 | `i64x2` | Two `i64` lanes, 128 bits (section 7.5) |
 
-4.1 There are no 8- or 16-bit values, no booleans, no aggregates. Narrow
+4.1 There are no 8- or 16-bit scalar values, no booleans, no aggregates. Narrow
 integers exist as load and store widths and as the `ext` operation.
 4.2 A comparison yields `i32` 0 or 1. A condition operand is any `i32` or
 `i64`; nonzero is true.
@@ -393,6 +393,10 @@ is left out). Lane 0 is at the lowest address.
 `store` operand. A `load` or `store` of a vector moves 16 bytes; its width
 field is the lane's, and its alignment is at least the lane's, never 16 by
 default.
+7.5.1a `i16x8` (eight 16-bit lanes) is a vector type of `load`, `store`,
+`vsplat` (of an `i32`, its low half), `add`, `sub`, `and`, `or` and `xor`
+only; its `load` and `store` have width 2.  There is no 16-bit scalar.
+
 7.5.1b `bitcast` of a vector type takes any vector type: the same 128 bits.
 
 7.5.2 These operations take a vector type as their result type, lane by lane:

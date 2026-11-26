@@ -184,6 +184,16 @@ VPRIV bool virbuild_vectorize_insn_is_skipped(virbuild_context *V, uint32_t q)
 }
 
 /* instruction q of the loop: its kind.  false: the loop is not vectorized */
+/* whether ty is the type of a scalar that the loop's integer lanes hold */
+static bool
+virbuild_vectorize_is_integer_lane(const virbuild_vectorize_state *S,
+                                   uint32_t ty)
+{
+    if (S->lg == 1) /* (16-bit lanes: the low half of either width) */
+        return ty == VIR_TYPE_I32 || ty == VIR_TYPE_I64;
+    return ty == S->ity;
+}
+
 static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
                                              uint32_t q)
 {
@@ -244,7 +254,7 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
             else if (!ex && in.type != VIR_TYPE_I32)
                 r.kind = VIRBUILD_VECTORIZE_KIND_BAD;
         } else {
-            r.kind = in.type == S->ity &&
+            r.kind = virbuild_vectorize_is_integer_lane(S, in.type) &&
                              virbuild_vectorize_info_is_lane(o[0]) &&
                              virbuild_vectorize_info_is_lane(o[1])
                          ? VIRBUILD_VECTORIZE_KIND_VEC
@@ -309,7 +319,7 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
         if (allinv)
             virbuild_vectorize_info_opaque_set(S, q, &r);
         else
-            r.kind = in.type == S->ity &&
+            r.kind = virbuild_vectorize_is_integer_lane(S, in.type) &&
                              virbuild_vectorize_info_is_lane(o[0]) &&
                              (no < 2 || virbuild_vectorize_info_is_lane(o[1]))
                          ? VIRBUILD_VECTORIZE_KIND_VEC
@@ -329,6 +339,23 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
             r.is_unsigned = 0;
         } else if (allinv) {
             virbuild_vectorize_info_opaque_set(S, q, &r);
+        } else if (VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == 2 &&
+                   !(in.flags & VIR_INSN_FLAG_MS) && in.type == VIR_TYPE_I64 &&
+                   V->insns[w[0]].insn.type == VIR_TYPE_I32 &&
+                   o[0]->kind == VIRBUILD_VECTORIZE_KIND_LIN &&
+                   o[0]->step > 0 && o[0]->step <= (1 << 20) && S->nwrap < 8) {
+            /* p[off + i] with unsigned off or i: linear while off + i stays below 2^32, which
+               is tested before the vector loop.  Its term is itself, so that no other access
+               is taken to be at a known distance */
+            S->wrap[S->nwrap].value = w[0];
+            S->wrap[S->nwrap++].step = o[0]->step;
+            r = VCC_LITERAL(virbuild_vectorize_info,
+                            .kind = VIRBUILD_VECTORIZE_KIND_LIN, .is_exact = 1,
+                            .step = o[0]->step, .term_value = q,
+                            .term_factor = 1);
+        } else if (S->lg == 1 && VIR_INSN_FLAG_WIDTH_LOG2(in.flags) >= 1 &&
+                   virbuild_vectorize_info_is_lane(o[0])) {
+            r.kind = VIRBUILD_VECTORIZE_KIND_VEC; /* (the low half is kept) */
         } else { /* (the walker selects int values as i64 and truncates) */
             r.kind = VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == 2 &&
                              in.type == VIR_TYPE_I64 &&
@@ -359,6 +386,8 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
     case VIR_OP_TRUNC:
         if (allinv)
             virbuild_vectorize_info_opaque_set(S, q, &r);
+        else if (S->lg == 1 && o[0]->kind == VIRBUILD_VECTORIZE_KIND_VEC)
+            r.kind = VIRBUILD_VECTORIZE_KIND_VEC;
         else if (o[0]->kind == VIRBUILD_VECTORIZE_KIND_LIN)
             r = VCC_LITERAL(virbuild_vectorize_info,
                             .kind = VIRBUILD_VECTORIZE_KIND_LIN,
@@ -497,7 +526,8 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
                 VCC_LITERAL(virbuild_vectorize_access, q, S->pos, false);
             r.kind = VIRBUILD_VECTORIZE_KIND_W32;
         } else if (VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == S->lg &&
-                   (in.type == S->fty || in.type == S->ity) &&
+                   (in.type == S->fty ||
+                    virbuild_vectorize_is_integer_lane(S, in.type)) &&
                    (o[0]->step && o[0]->step % S->esz == 0 &&
                     o[0]->step >= -(1 << 20) && o[0]->step <= (1 << 20))) {
             if (S->access_count == 64)
@@ -527,7 +557,7 @@ static bool virbuild_vectorize_insn_classify(virbuild_vectorize_state *S,
                 S, o[0]->step ? "a store with a stride other than its size"
                               : "a store to one address");
         if (VIR_INSN_FLAG_WIDTH_LOG2(in.flags) != S->lg ||
-            (vt != S->fty && vt != S->ity))
+            (vt != S->fty && !virbuild_vectorize_is_integer_lane(S, vt)))
             return virbuild_vectorize_reject(
                 S, "a store of another width than the loop's lanes");
         if (!virbuild_vectorize_info_is_lane(o[1]))
@@ -804,6 +834,11 @@ static uint32_t virbuild_vectorize_scalar_make(virbuild_vectorize_state *S,
 static uint32_t
 virbuild_vectorize_vector_type(const virbuild_vectorize_state *S, uint32_t ty)
 {
+    if (S->lg == 1) { /* 16-bit lanes: the low halves of i32 and i64 values */
+        if (ty == VIR_TYPE_I32 || ty == VIR_TYPE_I64)
+            return VIR_TYPE_I16X8;
+        return 0;
+    }
     if (ty != S->ity && ty != S->fty)
         return 0;
     return ty == VIR_TYPE_F32   ? VIR_TYPE_F32X4
@@ -1058,6 +1093,10 @@ static uint32_t virbuild_vectorize_vector_make(virbuild_vectorize_state *S,
         if (!(a = virbuild_vectorize_scalar_make(S, v,
                                                  VIRBUILD_VECTORIZE_MODE_BODY)))
             return 0;
+        if (S->lg == 1 && ty == VIR_TYPE_I64) /* (vsplat takes an i32) */
+            a = virbuild_vectorize_insn_append(S, S->vector_header_block,
+                                               VIR_OP_TRUNC, VIR_TYPE_I32, 0, a,
+                                               0, 0);
         r = virbuild_vectorize_insn_append(S, S->vector_header_block,
                                            VIR_OP_VSPLAT, vt, 0, a, 0, 0);
         break;
@@ -1105,6 +1144,12 @@ static uint32_t virbuild_vectorize_vector_make(virbuild_vectorize_state *S,
             }
         break;
     case VIRBUILD_VECTORIZE_KIND_VEC:
+        if (S->lg == 1 && (in.op == VIR_OP_EXT || in.op == VIR_OP_TRUNC)) {
+            r = virbuild_vectorize_vector_make(S, in.a); /* the same lanes */
+            if (!r)
+                return 0;
+            break;
+        }
         switch (in.op) {
         case VIR_OP_ADD:
         case VIR_OP_SUB:
@@ -1265,6 +1310,40 @@ static uint32_t virbuild_vectorize_address_make(virbuild_vectorize_state *S,
     S->pin[S->npin].a = a, S->pin[S->npin].rev = *rev;
     return S->pin[S->npin++].par = virbuild_vectorize_parameter_new(
                S, S->vector_body_block, VIR_TYPE_PTR, s, 0, 0);
+}
+
+/*
+ * Whether the u32 index v, which goes up by step, passes 2^32 - 1 within the vector
+ * iterations (nv of them, from v's value at the first); 0 when v cannot be made there.
+ */
+static uint32_t virbuild_vectorize_index_wraps(virbuild_vectorize_state *S,
+                                               uint32_t v, int64_t step,
+                                               uint32_t nv)
+{
+    codegen_context *e = S->context;
+    uint32_t first =
+        virbuild_vectorize_scalar_make(S, v, VIRBUILD_VECTORIZE_MODE_T0);
+
+    if (!first)
+        return 0;
+    uint32_t block = S->vector_header_block;
+    uint32_t base = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_EXT, VIR_TYPE_I64, 2, first, 0, 0);
+    uint32_t reach = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_MUL, VIR_TYPE_I64, 0, nv,
+        virbuild_constant_integer(e, VIR_TYPE_I64, step), 0);
+    uint32_t last = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_ADD, VIR_TYPE_I64, 0, base, reach, 0);
+    /* (more iterations than indexes: the product itself could wrap) */
+    uint32_t many = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_ICMP, VIR_TYPE_I32, 8, nv,
+        virbuild_constant_integer(e, VIR_TYPE_I64, 0xffffffffll), 0);
+    uint32_t past = virbuild_vectorize_insn_append(
+        S, block, VIR_OP_ICMP, VIR_TYPE_I32, 8, last,
+        virbuild_constant_integer(e, VIR_TYPE_I64, 0x100000000ll), 0);
+
+    return virbuild_vectorize_insn_append(S, block, VIR_OP_OR, VIR_TYPE_I32, 0,
+                                          many, past, 0);
 }
 
 /* [lo, hi): the bytes access x (virbuild_vectorize_range_pair_add's index) touches in the vector iterations; span = 4 * nv */
@@ -1472,6 +1551,73 @@ static bool virbuild_vectorize_require_infos(virbuild_vectorize_state *S)
     return S->infos != NULL;
 }
 
+/*
+ * Whether the low 16 bits of v are made of the low 16 bits of loads and invariants alone, by
+ * operations a 16-bit lane has.
+ */
+static bool virbuild_vectorize_half_value(virbuild_vectorize_state *S,
+                                          uint32_t v, uint32_t *budget)
+{
+    virbuild_context *V = S->context->vir_builder;
+
+    v = virbuild_value_resolve(V, v);
+    const virbuild_vectorize_info *x = virbuild_vectorize_info_get(S, v);
+    vir_insn in = V->insns[v].insn;
+
+    if (!*budget || !virbuild_vectorize_is_integer_lane(S, in.type))
+        return false;
+    (*budget)--;
+    if (x->kind == VIRBUILD_VECTORIZE_KIND_INV)
+        return true;
+    if (x->kind != VIRBUILD_VECTORIZE_KIND_VEC)
+        return false;
+    switch (in.op) {
+    case VIR_OP_LOAD:
+        return VIR_INSN_FLAG_WIDTH_LOG2(in.flags) == 1;
+    case VIR_OP_EXT:
+    case VIR_OP_TRUNC:
+        return virbuild_vectorize_half_value(S, in.a, budget);
+    case VIR_OP_ADD:
+    case VIR_OP_SUB:
+    case VIR_OP_AND:
+    case VIR_OP_OR:
+    case VIR_OP_XOR:
+        return virbuild_vectorize_half_value(S, in.a, budget) &&
+               virbuild_vectorize_half_value(S, in.b, budget);
+    default:
+        return false;
+    }
+}
+
+/*
+ * A loop of 16-bit lanes does less than the others: forward unit strides, and stored values of
+ * virbuild_vectorize_half_value; no sums, recurrences, indexed reads or reversals.
+ */
+static bool virbuild_vectorize_halves_check(virbuild_vectorize_state *S)
+{
+    virbuild_context *V = S->context->vir_builder;
+
+    if (S->reduction_count || S->nfold || S->ncarry || S->gather_count)
+        return virbuild_vectorize_reject(
+            S, "16-bit lanes: a sum, a recurrence or an indexed read");
+    for (uint32_t i = 0; i < S->access_count; i++) {
+        vir_insn in = V->insns[S->accesses[i].insn].insn;
+        uint32_t budget = 64;
+
+        if (VIR_INSN_FLAG_WIDTH_LOG2(in.flags) != 1 ||
+            virbuild_vectorize_info_get(S, virbuild_value_resolve(V, in.a))
+                    ->step != 2)
+            return virbuild_vectorize_reject(
+                S, "16-bit lanes: an access that is not the next 2 bytes");
+        if (S->accesses[i].store &&
+            !virbuild_vectorize_half_value(S, in.b, &budget))
+            return virbuild_vectorize_reject(
+                S, "16-bit lanes: a stored value needs more than add, "
+                   "subtract and bit operations");
+    }
+    return true;
+}
+
 static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 {
     codegen_context *e = S->context;
@@ -1487,7 +1633,7 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
 
     S->nfold = S->ncarry = S->gather_count = S->access_count =
         S->invariant_load_count = S->reduction_count = S->nind = S->nstep =
-            S->nchk = S->npin = S->none = 0,
+            S->nchk = S->nwrap = S->npin = S->none = 0,
     S->pos = 0, S->why = NULL;
     /* the lanes: the width of the loop's first store (of its first load when it stores nothing) */
     S->lg = 0;
@@ -1500,17 +1646,19 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
                     uint32_t w =
                         VIR_INSN_FLAG_WIDTH_LOG2(V->insns[q].insn.flags);
 
-                    if (st && w != 2 && w != 3)
+                    if (st && w != 1 && w != 2 && w != 3)
                         return virbuild_vectorize_reject(
-                            S, "a store that is not 4 or 8 bytes");
-                    if (w == 2 || w == 3)
+                            S, "a store that is not 2, 4 or 8 bytes");
+                    if ((st && w == 1) || w == 2 || w == 3)
                         S->lg = w;
                 }
     if (!S->lg)
         S->lg = 2;
     S->esz = 1u << S->lg, S->vf = 16 / S->esz;
-    S->ity = S->lg == 2 ? VIR_TYPE_I32 : VIR_TYPE_I64,
-    S->fty = S->lg == 2 ? VIR_TYPE_F32 : VIR_TYPE_F64;
+    S->ity = S->lg == 3 ? VIR_TYPE_I64 : VIR_TYPE_I32,
+    S->fty = S->lg == 3   ? VIR_TYPE_F64
+             : S->lg == 2 ? VIR_TYPE_F32
+                          : VIR_TYPE_VOID;
     /* H's parameters */
     for (uint32_t p = V->blocks[H].first_parameter; p; p = V->insns[p].next) {
         uint32_t init, nx, ty = V->insns[p].insn.type, budget = 256;
@@ -1651,6 +1799,8 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
             virbuild_vectorize_info_get(S, S->reductions[i].update)
                     ->use_count != 0)
             return virbuild_vectorize_reject(S, "a sum used inside the loop");
+    if (S->lg == 1 && !virbuild_vectorize_halves_check(S))
+        return false;
     if (!virbuild_vectorize_dependences_check(S))
         return false;
     /* the exit test: continue while u cc n */
@@ -1727,7 +1877,7 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
                                                         VIRBUILD_BLOCK_NONE);
     S->join_block = virbuild_vectorize_block_new(S, S->preheader_block,
                                                  S->vector_exit_block);
-    if (S->nchk) { /* (J's predecessors are the last in V->pr) */
+    if (S->nchk || S->nwrap) { /* (J's predecessors are the last in V->pr) */
         VIRBUILD_ARRAY_GROW(V->predecessors, V->predecessor_count,
                             V->predecessor_capacity, 1);
         V->predecessors[V->predecessor_count++] = S->vector_header_block,
@@ -2138,11 +2288,25 @@ static bool virbuild_vectorize_loop(virbuild_vectorize_state *S)
     virbuild_vectorize_block_terminate(S, S->vector_exit_block, VIR_OP_BR,
                                        S->join_block, 0, 0);
     virbuild_vectorize_block_terminate(S, S->join_block, VIR_OP_BR, H, 0, 0);
-    if (S->nchk) { /* the pairs that may be one memory: any two ranges that meet, and the loop stays scalar */
-        uint32_t span = virbuild_vectorize_insn_append(
-                     S, S->vector_header_block, VIR_OP_SHL, VIR_TYPE_I64, 0, nv,
-                     virbuild_constant_integer(e, VIR_TYPE_I64, S->lg), 0),
-                 any = 0;
+    if (S->nchk ||
+        S->nwrap) { /* an index that would wrap, or a pair of ranges that meet: the loop stays scalar */
+        uint32_t span = 0, any = 0;
+
+        for (uint32_t i = 0; i < S->nwrap; i++) {
+            uint32_t m = virbuild_vectorize_index_wraps(S, S->wrap[i].value,
+                                                        S->wrap[i].step, nv);
+
+            if (!m)
+                return false;
+            any = any ? virbuild_vectorize_insn_append(
+                            S, S->vector_header_block, VIR_OP_OR, VIR_TYPE_I32,
+                            0, any, m, 0)
+                      : m;
+        }
+        if (S->nchk)
+            span = virbuild_vectorize_insn_append(
+                S, S->vector_header_block, VIR_OP_SHL, VIR_TYPE_I64, 0, nv,
+                virbuild_constant_integer(e, VIR_TYPE_I64, S->lg), 0);
 
         for (uint32_t i = 0; i < S->nchk; i++) {
             uint32_t l0, h0, l1, h1, m;

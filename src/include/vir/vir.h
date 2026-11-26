@@ -46,16 +46,19 @@ enum {
     VIR_TYPE_F32X4,
     VIR_TYPE_I32X4,
     VIR_TYPE_F64X2,
-    VIR_TYPE_I64X2, /* 128-bit vectors (RESEARCH-vectors.md 5.1; i8x16 and i16x8 are not in yet) */
+    VIR_TYPE_I64X2, /* 128-bit vectors (RESEARCH-vectors.md 5.1; i8x16 is not in yet) */
+    VIR_TYPE_I16X8, /* load, store, vsplat (of an i32), add, sub, and, or, xor only */
     VIR_TYPE_COUNT
 };
 static inline bool vir_type_is_vector(uint32_t ty)
 {
-    return ty >= VIR_TYPE_F32X4 && ty <= VIR_TYPE_I64X2;
+    return ty >= VIR_TYPE_F32X4 && ty <= VIR_TYPE_I16X8;
 }
 /* a vector's lane type; a scalar's own */
 static inline uint32_t vir_type_element(uint32_t ty)
 {
+    if (ty == VIR_TYPE_I16X8)
+        return VIR_TYPE_I32; /* (no 16-bit scalar) */
     return ty == VIR_TYPE_F32X4   ? VIR_TYPE_F32
            : ty == VIR_TYPE_I32X4 ? VIR_TYPE_I32
            : ty == VIR_TYPE_F64X2 ? VIR_TYPE_F64
@@ -431,6 +434,7 @@ enum { /* result type sets */
        VIR_TYPE_MASK_I32X4 = 1 << VIR_TYPE_I32X4,
        VIR_TYPE_MASK_F64X2 = 1 << VIR_TYPE_F64X2,
        VIR_TYPE_MASK_I64X2 = 1 << VIR_TYPE_I64X2,
+       VIR_TYPE_MASK_I16X8 = 1 << VIR_TYPE_I16X8,
        VIR_TYPE_MASK_VI = VIR_TYPE_MASK_I32X4 | VIR_TYPE_MASK_I64X2,
        VIR_TYPE_MASK_VF = VIR_TYPE_MASK_F32X4 | VIR_TYPE_MASK_F64X2,
        VIR_TYPE_MASK_VEC = VIR_TYPE_MASK_VI | VIR_TYPE_MASK_VF
