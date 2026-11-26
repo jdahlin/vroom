@@ -488,9 +488,14 @@ semantic_analysis::class_sequence(const expression_meaning &a,
        converting constructor templates, with one parameter to take the
        argument */
     owned_array<entity_index> constructors;
+    /* each one's constructor template (a function_templates index + 1),
+       or 0 */
+    owned_array<uint32_t> template_of;
     for (entity_index k = entity_table[c1].first_constructor; k;
-         k = entity_table[k].next_constructor)
+         k = entity_table[k].next_constructor) {
         constructors.append(k);
+        template_of.append(0u);
+    }
     if (entity_table[c1].constructor_templates) {
         owned_array<overload_candidate> specializations;
         if (constructor_template_candidates(SyntaxRef(), c1, &a, 1, true,
@@ -500,23 +505,17 @@ semantic_analysis::class_sequence(const expression_meaning &a,
             cannot_tell.user_defined_if_viable = true;
             return cannot_tell;
         }
-        for (const overload_candidate &k : specializations)
+        for (const overload_candidate &k : specializations) {
             constructors.append(k.function);
-    }
-    /* (the constructors before this index are no templates'
-       specializations) */
-    size_t first_specialization = constructors.size();
-    if (entity_table[c1].constructor_templates) {
-        first_specialization = 0;
-        for (entity_index k = entity_table[c1].first_constructor; k;
-             k = entity_table[k].next_constructor)
-            first_specialization++;
+            template_of.append(k.template_index);
+        }
     }
     sequence best = of_form(sequence::form::bad);
-    bool unique = true, unknown = false, best_specialization = false;
+    /* the constructors whose conversion is as good as best's */
+    owned_array<size_t> alike;
+    bool unknown = false;
     for (size_t index = 0; index < constructors.size(); index++) {
         entity_index k = constructors[index];
-        bool specialization = index >= first_specialization;
         const struct type &f = type_table[entity_table[k].type.unqualified()];
         /* [over.match.copy]/1.1: "the converting constructors of T" */
         if (entity_table[k].explicit_)
@@ -531,30 +530,53 @@ semantic_analysis::class_sequence(const expression_meaning &a,
             unknown = true;
         if (first.kind != sequence::form::standard)
             continue;
-        if (best.kind == sequence::form::bad) {
-            best = first;
-            best.function = k;
-            best_specialization = specialization;
-            continue;
-        }
-        int c = compare_conversions(first, best);
+        int c = -1;
+        if (best.kind != sequence::form::bad)
+            c = compare_conversions(first, best);
         if (c < 0) {
             best = first;
             best.function = k;
-            best_specialization = specialization;
+            alike.clear();
+        }
+        if (c <= 0)
+            alike.append(index);
+    }
+    /* [over.match.best]/2.4: of conversions alike, "F1 is not a function
+       template specialization and F2 is a function template
+       specialization" makes F1 better (json's basic_json(value_t) over
+       basic_json(CompatibleType&&) for a value_t) */
+    bool non_template = false;
+    for (size_t index : alike)
+        if (!template_of[index])
+            non_template = true;
+    owned_array<size_t> left;
+    for (size_t index : alike)
+        if (!non_template || !template_of[index])
+            left.append(index);
+    bool unique = left.size() < 2;
+    if (!left.empty())
+        best.function = constructors[left[0]];
+    /* /2.5: or the one whose template is more specialized than each other's
+       ([temp.func.order]) */
+    for (size_t i = 0; i < left.size() && !unique && !non_template; i++) {
+        bool beats_all = true;
+        for (size_t j = 0; j < left.size() && beats_all; j++) {
+            if (i == j)
+                continue;
+            bool order_unknown = false;
+            int order = 0;
+            if (template_of[left[i]] != template_of[left[j]])
+                order = function_template_order(template_of[left[i]],
+                                                template_of[left[j]], 1,
+                                                order_unknown);
+            if (order_unknown)
+                unknown = true;
+            beats_all = !order_unknown && order > 0;
+        }
+        if (beats_all) {
+            best.function = constructors[left[i]];
             unique = true;
-        } else if (c == 0 && best_specialization && !specialization) {
-            /* [over.match.best]/2.4: of conversions alike, "F1 is not a
-               function template specialization and F2 is a function
-               template specialization" makes F1 better (json's
-               basic_json(value_t) over basic_json(CompatibleType&&) for
-               a value_t) */
-            best = first;
-            best.function = k;
-            best_specialization = false;
-            unique = true;
-        } else if (c == 0 && !(specialization && !best_specialization)) {
-            unique = false;
+            unknown = false;
         }
     }
     if (unknown) {
