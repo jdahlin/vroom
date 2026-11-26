@@ -176,6 +176,7 @@ class itanium_mangler
     bool encoding(entity_index e);
     bool specialization_encoding(entity_index e);
     bool constraint_expression(entity_index t, SyntaxElement c);
+    bool integer_literal(token_index token);
     bool constraint_parameter(entity_index t, entity_index parameter);
     bool constraint_template_args(entity_index t, SyntaxElement c);
     bool constraint_namespace_member(entity_index t, SyntaxElement qualifier,
@@ -1006,20 +1007,22 @@ bool itanium_mangler::operand_type(SyntaxElement a, qualified_type &t,
                 }
                 break;
             }
-        if (!pe ||
-            analysis.entity_table[pe].kind != entity_kind::typedef_name ||
-            record(analysis.entity_table[pe].type).kind !=
-                type_kind::template_parameter)
-            return false;
-        t = analysis.entity_table[pe].type;
-        return true;
+        if (pe && analysis.entity_table[pe].kind == entity_kind::typedef_name &&
+            record(analysis.entity_table[pe].type).kind ==
+                type_kind::template_parameter) {
+            t = analysis.entity_table[pe].type;
+            return true;
+        }
+        /* another name: the type recorded with the type-id's node */
     }
     if (!a.is_node())
         return false;
     SyntaxRef ar = a;
     for (uint32_t i = 0; i < written_count; i++) {
         const auto &w = analysis.written_bindings[written_first + i];
-        if (!w.identifier && w.cast == ar.index().index()) {
+        /* (a called specialization's binding is no type written) */
+        if (!w.identifier && !w.specialization &&
+            w.cast == ar.index().index()) {
             t = w.type;
             return true;
         }
@@ -1163,7 +1166,10 @@ int itanium_mangler::unresolved_qualifier(SyntaxElement q)
         return 0;
     }
     const struct type &r = record(t);
-    if (r.kind == type_kind::template_parameter && !t.cv()) {
+    /* (an alias template's template-id naming a parameter is mangled as
+       written, below, as clang does) */
+    if (r.kind == type_kind::template_parameter && !t.cv() &&
+        !q.is(syntax_kind::simple_template_id)) {
         if (!type(t))
             return 0;
         return 1;
@@ -1529,9 +1535,11 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
     /* T(), T an alias template's parameter or the template's own type
        parameter: cv <type> _ E */
     if (expression.is(syntax_kind::postfix_expression) &&
-        expression.size() == 3 && expression[0].is_token() &&
-        (expression[0].is_identifier() ||
-         expression[0].keyword() != standard_keyword::none) &&
+        expression.size() == 3 &&
+        ((expression[0].is_token() &&
+          (expression[0].is_identifier() ||
+           expression[0].keyword() != standard_keyword::none)) ||
+         expression[0].is(syntax_kind::simple_template_id)) &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
         size_t before = out->n;
@@ -1541,6 +1549,15 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             return true;
         }
         out->n = before;
+    }
+    /* [abi:expressions] c ? a : b is qu <expression> <expression>
+       <expression> */
+    if (expression.is(syntax_kind::conditional_expression) &&
+        expression.size() == 5) {
+        text("qu");
+        return dependent_expression(expression[0]) &&
+               dependent_expression(expression[2]) &&
+               dependent_expression(expression[4]);
     }
     if (expression.is(syntax_kind::expression) && expression.size() == 3 &&
         punctuator(expression[1], preprocessing_op_or_punc::COMMA)) {
@@ -1601,16 +1618,32 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                <unresolved-name> ::= [gs] sr <unresolved-qualifier-level>+ E <base-unresolved-name>
                <base-unresolved-name> ::= <simple-id>
          */
-        if (!global && qual.size() == 2 &&
+        /* (ns::A<args>::name too: the namespaces' <source-name>s are the
+           first <unresolved-qualifier-level>s) */
+        uint32_t last = 0;
+        if (qual.size() >= 2)
+            last = qual.size() - 2;
+        bool namespaces = qual.size() % 2 == 0;
+        for (uint32_t i = 0; i < last; i += 2)
+            namespaces = namespaces && qual[i].is_identifier();
+        if (!global && namespaces && qual.size() >= 2 &&
             (member.is_identifier() ||
              (member.is(syntax_kind::simple_template_id) &&
               member.size() >= 3 && member[0].is_identifier())) &&
-            (qual[0].is_identifier() ||
-             qual[0].is(syntax_kind::simple_template_id))) {
+            ((qual[last].is_identifier() && !last) ||
+             qual[last].is(syntax_kind::simple_template_id))) {
             size_t before = out->n;
             size_t candidates_before = candidates.size();
             text("sr");
-            int form = unresolved_qualifier(qual[0]);
+            bool named = true;
+            for (uint32_t i = 0; i < last; i += 2)
+                named = named &&
+                        source_name(analysis.token_identifier(qual[i].token()));
+            int form = 0;
+            if (named)
+                form = unresolved_qualifier(qual[last]);
+            if (form == 1 && last)
+                form = 0;
             if (form) {
                 if (form == 2)
                     text("E");
@@ -1728,26 +1761,8 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             for (SyntaxElement a : written) {
                 if (a.is(preprocessing_op_or_punc::COMMA))
                     continue;
-                /* (a type-id that is not a name: the type the analysis
-                   gave it, collect_written_casts) */
-                SyntaxElement inner = a;
-                while (inner.is_node() && inner.size() == 1 &&
-                       inner.is(syntax_kind::type_id,
-                                syntax_kind::type_specifier_seq))
-                    inner = inner[0];
-                if (a.is(syntax_kind::type_id) && !inner.is_token()) {
-                    SyntaxRef ar = a;
-                    bool found = false;
-                    for (uint32_t i = 0; i < written_count && !found; i++) {
-                        const auto &w =
-                            analysis.written_bindings[written_first + i];
-                        if (w.identifier || w.cast != ar.index().index())
-                            continue;
-                        if (!type(w.type))
-                            return false;
-                        found = true;
-                    }
-                    if (!found)
+                if (a.is(syntax_kind::type_id)) {
+                    if (!type_operand(a))
                         return false;
                     continue;
                 }
@@ -1872,18 +1887,80 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
         text("Lb0E");
         return true;
     }
+    return integer_literal(expression.token());
+}
+
+/* [abi:mangling.literal] an integer-literal: L <type> <value> E, the type
+   the first of [lex.icon]'s table that holds it (long is as wide as a
+   pointer), the value in decimal */
+bool itanium_mangler::integer_literal(token_index token)
+{
     owned_buffer spelling;
-    analysis.token_spelling(expression.token(), spelling.get());
-    if (!spelling.size() || spelling.size() > 9 ||
-        (spelling.data()[0] == '0' && spelling.size() > 1))
-        return false;
-    for (size_t i = 0; i < spelling.size(); i++)
-        if (spelling.data()[i] < '0' || spelling.data()[i] > '9')
+    analysis.token_spelling(token, spelling.get());
+    const char *p = spelling.data();
+    const char *end = p + spelling.size();
+    unsigned base = 10;
+    if (end - p > 1 && p[0] == '0') {
+        base = 8;
+        if (p[1] == 'x' || p[1] == 'X') {
+            base = 16;
+            p += 2;
+        } else if (p[1] == 'b' || p[1] == 'B') {
+            base = 2;
+            p += 2;
+        }
+    }
+    uint64_t value = 0;
+    bool digits = false;
+    for (; p < end; p++) {
+        unsigned digit = base;
+        if (*p >= '0' && *p <= '9')
+            digit = static_cast<unsigned>(*p - '0');
+        else if (*p >= 'a' && *p <= 'f')
+            digit = static_cast<unsigned>(*p - 'a') + 10;
+        else if (*p >= 'A' && *p <= 'F')
+            digit = static_cast<unsigned>(*p - 'A') + 10;
+        else if (*p == '\'')
+            continue;
+        if (digit >= base)
+            break;
+        if (value > (UINT64_MAX - digit) / base)
             return false;
-    text("Li");
-    vbuffer_append(out, spelling.data(), spelling.size());
-    text("E");
-    return true;
+        value = value * base + digit;
+        digits = true;
+    }
+    bool is_unsigned = false;
+    unsigned longs = 0;
+    for (; p < end; p++) {
+        if (*p == 'u' || *p == 'U')
+            is_unsigned = true;
+        else if (*p == 'l' || *p == 'L')
+            longs++;
+        else
+            return false;
+    }
+    if (!digits || longs > 2)
+        return false;
+    /* int, unsigned, long, unsigned long, long long, unsigned long long */
+    static const char codes[] = "ijlmxy";
+    unsigned long_bits = static_cast<unsigned>(analysis.pointer_size()) * 8;
+    const unsigned widths[] = {32, long_bits, 64};
+    for (unsigned rank = longs; rank < 3; rank++) {
+        for (unsigned u = 0; u < 2; u++) {
+            /* a decimal literal without u is never unsigned */
+            if (u != is_unsigned && (is_unsigned || base == 10))
+                continue;
+            unsigned bits = widths[rank] - 1 + u;
+            if (bits < 64 && value >> bits)
+                continue;
+            text("L");
+            vbuffer_append(out, &codes[rank * 2 + u], 1);
+            number(value);
+            text("E");
+            return true;
+        }
+    }
+    return false;
 }
 
 /*
