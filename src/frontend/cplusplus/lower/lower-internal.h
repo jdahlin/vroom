@@ -141,6 +141,7 @@ class c_lowering
                                      uint32_t object,
                                      bool thread_local_var = false);
     bool copied_array(qualified_type t, uint32_t init) const;
+    ast_qualified_type writable_array(qualified_type t, token_index at);
     uint32_t initialization(entity_index e, uint32_t init, token_index at);
     void static_initialization(entity_index e, uint32_t init,
                                owned_array<uint32_t> &out, token_index at);

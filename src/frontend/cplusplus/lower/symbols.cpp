@@ -232,6 +232,12 @@ uint32_t c_lowering::symbol(entity_index e, token_index at, int variant)
         t = type(
             qualified_type::make(x.type.unqualified(), x.type.cv() & ~cv_const),
             at);
+    /* (an array's const is its elements': one copied at start-up
+       is written too) */
+    if (x.kind == entity_kind::variable && !x.automatic && x.definition &&
+        !constant_initializer(x.definition) &&
+        copied_array(x.type, x.definition))
+        t = writable_array(x.type, at);
     owned_buffer name;
     uint32_t s = 0;
     if (x.kind == entity_kind::variable && x.automatic) {

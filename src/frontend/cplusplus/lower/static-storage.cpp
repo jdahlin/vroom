@@ -90,6 +90,16 @@ uint32_t c_lowering::initialization(entity_index e, uint32_t init,
     return runtime_call(memcpy_function, "memcpy", v, parameters, arguments, 3);
 }
 
+/* the C type of array type t without its elements' cv-qualifiers */
+ast_qualified_type c_lowering::writable_array(qualified_type t, token_index at)
+{
+    const struct type &r = record(t);
+    if (r.kind != type_kind::array)
+        return type(qualified_type::make(t.unqualified(), cv_none), at);
+    ast_qualified_type element = writable_array(r.operand, at);
+    return ast_builder_type_array(c, element, r.bound, true);
+}
+
 /* whether t is an array of a scalar type (nothing to construct) and init a
    braced-init-list of it */
 bool c_lowering::copied_array(qualified_type t, uint32_t init) const
