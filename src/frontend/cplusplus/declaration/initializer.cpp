@@ -525,14 +525,17 @@ analysis_result semantic_analysis::reference_binding(SyntaxRef at,
        one bound to a base class's reference needs the conversion to the
        base subobject, and at namespace scope the temporary has static
        storage ([class.temporary]/6): _ZGR<name>_ (lowering) */
-    /* (a scalar's or array's list temporary in an unevaluated operand,
-       [expr.context]/1, has no storage to give) */
-    bool scalar_in_unevaluated =
-        unevaluated &&
-        type_table[m.type.unqualified()].kind != type_kind::class_type;
-    if (aggregate_prvalue(m) && !closure_prvalue_binding(m) &&
-        !scalar_in_unevaluated &&
-        (type_table[m.type.unqualified()].kind != type_kind::class_type ||
+    /* (a temporary in an unevaluated operand, [expr.context]/1, has no
+       storage to give.  A class's: not in a default argument, which is
+       evaluated by its calls, and without a destructor, whose call
+       potentially_throwing does not see for an aggregate's temporary) */
+    const struct type object = type_table[m.type.unqualified()];
+    bool no_storage = unevaluated && object.kind != type_kind::class_type;
+    if (object.kind == type_kind::class_type)
+        no_storage = unevaluated > default_argument_unevaluated &&
+                     !entity_table[object.entity].destructor;
+    if (aggregate_prvalue(m) && !closure_prvalue_binding(m) && !no_storage &&
+        (object.kind != type_kind::class_type ||
          (!at_block_scope() && !binding_extends)))
         return not_supported_because(
             at, "class.temporary",
