@@ -6248,6 +6248,7 @@ class semantic_analysis
                                 bool g_reversed = false);
     int constraint_subsumption_order(uint32_t f, uint32_t g) const;
     /* a type partial ordering compares with deduce_type's rules alone */
+    bool non_deduced(qualified_type t) const;
     bool orderable(qualified_type t, bool packs) const;
     bool at_least_as_specialized(uint32_t f, uint32_t g, size_t arguments,
                                  bool &unknown, bool f_reversed = false,
