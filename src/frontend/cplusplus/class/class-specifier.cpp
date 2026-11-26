@@ -1091,6 +1091,11 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
         /* [dcl.type.elab]/1: class-key simple-template-id */
         type_index t = 0;
         VTRY(r, template_type(e[at], 0, false, t));
+        if (type_table[t].kind == type_kind::dependent)
+            return not_supported_because(
+                n, "dcl.type.elab",
+                "a dependent elaborated-type-specifier with a "
+                "simple-template-id");
         if (type_table[t].kind != type_kind::class_type)
             return ill_formed(n,
                               "an elaborated-type-specifier with a "
