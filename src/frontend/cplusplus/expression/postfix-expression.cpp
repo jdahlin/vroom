@@ -490,6 +490,57 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 entity_kind::class_type)
             class_named = type_table[named].entity;
     }
+    /* [expr.prim.id.qual] with [expr.type.conv]/1: Q::name(args) the parser
+       kept as a qualified-id (a member of a specialization it does not
+       instantiate) whose name lookup finds a type.  In an instantiation
+       such a name may have been dependent, and needs typename
+       ([temp.res.general]): class_member_value reports it */
+    if ((parenthesized || braced) && !instantiation_depth &&
+        n[0].is(syntax_kind::qualified_id) && n[0].size() == 2 &&
+        n[0][0].is(syntax_kind::nested_name_specifier) && n[0][1].is_token() &&
+        tokens[n[0][1].token()].kind == token_kind::identifier) {
+        nominated_scope qscope;
+        if (nested_name_specifier(n[0][0], qscope, false) ==
+                analysis_result::well_formed &&
+            !qscope.dependent) {
+            entity_index scope = qscope.entity;
+            if (qscope.global)
+                scope = 0;
+            token_index at = n[0][1].token();
+            lookup_result found = lookup_qualified(scope, tokens.identifier(at),
+                                                   lookup_filter::any);
+            entity_index e = found.entity;
+            if (found.ambiguous || found.unknown)
+                e = 0;
+            bool type = false;
+            if (e) {
+                entity_kind kind = entity_table[e].kind;
+                type = kind == entity_kind::class_type ||
+                       kind == entity_kind::typedef_name ||
+                       kind == entity_kind::enumeration;
+            }
+            if (type) {
+                if (!accessible(e))
+                    return ill_formed_at_token(at,
+                                               "a private or protected "
+                                               "member's name can be used only "
+                                               "by members and friends of the "
+                                               "class in which it is declared",
+                                               "class.access");
+                used(at, e);
+                if (entity_table[e].kind == entity_kind::class_type) {
+                    class_named = e;
+                } else {
+                    named = entity_table[e].type.unqualified();
+                    named_cv = entity_table[e].type.cv();
+                    if (type_table[named].kind == type_kind::class_type &&
+                        entity_table[type_table[named].entity].kind ==
+                            entity_kind::class_type)
+                        class_named = type_table[named].entity;
+                }
+            }
+        }
+    }
     if ((parenthesized || braced) && n[0].is_token()) {
         const token &t = tokens[n[0].token()];
         if (t.kind == token_kind::identifier) {
