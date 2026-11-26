@@ -740,6 +740,10 @@ class c_lowering
     /* C23's <stdbit.h> functions and __builtin_bitreverseg at run time */
     uint32_t stdc_bits(const semantic_node &n, ast_qualified_type t,
                        uint32_t argument);
+    /* x86-64: the instruction in place of a call of a function clang's
+       headers only declare; 0 if the call is of another */
+    uint32_t x86_header_call(uint32_t function,
+                             const owned_array<uint32_t> &arguments);
     uint32_t special_builtin(builtin_lowering lowering, const semantic_node &n,
                              ast_qualified_type t,
                              const owned_array<uint32_t> &arguments);

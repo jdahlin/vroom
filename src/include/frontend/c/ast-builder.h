@@ -202,6 +202,11 @@ const char *ast_builder_builtin_signature(const char *name, size_t length);
 uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
                                   ast_qualified_type t, const uint32_t *args,
                                   uint32_t count);
+/* x86-64: the instruction a call of the header-declared function
+   name[0..length) with C linkage and no definition is (_mm_pause, __rdtsc,
+   ...); 0 if it is not one */
+uint32_t ast_builder_x86_header_call(cc *c, const char *name, size_t length,
+                                     const uint32_t *args, uint32_t n);
 /* the C library function the builtin __builtin_NAME (name[0..length) is
    NAME) declares implicitly, as clang does: its prototype in the front
    end's builtin table letters (*clang_encoding false) or in clang's

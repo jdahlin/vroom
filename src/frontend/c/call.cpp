@@ -355,6 +355,21 @@ CC_PRIVATE __attribute__((noinline)) uint32_t call(cc *c, uint32_t fn,
             cc_report_error(
                 c, loc, "interrupt service routine cannot be called directly");
     }
+    if (AST_NODE(callee)->op == AST_NODE_VARIABLE &&
+        !(aflags & AST_NODE_FLAG_ERROR)) {
+        const sym *y = &c->syms[AST_NODE(callee)->a];
+        if (y->kind == AST_SYMBOL_FUNCTION && !y->body &&
+            (y->flags & AST_SYMBOL_FLAG_GLOBAL) &&
+            !(y->flags & AST_SYMBOL_FLAG_DEFINED) &&
+            y->sc != AST_STORAGE_STATIC &&
+            !(y->attrs && c->attr[y->attrs].asmname)) {
+            uint32_t made = cc_x86_header_call_build(
+                c, cc_identifier_string(y->name),
+                (size_t)cc_identifier_length(y->name), args.v, args.n, loc);
+            if (made)
+                return made;
+        }
+    }
     n = cc_node_new(c, AST_NODE_CALL,
                     AST_QUALIFIED_TYPE_UNQUALIFIED(AST_TYPE(c, ft)->base), loc);
     AST_NODE(n)->a = fn;
