@@ -722,6 +722,15 @@ VPRIV bool virbuild_vector_operation(codegen_context *e, int op,
         virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
     return false;
 }
+VPRIV bool virbuild_vector_shuffle(codegen_context *e, const int *bytes, int ra,
+                                   int rb, const codegen_lvalue *d)
+{
+    (void)ra, (void)rb, (void)d;
+    if (CODEGEN_IS_X64(e->compile_context) &&
+        x64_vector_shuffle_exists(e, bytes))
+        virbuild_fail(e, VIRBUILD_FAILURE(vector_operation));
+    return false;
+}
 VPRIV codegen_value virbuild_bigcvt(codegen_context *e, codegen_value v,
                                     ast_qualified_type from,
                                     ast_qualified_type to)

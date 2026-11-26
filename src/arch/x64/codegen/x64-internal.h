@@ -287,6 +287,7 @@ VPRIV bool codegen_symbol_needs_got(
 VPRIV int x64_memory_base_register(codegen_context *e, const codegen_lvalue *l,
                                    uint32_t *ref);
 VPRIV bool x64_target_has_no_simd(codegen_context *e);
+VPRIV bool x64_vector_shuffle_exists(codegen_context *e, const int *bytes);
 VPRIV bool x64_vector_operation_exists(codegen_context *e, int op,
                                        ast_qualified_type vt, bool a_vector,
                                        bool b_vector, bool unary);

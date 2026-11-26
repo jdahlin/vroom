@@ -233,6 +233,10 @@ VPRIV codegen_value WALK_LOWER(wcvt)(
     codegen_context *e, codegen_value v, ast_qualified_type from,
     ast_qualified_type to);                      /* __int128 on either side */
 VPRIV int WALK_LOWER(ftreg)(codegen_context *e); /* a free float temporary */
+/* a shuffle of two 16-byte vectors at ra and rb into *d, bytes[16] the source
+   of each result byte (16 up: the second operand, -1 any); false: none */
+VPRIV bool WALK_LOWER(vector_shuffle)(codegen_context *e, const int *bytes,
+                                      int ra, int rb, const codegen_lvalue *d);
 /* a GNU vector operation with the CPU's vector instructions into *d; false:
    none, the caller does it lane by lane.  ra, rb: a vector operand's address,
    a scalar operand's value */

@@ -84,7 +84,8 @@ static x64_simd_plan x64_simd_integer_plan(int op, unsigned size,
         p.op = x64_simd_by_width(size, "psubb", "psubw", "psubd", "psubq");
         break;
     case LEX_TOKEN_STAR:
-        p.op = x64_simd_by_width(size, NULL, "pmullw", NULL, NULL);
+        /* SSE2 has no pmulld: x64_simd_multiply_dwords */
+        p.op = x64_simd_by_width(size, NULL, "pmullw", "pmuludq", NULL);
         break;
     case LEX_TOKEN_AMPERSAND:
         p.op = "pand";
@@ -190,6 +191,16 @@ static void x64_simd_shift_by(codegen_context *e, const char *op, int count,
     x64_simd_text(e, text);
 }
 
+/* an instruction with a control byte: pshufd, shufps ... */
+static void x64_simd_pick(codegen_context *e, const char *op, int control,
+                          int source, int d)
+{
+    char text[64];
+    snprintf(text, sizeof text, "\t%s\t$%d, %%xmm%d, %%xmm%d\n", op, control,
+             source - XMM0, d - XMM0);
+    x64_simd_text(e, text);
+}
+
 /* the scalar in the general register r in every lane of x */
 static void x64_simd_splat(codegen_context *e, int x, int r, unsigned size)
 {
@@ -221,6 +232,22 @@ static void x64_simd_operand(codegen_context *e, int x, int r, bool vector,
                         .register_number = (uint8_t)r,
                         .align = 1};
     x64_load(e, x, &l, 16, false);
+}
+
+/* x *= y on four dwords: pmuludq multiplies lanes 0 and 2 into qwords, a
+   second one the lanes shifted down, and the low halves are interleaved; y and
+   t are scratch afterwards */
+static void x64_simd_multiply_dwords(codegen_context *e, int x, int y, int t)
+{
+    x64_simd_two(e, "movdqa", x, t);
+    x64_simd_two(e, "pmuludq", y, t);
+    x64_simd_shift_by(e, "psrlq", 32, x);
+    x64_simd_shift_by(e, "psrlq", 32, y);
+    x64_simd_two(e, "pmuludq", y, x);
+    x64_simd_pick(e, "pshufd", 8, t, t);
+    x64_simd_pick(e, "pshufd", 8, x, x);
+    x64_simd_two(e, "punpckldq", x, t);
+    x64_simd_two(e, "movdqa", t, x);
 }
 
 /* ra, rb: a vector operand's address, or the scalar operand's value */
@@ -269,7 +296,11 @@ VPRIV bool x64_vector_operation(codegen_context *e, int op,
             x = y;
             y = s;
         }
-        x64_simd_two(e, p.op, y, x);
+        if (op == LEX_TOKEN_STAR && size == 4 &&
+            !codegen_type_is_float(c, T(c, vt)->base))
+            x64_simd_multiply_dwords(e, x, y, t);
+        else
+            x64_simd_two(e, p.op, y, x);
         if (p.invert) {
             x64_simd_two(e, "pcmpeqd", t, t);
             x64_simd_two(e, "pxor", t, x);
@@ -279,5 +310,280 @@ VPRIV bool x64_vector_operation(codegen_context *e, int op,
     x64_tfree(e, x);
     x64_tfree(e, y);
     x64_tfree(e, t);
+    return true;
+}
+
+/* ---- shuffles: a __builtin_shufflevector of two 16-byte vectors, as the 16
+ * source bytes it takes (0-15 the first operand, 16-31 the second, -1 any) */
+
+typedef enum x64_shuffle_kind {
+    X64_SHUFFLE_NONE,
+    X64_SHUFFLE_UNPACK, /* punpckl/h of lanes `width` wide */
+    X64_SHUFFLE_DWORDS, /* pshufd */
+    X64_SHUFFLE_PAIRS,  /* shufps: two dwords of each source */
+    X64_SHUFFLE_LOW,    /* pshuflw */
+    X64_SHUFFLE_HIGH,   /* pshufhw */
+    X64_SHUFFLE_ROTATE, /* 16 consecutive bytes of the two */
+    X64_SHUFFLE_EVEN    /* the even lanes `width` wide of both */
+} x64_shuffle_kind;
+
+typedef struct x64_shuffle_plan {
+    x64_shuffle_kind kind;
+    int first, second; /* the operands used: 0 or 1 */
+    int width;         /* unpack and even: lane bytes; rotate: the start */
+    int control;
+    bool high;
+} x64_shuffle_plan;
+
+static bool x64_shuffle_byte_is(int have, int want)
+{
+    return have < 0 || have == want;
+}
+
+static bool x64_shuffle_unpack_matches(const int *bytes,
+                                       const x64_shuffle_plan *p)
+{
+    int base = 0;
+    if (p->high)
+        base = 8;
+    for (int i = 0; i < 16; i++) {
+        int lane = i / p->width;
+        int operand = p->first;
+        if (lane & 1)
+            operand = p->second;
+        int want = operand * 16 + base + (lane / 2) * p->width + i % p->width;
+        if (!x64_shuffle_byte_is(bytes[i], want))
+            return false;
+    }
+    return true;
+}
+
+/* the source of the `width`-byte lane at i, as operand * lanes + lane;
+   -1 any, -2 not a whole aligned lane */
+static int x64_shuffle_lane(const int *bytes, int i, int width)
+{
+    int lane = -1;
+    for (int k = 0; k < width; k++) {
+        int b = bytes[i * width + k];
+        if (b < 0)
+            continue;
+        if (b % width != k || (lane >= 0 && lane != b / width))
+            return -2;
+        lane = b / width;
+    }
+    return lane;
+}
+
+/* four lanes at `from` taken from the four at `from` of one operand: their
+   control byte */
+static bool x64_shuffle_control(const int *bytes, int width, int from,
+                                int *operand, int *control)
+{
+    int lanes = 16 / width;
+    *operand = -1;
+    *control = 0;
+    for (int i = 0; i < 4; i++) {
+        int s = x64_shuffle_lane(bytes, from + i, width);
+        int pick = i;
+        if (s == -2)
+            return false;
+        if (s >= 0) {
+            pick = s % lanes - from;
+            if (pick < 0 || pick > 3 ||
+                (*operand >= 0 && *operand != s / lanes))
+                return false;
+            *operand = s / lanes;
+        }
+        *control |= pick << (2 * i);
+    }
+    if (*operand < 0)
+        *operand = 0;
+    return true;
+}
+
+static bool x64_shuffle_words_keep(const int *bytes, int from, int operand)
+{
+    for (int i = from * 2; i < from * 2 + 8; i++)
+        if (!x64_shuffle_byte_is(bytes[i], operand * 16 + i))
+            return false;
+    return true;
+}
+
+static x64_shuffle_plan x64_shuffle_plan_for(const int *bytes)
+{
+    x64_shuffle_plan p = {};
+
+    for (p.width = 1; p.width <= 8; p.width *= 2)
+        for (int pair = 0; pair < 8; pair++) {
+            p.first = pair & 1;
+            p.second = (pair >> 1) & 1;
+            p.high = pair >> 2;
+            if (x64_shuffle_unpack_matches(bytes, &p)) {
+                p.kind = X64_SHUFFLE_UNPACK;
+                return p;
+            }
+        }
+    p = {};
+    if (x64_shuffle_control(bytes, 4, 0, &p.first, &p.control)) {
+        p.kind = X64_SHUFFLE_DWORDS;
+        return p;
+    }
+    {
+        int low = 0, high = 0;
+        bool pairs = true;
+        p.first = p.second = -1;
+        for (int i = 0; i < 4; i++) {
+            int s = x64_shuffle_lane(bytes, i, 4);
+            int *operand = &p.first;
+            if (i >= 2)
+                operand = &p.second;
+            if (s == -1)
+                continue;
+            if (s < 0 || (*operand >= 0 && *operand != s / 4)) {
+                pairs = false;
+                break;
+            }
+            *operand = s / 4;
+            if (i < 2)
+                low |= (s % 4) << (2 * i);
+            else
+                high |= (s % 4) << (2 * (i - 2));
+        }
+        if (pairs) {
+            if (p.first < 0)
+                p.first = 0;
+            if (p.second < 0)
+                p.second = 0;
+            p.control = low | (high << 4);
+            p.kind = X64_SHUFFLE_PAIRS;
+            return p;
+        }
+    }
+    if (x64_shuffle_control(bytes, 2, 0, &p.first, &p.control) &&
+        x64_shuffle_words_keep(bytes, 4, p.first)) {
+        p.kind = X64_SHUFFLE_LOW;
+        return p;
+    }
+    if (x64_shuffle_control(bytes, 2, 4, &p.first, &p.control) &&
+        x64_shuffle_words_keep(bytes, 0, p.first)) {
+        p.kind = X64_SHUFFLE_HIGH;
+        return p;
+    }
+    for (int pair = 0; pair < 4; pair++) {
+        p.first = pair & 1;
+        p.second = pair >> 1;
+        for (int start = 1; start < 16; start++) {
+            bool match = true;
+            for (int i = 0; i < 16; i++) {
+                int at = start + i;
+                int want = p.first * 16 + at;
+                if (at >= 16)
+                    want = p.second * 16 + at - 16;
+                match = match && x64_shuffle_byte_is(bytes[i], want);
+            }
+            if (match) {
+                p.width = start;
+                p.kind = X64_SHUFFLE_ROTATE;
+                return p;
+            }
+        }
+        for (int width = 1; width <= 2; width++) {
+            bool match = true;
+            for (int i = 0; i < 16; i++) {
+                int half = p.first;
+                if (i >= 8)
+                    half = p.second;
+                int want =
+                    half * 16 + 2 * width * ((i % 8) / width) + i % width;
+                match = match && x64_shuffle_byte_is(bytes[i], want);
+            }
+            if (match) {
+                p.width = width;
+                p.kind = X64_SHUFFLE_EVEN;
+                return p;
+            }
+        }
+    }
+    p.kind = X64_SHUFFLE_NONE;
+    return p;
+}
+
+VPRIV bool x64_vector_shuffle_exists(codegen_context *e, const int *bytes)
+{
+    return !x64_target_has_no_simd(e) &&
+           x64_shuffle_plan_for(bytes).kind != X64_SHUFFLE_NONE;
+}
+
+/* the low `width` bytes of each pair of x, sign or zero bits above, ready for
+   the saturating pack to keep them as they are */
+static void x64_simd_even_prepare(codegen_context *e, int x, int width)
+{
+    if (width == 1) {
+        x64_simd_shift_by(e, "psllw", 8, x);
+        x64_simd_shift_by(e, "psrlw", 8, x);
+    } else {
+        x64_simd_shift_by(e, "pslld", 16, x);
+        x64_simd_shift_by(e, "psrad", 16, x);
+    }
+}
+
+/* ra, rb: the operands' addresses */
+VPRIV bool x64_vector_shuffle(codegen_context *e, const int *bytes, int ra,
+                              int rb, const codegen_lvalue *d)
+{
+    if (x64_target_has_no_simd(e))
+        return false;
+    x64_shuffle_plan p = x64_shuffle_plan_for(bytes);
+    if (p.kind == X64_SHUFFLE_NONE)
+        return false;
+    int address[2] = {ra, rb};
+    int x = x64_ftreg(e), y = x64_ftreg(e);
+
+    x64_simd_operand(e, x, address[p.first], true, 1);
+    if (p.kind == X64_SHUFFLE_UNPACK || p.kind == X64_SHUFFLE_PAIRS ||
+        p.kind == X64_SHUFFLE_ROTATE || p.kind == X64_SHUFFLE_EVEN)
+        x64_simd_operand(e, y, address[p.second], true, 1);
+    switch (p.kind) {
+    case X64_SHUFFLE_UNPACK: {
+        const char *op =
+            x64_simd_by_width((unsigned)p.width, "punpcklbw", "punpcklwd",
+                              "punpckldq", "punpcklqdq");
+        if (p.high)
+            op = x64_simd_by_width((unsigned)p.width, "punpckhbw", "punpckhwd",
+                                   "punpckhdq", "punpckhqdq");
+        x64_simd_two(e, op, y, x);
+        break;
+    }
+    case X64_SHUFFLE_DWORDS:
+        x64_simd_pick(e, "pshufd", p.control, x, x);
+        break;
+    case X64_SHUFFLE_PAIRS:
+        x64_simd_pick(e, "shufps", p.control, y, x);
+        break;
+    case X64_SHUFFLE_LOW:
+        x64_simd_pick(e, "pshuflw", p.control, x, x);
+        break;
+    case X64_SHUFFLE_HIGH:
+        x64_simd_pick(e, "pshufhw", p.control, x, x);
+        break;
+    case X64_SHUFFLE_ROTATE:
+        x64_simd_shift_by(e, "psrldq", p.width, x);
+        x64_simd_shift_by(e, "pslldq", 16 - p.width, y);
+        x64_simd_two(e, "por", y, x);
+        break;
+    case X64_SHUFFLE_EVEN:
+        x64_simd_even_prepare(e, x, p.width);
+        x64_simd_even_prepare(e, y, p.width);
+        if (p.width == 1)
+            x64_simd_two(e, "packuswb", y, x);
+        else
+            x64_simd_two(e, "packssdw", y, x);
+        break;
+    case X64_SHUFFLE_NONE:
+        break;
+    }
+    x64_store(e, x, d, 16);
+    x64_tfree(e, x);
+    x64_tfree(e, y);
     return true;
 }

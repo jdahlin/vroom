@@ -459,7 +459,7 @@ bench/vnm-coff.py -j 6              # vnm on COFF objects, archives and import r
 bench/vcc-tsvc.py [-v] [--why]      # TSVC_2 (macOS; fetch-testsuites.sh TSVC_2): 151 loop checksums vs clang -O3 at vcc -O1, -O2, -O3, loops vectorized (~20 s)
 bench/vcpkg/build.py [-j N] [--clang] [-v] [PAT]   # microsoft/vcpkg-tool (C++17, 119 TUs; work/vcpkg-tool, work/vcpkg-deps-{fmt,cmrc,curl}: git clone --depth 1): vpp -x c++ -c per TU, refusals grouped by reason; --clang is the reference (all 119 build)
 bench/cxx-json.py [-v] [--force] [PAT]     # nlohmann/json's 71 test TUs (work/cxx/json/src/tests) by vpp -x c++ -std=c++17 -c against libc++, one at a time (nice, 60 s each): ok or the first error (refused subclause, vcc file:line), grouped by first error; cached in build/cxx-json.json (a rerun compiles only what changed; the full run ~1.5 min)
-bench/stockfish/run.py [-O 0123] [--depth N] [--mix] [-v]   # Stockfish 17.1 (work/stockfish, 23 TUs, SSE2, libc++) by vpp -x c++ -c, first error per TU; once all compile, linked by clang++ and `bench` node count = clang++'s (--mix: one vcc object among clang's) (~20 s)
+bench/stockfish/run.py [-O 0123] [--depth N] [--mix] [-v]   # Stockfish 17.1 (work/stockfish, 23 TUs, SSE2, libc++) by vpp -x c++ -c, first error per TU; once all compile, linked by clang++ and `bench` node count = clang++'s, with both nodes/second (--mix: one vcc object among clang's; --arch sse2: the SIMD build; ~20 s)
 ```
 Fast loop while iterating (cold numbers on a loaded machine, in brackets):
 `vcc-sema.py batch` (3 s [33 s]), `vcc-diff.py batch --cmp --kernel` (3 s
