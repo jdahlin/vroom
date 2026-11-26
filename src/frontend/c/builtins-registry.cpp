@@ -78,8 +78,6 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_ia32_psrlqi128", CC_BUILTIN_X86_SIMD, 1, "QQi"},
     {"__builtin_ia32_psrawi128", CC_BUILTIN_X86_SIMD, 1, "HHi"},
     {"__builtin_ia32_psradi128", CC_BUILTIN_X86_SIMD, 1, "IIi"},
-    {"__builtin_ia32_pmovmskb128", CC_BUILTIN_X86_SIMD, 1, "iB"},
-    {"__builtin_ia32_movmskps", CC_BUILTIN_X86_SIMD, 1, "iF"},
     {"__builtin_ia32_shufps", CC_BUILTIN_X86_SIMD, 1, "FFFi"},
     {"__builtin_ia32_maxps", CC_BUILTIN_X86_SIMD, 1, "FFF"},
     {"__builtin_ia32_minps", CC_BUILTIN_X86_SIMD, 1, "FFF"},
