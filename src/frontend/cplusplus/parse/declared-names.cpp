@@ -29,8 +29,10 @@ declared_names::declared_names()
     global.enclosing = global_namespace;
 }
 
-const declared_names::declaration *
-declared_names::find(scope_index in, uint32_t name, unsigned depth) const
+const declared_names::declaration *declared_names::find(scope_index in,
+                                                        uint32_t name,
+                                                        unsigned depth,
+                                                        bool *concrete) const
 {
     const scope &s = scopes[in];
     /* the latest declaration first: a later one of another kind is the one
@@ -69,10 +71,13 @@ declared_names::find(scope_index in, uint32_t name, unsigned depth) const
        the depth stops a cycle */
     if (depth > 16)
         return nullptr;
-    for (scope_index other : s.searched_with) {
-        const declaration *d = find(other, name, depth + 1);
-        if (d)
+    for (const scope::searched &other : s.searched_with) {
+        const declaration *d = find(other.region, name, depth + 1, concrete);
+        if (d) {
+            if (other.concrete && concrete)
+                *concrete = true;
             return d;
+        }
     }
     return nullptr;
 }
@@ -138,7 +143,7 @@ scope_index declared_names::enter_namespace(uint32_t name, bool inline_)
        an inline namespace can be used in most respects as though they were
        members of the enclosing namespace." */
     if (!name || inline_) {
-        scopes[enclosing].searched_with.append(made);
+        scopes[enclosing].searched_with.append({made, false});
         journal.append(enclosing | 0x80000000u);
     }
     current_scope = made;
@@ -262,13 +267,14 @@ scope_index declared_names::nearest_namespace_or_block() const
     return s;
 }
 
-void declared_names::add_base(scope_index derived, scope_index base)
+void declared_names::add_base(scope_index derived, scope_index base,
+                              bool concrete)
 {
     /* a class is not its own base ([class.derived]/2: "shall not be an
        incompletely defined class"): no cycle */
     if (derived == base)
         return;
-    scopes[derived].searched_with.append(base);
+    scopes[derived].searched_with.append({base, concrete});
     journal.append(derived | 0x80000000u);
 }
 
@@ -285,13 +291,13 @@ scope_index declared_names::snapshot(scope_index region)
     scope_index result = static_cast<scope_index>(scopes.size() - 1);
     /* the recursion grows scopes: no reference is kept across it */
     for (size_t i = 0; i < scopes[region].searched_with.size(); i++) {
-        scope_index other = scopes[region].searched_with[i];
+        scope::searched other = scopes[region].searched_with[i];
         /* the members of an anonymous union or struct of the region
            (add_base, decl-specifier.cpp): the first pass's rollback
            empties that region, so the copy has a copy of it too */
-        if (scopes[other].kind == scope_kind::class_ &&
-            scopes[other].enclosing == region)
-            other = snapshot(other);
+        if (scopes[other.region].kind == scope_kind::class_ &&
+            scopes[other.region].enclosing == region)
+            other.region = snapshot(other.region);
         scopes[result].searched_with.append(other);
     }
     return result;
@@ -308,7 +314,7 @@ void declared_names::define_class(scope_index in, uint32_t name,
         if ((d.kind == name_kind::type_name ||
              d.kind == name_kind::template_name) &&
             d.scope && d.scope != region) {
-            scopes[d.scope].searched_with.append(region);
+            scopes[d.scope].searched_with.append({region, false});
             journal.append(d.scope | 0x80000000u);
         }
         return;
@@ -330,7 +336,7 @@ void declared_names::declare_namespace_alias(uint32_t name,
 
 void declared_names::use_namespace(scope_index nominated)
 {
-    scopes[current_scope].searched_with.append(nominated);
+    scopes[current_scope].searched_with.append({nominated, false});
     journal.append(current_scope | 0x80000000u);
 }
 
@@ -364,6 +370,7 @@ name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope,
        ends as soon as a declaration is found for the name." */
     name_kind found = name_kind::not_declared;
     const declaration *d = nullptr;
+    bool concrete = false;
     bool parameters_searched = false;
     for (scope_index s = current_scope;; s = scopes[s].enclosing) {
         /* [temp.local]/8: in the definition of a member of a class
@@ -373,7 +380,7 @@ name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope,
             parameters_searched = true;
             for (size_t i = template_parameters_in_effect.size();
                  !d && i-- > 0;)
-                d = find(template_parameters_in_effect[i], name);
+                d = find(template_parameters_in_effect[i], name, 0, &concrete);
             if (d)
                 break;
         }
@@ -382,19 +389,20 @@ name_kind declared_names::lookup_unqualified(uint32_t name, scope_index *scope,
            that a member template declared after a function of the same
            name keeps the overload set a template-name ([temp.names]/2) */
         if (complete_contexts && scopes[s].complete)
-            d = find(scopes[s].complete, name);
+            d = find(scopes[s].complete, name, 0, &concrete);
         if (!d)
-            d = find(s, name);
+            d = find(s, name, 0, &concrete);
         if (d || s == global_namespace)
             break;
     }
     if (d) {
         found = d->kind;
+        bool is_dep = d->dependent && !concrete;
         if (scope)
             *scope = d->scope;
         if (dependent)
-            *dependent = d->dependent;
-        if (d->dependent)
+            *dependent = is_dep;
+        if (is_dep)
             dependent_found++;
     }
     lookups.append({name, current_scope, false, found});
@@ -438,17 +446,19 @@ name_kind declared_names::lookup_qualified(scope_index in, uint32_t name,
        or enumeration." */
     name_kind found = name_kind::not_declared;
     const declaration *d = nullptr;
+    bool concrete = false;
     if (complete_contexts && scopes[in].complete)
-        d = find(scopes[in].complete, name);
+        d = find(scopes[in].complete, name, 0, &concrete);
     if (!d)
-        d = find(in, name);
+        d = find(in, name, 0, &concrete);
     if (d) {
         found = d->kind;
+        bool is_dep = d->dependent && !concrete;
         if (scope)
             *scope = d->scope;
         if (dependent)
-            *dependent = d->dependent;
-        if (d->dependent)
+            *dependent = is_dep;
+        if (is_dep)
             dependent_found++;
     }
     lookups.append({name, in, true, found});

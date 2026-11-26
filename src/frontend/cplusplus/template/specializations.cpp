@@ -157,13 +157,17 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                                          "an explicit specialization with an "
                                          "attribute that has an effect");
     bool defines = inner.is(syntax_kind::function_definition);
+    bool deleted_body =
+        defines && inner.function_definition().function_body().deleted();
     bool ctor_body =
-        defines && !inner.function_definition().function_body().deleted() &&
+        defines && !deleted_body &&
         !inner.function_definition().function_body().defaulted() &&
         inner.function_definition().function_body().ctor_initializer();
-    /* [dcl.fct.def.delete], = default: not yet */
+    /* [dcl.fct.def.delete]: = delete on an explicit specialization of a member
+       function of a class template specialization (handled below); = default
+       not yet */
     if (defines && !inner.function_definition().function_body().plain() &&
-        !ctor_body)
+        !ctor_body && !deleted_body)
         return not_supported_because(
             n, "temp.expl.spec",
             "a deleted, defaulted or non-plain explicit specialization body");
@@ -177,12 +181,11 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
         if (tail.size() == 2 + has_spec && !tail[has_spec].is_token() &&
             tail[has_spec].is(syntax_kind::noptr_declarator,
                               syntax_kind::ptr_declarator) &&
-            ((defines && has_spec && inner.function_definition().plain()) ||
+            ((defines && has_spec &&
+              (inner.function_definition().plain() || deleted_body)) ||
              (defines && !has_spec &&
               (inner.function_definition().function_body().plain() ||
-               ctor_body)) ||
-             (defines && !has_spec &&
-              inner.function_definition().function_body().plain()) ||
+               ctor_body || deleted_body)) ||
              (!defines &&
               tail[1 + has_spec].is(preprocessing_op_or_punc::SEMICOLON))) &&
             is_namespace(current_scope) && !defining_class &&
@@ -198,11 +201,21 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
             declarator_meaning m;
             qualified_type type;
             analysis_result mr = analysis_result::well_formed;
+            SyntaxRef conv_id = conversion_function_id_of(inner);
             if (has_spec)
                 mr = decl_specifier_seq(tail[0], ms, false);
             uint32_t cv = 0;
             if (mr == analysis_result::well_formed) {
-                type = ms.type;
+                if (conv_id) {
+                    if (ms.has_type)
+                        mr = analysis_result::ill_formed;
+                    else
+                        mr = qualified_conversion_type(inner, conv_id, type);
+                } else {
+                    type = ms.type;
+                }
+            }
+            if (mr == analysis_result::well_formed) {
                 function_cv = 0;
                 function_parameters.clear();
                 declarator_template_id = true;
@@ -231,7 +244,8 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                                   "declaration of a member of an explicitly "
                                   "specialized class",
                                   "temp.expl.spec");
-            if (mr == analysis_result::well_formed && m.has_id && m.qualifier &&
+            if (mr == analysis_result::well_formed &&
+                (m.has_id || m.conversion_function) && m.qualifier &&
                 !m.template_id && !m.operator_function && !m.literal_operator &&
                 !defaults &&
                 entity_table[m.qualifier].kind == entity_kind::class_type &&
@@ -239,12 +253,24 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                 type_table[type.unqualified()].kind == type_kind::function &&
                 !ms.typedef_ && !ms.static_ && !ms.extern_ && !ms.aligned &&
                 !m.aligned && !ms.section && !m.section && !m.asm_label) {
-                entity_index e =
-                    entity_table.find(m.qualifier, tokens.identifier(m.id));
-                if (e && entity_table[e].kind == entity_kind::function &&
-                    !entity_table[e].next_overload)
-                    define_waiting_members(m.qualifier, m.id, false);
-                entity_index match = overload_of_type(e, type, cv);
+                entity_index match = 0;
+                if (m.conversion_function) {
+                    qualified_type ret = type_table[type.unqualified()].operand;
+                    for (entity_index o = own_conversion_functions(m.qualifier);
+                         o && !match; o = entity_table[o].next_overload)
+                        if (entity_table[o].conversion_function &&
+                            entity_table[o].member_cv == cv &&
+                            type_table[entity_table[o].type.unqualified()]
+                                    .operand == ret)
+                            match = o;
+                } else {
+                    entity_index e =
+                        entity_table.find(m.qualifier, tokens.identifier(m.id));
+                    if (e && entity_table[e].kind == entity_kind::function &&
+                        !entity_table[e].next_overload)
+                        define_waiting_members(m.qualifier, m.id, false);
+                    match = overload_of_type(e, type, cv);
+                }
                 /* a constructor or destructor: the class's own, found by
                    its parameters ([temp.expl.spec]/1 has no return type
                    to compare) */
@@ -267,6 +293,12 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                     for (size_t k = 0; k < postponed_bodies.size(); k++)
                         if (postponed_bodies[k].function == match)
                             postponed_bodies[k].c = 0;
+                    if (deleted_body) {
+                        entity_table[match].deleted = true;
+                        entity_table[match].defined = true;
+                        entity_table[match].definition = 0;
+                        return analysis_result::well_formed;
+                    }
                     if (!defines) {
                         VTRY(cr, constexpr_redeclaration(m.id, match,
                                                          ms.constexpr_));

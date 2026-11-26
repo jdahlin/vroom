@@ -753,10 +753,29 @@ analysis_result semantic_analysis::using_declarator(UsingDeclarator n,
        region also apply to using-declarations." Two functions are overloads; a
        class or enumeration and a variable or function hide one another; a
        typedef-name may name the same type */
-    if (kind == entity_kind::function && prior_kind == entity_kind::function)
+    if (kind == entity_kind::function && prior_kind == entity_kind::function) {
+        if (is_namespace(scope)) {
+            if (entity_table[prior].enclosing != scope)
+                return using_join_chains(n, t, scope, name, prior, e);
+            entity_index last = prior;
+            while (entity_table[last].next_overload &&
+                   entity_table[entity_table[last].next_overload].enclosing ==
+                       scope)
+                last = entity_table[last].next_overload;
+            if (entity_table[last].next_overload == e) {
+                used(t, e);
+                return analysis_result::well_formed;
+            }
+            if (entity_table[last].next_overload)
+                return using_join_chains(n, t, scope, name, prior, e);
+            entity_table[last].next_overload = e;
+            used(t, e);
+            return analysis_result::well_formed;
+        }
         return not_supported_because(
             n, "over",
             "a using of a function beside a function of the same name");
+    }
     bool plain =
         (kind == entity_kind::variable || kind == entity_kind::function) &&
         (prior_kind == entity_kind::variable ||

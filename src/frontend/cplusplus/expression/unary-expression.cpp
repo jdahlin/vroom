@@ -1302,9 +1302,14 @@ analysis_result semantic_analysis::potentially_throwing(SyntaxRef n, uint32_t x,
                 work.append(semantics.items(s.first)[i]);
             break;
         }
+        case semantic_kind::member_pointer:
+            break;
+        case semantic_kind::member_pointer_access:
+            work.append(s.a);
+            work.append(s.b);
+            break;
         default:
-            /* a temporary's destruction, a delete-expression, a member
-               pointer: no rule here */
+            /* a temporary's destruction, a delete-expression: no rule here */
             return not_supported_because(
                 n, "expr.unary.noexcept",
                 "noexcept of an operand with a construct that has no rules");

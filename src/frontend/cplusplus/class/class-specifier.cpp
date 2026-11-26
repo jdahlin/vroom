@@ -1636,8 +1636,13 @@ analysis_result semantic_analysis::member_declaration_with_specifiers(
 
     /* [dcl.fct]/18: an abbreviated member function template */
     if (node.is(syntax_kind::function_definition) &&
-        is_namespace(entity_table[c].enclosing) && abbreviated_function(node))
-        return member_function_template(c, node, node, access);
+        abbreviated_function(node)) {
+        entity_index top = entity_table[c].enclosing;
+        while (top && entity_table[top].kind == entity_kind::class_type)
+            top = entity_table[top].enclosing;
+        if (is_namespace(top))
+            return member_function_template(c, node, node, access);
+    }
     if (SyntaxRef id = conversion_function_id_of(node))
         return conversion_function_member(c, node, id, access, bodies);
 
@@ -2181,11 +2186,17 @@ analysis_result semantic_analysis::member_declarator(
     /* a member's symbol attributes (a member function's weak and section,
        a static data member's, a data member's function attributes) are not
        analysed yet; on a non-static data member they are GCC's error */
+    uint32_t static_member_symbol_flags =
+        gnu_hidden_visibility | gnu_abi_tag |
+        gnu_exclude_from_explicit_instantiation;
     if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section | gnu_mode |
                         gnu_constructor | gnu_destructor | gnu_cleanup |
                         gnu_require_constant_initialization)) ||
-        (!is_function &&
-         (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))))
+        (!is_function && !s.static_ &&
+         (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))) ||
+        (!is_function && s.static_ &&
+         (m.gnu_flags & ((gnu_inline_flags | gnu_function_symbol_flags) &
+                         ~static_member_symbol_flags))))
         return not_supported_because(declaration, "ext.gnu",
                                      "a member with a GNU symbol or function "
                                      "attribute that is not handled");
@@ -2465,6 +2476,8 @@ analysis_result semantic_analysis::member_declarator(
         entity_table[e].inline_ = s.inline_;
         entity_table[e].defined = s.inline_;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
+        entity_table[e].gnu_flags |= m.gnu_flags & static_member_symbol_flags;
+        entity_table[e].abi_tag = m.abi_tag;
         /* its first declaration, which a name found refers to (the
            definition outside the class is a later one) */
         declared_name first;
@@ -2877,10 +2890,44 @@ semantic_analysis::member_function_definition(entity_index c,
     if (body.deleted())
         return deleted_definition(definition, last_declared);
     if (body.defaulted()) {
-        /* [class.compare.default]: the member operator== member_declarators
-           declared */
+        /* [class.compare.default]: the member operator== / operator<=>
+           member_declarators declared */
+        entity_index fn = last_declared;
         scoped_value<entity_index> compared(defaulted_comparison, c);
-        return analyse_function_body(definition, body);
+        VTRY(br, analyse_function_body(definition, body));
+        /* [class.spaceship]/3: a defaulted operator<=> implicitly declares a
+           defaulted operator== if the class does not declare one */
+        uint32_t eq_name = operator_name(preprocessing_op_or_punc::EQUAL_EQUAL);
+        if (entity_table[fn].implemented ==
+                preprocessing_op_or_punc::SPACESHIP &&
+            !entity_table.find(c, eq_name)) {
+            type_index fn_t = entity_table[fn].type.unqualified();
+            const struct type &ft = type_table[fn_t];
+            owned_array<qualified_type> params;
+            for (uint32_t i = 0; i < ft.parameter_count; i++)
+                params.append(type_table.parameters(fn_t)[i]);
+            type_index eq_type = type_table.function(
+                qualified_type::make(
+                    type_table.fundamental(fundamental_type::bool_), cv_none),
+                params.data(), static_cast<uint32_t>(params.size()), false);
+            entity_index eq =
+                entity_table.make(entity_kind::function, eq_name, c);
+            entity_table.bind(c, eq_name, eq);
+            entity_table[eq].type = qualified_type::make(eq_type, cv_none);
+            entity_table[eq].nonstatic_member = true;
+            entity_table[eq].member_cv = entity_table[fn].member_cv;
+            entity_table[eq].inline_ = true;
+            entity_table[eq].constexpr_ = entity_table[fn].constexpr_;
+            entity_table[eq].defined = true;
+            entity_table[eq].implicit = true;
+            entity_table[eq].operator_function = true;
+            entity_table[eq].implemented =
+                preprocessing_op_or_punc::EQUAL_EQUAL;
+            entity_table[eq].exceptions = entity_table[fn].exceptions;
+            last_declared = eq;
+            VTRY(eq_r, analyse_function_body(definition, body));
+        }
+        return analysis_result::well_formed;
     }
     if (!body.plain())
         return not_supported_because(definition, "dcl.fct.def.general",

@@ -793,6 +793,10 @@ analysis_result semantic_analysis::alias_type(SyntaxRef n, qualified_type &type)
                 n, "dcl.typedef", "a type defined or elaborated in this alias");
     }
     specified s;
+    /* [dcl.spec.auto]/3 and [dcl.fct]/2: auto before a declarator with a
+       trailing-return-type in an alias-declaration (using f = auto (*)() -> R) */
+    if (id.size() == 2 && id[1].is(syntax_kind::abstract_declarator))
+        placeholder_allowed = true;
     VTRY(r, decl_specifier_seq(id[0], s, false));
     if (!s.has_type || s.declares_enumeration || s.typedef_ || s.static_ ||
         s.extern_ || s.inline_ || s.constexpr_ || s.gnu_flags || s.aligned)

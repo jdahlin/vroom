@@ -122,15 +122,17 @@ bool semantic_analysis::default_constructor_deleted(entity_index c) const
     if (x.implicit_default_deleted)
         return true;
     if (x.union_) {
-        /* [class.default.ctor]/2: only a defaulted default constructor is
-           defined as deleted; a user-provided one (Storage() {}) is not */
-        if (!x.defaulted_default_constructor)
+        /* [class.default.ctor]/1,/2: only an implicitly-declared or defaulted
+           default constructor is defined as deleted; any user-declared
+           constructor suppresses the implicit one (e.g. U(int = 0) {}) */
+        if (!x.defaulted_default_constructor) {
+            if (x.constructor_templates)
+                return false;
             for (entity_index k = x.first_constructor; k;
                  k = entity_table[k].next_constructor)
-                if (!entity_table[k].implicit &&
-                    !type_table[entity_table[k].type.unqualified()]
-                         .parameter_count)
+                if (!entity_table[k].implicit)
                     return false;
+        }
         /* [class.default.ctor]/2.2: a union with no default member
            initializers and a variant member with a non-trivial default
            constructor has a deleted defaulted default constructor */

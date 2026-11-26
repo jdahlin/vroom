@@ -646,18 +646,28 @@ bool semantic_analysis::deduce_member_body_now(entity_index e)
         if (b.function) {
             if (b.function != e)
                 continue;
-        } else if (!declared_by(e, b.body.function_definition())) {
+        } else if (!declared_by(e, b.body)) {
             continue;
         }
         const postponed_body taken = b;
         b.c = 0;
         if (taken.function)
             entity_table[taken.function].member_body_deferred = false;
+        function_context outer_function =
+            static_cast<function_context &&>(function_state);
+        function_state = function_context();
+        owned_array<entity_index> outer_variables =
+            static_cast<owned_array<entity_index> &&>(block_variables);
+        block_variables = owned_array<entity_index>();
         instantiation_context context;
         enter_instantiation(context, taken.scope, taken.declaration);
         instantiated_member_body(taken.c, taken.body);
         leave_instantiation(context);
-        return !contains_placeholder(entity_table[e].type);
+        function_state = static_cast<function_context &&>(outer_function);
+        block_variables =
+            static_cast<owned_array<entity_index> &&>(outer_variables);
+        return !contains_placeholder(
+            type_table[entity_table[e].type.unqualified()].operand);
     }
     return false;
 }

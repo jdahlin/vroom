@@ -297,6 +297,7 @@ lower SemaTemplate/instantiate-deeply.cpp -std=gnu++17 -Wall: vpp -S defines [] 
 lower src/test/cxx/sema/gram/class.base.init-anonymous-struct-members.cpp -std=c++20: vpp -S defines ['_GLOBAL__sub_I_class.base.init_anonymous_struct_members.cpp', '_ZL1s', '_ZN1SC2Ei'] clang -O0 does not, not []
 symbols SemaCXX/PR38913.cpp -std=gnu++17: _Z1av is not a symbol clang -O0 defines
 symbols SemaCXX/PR38913.cpp -std=gnu++17: _Z1bv is not a symbol clang -O0 defines
+symbols SemaCXX/attr-exclude_from_explicit_instantiation.explicit_instantiation.cpp -std=gnu++17: _ZN3FooIiE18static_data_memberE is not a symbol clang -O0 defines
 tree CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p2-1z.cpp -std=c++1z: p2-1z.cpp:44:14: if_statement: no substatement
 tree CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p2-1z.cpp -std=c++1z: p2-1z.cpp:7:3: if_statement: no substatement
 tree CXX/drs/cwg16xx.cpp -std=c++11 -pedantic-errors: cwg16xx.cpp:543:12: assignment: the right operand is a bind_reference
@@ -549,6 +550,9 @@ verdict CXX/class.access/class.protected/p1-cxx11.cpp -std=gnu++17: ill-formed f
 verdict CXX/class.access/class.protected/p1.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 394 (2 declarations)
 verdict CXX/class/class.compare/class.compare.default/p1.cpp -std=c++2a: ill-formed for us, accepted by clang: line 258 (1 declarations)
 verdict CXX/class/class.compare/class.spaceship/p2.cpp -std=c++2a: ill-formed for us, accepted by clang: line 83 (10 declarations)
+verdict CXX/class/class.init/class.copy.elision/p3.cpp -std=c++11: ill-formed for us, accepted by clang: line 432 (1 declarations)
+verdict CXX/class/class.init/class.copy.elision/p3.cpp -std=c++20: ill-formed for us, accepted by clang: line 432 (1 declarations)
+verdict CXX/class/class.init/class.copy.elision/p3.cpp -std=c++23: ill-formed for us, accepted by clang: line 432 (1 declarations)
 verdict CXX/dcl.dcl/dcl.spec/dcl.constexpr/p4.cpp -std=c++20 -DCXX14 -DCXX2A: ill-formed for us, accepted by clang: line 146 (1 declarations)
 verdict CXX/dcl.dcl/dcl.spec/dcl.type/dcl.spec.auto/p2-1z.cpp -std=c++1z: ill-formed for us, accepted by clang: line 10 (3 declarations)
 verdict CXX/dcl.dcl/dcl.spec/dcl.type/dcl.type.class.deduct/p1.cpp -std=c++1z: ill-formed for us, accepted by clang: line 8 (2 declarations)
@@ -612,9 +616,9 @@ verdict CXX/over/over.over/p1.cpp -std=c++1z -DNOEXCEPT=noexcept: ill-formed for
 verdict CXX/special/class.copy/implicit-move.cpp -std=c++11 -Wno-inaccessible-base: ill-formed for us, accepted by clang: line 211 (2 declarations)
 verdict CXX/special/class.copy/p12-0x.cpp -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 96 (7 declarations)
 verdict CXX/special/class.copy/p12-0x.cpp -std=c++11 -Wno-deprecated-builtins -Wno-defaulted-function-deleted: ill-formed for us, accepted by clang: line 96 (7 declarations)
-verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 105 (23 declarations)
-verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (23 declarations)
-verdict CXX/special/class.copy/p25-0x.cpp -std=c++2b -DDEDUCING_THIS -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (10 declarations)
+verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins -DCLANG_ABI_COMPAT=14: ill-formed for us, accepted by clang: line 105 (19 declarations)
+verdict CXX/special/class.copy/p25-0x.cpp -std=c++11 -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (19 declarations)
+verdict CXX/special/class.copy/p25-0x.cpp -std=c++2b -DDEDUCING_THIS -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 105 (6 declarations)
 verdict CXX/temp/temp.decls/temp.variadic/metafunctions.cpp -std=c++11: ill-formed for us, accepted by clang: line 271 (1 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/cwg1170.cpp -std=c++11: ill-formed for us, accepted by clang: line 39 (2 declarations)
 verdict CXX/temp/temp.fct.spec/temp.deduct/p7.cpp -std=c++11: ill-formed for us, accepted by clang: line 12 (1 declarations)
@@ -650,6 +654,7 @@ verdict SemaCXX/ctad.cpp -Wno-unused-value -std=c++20: ill-formed for us, accept
 verdict SemaCXX/cxx0x-defaulted-functions.cpp -std=c++11 -Wno-deprecated-builtins: ill-formed for us, accepted by clang: line 252 (1 declarations)
 verdict SemaCXX/cxx0x-initializer-aggregates.cpp -std=c++0x: ill-formed for us, accepted by clang: line 123 (1 declarations)
 verdict SemaCXX/cxx0x-initializer-scalars.cpp -std=c++11 -pedantic-errors: ill-formed for us, accepted by clang: line 144 (3 declarations)
+verdict SemaCXX/cxx11-inheriting-ctors.cpp -std=c++11: ill-formed for us, accepted by clang: line 153 (1 declarations)
 verdict SemaCXX/cxx14-compat.cpp -std=c++17 -Wc++14-compat-pedantic: ill-formed for us, accepted by clang: line 19 (1 declarations)
 verdict SemaCXX/cxx1y-generic-lambdas-capturing.cpp -std=c++1y: ill-formed for us, accepted by clang: line 1479 (1 declarations)
 verdict SemaCXX/cxx1y-generic-lambdas-capturing.cpp -std=c++2a -Wno-deprecated-this-capture: ill-formed for us, accepted by clang: line 1479 (1 declarations)
@@ -675,7 +680,6 @@ verdict SemaCXX/embed-init-list.cpp -std=gnu++17 -Wno-c++26-extensions: ill-form
 verdict SemaCXX/ext-int-vector.cpp -std=gnu++17: ill-formed for us, accepted by clang: line 30 (6 declarations)
 verdict SemaCXX/ext-int.cpp -std=gnu++17 -Wimplicit-int-conversion -Wno-unused -Wunevaluated-expression: ill-formed for us, accepted by clang: line 133 (1 declarations)
 verdict SemaCXX/imaginary-constants.cpp -std=c++14 -DCXX14=1: ill-formed for us, accepted by clang: line 13 (3 declarations)
-verdict SemaCXX/implicit-special-member-deprecated.cpp -std=c++20 -Wdeprecated-declarations -I./Inputs: ill-formed for us, accepted by clang: line 42 (1 declarations)
 verdict SemaCXX/libstdcxx_common_type_hack.cpp -std=c++11 -D__GLIBCXX__=20100000L: ill-formed for us, accepted by clang: line 28 (1 declarations)
 verdict SemaCXX/linkage2.cpp -Wno-non-c-typedef-for-linkage -Wno-c++11-extensions -Wno-local-type-template-args -std=gnu++98: ill-formed for us, accepted by clang: line 119 (1 declarations)
 verdict SemaCXX/linkage2.cpp -Wno-non-c-typedef-for-linkage -std=gnu++11: ill-formed for us, accepted by clang: line 119 (1 declarations)

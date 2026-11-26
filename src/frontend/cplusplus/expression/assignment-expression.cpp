@@ -443,7 +443,7 @@ analysis_result semantic_analysis::class_assignment(SyntaxRef n,
     /* [class.copy.assign]/12: the implicitly-defined copy assignment
        operator "performs memberwise copy assignment of its subobjects":
        one that calls an operator function is not analysed */
-    if (!assigned_bitwise(c) &&
+    if (!unevaluated && !assigned_bitwise(c) &&
         !(right.category != value_category::lvalue && moved_bitwise(c)))
         return not_supported_because(
             n, "class.copy.assign",

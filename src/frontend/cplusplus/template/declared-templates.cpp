@@ -1307,7 +1307,10 @@ analysis_result semantic_analysis::template_id_arguments(
     owned_array<template_argument> elements;
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
-    for (uint32_t i = 2; i + 1 < id.size(); i++) {
+    uint32_t arg_start = 2;
+    if (id.size() > 2 && id[0].is(syntax_kind::nested_name_specifier))
+        arg_start = 3;
+    for (uint32_t i = arg_start; i + 1 < id.size(); i++) {
         if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return not_supported_because(
@@ -1531,6 +1534,15 @@ bool semantic_analysis::equivalent_template(const function_template &f,
        does not claim it for a non-type parameter (a refusal holds the name) */
     bool both_defined = f.definition && n.size() &&
                         n[n.size() - 1].is(syntax_kind::function_definition);
+    /* [temp.over.link]: two function template definitions with dependent
+       return types (e.g. enable_if<cond1, R>::type vs enable_if<cond2, R>::type)
+       are distinct SFINAE overloads, not redefinitions */
+    if (both_defined) {
+        const struct type &ft = type_table[type.unqualified()];
+        if (ft.kind == type_kind::function &&
+            type_table[ft.operand.unqualified()].kind == type_kind::dependent)
+            return false;
+    }
     owned_array<template_argument> values;
     owned_array<bool> set;
     for (uint32_t i = 0; i < count; i++) {

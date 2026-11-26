@@ -350,7 +350,7 @@ bool semantic_analysis::aggregate_built_in_place(uint32_t value) const
     const struct type &t = type_table[n.type.unqualified()];
     if (t.kind == type_kind::class_type) {
         const entity &c = entity_table[t.entity];
-        if (c.union_ || c.base_count || n.count != c.member_count)
+        if (c.union_ || n.count != c.member_count)
             return false;
     } else if (t.kind != type_kind::array || n.count != t.bound) {
         return false;
@@ -993,22 +993,6 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
            program */
         if (f.special == special_member::destructor)
             return deleted_definition(n, last_declared);
-        /* An X(X&) constructor changes implicit-move fallback on returns,
-           which return-statement analysis does not yet model. */
-        const struct type &ft = type_table[f.type.unqualified()];
-        if (ft.parameter_count) {
-            const struct type &first =
-                type_table[type_table.parameters(f.type.unqualified())[0]
-                               .unqualified()];
-            if (first.kind == type_kind::lvalue_reference &&
-                first.operand.unqualified() ==
-                    entity_table[c].type.unqualified() &&
-                first.operand.cv() != cv_const)
-                return not_supported_because(
-                    n, "class.copy.elision",
-                    "a deleted constructor from a non-const lvalue reference "
-                    "to its class");
-        }
         return deleted_definition(n, last_declared);
     }
     if (!form.defaulted())
@@ -1331,7 +1315,7 @@ bool semantic_analysis::copy_argument_candidate(
         return false;
     const struct type &t = type_table[arguments[0].type.unqualified()];
     if (t.kind == type_kind::fundamental || t.kind == type_kind::pointer ||
-        t.kind == type_kind::enumeration)
+        t.kind == type_kind::enumeration || t.kind == type_kind::array)
         return false;
     /* anything else not analysed is taken as a candidate */
     if (t.kind != type_kind::class_type)
@@ -3104,12 +3088,11 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             if (copy_or_move_constructor(base_class, k) ||
                 (!base_type.parameter_count && !user_declared))
                 continue;
-            if (base_type.variadic || entity_table[k].first_default ||
-                entity_table[k].unknown_defaults)
+            if (base_type.variadic || entity_table[k].unknown_defaults)
                 return not_supported_because(
                     n, "namespace.udecl",
-                    "an inherited constructor that is variadic or has default "
-                    "arguments");
+                    "an inherited constructor that is variadic or has unknown "
+                    "default arguments");
             owned_array<qualified_type> parameters;
             for (uint32_t i = 0; i < base_type.parameter_count; i++) {
                 parameters.append(type_table.parameters(
@@ -3168,6 +3151,8 @@ analysis_result semantic_analysis::inherit_constructors(entity_index c,
             f.explicit_ = entity_table[k].explicit_;
             f.deleted = entity_table[k].deleted;
             f.access = entity_table[k].access;
+            f.first_default = entity_table[k].first_default;
+            f.default_arguments = entity_table[k].default_arguments;
             entity_index last = entity_table[c].first_constructor;
             if (!last) {
                 entity_table[c].first_constructor = e;
@@ -3986,7 +3971,7 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
         if (written.list) {
             owned_array<SyntaxElement> *keep = nullptr;
             require_complete(c);
-            if (entity_table[c].first_constructor)
+            if (entity_table[c].first_constructor || is_aggregate(c))
                 keep = &as_written;
             VTRY_SET(r,
                      expression_list_meanings(written.list, arguments, keep));
@@ -4100,12 +4085,21 @@ analysis_result semantic_analysis::class_direct_initialization(
              (type_table[arguments[0].type.unqualified()].kind !=
                   type_kind::class_type ||
               !base_step(type_table[arguments[0].type.unqualified()].entity, c,
-                         ambiguous))))
-            return not_supported_because(
-                n, "expr.type.conv",
-                "a parenthesized initialization of a class without "
-                "constructors from other than its own or a derived type");
-        r = initialize_with(n, arguments[0], type, true, false, value);
+                         ambiguous)))) {
+            if (is_aggregate(c) && written_arguments &&
+                tokens.files.behavior.has(
+                    language_feature::three_way_comparison_operator)) {
+                r = class_list_initialization(n, *written_arguments, type, true,
+                                              value);
+            } else {
+                return not_supported_because(
+                    n, "expr.type.conv",
+                    "a parenthesized initialization of a class without "
+                    "constructors from other than its own or a derived type");
+            }
+        } else {
+            r = initialize_with(n, arguments[0], type, true, false, value);
+        }
     } else if (is_aggregate(c) && arguments.empty()) {
         /* T() of an aggregate with default member initializers:
            [dcl.init]/9 value-initialization zero-initializes the object
@@ -4131,12 +4125,18 @@ analysis_result semantic_analysis::class_direct_initialization(
     } else if (is_aggregate(c) &&
                (arguments.size() != 1 ||
                 arguments[0].type.unqualified() != type.unqualified())) {
-        /* an aggregate's implicit constructors (a default member
-           initializer makes its default constructor non-trivial) do
-           not take these arguments: C++20's parenthesized aggregate
-           initialization ([dcl.init]/17) is not analysed */
-        return not_supported_because(
-            n, "expr.type.conv", "a parenthesized aggregate initialization");
+        /* [dcl.init]/17.6.2.2 (C++20 P0960R3): parenthesized aggregate
+           initialization */
+        if (written_arguments &&
+            tokens.files.behavior.has(
+                language_feature::three_way_comparison_operator)) {
+            r = class_list_initialization(n, *written_arguments, type, true,
+                                          value);
+        } else {
+            return not_supported_because(
+                n, "expr.type.conv",
+                "a parenthesized aggregate initialization");
+        }
     } else {
         r = construct(n, type, arguments, 0, value, false, written_arguments);
     }

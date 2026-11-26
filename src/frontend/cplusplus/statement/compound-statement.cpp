@@ -92,7 +92,8 @@ analysis_result semantic_analysis::block_items(SyntaxRef n, uint32_t &built)
            analysed (clang: "fallthrough annotation does not directly
            precede switch label") */
         if (fallthrough_statement(s) &&
-            (i + 1 == items.size() || !case_or_default_label(items[i + 1]))) {
+            ((i + 1 < items.size() && !case_or_default_label(items[i + 1])) ||
+             (i + 1 == items.size() && function_state.switches.empty()))) {
             result = worse(
                 result, not_supported_because(
                             s, "dcl.attr.fallthrough",

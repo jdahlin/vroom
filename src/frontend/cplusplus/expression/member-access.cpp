@@ -268,8 +268,12 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         address.evaluation = constness::not_constant;
         address.node =
             expression_node(semantic_kind::address, address, at, m.node);
+        for (entity_index fn = e; fn; fn = entity_table[fn].next_overload)
+            if (contains_placeholder(
+                    type_table[entity_table[fn].type.unqualified()].operand))
+                deduce_member_body_now(fn);
         expression_meaning result;
-        result.type = x.type;
+        result.type = entity_table[e].type;
         result.category = value_category::prvalue;
         result.evaluation = constness::not_constant;
         result.node = expression_node(semantic_kind::bound_member_function,
@@ -366,11 +370,32 @@ analysis_result semantic_analysis::implicit_member_access(token_index at,
         m = object;
         return analysis_result::well_formed;
     }
-    if (!function_state.this_entity || !of_current)
+    if (!function_state.this_entity || !of_current) {
+        /* [class.static.mfct]/1: an overload set containing both non-static
+           and static member functions can still be called without `this`
+           (overload resolution selects the static overloads) */
+        if (entity_table[e].kind == entity_kind::function) {
+            entity_index static_fn = 0;
+            for (entity_index o = e; o; o = entity_table[o].next_overload)
+                if (!entity_table[o].nonstatic_member) {
+                    static_fn = o;
+                    break;
+                }
+            if (static_fn) {
+                m.type = entity_table[static_fn].type;
+                m.category = value_category::lvalue;
+                m.evaluation = constness::constant;
+                m.entity = static_fn;
+                m.node =
+                    expression_node(semantic_kind::entity, m, at, static_fn);
+                return analysis_result::well_formed;
+            }
+        }
         /* in a static member function, or a member function unevaluated */
         return not_supported_because(
             current_declaration, "expr.prim.id",
             "a non-static member used without a usable this pointer");
+    }
     VTRY(r, this_object(at, object));
     VTRY_SET(r, member_access(at, e, object));
     m = object;

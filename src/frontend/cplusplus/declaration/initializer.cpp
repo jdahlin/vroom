@@ -2552,9 +2552,10 @@ analysis_result semantic_analysis::omitted_element_value(
             entity_table[member.entity].kind == entity_kind::class_type &&
             (entity_table[member.entity].first_constructor ||
              destroys(member.entity)) &&
-            !aggregate_value_stored(member.entity, one.node))
-            /* a class with constructors initialized in place by a
-               constructor call: not analysed */
+            !aggregate_value_stored(member.entity, one.node) &&
+            (!one.node || semantics[one.node].kind != semantic_kind::construct))
+            /* a class with constructors initialized in place by something
+               other than a constructor call: not analysed */
             return not_supported_because(
                 list, "dcl.init.aggr",
                 "a class member default that needs construction in place");
@@ -2566,10 +2567,10 @@ analysis_result semantic_analysis::omitted_element_value(
        ([dcl.init.list]/3.11 for a scalar, a default constructor for a
        class with constructors, all zero otherwise) */
     const struct type of_element = type_table[element.unqualified()];
-    if (of_element.kind == type_kind::array && empty_list_runs_code(element))
-        return not_supported_because(
-            list, "dcl.init.aggr",
-            "an omitted array whose elements need construction");
+    if (of_element.kind == type_kind::array && empty_list_runs_code(element)) {
+        owned_array<SyntaxElement> no_clauses;
+        return element_list_initialization(list, no_clauses, element, one);
+    }
     if (of_element.kind == type_kind::class_type &&
         empty_list_runs_code(element) && is_aggregate(of_element.entity)) {
         owned_array<SyntaxElement> no_clauses;

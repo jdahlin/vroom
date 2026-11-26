@@ -555,7 +555,12 @@ semantic_analysis::friend_function(entity_index c, SyntaxRef n,
     friend_allowed = outer;
     if (r != analysis_result::well_formed)
         return r;
-    if (!s.friend_ || s.typedef_ || s.declares_class || s.declares_enumeration)
+    bool defines_class = false;
+    if (s.declares_class)
+        for (SyntaxElement x : tail[0].elements())
+            if (x.is(syntax_kind::class_specifier))
+                defines_class = true;
+    if (!s.friend_ || s.typedef_ || defines_class || s.declares_enumeration)
         return not_supported_because(
             n, "class.friend",
             "a friend function without friend, or with typedef or a class or "

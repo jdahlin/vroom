@@ -143,13 +143,18 @@ bool semantic_analysis::member_class_function_unjudged(
         if (qualified && !typename_seen)
             return true;
     }
+    bool in_params = false;
     for (token_index t = parts[static_cast<uint32_t>(last - 1)].first_token();
          t < parts[static_cast<uint32_t>(last)].first_token(); t++) {
         const token &x = tokens[t];
-        if (x.kind == token_kind::operator_or_punctuator &&
-            preprocessing_op_or_punc_primary(x.op_or_punc) ==
-                preprocessing_op_or_punc::EQUAL)
-            return true;
+        if (x.kind == token_kind::operator_or_punctuator) {
+            preprocessing_op_or_punc op =
+                preprocessing_op_or_punc_primary(x.op_or_punc);
+            if (op == preprocessing_op_or_punc::LEFT_PARENTHESIS)
+                in_params = true;
+            else if (in_params && op == preprocessing_op_or_punc::EQUAL)
+                return true;
+        }
     }
     return false;
 }
@@ -444,7 +449,12 @@ analysis_result semantic_analysis::member_definition_of_template(
                 n, "temp.mem",
                 "a constrained or undeclared out-of-class member template");
     }
+    bool nested_member_template =
+        !variable && inner && !out_of_class_member(definition) &&
+        out_of_class_nested(definition).size() == 4 &&
+        out_of_class_nested(definition)[2].is_identifier();
     if (!variable && inner && !out_of_class_member(definition) &&
+        !nested_member_template &&
         of.definition.is(syntax_kind::class_specifier)) {
         /* [temp.mem]/1, [basic.lookup.qual]/3: the member class template
            the second template-head and Y<U> name, declared in the class
@@ -533,8 +543,9 @@ analysis_result semantic_analysis::member_definition_of_template(
     record.inner = inner;
     record.template_entity = function_templates[ct - 1].entity;
     record.pattern = pattern;
-    record.member_class =
-        !variable && inner && !out_of_class_member(definition);
+    record.member_class = !variable && inner &&
+                          !out_of_class_member(definition) &&
+                          !nested_member_template;
     return record_template_member(record);
 }
 

@@ -285,6 +285,10 @@ analysis_result semantic_analysis::range_call(SyntaxRef n, token_index at,
             return not_supported_because(
                 n, "stmt.ranged",
                 "a begin or end member that is no plain function");
+        for (entity_index fn = e; fn; fn = entity_table[fn].next_overload)
+            if (contains_placeholder(
+                    type_table[entity_table[fn].type.unqualified()].operand))
+                deduce_member_body_now(fn);
         overloaded_callee = at;
         r = member_access(at, e, f);
         overloaded_callee = 0;

@@ -104,15 +104,38 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
 {
     satisfied = false;
     uint32_t parts = q.size();
-    if (q.is_token() || (parts != 1 && parts < 3) || !q[0].is_token())
+    uint32_t name_at = 0;
+    if (!q.is_token() && parts >= 2 &&
+        q[0].is(syntax_kind::nested_name_specifier))
+        name_at = 1;
+    uint32_t rest = parts - name_at;
+    if (q.is_token() || (rest != 1 && rest < 3) || !q[name_at].is_token())
         return not_supported_because(q, "temp.param",
                                      "a type-constraint of an unhandled form");
-    entity_index named = constraint_concept(current_scope, q[0].token());
+    entity_index named = 0;
+    if (name_at) {
+        nominated_scope ns;
+        VTRY(nr, nested_name_specifier(q[0].index(), ns));
+        if (!ns.entity)
+            return not_supported_because(
+                q, "temp.param", "a type-constraint with an unknown qualifier");
+        lookup_result found =
+            lookup_qualified(ns.entity, tokens.identifier(q[name_at].token()),
+                             lookup_filter::any);
+        if (!found.ambiguous) {
+            if (found.entity)
+                named = found.entity;
+            else if (found.unknown && found.unknown_entity)
+                named = found.unknown_entity;
+        }
+    } else {
+        named = constraint_concept(current_scope, q[0].token());
+    }
     uint32_t ct = 0;
     if (named)
         ct = concept_of(named);
     if (!ct ||
-        (parts == 1 && function_templates[ct - 1].parameter_count != 1 &&
+        (rest == 1 && function_templates[ct - 1].parameter_count != 1 &&
          !(function_templates[ct - 1].parameter_count == 2 &&
            template_parameter_is_pack(
                function_templates[ct - 1].first_parameter + 1))) ||
@@ -125,9 +148,9 @@ analysis_result semantic_analysis::type_constraint_satisfied(SyntaxElement q,
     first.kind = template_argument::kind_t::type;
     first.type = u;
     arguments.append(first);
-    if (parts == 1 && function_templates[ct - 1].parameter_count == 2) {
+    if (rest == 1 && function_templates[ct - 1].parameter_count == 2) {
         arguments.append(make_pack(nullptr, 0));
-    } else if (parts != 1) {
+    } else if (rest != 1) {
         substitution_mark mark = mark_substitution();
         analysis_result r = template_id_arguments(q, ct, arguments);
         if (r == analysis_result::ill_formed && undo_substitution(mark))
