@@ -41,7 +41,8 @@ builds them (vcc's side by `vpp -S` and clang's assembler), linked by lld
 against the MinGW sysroot and run under Wine; `/* vcc-xfail-win64: ... */`
 marks a known bug there, `/* vcc-skip-win64: reason */` a test that does not
 apply (an LP64 or System V assumption).  --vir: vcc's side through VIR
-(-O2's code generator; without it -fno-vir, the direct emitter, for x86_64 and win64).  The tests under src/test/abi/msabi* also run natively on an
+(-O2's code generator; without it -fno-vir, the direct emitter, for x86_64 and win64).  The tests under src/test/abi/avx* run only with
+--target x86_64 (a host with AVX2).  The tests under src/test/abi/msabi* also run natively on an
 x86-64 Linux host (--target x86_64): ms_abi functions against clang.
 """
 import importlib.util, os, re, shutil, sys, tempfile
@@ -98,6 +99,8 @@ def one(name, wd, verbose):
             return 'skip', ' '.join(sk.group(1).split()), None
     elif name.startswith('msabi') and not X86:
         return 'skip', 'ms_abi/sysv_abi: x86-64 only', None
+    elif name.startswith('avx') and not X86:
+        return 'skip', 'AVX: the System V x86-64 target only', None
     xf = re.search(r'/\*\s*vcc-xfail:(.*?)\*/', src, re.S) or (HOST and re.search(r'/\*\s*vcc-xfail-host:(.*?)\*/', src, re.S)) \
         or (WASM and re.search(r'/\*\s*vcc-xfail-wasm:(.*?)\*/', src, re.S)) \
         or (X86 and re.search(r'/\*\s*vcc-xfail-x86:(.*?)\*/', src, re.S)) \
