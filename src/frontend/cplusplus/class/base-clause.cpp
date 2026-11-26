@@ -72,12 +72,13 @@ node_index parser::base_specifier(scope_index derived)
                             "template's name in a base-specifier",
                             "class.derived", position);
     }
+    uint64_t before = names.dependent_found;
     scope_index base = 0;
     class_or_decltype(&base);
     if (failed())
         return 0;
     if (base)
-        names.add_base(derived, base);
+        names.add_base(derived, base, names.dependent_found == before);
     if (pending.size() == mark + 1)
         return 0;
     return finish_node(syntax_kind::base_specifier, mark, first);

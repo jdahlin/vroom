@@ -424,7 +424,7 @@ class declared_names
     }
     /* [class.derived]/2, [class.member.lookup]: the members of a base class
        are found by lookup in the derived class's region, after its own */
-    void add_base(scope_index derived, scope_index base);
+    void add_base(scope_index derived, scope_index base, bool concrete = false);
     /* [class.mem]/6: "A complete-class context of a class is a function
        body, default argument, noexcept-specifier, or default member
        initializer within the member-specification of the class", where
@@ -518,9 +518,13 @@ class declared_names
         scope_kind kind;
         scope_index enclosing;
         owned_array<declaration> declarations;
+        struct searched {
+            scope_index region;
+            bool concrete = false;
+        };
         /* inline and unnamed namespaces of this one, and the namespaces
            using-directives nominated in it: searched with it */
-        owned_array<scope_index> searched_with;
+        owned_array<searched> searched_with;
         /* a class's region with all its members ([class.mem]/6), 0 when
            there is none yet */
         scope_index complete = 0;
@@ -532,8 +536,8 @@ class declared_names
     owned_array<uint32_t> journal;
     /* by name: bit 0 = member template, bit 1 = member variable template */
     owned_array<uint8_t> member_template_names;
-    const declaration *find(scope_index in, uint32_t name,
-                            unsigned depth = 0) const;
+    const declaration *find(scope_index in, uint32_t name, unsigned depth = 0,
+                            bool *concrete = nullptr) const;
     /* find skips the names of no type (lookup_elaborated) */
     bool ignoring_non_types = false;
     /* lookup_unqualified_nested: also keeps namespace-names */
