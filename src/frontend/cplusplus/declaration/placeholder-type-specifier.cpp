@@ -641,9 +641,14 @@ bool semantic_analysis::deduce_member_body_now(entity_index e)
     }
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         postponed_body &b = postponed_bodies[i];
-        if (!b.c ||
-            (b.function != e && !declared_by(e, b.body.function_definition())))
+        if (!b.c)
             continue;
+        if (b.function) {
+            if (b.function != e)
+                continue;
+        } else if (!declared_by(e, b.body.function_definition())) {
+            continue;
+        }
         const postponed_body taken = b;
         b.c = 0;
         if (taken.function)
