@@ -1866,6 +1866,10 @@ walk_vector_lanes_emit(codegen_context *e, int op, ast_qualified_type at,
     ra = walk_value_to_register(e, &a);
     if (!unary)
         rb = walk_value_to_register(e, &b);
+    if (WALK_LOWER(vector_operation)(e, op, vt, codegen_type_is_vector(c, at),
+                                     codegen_type_is_vector(c, bt), ra, rb, &d,
+                                     unary))
+        nl = 0;
     for (unsigned i = 0; i < nl; i++) {
         codegen_value x = walk_vector_lane(e, at, ra, i), r;
 
