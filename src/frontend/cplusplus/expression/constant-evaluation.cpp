@@ -4257,6 +4257,40 @@ constness semantic_analysis::evaluate_invocation(
     return leave_scope(state, saved, saved_elements, returned, result, c);
 }
 
+/* [class.default.ctor]/4, for a class c without members: whether
+   default-initializing its base class subobjects does nothing a constant
+   initialization would have to show.  A user-declared default constructor
+   does only if it is a constexpr one of an empty class */
+bool semantic_analysis::bases_construct_nothing(entity_index c) const
+{
+    owned_array<entity_index> classes;
+    subobject_classes(c, classes);
+    for (entity_index k : classes) {
+        const entity &x = entity_table[k];
+        if (x.constructor_template || x.constructor_templates)
+            return false;
+        for (uint32_t i = 0; i < x.member_count; i++)
+            if (entity_table[class_members[x.first_member + i]]
+                    .default_initializer)
+                return false;
+        bool provided = false;
+        for (entity_index f = x.first_constructor; f;
+             f = entity_table[f].next_constructor) {
+            const entity &constructor = entity_table[f];
+            const struct type &t = type_table[constructor.type.unqualified()];
+            if (constructor.implicit ||
+                t.parameter_count != constructor.default_arguments)
+                continue;
+            if (!constructor.constexpr_ || !empty_class(k))
+                return false;
+            provided = true;
+        }
+        if (!provided && !bases_construct_nothing(k))
+            return false;
+    }
+    return true;
+}
+
 /*
  * [class.ctor]/2 for the construct node on the object at place: the
  * implicit default constructor of a class with no member initializers
@@ -4271,12 +4305,13 @@ constness semantic_analysis::evaluate_construct(constant_evaluation &state,
     const entity &k = entity_table[x.b];
     entity_index c_entity = evaluated_class(entity_table[k.enclosing].type);
     if (k.implicit) {
-        /* [class.default.ctor]/1: the implicit default constructor of a
-           class with no members and no bases does nothing; one with a
+        /* [class.default.ctor]/4: the implicit default constructor of a
+           class with no members does nothing where its bases' do; one with a
            synthesized definition (default member initializers) is evaluated
            below ([class.default.ctor]/4) */
         if (!x.count) {
-            if (c_entity && !entity_table[c_entity].member_count)
+            if (c_entity && !entity_table[c_entity].member_count &&
+                bases_construct_nothing(c_entity))
                 return constness::constant;
             if (!k.definition || !c_entity)
                 return CONST_UNKNOWN;

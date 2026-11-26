@@ -2048,6 +2048,7 @@ class semantic_analysis
     constness literal_class(entity_index c) const;
     /* [special]: which special member functions are trivial
        (class/triviality.cpp) */
+    bool bases_construct_nothing(entity_index c) const;
     bool trivial_defaulted_default_constructor(entity_index c) const;
     bool trivial_default_constructor(entity_index c, bool &known) const;
     bool trivial_copy_constructor(entity_index c) const;
