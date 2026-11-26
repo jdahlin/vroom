@@ -948,10 +948,6 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
         virt_override = virt_final = virt_pure = false;
         return virtual_member(c, e, n, m.id, true);
     }
-    if (access && f.parameter_count)
-        return not_supported_because(
-            n, "dcl.fct.def.default",
-            "a defaulted constructor with parameters that is not public");
     if (!f.parameter_count) {
         if (x.defaulted_default_constructor)
             return not_supported_because(
