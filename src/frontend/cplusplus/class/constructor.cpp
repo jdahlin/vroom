@@ -3986,7 +3986,7 @@ analysis_result semantic_analysis::class_conversion(SyntaxRef n, entity_index c,
         if (written.list) {
             owned_array<SyntaxElement> *keep = nullptr;
             require_complete(c);
-            if (entity_table[c].first_constructor)
+            if (entity_table[c].first_constructor || is_aggregate(c))
                 keep = &as_written;
             VTRY_SET(r,
                      expression_list_meanings(written.list, arguments, keep));
@@ -4100,12 +4100,21 @@ analysis_result semantic_analysis::class_direct_initialization(
              (type_table[arguments[0].type.unqualified()].kind !=
                   type_kind::class_type ||
               !base_step(type_table[arguments[0].type.unqualified()].entity, c,
-                         ambiguous))))
-            return not_supported_because(
-                n, "expr.type.conv",
-                "a parenthesized initialization of a class without "
-                "constructors from other than its own or a derived type");
-        r = initialize_with(n, arguments[0], type, true, false, value);
+                         ambiguous)))) {
+            if (is_aggregate(c) && written_arguments &&
+                tokens.files.behavior.has(
+                    language_feature::three_way_comparison_operator)) {
+                r = class_list_initialization(n, *written_arguments, type, true,
+                                              value);
+            } else {
+                return not_supported_because(
+                    n, "expr.type.conv",
+                    "a parenthesized initialization of a class without "
+                    "constructors from other than its own or a derived type");
+            }
+        } else {
+            r = initialize_with(n, arguments[0], type, true, false, value);
+        }
     } else if (is_aggregate(c) && arguments.empty()) {
         /* T() of an aggregate with default member initializers:
            [dcl.init]/9 value-initialization zero-initializes the object
@@ -4131,12 +4140,18 @@ analysis_result semantic_analysis::class_direct_initialization(
     } else if (is_aggregate(c) &&
                (arguments.size() != 1 ||
                 arguments[0].type.unqualified() != type.unqualified())) {
-        /* an aggregate's implicit constructors (a default member
-           initializer makes its default constructor non-trivial) do
-           not take these arguments: C++20's parenthesized aggregate
-           initialization ([dcl.init]/17) is not analysed */
-        return not_supported_because(
-            n, "expr.type.conv", "a parenthesized aggregate initialization");
+        /* [dcl.init]/17.6.2.2 (C++20 P0960R3): parenthesized aggregate
+           initialization */
+        if (written_arguments &&
+            tokens.files.behavior.has(
+                language_feature::three_way_comparison_operator)) {
+            r = class_list_initialization(n, *written_arguments, type, true,
+                                          value);
+        } else {
+            return not_supported_because(
+                n, "expr.type.conv",
+                "a parenthesized aggregate initialization");
+        }
     } else {
         r = construct(n, type, arguments, 0, value, false, written_arguments);
     }
