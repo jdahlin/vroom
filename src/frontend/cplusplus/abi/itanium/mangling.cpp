@@ -250,6 +250,7 @@ class itanium_mangler
     void number(uint64_t n);
     bool local_name(entity_index e, entity_index function);
     bool closure_type_name(entity_index c);
+    bool translation_unit_number(entity_index c);
     bool closure_numbered(entity_index c) const;
     entity_index local_function(entity_index e,
                                 entity_index *local_class = nullptr) const;
@@ -2378,12 +2379,6 @@ bool itanium_mangler::class_enum_type(qualified_type t)
         return false;
     entity_index local_class = 0;
     entity_index local = local_function(c, &local_class);
-    /* (an unnamed class of a class is its Ut _ unnamed-type-name,
-       unqualified_name_untagged) */
-    if (!x.name && !x.linkage_name && !x.lambda && c != local_class &&
-        !(x.kind == entity_kind::class_type && x.enclosing &&
-          table[x.enclosing].kind == entity_kind::class_type))
-        return false;
     /* [abi:mangling-compression]: a template's name seen before, with its
        prefix, is a <substitution> before the arguments */
     if (x.instantiation && x.enclosing && !is_std(x.enclosing) && !local &&
@@ -3175,9 +3170,16 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
     }
     if (x.kind == entity_kind::class_type && x.lambda)
         return closure_type_name(e);
-    if (x.kind == entity_kind::class_type && !x.name && !x.linkage_name &&
-        !(as_type && analysis.number_closures)) {
+    bool unnamed = !x.name && !x.linkage_name &&
+                   (x.kind == entity_kind::class_type ||
+                    x.kind == entity_kind::enumeration);
+    if (unnamed) {
         if (entity_index function = enclosing_function(table, e)) {
+            /* [impl.clang]: as a closure type, one of a function that is
+               neither inline nor a specialization is unique to the
+               translation unit, $_N */
+            if (!closure_numbered(e))
+                return translation_unit_number(e);
             /* [abi:mangling.named]: <unnamed-type-name> ::= Ut [ <nonnegative number> ] _ */
             text("Ut");
             if (uint64_t ordinal = local_class_ordinal(e, function))
@@ -3186,8 +3188,7 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
             return true;
         }
     }
-    if (x.kind == entity_kind::class_type && !x.name && !x.linkage_name &&
-        !(as_type && analysis.number_closures) && x.enclosing &&
+    if (unnamed && x.enclosing &&
         table[x.enclosing].kind == entity_kind::class_type) {
         /* [abi:mangling.named]: an unnamed class of a class (clang's
            _ZN1OUt0_C2Ev): Ut, the number of the unnamed classes and
@@ -3207,35 +3208,16 @@ bool itanium_mangler::unqualified_name_untagged(entity_index e, bool as_type)
         text("_");
         return true;
     }
+    /* [impl.clang]: one of namespace scope with no name for linkage
+       purposes is unique to the translation unit too */
+    if (unnamed && (!x.enclosing ||
+                    table[x.enclosing].kind == entity_kind::namespace_entity))
+        return translation_unit_number(e);
     /* [dcl.typedef]/9: an unnamed class's name for linkage purposes */
     if (!x.name && (x.kind == entity_kind::class_type ||
                     x.kind == entity_kind::enumeration)) {
         if (x.linkage_name)
             return source_name(x.linkage_name);
-        /* [impl.clang]: an unnamed local class/union without a typedef name is
-           mangled as $_<n> in its enclosing function */
-        if (x.kind == entity_kind::class_type && enclosing_function(table, e) &&
-            analysis.number_closures) {
-            entity_index context = enclosing_function(table, e);
-            size_t n = 0;
-            bool seen = false;
-            for (entity_index k : analysis.unnumbered_closures) {
-                if (k == e) {
-                    seen = true;
-                    break;
-                }
-                if (enclosing_function(table, k) == context)
-                    n++;
-            }
-            if (!seen)
-                analysis.unnumbered_closures.append(e);
-            char buf[32];
-            size_t len =
-                static_cast<size_t>(snprintf(buf, sizeof(buf), "$_%zu", n));
-            number(len);
-            vbuffer_append(out, buf, len);
-            return true;
-        }
         return false;
     }
     return source_name(x.name);
@@ -3547,12 +3529,18 @@ entity_index itanium_mangler::local_function(entity_index e,
 {
     const entities &table = analysis.entity_table;
     entity_index c = e;
-    if (table[c].kind != entity_kind::class_type)
+    /* (a local enumeration is a local entity as a class is,
+       [basic.scope.block]; one of a class goes with its class) */
+    if (table[c].kind == entity_kind::enumeration) {
+        if (table[table[c].enclosing].kind == entity_kind::class_type)
+            c = table[c].enclosing;
+    } else if (table[c].kind != entity_kind::class_type)
         c = table[c].enclosing;
     while (c && table[c].kind == entity_kind::class_type &&
            table[table[c].enclosing].kind == entity_kind::class_type)
         c = table[c].enclosing;
-    if (!c || table[c].kind != entity_kind::class_type)
+    if (!c || (table[c].kind != entity_kind::class_type &&
+               table[c].kind != entity_kind::enumeration))
         return 0;
     entity_index function = enclosing_function(table, c);
     if (function && local_class)
@@ -3560,8 +3548,8 @@ entity_index itanium_mangler::local_function(entity_index e,
     return function;
 }
 
-/* [abi:mangling-scope]: count earlier classes with the same name in the
-   function. Unnamed classes have their own sequence, separate from lambdas. */
+/* [abi:mangling-scope]: count earlier classes and enumerations with the
+   same name in the function. Unnamed ones have their own sequence, separate from lambdas. */
 uint64_t itanium_mangler::local_class_ordinal(entity_index c,
                                               entity_index function) const
 {
@@ -3575,8 +3563,10 @@ uint64_t itanium_mangler::local_class_ordinal(entity_index c,
         uint32_t other_name = x.name;
         if (!other_name)
             other_name = x.linkage_name;
-        if (x.kind == entity_kind::class_type && !x.lambda &&
-            other_name == name && enclosing_function(table, other) == function)
+        if ((x.kind == entity_kind::class_type ||
+             x.kind == entity_kind::enumeration) &&
+            !x.lambda && other_name == name &&
+            enclosing_function(table, other) == function)
             ordinal++;
     }
     return ordinal;
@@ -3669,6 +3659,42 @@ bool itanium_mangler::closure_numbered(entity_index c) const
     return false;
 }
 
+/* [impl.clang]: the name of a closure type, or of an unnamed local class or
+   enumeration, that is unique to the translation unit: the <source-name>
+   $_N, N its number among those of its function (or of namespace scope,
+   which a generic lambda's of a function counts too) in the order their
+   names are first mangled (as clang's code generator mangles them) */
+bool itanium_mangler::translation_unit_number(entity_index c)
+{
+    const entities &table = analysis.entity_table;
+    if (!analysis.number_closures)
+        return false;
+    entity_index context = enclosing_function(table, c);
+    size_t n = 0;
+    bool seen = false;
+    for (entity_index k : analysis.unnumbered_closures) {
+        if (k == c) {
+            seen = true;
+            break;
+        }
+        /* ([impl.clang] a generic lambda's closure of a function takes
+           a number of the translation unit's too) */
+        if (enclosing_function(table, k) == context ||
+            (!context && table[k].lambda &&
+             table[table[k].call_operator].kind ==
+                 entity_kind::template_entity))
+            n++;
+    }
+    if (!seen)
+        analysis.unnumbered_closures.append(c);
+    owned_buffer written;
+    vbuffer_format_append(written.get(), "$_%llu",
+                          static_cast<unsigned long long>(n));
+    number(written.size());
+    vbuffer_append(out, written.data(), written.size());
+    return true;
+}
+
 /*
  * [abi:closure-types]:
  *
@@ -3678,11 +3704,8 @@ bool itanium_mangler::closure_numbered(entity_index c) const
  * "The number is omitted for the first closure type with a given
  * <lambda-sig> in a given context; it is n-2 for the nth closure type (in
  * lexical order) with that same <lambda-sig> and context."  A closure type
- * unique to the translation unit has no encoding in the ABI: [impl.clang]
- * names it $_N, a <source-name>, N the closure's number among those of
- * its function (or of namespace scope, which a generic lambda's of a
- * function counts too) in the order their names are first mangled (as
- * clang's code generator mangles them).
+ * unique to the translation unit has no encoding in the ABI
+ * (translation_unit_number).
  */
 bool itanium_mangler::closure_type_name(entity_index c)
 {
@@ -3690,33 +3713,8 @@ bool itanium_mangler::closure_type_name(entity_index c)
     entity_index call = table[c].call_operator;
     if (!call)
         return false;
-    if (!closure_numbered(c)) {
-        if (!analysis.number_closures)
-            return false;
-        entity_index context = enclosing_function(table, c);
-        size_t n = 0;
-        bool seen = false;
-        for (entity_index k : analysis.unnumbered_closures) {
-            if (k == c) {
-                seen = true;
-                break;
-            }
-            /* ([impl.clang] a generic lambda's closure of a function takes
-               a number of the translation unit's too) */
-            if (enclosing_function(table, k) == context ||
-                (!context && table[table[k].call_operator].kind ==
-                                 entity_kind::template_entity))
-                n++;
-        }
-        if (!seen)
-            analysis.unnumbered_closures.append(c);
-        owned_buffer written;
-        vbuffer_format_append(written.get(), "$_%llu",
-                              static_cast<unsigned long long>(n));
-        number(written.size());
-        vbuffer_append(out, written.data(), written.size());
-        return true;
-    }
+    if (!closure_numbered(c))
+        return translation_unit_number(c);
     /* [impl.clang] the context of a closure type in an inline variable's
        initializer (the ABI's later data-member-prefix): the variable's
        <source-name> and M */
