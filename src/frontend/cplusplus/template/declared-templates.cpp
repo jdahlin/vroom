@@ -1307,7 +1307,10 @@ analysis_result semantic_analysis::template_id_arguments(
     owned_array<template_argument> elements;
     owned_array<SyntaxElement> written;
     owned_array<bool> expansion;
-    for (uint32_t i = 2; i + 1 < id.size(); i++) {
+    uint32_t arg_start = 2;
+    if (id.size() > 2 && id[0].is(syntax_kind::nested_name_specifier))
+        arg_start = 3;
+    for (uint32_t i = arg_start; i + 1 < id.size(); i++) {
         if (id[i].is(preprocessing_op_or_punc::ELLIPSIS)) {
             if (written.empty() || expansion.back())
                 return not_supported_because(

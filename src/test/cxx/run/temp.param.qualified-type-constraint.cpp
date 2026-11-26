@@ -1,38 +1,34 @@
-// [temp.param]/4: namespace-qualified type-constraint on an abbreviated
-// function template parameter (e.g. `const std::integral auto &val` in
-// OpenTTD core/pool_type.hpp:78).
+// [temp.param]/4, [expr.prim.req.compound]/1.3: qualified type-constraint
+// (e.g. `{ a.base() } noexcept -> ns::convertible_to<long long>;`).
 
-namespace my {
-inline namespace v1 {
-template <typename T>
-concept integral = __is_integral(T);
+namespace ns {
+template <class From, class To>
+concept convertible_to = __is_convertible_to(From, To);
 }
-} // namespace my
 
-struct Tag {
+template <class T>
+concept ConvertibleThroughBase = requires(T const a) {
+    typename T::BaseType;
+    { a.base() } noexcept -> ns::convertible_to<long long>;
+};
+
+struct StrongInt {
+    using BaseType = int;
+    int v;
+    constexpr int base() const noexcept { return v; }
+};
+
+struct NotStrong {
     int v;
 };
 
-constexpr Tag operator+(const my::integral auto &a, const Tag &b)
-{
-    return {static_cast<int>(a) + b.v};
-}
-
-struct Other {
-    int v;
-    friend constexpr Other operator+(const Other &a, const Other &b)
-    {
-        return {a.v + b.v};
-    }
-};
+static_assert(ConvertibleThroughBase<StrongInt>);
+static_assert(!ConvertibleThroughBase<NotStrong>);
 
 int main()
 {
-    constexpr Tag t = 10 + Tag{5};
-    static_assert(t.v == 15);
-    volatile int x = 3;
-    Other o = Other{x} + Other{4};
-    if (o.v != 7)
+    StrongInt s{7};
+    if (s.base() != 7)
         return 1;
     return 0;
 }
