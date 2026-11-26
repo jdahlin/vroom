@@ -917,13 +917,15 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             if (!body || queue_body_until_used(body))
                 continue;
             bool placeholder = false;
+            entity_index body_fn = 0;
             for (entity_index f = first_member_entity; f < entity_table.size();
                  f++) {
                 const entity &member = entity_table[f];
                 if (member.kind == entity_kind::function &&
-                    member.enclosing == c && member.placeholder_return &&
                     declared_by(f, body)) {
-                    placeholder = true;
+                    body_fn = f;
+                    if (member.enclosing == c && member.placeholder_return)
+                        placeholder = true;
                     break;
                 }
             }
@@ -932,8 +934,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
                 current_declaration = outer_declaration;
                 continue;
             }
-            postponed_bodies.append(postponed_body{c, body, postponed_scope,
-                                                   postponed_declaration});
+            postponed_bodies.append(postponed_body{
+                c, body, postponed_scope, postponed_declaration, body_fn});
         }
         for (size_t i = nested_start; i < nested_bodies.size(); i++)
             postponed_bodies.append(

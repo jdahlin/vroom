@@ -3971,9 +3971,14 @@ void semantic_analysis::analyse_postponed_body(entity_index f)
     }
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         postponed_body &b = postponed_bodies[i];
-        if (!b.c ||
-            (b.function != f && !declared_by(f, b.body.function_definition())))
+        if (!b.c)
             continue;
+        if (b.function) {
+            if (b.function != f)
+                continue;
+        } else if (!declared_by(f, b.body.function_definition())) {
+            continue;
+        }
         bool still_defining = false;
         for (entity_index d = defining_class; d; d = entity_table[d].enclosing)
             if (d == b.c)
