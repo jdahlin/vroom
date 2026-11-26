@@ -270,14 +270,15 @@ semantic_analysis::explicit_specialization(ExplicitSpecialization n)
                     if (!defines) {
                         VTRY(cr, constexpr_redeclaration(m.id, match,
                                                          ms.constexpr_));
-                        if (ms.inline_)
+                        if (ms.inline_ || ms.constexpr_)
                             entity_table[match].inline_ = true;
                         entity_table.add_declaration(match, inner);
                         return analysis_result::well_formed;
                     }
                     entity_table[match].defined = false;
                     entity_table[match].definition = 0;
-                    entity_table[match].inline_ = ms.inline_;
+                    /* [temp.expl.spec]/12, [dcl.constexpr]/1 */
+                    entity_table[match].inline_ = ms.inline_ || ms.constexpr_;
                     return function_definition(inner);
                 }
             }
