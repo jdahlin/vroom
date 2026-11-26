@@ -161,11 +161,19 @@ void preprocessor::execute_pragma(const preprocessing_token *t, size_t count,
     /* [ext:gnu_pragmas], gnu_push_pop_macro, gnu_pragma_message */
     if (gnu_pragma(t, count))
         return;
-    if (spelled_as(files, t[0], "STDC") ||
-        spelled_as(files, t[0], "float_control") ||
-        spelled_as(files, t[0], "fenv_access") ||
-        (count > 1 && spelled_as(files, t[0], "clang") &&
-         spelled_as(files, t[1], "fp")))
+    /* what changes the floating-point environment a constant is evaluated
+       in; contract, reassociate and reciprocal (#pragma clang fp, STDC
+       FP_CONTRACT) change none of it */
+    bool environment = spelled_as(files, t[0], "float_control") ||
+                       spelled_as(files, t[0], "fenv_access") ||
+                       (count > 1 && spelled_as(files, t[0], "STDC") &&
+                        (spelled_as(files, t[1], "FENV_ACCESS") ||
+                         spelled_as(files, t[1], "FENV_ROUND"))) ||
+                       (count > 2 && spelled_as(files, t[0], "clang") &&
+                        spelled_as(files, t[1], "fp") &&
+                        (spelled_as(files, t[2], "exceptions") ||
+                         spelled_as(files, t[2], "eval_method")));
+    if (environment)
         files.floating_point_pragma = true;
     layout_pragma_directive(t, count);
     if (!known_pragma(*this, t[0]))
