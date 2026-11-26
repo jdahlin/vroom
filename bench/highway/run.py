@@ -46,13 +46,44 @@ FLAGS = ['-std=c++17', '-I', SRC, '-DHWY_TEST_STANDALONE',
 
 
 def sources():
-    """(library TUs, test TUs), relative to SRC"""
-    def found(pattern):
-        return sorted(os.path.relpath(p, SRC)
-                      for p in glob.glob(os.path.join(SRC, pattern)))
-    lib = [s for s in found('hwy/*.cc') if not s.endswith('_test.cc')]
-    lib.append('hwy/tests/test_util.cc')
-    return lib, found('hwy/tests/*_test.cc')
+    """(library TUs, {executable: its TUs}) as CMakeLists.txt lists them:
+    the *_SOURCES libraries, HWY_TEST_FILES and the add_executable lines"""
+    with open(os.path.join(SRC, 'CMakeLists.txt')) as f:
+        text = re.sub(r'#.*', '', f.read())
+
+    def files(block):
+        out = []
+        for word in block.split():
+            word = word.strip('"')
+            if not re.match(r'hwy/\S+\.(cc|c)$', word):
+                continue
+            if '*' in word:
+                out += sorted(os.path.relpath(p, SRC) for p in
+                              glob.glob(os.path.join(SRC, word)))
+            elif os.path.exists(os.path.join(SRC, word)):
+                out.append(word)
+        return out
+
+    lib = []
+    execs = {}
+    for command, name, body in re.findall(
+            r'(set|list|file)\s*\(\s*(?:APPEND\s+|GLOB\s+)?(\w+)([^)]*)\)',
+            text):
+        if name == 'HWY_TEST_FILES':
+            for src in files(body):
+                execs[os.path.basename(src).rsplit('.', 1)[0]] = [src]
+        elif name in ('HWY_SOURCES', 'HWY_IO_SOURCES', 'HWY_CONTRIB_SOURCES',
+                      'HWY_TEST_SOURCES'):
+            lib += [s for s in files(body) if s not in lib]
+    for name, body in re.findall(
+            r'(?:add_executable|target_sources)\s*\(\s*([\w$}{]+)([^)]*)\)',
+            text):
+        if '$' not in name and files(body):
+            execs.setdefault(name, [])
+            execs[name] += [s for s in files(body) if s not in execs[name]]
+    # (Windows' file I/O)
+    lib = [s for s in lib if not s.endswith('windows_file.cc')]
+    return lib, execs
 
 
 def headers_stamp():
@@ -102,15 +133,17 @@ def compile_one(cmd, src, obj, key, timeout):
     return error
 
 
-def link_and_run(test, objs, exe, timeout):
-    """'' when the program passes, else why not"""
+def link_and_run(objs, exe, run, timeout):
+    """'' when the program links (and, if run, passes), else why not"""
     p = subprocess.run(['clang++', '-stdlib=libc++', '-pthread', '-no-pie'] +
                        objs + ['-o', exe], capture_output=True, text=True)
     if p.returncode:
         missing = re.findall(r"undefined reference to `([^']*)'", p.stderr)
         if missing:
             return 'link: undefined ' + ', '.join(sorted(set(missing)))[:100]
-        return 'link failed'
+        return 'link: ' + ' '.join(p.stderr.strip().splitlines()[-2:])[:100]
+    if not run:
+        return ''
     try:
         p = subprocess.run(['nice', exe], capture_output=True, text=True,
                            errors='replace', timeout=timeout)
@@ -123,7 +156,7 @@ def link_and_run(test, objs, exe, timeout):
 
 
 def object_path(d, src):
-    return os.path.join(d, src.replace('/', '_')[:-3] + '.o')
+    return os.path.join(d, src.replace('/', '_').replace('.', '_') + '.o')
 
 
 def main():
@@ -144,9 +177,10 @@ def main():
         print('highway: needs an x86-64 host')
         return 0
     vpp = os.path.join(a.bin_dir, 'vpp')
-    lib, tests = sources()
+    lib, execs = sources()
     if a.pattern:
-        tests = [t for t in tests if a.pattern in t]
+        execs = {n: s for n, s in execs.items() if a.pattern in n}
+    tus = lib + sorted({s for srcs in execs.values() for s in srcs} - set(lib))
     headers = headers_stamp()
     failed = 0
     for level in a.levels:
@@ -168,44 +202,55 @@ def main():
 
         def build(job):
             who, src = job
+            command = commands[who]
+            if src.endswith('.c'):
+                command = [command[0], '-I', SRC, '-O' + level,
+                           '-DHWY_COMPILE_ONLY_STATIC']
             key = [versions[who], stamp(os.path.join(SRC, src)), headers]
-            return job, compile_one(commands[who], src,
+            return job, compile_one(command, src,
                                     object_path(dirs[who], src), key,
                                     a.timeout)
 
         with concurrent.futures.ThreadPoolExecutor(a.j) as pool:
             errors = dict(pool.map(build, [(who, s) for who in commands
-                                           for s in lib + tests]))
-        broken = [s for s in lib + tests if errors[('clang', s)]]
+                                           for s in tus]))
+        broken = [s for s in tus if errors[('clang', s)]]
         if broken:
             sys.exit('highway: clang++ failed on %s: %s' %
                      (broken[0], errors[('clang', broken[0])]))
-        library = []
-        for s in lib:
+        def object_of(src):
             who = 'vcc'
-            if errors[('vcc', s)]:
+            if errors[('vcc', src)]:
                 who = 'clang'
-            library.append(object_path(dirs[who], s))
+            return object_path(dirs[who], src)
 
-        def run(test):
-            if errors[('vcc', test)]:
-                return test, errors[('vcc', test)]
-            exe = object_path(dirs['vcc'], test)[:-2]
-            return test, link_and_run(
-                test, library + [object_path(dirs['vcc'], test)], exe,
-                a.timeout)
+        archive = os.path.join(dirs['vcc'], 'libhwy.a')
+        if os.path.exists(archive):
+            os.remove(archive)
+        subprocess.run(['ar', 'rcs', archive] + [object_of(s) for s in lib],
+                       check=True)
+
+        def run(name):
+            for src in execs[name]:
+                if errors[('vcc', src)]:
+                    return name, errors[('vcc', src)]
+            # examples and benchmarks are linked, tests also run
+            return name, link_and_run(
+                [object_path(dirs['vcc'], s) for s in execs[name]] +
+                [archive], os.path.join(dirs['vcc'], name),
+                name.endswith('_test'), a.timeout)
 
         with concurrent.futures.ThreadPoolExecutor(a.j) as pool:
-            results = dict(pool.map(run, tests))
+            results = dict(pool.map(run, sorted(execs)))
 
-        names = {t: os.path.basename(t)[:-3] for t in tests}
-        passed = {names[t] for t in tests if not results[t]}
-        compiled = [t for t in tests if not errors[('vcc', t)]]
-        refused = [s for s in lib + tests if errors[('vcc', s)]]
-        print('highway -O%s: library %d of %d TUs by vcc; tests %d, compiled '
-              '%d, passed %d' %
+        passed = {n for n in execs if not results[n]}
+        compiled = [n for n in sorted(execs)
+                    if not any(errors[('vcc', s)] for s in execs[n])]
+        refused = [s for s in tus if errors[('vcc', s)]]
+        print('highway -O%s: library %d of %d TUs by vcc; executables %d, '
+              'compiled %d, linked (tests: and passed) %d' %
               (level, sum(not errors[('vcc', s)] for s in lib), len(lib),
-               len(tests), len(compiled), len(passed)))
+               len(execs), len(compiled), len(passed)))
         groups = {}
         for s in refused:
             groups.setdefault(errors[('vcc', s)], []).append(s)
@@ -214,16 +259,16 @@ def main():
             print('%4d  %s' % (len(where), error))
             if a.v:
                 print('      ' + ' '.join(where))
-        for t in compiled:
-            if results[t]:
-                print('  FAIL %s: %s' % (names[t], results[t]))
+        for name in compiled:
+            if results[name]:
+                print('  FAIL %s: %s' % (name, results[name]))
 
         listed = os.path.join(HERE, 'passing-O' + level)
         before = set()
         if os.path.exists(listed):
             with open(listed) as f:
                 before = set(f.read().split())
-        lost = sorted((before & set(names.values())) - passed)
+        lost = sorted((before & set(execs)) - passed)
         new = sorted(passed - before)
         for name in lost:
             print('  LOST %s' % name)
@@ -232,7 +277,7 @@ def main():
                   (len(new), os.path.relpath(listed, R)))
         if a.bless:
             # (a pattern's run keeps the other tests' lines)
-            keep = before - set(names.values())
+            keep = before - set(execs)
             with open(listed, 'w') as f:
                 f.writelines(n + '\n' for n in sorted(keep | passed))
         elif lost:

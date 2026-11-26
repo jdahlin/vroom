@@ -140,6 +140,7 @@ class c_lowering
     uint32_t destructor_registration(uint32_t d, ast_qualified_type f,
                                      uint32_t object,
                                      bool thread_local_var = false);
+    ast_qualified_type writable_type(qualified_type t, token_index at);
     uint32_t initialization(entity_index e, uint32_t init, token_index at);
     void static_initialization(entity_index e, uint32_t init,
                                owned_array<uint32_t> &out, token_index at);
