@@ -2428,12 +2428,6 @@ analysis_result semantic_analysis::member_declarator(
         /* [class.static.data]/3: "The declaration of a non-inline static
            data member in its class definition is not a definition and may
            be of an incomplete type other than cv void." */
-        /* an inline static data member ([dcl.inline]/6: defined in the
-           class) has rules when it is const too: the constexpr path */
-        if (s.inline_ && !s.constexpr_ && !(type.cv() & cv_const))
-            return not_supported_because(declaration, "class.static.data",
-                                         "an inline static data member that is "
-                                         "neither const nor constexpr");
         /* [dcl.constexpr]/10: "A constexpr specifier used in an object
            declaration declares the object as const"; [dcl.constexpr]/1 a
            constexpr static data member is an inline variable, defined by
@@ -2458,7 +2452,8 @@ analysis_result semantic_analysis::member_declarator(
         /* [class.static.data]/1: "A static data member is not part of the
            subobjects of a class." */
         entity_table[e].nonstatic_member = false;
-        entity_table[e].defined = false;
+        entity_table[e].inline_ = s.inline_;
+        entity_table[e].defined = s.inline_;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
         /* its first declaration, which a name found refers to (the
            definition outside the class is a later one) */
@@ -3019,6 +3014,19 @@ semantic_analysis::static_member_initializer(SyntaxRef declarator,
     if (s.constexpr_ ||
         ((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration))
         entity_table[e].usable = constness::unknown;
+    const bool dynamic_inline =
+        s.inline_ && !s.constexpr_ &&
+        !((cv & cv_const) && !(cv & cv_volatile) && integral_or_enumeration);
+    if (dynamic_inline) {
+        if (!deduced) {
+            VTRY(r, initializer(init, type, value));
+        }
+        entity &x = entity_table[e];
+        x.definition = value.node;
+        x.inline_ = true;
+        x.defined = true;
+        return analysis_result::well_formed;
+    }
     if (!(cv & cv_const) || (cv & cv_volatile) ||
         (!integral_or_enumeration && !constexpr_floating && !constexpr_class))
         return not_supported_because(
