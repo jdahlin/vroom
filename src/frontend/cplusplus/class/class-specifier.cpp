@@ -2181,11 +2181,17 @@ analysis_result semantic_analysis::member_declarator(
     /* a member's symbol attributes (a member function's weak and section,
        a static data member's, a data member's function attributes) are not
        analysed yet; on a non-static data member they are GCC's error */
+    uint32_t static_member_symbol_flags =
+        gnu_hidden_visibility | gnu_abi_tag |
+        gnu_exclude_from_explicit_instantiation;
     if ((m.gnu_flags & (gnu_weak | gnu_used | gnu_section | gnu_mode |
                         gnu_constructor | gnu_destructor | gnu_cleanup |
                         gnu_require_constant_initialization)) ||
-        (!is_function &&
-         (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))))
+        (!is_function && !s.static_ &&
+         (m.gnu_flags & (gnu_inline_flags | gnu_function_symbol_flags))) ||
+        (!is_function && s.static_ &&
+         (m.gnu_flags & ((gnu_inline_flags | gnu_function_symbol_flags) &
+                         ~static_member_symbol_flags))))
         return not_supported_because(declaration, "ext.gnu",
                                      "a member with a GNU symbol or function "
                                      "attribute that is not handled");
@@ -2465,6 +2471,8 @@ analysis_result semantic_analysis::member_declarator(
         entity_table[e].inline_ = s.inline_;
         entity_table[e].defined = s.inline_;
         entity_table[e].alignment = static_cast<uint32_t>(m.aligned);
+        entity_table[e].gnu_flags |= m.gnu_flags & static_member_symbol_flags;
+        entity_table[e].abi_tag = m.abi_tag;
         /* its first declaration, which a name found refers to (the
            definition outside the class is a later one) */
         declared_name first;
