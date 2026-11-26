@@ -129,6 +129,8 @@ static const virbuild_pass virbuild_passes[] = {
 	   integer comes back as i2p(p2i $slot)): promote again, then simplify what it forwards */
     {"aggregate-copy", virbuild_aggregate_copies_forward, O | P, 0, O | P | D,
      0, NULL},
+    {"vector-elements", virbuild_vectors_from_elements, O | P, 0, O | P | D, 0,
+     NULL}, /* vector-from-elements.c */
     {"slot-address-loads", virbuild_slot_address_loads_split, O | P, 0,
      O | P | D, 0, NULL}, /* load-of-slot-address.c */
     {"promote-again", virbuild_slots_promote, O | P, 0, O | P | D, 0,

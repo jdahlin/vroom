@@ -69,6 +69,31 @@ VPRIV uint32_t virbuild_block_insn_append(codegen_context *e, uint32_t b,
     return i;
 }
 
+/* a new instruction of block b after *prev (0: first), or at b's end (prev NULL) */
+VPRIV uint32_t virbuild_preir_insn_insert(codegen_context *e, uint32_t b,
+                                          uint32_t *prev, vir_insn in)
+{
+    virbuild_context *V = e->vir_builder;
+
+    if (!prev)
+        return virbuild_block_insn_append(e, b, in.op, in.type, in.flags, in.a,
+                                          in.b, in.c);
+    uint32_t i = virbuild_preir_insn_add(e, in.op, in.type, in.flags, in.a,
+                                         in.b, in.c, b);
+
+    if (*prev) {
+        V->insns[i].next = V->insns[*prev].next;
+        V->insns[*prev].next = i;
+    } else {
+        V->insns[i].next = V->blocks[b].first_insn;
+        V->blocks[b].first_insn = i;
+    }
+    if (V->blocks[b].last_insn == *prev)
+        V->blocks[b].last_insn = i;
+    *prev = i;
+    return i;
+}
+
 VPRIV uint32_t virbuild_insn_append(codegen_context *e, uint32_t op,
                                     uint32_t ty, uint32_t fl, uint32_t a,
                                     uint32_t b, uint32_t c)

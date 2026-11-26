@@ -386,6 +386,10 @@ VPRIV bool virbuild_promote_store_is_dead(const virbuild_context *V,
                                           uint32_t q);
 VPRIV bool virbuild_slots_promote(codegen_context *e);
 VPRIV bool virbuild_aggregate_copies_forward(codegen_context *e);
+VPRIV uint32_t virbuild_preir_insn_insert(codegen_context *e, uint32_t b,
+                                          uint32_t *prev, vir_insn in);
+/* vector-from-elements.c */
+VPRIV bool virbuild_vectors_from_elements(codegen_context *e);
 /* load-of-slot-address.c */
 VPRIV bool virbuild_slot_address_loads_split(codegen_context *e);
 
