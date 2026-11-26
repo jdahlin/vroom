@@ -182,25 +182,32 @@ def stencil_rows(bin_dir):
         text = f.read()
 
     def section(name):
-        body = text.split('#ifdef %s\n' % name)[1].split('#endif')[0]
-        return body.splitlines()
+        return text.split('#ifdef %s\n' % name)[1].split('#endif')[0]
 
-    def numbers(line):
-        return [int(x) for x in re.findall(r'\d+', line)]
+    def records(name):
+        return [[int(x) for x in item.split(',')]
+                for item in re.findall(r'\{([\d,]+)\}', section(name))]
 
-    features = [line.strip(' ",') for line in section('X86_STENCIL_FEATURES')]
-    rows = [numbers(line) for line in section('X86_STENCIL_ROWS')]
-    groups = [numbers(line) for line in section('X86_STENCIL_GROUPS')]
-    ranges = [numbers(line) for line in section('X86_STENCIL_KEYS')]
+    features = re.findall(r'^"(.*)",$', section('X86_STENCIL_FEATURES'), re.M)
+    kinds = records('X86_STENCIL_KINDS')
+    rows = [int(x) for x in re.findall(r'\d+', section('X86_STENCIL_ROWS'))]
+    groups = records('X86_STENCIL_GROUPS')
+    shapes = records('X86_STENCIL_SHAPES')
+    ranges = records('X86_STENCIL_KEYS')
     made = []
-    for (name, signature), (feature, mask, count, first) in zip(listed, rows):
+    first = 0
+    for (name, signature), kind in zip(listed, rows):
+        feature, mask, count = kinds[kind]
         keys = []
         for group in groups[first:first + count]:
-            for key, many in ranges[group[3]:group[3] + group[8]]:
+            shape = shapes[group[2]]
+            for key, many in ranges[shape[1]:shape[1] + shape[6]]:
                 keys.extend(range(key, key + many))
+        first += count
         keys.sort()
         picked = sorted({keys[i * (len(keys) - 1) // 5] for i in range(6)})
-        made.append((name, signature, features[feature], mask, picked))
+        made.append(('__builtin_' + name, signature, features[feature], mask,
+                     picked))
     return made
 
 

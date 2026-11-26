@@ -27,7 +27,7 @@ static const cc_builtin cc_builtin_table[] = {
 #include "frontend/x86-instructions.inc"
 #undef X86_INSTRUCTION
 #define X86_STENCIL(name, signature)                                           \
-    {name, CC_BUILTIN_X86_STENCIL, 0, signature},
+    {"__builtin_" name, CC_BUILTIN_X86_STENCIL, 0, signature},
 #include "frontend/x86-stencil-names.inc"
 #undef X86_STENCIL
     {"__builtin_ia32_pblendvb128", CC_BUILTIN_X86_BLENDVB, 1, "BBBB"},

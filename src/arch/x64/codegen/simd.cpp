@@ -636,22 +636,25 @@ static void x64_simd_general_text(codegen_context *e, const char *before, int r,
 typedef struct x64_stencil {
     uint8_t features;  /* in x64_stencil_features_names */
     uint8_t constants; /* the constant operands, as a mask */
-    uint16_t groups;
-    uint32_t first; /* in x64_stencil_groups */
+    uint8_t groups;
 } x64_stencil;
 
 /* a builtin's variants of one length: one code, and what differs */
 typedef struct x64_stencil_group {
-    uint32_t code;    /* in x64_stencil_bytes: constants, then code */
+    uint32_t code;    /* in the code bytes: constants, then code */
     uint32_t columns; /* ... : `stored` bytes per variant */
-    uint32_t fixups;  /* in x64_stencil_fixups: stored, then patched */
-    uint32_t keys;    /* in x64_stencil_keys */
+    uint16_t shape;   /* in x64_stencil_shapes */
+} x64_stencil_group;
+
+typedef struct x64_stencil_shape {
+    uint16_t fixups; /* in x64_stencil_fixups: stored, then patched */
+    uint16_t keys;   /* in x64_stencil_keys */
     uint16_t length;
     uint16_t constants;
     uint16_t stored;
     uint16_t patched;
     uint16_t ranges;
-} x64_stencil_group;
+} x64_stencil_shape;
 
 typedef struct x64_stencil_key {
     uint32_t key; /* the constants, a byte each */
@@ -665,10 +668,22 @@ static const char *const x64_stencil_features_names[] = {
 #undef X86_STENCIL_FEATURES
 };
 
-static const x64_stencil x64_stencils[] = {
+static const x64_stencil x64_stencil_kinds[] = {
+#define X86_STENCIL_KINDS
+#include "x86-stencils.inc"
+#undef X86_STENCIL_KINDS
+};
+
+static const uint8_t x64_stencil_rows[] = {
 #define X86_STENCIL_ROWS
 #include "x86-stencils.inc"
 #undef X86_STENCIL_ROWS
+};
+
+static const x64_stencil_shape x64_stencil_shapes[] = {
+#define X86_STENCIL_SHAPES
+#include "x86-stencils.inc"
+#undef X86_STENCIL_SHAPES
 };
 
 static const x64_stencil_group x64_stencil_groups[] = {
@@ -689,11 +704,16 @@ static const uint32_t x64_stencil_fixups[] = {
 #undef X86_STENCIL_FIXUPS
 };
 
-static const uint8_t x64_stencil_bytes[] = {
-#define X86_STENCIL_BYTES
+static const uint64_t x64_stencil_words[] = {
+#define X86_STENCIL_WORDS
 #include "x86-stencils.inc"
-#undef X86_STENCIL_BYTES
+#undef X86_STENCIL_WORDS
 };
+
+static const uint8_t *x64_stencil_bytes(void)
+{
+    return (const uint8_t *)(const void *)x64_stencil_words;
+}
 
 /* the names, one after another */
 static const char x64_stencil_names[] =
@@ -708,7 +728,7 @@ static const char *x64_stencil_name(unsigned row)
 
     while (row--)
         name += strlen(name) + 1;
-    return name;
+    return name; /* (without "__builtin_") */
 }
 
 /* whether the target has the features: names joined by ',' (all of) and '|'
@@ -768,16 +788,23 @@ static void x64_stencil_text(codegen_context *e, const uint8_t *code,
     }
 }
 
-/* the group with the variant for `key` and its place in it, or NULL */
-static const x64_stencil_group *
-x64_stencil_find(const x64_stencil *s, uint32_t key, unsigned *variant)
+/* the group of row's builtin with the variant for `key` and its place in it,
+   or NULL */
+static const x64_stencil_group *x64_stencil_find(unsigned row, uint32_t key,
+                                                 unsigned *variant)
 {
-    for (unsigned i = 0; i < s->groups; i++) {
-        const x64_stencil_group *g = &x64_stencil_groups[s->first + i];
+    unsigned first = 0;
+    for (unsigned i = 0; i < row; i++)
+        first += x64_stencil_kinds[x64_stencil_rows[i]].groups;
+
+    unsigned count = x64_stencil_kinds[x64_stencil_rows[row]].groups;
+    for (unsigned i = 0; i < count; i++) {
+        const x64_stencil_group *g = &x64_stencil_groups[first + i];
+        const x64_stencil_shape *shape = &x64_stencil_shapes[g->shape];
         unsigned before = 0;
 
-        for (unsigned k = 0; k < g->ranges; k++) {
-            const x64_stencil_key *range = &x64_stencil_keys[g->keys + k];
+        for (unsigned k = 0; k < shape->ranges; k++) {
+            const x64_stencil_key *range = &x64_stencil_keys[shape->keys + k];
 
             if (key >= range->key && key - range->key < range->keys) {
                 *variant = before + (key - range->key);
@@ -795,26 +822,28 @@ x64_stencil_find(const x64_stencil *s, uint32_t key, unsigned *variant)
 static void x64_stencil_emit(codegen_context *e, const x64_stencil_group *g,
                              unsigned variant, uint32_t key)
 {
-    unsigned size = (unsigned)g->length + g->constants;
+    const x64_stencil_shape *shape = &x64_stencil_shapes[g->shape];
+    unsigned size = (unsigned)shape->length + shape->constants;
     uint8_t *code = (uint8_t *)malloc(size);
     if (!code)
         vout_of_memory();
-    memcpy(code, x64_stencil_bytes + g->code, size);
-    const uint32_t *fixup = &x64_stencil_fixups[g->fixups];
+    memcpy(code, x64_stencil_bytes() + g->code, size);
+    const uint32_t *fixup = &x64_stencil_fixups[shape->fixups];
     const uint8_t *own =
-        x64_stencil_bytes + g->columns + (size_t)variant * g->stored;
-    for (unsigned i = 0; i < g->stored; i++)
+        x64_stencil_bytes() + g->columns + (size_t)variant * shape->stored;
+    for (unsigned i = 0; i < shape->stored; i++)
         code[fixup[i]] = own[i];
-    for (unsigned i = g->stored; i < (unsigned)g->stored + g->patched; i++) {
+    for (unsigned i = shape->stored;
+         i < (unsigned)shape->stored + shape->patched; i++) {
         unsigned constant = (fixup[i] >> 24) - 1;
         code[fixup[i] & 0xffffff] = (uint8_t)(key >> (8 * constant));
     }
-    if (g->constants) {
+    if (shape->constants) {
         x64_simd_text(e, "\tjmp\t99f\n\t.p2align\t6\n");
-        x64_stencil_text(e, code, g->constants);
+        x64_stencil_text(e, code, shape->constants);
         x64_simd_text(e, "99:\n");
     }
-    x64_stencil_text(e, code + g->constants, g->length);
+    x64_stencil_text(e, code + shape->constants, shape->length);
     free(code);
 }
 
@@ -827,7 +856,7 @@ static codegen_value x64_x86_stencil(codegen_context *e, uint32_t n)
     const uint32_t *arg = &c->lists[x->b];
     unsigned count = x->c - 1;
     unsigned row = (unsigned)c->ipool[N(arg[count])->a];
-    const x64_stencil *s = &x64_stencils[row];
+    const x64_stencil *s = &x64_stencil_kinds[x64_stencil_rows[row]];
     uint32_t fn = e->walk_state->inline_call
                       ? e->walk_state->inline_call->function
                       : e->walk_state->function_symbol;
@@ -835,9 +864,9 @@ static codegen_value x64_x86_stencil(codegen_context *e, uint32_t n)
 
     x64_nofp(e);
     if (!x64_stencil_features(e, features, cc_x86_features_get(c, fn)))
-        codegen_fatal_report(e, x->loc, "'%s' needs target feature %s",
-                             x64_stencil_name(row),
-                             x64_stencil_features_names[s->features]);
+        codegen_fatal_report(
+            e, x->loc, "'__builtin_%s' needs target feature %s",
+            x64_stencil_name(row), x64_stencil_features_names[s->features]);
 
     uint32_t key = 0;
     unsigned constants = 0;
@@ -852,17 +881,18 @@ static codegen_value x64_x86_stencil(codegen_context *e, uint32_t n)
         }
         cc_value value;
         if (!cc_eval(c, arg[i], &value) || value.kind != CC_VALUE_INTEGER)
-            codegen_fatal_report(e, x->loc,
-                                 "argument to '%s' must be a constant integer",
-                                 x64_stencil_name(row));
+            codegen_fatal_report(
+                e, x->loc,
+                "argument to '__builtin_%s' must be a constant integer",
+                x64_stencil_name(row));
         key |= (uint32_t)(value.i & 0xff) << (8 * constants++);
     }
     unsigned variant = 0;
-    const x64_stencil_group *found = x64_stencil_find(s, key, &variant);
+    const x64_stencil_group *found = x64_stencil_find(row, key, &variant);
     if (!found)
-        codegen_fatal_report(e, x->loc,
-                             "constant argument to '%s' is out of range",
-                             x64_stencil_name(row));
+        codegen_fatal_report(
+            e, x->loc, "constant argument to '__builtin_%s' is out of range",
+            x64_stencil_name(row));
 
     codegen_lvalue block = {.kind = CODEGEN_LVALUE_FRAME, .align = 16};
     if (size)

@@ -516,8 +516,9 @@ def main():
             blob.extend(code)
         return offsets[code]
 
-    names = [GENERATED, '/* X86_STENCIL (spelling, signature) */']
-    features, rows, groups, keys, fixups = {}, [], [], [], []
+    names = [GENERATED, '/* X86_STENCIL (spelling after __builtin_, signature) */']
+    features, kinds, shapes = {}, {}, {}
+    rows, groups, keys, fixups = [], [], [], []
     fixup_runs, key_runs = {}, {}
 
     def run(items, table, runs):
@@ -528,38 +529,54 @@ def main():
         return runs[items]
 
     for builtin, codes in made:
-        names.append(f'X86_STENCIL("{builtin.table_name}", "{builtin.signature()}")')
+        spelled = builtin.table_name.removeprefix('__builtin_')
+        names.append(f'X86_STENCIL("{spelled}", "{builtin.signature()}")')
         mask = sum(1 << i for i in builtin.constants)
         feature = features.setdefault(builtin.features, len(features))
-        first = len(groups)
-        for ranges, template, pool, fixed, columns, stored in groups_of(codes):
+        made_groups = groups_of(codes)
+        for ranges, template, pool, fixed, columns, stored in made_groups:
+            shape = (run(tuple(fixed), fixups, fixup_runs),
+                     run(tuple(map(tuple, ranges)), keys, key_runs),
+                     len(template) - pool, pool, stored, len(fixed) - stored,
+                     len(ranges))
             offset = place(template)
+            own = 0
+            if columns:
+                own = place(columns)
             groups.append(
-                f'{{{offset},{place(columns)},'
-                f'{run(tuple(fixed), fixups, fixup_runs)},'
-                f'{run(tuple(map(tuple, ranges)), keys, key_runs)},'
-                f'{len(template) - pool},{pool},{stored},'
-                f'{len(fixed) - stored},{len(ranges)}}},')
-        rows.append(f'{{{feature},{mask},{len(groups) - first},{first}}},')
+                f'{{{offset},{own},{shapes.setdefault(shape, len(shapes))}}},')
+        kind = (feature, mask, len(made_groups))
+        rows.append(f'{kinds.setdefault(kind, len(kinds))},')
 
     def section(name, lines):
         return [f'#ifdef {name}', *lines, '#endif']
 
+    def packed(items, width):
+        return [''.join(items[i:i + width])
+                for i in range(0, len(items), width)]
+
+    padded = bytes(blob) + bytes(-len(blob) % 8)
+    words = [f'{w:#x},' for (w,) in struct.iter_unpack('<Q', padded)]
     table = [
         GENERATED,
-        '/* Rows in the names\' order: {features, constant operands as a mask,',
-        '   groups, first group}.  A group (a builtin\'s variants of one length):',
-        '   {code, per-variant bytes, first fixup, first key range, code length,',
-        '   bytes of constants before the code, stored bytes per variant,',
-        '   patched bytes, key ranges}; a key is the constants, a byte each. */',
+        "/* Rows in the names' order: an index into the row kinds {features,",
+        '   constant operands as a mask, groups}; a row\'s groups follow those of',
+        '   the rows before it.  A group (a builtin\'s variants of one length):',
+        '   {code, per-variant bytes, shape}.  A shape: {first fixup, first key',
+        '   range, code length, bytes of constants before the code, stored bytes',
+        '   per variant, patched bytes, key ranges}.  A key is the constants, a',
+        '   byte each.  The code is in little-endian words. */',
         *section('X86_STENCIL_FEATURES', [f'"{f}",' for f in features]),
-        *section('X86_STENCIL_ROWS', rows),
-        *section('X86_STENCIL_GROUPS', groups),
-        *section('X86_STENCIL_KEYS', [f'{{{k}u,{n}}},' for k, n in keys]),
-        *section('X86_STENCIL_FIXUPS', [f'{f}u,' for f in fixups]),
-        *section('X86_STENCIL_BYTES',
-                 [''.join(f'{b},' for b in blob[i:i + 24])
-                  for i in range(0, len(blob), 24)]),
+        *section('X86_STENCIL_KINDS',
+                 packed([f'{{{f},{m},{n}}},' for f, m, n in kinds], 6)),
+        *section('X86_STENCIL_ROWS', packed(rows, 20)),
+        *section('X86_STENCIL_GROUPS', packed(groups, 5)),
+        *section('X86_STENCIL_SHAPES',
+                 packed(['{%s},' % ','.join(map(str, s)) for s in shapes], 3)),
+        *section('X86_STENCIL_KEYS',
+                 packed([f'{{{k},{n}}},' for k, n in keys], 6)),
+        *section('X86_STENCIL_FIXUPS', packed([f'{f},' for f in fixups], 10)),
+        *section('X86_STENCIL_WORDS', packed(words, 4)),
     ]
     for name, reason in skipped:
         names.append(f'/* {name}: {reason} */')
