@@ -345,10 +345,14 @@ semantic_analysis::lookup_unqualified(uint32_t name, lookup_filter filter) const
             entity_index e = declared_in(s, name, filter);
             if (e)
                 found_also(r, e, s);
+            if (e && collected_names)
+                collected_names->append(e);
             for (const visible_namespace &v : visible) {
                 if (v.appears_in != s)
                     continue;
                 e = declared_in(v.nominated, name, filter);
+                if (e && collected_names)
+                    collected_names->append(e);
                 if (e)
                     found_also(r, e, v.nominated);
                 else if (entity_table[v.nominated].unknown_names)

@@ -2558,6 +2558,9 @@ class semantic_analysis
     void name_held_detail(token_index t, held_cause by);
     const char *unknown_scope_subclause(entity_index s) const;
     lookup_result lookup_unqualified(uint32_t name, lookup_filter filter) const;
+    /* when set, lookup_unqualified appends the declarations it finds in
+       namespaces: the overload set of functions of several */
+    owned_array<entity_index> *collected_names = nullptr;
     /* [namespace.qual]/2: the name looked up in the namespace n (0: the
        global namespace) */
     lookup_result lookup_in_namespace(entity_index n, uint32_t name,

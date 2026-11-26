@@ -499,15 +499,31 @@ analysis_result semantic_analysis::overloaded_operator(
             function_candidates(members, true, candidates);
             return analysis_result::well_formed;
         }
+        owned_array<entity_index> declared;
+        collected_names = &declared;
         lookup_result found =
             lookup_unqualified(name, lookup_filter::non_members);
+        collected_names = nullptr;
+        /* [namespace.udir]/6: functions of several namespaces are one
+           overload set */
+        bool several = found.unknown && !found.ambiguous &&
+                       !found.unknown_entity && !declared.empty();
+        for (entity_index d : declared)
+            several = several &&
+                      entity_table[d].kind == entity_kind::function &&
+                      is_namespace(entity_table[d].enclosing);
+        bool apart = false;
+        for (entity_index d : declared)
+            apart = apart || entity_table[d].enclosing !=
+                                 entity_table[declared[0]].enclosing;
+        several = several && apart;
         /* [temp.over]/1: operator function templates by that name, whose
            specializations deduced from the operands are candidates too */
         owned_array<entity_index> held_names;
         if (found.unknown && !found.ambiguous &&
             function_template_of(found.unknown_entity))
             held_names.append(found.unknown_entity);
-        else if (found.unknown || found.ambiguous) {
+        else if ((found.unknown && !several) || found.ambiguous) {
             analysis_result refused = not_supported_because(
                 n, "over.match.oper",
                 "an operator whose non-member lookup is unknown or ambiguous");
@@ -516,7 +532,15 @@ analysis_result semantic_analysis::overloaded_operator(
             return refused;
         }
         owned_array<entity_index> set;
-        if (found.entity) {
+        if (several) {
+            for (entity_index d : declared) {
+                bool present = false;
+                for (entity_index have : set)
+                    present = present || have == d;
+                if (!present)
+                    set.append(d);
+            }
+        } else if (found.entity) {
             const entity &x = entity_table[found.entity];
             if (x.kind != entity_kind::function || !is_namespace(x.enclosing) ||
                 !is_namespace(found.found_in))
