@@ -200,7 +200,15 @@ semantic_analysis::make_pack(const template_argument *elements, uint32_t count)
     a.count = count;
     if (!count)
         return a;
-    for (const template_argument &prior : canonical_packs) {
+    canonical_packs_by_key.update(
+        canonical_packs, [&](const template_argument &p) {
+            return instantiation_bucket(0, pack_arguments.data() + p.value,
+                                        p.count);
+        });
+    for (uint32_t k = canonical_packs_by_key.first(
+             instantiation_bucket(0, elements, count));
+         k; k = canonical_packs_by_key.after(k)) {
+        const template_argument &prior = canonical_packs[k - 1];
         if (prior.count != count)
             continue;
         bool same = true;

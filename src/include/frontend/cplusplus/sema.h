@@ -5927,6 +5927,40 @@ class semantic_analysis
                                                    bool negated,
                                                    entity_index scope = 0);
     owned_array<entity_index> dependent_values;
+    /* those of dependent_values whose value and name are these (and maybe
+       others of the hash's bucket), in order.  Neither changes once an
+       entity is among them */
+    record_chains dependent_values_by_key;
+    struct dependent_value_range {
+        const record_chains &chains;
+        const owned_array<entity_index> &values;
+        uint32_t head;
+        struct iterator {
+            const dependent_value_range &range;
+            uint32_t at;
+            entity_index operator*() const
+            {
+                return range.values[at - 1];
+            }
+            void operator++()
+            {
+                at = range.chains.after(at);
+            }
+            bool operator!=(const iterator &o) const
+            {
+                return at != o.at;
+            }
+        };
+        iterator begin() const
+        {
+            return {*this, head};
+        }
+        iterator end() const
+        {
+            return {*this, 0};
+        }
+    };
+    dependent_value_range dependent_values_like(uint64_t value, uint32_t name);
     bool written_type_arguments(SyntaxElement id,
                                 owned_array<qualified_type> &out);
     analysis_result substituted_parameter_type(uint32_t template_index,
@@ -6221,6 +6255,7 @@ class semantic_analysis
     /* Packs returned by make_pack, indexed separately from their elements:
        an overlapping element sequence may appear only after a pack exists. */
     owned_array<template_argument> canonical_packs;
+    record_chains canonical_packs_by_key;
     template_argument make_pack(const template_argument *elements,
                                 uint32_t count);
     bool deduce_argument(const template_argument &x, const template_argument &y,
