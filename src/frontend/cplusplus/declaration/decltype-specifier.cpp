@@ -525,7 +525,10 @@ void semantic_analysis::collect_written_bindings(
         }
         analysis_result r = analysis_result::well_formed;
         {
-            expansion_scope expanding_pattern(*this, !packs.empty(), 0, true);
+            bool ellipsis = is_operator(tokens[n.end_token() - 1],
+                                        preprocessing_op_or_punc::ELLIPSIS);
+            expansion_scope expanding_pattern(*this, !packs.empty() || ellipsis,
+                                              0, true);
             r = type_id(n, t);
         }
         for (size_t k = packs.size(); k-- > 0;)
