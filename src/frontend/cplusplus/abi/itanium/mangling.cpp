@@ -221,8 +221,15 @@ class itanium_mangler
     bool template_arg(entity_index c, uint32_t i, uint32_t element);
     bool template_arg_of(entity_index c, uint32_t i, uint32_t element);
     bool template_template_arg(entity_index t, uint32_t parameter);
+    /* (the <template-param>s written so far; an alias template's
+       specialization in a value-dependent argument was refused, and is to
+       be written as its type: parameter_type) */
+    uint64_t template_params_written = 0;
+    bool alias_value_refused = false, alias_value_trial = false;
+    bool parameter_type(entity_index c, uint32_t i, qualified_type declared);
     void template_param(uint64_t position)
     {
+        template_params_written++;
         text("T");
         if (position)
             number(position - 1);
@@ -2502,6 +2509,49 @@ bool itanium_mangler::class_template_args(entity_index c)
 }
 
 /*
+ * The type of non-type parameter i of the function template specialization
+ * c, declared with the dependent type declared.  [temp.alias]/2: an alias
+ * template's specialization is its type-id's type, so is_same<void,
+ * void_t<T>>::value depends on no parameter; [impl.clang] clang then writes
+ * the parameter's type in the specialization (enable_if_t<that, int>: i).
+ * Told apart by a second mangling with each such alias as its type: where
+ * that names no <template-param>, nothing else made the type dependent.
+ */
+bool itanium_mangler::parameter_type(entity_index c, uint32_t i,
+                                     qualified_type declared)
+{
+    size_t length = out->n;
+    owned_array<candidate> saved;
+    for (const candidate &x : candidates)
+        saved.append(x);
+    const char *before = refused;
+    alias_value_refused = false;
+    if (type(declared))
+        return true;
+    if (before || !alias_value_refused)
+        return false;
+    const char *why = refused, *where = refused_in;
+    refused = nullptr;
+    out->n = length;
+    candidates.clear();
+    uint64_t written = template_params_written;
+    alias_value_trial = true;
+    bool resolved = type(declared) && written == template_params_written;
+    alias_value_trial = false;
+    out->n = length;
+    candidates.clear();
+    for (const candidate &x : saved)
+        candidates.append(x);
+    if (!resolved) {
+        refused = why;
+        refused_in = where;
+        return false;
+    }
+    refused = nullptr;
+    return type(analysis.specialization_argument(c, i, 0));
+}
+
+/*
  * <template-args> of a template's specialization c.  [abi:mangle.template-arg]:
  *
  *     <template-arg> ::= <expr-primary>
@@ -2557,7 +2607,7 @@ bool itanium_mangler::template_args(entity_index c, entity_index function,
             text("Tn");
             const char *outer_part = mangling_part;
             mangling_part = "a non-type template parameter's type";
-            bool typed = type(declared);
+            bool typed = parameter_type(c, i, declared);
             mangling_part = outer_part;
             if (!typed)
                 return false;
@@ -3850,11 +3900,13 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
        there */
     if (r.kind == type_kind::dependent &&
         analysis.entity_table[r.entity].alias_expansion.unqualified()) {
-        if (dependent_value_depth)
+        if (dependent_value_depth && !alias_value_trial) {
+            alias_value_refused = true;
             return refuse("an alias template's specialization of dependent "
                           "arguments and a non-dependent type in a "
                           "value-dependent template argument (clang "
                           "evaluates it)");
+        }
         qualified_type x = analysis.entity_table[r.entity].alias_expansion;
         return type(qualified_type::make(x.unqualified(), x.cv() | t.cv()),
                     member_class);
