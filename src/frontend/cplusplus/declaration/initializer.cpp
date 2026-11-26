@@ -427,8 +427,9 @@ analysis_result semantic_analysis::narrowing(SyntaxRef at,
     expression_meaning converted = m;
     convert_arithmetic(converted, t);
     if (fundamental_type_is_floating(f) && fundamental_type_is_floating(t)) {
-        /* within the range: the conversion did not overflow */
-        narrows = converted.evaluation != constness::constant;
+        /* within the range: the conversion did not overflow (unknown is a
+           rounding a pragma may change, not an overflow) */
+        narrows = converted.evaluation == constness::not_constant;
         return analysis_result::well_formed;
     }
     if (fundamental_type_is_floating(t)) {

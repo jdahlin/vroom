@@ -392,11 +392,12 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
         return;
     if (from == fundamental_type::long_double ||
         to == fundamental_type::long_double ||
-        ((fundamental_type_is_floating(from) ||
-          fundamental_type_is_floating(to)) &&
+        (fundamental_type_is_floating(from) &&
+         fundamental_type_is_floating(to) &&
          tokens.files.floating_point_pragma)) {
         /* binary128: not evaluated here; nor a conversion whose rounding a
-           pragma may change */
+           pragma may change (to an integer it truncates whatever the mode;
+           from an integer: below) */
         m.evaluation = constness::unknown;
         return;
     }
@@ -429,6 +430,12 @@ void semantic_analysis::arithmetic_value(expression_meaning &m,
             else
                 f = static_cast<float>(static_cast<uint64_t>(v));
             d = f;
+        }
+        /* an inexact value depends on the rounding mode */
+        if (tokens.files.floating_point_pragma &&
+            static_cast<__int128>(d) != v) {
+            m.evaluation = constness::unknown;
+            return;
         }
         m.value = floating_kept(d);
         return;
