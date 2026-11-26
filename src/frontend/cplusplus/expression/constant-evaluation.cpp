@@ -1644,9 +1644,14 @@ constness semantic_analysis::evaluate_object(constant_evaluation &state,
             !e.constexpr_ &&
             (tk == type_kind::array ||
              (tk == type_kind::class_type &&
-              !empty_class(type_table[e.type.unqualified()].entity)))) {
+              ((state.member_call_object &&
+                !entity_table[type_table[e.type.unqualified()].entity]
+                     .lambda) ||
+               !empty_class(type_table[e.type.unqualified()].entity))))) {
             /* (an empty class's copy reads no value, [class.copy.ctor]/14:
-               its object is not designated here, the answer stays unknown) */
+               its object is designated only as a member call's object
+               expression, else the answer stays unknown; not a closure's,
+               whose generic call operator clang may find undefined) */
             constant_evaluation::object o;
             o.entity = x.a;
             o.opaque = true;
@@ -3789,8 +3794,11 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
         } else {
             uint32_t object = 0;
             uint32_t outer_reading = state.reading;
+            bool outer_call_object = state.member_call_object;
             state.reading = 0;
+            state.member_call_object = true;
             c = evaluate_object(state, object_expression, object);
+            state.member_call_object = outer_call_object;
             state.reading = outer_reading;
         }
         if (c != constness::constant)
@@ -3901,7 +3909,10 @@ constness semantic_analysis::evaluate_call(constant_evaluation &state,
        of the object expression */
     constant_value self;
     if (x.b) {
+        bool outer_call_object = state.member_call_object;
+        state.member_call_object = true;
         constness c = evaluate_node(state, x.b, self);
+        state.member_call_object = outer_call_object;
         if (c != constness::constant)
             return c;
         if (self.kind != constant_value_kind::pointer)

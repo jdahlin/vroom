@@ -4284,6 +4284,8 @@ class semantic_analysis
            constructed in place) or for a read: a union's member that is
            not active is made so, or is not constant */
         uint32_t writing = 0, reading = 0;
+        /* evaluate_object for the object expression of a member call */
+        bool member_call_object = false;
         /* [basic.life]/1, [expr.const]/5.8: the places whose initialization
            (a constructor's store of a member) is under way: an assignment
            to one from its own initializer is outside its lifetime */
