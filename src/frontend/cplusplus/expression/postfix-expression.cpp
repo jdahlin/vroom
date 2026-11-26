@@ -490,6 +490,19 @@ analysis_result semantic_analysis::postfix(SyntaxRef n, expression_meaning &m)
                 entity_kind::class_type)
             class_named = type_table[named].entity;
     }
+    if ((parenthesized || braced) && n[0].is(syntax_kind::decltype_specifier)) {
+        /* [dcl.type.simple]/1 with [expr.type.conv]/1: a decltype-specifier
+           is a simple-type-specifier, decltype(e)(args) of the type it
+           denotes ([dcl.type.decltype]/1) */
+        qualified_type denoted;
+        VTRY(r, decltype_type(n[0], denoted));
+        named = denoted.unqualified();
+        named_cv = denoted.cv();
+        if (type_table[named].kind == type_kind::class_type &&
+            entity_table[type_table[named].entity].kind ==
+                entity_kind::class_type)
+            class_named = type_table[named].entity;
+    }
     /* [expr.prim.id.qual] with [expr.type.conv]/1: Q::name(args) the parser
        kept as a qualified-id (a member of a specialization it does not
        instantiate) whose name lookup finds a type.  In an instantiation
