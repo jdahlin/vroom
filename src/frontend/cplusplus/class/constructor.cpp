@@ -3324,7 +3324,7 @@ void semantic_analysis::declare_implicit(entity_index c, special_member kind,
     f.implicit = true;
     f.linkage_of_name = entity_table[c].linkage_of_name;
     /* explicit X() = default */
-    f.explicit_ = kind == special_member::constructor && !copy &&
+    f.explicit_ = kind == special_member::constructor && !copy && !move &&
                   entity_table[c].explicit_default_constructor;
     if (kind == special_member::destructor) {
         entity_table[c].destructor = e;
