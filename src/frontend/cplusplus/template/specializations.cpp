@@ -505,14 +505,39 @@ semantic_analysis::explicit_instantiation(ExplicitInstantiation n)
     return analysis_result::well_formed;
 }
 
+size_t semantic_analysis::instantiation_bucket(entity_index t,
+                                               const template_argument *a,
+                                               uint32_t count)
+{
+    uint64_t h = t;
+    auto mix = [&](uint64_t v) {
+        h = (h ^ v) * 0x9E3779B97F4A7C15u;
+        h ^= h >> 29;
+    };
+    for (uint32_t i = 0; i < count; i++) {
+        mix(static_cast<uint64_t>(a[i].type.bits) << 8 |
+            static_cast<uint64_t>(a[i].kind));
+        mix(a[i].value);
+        mix(static_cast<uint64_t>(a[i].template_entity) << 32 | a[i].count);
+    }
+    return h >> 48;
+}
+
 uint32_t semantic_analysis::find_instantiation(entity_index t,
                                                const template_argument *a,
                                                uint32_t count) const
 {
-    const record_chains &chains = instantiations_of_templates();
-    for (uint32_t k = chains.first(t); k; k = chains.after(k)) {
+    instantiations_by_key.update(
+        instantiations, [&](const instantiation_record &x) {
+            return instantiation_bucket(
+                x.template_entity, template_arguments.data() + x.first_argument,
+                x.argument_count);
+        });
+    for (uint32_t k =
+             instantiations_by_key.first(instantiation_bucket(t, a, count));
+         k; k = instantiations_by_key.after(k)) {
         const instantiation_record &x = instantiations[k - 1];
-        if (x.argument_count != count)
+        if (x.template_entity != t || x.argument_count != count)
             continue;
         bool same = true;
         for (uint32_t i = 0; i < x.argument_count && same; i++)

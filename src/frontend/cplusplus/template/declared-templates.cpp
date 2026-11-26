@@ -876,17 +876,10 @@ bool semantic_analysis::template_id_name(SyntaxRef id, lookup_result &x,
 type_index semantic_analysis::dependent_specialization(
     entity_index t, const owned_array<template_argument> &arguments)
 {
-    const record_chains &chains = instantiations_of_templates();
-    for (uint32_t k = chains.first(t); k; k = chains.after(k)) {
-        const instantiation_record &x = instantiations[k - 1];
-        if (x.argument_count != arguments.size())
-            continue;
-        bool same = true;
-        for (uint32_t i = 0; i < x.argument_count && same; i++)
-            same = template_arguments[x.first_argument + i] == arguments[i];
-        if (same)
-            return entity_table[x.specialization].type.unqualified();
-    }
+    if (uint32_t k = find_instantiation(
+            t, arguments.data(), static_cast<uint32_t>(arguments.size())))
+        return entity_table[instantiations[k - 1].specialization]
+            .type.unqualified();
     instantiation_record record;
     record.template_entity = t;
     record.first_argument = static_cast<uint32_t>(template_arguments.size());

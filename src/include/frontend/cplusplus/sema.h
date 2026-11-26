@@ -6306,6 +6306,12 @@ class semantic_analysis
        arguments, plus one; 0 if there is none yet */
     uint32_t find_instantiation(entity_index t, const template_argument *a,
                                 uint32_t count) const;
+    /* instantiations in 64K buckets by a hash of template and arguments,
+       none of which changes once recorded */
+    mutable record_chains instantiations_by_key;
+    static size_t instantiation_bucket(entity_index t,
+                                       const template_argument *a,
+                                       uint32_t count);
     /* a new instantiation record of function template ft (its entity the
        template's) for the arguments, with a block scope in the template's
        enclosing scope binding the template-parameters' names to them
