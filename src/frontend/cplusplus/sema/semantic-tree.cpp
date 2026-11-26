@@ -141,7 +141,11 @@ void semantic_analysis::require_destructor_definition(qualified_type type)
 
 void semantic_analysis::mark_needed(entity_index function)
 {
-    if (needs_deferred_by && function != needs_deferred_by) {
+    if (needs_deferred_by) {
+        /* ([basic.def.odr]: a recursive function's use of itself in a
+           body nothing is known to use makes it no more used) */
+        if (function == needs_deferred_by)
+            return;
         deferred_need d;
         d.by = needs_deferred_by;
         d.needed = function;
