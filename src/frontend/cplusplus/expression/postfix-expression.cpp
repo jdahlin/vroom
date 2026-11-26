@@ -1405,10 +1405,17 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
            Y." */
         token_index t = adl_token;
         uint32_t name = adl_name;
+        owned_array<entity_index> declared;
+        collected_names = &declared;
         lookup_result x = lookup_unqualified(name, lookup_filter::any);
+        collected_names = nullptr;
+        /* [namespace.udir]/6: functions of several namespaces (nominated by
+           using-directives) are one overload set */
+        bool several = functions_of_several_namespaces(x, declared);
         /* ([lex.name]/3 reserves __builtin_x to the implementation: a
            builtin function, found by the call's analysis of the name) */
-        bool dependent = !x.ambiguous && !x.unknown && !builtin_spelled(name);
+        bool dependent =
+            several || (!x.ambiguous && !x.unknown && !builtin_spelled(name));
         if (x.entity) {
             const entity &fx = entity_table[x.entity];
             dependent = fx.kind == entity_kind::function &&
@@ -1425,13 +1432,25 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             owned_array<entity_index> set;
             if (x.entity)
                 set.append(x.entity);
-            if (!argument_dependent_lookup(name, types, set) || !x.entity)
+            if (several)
+                for (entity_index d : declared)
+                    set.append(d);
+            if (!argument_dependent_lookup(name, types, set) || set.empty() ||
+                (!x.entity && !several))
                 return not_supported_because(
                     n, "basic.lookup.argdep",
                     "argument-dependent lookup that failed or found nothing "
                     "for a name");
             for (entity_index e : set)
                 overload_set(e, found_by_adl);
+            if (several) {
+                overloaded_callee = t;
+                r = named_entity(t, set[0], f);
+                overloaded_callee = 0;
+                if (r != analysis_result::well_formed)
+                    return r;
+                looked_up = true;
+            }
         } else if (dependent) {
             owned_array<qualified_type> types;
             for (SyntaxElement a : arguments) {
@@ -1456,6 +1475,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
             owned_array<entity_index> set;
             if (x.entity)
                 set.append(x.entity);
+            if (several)
+                for (entity_index d : declared)
+                    set.append(d);
             owned_array<entity_index> held;
             if (!argument_dependent_lookup(name, types, set, 0, &held))
                 return not_supported_because(
@@ -1473,6 +1495,9 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
                 owned_array<template_argument> specified;
                 {
                     resolving_call scope(resolving_calls);
+                    if (several)
+                        for (entity_index d : declared)
+                            using_directive_functions.append(d);
                     VTRY_SET(r, template_call(n, t, found_template, specified,
                                               false, arguments, early, f));
                 }
@@ -2216,6 +2241,11 @@ analysis_result semantic_analysis::template_call(
     overloaded_written.clear();
     overloaded_written_expansion.clear();
     overloaded_written_at = 0;
+    /* the caller's, taken before the arguments are analysed */
+    owned_array<entity_index> directed;
+    for (entity_index d : using_directive_functions)
+        directed.append(d);
+    using_directive_functions.clear();
     owned_array<qualified_type> types;
     /* (arguments analysed already: a pack expansion's, call) */
     bool given = !early.empty();
@@ -2354,6 +2384,12 @@ analysis_result semantic_analysis::template_call(
     if (!template_id)
         for (entity_index held : adl_templates)
             inline_set_functions(held, functions);
+    /* [namespace.udir]/6: those of the other namespaces unqualified lookup
+       found */
+    if (!template_id)
+        for (entity_index d : directed)
+            for (entity_index o = d; o; o = entity_table[o].next_overload)
+                others.append(o);
     /* [basic.lookup.argdep]/3: the non-template functions argument-dependent
        lookup found are candidates too, every overload of each */
     if (!template_id)

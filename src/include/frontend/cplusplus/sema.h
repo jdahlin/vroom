@@ -2580,6 +2580,12 @@ class semantic_analysis
     /* when set, lookup_unqualified appends the declarations it finds in
        namespaces: the overload set of functions of several */
     owned_array<entity_index> *collected_names = nullptr;
+    bool functions_of_several_namespaces(
+        const lookup_result &found,
+        const owned_array<entity_index> &declared) const;
+    /* [namespace.udir]/6: template_call's further non-template candidates,
+       found in other namespaces than its template */
+    owned_array<entity_index> using_directive_functions;
     /* [namespace.qual]/2: the name looked up in the namespace n (0: the
        global namespace) */
     lookup_result lookup_in_namespace(entity_index n, uint32_t name,

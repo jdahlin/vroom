@@ -200,6 +200,25 @@ bool semantic_analysis::converts_to_lvalue_reference(entity_index c) const
     return false;
 }
 
+/* whether an unqualified lookup is unknown only because it found functions
+   of several namespaces (declared: what it collected) */
+bool semantic_analysis::functions_of_several_namespaces(
+    const lookup_result &found, const owned_array<entity_index> &declared) const
+{
+    if (!found.unknown || found.ambiguous || found.unknown_entity ||
+        declared.empty())
+        return false;
+    bool apart = false;
+    for (entity_index d : declared) {
+        if (entity_table[d].kind != entity_kind::function ||
+            !is_namespace(entity_table[d].enclosing))
+            return false;
+        apart = apart || entity_table[d].enclosing !=
+                             entity_table[declared[0]].enclosing;
+    }
+    return apart;
+}
+
 analysis_result semantic_analysis::overloaded_operator(
     SyntaxRef n, token_index at, preprocessing_op_or_punc op, bool postfix,
     const owned_array<SyntaxElement> &syntax,
@@ -519,17 +538,7 @@ analysis_result semantic_analysis::overloaded_operator(
         collected_names = nullptr;
         /* [namespace.udir]/6: functions of several namespaces are one
            overload set */
-        bool several = found.unknown && !found.ambiguous &&
-                       !found.unknown_entity && !declared.empty();
-        for (entity_index d : declared)
-            several = several &&
-                      entity_table[d].kind == entity_kind::function &&
-                      is_namespace(entity_table[d].enclosing);
-        bool apart = false;
-        for (entity_index d : declared)
-            apart = apart || entity_table[d].enclosing !=
-                                 entity_table[declared[0]].enclosing;
-        several = several && apart;
+        bool several = functions_of_several_namespaces(found, declared);
         /* [temp.over]/1: operator function templates by that name, whose
            specializations deduced from the operands are candidates too */
         owned_array<entity_index> held_names;
