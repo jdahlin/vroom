@@ -20,7 +20,7 @@ uint32_t c_lowering::store(ast_qualified_type t, qualified_type object_type,
 {
     /* [class.copy.elision]/1, [abi:calls]: a class passed by address is
        built where it ends up, a call's result too */
-    if (passed_indirectly(object_type) && ast_builder_node_is_call(c, value))
+    if (built_in_place(object_type) && ast_builder_node_is_call(c, value))
         return make(AST_NODE_CALL_INTO, void_type, object, value, 0, 0, 0);
     /* an empty class has no value: its byte may be another member's
        ([[no_unique_address]], an empty base) */
@@ -525,12 +525,19 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
     entity_index cls = record(bound.type).entity;
     if (record(bound.type).kind == type_kind::class_type &&
         (analysis.entity_table[cls].destructor ||
-         (passed_indirectly(bound.type) &&
-          bound.kind == semantic_kind::call))) {
+         (built_in_place(bound.type) && bound.kind == semantic_kind::call))) {
         /* [class.temporary]/4 and /6: a temporary with a destructor,
            destroyed by the full-expression or as the reference dies: the
            object construct() or call() made */
         uint32_t held = object(n.a);
+        if (!held)
+            return 0;
+        return address_of(held, pointer);
+    }
+    if (built_in_place(bound.type) && bound.kind == semantic_kind::construct &&
+        collecting) {
+        /* constructed in its temporary, never copied there */
+        uint32_t held = temporary_object(n.a);
         if (!held)
             return 0;
         return address_of(held, pointer);

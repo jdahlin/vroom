@@ -61,7 +61,7 @@ bool c_lowering::definition_body(entity_index e, uint32_t s, int variant)
     live.clear();
     named_return = 0;
     returned_in_place = qualified_type();
-    if (passed_indirectly(f.operand)) {
+    if (built_in_place(f.operand)) {
         returned_in_place = f.operand;
         /* (the inliners do not follow the result object) */
         ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_NOINLINE);

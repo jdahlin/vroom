@@ -114,7 +114,7 @@ void c_lowering::initialized_variable(const semantic_node &n,
                (node(n.b).kind != semantic_kind::construct &&
                 !(node(n.b).kind == semantic_kind::initializer_list &&
                   piecewise_initializer(n.b)) &&
-                !passed_indirectly(x.type)) ||
+                !built_in_place(x.type)) ||
                !x.automatic) {
         /* a block's object, whose destructor is called below */
         out.append(declaration(n));

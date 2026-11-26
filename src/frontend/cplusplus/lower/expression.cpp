@@ -188,7 +188,7 @@ uint32_t c_lowering::expression(uint32_t index)
             return constant(n);
         /* a class result returned by address that initializes no object:
            materialized ([class.temporary]/2) */
-        if (!at_result_object && !is_glvalue(n) && passed_indirectly(n.type))
+        if (!at_result_object && !is_glvalue(n) && built_in_place(n.type))
             return temporary_object(index);
         return call(n);
     case semantic_kind::subscript: {
