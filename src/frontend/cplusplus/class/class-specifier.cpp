@@ -327,8 +327,10 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
             n, "class.pre",
             "a class-head that does not start with a class-key");
     /* [class.pre]/1: "A class-specifier whose class-head omits the
-       class-head-name defines an unnamed class." */
-    bool unnamed = head_count == 1;
+       class-head-name defines an unnamed class."  It may have a
+       base-clause ([class.pre]/1's grammar: class-head: class-key
+       attribute-specifier-seq_opt base-clause_opt) */
+    bool unnamed = head_count == 1 || head_children[1].base_clause();
     /* class-head-name: nested-name-specifier_opt class-name */
     token_index head_name = 0;
     SyntaxRef head_qualifier = 0;
@@ -368,6 +370,8 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
     }
     bool is_final = false;
     uint32_t next = 2;
+    if (unnamed)
+        next = 1;
     if (!unnamed && head_count > next && head_children[next].is_identifier()) {
         owned_buffer spelling;
         tokens.spelling(head_children[next].token(), spelling.get());
@@ -377,13 +381,12 @@ analysis_result semantic_analysis::class_definition(SyntaxRef n,
         }
     }
     bool has_bases =
-        head_count == next + 1 && !unnamed && head_children[next].base_clause();
+        head_count == next + 1 && head_children[next].base_clause();
     if (head_count > next && !has_bases)
-        /* a class-virt-specifier, a base-clause of an unnamed class */
+        /* a class-virt-specifier */
         return not_supported_because(
             n, "class.derived",
-            "extra class-head parts, such as bases on an unnamed class or an "
-            "unhandled virt-specifier");
+            "extra class-head parts, such as an unhandled virt-specifier");
     standard_keyword key = head_children[0].keyword();
     if (!is_class_key(key))
         return not_supported_because(
