@@ -268,8 +268,12 @@ analysis_result semantic_analysis::member_access(token_index at, entity_index e,
         address.evaluation = constness::not_constant;
         address.node =
             expression_node(semantic_kind::address, address, at, m.node);
+        for (entity_index fn = e; fn; fn = entity_table[fn].next_overload)
+            if (contains_placeholder(
+                    type_table[entity_table[fn].type.unqualified()].operand))
+                deduce_member_body_now(fn);
         expression_meaning result;
-        result.type = x.type;
+        result.type = entity_table[e].type;
         result.category = value_category::prvalue;
         result.evaluation = constness::not_constant;
         result.node = expression_node(semantic_kind::bound_member_function,
