@@ -650,9 +650,12 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
                                          "delete is deleted or not public");
     }
     /* the key function is among all the class's virtual functions,
-       overriders too, in declaration order */
+       overriders too, in declaration order.  A local class has none: its
+       members are defined in it or nowhere ([class.local]), and its
+       virtual table and type information are this translation unit's */
+    bool local = local_class_rule(c) != nullptr;
     for (const declared_virtual &v : declared_virtuals)
-        if (v.c == c && !d.key_function && !entity_table[v.f].pure &&
+        if (v.c == c && !local && !d.key_function && !entity_table[v.f].pure &&
             !entity_table[v.f].inline_)
             d.key_function = v.f;
     for (uint32_t k = d.first_slot; k < vtable_slots.size(); k++)
