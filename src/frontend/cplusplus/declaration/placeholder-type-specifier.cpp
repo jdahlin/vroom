@@ -641,8 +641,8 @@ bool semantic_analysis::deduce_member_body_now(entity_index e)
     }
     for (size_t i = 0; i < postponed_bodies.size(); i++) {
         postponed_body &b = postponed_bodies[i];
-        if (!b.c || b.c != entity_table[e].enclosing ||
-            !declared_by(e, b.body.function_definition()))
+        if (!b.c ||
+            (b.function != e && !declared_by(e, b.body.function_definition())))
             continue;
         const postponed_body taken = b;
         b.c = 0;
@@ -667,14 +667,17 @@ bool semantic_analysis::deduce_member_body_now(entity_index e)
 analysis_result semantic_analysis::undeduced_use(token_index t, entity_index e)
 {
     const entity &x = entity_table[e];
-    bool undeduced = false;
-    if (x.kind == entity_kind::variable)
-        undeduced = e == deducing_variable;
-    else if (x.kind == entity_kind::function)
-        undeduced = !x.defined ||
-                    (function_state.active && function_state.function == e);
-    if (!undeduced && deduce_member_body_now(e))
+    if (x.kind == entity_kind::function &&
+        !(function_state.active && function_state.function == e) &&
+        deduce_member_body_now(e))
         return analysis_result::well_formed;
+    const entity &x2 = entity_table[e];
+    bool undeduced = false;
+    if (x2.kind == entity_kind::variable)
+        undeduced = e == deducing_variable;
+    else if (x2.kind == entity_kind::function)
+        undeduced = !x2.defined ||
+                    (function_state.active && function_state.function == e);
     if (!undeduced) {
         const entity &after = entity_table[e];
         if (after.kind == entity_kind::variable)
