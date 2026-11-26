@@ -12,6 +12,7 @@
  * parameters to the arguments, and its returns go to a label (wkinl); the prepass (prepass.c) says
  * whether a function may be inlined.
  */
+#include "common/vector.h"
 #include "common/literal.h"
 #include "walk.h"
 
@@ -701,8 +702,11 @@ static void walk_vla_scan(codegen_context *e, uint32_t n, uint32_t *top)
             W->vla_zero_generations[x->a] = W->generation;
         }
         if (y->kind == AST_SYMBOL_VARIABLE &&
-            codegen_symbol_attributes(c, x->a)->cleanup &&
-            W->cleanup_node_count + 1 < WALK_CLEANUP_MAX) {
+            codegen_symbol_attributes(c, x->a)->cleanup) {
+            /* (every one: one left out would not be run by a goto or
+               an unwind) */
+            VVECTOR_NEED(W->cleanup_nodes, W->cleanup_node_count,
+                         W->cleanup_node_capacity, 2);
             W->cleanup_node_count++;
             W->cleanup_nodes[W->cleanup_node_count].symbol = x->a;
             W->cleanup_nodes[W->cleanup_node_count].parent = *top;
@@ -2245,7 +2249,7 @@ VPRIV void walk_function_emit(codegen_context *e, uint32_t s)
     /* exceptions: a function with cleanup variables gets an exception table (every call's bounds, the
 	   landing pads that run the cleanups live there): x86-64's direct emitter, and VIR's invokes and
 	   landing pads (codegen/vir/exceptions.cpp) */
-    W->eh_nsites = W->eh_marks = 0, W->eh_in_pads = W->eh_overflow = 0;
+    W->eh_nsites = W->eh_marks = 0, W->eh_in_pads = 0;
     memset(&W->eh_lsda, 0, sizeof W->eh_lsda);
     W->eh_vir = 0;
     W->eh_cleanup_limit = INT32_MAX;

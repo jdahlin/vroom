@@ -290,7 +290,20 @@ uint32_t c_lowering::assignment(const semantic_node &n)
         ast_qualified_type pointer = pointer_to(t);
         return dereference(comma(pointer, made, address_of(a, pointer)), t);
     }
-    if (node(n.b).kind == semantic_kind::initializer_list)
+    const semantic_node &right = node(n.b);
+    bool destroyed =
+        !n.c && !is_glvalue(right) &&
+        record(right.type).kind == type_kind::class_type &&
+        analysis.entity_table[record(right.type).entity].destructor &&
+        (right.kind == semantic_kind::initializer_list ||
+         right.kind == semantic_kind::zero ||
+         right.kind == semantic_kind::conditional);
+    if (destroyed)
+        /* [class.temporary]/2, /4: the prvalue a built-in assignment reads
+           is a temporary, destroyed at the end of the full-expression (a
+           call's and a constructor's are made so where they are lowered) */
+        b = temporary_object(n.b);
+    else if (node(n.b).kind == semantic_kind::initializer_list)
         /* [dcl.init.list]/3.4: a member's braced default member
            initializer ([class.base.init]/9.1): its object, copied in */
         b = compound_literal(n.b);

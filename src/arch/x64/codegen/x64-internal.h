@@ -354,6 +354,7 @@ static inline bool x64w_helpers(const codegen_context *e)
 }
 
 /* eh.cpp: C++ exceptions' landing pads and table */
+VPRIV uint32_t x64_eh_site_new(walk_state *W);
 VPRIV bool x64_eh_wanted(codegen_context *e);
 VPRIV void x64_eh_table(codegen_context *e, tbuf *b, uint32_t s);
 

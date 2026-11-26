@@ -1905,6 +1905,10 @@ class semantic_analysis
         entity_index entity = 0;
     };
     owned_array<definition_record> definitions;
+    /* the static data members a constexpr declaration at namespace scope
+       defines or redeclares ([depr.static.constexpr]/1): emitted weak,
+       whether used or not */
+    owned_array<entity_index> weak_static_members;
     /* the non-static data members of the classes (entity::first_member) */
     owned_array<entity_index> class_members;
     /* the direct base class subobjects of the classes (entity::first_base) */
@@ -2044,6 +2048,7 @@ class semantic_analysis
     constness literal_class(entity_index c) const;
     /* [special]: which special member functions are trivial
        (class/triviality.cpp) */
+    bool bases_construct_nothing(entity_index c) const;
     bool trivial_defaulted_default_constructor(entity_index c) const;
     bool trivial_default_constructor(entity_index c, bool &known) const;
     bool trivial_copy_constructor(entity_index c) const;
@@ -4989,11 +4994,23 @@ class semantic_analysis
     /* [class.union.anon]/1: the default member initializers of an anonymous
        union's (or anonymous struct's) members, run in the constructor of the
        enclosing class as clang does (the unnamed class has no constructor of
-       its own): a block of them, nested anonymous classes included */
+       its own): a block of them, nested anonymous classes included.  A
+       member a mem-initializer designates gets that initialization in place
+       of its default one */
+    struct designated_initialization {
+        entity_index member;
+        uint32_t statement;
+    };
+    analysis_result default_array_initialization(token_index at, entity_index m,
+                                                 uint32_t &statement);
+    bool member_designated(
+        entity_index m,
+        const owned_array<designated_initialization> &designated) const;
     bool variant_initialized(entity_index m) const;
-    analysis_result anonymous_member_initializers(token_index at,
-                                                  entity_index anonymous,
-                                                  uint32_t &statement);
+    analysis_result anonymous_member_initializers(
+        token_index at, entity_index anonymous,
+        const owned_array<designated_initialization> &designated,
+        uint32_t &statement);
     analysis_result default_member_initializer(token_index at, entity_index e,
                                                uint32_t &statement);
     /* the subobject e (a base or a non-static data member) of *this */
@@ -5587,6 +5604,9 @@ class semantic_analysis
        instantiations nest ([temp.inst]/16) */
     uint32_t instantiating = 0;
     unsigned instantiation_depth = 0;
+    /* how deep the substitution of function template signatures nests
+       ([temp.inst]/17: a trailing-return-type naming the template again) */
+    unsigned signature_depth = 0;
     /* how deep overloaded operators nest in their own candidates' analysis
        (a default template argument whose expression uses the operator:
        [temp.deduct]/7, [implimits] bounds it) */
@@ -7070,6 +7090,9 @@ class semantic_analysis
         uint32_t count = 0;
     };
     owned_array<class_matching> class_matchings;
+    /* the concept-ids whose satisfaction is being decided
+       ([temp.constr.atomic]/3), the concept where class_template is */
+    owned_array<class_matching> concepts_in_progress;
     struct class_matching_scope {
         owned_array<class_matching> &list;
         class_matching_scope(owned_array<class_matching> &l, uint32_t t,

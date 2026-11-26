@@ -61,6 +61,14 @@ semantic_analysis::instantiate(SyntaxRef at, entity_index template_entity,
     if (prior)
         index = prior - 1;
     if (!prior) {
+        /* [temp.inst]/17: the limit on the total depth of recursive
+           instantiations, here of declarations ([implimits]/2), each
+           level C++ stack frames of analysis */
+        if (signature_depth >= 256)
+            return not_supported_because(
+                at, "temp.inst",
+                "function template declarations instantiated 256 deep");
+        scoped_value<unsigned> deeper(signature_depth, signature_depth + 1);
         index = record_instantiation(ft, arguments, count);
         /* the declaration: the declarator, where its types are the
            arguments' */

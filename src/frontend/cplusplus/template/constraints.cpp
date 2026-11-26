@@ -304,6 +304,24 @@ analysis_result semantic_analysis::concept_satisfied(
             return analysis_result::well_formed;
         }
     }
+    /* [temp.constr.atomic]/3: "If, during the evaluation of an atomic
+       constraint, its evaluation requires the evaluation of itself, the
+       program is ill-formed" */
+    for (const class_matching &m : concepts_in_progress) {
+        if (m.class_template != ct || m.count != arguments.size())
+            continue;
+        bool same = true;
+        for (uint32_t i = 0; i < m.count && same; i++)
+            same = m.arguments[i] == arguments[i];
+        if (same)
+            return ill_formed(at,
+                              "satisfaction of the constraint depends on "
+                              "itself",
+                              "temp.constr.atomic");
+    }
+    class_matching_scope in_progress(concepts_in_progress, ct,
+                                     arguments.begin(),
+                                     static_cast<uint32_t>(arguments.size()));
     const function_template c = function_templates[ct - 1];
     entity_index scope = entity_table.make(entity_kind::block_scope, 0,
                                            entity_table[c.entity].enclosing);

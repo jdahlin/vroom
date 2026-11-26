@@ -49,6 +49,12 @@ void c_lowering::symbol_linkage(entity_index e, int &storage,
         /* (an inline gnu_inline function is not emitted at all: a plain
            global symbol, C's GNU extern inline, gnu_attributes) */
         flags |= AST_SYMBOL_FLAG_LINKONCE | AST_SYMBOL_FLAG_WEAK;
+    /* [depr.static.constexpr]/1, [dcl.constexpr]/1 [impl.clang]: an inline
+       member's redeclaration at namespace scope, and a definition there
+       that adds constexpr, emitted here, weak (weak_odr) */
+    for (entity_index member : analysis.weak_static_members)
+        if (member == e)
+            flags = AST_SYMBOL_FLAG_GLOBAL | AST_SYMBOL_FLAG_WEAK;
     /* [class.local]: a member of a local class has no linkage
        ([basic.link]/8); [impl.clang] its symbol is local unless the
        outermost function the class is in is inline or templated (then

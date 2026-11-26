@@ -1767,12 +1767,17 @@ analysis_result semantic_analysis::declare_with_initializer(
         declared_entity =
             entity_table.find(m.qualifier, tokens.identifier(m.id));
         entity_table.add_declaration(declared_entity, declaration);
+        weak_static_members.append(declared_entity);
         current_scope = m.qualifier;
     } else if (m.qualifier) {
         r = static_member_definition(declaration, m.id, m.qualifier, type, s,
                                      definition, declared_entity);
         if (r == analysis_result::well_formed)
             current_scope = m.qualifier;
+        if (r == analysis_result::well_formed && s.constexpr_ && !s.inline_ &&
+            kind == entity_kind::variable &&
+            tokens.files.behavior.edition >= standard_edition::cplusplus_17)
+            weak_static_members.append(declared_entity);
     } else {
         qualified_declarator = m.qualified_namespace;
         qualified_scope = m.namespace_qualifier;

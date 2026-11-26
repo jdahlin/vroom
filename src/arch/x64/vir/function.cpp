@@ -337,15 +337,19 @@ VPRIV bool x64_vir_function_lower(codegen_context *e, uint32_t sym,
         W->eh_nsites = W->eh_marks = W->eh_term = 0;
         W->eh_vir = 1;
         memset(&W->eh_lsda, 0, sizeof W->eh_lsda);
-        W->eh_overflow = W->eh_in_pads = 0;
+        W->eh_in_pads = 0;
         W->eh_fn = (f->flags & VIR_FUNCTION_FLAG_EH) != 0;
         if (W->eh_fn && f->block_count + 1 >= WALK_CLEANUP_MAX) {
             *why = VIRBUILD_FAILURE(exceptions_lowering);
             e->vir_try = false;
             return false;
         }
-        if (W->eh_fn)
+        if (W->eh_fn) {
+            W->eh_pad = (uint32_t *)vvector_reserve(
+                W->eh_pad, &W->eh_pad_capacity, f->block_count + 1,
+                sizeof *W->eh_pad);
             memset(W->eh_pad, 0, (f->block_count + 1) * sizeof *W->eh_pad);
+        }
     }
     if (VIR_GROUP_KIND(f->extra[f->signature + 1]) == VIR_GROUP_SRET) {
         L.result_pointer_slot = walk_slot_temporary(e, 8, 8);

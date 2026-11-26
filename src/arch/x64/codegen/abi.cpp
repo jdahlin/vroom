@@ -739,10 +739,8 @@ VPRIV codegen_value x64_call(codegen_context *e, uint32_t ref,
         EW &&
         EW->eh_fn; /* (a landing pad's calls too, no pad of their own: an address the table lacks terminates) */
 
-    if (eh && EW->eh_nsites == WALK_EH_SITES)
-        EW->eh_overflow = 1, eh = false;
     if (eh) {
-        uint32_t k = EW->eh_nsites++;
+        uint32_t k = x64_eh_site_new(EW);
 
         EW->eh_sites[k].begin = ++EW->eh_marks;
         EW->eh_sites[k].node = walk_eh_call_node(e);

@@ -53,7 +53,6 @@ typedef struct walk_loop {
     int cleanup_depth;
 } walk_loop; /* cdepth: the cleanups live at its entry */
 #define WALK_CLEANUP_MAX 1024
-#define WALK_EH_SITES 4096
 typedef struct walk_case {
     i128 low, high;
     uint32_t node;
@@ -141,15 +140,18 @@ typedef struct walk_state {
 	   enclosing it; per sym its node, per user label the innermost node in scope there */
     struct {
         uint32_t symbol, parent;
-    } cleanup_nodes[WALK_CLEANUP_MAX];
-    uint32_t cleanup_node_count;
+    } *cleanup_nodes; /* grown by the scan (one per declaration: no limit) */
+    uint32_t cleanup_node_count, cleanup_node_capacity;
     /* C++ exceptions (options->eh, x86-64): each call's bounds and the innermost cleanup node live there (0: none),
 	   marks .Lvcceh<fn>_<n> (X64_OP_EHMARK); the landing pads' marks per node; eh_fn: this function has a table */
-    struct {
+    struct walk_eh_site {
         uint32_t begin, end, node;
-    } eh_sites[WALK_EH_SITES];
-    uint32_t eh_nsites, eh_marks, eh_term, eh_pad[WALK_CLEANUP_MAX];
-    uint8_t eh_fn, eh_in_pads, eh_overflow;
+    } *eh_sites; /* grown by walk_eh_site_new: every call of a function with a table has one */
+    uint32_t eh_site_capacity;
+    uint32_t eh_nsites, eh_marks, eh_term,
+        *eh_pad; /* per node (VIR: per block) */
+    uint32_t eh_pad_capacity;
+    uint8_t eh_fn, eh_in_pads;
     uint32_t eh_action
         [WALK_CLEANUP_MAX]; /* VIR's lowering: per landing pad node, its call site action (eh_vir) */
     uint8_t eh_vir;
