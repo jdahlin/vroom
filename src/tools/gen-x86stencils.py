@@ -57,7 +57,8 @@ VECTOR_BYTES = {8: '3', 16: '4', 32: '5', 64: '6'}
 # clang 23 folds a memory operand into these with the wrong operand order
 # (a*c+b for a*b+c): their operands are read as volatile, which keeps them in
 # registers
-UNFOLDED = {'__builtin_ia32_vfmaddsd3_maskz', '__builtin_ia32_vfmaddss3_maskz'}
+UNFOLDED = {'__builtin_ia32_vfmaddsd3_maskz', '__builtin_ia32_vfmaddss3_maskz',
+            '__builtin_ia32_vfmaddsh3_maskz'}
 
 
 class Skip(Exception):

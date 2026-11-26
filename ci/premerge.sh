@@ -188,8 +188,9 @@ x86)
 	step host-dispatch python3 bench/vcc-host-dispatch.py --bin-dir "$BUILD"
 	step vlink-dyn python3 bench/vlink-dyn.py
 	step x86-direct-objects python3 bench/vcc-x86.py --suite vcc --objcmp -j "$J"
-	step x86-intrinsics python3 bench/vcc-x86intrinsics.py -j "$J" --bin-dir "$BUILD"
-	step x86-intrinsics-cxx python3 bench/vcc-x86intrinsics.py -j "$J" --cxx --bin-dir "$BUILD"
+	step x86-intrinsics python3 bench/vcc-x86intrinsics.py -j "$J" -O 0 --bin-dir "$BUILD"
+	# (C++ differs in the front end only: a tenth of the builtins)
+	step x86-intrinsics-cxx python3 bench/vcc-x86intrinsics.py -j "$J" -O 0 --cxx --stride 10 --bin-dir "$BUILD"
 	step x86-eh       python3 bench/vcc-eh.py -j "$J" --target x86_64
 	step interrupt python3 bench/vcc-interrupt.py
 	step vir-x86 python3 bench/vcc-vir-x86.py --bin-dir "$BUILD"

@@ -11,7 +11,8 @@ One program per builtin, generated from its row's signature: the builtin is
 called on each operand set (controls 0 to 3) and the results' bytes hashed.
 A new row needs no new test code.
 
-  bench/vcc-x86intrinsics.py [-j N] [-O 02] [--cxx] [--bin-dir DIR] [-v] [PAT]
+  bench/vcc-x86intrinsics.py [-j N] [-O 02] [--cxx] [--stride N]
+                            [--bin-dir DIR] [-v] [PAT]
 """
 import argparse
 import concurrent.futures
@@ -258,7 +259,13 @@ def stencil_program(name, signature, mask, keys):
             calls.append('    { %s\n      %s r = %s;\n      '
                          'add(&r, sizeof r); }\n'
                          % (' '.join(declarations), result[1], call))
-    return (STENCIL_PRELUDE + vector_typedefs() + 'static __attribute__((noinline)) void one(void)'
+    prelude = STENCIL_PRELUDE
+    if HALF.search(name):
+        # (bit 14 of every 16 clear: no half is a NaN or an infinity)
+        prelude = prelude.replace(
+            '        if (i < 6 * 64)',
+            '        r &= 0xbfffbfffbfffbfffull;\n        if (i < 6 * 64)')
+    return (prelude + vector_typedefs() + 'static __attribute__((noinline)) void one(void)'
             '\n{\n' + ''.join(calls) + '    add(memory, sizeof memory);\n}\n\n'
             'int main(void)\n{\n'
             '    for (int round = 0; round < 48; round++) {\n'
@@ -314,7 +321,10 @@ static void fill(int round)
 
 
 # processor state is in their results: only compiled
-STATE = re.compile(r'^__builtin_ia32_(readeflags|rdpid|xsave)')
+STATE = re.compile(r'^__builtin_ia32_(readeflags|rdpid|xsave|fxsave)')
+# half-precision arithmetic: which NaN of two operands comes out depends on
+# the instruction form the compiler picked, so their inputs hold none
+HALF = re.compile(r'(ph|sh)(\d+)?(_mask\w*|_round\w*)?$')
 
 
 def check_stencil(row, vpp, levels, directory, language):
@@ -408,6 +418,8 @@ def main():
                     os.path.join(R, 'build', 'linux', 'src'))
     ap.add_argument('--cxx', action='store_true',
                     help="vpp compiles the programs as C++")
+    ap.add_argument('--stride', type=int, default=1,
+                    help='every Nth builtin only (a quick pass)')
     ap.add_argument('-v', action='store_true')
     ap.add_argument('pattern', nargs='?', default='')
     a = ap.parse_args()
@@ -421,6 +433,7 @@ def main():
     with open('/proc/cpuinfo') as f:
         if 'sha_ni' not in f.read():
             rows = [r for r in rows if r[4] != 'sha']
+    rows = rows[::a.stride]
     vpp = os.path.join(a.bin_dir, 'vpp')
     language = 'c'
     if a.cxx:
@@ -437,6 +450,7 @@ def main():
                     print('ok  ', name)
         compiled = []
         stencils = [r for r in stencil_rows(a.bin_dir) if a.pattern in r[0]]
+        stencils = stencils[::a.stride]
         with concurrent.futures.ThreadPoolExecutor(a.j) as pool:
             for name, error, runs in pool.map(
                     lambda r: check_stencil(r, vpp,
