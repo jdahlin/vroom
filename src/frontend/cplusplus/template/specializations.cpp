@@ -927,7 +927,8 @@ analysis_result semantic_analysis::named_specialization(
     uint32_t symbol_flags = 0;
     token_index symbol_abi_tag = 0;
     if (specialization) {
-        symbol_flags = (s.gnu_flags | m.gnu_flags) & gnu_function_symbol_flags;
+        symbol_flags = (s.gnu_flags | m.gnu_flags) &
+                       (gnu_function_symbol_flags | gnu_inline_flags);
         symbol_abi_tag = s.abi_tag;
         if (m.abi_tag)
             symbol_abi_tag = m.abi_tag;
