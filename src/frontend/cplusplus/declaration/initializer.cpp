@@ -1627,7 +1627,8 @@ analysis_result semantic_analysis::initializer(SyntaxElement init,
                    expression-list as its arguments */
                 if (entity_table[target.entity].kind !=
                         entity_kind::class_type ||
-                    !entity_table[target.entity].first_constructor)
+                    (!entity_table[target.entity].first_constructor &&
+                     !entity_table[target.entity].constructor_templates))
                     return not_supported_because(
                         init, "dcl.init",
                         "several arguments for a class without constructors");
