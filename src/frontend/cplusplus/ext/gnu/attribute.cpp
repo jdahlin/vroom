@@ -388,6 +388,13 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
     /* clang's swift_attr("..."): an annotation for Swift's importer (the
        SDK's __swift_nonisolated_unsafe) */
     {"swift_attr", 0},
+    /* clang's overloadable, pass_object_size and pass_dynamic_object_size
+       (glibc _FORTIFY_SOURCE=2): overloadable allows C overloading (no-op in
+       C++); pass_[dynamic_]object_size passes hidden object-size info for
+       __builtin_object_size (no-op without fortify lowering) */
+    {"overloadable", 0},
+    {"pass_object_size", 0},
+    {"pass_dynamic_object_size", 0},
     /* clang's diagnose_if(condition, message, "warning" | "error"): a
        diagnostic at a call where the condition holds (libc++'s
        _LIBCPP_DIAGNOSE_WARNING and _LIBCPP_CHECK_*_MEMORY_ORDER), analysed
