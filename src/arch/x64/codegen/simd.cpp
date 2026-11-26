@@ -1313,3 +1313,24 @@ VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
         }
     return false;
 }
+
+VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n)
+{
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    if (x->aux != CC_BUILTIN_X86_STENCIL || x->c < 2)
+        return 0;
+    unsigned row = (unsigned)c->ipool[N(c->lists[x->b + x->c - 1])->a];
+    const char *name = x64_stencil_name(row);
+    uint32_t fn = e->walk_state->function_symbol;
+    if (e->walk_state->inline_call)
+        fn = e->walk_state->inline_call->function;
+    if (!x86_feature_has(cc_x86_features_get(c, fn), X86_FEATURE_AVX2))
+        return 0;
+    if (!strcmp(name, "ia32_movmskps256"))
+        return 1;
+    if (!strcmp(name, "ia32_permvarsi256") ||
+        !strcmp(name, "ia32_permvarsf256"))
+        return 2;
+    return 0;
+}

@@ -892,6 +892,33 @@ VPRIV codegen_value virbuild_x86_instruction(codegen_context *e, uint32_t n)
     uint32_t code = 0;
     unsigned operands = 0;
 
+    int crossing = 0;
+    if (CODEGEN_IS_X64(c))
+        crossing = x64_x86_crossing_builtin(e, n);
+    if (crossing) {
+        const uint32_t *argument = &c->lists[x->b];
+        codegen_value v = walk_value_emit(e, argument[0]);
+        int ra = walk_value_to_register(e, &v);
+        if (crossing == 1) {
+            int result = WALK_LOWER(treg)(e);
+            virbuild_register_write(e, result,
+                                    virbuild_vector_sign_bits(e, ra));
+            WALK_LOWER(tfree)(e, ra);
+            return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                               .register_number = (uint8_t)result);
+        }
+        codegen_value w = walk_value_emit(e, argument[1]);
+        int rb = walk_value_to_register(e, &w);
+        codegen_lvalue out = {.kind = CODEGEN_LVALUE_FRAME,
+                              .align = 16,
+                              .offset = walk_slot_temporary(e, 32, 16)};
+        virbuild_vector_permute(e, ra, rb, &out);
+        WALK_LOWER(tfree)(e, ra);
+        WALK_LOWER(tfree)(e, rb);
+        return VCC_LITERAL(codegen_value, .kind = CODEGEN_VALUE_REGISTER,
+                           .register_number =
+                               (uint8_t)WALK_LOWER(laddr)(e, &out));
+    }
     bool count = false;
     if (CODEGEN_IS_X64(c) && codegen_type_is_vector(c, x->ty) &&
         codegen_type_size(c, x->ty) == 32 &&

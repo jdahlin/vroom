@@ -435,6 +435,76 @@ VPRIV void virbuild_vector_scalar(codegen_context *e, uint32_t op,
     virbuild_vector_result(e, op, code, vt, lane, x, y, d);
 }
 
+/* the address `at` bytes (a value) past the address in register r */
+static uint32_t virbuild_address_plus(codegen_context *e, int r, uint32_t at)
+{
+    uint32_t a = virbuild_register_read(e, r, VIR_TYPE_PTR);
+
+    return virbuild_insn_append(e, VIR_OP_PTRADD, VIR_TYPE_PTR, 0, a, at, 0);
+}
+
+static uint32_t virbuild_dword_load(codegen_context *e, int r, uint32_t at)
+{
+    return virbuild_insn_append(e, VIR_OP_LOAD, VIR_TYPE_I32,
+                                virbuild_memory_flags_make(4, 4, false),
+                                virbuild_address_plus(e, r, at), 0, 0);
+}
+
+static uint32_t virbuild_integer(codegen_context *e, uint32_t type, int64_t k)
+{
+    return virbuild_constant_integer(e, type, k);
+}
+
+/* movmskps of eight lanes at ra: the sign bit of lane i as bit i */
+VPRIV uint32_t virbuild_vector_sign_bits(codegen_context *e, int ra)
+{
+    uint32_t bits = virbuild_integer(e, VIR_TYPE_I32, 0);
+
+    for (int i = 0; i < 8; i++) {
+        uint32_t lane = virbuild_dword_load(
+            e, ra, virbuild_integer(e, VIR_TYPE_I64, 4 * i));
+        uint32_t sign =
+            virbuild_insn_append(e, VIR_OP_LSHR, VIR_TYPE_I32, 0, lane,
+                                 virbuild_integer(e, VIR_TYPE_I32, 31), 0);
+        uint32_t placed =
+            virbuild_insn_append(e, VIR_OP_SHL, VIR_TYPE_I32, 0, sign,
+                                 virbuild_integer(e, VIR_TYPE_I32, i), 0);
+        bits = virbuild_insn_append(e, VIR_OP_OR, VIR_TYPE_I32, 0, bits, placed,
+                                    0);
+    }
+    return bits;
+}
+
+/* vpermd: lane i of d is the lane of ra that lane i of rb numbers */
+VPRIV void virbuild_vector_permute(codegen_context *e, int ra, int rb,
+                                   const codegen_lvalue *d)
+{
+    virbuild_context *V = e->vir_builder;
+    uint32_t flags = virbuild_memory_flags_make(4, 4, false);
+
+    for (int i = 0; i < 8; i++) {
+        uint32_t index = virbuild_dword_load(
+            e, rb, virbuild_integer(e, VIR_TYPE_I64, 4 * i));
+        index = virbuild_insn_append(e, VIR_OP_AND, VIR_TYPE_I32, 0, index,
+                                     virbuild_integer(e, VIR_TYPE_I32, 7), 0);
+        index = virbuild_insn_append(e, VIR_OP_SHL, VIR_TYPE_I32, 0, index,
+                                     virbuild_integer(e, VIR_TYPE_I32, 2), 0);
+        uint32_t value = virbuild_dword_load(
+            e, ra,
+            virbuild_insn_append(e, VIR_OP_EXT, VIR_TYPE_I64, 2, index, 0, 0));
+        codegen_lvalue to = *d;
+        to.offset += 4 * i;
+        uint32_t slot;
+        int64_t rel;
+        uint32_t at = virbuild_address_make(e, &to, 4, &slot, &rel);
+        if (slot != VIRBUILD_BLOCK_NONE)
+            V->slots[slot].exposed = 1;
+        virbuild_insn_append(e, VIR_OP_STORE, VIR_TYPE_VOID, flags, at, value,
+                             0);
+    }
+    virbuild_store_table_clear(e, true);
+}
+
 VPRIV int virbuild_laddr(codegen_context *e, const codegen_lvalue *l)
 {
     virbuild_context *V = e->vir_builder;

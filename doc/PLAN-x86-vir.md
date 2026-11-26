@@ -128,14 +128,16 @@ deleted in the commit that gives it a table row or a generic operation.
   `maddubs`, `madd`, min, max, compare, `permutevar8x32`, `movemask`,
   extract, loads and stores).  Gate: Stockfish AVX2, node count as clang's,
   nodes/second reported.
-  - XV3b (tried first, chosen over real 256-bit types): a 32-byte lane
+  - XV3b (chosen over real 256-bit types, as a first step): a 32-byte lane
     operator and the AVX2 builtins that work on each half alone are two SSE
-    operations.  Correct, but no gain: Stockfish AVX2 stays at about 50600
-    nodes/second, and its 23 TUs compile in 31 s CPU instead of 19 s (cause
-    not examined).  Its hot functions still leave VIR for other reasons:
-    frame slots aligned to 32 (`x64_slot_size`, the x86-64 lowering takes up
-    to 16), 32-byte vector parameters and results
-    (`record_argument_or_result`), `movmskps256`, `permvarsi256`.
+    operations; `movmskps256` and `vpermd` are scalar operations; frames with
+    objects aligned to 32 or 64 are realigned by the x86-64 lowering.
+    Stockfish AVX2, depth 13: 50600 to 91800 nodes/second (clang++ 1990000;
+    SSE2 by vcc: 119900).
+  - Left: 32-byte vector parameters and results leave VIR
+    (`record_argument_or_result`, 6 functions of `nnue/network.cpp`, the
+    dot-product helper and the `propagate`s among them); real 256-bit
+    operations.
 - **XV4** The rest of SSE through AVX2, by family.
 - **XV5** AVX-512: 512 bits, mask registers, EVEX rounding and broadcast.
 - **XV6** Delete the stencils and `tools/gen-x86stencils.py`, or keep them

@@ -304,6 +304,9 @@ VPRIV bool x64_x86_shuffle_code(codegen_context *e, const int *bytes,
                                 x64_x86_shuffle *shuffle);
 VPRIV bool x64_x86_halved_code(codegen_context *e, uint32_t n, uint32_t *code,
                                bool *count);
+/* an AVX2 builtin that crosses the halves: 1 movmskps256, 2 permvarsi256
+   and permvarsf256, 0 otherwise */
+VPRIV int x64_x86_crossing_builtin(codegen_context *e, uint32_t n);
 VPRIV bool x64_x86_builtin_code(codegen_context *e, uint32_t n, uint32_t *code,
                                 unsigned *operands);
 VPRIV bool x64_vector_shuffle_exists(codegen_context *e, const int *bytes);
