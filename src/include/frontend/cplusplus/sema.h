@@ -1654,6 +1654,7 @@ enum class conversion_kind : uint8_t {
     qualification_cast,  /* [expr.const.cast]/3: the same address */
     pointer_cast,        /* [expr.static.cast]/13, [expr.reinterpret.cast]/6,
                             /7, /8: the same address, another type */
+    dynamic_cast_,       /* [expr.dynamic.cast]: run-time __dynamic_cast */
     pointer_to_integral, /* [expr.reinterpret.cast]/4 */
     integral_to_pointer, /* [expr.reinterpret.cast]/5 */
     /* [conv.ptr]/3: a pointer to a derived class to a pointer to its base
