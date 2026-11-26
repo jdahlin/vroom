@@ -163,6 +163,13 @@ bool c_lowering::piecewise_initializer(uint32_t n) const
     const semantic_node &x = node(n);
     if (x.kind == semantic_kind::construct)
         return true;
+    /* [dcl.init]/17.6.1, [class.copy.elision]/1: a call's (or a
+       conditional's) prvalue of a class that must be built where it is
+       initializes the element itself */
+    if (x.kind != semantic_kind::initializer_list &&
+        x.kind != semantic_kind::zero && !is_glvalue(x) &&
+        built_in_place(x.type))
+        return true;
     if (x.kind == semantic_kind::initializer_list) {
         const uint32_t *items = analysis.semantics.items(x.first);
         for (uint32_t i = 0; i < x.count; i++)
@@ -179,6 +186,20 @@ uint32_t c_lowering::initialize_list_into(uint32_t object,
     const semantic_node &x = node(n);
     if (x.kind == semantic_kind::construct && !x.a)
         return construct_at(x, object, 0, x.at);
+    /* [expr.cond]/7: the operand chosen initializes the element */
+    if (x.kind == semantic_kind::conditional && x.b && !is_glvalue(x) &&
+        built_in_place(object_type)) {
+        uint32_t cond = truth(expression(x.a));
+        conditional_depth++;
+        uint32_t b = initialize_list_into(object, object_type, t, x.b);
+        uint32_t c_ = initialize_list_into(object, object_type, t, x.c);
+        conditional_depth--;
+        if (!cond || !b || !c_)
+            return 0;
+        return make(AST_NODE_CONDITIONAL, void_type, cond,
+                    cast(b, void_type, AST_CAST_VOID),
+                    cast(c_, void_type, AST_CAST_VOID), 0, 0);
+    }
     if (x.kind == semantic_kind::initializer_list) {
         const uint32_t *items = analysis.semantics.items(x.first);
         owned_array<uint32_t> stmts;
@@ -186,7 +207,13 @@ uint32_t c_lowering::initialize_list_into(uint32_t object,
             entity_index ce = record(object_type).entity;
             const entity &k = analysis.entity_table[ce];
             class_type(ce, x.at);
-            for (uint32_t i = 0, item = 0; item < x.count; i++) {
+            /* the member of a union a designator named (x.a), alone
+               ([dcl.init.aggr]/3.1); else from the first */
+            uint32_t first = 0;
+            while (k.union_ && x.a && first < k.member_count &&
+                   analysis.class_members[k.first_member + first] != x.a)
+                first++;
+            for (uint32_t i = first, item = 0; item < x.count; i++) {
                 if (i >= k.member_count)
                     return fail("an initializer for no member", x.at);
                 entity_index member =
