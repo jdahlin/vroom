@@ -359,6 +359,16 @@ analysis_result semantic_analysis::constructible_types(
     if (is_class) {
         c = k.entity;
         require_complete(c);
+        /* [temp.inst]/2: one that waits for the class being defined is
+           required complete here (libc++'s allocator of a container's
+           element) */
+        uint32_t record = entity_table[c].instantiation;
+        if (record && !entity_table[c].defined && !entity_table[c].size &&
+            !instantiations[record - 1].defining &&
+            instantiations[record - 1].specialization == c) {
+            entity_index done = c;
+            VTRY(defined, define_class_outside(n, record - 1, done));
+        }
         if (!entity_table[c].size)
             return not_supported_because(
                 n, "dcl.init",
