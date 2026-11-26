@@ -38,6 +38,48 @@ node_index parser::clang_bit_cast_expression()
     return finish_node(syntax_kind::clang_bit_cast_expression, mark, first);
 }
 
+/* the binary16 bits of a _Float16 value kept as a double's bits, a NaN's
+   payload with it */
+uint32_t half_storage_bits(uint64_t kept)
+{
+    uint32_t sign = static_cast<uint32_t>(kept >> 48) & 0x8000;
+    double v = fabs(floating_value(kept));
+    if (isnan(v)) {
+        uint32_t payload = static_cast<uint32_t>(kept >> 42) & 0x3ff;
+        if (!payload)
+            payload = 0x200;
+        return sign | 0x7c00 | payload;
+    }
+    if (isinf(v))
+        return sign | 0x7c00;
+    if (v == 0)
+        return sign;
+    int exponent = 0;
+    frexp(v, &exponent);
+    if (exponent < -13)
+        return sign | static_cast<uint32_t>(ldexp(v, 24));
+    uint32_t significand = static_cast<uint32_t>(ldexp(v, 11 - exponent));
+    return sign | static_cast<uint32_t>(exponent + 14) << 10 |
+           (significand & 0x3ff);
+}
+
+/* the kept value of binary16 bits */
+uint64_t half_kept(uint32_t bits)
+{
+    uint32_t exponent = bits >> 10 & 31;
+    uint64_t sign = static_cast<uint64_t>(bits & 0x8000) << 48;
+    uint64_t fraction = bits & 0x3ff;
+    if (exponent == 31)
+        return sign | UINT64_C(0x7ff0000000000000) | fraction << 42;
+    double significand = static_cast<double>(fraction);
+    if (exponent)
+        significand += 1024;
+    else
+        exponent = 1;
+    return sign |
+           floating_kept(ldexp(significand, static_cast<int>(exponent) - 25));
+}
+
 bool bit_cast_kept(const implementation_defined_behavior &behavior,
                    fundamental_type from, fundamental_type to, uint64_t kept,
                    uint64_t &result)
@@ -46,13 +88,24 @@ bool bit_cast_kept(const implementation_defined_behavior &behavior,
     uint64_t bits = kept;
     if (from == fundamental_type::float_) {
         bits = float_storage_bits(kept);
+    } else if (from == fundamental_type::bfloat16) {
+        /* __bf16 is a float's upper half */
+        bits = float_storage_bits(kept) >> 16;
+    } else if (from == fundamental_type::float16) {
+        bits = half_storage_bits(kept);
     } else if (from != fundamental_type::double_ &&
                (!fundamental_type_is_integral(from) ||
                 fundamental_type_width(behavior, from) > 64)) {
         return false;
     }
-    if (to == fundamental_type::float_) {
+    if (to == fundamental_type::float16) {
+        result = half_kept(static_cast<uint32_t>(bits));
+        return true;
+    }
+    if (to == fundamental_type::float_ || to == fundamental_type::bfloat16) {
         uint32_t b32 = static_cast<uint32_t>(bits);
+        if (to == fundamental_type::bfloat16)
+            b32 <<= 16;
         uint32_t fraction = b32 & UINT32_C(0x007fffff);
         if ((b32 & UINT32_C(0x7f800000)) == UINT32_C(0x7f800000) && fraction) {
             result = (uint64_t)(b32 & UINT32_C(0x80000000)) << 32 |

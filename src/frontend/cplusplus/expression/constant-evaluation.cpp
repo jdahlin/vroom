@@ -283,7 +283,7 @@ fundamental_type semantic_analysis::evaluated_type(qualified_type t) const
         f = entity_table[e].underlying;
     }
     if (f == fundamental_type::float_ || f == fundamental_type::double_ ||
-        f == fundamental_type::float16)
+        f == fundamental_type::float16 || f == fundamental_type::bfloat16)
         return f;
     if (!fundamental_type_is_integral(f) ||
         f == fundamental_type::bit_precise_int ||
@@ -304,7 +304,8 @@ constant_value semantic_analysis::value_of(fundamental_type t,
                                            uint64_t kept) const
 {
     constant_value r;
-    if (fundamental_type_is_floating(t)) {
+    /* (__bf16, which no arithmetic takes, is kept as a floating value too) */
+    if (fundamental_type_is_floating(t) || t == fundamental_type::bfloat16) {
         r.kind = constant_value_kind::floating;
         r.floating = floating_value(kept);
         return r;
@@ -352,6 +353,10 @@ constness semantic_analysis::evaluate_conversion(constant_value &v,
                          integer_wrap(tokens.files.behavior, to, v.integer));
         return constness::constant;
     }
+    /* __bf16 converts to nothing but itself here */
+    if (from != to && (from == fundamental_type::bfloat16 ||
+                       to == fundamental_type::bfloat16))
+        return CONST_UNKNOWN;
     expression_meaning m;
     m.type = qualified_type::make(type_table.fundamental(from), cv_none);
     m.evaluation = constness::constant;
