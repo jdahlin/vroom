@@ -391,6 +391,15 @@ analysis_result semantic_analysis::instantiate_definition(SyntaxRef at,
     size_t unsupported_before = unsupported.size();
     uint32_t hidden_before = horizon_hidden;
     bool quiet = instantiations[index].quiet;
+    /* one that only bodies nobody uses ask for (a member template called
+       by an unused constructor, deque's __append) is as quiet, and its
+       needs wait as theirs do (not an implicit member's, whose errors
+       clang reports) */
+    entity_index spec = instantiations[index].specialization;
+    if (!entity_table[spec].member_definition_needed)
+        for (const deferred_need &d : deferred_needs)
+            if (d.needed == spec && !entity_table[d.by].implicit)
+                quiet = true;
     diagnostics_suppressed_if hush(diagnostics, quiet);
     /* (what a quiet definition wants is as quiet) */
     quiet_member_bodies += quiet;
