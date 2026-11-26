@@ -4118,6 +4118,39 @@ bool itanium_mangler::type(qualified_type t, entity_index member_class)
             add_candidate(t);
             return true;
         }
+        if (n.is(syntax_kind::simple_template_id)) {
+            /* [abi:mangling-type]: a template-id's <class-enum-type>
+               <template-args>; [impl.clang] __make_integer_seq<B, T, N>
+               of a dependent length keeps the builtin template's name
+               (builtin_make_integer_seq's bindings) */
+            const entity &w = analysis.entity_table[r.entity];
+            const semantic_analysis::written_binding *parts[3] = {};
+            for (uint32_t i = 0; i < w.member_count; i++) {
+                const auto &b = analysis.written_bindings[w.first_member + i];
+                if (b.cast == w.value && !b.identifier && b.element < 3)
+                    parts[b.element] = &b;
+            }
+            if (!parts[0] || !parts[1] || !parts[2] ||
+                !parts[0]->specialization)
+                return false;
+            /* (the builtin template's name a candidate as a template
+               prefix is; no entity: a scope of its own) */
+            if (!substitution(UINT32_MAX)) {
+                text("18__make_integer_seq");
+                candidate builtin;
+                builtin.scope = UINT32_MAX;
+                candidates.append(builtin);
+            }
+            text("I");
+            if (!template_template_arg(parts[0]->specialization, 0) ||
+                !type(parts[1]->type))
+                return false;
+            text("X");
+            template_param(parts[2]->pack_position - 1);
+            text("EE");
+            add_candidate(t);
+            return true;
+        }
         if (n.size() != 4 || !encoding_template)
             return false;
         SyntaxElement operand = n[2];

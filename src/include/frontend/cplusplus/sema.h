@@ -2947,7 +2947,6 @@ class semantic_analysis
                               uint32_t name, uint64_t value);
     /* the type typename Q::name for a dependent Q, one per Q and name */
     type_index dependent_member_type(type_index qualifier, uint32_t name);
-    type_index dependent_written_type(SyntaxRef n, bool every_name = false);
     bool names_dependent_entity(token_index first, token_index end) const;
     bool pack_depends(entity_index pack) const;
     owned_array<entity_index> dependent_members;
@@ -2974,6 +2973,10 @@ class semantic_analysis
         entity_index specialization = 0;
     };
     owned_array<written_binding> written_bindings;
+    /* (also: bindings of the caller's, which tell the type apart too) */
+    type_index
+    dependent_written_type(SyntaxRef n, bool every_name = false,
+                           const owned_array<written_binding> *also = nullptr);
     /* the tags of an expression's structure (expression_structure): a
        node (word its syntax_kind, a its first tag_children: a the child,
        b the next), a token (word its kind << 48, keyword << 24 and

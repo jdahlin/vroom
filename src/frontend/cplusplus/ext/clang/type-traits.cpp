@@ -1095,8 +1095,40 @@ analysis_result semantic_analysis::builtin_make_integer_seq(SyntaxRef id,
     if (function_templates[t - 1].is_parameter ||
         depends_on_template_parameter(element) ||
         names_dependent_entity(first_token(n), end)) {
-        /* [temp.dep.type]/9: a template-id of dependent arguments */
-        type = dependent_written_type(id);
+        /* [temp.dep.type]/9: a template-id of dependent arguments.  For
+           the mangler, when only the length depends and it is a non-type
+           template parameter's name: the template (element 0), the
+           element type (1) and the parameter's position (2) */
+        entity_index length = 0;
+        if (end == first_token(n) + 1 &&
+            tokens[first_token(n)].kind == token_kind::identifier) {
+            lookup_result named = lookup_unqualified(
+                tokens.identifier(first_token(n)), lookup_filter::any);
+            length = named.entity;
+            if (!length && !named.ambiguous)
+                length = named.unknown_entity;
+        }
+        owned_array<written_binding> parts;
+        if (!function_templates[t - 1].is_parameter &&
+            !depends_on_template_parameter(element) && length &&
+            entity_table[length].kind == entity_kind::none) {
+            written_binding part;
+            SyntaxRef whole = id;
+            part.cast = whole.index().index();
+            part.element = 0;
+            part.specialization = function_templates[t - 1].entity;
+            parts.append(part);
+            part.specialization = 0;
+            part.element = 1;
+            part.type = element;
+            parts.append(part);
+            part.type = qualified_type();
+            part.element = 2;
+            part.pack_position =
+                static_cast<uint32_t>(entity_table[length].value) + 1;
+            parts.append(part);
+        }
+        type = dependent_written_type(id, false, &parts);
         return analysis_result::well_formed;
     }
     expression_meaning m;
