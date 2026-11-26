@@ -110,6 +110,7 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_longjmp", CC_BUILTIN_LONGJMP, 0, "vpi"},
     {"__builtin_return_address", CC_BUILTIN_RETURN_ADDRESS, 0, "pu"},
     {"__builtin_frame_address", CC_BUILTIN_FRAME_ADDRESS, 0, "pu"},
+    {"__builtin_vcc_result_address", CC_BUILTIN_RESULT_ADDRESS, 0, "p"},
     {"__builtin_extract_return_addr", CC_BUILTIN_EXTRACT_RETURN_ADDRESS, 0,
      "pp"},
     {"__builtin_add_overflow", CC_BUILTIN_ADD_OVERFLOW, 0, "b."},

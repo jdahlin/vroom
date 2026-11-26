@@ -3948,6 +3948,15 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
         WALK_LOWER(longjmp)(e, r);
         return codegen_value_constant(0);
     }
+    case CC_BUILTIN_RESULT_ADDRESS: {
+        codegen_lvalue at = {.kind = CODEGEN_LVALUE_FRAME,
+                             .align = 8,
+                             .offset = e->walk_state->return_record.slot};
+        int r = WALK_LOWER(treg)(e);
+
+        WALK_LOWER(load)(e, r, &at, 8, false);
+        return codegen_value_register(r);
+    }
     case CC_BUILTIN_RETURN_ADDRESS:
     case CC_BUILTIN_FRAME_ADDRESS: {
         codegen_value v = walk_value_emit(e, arg[0]);

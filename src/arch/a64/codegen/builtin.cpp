@@ -1200,6 +1200,13 @@ VPRIV codegen_value gen_builtin(codegen_context *e, uint32_t n)
         if (e->is_reachable)
             a64_record_emit(e, A64_OP_BRK)->immediate = 0xf000;
         return codegen_value_none();
+    case CC_BUILTIN_RESULT_ADDRESS: {
+        int r = treg(e);
+
+        a64_record_emit_memory(e, A64_OP_LD, 3, 0, r, A64_REGISTER_FRAME,
+                               e->function_instance->return_slot);
+        return codegen_value_register(r);
+    }
     case CC_BUILTIN_RETURN_ADDRESS:
     case CC_BUILTIN_FRAME_ADDRESS: {
         codegen_value depth = gen(e, arg[0]);
