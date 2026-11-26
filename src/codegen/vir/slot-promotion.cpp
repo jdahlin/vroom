@@ -92,8 +92,29 @@ static uint32_t virbuild_promote_variable_entry(codegen_context *e,
     return virbuild_value_resolve(V, p);
 }
 
+/* a vector has no constant: a splat of 0 at the start of the entry block, which dominates
+   every use */
+static uint32_t virbuild_promote_zero_vector(codegen_context *e, uint32_t ty)
+{
+    uint32_t entry = e->vir_builder->block_order[0];
+    uint32_t prev = 0;
+    vir_insn splat =
+        VCC_LITERAL(vir_insn, VIR_OP_VSPLAT, VIR_TYPE_I32X4, 0,
+                    virbuild_constant_integer(e, VIR_TYPE_I32, 0), 0, 0);
+    uint32_t zero = virbuild_preir_insn_insert(e, entry, &prev, splat);
+
+    if (ty == VIR_TYPE_I32X4)
+        return zero;
+    vir_insn cast =
+        VCC_LITERAL(vir_insn, VIR_OP_BITCAST, (uint8_t)ty, 0, zero, 0, 0);
+
+    return virbuild_preir_insn_insert(e, entry, &prev, cast);
+}
+
 static uint32_t virbuild_promote_zero_constant(codegen_context *e, uint32_t ty)
 {
+    if (vir_type_is_vector(ty))
+        return virbuild_promote_zero_vector(e, ty);
     return ty == VIR_TYPE_F32 || ty == VIR_TYPE_F64
                ? virbuild_constant_make(e, VIR_OP_FCONST, ty, 0, 0, 0)
                : virbuild_constant_integer(e, ty, 0);
@@ -293,9 +314,8 @@ VPRIV bool virbuild_slots_promote(codegen_context *e)
 
             if (f->slot == ms[m].slot && f->relative_offset < hi &&
                 lo < f->relative_offset + (int64_t)f->size &&
-                (f->size == 16 || /* (no vector zero constant) */
-                 !(lo <= f->relative_offset &&
-                   f->relative_offset + (int64_t)f->size <= hi)))
+                !(lo <= f->relative_offset &&
+                  f->relative_offset + (int64_t)f->size <= hi))
                 bad[f->slot] = 1;
         }
     /* every load must take the field's stored type with one conversion at most */
