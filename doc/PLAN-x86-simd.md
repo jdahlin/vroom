@@ -6,6 +6,7 @@ through AVX-512).
 
 ## Baseline (2026-11-26, x86-64 host with AVX-512)
 
+Quick check: `bench/stockfish/run.py --arch sse2` (depth 6, ~5 s).
 Stockfish 17.1, `bench 16 1 13 default depth`, -O2, 2030154 nodes everywhere:
 
 | build | nodes/second |
@@ -38,7 +39,12 @@ Stockfish 17.1, `bench 16 1 13 default depth`, -O2, 2030154 nodes everywhere:
     direct emitter.  Stockfish bench depth 13: 8275 nodes/second.  77% of the
     time is in `affine_transform_non_ssse3`; its unpacks are shuffles, which
     are still lane by lane.
-  - XS1b: shuffles as SSE2 instructions.
+  - XS1b (done): shuffles as SSE2 instructions (unpacks, dword and word
+    shuffles, rotations, even lanes) and the 32-bit lane multiply.  No
+    speedup on Stockfish (8240 nodes/second at depth 13): of the 904
+    instructions of `affine_transform_non_ssse3`, about 700 are `mov` and
+    `lea`, the vectors copied between frame objects around the inlined
+    intrinsics.  Only vectors as values in registers (XS1c) removes them.
   - XS1c: VIR: `i8x16` and `i16x8`, vector shifts and shuffles, vectors from
     source (values, not addresses), vector arguments and results.
 - **XS2** Builtins that no vector operation expresses (`pmaddwd`, packs,

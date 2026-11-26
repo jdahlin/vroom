@@ -4015,6 +4015,22 @@ static codegen_value walk_builtin_emit(codegen_context *e, uint32_t n)
             .align = codegen_type_alignment(c, re),
             .offset = walk_slot_temporary(e, codegen_type_size(c, x->ty), 16)};
 
+        if (sh && codegen_type_size(c, at) == 16 &&
+            codegen_type_size(c, x->ty) == 16 &&
+            !codegen_type_is_bool_vector(c, at) &&
+            codegen_type_size(c, ae) == codegen_type_size(c, re)) {
+            int bytes[16], size = (int)codegen_type_size(c, ae);
+
+            for (int i = 0; i < 16; i++) {
+                int64_t k = (int64_t)c->ipool[N(arg[2 + i / size])->a];
+
+                bytes[i] = -1;
+                if (k >= 0)
+                    bytes[i] = (int)k * size + i % size;
+            }
+            if (WALK_LOWER(vector_shuffle)(e, bytes, ra, rb, &d))
+                nr = 0;
+        }
         for (int64_t i = 0; i < nr; i++) {
             codegen_lvalue dl = d,
                            sl = {.kind = CODEGEN_LVALUE_REGISTER,

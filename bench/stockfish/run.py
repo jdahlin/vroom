@@ -15,7 +15,8 @@ the summary groups the TUs by first error as bench/cxx-json.py does.  When
 every TU compiles, vcc's objects are linked by clang++ and `stockfish bench
 16 1 DEPTH default depth` must print the node count of clang++'s build: the
 search is deterministic with one thread, so one wrong evaluation or move
-changes it.  `--mix` also links each vcc object alone with clang's others,
+changes it.  Both builds' nodes per second are printed (a shallow search, so
+that a slow build is measured in seconds).  `--mix` also links each vcc object alone with clang's others,
 to find the TU that changes the count.
 
   bench/stockfish/run.py [-O 0123] [--depth N] [--mix] [--force] [-v] [PAT]
@@ -108,10 +109,12 @@ def link(d, objs, exe):
 
 
 NODES = re.compile(r'^Nodes searched\s*:\s*(\d+)', re.M)
+NPS = re.compile(r'^Nodes/second\s*:\s*(\d+)', re.M)
 
 
-def nodes(exe, depth):
-    """(node count or None, error text) of exe's bench"""
+def nodes(exe, depth, speed=None):
+    """(node count or None, error text) of exe's bench; speed gets its
+    nodes per second"""
     try:
         p = subprocess.run([exe, 'bench', '16', '1', str(depth), 'default',
                             'depth'], cwd=SRC, capture_output=True, text=True,
@@ -121,6 +124,9 @@ def nodes(exe, depth):
     m = NODES.search(p.stderr + p.stdout)
     if p.returncode or not m:
         return None, 'exit %d' % p.returncode
+    n = NPS.search(p.stderr + p.stdout)
+    if n and speed is not None:
+        speed.append(int(n.group(1)))
     return int(m.group(1)), ''
 
 
@@ -131,7 +137,7 @@ def main():
     ap.add_argument('--bin-dir', default=os.environ.get('VCC_BIN') or
                     os.path.join(R, 'build', 'linux', 'src'))
     ap.add_argument('-O', dest='levels', default='2')
-    ap.add_argument('--depth', type=int, default=10)
+    ap.add_argument('--depth', type=int, default=6)
     ap.add_argument('--timeout', type=int, default=120)
     ap.add_argument('--mix', action='store_true')
     ap.add_argument('--force', action='store_true')
@@ -193,7 +199,8 @@ def main():
         if not ok or a.pattern:
             continue
         cdir = os.path.join(OUT, 'clang' + level)
-        want, err = nodes(build_clang(level, cdir), a.depth)
+        fast, slow = [], []
+        want, err = nodes(build_clang(level, cdir), a.depth, fast)
         if want is None:
             sys.exit('stockfish: clang++\'s build: ' + err)
         if a.mix:
@@ -217,7 +224,10 @@ def main():
                    exe)
         got = None
         if not err:
-            got, err = nodes(exe, a.depth)
+            got, err = nodes(exe, a.depth, slow)
+        if fast and slow:
+            print('stockfish %s: %d nodes/s, clang++ %d'
+                  % (level, slow[0], fast[0]))
         if got == want:
             print('stockfish %s: bench depth %d: %d nodes, as clang++\'s'
                   % (level, a.depth, got))
