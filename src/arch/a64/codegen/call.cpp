@@ -137,6 +137,9 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
     cc *c = e->compile_context;
     int ngrn = 0, nsaa = 0;
     int64_t fslot = 1, rslot = 1;
+    /* AST_NODE_CALL_INTO's destination */
+    int64_t into = e->call_destination;
+    e->call_destination = 0;
     bool sret = a64_abi_result_is_indirect(c, rty);
     uint32_t keep =
         0; /* temporaries holding register arguments: moved, not parked or spilled */
@@ -347,7 +350,9 @@ VPRIV codegen_value do_call(codegen_context *e, uint32_t ref,
              args[i].value.kind == CODEGEN_VALUE_REGISTER_PAIR) &&
             args[i].argument.kind == A64_ABI_ARGUMENT_REGISTER)
             val_free(e, &args[i].value);
-    if (sret)
+    if (sret && into)
+        a64_record_emit_memory(e, A64_OP_LD, 3, 0, 8, A64_REGISTER_FRAME, into);
+    else if (sret)
         a64_record_emit_immediate(e, A64_OP_ADDI, 1, 8, A64_REGISTER_FRAME,
                                   rslot);
     if (fslot != 1) {
@@ -859,6 +864,9 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
     int na = (int)x->c;
     codegen_value fnv = codegen_value_none(), r;
     bool noret = false, inl;
+    /* (this call's, not one of its arguments': handed to do_call) */
+    int64_t into = e->call_destination;
+    e->call_destination = 0;
 
     /* more than MAXARGS (psql's sql_help.c passes ~260): on the heap */
     if (na > MAXARGS &&
@@ -878,7 +886,7 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
     }
     if (!s && !ref)
         fnv = gen(e, x->a);
-    inl = s && can_inline(e, s);
+    inl = s && !into && can_inline(e, s);
     if (inl)
         codegen_function_prepass_request(e, s);
     for (int i = 0; i < na; i++) {
@@ -960,6 +968,7 @@ __attribute__((noinline)) VPRIV codegen_value gen_call(codegen_context *e,
         if (codegen_type_is_function(c, ft) &&
             (T(c, ft)->flags & AST_TYPE_FLAG_VARIADIC))
             nfix = (int)T(c, ft)->n;
+        e->call_destination = into;
         r = s || ref ? do_call(e, ref, NULL, args, na, x->ty, noret, nfix)
                      : do_call(e, 0, &fnv, args, na, x->ty, false, nfix);
     }

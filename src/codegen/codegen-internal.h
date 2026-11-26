@@ -498,6 +498,9 @@ typedef struct codegen_eh_lsda {
 } codegen_eh_lsda;
 typedef struct codegen_context {
     codegen_unit *unit;
+    /* AST_NODE_CALL_INTO: the frame slot of the address the next call
+       writes its in-memory result at (0: none) */
+    int64_t call_destination;
     cc *compile_context;
     /* records of the function being emitted */
     a64_record *records;

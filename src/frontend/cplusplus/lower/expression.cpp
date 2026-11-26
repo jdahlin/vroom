@@ -70,6 +70,8 @@ uint32_t c_lowering::expression(uint32_t index)
         ast_builder_symbol_flags_add(c, s, AST_SYMBOL_FLAG_USED);
         if (x.kind == entity_kind::function)
             return make(AST_NODE_VARIABLE, type(x.type, n.at), s, 0, 0, 0, 0);
+        if (e == named_return && named_return)
+            return result_node(type(x.type, n.at));
         if (indirect_parameter(e))
             /* the object at the address the caller passed */
             return dereference(c_variable(c, s, parameter_type(x.type, n.at)),

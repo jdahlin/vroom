@@ -4,6 +4,21 @@
 namespace cplusplus::lowering
 {
 
+uint32_t c_lowering::result_node(ast_qualified_type t)
+{
+    return make(AST_NODE_RESULT_OBJECT, t, 0, 0, 0, 0, AST_NODE_FLAG_LVALUE);
+}
+
+uint32_t c_lowering::store(ast_qualified_type t, qualified_type object_type,
+                           uint32_t object, uint32_t value)
+{
+    /* [class.copy.elision]/1, [abi:calls]: a class passed by address is
+       built where it ends up, a call's result too */
+    if (passed_indirectly(object_type) && ast_builder_node_is_call(c, value))
+        return make(AST_NODE_CALL_INTO, void_type, object, value, 0, 0, 0);
+    return assign(t, object, value);
+}
+
 /* the initializer n of an object: a prvalue there initializes the object
    itself ([dcl.init]/17.6.1) */
 uint32_t c_lowering::initializer(uint32_t n)
@@ -129,7 +144,7 @@ uint32_t c_lowering::initialize_into(uint32_t s, qualified_type object_type,
         value = initializer(n);
     if (!value)
         return 0;
-    return assign(t, object, value);
+    return store(t, object_type, object, value);
 }
 
 bool c_lowering::piecewise_initializer(uint32_t n) const
@@ -209,7 +224,7 @@ uint32_t c_lowering::initialize_list_into(uint32_t object,
         value = initializer(n);
     if (!value)
         return 0;
-    return assign(AST_QUALIFIED_TYPE_UNQUALIFIED(t), object, value);
+    return store(AST_QUALIFIED_TYPE_UNQUALIFIED(t), object_type, object, value);
 }
 
 /* [dcl.init]/6: "To zero-initialize an object ... of scalar type T means
@@ -498,7 +513,9 @@ uint32_t c_lowering::bind_reference(const semantic_node &n)
         return static_temporary(n, pointer);
     entity_index cls = record(bound.type).entity;
     if (record(bound.type).kind == type_kind::class_type &&
-        analysis.entity_table[cls].destructor) {
+        (analysis.entity_table[cls].destructor ||
+         (passed_indirectly(bound.type) &&
+          bound.kind == semantic_kind::call))) {
         /* [class.temporary]/4 and /6: a temporary with a destructor,
            destroyed by the full-expression or as the reference dies: the
            object construct() or call() made */

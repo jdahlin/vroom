@@ -192,6 +192,8 @@ void ast_builder_toplevel(cc *c, uint32_t s);
 uint32_t ast_builder_node(cc *c, int op, ast_qualified_type t, uint32_t a,
                           uint32_t b, uint32_t c_, uint16_t aux, uint8_t flags);
 uint32_t ast_builder_list(cc *c, const uint32_t *items, uint32_t count);
+/* whether node n is a call (what AST_NODE_CALL_INTO takes) */
+bool ast_builder_node_is_call(cc *c, uint32_t n);
 /* a builtin of the C front end's table named so (name[0..length)): its
    signature in the table's letters (the result, then the parameters), or
    NULL; ast_builder_builtin_call is its call of type t, the arguments

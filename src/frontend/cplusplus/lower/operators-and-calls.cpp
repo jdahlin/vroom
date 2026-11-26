@@ -298,6 +298,16 @@ uint32_t c_lowering::assignment(const semantic_node &n)
             analysis.entity_table[r.entity].data_size <
                 analysis.entity_table[r.entity].size)
             return data_size_assignment(n, a, b);
+        if (passed_indirectly(n.type) && ast_builder_node_is_call(c, b) &&
+            side_effect_free(a)) {
+            /* (a member's initialization: the call's result built there;
+               the assignment's value, the object) */
+            uint32_t into = store(t, n.type, a, b);
+            if (!into)
+                return 0;
+            ast_qualified_type at = pointer_to(t);
+            return dereference(comma(at, into, address_of(a, at)), t);
+        }
         return assign(t, a, b);
     }
     int op = c_operator(static_cast<preprocessing_op_or_punc>(n.op));

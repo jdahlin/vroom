@@ -98,11 +98,24 @@ void c_lowering::initialized_variable(const semantic_node &n,
         guarded_initialization(n, destructor, out);
         return;
     }
-    if (!n.b ||
-        (node(n.b).kind != semantic_kind::construct &&
-         !(node(n.b).kind == semantic_kind::initializer_list &&
-           piecewise_initializer(n.b))) ||
-        !x.automatic) {
+    if (e == named_return && named_return) {
+        /* [class.copy.elision]/1.1: the variable is the result object */
+        if (n.b) {
+            ast_qualified_type t = type(x.type, n.at);
+            uint32_t at = c_local(c, pointer_to(t));
+            uint32_t made = initialize_into(at, x.type, t, n.b, true);
+            if (!made)
+                return;
+            out.append(
+                c_declare(c, at, address_of(result_node(t), pointer_to(t))));
+            out.append(c_statement(c, made));
+        }
+    } else if (!n.b ||
+               (node(n.b).kind != semantic_kind::construct &&
+                !(node(n.b).kind == semantic_kind::initializer_list &&
+                  piecewise_initializer(n.b)) &&
+                !passed_indirectly(x.type)) ||
+               !x.automatic) {
         /* a block's object, whose destructor is called below */
         out.append(declaration(n));
     } else {
@@ -870,9 +883,26 @@ uint32_t c_lowering::statement(uint32_t index)
         if (n.a && named_return && returned_variable(n.a) == named_return) {
             /* the variable is the result object: its bytes are the
                result, and it is not destroyed */
-            uint32_t s = symbol(named_return, n.at);
-            value = c_variable(
-                c, s, type(analysis.entity_table[named_return].type, n.at));
+            value = result_node(
+                type(analysis.entity_table[named_return].type, n.at));
+        } else if (n.a && returned_in_place.unqualified()) {
+            /* [stmt.return]/3, [abi:calls]: built in the result object */
+            collection k = collect();
+            ast_qualified_type t = type(returned_in_place, n.at);
+            uint32_t at = c_local(c, pointer_to(t));
+            uint32_t made =
+                initialize_into(at, returned_in_place, t, n.a, true);
+            if (!made)
+                return 0;
+            uint32_t stmts[3] = {
+                c_declare(c, at, address_of(result_node(t), pointer_to(t))),
+                c_statement(c, made),
+                ast_builder_node(c, AST_NODE_EXPRESSION, t, result_node(t), 0,
+                                 0, 0, 0)};
+            value = statement_expression(t, block(stmts, 3));
+            collected(k, items, after);
+            if (!value)
+                return 0;
         } else if (n.a && node(n.a).kind == semantic_kind::initializer_list) {
             /* a class's result initialized by a braced-init-list
                ([stmt.return]/2, [dcl.init.list]/3.4): its value; the

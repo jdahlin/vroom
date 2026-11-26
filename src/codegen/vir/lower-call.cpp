@@ -229,7 +229,18 @@ VPRIV codegen_value virbuild_call(codegen_context *e, uint32_t ref,
     V->extra_count += 1 + count + successor_words;
     V->extra[o] = count;
     if (sret) {
-        uint32_t ptr = virbuild_call_slot_pointer(e, r->slot);
+        uint32_t ptr;
+        if (r->destination) {
+            codegen_lvalue at = {.kind = CODEGEN_LVALUE_FRAME,
+                                 .align = 8,
+                                 .offset = r->destination};
+            int q = virbuild_treg(e);
+            virbuild_load(e, q, &at, 8, false);
+            ptr = virbuild_register_read(e, q, VIR_TYPE_PTR);
+            virbuild_tfree(e, q);
+        } else {
+            ptr = virbuild_call_slot_pointer(e, r->slot);
+        }
         V->extra[o + 1 + word++] = ptr;
     }
     for (int k = 0; k < n; k++) {
