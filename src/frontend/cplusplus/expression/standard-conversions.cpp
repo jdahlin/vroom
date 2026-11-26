@@ -935,6 +935,12 @@ analysis_result semantic_analysis::implicit_conversion(SyntaxRef at,
                     "a conversion to std::nullptr_t from an unhandled type");
             return ill_formed(at, rule, "dcl.init");
         }
+        /* __bf16 takes no arithmetic conversion; its own value is kept */
+        if (t == fundamental_type::bfloat16 &&
+            from == fundamental_type::bfloat16) {
+            m.type = to;
+            return analysis_result::well_formed;
+        }
         return not_supported_because(
             at, "conv", "a conversion to a fundamental type that has no rules");
     }

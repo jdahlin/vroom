@@ -3158,6 +3158,12 @@ constness semantic_analysis::evaluate_node(constant_evaluation &state,
             return constness::constant;
         }
         if (k == conversion_kind::bit_cast) {
+            /* a class's object representation is not evaluated */
+            const qualified_type sides[] = {x.type, semantics[x.a].type};
+            for (qualified_type side : sides)
+                if (type_table[side.unqualified()].kind ==
+                    type_kind::class_type)
+                    return CONST_UNKNOWN;
             c = evaluate_node(state, x.a, v);
             if (c != constness::constant)
                 return c;

@@ -2092,6 +2092,8 @@ class semantic_analysis
     /* the size (and alignment) of a pointer, which a reference member
        takes in a class ([abi:class-types]) */
     uint64_t pointer_size() const;
+    /* whether the target is x86-64 (its va_list is an array) */
+    bool x86_64_target() const;
     uint64_t alignment_of_type(qualified_type t) const;
     /* [class.virtual]/2: whether member function e has the name,
        parameter-type-list and cv-qualification of virtual function g (a
