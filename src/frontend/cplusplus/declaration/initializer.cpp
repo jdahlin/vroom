@@ -2666,6 +2666,19 @@ analysis_result semantic_analysis::designated_list_initialization(
     const designation_set &designations, qualified_type &type,
     initialized_value &result)
 {
+    /* [dcl.init.general]/1's grammar has no list that mixes clauses with
+       and without designators, and [ext.clang]'s extension is an error in
+       some modes: not followed for an aggregate with base classes */
+    const struct type &listed = type_table[type.unqualified()];
+    if (listed.kind == type_kind::class_type &&
+        entity_table[listed.entity].base_count) {
+        for (size_t i = 0; i < clauses.size(); i++)
+            if (!designations.of[i].count)
+                return not_supported_because(
+                    list, "dcl.init.aggr",
+                    "designated and other clauses mixed for an aggregate "
+                    "with base classes");
+    }
     owned_array<designated_item> items;
     for (size_t i = 0; i < clauses.size(); i++) {
         designated_item item;
