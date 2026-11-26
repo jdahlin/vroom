@@ -471,6 +471,17 @@ semantic_analysis::default_member_initializer(token_index at, entity_index e,
     /* [dcl.init]/17.6.1: a prvalue of the class that is no constructor
        call (a function call's result) initializes the member itself,
        whatever the class's constructors do, as in a mem-initializer */
+    /* [dcl.init]/8.2: value-initialization by a trivial default
+       constructor zero-initializes the member itself, also one that
+       cannot be copied (std::atomic<int> a{}) */
+    if (constructed && !aggregate_value_stored(record.entity, value.node) &&
+        semantics[value.node].kind == semantic_kind::zero &&
+        semantics[value.node].type.unqualified() == type.unqualified()) {
+        entity_table[e].initializer_throws =
+            initializer_exception::cannot_throw;
+        statement = subobject_store(object, type, at, value.node, true);
+        return analysis_result::well_formed;
+    }
     if (constructed && !aggregate_value_stored(record.entity, value.node) &&
         semantics[value.node].kind == semantic_kind::call &&
         semantics[value.node].category == value_category::prvalue &&
