@@ -717,6 +717,21 @@ semantic_analysis::conversion_sequence semantic_analysis::reference_sequence(
                     x.kind != type_kind::function &&
                     !conversion_may_yield_lvalue(c2, t1))
                     functions = false;
+                /* [dcl.init.ref]/5.3.2 and /5.4: a const or rvalue
+                   reference to a scalar binds a conversion function's
+                   result, or what it converts to by a standard conversion
+                   sequence; with no such function there is none */
+                if (functions && !c1 && binds_rvalues &&
+                    (x.kind == type_kind::fundamental ||
+                     x.kind == type_kind::enumeration ||
+                     x.kind == type_kind::pointer ||
+                     x.kind == type_kind::pointer_to_member)) {
+                    bool several = false, cannot_tell = false;
+                    entity_index found = conversion_function_for(
+                        a, qualified_type::make(t1.unqualified(), cv_none),
+                        false, several, cannot_tell);
+                    functions = found || several || cannot_tell;
+                }
                 if (functions) {
                     sequence cannot_tell = of_form(sequence::form::unknown);
                     /* [over.ics.rank]/2: once the source class is complete
