@@ -138,6 +138,16 @@ analysis_result semantic_analysis::clang_assignable_trait(SyntaxRef n,
                         "triviality is unknown");
                 value = k == triviality::trivial;
             }
+        } else if (which == 2 && lk.kind == type_kind::class_type &&
+                   left.type.unqualified() == right.type.unqualified() &&
+                   !assigned_bitwise(lk.entity) &&
+                   !(right.category != value_category::lvalue &&
+                     moved_bitwise(lk.entity))) {
+            /* an implicit assignment that calls a non-trivial member operator=
+               is never trivial */
+            if (!undo_substitution(mark))
+                return r;
+            value = false;
         } else {
             return r;
         }
