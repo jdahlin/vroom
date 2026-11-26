@@ -222,7 +222,7 @@ static uint64_t dependent_comparison_value(SyntaxElement op)
     return 0;
 }
 
-VPRIV size_t dependent_value_bucket(uint64_t value, uint32_t name)
+static size_t dependent_value_bucket(uint64_t value, uint32_t name)
 {
     uint64_t h = (value ^ (static_cast<uint64_t>(name) << 40) ^ name) *
                  0x9E3779B97F4A7C15u;
