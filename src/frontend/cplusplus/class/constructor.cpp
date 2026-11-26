@@ -980,19 +980,15 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
 {
     auto form = body.function_body();
     if (form.deleted()) {
-        if (explicit_specified)
-            return not_supported_because(n, "dcl.fct.def.delete",
-                                         "an explicit deleted special member");
-        VTRY(r,
-             special_member_declarator(c, n, d, access, false,
-                                       constexpr_specified, virtual_specified));
-        const entity &f = entity_table[last_declared];
+        /* [dcl.fct.spec]: explicit on a deleted constructor, which stays
+           a candidate of direct-initialization only ([over.match.ctor]) */
+        VTRY(r, special_member_declarator(
+                    c, n, d, access, false, constexpr_specified,
+                    virtual_specified, explicit_specified));
         /* a deleted destructor (libc++'s __nat): the class's destructor,
            deleted, which a delete-expression checks (deleted_use); an
            object of the class is never destroyed in a well-formed
            program */
-        if (f.special == special_member::destructor)
-            return deleted_definition(n, last_declared);
         return deleted_definition(n, last_declared);
     }
     if (!form.defaulted())
