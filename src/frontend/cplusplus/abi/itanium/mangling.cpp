@@ -2216,6 +2216,9 @@ bool itanium_mangler::dependent_member_prefix(type_index q)
        as clang writes it */
     if (prefix.kind == entity_kind::type_transformation)
         return type(t);
+    /* typename decltype(e)::name: the <decltype>, [abi:mangle.prefix] */
+    if (prefix.kind == entity_kind::dependent_written)
+        return type(t);
     if (prefix.kind != entity_kind::template_specialization &&
         prefix.kind != entity_kind::dependent_member)
         return false;
