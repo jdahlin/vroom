@@ -302,6 +302,12 @@ VPRIV void virbuild_function_simplify(codegen_context *e)
                     : ++S.block_generations;
             S.block = ++S.block_generations;
             virbuild_block_values_number(e, &S, b);
+            /* a terminator that writes (an invoke: a call that may unwind)
+               ends the memory state too: no successor reuses it */
+            uint32_t end = V->blocks[b].terminator;
+            if (end && (vir_opcode_table[V->insns[end].insn.op].effects &
+                        (VIR_EFFECT_W | VIR_EFFECT_C | VIR_EFFECT_A)))
+                S.memory_generation = ++S.block_generations;
             S.end_generations[b] = S.memory_generation;
             for (uint32_t c = S.dominator_first_child[b];
                  c != VIRBUILD_BLOCK_NONE; c = S.dominator_next_sibling[c])
