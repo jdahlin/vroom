@@ -5599,6 +5599,9 @@ class semantic_analysis
        instantiations nest ([temp.inst]/16) */
     uint32_t instantiating = 0;
     unsigned instantiation_depth = 0;
+    /* how deep the substitution of function template signatures nests
+       ([temp.inst]/17: a trailing-return-type naming the template again) */
+    unsigned signature_depth = 0;
     /* how deep overloaded operators nest in their own candidates' analysis
        (a default template argument whose expression uses the operator:
        [temp.deduct]/7, [implimits] bounds it) */
@@ -7082,6 +7085,9 @@ class semantic_analysis
         uint32_t count = 0;
     };
     owned_array<class_matching> class_matchings;
+    /* the concept-ids whose satisfaction is being decided
+       ([temp.constr.atomic]/3), the concept where class_template is */
+    owned_array<class_matching> concepts_in_progress;
     struct class_matching_scope {
         owned_array<class_matching> &list;
         class_matching_scope(owned_array<class_matching> &l, uint32_t t,
