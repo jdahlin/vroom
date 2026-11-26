@@ -11,6 +11,7 @@
  *     clang-bit-cast-expression:
  *         __builtin_bit_cast ( type-id , assignment-expression )
  */
+#include <math.h>
 #include "../../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
 

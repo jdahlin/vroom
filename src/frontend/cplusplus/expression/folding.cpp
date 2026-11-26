@@ -25,8 +25,9 @@ namespace cplusplus
 namespace
 {
 
-/* the value of a floating-point operation in type t: computed in float for
-   float, so that each operation rounds as the target's does */
+/* [expr.mul], [expr.add]: the value of a floating-point operation in type
+   t: computed in float for float, so that each operation rounds as the
+   target's does, and rounded to binary16 for [ext:clang_float16] _Float16 */
 double floating_operation(fundamental_type t, preprocessing_op_or_punc op,
                           double a, double b)
 {

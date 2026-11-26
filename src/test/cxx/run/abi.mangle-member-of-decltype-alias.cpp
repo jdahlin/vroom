@@ -1,4 +1,4 @@
-/* [abi:mangle.prefix]: typename decltype(e)::name, through aliases, in a
+/* [abi:mangle.name]: typename decltype(e)::name, through aliases, in a
    non-type template parameter's type and in a parameter's (Highway's
    TFromD<DFromV<V>>) */
 template <bool B> struct En {};

@@ -12,6 +12,7 @@
  * behavior" makes an expression no core constant expression: each
  * operator checks its own (signed overflow, division by zero, shifts).
  */
+#include <math.h>
 #include "../cplusplus-internal.h"
 #include "frontend/cplusplus/sema.h"
 
