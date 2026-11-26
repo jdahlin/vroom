@@ -6347,7 +6347,8 @@ class semantic_analysis
     owned_array<uint32_t> specializations_instantiated;
     void want_definition(instantiation_record &x, uint32_t index);
     analysis_result quiet_definition_failed(SyntaxRef at, uint32_t index,
-                                            analysis_result r);
+                                            analysis_result r,
+                                            const unsupported_construct *cause);
     /* the instantiation record of the template's specialization for the
        arguments, plus one; 0 if there is none yet */
     uint32_t find_instantiation(entity_index t, const template_argument *a,
