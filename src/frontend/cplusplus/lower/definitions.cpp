@@ -339,27 +339,28 @@ bool c_lowering::translation_unit()
             continue;
         /* a function with a placeholder return type never defined: its
            name is in no expression ([dcl.spec.auto]/11), so it needs no
-           symbol (clang emits none) */
-        bool undeduced = x.placeholder_return;
-        if (x.kind == entity_kind::function && !x.defined && !undeduced) {
+           symbol (clang emits none).  Likewise one whose body is not
+           analysed and left the placeholder undeduced: a use of it
+           reports why (symbol) */
+        if (x.kind == entity_kind::function &&
+            (!x.defined || x.unsupported_body)) {
+            bool undeduced = !x.defined && x.placeholder_return;
             qualified_type rt =
                 analysis.type_table[x.type.unqualified()].operand;
-            while (rt.unqualified()) {
+            while (!undeduced && rt.unqualified()) {
                 const struct type &r = analysis.type_table[rt.unqualified()];
-                if (r.kind == type_kind::placeholder) {
+                if (r.kind == type_kind::placeholder)
                     undeduced = true;
-                    break;
-                }
-                if (r.kind == type_kind::pointer ||
-                    r.kind == type_kind::lvalue_reference ||
-                    r.kind == type_kind::rvalue_reference)
+                else if (r.kind == type_kind::pointer ||
+                         r.kind == type_kind::lvalue_reference ||
+                         r.kind == type_kind::rvalue_reference)
                     rt = r.operand;
                 else
                     break;
             }
+            if (undeduced)
+                continue;
         }
-        if (x.kind == entity_kind::function && !x.defined && undeduced)
-            continue;
         /* a deleted function: no symbol ([dcl.fct.def.delete]) */
         if (x.kind == entity_kind::function && x.deleted)
             continue;
