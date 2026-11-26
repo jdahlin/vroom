@@ -406,20 +406,20 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
     if (!associated_namespaces(types, classes, namespaces))
         return not_supported_because(n, "basic.lookup.argdep",
                                      "get with unknown associated namespaces");
-    entity_index held = 0;
+    /* the function templates of each associated namespace that has the
+       name */
+    owned_array<entity_index> held;
     for (entity_index s : namespaces) {
         entity_index x = entity_table.find(s, name);
         if (!x)
             continue;
-        /* a function that is no template, a second namespace's get */
-        if (!function_template_of(x) || held)
-            return not_supported_because(
-                n, "dcl.struct.bind",
-                "a get that is no single function template");
-        held = x;
+        if (!function_template_of(x))
+            return not_supported_because(n, "dcl.struct.bind",
+                                         "a get that is no function template");
+        held.append(x);
     }
     /* none: a hidden friend may declare it ([basic.lookup.argdep]/4.3) */
-    if (!held)
+    if (held.empty())
         return not_supported_because(
             n, "dcl.struct.bind", "no get found by argument-dependent lookup");
     expression_meaning object;
@@ -430,7 +430,18 @@ analysis_result semantic_analysis::binding_get_call(SyntaxRef n, token_index at,
         object.node = expression_node(semantic_kind::entity, object, at, e);
     }
     owned_array<uint32_t> group;
-    function_template_overloads(held, group);
+    for (entity_index h : held) {
+        owned_array<uint32_t> one;
+        function_template_overloads(h, one);
+        for (uint32_t g : one) {
+            bool listed = false;
+            for (uint32_t other : group)
+                if (other == g)
+                    listed = true;
+            if (!listed)
+                group.append(g);
+        }
+    }
     owned_array<overload_candidate> candidates;
     owned_array<uint32_t> first_arguments;
     owned_array<template_argument> all;
