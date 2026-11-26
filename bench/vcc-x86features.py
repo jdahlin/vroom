@@ -11,8 +11,9 @@ data=json.loads((ROOT/'bench/data/x86features-oracle.json').read_text())
 controlled=set(data['feature_macros'])|set(data['cpu_macro_names'])
 # These strings identify the compiler build that supplied the frozen tables,
 # including its distribution packaging. They are not target-feature facts.
-# Keep numeric compiler version macros and every target macro in the oracle.
-BUILD_IDENTITY={'__VERSION__','__clang_version__'}
+# So is the patch level: CI's clang moves to a new patch release by itself.
+# Keep the major and minor version macros and every target macro in the oracle.
+BUILD_IDENTITY={'__VERSION__','__clang_version__','__clang_patchlevel__'}
 def macros(text):return {k:v for k,v in re.findall(r'^#define (\S+) ?(.*)$',text,re.M) if k not in BUILD_IDENTITY}
 def run(args):
  r=subprocess.run(args,text=True,capture_output=True)
