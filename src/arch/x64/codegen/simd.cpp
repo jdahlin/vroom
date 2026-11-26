@@ -1072,7 +1072,7 @@ static const char *const x64_x86_operators[] = {
     "pshufd",     "shufps",    "pshuflw",   "pshufhw",   "psrldq",
     "pslldq",     "packuswb",  "packssdw",  "packsswb",  "packusdw",
     "pmaddubsw",  "pmaddwd",   "pmulhw",    "pmulhuw",   "pmulhrsw",
-    "pshufb"};
+    "pshufb",     "pminsw",    "pmaxsw"};
 
 VPRIV const char *x64_x86_code_mnemonic(uint32_t code)
 {
@@ -1105,6 +1105,41 @@ VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
         return false;
     *code |= X64_X86_SHIFT | (uint32_t)count << 16;
     return true;
+}
+
+/* the code that shifts by count as code (a shift by a count in a register) does, with the
+   count in the instruction; false when code is no such shift */
+VPRIV bool x64_x86_shift_immediate_code(uint32_t code, uint32_t count,
+                                        uint32_t *out)
+{
+    static const char *const shifts[] = {"psllw", "pslld", "psllq", "psraw",
+                                         "psrad", "psrlw", "psrld", "psrlq"};
+
+    if (code >= sizeof x64_x86_operators / sizeof *x64_x86_operators)
+        return false;
+    if (count > 255) /* (past every lane's width, as 255 is) */
+        count = 255;
+    for (const char *shift : shifts)
+        if (!strcmp(shift, x64_x86_operators[code])) {
+            *out = code | X64_X86_SHIFT | count << 16;
+            return true;
+        }
+    return false;
+}
+
+/* the code of the operator named mnemonic when code is the operator `is`, else false */
+VPRIV bool x64_x86_operator_is(uint32_t code, const char *is)
+{
+    return code < sizeof x64_x86_operators / sizeof *x64_x86_operators &&
+           !strcmp(x64_x86_operators[code], is);
+}
+
+VPRIV uint32_t x64_x86_operator_code(const char *mnemonic)
+{
+    uint32_t code = 0;
+
+    x64_x86_operator_find(mnemonic, &code);
+    return code;
 }
 
 /* op $count of one vector */

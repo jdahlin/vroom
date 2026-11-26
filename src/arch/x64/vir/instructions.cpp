@@ -714,6 +714,11 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
 		 * a later unsigned EXT is responsible for clearing them if needed. */
         if (d == a)
             return;
+        if (vir_type_is_vector(i->type)) {
+            x64_record_emit_three_registers(e, X64_OP_MOV, 16, d, a,
+                                            X64_REGISTER_NONE);
+            return;
+        }
         x64_record_emit_three_registers(e, X64_OP_MOV, sz, d, a,
                                         X64_REGISTER_NONE);
         return;

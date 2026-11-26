@@ -397,6 +397,8 @@ default.
 `vsplat` (of an `i32`, its low half), `add`, `sub`, `and`, `or` and `xor`
 only; its `load` and `store` have width 2.  There is no 16-bit scalar.
 
+7.5.1b `bitcast` of a vector type takes any vector type: the same 128 bits.
+
 7.5.2 These operations take a vector type as their result type, lane by lane:
 `add sub and or xor neg not` on `i32x4` and `i64x2`, `mul` on `i32x4` only
 (no target has a 64-bit lane multiply); `fadd fsub fmul fdiv fneg fabs fsqrt`

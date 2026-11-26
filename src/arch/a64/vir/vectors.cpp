@@ -25,6 +25,13 @@ VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in,
                      : 0;
 
     switch (in->op) {
+    case VIR_OP_BITCAST:
+        if (!vir_type_is_vector(in->type))
+            return false;
+        A64_VIR_VECTOR_WORD3(0x4ea01c00u, a64_vir_operand_float_register(L, 0),
+                             a64_vir_operand_float_register(L, 0),
+                             vd); /* mov v.16b */
+        return true;
     case VIR_OP_LOAD:
         if (!vir_type_is_vector(in->type))
             return false;

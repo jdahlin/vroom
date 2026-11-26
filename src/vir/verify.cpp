@@ -107,6 +107,8 @@ static bool vir_verify_operand_type_is_ok(uint32_t k, uint32_t ty, uint32_t rty)
     case VIR_OPERAND_KIND_MULTI:
         return ty == VIR_TYPE_MULTI;
     case VIR_OPERAND_KIND_BITC:
+        if (vir_type_is_vector(rty)) /* (any vector's 128 bits as another) */
+            return vir_type_is_vector(ty);
         return (rty == VIR_TYPE_I32 && ty == VIR_TYPE_F32) ||
                (rty == VIR_TYPE_F32 && ty == VIR_TYPE_I32) ||
                (rty == VIR_TYPE_I64 && ty == VIR_TYPE_F64) ||
