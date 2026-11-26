@@ -725,6 +725,8 @@ enum {
 
 /* a shuffle as VIR operations: `steps` shifts of each operand, then one
    instruction on the two (or, one operand, on the first) */
+VPRIV bool x64_x86_shift_immediate_code(uint32_t code, uint32_t count,
+                                        uint32_t *out);
 typedef struct x64_x86_shuffle {
     int first, second; /* the operands, 0 or 1; second < 0: one operand */
     int steps;

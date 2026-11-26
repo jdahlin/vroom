@@ -1107,6 +1107,26 @@ VPRIV bool x64_x86_shift_code(codegen_context *e, int op, ast_qualified_type vt,
     return true;
 }
 
+/* the code that shifts by count as code (a shift by a count in a register) does, with the
+   count in the instruction; false when code is no such shift */
+VPRIV bool x64_x86_shift_immediate_code(uint32_t code, uint32_t count,
+                                        uint32_t *out)
+{
+    static const char *const shifts[] = {"psllw", "pslld", "psllq", "psraw",
+                                         "psrad", "psrlw", "psrld", "psrlq"};
+
+    if (code >= sizeof x64_x86_operators / sizeof *x64_x86_operators)
+        return false;
+    if (count > 255) /* (past every lane's width, as 255 is) */
+        count = 255;
+    for (const char *shift : shifts)
+        if (!strcmp(shift, x64_x86_operators[code])) {
+            *out = code | X64_X86_SHIFT | count << 16;
+            return true;
+        }
+    return false;
+}
+
 /* op $count of one vector */
 static uint32_t x64_x86_by_count(const char *mnemonic, int count)
 {

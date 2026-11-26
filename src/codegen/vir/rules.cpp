@@ -95,6 +95,38 @@ VPRIV uint32_t virbuild_simplify_undefined_value(codegen_context *e,
 }
 
 /* q rewritten in place (true), or the value that replaces it in *r */
+/* icmp's condition cc (eq ne slt sle sgt sge ult ule ugt uge) of two constants of type ty */
+static bool virbuild_compare_constants(uint32_t cc, uint32_t ty, int64_t a,
+                                       int64_t b)
+{
+    uint64_t x = (uint64_t)a, y = (uint64_t)b;
+
+    if (ty == VIR_TYPE_I32)
+        x = (uint32_t)x, y = (uint32_t)y;
+    switch (cc) {
+    case 0:
+        return x == y;
+    case 1:
+        return x != y;
+    case 2:
+        return a < b;
+    case 3:
+        return a <= b;
+    case 4:
+        return a > b;
+    case 5:
+        return a >= b;
+    case 6:
+        return x < y;
+    case 7:
+        return x <= y;
+    case 8:
+        return x > y;
+    default:
+        return x >= y;
+    }
+}
+
 VPRIV bool virbuild_insn_simplify(codegen_context *e,
                                   virbuild_simplify_state *S, uint32_t q,
                                   uint32_t *r)
@@ -110,6 +142,29 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
         V->insns[q].insn.a = in.b,
         V->insns[q].insn.b = in.a; /* the constant second (an immediate) */
         in = V->insns[q].insn;
+    }
+    /* what became constant only here (an inlined argument): the walker folded the rest */
+    if ((in.op == VIR_OP_ADD || in.op == VIR_OP_SUB || in.op == VIR_OP_AND ||
+         in.op == VIR_OP_OR || in.op == VIR_OP_XOR) &&
+        (in.type == VIR_TYPE_I32 || in.type == VIR_TYPE_I64) &&
+        virbuild_value_integer_constant(V, in.a, &k) &&
+        virbuild_value_integer_constant(V, in.b, &k2)) {
+        uint64_t x = (uint64_t)k, y = (uint64_t)k2, v;
+
+        if (in.op == VIR_OP_ADD)
+            v = x + y;
+        else if (in.op == VIR_OP_SUB)
+            v = x - y;
+        else if (in.op == VIR_OP_AND)
+            v = x & y;
+        else if (in.op == VIR_OP_OR)
+            v = x | y;
+        else
+            v = x ^ y;
+        if (in.type == VIR_TYPE_I32)
+            v = (uint32_t)v;
+        *r = virbuild_constant_integer(e, in.type, (int64_t)v);
+        return false;
     }
     switch (in.op) {
     case VIR_OP_I2P:
@@ -140,6 +195,14 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
         return false;
     }
     case VIR_OP_ICMP:
+        if (virbuild_value_integer_constant(V, in.a, &k) &&
+            virbuild_value_integer_constant(V, in.b, &k2)) {
+            *r = virbuild_constant_integer(
+                e, VIR_TYPE_I32,
+                virbuild_compare_constants(in.flags & 15,
+                                           V->insns[in.a].insn.type, k, k2));
+            return false;
+        }
         /* Comparisons already produce an i32 zero or one. This also
 		 * preserves unordered floating comparison results verbatim. */
         if ((in.flags & 15) == 1 /* ne */ &&
@@ -148,6 +211,26 @@ VPRIV bool virbuild_insn_simplify(codegen_context *e,
              V->insns[in.a].insn.op == VIR_OP_FCMP))
             *r = in.a;
         return false;
+    case VIR_OP_X86: { /* a shift by a constant in a vector: by an immediate */
+        vir_insn count = V->insns[in.b].insn;
+        uint32_t code = 0;
+
+        if (count.op != VIR_OP_VINSERT || count.c ||
+            !virbuild_value_integer_constant(
+                V, virbuild_value_resolve(V, count.b), &k))
+            return false;
+        vir_insn rest = V->insns[virbuild_value_resolve(V, count.a)].insn;
+        if (rest.op != VIR_OP_VSPLAT ||
+            !virbuild_value_integer_constant(
+                V, virbuild_value_resolve(V, rest.a), &k2) ||
+            k2 || !x64_x86_shift_immediate_code(in.c, (uint32_t)k, &code))
+            return false;
+        virbuild_use_count_decrement(V, S, in.b),
+            virbuild_use_count_increment(V, S, in.a);
+        V->insns[q].insn.b = in.a;
+        V->insns[q].insn.c = code;
+        return true;
+    }
     case VIR_OP_EXT: {
         uint32_t x = in.a, K = 1u << VIR_INSN_FLAG_WIDTH_LOG2(in.flags),
                  ts = vir_type_size(in.type);
