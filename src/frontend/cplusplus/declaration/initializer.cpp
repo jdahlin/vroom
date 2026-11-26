@@ -2602,6 +2602,16 @@ analysis_result semantic_analysis::aggregate_element_clause(
                 list, "dcl.init.aggr",
                 "a subaggregate converted from another class");
     }
+    if (record.kind == type_kind::vector) {
+        /* /16: a clause that is a vector initializes the whole vector;
+           scalars go to its elements, braces elided */
+        expression_meaning e;
+        VTRY(r, expression(clause, e));
+        if (type_table[e.type.unqualified()].kind == type_kind::vector) {
+            next++;
+            return initialize_with(at, e, element, false, true, one);
+        }
+    }
     if (!subaggregate) {
         next++;
         return initialize_from(at, clause, element, false, true, one);
