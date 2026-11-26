@@ -1085,6 +1085,23 @@ semantic_analysis::elaborated_type_specifier(ElaboratedTypeSpecifier n,
         type = entity_table[c].type.unqualified();
         return analysis_result::well_formed;
     }
+    if (count == 2 && e[at].is(syntax_kind::simple_template_id)) {
+        /* [dcl.type.elab]/1: class-key simple-template-id */
+        type_index t = 0;
+        VTRY(r, template_type(e[at], 0, false, t));
+        if (type_table[t].kind != type_kind::class_type)
+            return ill_formed(n,
+                              "an elaborated-type-specifier with a "
+                              "simple-template-id shall name a class",
+                              "dcl.type.elab");
+        entity_index c = type_table[t].entity;
+        if (entity_table[c].union_ != is_union)
+            return not_supported_because(n, "dcl.type.elab",
+                                         "an elaborated type whose "
+                                         "class-key disagrees about union");
+        type = t;
+        return analysis_result::well_formed;
+    }
     if (count != 2 || !e[at].is_identifier())
         return not_supported_because(
             n, "dcl.type.elab",
