@@ -1646,11 +1646,6 @@ analysis_result semantic_analysis::member_callee(
     if (id.is(syntax_kind::simple_template_id)) {
         owned_array<bool> expansion;
         VTRY(r, written_arguments_of(id, written, expansion));
-        for (bool e : expansion)
-            if (e)
-                return not_supported_because(id.index(), "temp.variadic",
-                                             "a pack expansion in explicit "
-                                             "arguments of a member template");
         written_at = id.index();
     }
     return analysis_result::well_formed;

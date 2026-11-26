@@ -350,9 +350,19 @@ analysis_result semantic_analysis::member_template_candidates(
     owned_array<uint32_t> group;
     function_template_overloads(held, group);
     size_t first = candidates.size();
-    analysis_result r =
-        template_candidates(n, group, arguments, count, candidates,
-                            first_arguments, all, written, written_at);
+    /* which of the written template arguments are pack expansions */
+    owned_array<SyntaxElement> items;
+    owned_array<bool> expansion;
+    const owned_array<bool> *expanded = nullptr;
+    if (written && written_at) {
+        VTRY(w,
+             written_arguments_of(SyntaxElement(written_at), items, expansion));
+        if (items.size() == written->size())
+            expanded = &expansion;
+    }
+    analysis_result r = template_candidates(
+        n, group, arguments, count, candidates, first_arguments, all, written,
+        written_at, nullptr, expanded);
     for (size_t i = first; i < candidates.size(); i++)
         candidates[i].member = with_object;
     return r;
