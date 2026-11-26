@@ -1437,6 +1437,7 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             analysis.entity_table[encoding_template].enclosing,
             expression[0].token());
         if (!named || (!analysis.names_function_template(named) &&
+                       !analysis.names_member_template(named) &&
                        !analysis.names_variable_template(named)))
             return false;
         if (!source_name(analysis.token_identifier(expression[0].token())))

@@ -6739,6 +6739,11 @@ class semantic_analysis
     {
         return function_template_of(held) != 0;
     }
+    /* ... or a class's member template (Is<E>() written in the class) */
+    bool names_member_template(entity_index held) const
+    {
+        return member_templates_of(held) != 0;
+    }
     /* the number of template-parameters of template entity t */
     uint32_t template_parameter_count(entity_index t) const
     {
