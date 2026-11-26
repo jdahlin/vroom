@@ -636,11 +636,25 @@ analysis_result semantic_analysis::dynamic_class_record(entity_index c,
            delete this appearing in a non-virtual destructor of the
            destructor's class": the deleting destructor's
            ([abi:mangling-special-ctor-dtor] D0) */
-        VTRY(r, usual_deallocation(n, c, false, false, d.deallocation,
-                                   d.deallocation_sized, true, false, false,
-                                   true));
-        if (entity_table[d.deallocation].access ||
-            entity_table[d.deallocation].deleted)
+        bool dtor_defined = entity_table[destructor].defined ||
+                            entity_table[destructor].implicit;
+        size_t unsupported_before = unsupported.size();
+        analysis_result dr = analysis_result::well_formed;
+        {
+            diagnostics_suppressed_if hush(diagnostics, !dtor_defined);
+            dr = usual_deallocation(n, c, false, false, d.deallocation,
+                                    d.deallocation_sized, true, false, false,
+                                    true);
+        }
+        if (dr != analysis_result::well_formed) {
+            if (dtor_defined)
+                return dr;
+            unsupported.resize(unsupported_before);
+            d.deallocation = 0;
+            d.deallocation_sized = false;
+        }
+        if (d.deallocation && (entity_table[d.deallocation].access ||
+                               entity_table[d.deallocation].deleted))
             /* [class.dtor]/6: the destructor is deleted when the lookup
                "results in an ambiguity or in a function that is deleted
                or inaccessible from the destructor" (access from the
