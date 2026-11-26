@@ -125,6 +125,10 @@ class c_lowering
     /* [basic.start.term], [abi:guards]: the run time's functions and
        __dso_handle, 0 until declared */
     uint32_t memset_function = 0;
+    /* the guard variables made, by their entity: a function body lowered
+       again (a member template's) defines its guard once */
+    owned_array<entity_index> guarded_entities;
+    owned_array<uint32_t> guards;
     uint32_t cxa_atexit = 0, cxa_thread_atexit = 0, cxa_dynamic_cast = 0,
              dso_handle = 0, guard_acquire = 0, guard_release = 0,
              noop_coro_symbol = 0;

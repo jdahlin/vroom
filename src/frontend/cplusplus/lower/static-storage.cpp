@@ -262,7 +262,11 @@ void c_lowering::guarded_initialization(const semantic_node &n,
     uint32_t per_thread = 0;
     if (analysis.entity_table[e].c11_thread_local)
         per_thread = AST_SYMBOL_FLAG_THREAD;
-    if (weak_guard) {
+    for (size_t i = 0; i < guarded_entities.size(); i++)
+        if (guarded_entities[i] == e)
+            guard = guards[i];
+    bool made = guard != 0;
+    if (!made && weak_guard) {
         guard = ast_builder_symbol(
             c, AST_SYMBOL_VARIABLE, guard_name.data(), guard_name.size(), i64,
             AST_STORAGE_NONE,
@@ -270,14 +274,21 @@ void c_lowering::guarded_initialization(const semantic_node &n,
                 AST_SYMBOL_FLAG_DEFINED | AST_SYMBOL_FLAG_USED | per_thread,
             0);
         ast_builder_toplevel(c, guard);
-    } else {
+    } else if (!made) {
         guard = ast_builder_symbol(c, AST_SYMBOL_VARIABLE, guard_name.data(),
                                    guard_name.size(), i64, AST_STORAGE_STATIC,
                                    per_thread, 1);
         ast_builder_symbol_flags_add(c, guard, AST_SYMBOL_FLAG_DEFINED);
     }
-    ast_builder_symbol_assembler_name(c, guard, written.data(), written.size());
-    ast_builder_symbol_keep(c, guard);
+    if (!made) {
+        guarded_entities.append(e);
+        guards.append(guard);
+    }
+    if (!made) {
+        ast_builder_symbol_assembler_name(c, guard, written.data(),
+                                          written.size());
+        ast_builder_symbol_keep(c, guard);
+    }
     auto guard_address = [&]() {
         return address_of(c_variable(c, guard, i64), i64p);
     };
