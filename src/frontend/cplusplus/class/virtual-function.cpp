@@ -288,17 +288,12 @@ bool semantic_analysis::primary_base_choice(entity_index c,
                                             entity_index &primary) const
 {
     const entity &x = entity_table[c];
-    bool nonvirtual_before = false;
     for (uint32_t i = 0; i < x.base_count && !primary; i++) {
         entity_index specifier = class_bases[x.first_base + i];
         const entity &base = entity_table[specifier];
         if (base.virtual_base)
             continue;
-        if (!entity_table[type_table[base.type.unqualified()].entity].dynamic)
-            nonvirtual_before = true;
-        else if (nonvirtual_before)
-            return false;
-        else
+        if (entity_table[type_table[base.type.unqualified()].entity].dynamic)
             primary = specifier;
     }
     return true;

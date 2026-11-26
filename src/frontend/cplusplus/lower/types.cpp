@@ -326,8 +326,19 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
             -1);
         offsets.append(UINT64_MAX);
     };
+    owned_array<entity_index> member_order;
+    if (!x.union_ && dynamic && dynamic->primary_base &&
+        !dynamic->primary_is_virtual)
+        member_order.append(dynamic->primary_base);
     for (uint32_t i = 0; i < x.member_count; i++) {
         entity_index member = analysis.class_members[x.first_member + i];
+        if (!x.union_ && dynamic && !dynamic->primary_is_virtual &&
+            member == dynamic->primary_base)
+            continue;
+        member_order.append(member);
+    }
+    for (uint32_t i = 0; i < member_order.size(); i++) {
+        entity_index member = member_order[i];
         const entity &m = analysis.entity_table[member];
         ast_qualified_type t = type(m.type, at);
         uint64_t size = analysis.size_of_type(m.type);
@@ -349,11 +360,8 @@ ast_qualified_type c_lowering::class_type(entity_index e, token_index at)
                 padding(m.offset - end);
             /* the next member placed inside this base's tail padding */
             uint64_t next = x.size;
-            if (i + 1 < x.member_count)
-                next = analysis
-                           .entity_table[analysis.class_members[x.first_member +
-                                                                i + 1]]
-                           .offset;
+            if (i + 1 < member_order.size())
+                next = analysis.entity_table[member_order[i + 1]].offset;
             const entity &of = analysis.entity_table[record(m.type).entity];
             if (m.base_subobject && of.virtual_base_count) {
                 /* a base with virtual bases: its non-virtual part
