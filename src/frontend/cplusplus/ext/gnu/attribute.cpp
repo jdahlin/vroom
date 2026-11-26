@@ -392,7 +392,7 @@ static const gnu_attribute_rule gnu_attribute_rules[] = {
        (glibc _FORTIFY_SOURCE=2): overloadable allows C overloading (no-op in
        C++); pass_[dynamic_]object_size passes hidden object-size info for
        __builtin_object_size (no-op without fortify lowering) */
-    {"overloadable", 0},
+    {"overloadable", gnu_overloadable},
     {"pass_object_size", 0},
     {"pass_dynamic_object_size", 0},
     /* clang's diagnose_if(condition, message, "warning" | "error"): a

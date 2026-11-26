@@ -385,6 +385,9 @@ enum gnu_attribute_flag : uint32_t {
        own name, with or without noexcept, is of this function, as clang's
        are */
     gnu_library_function = 1048576,
+    /* clang's __attribute__((overloadable)): allows static inline fortify
+       wrappers over extern C declarations (glibc _FORTIFY_SOURCE=2) */
+    gnu_overloadable = 2097152,
     /* [dcl.attr.nouniqueaddr] [[no_unique_address]] (the standard's, not a
        GCC attribute): a non-static data member that may share its bytes
        with another subobject (entity::no_unique_address) */
