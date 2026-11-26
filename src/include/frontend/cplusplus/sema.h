@@ -5533,6 +5533,8 @@ class semantic_analysis
         entity_index parameter;
     };
     owned_array<bound_template_template> bound_template_templates;
+    /* ... by name; function_templates by primary (partial specializations) */
+    mutable record_chains bound_templates_by_name, templates_by_primary;
     /* the instantiation whose specialization the declaration analysed
        now declares (its record's index plus one), and how deep
        instantiations nest ([temp.inst]/16) */

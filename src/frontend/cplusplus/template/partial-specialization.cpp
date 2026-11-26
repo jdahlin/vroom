@@ -821,12 +821,18 @@ analysis_result semantic_analysis::matching_specialization(
     owned_array<uint32_t> found, first_deduced;
     owned_array<template_argument> all;
     uint32_t partial_count = 0;
-    for (const function_template &candidate : function_templates)
-        if (candidate.primary == class_template)
-            partial_count++;
-    for (uint32_t k = 0; k < function_templates.size(); k++) {
+    auto by_primary = [](const function_template &t) { return t.primary; };
+    templates_by_primary.update(function_templates, by_primary);
+    for (uint32_t n = templates_by_primary.first(class_template); n;
+         n = templates_by_primary.after(n))
+        partial_count++;
+    /* (deduction can declare templates: taken in as the walk goes on) */
+    for (uint32_t n = templates_by_primary.first(class_template); n;
+         templates_by_primary.update(function_templates, by_primary),
+                  n = templates_by_primary.after(n)) {
+        uint32_t k = n - 1;
         const function_template s = function_templates[k];
-        if (s.primary != class_template || s.pattern_count != count)
+        if (s.pattern_count != count)
             continue;
         owned_array<template_argument> d;
         owned_array<bool> set;

@@ -1237,16 +1237,25 @@ uint32_t semantic_analysis::bound_template_template_of(SyntaxRef id) const
         tokens[first.token()].kind != token_kind::identifier)
         return 0;
     uint32_t name = tokens.identifier(first.token());
+    bound_templates_by_name.update(
+        bound_template_templates,
+        [](const bound_template_template &b) { return b.name; });
+    if (!bound_templates_by_name.first(name))
+        return 0;
     lookup_result x = lookup_unqualified(name, lookup_filter::any);
     entity_index named = x.entity;
     if (!named)
         named = x.unknown_entity;
     if (!named)
         return 0;
-    for (size_t i = bound_template_templates.size(); i-- > 0;) {
-        const bound_template_template &b = bound_template_templates[i];
-        if (b.name != name || b.target != named)
-            continue;
+    /* the latest of them */
+    uint32_t latest = 0;
+    for (uint32_t i = bound_templates_by_name.first(name); i;
+         i = bound_templates_by_name.after(i))
+        if (bound_template_templates[i - 1].target == named)
+            latest = i;
+    if (latest) {
+        const bound_template_template &b = bound_template_templates[latest - 1];
         uint32_t record = entity_table[b.parameter].instantiation;
         if (!record)
             return 0;
