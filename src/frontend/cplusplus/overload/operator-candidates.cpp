@@ -1158,10 +1158,14 @@ analysis_result semantic_analysis::overloaded_operator(
                                          "a viable operator function that may "
                                          "not beat the built-in candidates");
     }
-    if (r == analysis_result::well_formed && none_viable && member_only &&
-        op != preprocessing_op_or_punc::EQUAL &&
-        has_conversion_functions(
-            type_table[operands[0].type.unqualified()].entity))
+    bool may_convert = member_only && op != preprocessing_op_or_punc::EQUAL &&
+                       has_conversion_functions(
+                           type_table[operands[0].type.unqualified()].entity);
+    /* [over.call.object]/2: a call has surrogate call functions only, of
+       conversion functions to function pointers or references */
+    if (op == preprocessing_op_or_punc::LEFT_PARENTHESIS)
+        may_convert = converts;
+    if (r == analysis_result::well_formed && none_viable && may_convert)
         /* [over.match.oper]/3.3, [over.built]: a conversion may make a
            built-in subscript or a surrogate call viable.  Assignment's
            built-in candidates require a non-class left operand without a

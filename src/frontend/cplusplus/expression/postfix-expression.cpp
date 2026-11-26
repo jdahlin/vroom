@@ -1647,8 +1647,8 @@ analysis_result semantic_analysis::call(SyntaxRef n, expression_meaning &m)
         /* [over.call.object]/2: if the class has no viable operator() and no
            conversion functions (no surrogate call functions), calling it is
            ill-formed in a substitution context */
-        if (substituting && !has_implicit_conversion_functions(
-                                type_table[f.type.unqualified()].entity))
+        if (substituting &&
+            !converts_to_callable(type_table[f.type.unqualified()].entity))
             return ill_formed(n,
                               "called object type is not a function or "
                               "function pointer",
