@@ -846,17 +846,19 @@ CC_PRIVATE bool cc_builtin_x86_sse2_build(cc *c, const char *name,
                                                    zero, idx, 4, loc));
         return true;
     }
-    if (!strcmp(name, "vec_ext_v8hi") || !strcmp(name, "vec_set_v8hi")) {
+    if (!strncmp(name, "vec_ext_v", 9) || !strncmp(name, "vec_set_v", 9)) {
         bool set = name[4] == 's';
         uint32_t index = args->v[set ? 2 : 1];
+        ast_qualified_type vt =
+            AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(args->v[0])->ty);
+        ast_qualified_type et = AST_TYPE(c, vt)->base;
+        /* clang takes the lane modulo the lanes' number */
         if (args->n != (set ? 3u : 2u) ||
-            !cc_x86_constant(c, index, name, loc, &imm) || imm < 0 || imm > 7) {
+            !cc_x86_constant(c, index, name, loc, &imm)) {
             *out = cc_node_error_new(c, loc);
             return true;
         }
-        ast_qualified_type vt =
-            AST_QUALIFIED_TYPE_UNQUALIFIED(AST_NODE(args->v[0])->ty);
-        ast_qualified_type et = cc_type_basic(AST_TYPE_SHORT);
+        imm &= 16 / cc_type_size(c, et) - 1;
         uint32_t pre = 0;
         uint32_t v = cc_vector_hold(c, args->v[0], vt, &pre, loc);
         if (!set) {

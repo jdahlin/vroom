@@ -282,8 +282,9 @@ BUILTIN_GENERATED = $(OUT)/generated/include/frontend/integer-builtins.inc \
 	$(OUT)/generated/include/frontend/stdc-builtins.inc \
 	$(OUT)/generated/include/frontend/cxx-builtins.inc \
 	$(OUT)/generated/include/frontend/c/target-builtins.inc \
-	$(OUT)/generated/include/frontend/c/builtin-stubs.inc
-$(BUILTIN_GENERATED) &: $(OUT)/clang-builtin-reader tools/gen-builtin-registrations.py $(BUILTIN_TD)
+	$(OUT)/generated/include/frontend/c/builtin-stubs.inc \
+	$(OUT)/generated/include/frontend/x86-instructions.inc
+$(BUILTIN_GENERATED) &: $(OUT)/clang-builtin-reader tools/gen-builtin-registrations.py $(BUILTIN_TD) frontend/c/builtins-registry.cpp
 	python3 tools/gen-builtin-registrations.py --reader $(OUT)/clang-builtin-reader \
 		--output-root $(OUT)/generated/include
 

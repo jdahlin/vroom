@@ -405,6 +405,7 @@ bench/vcc-ldconst.py [--target T]   # generated long double literals and folds, 
 bench/vcc-diff.py MODE -j 6 --win64 # any mode on one TU per MinGW-w64 header (+ flag variants) for x86_64-w64-mingw32 (cmp ~15 s; ref once ~1 min)
 bench/vcc-sema.py run|layout -j 6 --win64   # the same TUs: -fsyntax-only, layout claims checked by clang (layout ~5 min)
 src/tools/gen-win64data.sh          # Windows x64's predefines, -dD order, __has_* and attribute names from clang (ppdata-win64.inc, attrnames-win64.inc)
+bench/vcc-x86intrinsics.py [-j N] [-O 02] [--cxx] [PAT]   # every builtin of the generated x86 instruction table, vpp's result vs clang's (x86-64 host, ~2 s).  Pipeline: add a feature to X86_FEATURES (tools/gen-builtin-registrations.py), `make -C src vcc` (table from contrib/clang-builtins' .td), run this, fix what it reports (mnemonics: arch/x64/as; forms: arch/x64/codegen/simd.cpp)
 bench/vcc-f80.sh [N]                # x87 long double folding (include/common/softfloat.h) vs this x86-64 host's FPU (~3 s)
 bench/vccd-test.py                  # vccd as a service: socket, bad requests, cache invalidation, a file rewritten within a build, the win64 shim (~11 s)
 vcc --vccd-diagnostics[=json]       # vccd's diagnostics store: summary by flag/file, or every TU's records (JSON lines)

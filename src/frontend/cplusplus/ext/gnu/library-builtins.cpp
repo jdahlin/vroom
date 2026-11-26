@@ -214,7 +214,7 @@ entity_index semantic_analysis::declare_builtin(
 
 /* the scalar letters of the C front end's builtin signatures and their
    types */
-static const char signature_letters[] = "vbcChiulLwWzfdDFBHIQEN";
+static const char signature_letters[] = "vbcChiulLwWzfdDFBHIQENUG";
 static const fundamental_type signature_types[] = {
     fundamental_type::void_,
     fundamental_type::bool_,
@@ -242,6 +242,9 @@ static const fundamental_type signature_types[] = {
     fundamental_type::long_long_int,
     fundamental_type::double_,
     fundamental_type::short_int,
+    /* U and G: vectors of unsigned char and unsigned short */
+    fundamental_type::unsigned_char,
+    fundamental_type::unsigned_short_int,
 };
 
 enum class floating_builtin {
@@ -319,7 +322,7 @@ bool semantic_analysis::builtin_letter_type(char letter, qualified_type &t)
     t = builtin_scalar(signature_types[at - signature_letters]);
     /* [ext:gnu_vector_size] F, B, H, I, Q and E: the x86 builtins' vectors of
        16 bytes (v4sf, v16qi, v8hi, v4si, v2di, v2df) of that element */
-    if (strchr("FBHIQE", letter))
+    if (strchr("FBHIQEUG", letter))
         t = qualified_type::make(type_table.vector_of(t, 16 / size_of_type(t)),
                                  cv_none);
     return true;

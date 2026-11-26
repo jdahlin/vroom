@@ -57,6 +57,43 @@ CC_PRIVATE uint32_t cc_builtin_x86_addcarry_build(cc *c, const cc_builtin *b,
         c, pre, cc_lowering_sequence(c, store, cc_node_rvalue(c, carry)));
 }
 
+typedef struct x86_instruction_name {
+    const char *name, *signature;
+} x86_instruction_name;
+
+static const x86_instruction_name x86_instruction_names[] = {
+#define X86_INSTRUCTION(name, signature, mnemonic, form, feature)              \
+    {name, signature},
+#include "frontend/x86-instructions.inc"
+#undef X86_INSTRUCTION
+};
+
+/* a builtin of frontend/x86-instructions.inc: the node keeps its arguments and
+   its row; code generation checks the feature and emits the instruction */
+CC_PRIVATE uint32_t cc_builtin_x86_instruction_build(cc *c, const cc_builtin *b,
+                                                     cc_id_list *args,
+                                                     ast_qualified_type rt,
+                                                     uint32_t loc)
+{
+    unsigned row = 0;
+    unsigned count =
+        sizeof x86_instruction_names / sizeof *x86_instruction_names;
+
+    while (row < count && strcmp(x86_instruction_names[row].name, b->name))
+        row++;
+    if (!CC_X86_64(c)) {
+        cc_report_error(c, loc, "builtin '%s' requires an x86-64 target",
+                        b->name);
+        return cc_node_error_new(c, loc);
+    }
+    if (row == count ||
+        args->n + 1 != strlen(x86_instruction_names[row].signature))
+        return cc_node_error_new(c, loc);
+    cc_id_list_append(
+        c, args, cc_node_integer_new(c, row, cc_type_basic(AST_TYPE_INT), loc));
+    return cc_builtin_node_new(c, CC_BUILTIN_X86_INSTRUCTION, rt, loc, args);
+}
+
 /* The builtin converts its constant control to char, as Clang does. The final hidden
  * argument identifies the result projection and explicit-length variant. */
 CC_PRIVATE uint32_t cc_builtin_x86_pcmpstr_build(cc *c, const cc_builtin *b,

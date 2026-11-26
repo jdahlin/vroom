@@ -157,6 +157,10 @@ CC_PRIVATE uint32_t cc_builtin_x86_pcmpstr_build(cc *c, const cc_builtin *b,
                                                  cc_id_list *args,
                                                  ast_qualified_type rt,
                                                  uint32_t loc);
+CC_PRIVATE uint32_t cc_builtin_x86_instruction_build(cc *c, const cc_builtin *b,
+                                                     cc_id_list *args,
+                                                     ast_qualified_type rt,
+                                                     uint32_t loc);
 CC_PRIVATE uint32_t cc_builtin_x86_simd_build(cc *c, const cc_builtin *b,
                                               cc_id_list *args,
                                               ast_qualified_type rt,

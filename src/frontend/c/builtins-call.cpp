@@ -432,6 +432,8 @@ CC_PRIVATE uint32_t cc_builtin_call_build(cc *c, const cc_builtin *b,
         }
         if (b->id == CC_BUILTIN_X86_PCMPSTR)
             return cc_builtin_x86_pcmpstr_build(c, b, &args, rt, loc);
+        if (b->id == CC_BUILTIN_X86_INSTRUCTION)
+            return cc_builtin_x86_instruction_build(c, b, &args, rt, loc);
         if (b->id == CC_BUILTIN_X86_SIMD)
             return cc_builtin_x86_simd_build(c, b, &args, rt, loc);
         switch (b->id) {

@@ -587,3 +587,167 @@ VPRIV bool x64_vector_shuffle(codegen_context *e, const int *bytes, int ra,
     x64_tfree(e, y);
     return true;
 }
+
+/* ---- builtins that are one instruction (frontend/x86-instructions.inc) */
+
+typedef enum x64_form {
+    BINARY,         /* op b, a */
+    UNARY,          /* op a, a */
+    BINARY_CONTROL, /* op $k, b, a */
+    UNARY_CONTROL,  /* op $k, a, a */
+    BINARY_XMM0,    /* op b, a with the third operand in xmm0 */
+    SHIFT,          /* op count, a: the count in an xmm */
+    LOAD,           /* op (p), a */
+    TO_GENERAL,     /* op a, r */
+    COMPARE,        /* the mask's lowest bit of cmp b, a */
+    COMPARE_SWAPPED,
+    PTEST /* ptest b, a, then the mnemonic's condition */
+} x64_form;
+
+typedef struct x64_instruction {
+    const char *name, *signature, *mnemonic;
+    x64_form form;
+    const char *feature;
+} x64_instruction;
+
+static const x64_instruction x64_instructions[] = {
+#define X86_INSTRUCTION(name, signature, mnemonic, form, feature)              \
+    {name, signature, mnemonic, form, feature},
+#include "frontend/x86-instructions.inc"
+#undef X86_INSTRUCTION
+};
+
+static void x64_simd_general_text(codegen_context *e, const char *before, int r,
+                                  int size, const char *after)
+{
+    char line[128];
+    tbuf text = {};
+    text.p = line;
+    text.cap = sizeof line;
+    vtext_string_append(&text, before);
+    x64_register_name_append(&text, r, size);
+    vtext_string_append(&text, after);
+    vtext_append(&text, "", 1);
+    x64_simd_text(e, line);
+}
+
+VPRIV codegen_value x64_x86_instruction(codegen_context *e, uint32_t n)
+{
+    cc *c = e->compile_context;
+    const node *x = N(n);
+    const uint32_t *arg = &c->lists[x->b];
+    unsigned count = x->c - 1;
+    const x64_instruction *in =
+        &x64_instructions[(unsigned)c->ipool[N(arg[count])->a]];
+    uint32_t fn = e->walk_state->inline_call
+                      ? e->walk_state->inline_call->function
+                      : e->walk_state->function_symbol;
+    int feature = x86_feature_find(in->feature);
+
+    if (feature < 0 ||
+        !x86_feature_has(cc_x86_features_get(c, fn), (unsigned)feature))
+        codegen_fatal_report(e, x->loc, "'%s' needs target feature %s",
+                             in->name, in->feature);
+    bool control = in->form == BINARY_CONTROL || in->form == UNARY_CONTROL;
+    unsigned operands = count;
+    long long immediate = 0;
+    if (control) {
+        cc_value value;
+        operands--;
+        if (!cc_eval(c, arg[operands], &value) ||
+            value.kind != CC_VALUE_INTEGER)
+            codegen_fatal_report(e, x->loc,
+                                 "argument to '%s' must be a constant integer",
+                                 in->name);
+        immediate = (long long)(value.i & 0xff);
+    }
+    /* every operand first: evaluating one may use the registers */
+    codegen_value values[3];
+    int r[3] = {0, 0, 0};
+    for (unsigned i = 0; i < operands; i++) {
+        values[i] = walk_value_emit(e, arg[i]);
+        r[i] = walk_value_to_register(e, &values[i]);
+    }
+    int a = x64_ftreg(e), b = x64_ftreg(e);
+    char text[96];
+    if (in->form == LOAD) {
+        snprintf(text, sizeof text, "\t%s\t(", in->mnemonic);
+        char after[32];
+        snprintf(after, sizeof after, "), %%xmm%d\n", a - XMM0);
+        x64_simd_general_text(e, text, r[0], 8, after);
+    } else {
+        x64_simd_operand(e, a, r[0], true, 1);
+        if (in->form == SHIFT)
+            x64_record_emit_three_registers(e, X64_OP_MOV, 4, b, r[1],
+                                            X64_REGISTER_NONE);
+        else if (operands > 1)
+            x64_simd_operand(e, b, r[1], true, 1);
+    }
+    switch (in->form) {
+    case BINARY:
+    case SHIFT:
+        x64_simd_two(e, in->mnemonic, b, a);
+        break;
+    case UNARY:
+        x64_simd_two(e, in->mnemonic, a, a);
+        break;
+    case BINARY_CONTROL:
+        x64_simd_pick(e, in->mnemonic, (int)immediate, b, a);
+        break;
+    case UNARY_CONTROL:
+        x64_simd_pick(e, in->mnemonic, (int)immediate, a, a);
+        break;
+    case BINARY_XMM0:
+        x64_simd_operand(e, XMM0, r[2], true, 1);
+        snprintf(text, sizeof text, "\t%s\t%%xmm0, %%xmm%d, %%xmm%d\n",
+                 in->mnemonic, b - XMM0, a - XMM0);
+        x64_simd_text(e, text);
+        break;
+    case COMPARE:
+        x64_simd_two(e, in->mnemonic, b, a);
+        break;
+    case COMPARE_SWAPPED:
+        x64_simd_two(e, in->mnemonic, a, b);
+        x64_simd_two(e, "movdqa", b, a);
+        break;
+    case LOAD:
+    case TO_GENERAL:
+    case PTEST:
+        break;
+    }
+    for (unsigned i = 0; i < operands; i++)
+        x64_tfree(e, r[i]);
+    codegen_value result = codegen_value_constant(0);
+    if (in->signature[0] == 'i' || in->signature[0] == 'u' ||
+        in->signature[0] == 'w' || in->signature[0] == 'W') {
+        int size = 4;
+        if (in->signature[0] == 'w' || in->signature[0] == 'W')
+            size = 8;
+        int d = x64_treg(e);
+        if (in->form == TO_GENERAL) {
+            snprintf(text, sizeof text, "\t%s\t%%xmm%d, ", in->mnemonic,
+                     a - XMM0);
+            x64_simd_general_text(e, text, d, size, "\n");
+        } else if (in->form == PTEST) {
+            x64_simd_two(e, "ptest", b, a);
+            snprintf(text, sizeof text, "\t%s\t", in->mnemonic);
+            x64_simd_general_text(e, text, d, 1, "\n");
+            x64_simd_general_text(e, "\tandl\t$255, ", d, 4, "\n");
+        } else {
+            x64_simd_shift_by(e, "pslld", 31, a);
+            x64_simd_shift_by(e, "psrld", 31, a);
+            snprintf(text, sizeof text, "\tmovd\t%%xmm%d, ", a - XMM0);
+            x64_simd_general_text(e, text, d, 4, "\n");
+        }
+        result = walk_value_from_register(d);
+    } else {
+        codegen_lvalue l = {.kind = CODEGEN_LVALUE_FRAME,
+                            .align = 16,
+                            .offset = walk_slot_temporary(e, 16, 16)};
+        x64_store(e, a, &l, 16);
+        result = walk_value_from_register(x64_laddr(e, &l));
+    }
+    x64_tfree(e, a);
+    x64_tfree(e, b);
+    return result;
+}

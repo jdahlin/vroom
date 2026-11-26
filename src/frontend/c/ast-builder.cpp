@@ -552,7 +552,7 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
     }
     /* the x86 vector builtins expanded into lanes, as the parsed call does:
        the arguments converted to the signature's types first */
-    if (b->id == CC_BUILTIN_X86_SIMD) {
+    if (b->id == CC_BUILTIN_X86_SIMD || b->id == CC_BUILTIN_X86_INSTRUCTION) {
         const ctype *f = AST_TYPE(c, cc_builtin_type(c, b));
         cc_id_list typed;
         cc_id_list_init(&typed);
@@ -562,6 +562,8 @@ uint32_t ast_builder_builtin_call(cc *c, const char *name, size_t length,
                 a = cc_conversion_apply(c, a, c->params[f->aux + i]);
             cc_id_list_append(c, &typed, a);
         }
+        if (b->id == CC_BUILTIN_X86_INSTRUCTION)
+            return cc_builtin_x86_instruction_build(c, b, &typed, t, 0);
         return cc_builtin_x86_simd_build(c, b, &typed, t, 0);
     }
     cc_id_list list;

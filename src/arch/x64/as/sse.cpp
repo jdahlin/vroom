@@ -26,6 +26,7 @@ VPRIV int x64_i_sse(as_context *a, char *mn, XOp *o, int nops)
             {"mulss", 0xf3, 0x59},    {"mulsd", 0xf2, 0x59},
             {"divss", 0xf3, 0x5e},    {"divsd", 0xf2, 0x5e},
             {"sqrtss", 0xf3, 0x51},   {"sqrtsd", 0xf2, 0x51},
+            {"rcpss", 0xf3, 0x53},    {"rsqrtss", 0xf3, 0x52},
             {"minss", 0xf3, 0x5d},    {"minsd", 0xf2, 0x5d},
             {"maxss", 0xf3, 0x5f},    {"maxsd", 0xf2, 0x5f},
             {"xorps", 0, 0x57},       {"xorpd", 0x66, 0x57},
@@ -202,6 +203,13 @@ VPRIV int x64_i_sse4(as_context *a, char *mn, XOp *o, int nops)
             uint8_t pfx, map, op, imm;
         } x3[] = {
             {"pshufb", 0x66, 0x38, 0x00, 0},
+            {"phaddsw", 0x66, 0x38, 0x03, 0},
+            {"phsubw", 0x66, 0x38, 0x05, 0},
+            {"phsubd", 0x66, 0x38, 0x06, 0},
+            {"phsubsw", 0x66, 0x38, 0x07, 0},
+            {"blendvps", 0x66, 0x38, 0x14, 0},
+            {"blendvpd", 0x66, 0x38, 0x15, 0},
+            {"phminposuw", 0x66, 0x38, 0x41, 0},
             {"phaddw", 0x66, 0x38, 0x01, 0},
             {"phaddd", 0x66, 0x38, 0x02, 0},
             {"pmaddubsw", 0x66, 0x38, 0x04, 0},
@@ -247,6 +255,13 @@ VPRIV int x64_i_sse4(as_context *a, char *mn, XOp *o, int nops)
             {"sha256msg1", 0, 0x38, 0xcc, 0},
             {"sha256msg2", 0, 0x38, 0xcd, 0},
             {"palignr", 0x66, 0x3a, 0x0f, 1},
+            {"roundps", 0x66, 0x3a, 0x08, 1},
+            {"roundpd", 0x66, 0x3a, 0x09, 1},
+            {"blendpd", 0x66, 0x3a, 0x0d, 1},
+            {"insertps", 0x66, 0x3a, 0x21, 1},
+            {"dpps", 0x66, 0x3a, 0x40, 1},
+            {"dppd", 0x66, 0x3a, 0x41, 1},
+            {"mpsadbw", 0x66, 0x3a, 0x42, 1},
             {"pclmulqdq", 0x66, 0x3a, 0x44, 1},
             {"aeskeygenassist", 0x66, 0x3a, 0xdf, 1},
             {"sha1rnds4", 0, 0x3a, 0xcc, 1},
@@ -264,9 +279,10 @@ VPRIV int x64_i_sse4(as_context *a, char *mn, XOp *o, int nops)
             dst = &o[nops - 1], src = &o[nops - 2];
             if (nops == 3 && o[0].kind == XK_IMM)
                 im = &o[0];
-            else if (nops == 3 &&
-                     !(o[0].kind == XK_REG && o[0].cls == XR_XMM &&
-                       o[0].reg == 0 && !strcmp(mn, "sha256rnds2")))
+            else if (nops == 3 && !(o[0].kind == XK_REG && o[0].cls == XR_XMM &&
+                                    o[0].reg == 0 &&
+                                    (!strcmp(mn, "sha256rnds2") ||
+                                     !strncmp(mn, "blendv", 6))))
                 src = NULL;
         }
         if (src && (src->kind == XK_MEM || src->kind == XK_EXPR ||
@@ -420,7 +436,10 @@ VPRIV int x64_i_ssepk(as_context *a, char *mn, XOp *o, int nops)
             {"minpd", 0x66, 0x5d},     {"sqrtps", 0, 0x51},
             {"sqrtpd", 0x66, 0x51},    {"rcpps", 0, 0x53},
             {"rsqrtps", 0, 0x52},      {"movhlps", 0, 0x12},
-            {"movlhps", 0, 0x16},
+            {"movlhps", 0, 0x16},      {"addsubps", 0xf2, 0xd0},
+            {"addsubpd", 0x66, 0xd0},  {"haddps", 0xf2, 0x7c},
+            {"haddpd", 0x66, 0x7c},    {"hsubps", 0xf2, 0x7d},
+            {"hsubpd", 0x66, 0x7d},    {"lddqu", 0xf2, 0xf0},
         };
         static const struct {
             const char *n;

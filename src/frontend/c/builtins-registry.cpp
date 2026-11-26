@@ -22,6 +22,10 @@ CC_PRIVATE void cc_builtin_arity_check(cc *c, uint32_t loc, unsigned want,
 
 static const cc_builtin cc_builtin_table[] = {
 #include "frontend/c/target-builtins.inc"
+#define X86_INSTRUCTION(name, signature, mnemonic, form, feature)              \
+    {name, CC_BUILTIN_X86_INSTRUCTION, 0, signature},
+#include "frontend/x86-instructions.inc"
+#undef X86_INSTRUCTION
     {"__builtin_ia32_pblendvb128", CC_BUILTIN_X86_BLENDVB, 1, "BBBB"},
     {"__builtin_elementwise_abs", CC_BUILTIN_ELEMENTWISE_ABS, 1, "i."},
     {"__builtin_elementwise_min", CC_BUILTIN_ELEMENTWISE_MIN, 1, "i."},
@@ -35,6 +39,13 @@ static const cc_builtin cc_builtin_table[] = {
     {"__builtin_ia32_packssdw128", CC_BUILTIN_X86_SIMD, 1, "HII"},
     {"__builtin_ia32_packuswb128", CC_BUILTIN_X86_SIMD, 1, "BHH"},
     {"__builtin_ia32_packusdw128", CC_BUILTIN_X86_SIMD, 1, "HII"},
+    {"__builtin_ia32_vec_ext_v16qi", CC_BUILTIN_X86_SIMD, 1, "cBi"},
+    {"__builtin_ia32_vec_ext_v4si", CC_BUILTIN_X86_SIMD, 1, "iIi"},
+    {"__builtin_ia32_vec_ext_v2di", CC_BUILTIN_X86_SIMD, 1, "wQi"},
+    {"__builtin_ia32_vec_ext_v4sf", CC_BUILTIN_X86_SIMD, 1, "fFi"},
+    {"__builtin_ia32_vec_set_v16qi", CC_BUILTIN_X86_SIMD, 1, "BBci"},
+    {"__builtin_ia32_vec_set_v4si", CC_BUILTIN_X86_SIMD, 1, "IIii"},
+    {"__builtin_ia32_vec_set_v2di", CC_BUILTIN_X86_SIMD, 1, "QQwi"},
     {"__builtin_ia32_pshufd", CC_BUILTIN_X86_SIMD, 1, "IIi"},
     {"__builtin_ia32_pshuflw", CC_BUILTIN_X86_SIMD, 1, "HHi"},
     {"__builtin_ia32_pshufhw", CC_BUILTIN_X86_SIMD, 1, "HHi"},
@@ -532,6 +543,10 @@ CC_PRIVATE ast_qualified_type cc_builtin_signature_type(cc *c, char ch)
         return cc_type_basic(AST_TYPE_SHORT);
     case 'H':
         return cc_type_vector(c, cc_type_basic(AST_TYPE_SHORT), 16);
+    case 'U':
+        return cc_type_vector(c, cc_type_basic(AST_TYPE_UNSIGNED_CHAR), 16);
+    case 'G':
+        return cc_type_vector(c, cc_type_basic(AST_TYPE_UNSIGNED_SHORT), 16);
     case 'D':
         return cc_type_basic(AST_TYPE_LONG_DOUBLE);
     case 'p':
