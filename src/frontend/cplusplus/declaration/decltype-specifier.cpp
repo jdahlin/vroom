@@ -371,6 +371,31 @@ void semantic_analysis::collect_written_casts(
             found.append(b);
         }
     }
+    /* ns::A<args>::, the template-id after namespaces: the type the whole
+       specifier names, for the same */
+    if (x.is(syntax_kind::nested_name_specifier) && x.size() > 2 &&
+        x.size() % 2 == 0 && x[0].is_identifier() &&
+        x[x.size() - 2].is(syntax_kind::simple_template_id)) {
+        entity_index scope = lookup_unqualified(tokens.identifier(x[0].token()),
+                                                lookup_filter::any)
+                                 .entity;
+        for (uint32_t i = 2; i + 2 < x.size() && scope; i += 2)
+            scope = entity_table.find(scope, tokens.identifier(x[i].token()));
+        if (scope) {
+            size_t unsupported_before = unsupported.size();
+            type_index made = 0;
+            analysis_result r =
+                template_type(x[x.size() - 2], scope, true, made);
+            unsupported.resize(unsupported_before);
+            if (r == analysis_result::well_formed) {
+                written_binding b;
+                SyntaxRef ar = x[x.size() - 2];
+                b.cast = ar.index().index();
+                b.type = qualified_type::make(made, cv_none);
+                found.append(b);
+            }
+        }
+    }
     /* typename Q::template X<args> ([temp.dep.type]/9): the qualifier's
        type (element 0) and the type arguments, for the mangler */
     if (x.is(syntax_kind::typename_specifier) && x.size() >= 3 &&
@@ -447,6 +472,30 @@ void semantic_analysis::collect_written_casts(
         if (!ok)
             found.resize(before);
     }
+    /* A<args>(), A an alias template: the type it names, for cv <type> _ E
+       (cast the template-id's node) */
+    if (x.is(syntax_kind::postfix_expression) && x.size() == 3 &&
+        x[0].is(syntax_kind::simple_template_id) &&
+        x[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
+        x[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS) &&
+        x[0][0].is_identifier()) {
+        lookup_result named = lookup_unqualified(
+            tokens.identifier(x[0][0].token()), lookup_filter::any);
+        if (named.unknown_entity &&
+            !names_function_template(named.unknown_entity)) {
+            size_t unsupported_before = unsupported.size();
+            type_index made = 0;
+            analysis_result r = template_type(x[0], 0, false, made);
+            unsupported.resize(unsupported_before);
+            if (r == analysis_result::well_formed) {
+                written_binding b;
+                SyntaxRef id = x[0];
+                b.cast = id.index().index();
+                b.type = qualified_type::make(made, cv_none);
+                found.append(b);
+            }
+        }
+    }
     /* a template argument written as a type-id that is not a name
        (std::declval<_Iter&>()): its type, for the mangler (cast the
        type-id's node) */
@@ -467,7 +516,10 @@ void semantic_analysis::collect_written_casts(
                 inner.is_node() && inner.size() == 1 &&
                 inner.is(syntax_kind::type_id, syntax_kind::type_specifier_seq))
                 inner = inner[0];
-            if (inner.is_token())
+            /* (a keyword or a name: a class's, which the mangler cannot
+               look up where the signature is written) */
+            if (inner.is_token() && !inner.is_identifier() &&
+                inner.keyword() == standard_keyword::none)
                 continue;
             size_t unsupported_before = unsupported.size();
             qualified_type t;

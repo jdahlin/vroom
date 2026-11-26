@@ -1006,20 +1006,22 @@ bool itanium_mangler::operand_type(SyntaxElement a, qualified_type &t,
                 }
                 break;
             }
-        if (!pe ||
-            analysis.entity_table[pe].kind != entity_kind::typedef_name ||
-            record(analysis.entity_table[pe].type).kind !=
-                type_kind::template_parameter)
-            return false;
-        t = analysis.entity_table[pe].type;
-        return true;
+        if (pe && analysis.entity_table[pe].kind == entity_kind::typedef_name &&
+            record(analysis.entity_table[pe].type).kind ==
+                type_kind::template_parameter) {
+            t = analysis.entity_table[pe].type;
+            return true;
+        }
+        /* another name: the type recorded with the type-id's node */
     }
     if (!a.is_node())
         return false;
     SyntaxRef ar = a;
     for (uint32_t i = 0; i < written_count; i++) {
         const auto &w = analysis.written_bindings[written_first + i];
-        if (!w.identifier && w.cast == ar.index().index()) {
+        /* (a called specialization's binding is no type written) */
+        if (!w.identifier && !w.specialization &&
+            w.cast == ar.index().index()) {
             t = w.type;
             return true;
         }
@@ -1163,7 +1165,10 @@ int itanium_mangler::unresolved_qualifier(SyntaxElement q)
         return 0;
     }
     const struct type &r = record(t);
-    if (r.kind == type_kind::template_parameter && !t.cv()) {
+    /* (an alias template's template-id naming a parameter is mangled as
+       written, below, as clang does) */
+    if (r.kind == type_kind::template_parameter && !t.cv() &&
+        !q.is(syntax_kind::simple_template_id)) {
         if (!type(t))
             return 0;
         return 1;
@@ -1529,9 +1534,11 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
     /* T(), T an alias template's parameter or the template's own type
        parameter: cv <type> _ E */
     if (expression.is(syntax_kind::postfix_expression) &&
-        expression.size() == 3 && expression[0].is_token() &&
-        (expression[0].is_identifier() ||
-         expression[0].keyword() != standard_keyword::none) &&
+        expression.size() == 3 &&
+        ((expression[0].is_token() &&
+          (expression[0].is_identifier() ||
+           expression[0].keyword() != standard_keyword::none)) ||
+         expression[0].is(syntax_kind::simple_template_id)) &&
         expression[1].is(preprocessing_op_or_punc::LEFT_PARENTHESIS) &&
         expression[2].is(preprocessing_op_or_punc::RIGHT_PARENTHESIS)) {
         size_t before = out->n;
@@ -1541,6 +1548,15 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             return true;
         }
         out->n = before;
+    }
+    /* [abi:expressions] c ? a : b is qu <expression> <expression>
+       <expression> */
+    if (expression.is(syntax_kind::conditional_expression) &&
+        expression.size() == 5) {
+        text("qu");
+        return dependent_expression(expression[0]) &&
+               dependent_expression(expression[2]) &&
+               dependent_expression(expression[4]);
     }
     if (expression.is(syntax_kind::expression) && expression.size() == 3 &&
         punctuator(expression[1], preprocessing_op_or_punc::COMMA)) {
@@ -1601,16 +1617,32 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
                <unresolved-name> ::= [gs] sr <unresolved-qualifier-level>+ E <base-unresolved-name>
                <base-unresolved-name> ::= <simple-id>
          */
-        if (!global && qual.size() == 2 &&
+        /* (ns::A<args>::name too: the namespaces' <source-name>s are the
+           first <unresolved-qualifier-level>s) */
+        uint32_t last = 0;
+        if (qual.size() >= 2)
+            last = qual.size() - 2;
+        bool namespaces = qual.size() % 2 == 0;
+        for (uint32_t i = 0; i < last; i += 2)
+            namespaces = namespaces && qual[i].is_identifier();
+        if (!global && namespaces && qual.size() >= 2 &&
             (member.is_identifier() ||
              (member.is(syntax_kind::simple_template_id) &&
               member.size() >= 3 && member[0].is_identifier())) &&
-            (qual[0].is_identifier() ||
-             qual[0].is(syntax_kind::simple_template_id))) {
+            ((qual[last].is_identifier() && !last) ||
+             qual[last].is(syntax_kind::simple_template_id))) {
             size_t before = out->n;
             size_t candidates_before = candidates.size();
             text("sr");
-            int form = unresolved_qualifier(qual[0]);
+            bool named = true;
+            for (uint32_t i = 0; i < last; i += 2)
+                named = named &&
+                        source_name(analysis.token_identifier(qual[i].token()));
+            int form = 0;
+            if (named)
+                form = unresolved_qualifier(qual[last]);
+            if (form == 1 && last)
+                form = 0;
             if (form) {
                 if (form == 2)
                     text("E");
@@ -1728,26 +1760,8 @@ bool itanium_mangler::dependent_expression_of(SyntaxElement expression)
             for (SyntaxElement a : written) {
                 if (a.is(preprocessing_op_or_punc::COMMA))
                     continue;
-                /* (a type-id that is not a name: the type the analysis
-                   gave it, collect_written_casts) */
-                SyntaxElement inner = a;
-                while (inner.is_node() && inner.size() == 1 &&
-                       inner.is(syntax_kind::type_id,
-                                syntax_kind::type_specifier_seq))
-                    inner = inner[0];
-                if (a.is(syntax_kind::type_id) && !inner.is_token()) {
-                    SyntaxRef ar = a;
-                    bool found = false;
-                    for (uint32_t i = 0; i < written_count && !found; i++) {
-                        const auto &w =
-                            analysis.written_bindings[written_first + i];
-                        if (w.identifier || w.cast != ar.index().index())
-                            continue;
-                        if (!type(w.type))
-                            return false;
-                        found = true;
-                    }
-                    if (!found)
+                if (a.is(syntax_kind::type_id)) {
+                    if (!type_operand(a))
                         return false;
                     continue;
                 }
