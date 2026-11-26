@@ -6320,6 +6320,8 @@ class semantic_analysis
        is no pack expansion's pattern: no_expansion), or null */
     static constexpr uint32_t no_expansion = 0xffffffffu;
     const owned_array<uint32_t> *clause_packs = nullptr;
+    analysis_result clause_expression(const owned_array<SyntaxElement> &clauses,
+                                      size_t i, expression_meaning &e);
     bool bound_pack_is_dependent(entity_index e) const;
     entity_index make_bound_pack(entity_index scope, uint32_t name,
                                  const entity_index *elements, uint32_t count);

@@ -1175,24 +1175,18 @@ semantic_analysis::list_initialization(SyntaxRef list, qualified_type &type,
     owned_array<uint32_t> packs;
     designation_set designations;
     VTRY(gathered, list_clauses(list, clauses, &packs, &designations));
-    /* the expansions are known to the array path only: another type's
-       clauses are analysed without them */
+    /* the expansions are known to the aggregate and constructor paths:
+       another type's clauses are analysed without them */
     bool expanded = false;
     for (size_t i = 0; i < packs.size(); i++)
         if (packs[i] != no_expansion)
             expanded = true;
-    /* (std::initializer_list<E> is initialized from its backing array,
-       const E[N], by this list: the array path, [dcl.init.list]/5) */
-    const struct type &target = type_table[type.unqualified()];
-    bool initializer_list_target =
-        target.kind == type_kind::class_type && target.entity &&
-        named(target.entity, "initializer_list") &&
-        std_namespace(entity_table[target.entity].enclosing);
-    if (expanded && (designations.any || (target.kind != type_kind::array &&
-                                          !initializer_list_target)))
+    type_kind target = type_table[type.unqualified()].kind;
+    if (expanded && (designations.any || (target != type_kind::array &&
+                                          target != type_kind::class_type)))
         return not_supported_because(
             list, "temp.variadic",
-            "a designated or non-array list with a pack expansion");
+            "a designated or scalar list with a pack expansion");
     const owned_array<uint32_t> *saved = clause_packs;
     clause_packs = nullptr;
     if (expanded)
@@ -1910,7 +1904,7 @@ analysis_result semantic_analysis::class_list_initialization(
         /* (3.2): an element of the class's own type or of a class derived
            from it (CWG 1467) */
         expression_meaning e;
-        VTRY(r, expression(clauses[0], e));
+        VTRY(r, clause_expression(clauses, 0, e));
         if (e.type.unqualified() == type.unqualified() ||
             same_or_derived_class(e, c))
             return initialize_with(list, e, type, false, true, result);
@@ -1990,10 +1984,10 @@ analysis_result semantic_analysis::constructor_list_initialization(
                                      "several initializer_list constructors");
     }
     owned_array<expression_meaning> arguments;
-    for (SyntaxElement clause : clauses) {
+    for (size_t i = 0; i < clauses.size(); i++) {
         expression_meaning e;
-        if (!clause.is(syntax_kind::braced_init_list)) {
-            VTRY(r, expression(clause, e));
+        if (!clauses[i].is(syntax_kind::braced_init_list)) {
+            VTRY(r, clause_expression(clauses, i, e));
         }
         arguments.append(e);
     }
@@ -2101,6 +2095,21 @@ analysis_result semantic_analysis::constructor_list_initialization(
         }
     }
     return analysis_result::well_formed;
+}
+
+/* the expression of clauses[i]: a pack expansion's pattern for its element
+   ([temp.variadic]/7) */
+analysis_result
+semantic_analysis::clause_expression(const owned_array<SyntaxElement> &clauses,
+                                     size_t i, expression_meaning &e)
+{
+    bool has_pack = clause_packs && i < clause_packs->size() &&
+                    (*clause_packs)[i] != no_expansion;
+    uint32_t element = 0;
+    if (has_pack)
+        element = (*clause_packs)[i];
+    expansion_scope scope(*this, has_pack, element);
+    return expression(clauses[i], e);
 }
 
 /* [dcl.init.aggr]/11: "An initializer-list is ill-formed if the number of
