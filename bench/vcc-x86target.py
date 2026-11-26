@@ -46,9 +46,9 @@ with tempfile.TemporaryDirectory(prefix='vcc-x86target-') as td:
    if bool(r.returncode)!=rejected or (('0/3 ok' if rejected else '3/3 ok') not in r.stdout) or not hit or (replay and '0 mismatches' not in r.stdout):
     fail+=1;print('FAIL nested target cache',inner,middle,outer,replay,r.stdout,r.stderr)
  print(f'nested inline targets: {nested_checks} oracle checks, {cache_checks} verified snapshot/replay paths')
- # Wide-vector AVX ABI is deliberately diagnosed until YMM/ZMM calls exist.
- guards=[('-mavx', 'typedef float V __attribute__((vector_size(32))); V f(V x){return x;}'),
-         ('-mavx512f', 'typedef float V __attribute__((vector_size(64))); V f(V x){return x;}'),
+ # 64-byte vectors (zmm) are not passed yet, and a caller and callee that
+ # differ in AVX cannot pass a 32-byte one: both diagnosed.
+ guards=[('-mavx512f', 'typedef float V __attribute__((vector_size(64))); V f(V x){return x;}'),
          ('-msse2', 'typedef float V __attribute__((vector_size(32))); __attribute__((target("avx"))) extern V f(V); V g(V x){return f(x);}')]
  for flag,code in guards:
   src.write_text(code)
@@ -101,8 +101,14 @@ with tempfile.TemporaryDirectory(prefix='vcc-x86target-') as td:
     r=subprocess.run([a.vpp,'--target=x86_64-linux-gnu',*flags,'-S',str(src),'-o',str(out)],capture_output=True,text=True)
     rejected = bool(r.returncode) and 'AVX vector argument or return ABI' in r.stderr
     aggregate_checks += 1
-    if rejected != registers or (r.returncode and not rejected):
+    # in registers: 32 bytes go in a ymm register; 64 (zmm) are refused, as
+    # is a call from a function without AVX to one with it (external)
+    zmm = any(wide in fields for wide in ['V64', 'V32 v[2]', 'V32 a,b'])
+    refused = registers and (zmm or form == 'external')
+    if rejected != refused or (r.returncode and not rejected):
      fail+=1;print('FAIL aggregate ABI',kind,fields,feature,form,'registers=',registers,r.stderr)
+    elif not r.returncode and ('%ymm0' in out.read_text()) != (registers and not zmm and form != 'external'):
+     fail+=1;print('FAIL aggregate ymm',kind,fields,feature,form,'registers=',registers)
  # Natural vector alignment is independent of whether AVX instructions are enabled.
  alignment_checks = 0
  for width in [32,64]:
@@ -159,9 +165,10 @@ with tempfile.TemporaryDirectory(prefix='vcc-x86target-') as td:
     src.write_text(pre+code)
     r=subprocess.run([a.vpp,'--target=x86_64-linux-gnu','-m'+feature,'-S',str(src),'-o',str(out)],capture_output=True,text=True)
     variadic_checks += 1
-    if not r.returncode or 'AVX vector argument or return ABI' not in r.stderr:
+    refused = width == 64
+    if bool(r.returncode) != refused or (refused and 'AVX vector argument or return ABI' not in r.stderr):
      fail+=1;print('FAIL named variadic ABI guard',shape,width,result,r.stderr)
  print(f'variadic AVX ABI: {variadic_checks} compile/guard checks, {variadic_runs} native cross-compiler executions')
 print(f'aggregate AVX ABI: {aggregate_checks} oracle/diagnostic comparisons; total failures {fail}')
-print(f'x86 target attributes: {2*len(cases)} oracle comparisons, 3 ABI guards, 2 SIMD overrides; {fail} failures')
+print(f'x86 target attributes: {2*len(cases)} oracle comparisons, 2 ABI guards, 2 SIMD overrides; {fail} failures')
 raise SystemExit(bool(fail))
