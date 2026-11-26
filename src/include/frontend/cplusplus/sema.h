@@ -1628,6 +1628,7 @@ enum class source_location_builtin : uint8_t {
     function,  /* __builtin_FUNCTION: the function's name, "" outside one */
     line,      /* __builtin_LINE */
     column,    /* __builtin_COLUMN */
+    object, /* __builtin_source_location: const std::source_location::__impl * */
 };
 
 const char *semantic_kind_name(semantic_kind kind);
