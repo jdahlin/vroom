@@ -183,6 +183,22 @@ analysis_result semantic_analysis::literal(token_index t, expression_meaning &m)
             float f;
             memcpy(&f, &bits, sizeof f);
             m.value = floating_kept(f);
+        } else if (k.type == fundamental_type::float16) {
+            /* the literal's value is its binary16 bits: sign, 5 exponent
+               bits (bias 15), 10 fraction bits */
+            uint32_t bits = static_cast<uint32_t>(v.floating_bits_low);
+            int exponent = static_cast<int>(bits >> 10 & 31);
+            double significand = bits & 1023;
+            if (exponent)
+                significand += 1024;
+            else
+                exponent = 1;
+            double half = ldexp(significand, exponent - 25);
+            if ((bits >> 10 & 31) == 31)
+                half = static_cast<double>(INFINITY);
+            if (bits & 0x8000)
+                half = -half;
+            m.value = floating_kept(half);
         } else {
             m.value = v.floating_bits_low;
         }

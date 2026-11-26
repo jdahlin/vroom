@@ -282,7 +282,8 @@ fundamental_type semantic_analysis::evaluated_type(qualified_type t) const
             return fundamental_type::none;
         f = entity_table[e].underlying;
     }
-    if (f == fundamental_type::float_ || f == fundamental_type::double_)
+    if (f == fundamental_type::float_ || f == fundamental_type::double_ ||
+        f == fundamental_type::float16)
         return f;
     if (!fundamental_type_is_integral(f) ||
         f == fundamental_type::bit_precise_int ||

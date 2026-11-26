@@ -211,7 +211,8 @@ uint32_t c_lowering::constant(const semantic_node &n)
         return fail("a constant whose value analysis does not know", n.at);
     switch (f) {
     case fundamental_type::float_:
-    case fundamental_type::double_: {
+    case fundamental_type::double_:
+    case fundamental_type::float16: {
         /* A float constant normally reaches C as a double. Use an exact
            bit cast when narrowing that double would quiet a signaling NaN. */
         if (f == fundamental_type::float_ &&
@@ -226,7 +227,6 @@ uint32_t c_lowering::constant(const semantic_node &n)
         return ast_builder_floating(c, t, d);
     }
     case fundamental_type::long_double:
-    case fundamental_type::float16:
         return fail("a floating constant of this type", n.at);
     default:
         return ast_builder_integer(c, AST_QUALIFIED_TYPE_UNQUALIFIED(t),

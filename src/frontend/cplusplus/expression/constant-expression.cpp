@@ -154,6 +154,26 @@ uint32_t float_storage_bits(uint64_t kept)
     return bits;
 }
 
+/* [ext:clang_float16] binary16: 11 significand bits, the smallest quantum
+   2^-24; a magnitude rounding to 2^16 is the infinity.  Rounded once from
+   a double, which is exact for the sum, difference, product and quotient
+   of two of its values (53 >= 2 * 11 + 2 bits). */
+double half_rounded(double v)
+{
+    if (!isfinite(v) || v == 0)
+        return v;
+    int exponent = 0;
+    frexp(v, &exponent);
+    int quantum = exponent - 11;
+    if (quantum < -24)
+        quantum = -24;
+    /* (nearbyint rounds ties to even in the default mode) */
+    double r = ldexp(nearbyint(ldexp(v, -quantum)), quantum);
+    if (fabs(r) >= 65536.0)
+        return copysign(static_cast<double>(INFINITY), v);
+    return r;
+}
+
 uint64_t floating_kept(double v)
 {
     uint64_t kept;

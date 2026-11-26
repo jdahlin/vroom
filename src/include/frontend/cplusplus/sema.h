@@ -1282,6 +1282,8 @@ double floating_value(uint64_t kept);
 bool floating_is_signaling_nan(uint64_t kept);
 uint32_t float_storage_bits(uint64_t kept);
 uint64_t floating_kept(double v);
+/* v rounded to _Float16's value (binary16, to nearest, ties to even) */
+double half_rounded(double v);
 /* the least power of two that is n or more (1 for 0) */
 uint64_t power_of_two_at_least(uint64_t n);
 /* [bit.cast]/1 of a value as an expression_meaning keeps it, from one

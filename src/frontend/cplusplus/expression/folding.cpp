@@ -48,16 +48,24 @@ double floating_operation(fundamental_type t, preprocessing_op_or_punc op,
         }
         return r;
     }
+    double r = 0;
     switch (op) {
     case preprocessing_op_or_punc::PLUS:
-        return a + b;
+        r = a + b;
+        break;
     case preprocessing_op_or_punc::MINUS:
-        return a - b;
+        r = a - b;
+        break;
     case preprocessing_op_or_punc::STAR:
-        return a * b;
+        r = a * b;
+        break;
     default:
-        return a / b;
+        r = a / b;
+        break;
     }
+    if (t == fundamental_type::float16)
+        return half_rounded(r);
+    return r;
 }
 
 bool folded_comparison(preprocessing_op_or_punc op)
