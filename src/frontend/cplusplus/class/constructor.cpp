@@ -4013,37 +4013,35 @@ analysis_result semantic_analysis::class_direct_initialization(
         type_table[arguments[0].type.unqualified()].entity != c) {
         conversion_sequence found;
         bool cannot_tell = false;
+        bool convert = false;
         if (conversion_function_to_class(arguments[0], type, found,
                                          cannot_tell)) {
             conversion_sequence s = class_sequence(arguments[0], type, true);
-            if (s.kind == conversion_sequence::form::user_defined &&
-                !s.ambiguous && s.function == found.function) {
-                expression_meaning conv = arguments[0];
-                bool converted = false;
-                VTRY(cr,
-                     conversion_function_call(n, conv, type, true, converted));
-                if (converted &&
-                    conv.type.unqualified() == type.unqualified() &&
-                    conv.category == value_category::prvalue) {
-                    m = conv;
-                    return analysis_result::well_formed;
-                }
-            }
+            convert = s.kind == conversion_sequence::form::user_defined &&
+                      !s.ambiguous && s.function == found.function;
         } else {
             bool ambiguous = false, unknown = false;
             entity_index fn = conversion_function_for(arguments[0], type, true,
                                                       ambiguous, unknown);
-            if (fn && entity_table[fn].explicit_ && !ambiguous && !unknown) {
-                expression_meaning conv = arguments[0];
-                bool converted = false;
-                VTRY(cr,
-                     conversion_function_call(n, conv, type, true, converted));
-                if (converted &&
-                    conv.type.unqualified() == type.unqualified() &&
-                    conv.category == value_category::prvalue) {
+            convert =
+                fn && entity_table[fn].explicit_ && !ambiguous && !unknown;
+        }
+        if (convert) {
+            expression_meaning conv = arguments[0];
+            bool converted = false;
+            VTRY(cr, conversion_function_call(n, conv, type, true, converted));
+            if (converted && conv.type.unqualified() == type.unqualified()) {
+                if (conv.category == value_category::prvalue) {
                     m = conv;
                     return analysis_result::well_formed;
                 }
+                /* [over.match.copy]/(1.2): the explicit conversion
+                   function binds the copy or move constructor's reference
+                   parameter, so the glvalue it yields is what is copied;
+                   [dcl.init]/17.6.2.2: a viable constructor leaves no
+                   parenthesized aggregate initialization */
+                if (is_aggregate(c) || !entity_table[c].first_constructor)
+                    arguments[0] = conv;
             }
         }
     }
