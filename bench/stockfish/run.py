@@ -7,7 +7,7 @@ Source: work/stockfish (git clone --depth 1 --branch sf_17.1
 https://github.com/official-stockfish/Stockfish.git work/stockfish, then
 `make -C work/stockfish/src net` for the two NNUE files).  The networks are
 loaded from the source directory (NNUE_EMBEDDING_OFF: no .incbin), the build
-is Stockfish's ARCH=general-64 (--arch sse2: x86-64; avx2: x86-64-avx2),
+is Stockfish's ARCH=general-64 (--arch sse2: x86-64; v2: x86-64-sse41-popcnt; avx2: x86-64-avx2),
 single-threaded bench, against libc++.  The CPU time of compiling the TUs one
 at a time is printed for both compilers.
 
@@ -44,6 +44,10 @@ DEFINES = ['-DNDEBUG', '-DIS_64BIT', '-DUSE_PTHREADS', '-DNNUE_EMBEDDING_OFF']
 # Stockfish's ARCH=x86-64 (--arch sse2); the default is ARCH=general-64,
 # without intrinsics
 SSE2 = ['-DUSE_SSE2', '-msse2']
+# ARCH=x86-64-sse41-popcnt (what -march=x86-64-v2 has: SSE3, SSSE3, SSE4.1,
+# POPCNT)
+V2 = SSE2 + ['-DUSE_SSSE3', '-DUSE_SSE41', '-DUSE_POPCNT', '-msse3',
+             '-mssse3', '-msse4.1', '-mpopcnt']
 # ARCH=x86-64-avx2
 AVX2 = SSE2 + ['-DUSE_SSSE3', '-DUSE_SSE41', '-DUSE_POPCNT', '-DUSE_AVX2',
                '-mssse3', '-msse4.1', '-mpopcnt', '-mavx2']
@@ -149,7 +153,7 @@ def nodes(exe, depth, speed=None):
 def main():
     global OUT, CACHE
     ap = argparse.ArgumentParser()
-    ap.add_argument('--arch', choices=('general', 'sse2', 'avx2'),
+    ap.add_argument('--arch', choices=('general', 'sse2', 'v2', 'avx2'),
                     default='general')
     ap.add_argument('--bin-dir', default=os.environ.get('VCC_BIN') or
                     os.path.join(R, 'build', 'linux', 'src'))
@@ -161,7 +165,7 @@ def main():
     ap.add_argument('-v', action='store_true')
     ap.add_argument('pattern', nargs='?')
     a = ap.parse_args()
-    DEFINES.extend({'general': [], 'sse2': SSE2, 'avx2': AVX2}[a.arch])
+    DEFINES.extend({'general': [], 'sse2': SSE2, 'v2': V2, 'avx2': AVX2}[a.arch])
     OUT = os.path.join(OUT, a.arch)
     CACHE = os.path.join(OUT, 'cache.json')
     vpp = os.path.join(a.bin_dir, 'vpp')
