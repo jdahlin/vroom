@@ -993,22 +993,6 @@ analysis_result semantic_analysis::defaulted_or_deleted_special_member(
            program */
         if (f.special == special_member::destructor)
             return deleted_definition(n, last_declared);
-        /* An X(X&) constructor changes implicit-move fallback on returns,
-           which return-statement analysis does not yet model. */
-        const struct type &ft = type_table[f.type.unqualified()];
-        if (ft.parameter_count) {
-            const struct type &first =
-                type_table[type_table.parameters(f.type.unqualified())[0]
-                               .unqualified()];
-            if (first.kind == type_kind::lvalue_reference &&
-                first.operand.unqualified() ==
-                    entity_table[c].type.unqualified() &&
-                first.operand.cv() != cv_const)
-                return not_supported_because(
-                    n, "class.copy.elision",
-                    "a deleted constructor from a non-const lvalue reference "
-                    "to its class");
-        }
         return deleted_definition(n, last_declared);
     }
     if (!form.defaulted())
