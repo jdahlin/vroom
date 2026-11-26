@@ -2566,10 +2566,10 @@ analysis_result semantic_analysis::omitted_element_value(
        ([dcl.init.list]/3.11 for a scalar, a default constructor for a
        class with constructors, all zero otherwise) */
     const struct type of_element = type_table[element.unqualified()];
-    if (of_element.kind == type_kind::array && empty_list_runs_code(element))
-        return not_supported_because(
-            list, "dcl.init.aggr",
-            "an omitted array whose elements need construction");
+    if (of_element.kind == type_kind::array && empty_list_runs_code(element)) {
+        owned_array<SyntaxElement> no_clauses;
+        return element_list_initialization(list, no_clauses, element, one);
+    }
     if (of_element.kind == type_kind::class_type &&
         empty_list_runs_code(element) && is_aggregate(of_element.entity)) {
         owned_array<SyntaxElement> no_clauses;
