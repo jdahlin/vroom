@@ -559,6 +559,8 @@ static void vir_verify_insn_check(vir_verify_state *v, uint32_t b, uint32_t i,
         if (vir_alloc_checker) {
             uint32_t sz = vir_type_size(
                 vir_type_element(vt)); /* (a vector's width is its lanes') */
+            if (vt == VIR_TYPE_I16X8)
+                sz = 2;
             bool fp = vt == VIR_TYPE_F32 || vt == VIR_TYPE_F64 ||
                       vt == VIR_TYPE_PTR || vir_type_is_vector(vt);
 

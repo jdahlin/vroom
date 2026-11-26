@@ -444,6 +444,15 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
             return;
         }
         if (vir_type_is_vector(i->type)) {
+            if (i->type == VIR_TYPE_I16X8 &&
+                (i->op == VIR_OP_ADD || i->op == VIR_OP_SUB)) {
+                const char *words = "psubw";
+
+                if (i->op == VIR_OP_ADD)
+                    words = "paddw";
+                x64_vir_simd_emit(L, words, d, a, c);
+                return;
+            }
             const char *op =
                 i->op == VIR_OP_ADD
                     ? (i->type == VIR_TYPE_I32X4 ? "paddd" : "paddq")
@@ -1030,6 +1039,11 @@ VPRIV void x64_vir_insn_lower(x64_vir_context *L, uint32_t b, uint32_t v,
         int lane = x64_vir_type_size(vir_type_element(i->type));
         x64_record_emit_three_registers(e, X64_OP_MOV, lane, d, a,
                                         X64_REGISTER_NONE);
+        if (i->type == VIR_TYPE_I16X8) { /* the low word to all eight */
+            snprintf(s, sizeof s, "\tpshuflw\t$0, %%xmm%d, %%xmm%d\n", d - XMM0,
+                     d - XMM0);
+            x64_vir_text_append(L, s);
+        }
         snprintf(s, sizeof s, "\t%s\t$0, %%xmm%d, %%xmm%d\n",
                  lane == 4 ? "pshufd" : "shufpd", d - XMM0, d - XMM0);
         x64_vir_text_append(L, s);

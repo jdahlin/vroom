@@ -102,10 +102,15 @@ VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in,
 
         if (!vir_type_is_vector(in->type))
             return false;
-        A64_VIR_VECTOR_WORD3(
-            op[in->op] | (in->op == VIR_OP_ADD || in->op == VIR_OP_SUB ? D : 0),
-            a64_vir_operand_float_register(L, 1),
-            a64_vir_operand_float_register(L, 0), vd);
+        uint32_t word = op[in->op];
+
+        if (in->op == VIR_OP_ADD || in->op == VIR_OP_SUB) {
+            word |= D;
+            if (in->type == VIR_TYPE_I16X8)
+                word ^= 0x00c00000u; /* .4s to .8h */
+        }
+        A64_VIR_VECTOR_WORD3(word, a64_vir_operand_float_register(L, 1),
+                             a64_vir_operand_float_register(L, 0), vd);
         return true;
     }
     case VIR_OP_NEG:
@@ -121,6 +126,19 @@ VPRIV bool a64_vir_vector_lower(a64_vir_context *L, const vir_insn *in,
             return false;
         a64_vir_fail(L, VIRBUILD_FAILURE(vector_select));
     case VIR_OP_VSPLAT:
+        if (in->type == VIR_TYPE_I16X8) {
+            if (L->operand_registers[0] != VIR_REGISTER_NONE &&
+                a64_vir_register_is_float(L->operand_registers[0]))
+                A64_VIR_VECTOR_WORD2(
+                    0x4e020400u,
+                    a64_vir_vector_register(L->operand_registers[0]),
+                    vd); /* dup v.8h, v.h[0] */
+            else
+                A64_VIR_VECTOR_WORD2(
+                    0x4e020c00u, a64_vir_operand_general_register(L, 0, R_X16),
+                    vd); /* dup v.8h, w */
+            return true;
+        }
         if (L->operand_registers[0] != VIR_REGISTER_NONE &&
             a64_vir_register_is_float(L->operand_registers[0]))
             A64_VIR_VECTOR_WORD2(
