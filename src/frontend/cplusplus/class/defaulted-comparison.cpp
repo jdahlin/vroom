@@ -364,16 +364,17 @@ int semantic_analysis::comparison_category(qualified_type t)
 analysis_result semantic_analysis::defaulted_equality(
     token_index at, const owned_array<uint32_t> &parameters, uint32_t &block)
 {
-    const entity &x = entity_table[defaulted_comparison];
+    entity_index compared = defaulted_comparison;
+    scoped_value<entity_index> clear_compared(defaulted_comparison, 0);
+    const entity x = entity_table[compared];
     entity_table[last_declared].inline_ = true;
     declared_constexpr = entity_table[last_declared].constexpr_;
     /* (provisionally: a body analysis does not complete is a function not
        known to be non-constexpr) */
     entity_table[last_declared].constexpr_ = true;
     /* a member's first parameter entity is its object */
-    bool of_class =
-        entity_table[last_declared].kind == entity_kind::function &&
-        entity_table[last_declared].enclosing == defaulted_comparison;
+    bool of_class = entity_table[last_declared].kind == entity_kind::function &&
+                    entity_table[last_declared].enclosing == compared;
     if ((!x.base_count && !x.member_count) || parameters.size() != 2u)
         return not_supported_because(
             current_declaration, "class.compare.default",
