@@ -14,12 +14,21 @@ c-only-callable __builtin_ms_va_copy c++/x86_64 # the rules of [ext.gnu] are not
 c-only-callable __builtin_ms_va_end c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
 c-only-callable __builtin_ms_va_end c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_ms_va_end is the Microsoft va_list builtin, which has no lowering for this target
 c-only-callable __builtin_ms_va_start c++/x86_64 # the C++ front end does not handle a declaration the parser kept as tokens yet
-c-only-callable __builtin_neon_vaddh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet: a cast to a fundamental type that has no rules
-c-only-callable __builtin_neon_vsubh_f16 c++/arm64 # the rules of [expr.cast] are not implemented yet: a cast to a fundamental type that has no rules
+c-only-callable __builtin_neon_vaddh_f16 c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vaddh_f16 has a signature whose parameter types are not supported
+c-only-callable __builtin_neon_vsubh_f16 c++/arm64 # the rules of [ext.gnu] are not implemented yet: __builtin_neon_vsubh_f16 has a signature whose parameter types are not supported
+claimed-not-callable __builtin_elementwise_bitreverse c/arm64 # builtin '__builtin_elementwise_bitreverse' requires an x86-64 target
+claimed-not-callable __builtin_elementwise_clzg c/arm64 # builtin '__builtin_elementwise_clzg' requires an x86-64 target
+claimed-not-callable __builtin_elementwise_ctzg c/arm64 # builtin '__builtin_elementwise_ctzg' requires an x86-64 target
+claimed-not-callable __builtin_elementwise_fma c/arm64 # builtin '__builtin_elementwise_fma' requires an x86-64 target
+claimed-not-callable __builtin_elementwise_fshl c/arm64 # builtin '__builtin_elementwise_fshl' requires an x86-64 target
+claimed-not-callable __builtin_elementwise_fshr c/arm64 # builtin '__builtin_elementwise_fshr' requires an x86-64 target
+claimed-not-callable __builtin_elementwise_popcount c/arm64 # builtin '__builtin_elementwise_popcount' requires an x86-64 target
+claimed-not-callable __builtin_elementwise_sqrt c/arm64 # builtin '__builtin_elementwise_sqrt' requires an x86-64 target
 claimed-not-callable __builtin_ia32_addcarryx_u64 c++/x86_64 # the rules of [ext.gnu] are not implemented yet: __builtin_ia32_addcarryx_u64 has a signature whose parameter types are not supported
 claimed-not-callable __builtin_ia32_lfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_mfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
 claimed-not-callable __builtin_ia32_sfence c++/x86_64 # an atomic builtin takes the arguments its form does ([ext.gnu])
+claimed-not-callable __builtin_reduce_mul c/arm64 # builtin '__builtin_reduce_mul' requires an x86-64 target
 constexpr-claimed-not-folded __builtin_add_overflow c++/arm64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_add_overflow c++/x86_64 # the rules of [expr.const] are not implemented yet: evaluator kept no value (conversion, value 0)
 constexpr-claimed-not-folded __builtin_huge_val c++/arm64 # in any constexpr variable declaration, the full-expression of the initialization shall be a constant expression ([dcl.constexpr])
@@ -162,6 +171,36 @@ not-compiled __builtin_debugtrap c++/x86_64/O2 # x86-64: builtin 43 is not suppo
 not-compiled __builtin_debugtrap c/x86_64/O0 # x86-64: builtin 43 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_debugtrap c/x86_64/O1 # x86-64: builtin 43 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_debugtrap c/x86_64/O2 # x86-64: builtin 43 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_elementwise_bitreverse c++/arm64/O0 # builtin '__builtin_elementwise_bitreverse' requires an x86-64 target
+not-compiled __builtin_elementwise_bitreverse c++/arm64/O1 # builtin '__builtin_elementwise_bitreverse' requires an x86-64 target
+not-compiled __builtin_elementwise_bitreverse c++/arm64/O2 # builtin '__builtin_elementwise_bitreverse' requires an x86-64 target
+not-compiled __builtin_elementwise_clzg c++/arm64/O0 # builtin '__builtin_elementwise_clzg' requires an x86-64 target
+not-compiled __builtin_elementwise_clzg c++/arm64/O1 # builtin '__builtin_elementwise_clzg' requires an x86-64 target
+not-compiled __builtin_elementwise_clzg c++/arm64/O2 # builtin '__builtin_elementwise_clzg' requires an x86-64 target
+not-compiled __builtin_elementwise_ctzg c++/arm64/O0 # builtin '__builtin_elementwise_ctzg' requires an x86-64 target
+not-compiled __builtin_elementwise_ctzg c++/arm64/O1 # builtin '__builtin_elementwise_ctzg' requires an x86-64 target
+not-compiled __builtin_elementwise_ctzg c++/arm64/O2 # builtin '__builtin_elementwise_ctzg' requires an x86-64 target
+not-compiled __builtin_elementwise_fma c++/arm64/O0 # builtin '__builtin_elementwise_fma' requires an x86-64 target
+not-compiled __builtin_elementwise_fma c++/arm64/O1 # builtin '__builtin_elementwise_fma' requires an x86-64 target
+not-compiled __builtin_elementwise_fma c++/arm64/O2 # builtin '__builtin_elementwise_fma' requires an x86-64 target
+not-compiled __builtin_elementwise_fma c++/x86_64/O0 # '__builtin_elementwise_fma/16f4/3' needs target feature fma
+not-compiled __builtin_elementwise_fma c++/x86_64/O1 # '__builtin_elementwise_fma/16f4/3' needs target feature fma
+not-compiled __builtin_elementwise_fma c++/x86_64/O2 # '__builtin_elementwise_fma/16f4/3' needs target feature fma
+not-compiled __builtin_elementwise_fma c/x86_64/O0 # '__builtin_elementwise_fma/16f4/3' needs target feature fma
+not-compiled __builtin_elementwise_fma c/x86_64/O1 # '__builtin_elementwise_fma/16f4/3' needs target feature fma
+not-compiled __builtin_elementwise_fma c/x86_64/O2 # '__builtin_elementwise_fma/16f4/3' needs target feature fma
+not-compiled __builtin_elementwise_fshl c++/arm64/O0 # builtin '__builtin_elementwise_fshl' requires an x86-64 target
+not-compiled __builtin_elementwise_fshl c++/arm64/O1 # builtin '__builtin_elementwise_fshl' requires an x86-64 target
+not-compiled __builtin_elementwise_fshl c++/arm64/O2 # builtin '__builtin_elementwise_fshl' requires an x86-64 target
+not-compiled __builtin_elementwise_fshr c++/arm64/O0 # builtin '__builtin_elementwise_fshr' requires an x86-64 target
+not-compiled __builtin_elementwise_fshr c++/arm64/O1 # builtin '__builtin_elementwise_fshr' requires an x86-64 target
+not-compiled __builtin_elementwise_fshr c++/arm64/O2 # builtin '__builtin_elementwise_fshr' requires an x86-64 target
+not-compiled __builtin_elementwise_popcount c++/arm64/O0 # builtin '__builtin_elementwise_popcount' requires an x86-64 target
+not-compiled __builtin_elementwise_popcount c++/arm64/O1 # builtin '__builtin_elementwise_popcount' requires an x86-64 target
+not-compiled __builtin_elementwise_popcount c++/arm64/O2 # builtin '__builtin_elementwise_popcount' requires an x86-64 target
+not-compiled __builtin_elementwise_sqrt c++/arm64/O0 # builtin '__builtin_elementwise_sqrt' requires an x86-64 target
+not-compiled __builtin_elementwise_sqrt c++/arm64/O1 # builtin '__builtin_elementwise_sqrt' requires an x86-64 target
+not-compiled __builtin_elementwise_sqrt c++/arm64/O2 # builtin '__builtin_elementwise_sqrt' requires an x86-64 target
 not-compiled __builtin_flt_rounds c++/x86_64/O0 # x86-64: builtin 84 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_flt_rounds c++/x86_64/O1 # x86-64: builtin 84 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_flt_rounds c++/x86_64/O2 # x86-64: builtin 84 is not supported yet (PLAN-x86.md X3)
@@ -189,3 +228,6 @@ not-compiled __builtin_nansf c++/x86_64/O2 # x86-64: builtin 145 is not supporte
 not-compiled __builtin_nansl c++/x86_64/O0 # x86-64: builtin 145 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_nansl c++/x86_64/O1 # x86-64: builtin 145 is not supported yet (PLAN-x86.md X3)
 not-compiled __builtin_nansl c++/x86_64/O2 # x86-64: builtin 145 is not supported yet (PLAN-x86.md X3)
+not-compiled __builtin_reduce_mul c++/arm64/O0 # builtin '__builtin_reduce_mul' requires an x86-64 target
+not-compiled __builtin_reduce_mul c++/arm64/O1 # builtin '__builtin_reduce_mul' requires an x86-64 target
+not-compiled __builtin_reduce_mul c++/arm64/O2 # builtin '__builtin_reduce_mul' requires an x86-64 target
